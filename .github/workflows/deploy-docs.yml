@@ -65,5 +65,5 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs/docs/.vitepress/dist
-          cname: false # 如果你有自定义域名，可以设置为你的域名
+          cname: memoh.ai
 
