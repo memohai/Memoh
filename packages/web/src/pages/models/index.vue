@@ -2,13 +2,21 @@
 // import type { Payment } from '@/components/columns'
 import { h, computed, ref, provide, watch } from 'vue'
 import CreateModel from '@/components/CreateModel/index.vue'
-import { useQuery,useMutation,useQueryCache } from '@pinia/colada'
+import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
   Button,
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious
+
 } from '@memoh/ui'
 import DataTable from '@/components/DataTable/index.vue'
 import request from '@/utils/request'
 import { type ColumnDef } from '@tanstack/vue-table'
+
 
 
 
@@ -19,24 +27,24 @@ interface ModelType {
   modelId: string,
   name: string,
   type: 'chat' | 'embedding',
-  id:string
+  id: string
 }
 
 const openDialogModel = ref(false)
-const editModelInfo = ref<ModelType & {id:string} |null>(null)
+const editModelInfo = ref<ModelType & { id: string } | null>(null)
 provide('open', openDialogModel)
 provide('editModelInfo', editModelInfo)
 
 watch(openDialogModel, () => {
   if (!openDialogModel.value) {
-    editModelInfo.value=null
+    editModelInfo.value = null
   }
 }, {
-  immediate:true
+  immediate: true
 })
 
 
-const cacheQuery=useQueryCache()
+const cacheQuery = useQueryCache()
 const {
   mutate: deleteModel,
 } = useMutation({
@@ -47,9 +55,9 @@ const {
     }),
   onSettled: () => {
     cacheQuery.invalidateQueries({
-        key:['models']
-      })
-    }
+      key: ['models']
+    })
+  }
 })
 
 const columns: ColumnDef<ModelType>[] = [
@@ -83,16 +91,17 @@ const columns: ColumnDef<ModelType>[] = [
   {
     accessorKey: 'control',
     header: () => h('div', { class: 'text-center' }, '操作'),
-    cell: ({row}) => h('div', { class: ' w-full flex justify-around' }, [h(Button, {
+    cell: ({ row }) => h('div', { class: ' w-full flex justify-around' }, [h(Button, {
       'onClick': () => {
-        editModelInfo.value=row.original
-        openDialogModel.value = true       
+        editModelInfo.value = row.original
+        openDialogModel.value = true
       }
     }, () => '编辑'), h(Button, {
       variant: 'destructive', onClick() {
         deleteModel(row.original.id)
-        
-    }},()=>'删除')])
+
+      }
+    }, () => '删除')])
   }
 ]
 
@@ -107,10 +116,12 @@ const { data: modelData } = useQuery({
 
 
 const displayFormat = computed(() => {
-  return modelData.value?.data?.items?.map((currentModel: { model: Omit<ModelType,'id'>, id: 'string' }) => ({id:currentModel.id,...currentModel.model})) ?? []
+  return modelData.value?.data?.items?.map((currentModel: { model: Omit<ModelType, 'id'>, id: 'string' }) => ({ id: currentModel.id, ...currentModel.model })) ?? []
 })
 
-
+const pagination = computed(() => {
+  return modelData.value?.data.pagination ?? {}
+})
 
 </script>
 
@@ -118,12 +129,47 @@ const displayFormat = computed(() => {
   <div class="w-full py-10 mx-auto">
     <div class="flex mb-4">
       <CreateModel />
-    </div>    
+    </div>
     <div class="[&_td:last-child]:w-45">
       <DataTable
         :columns="columns"
         :data="displayFormat"
-      />  
+      />
+    </div>
+    <div class="flex flex-col mt-4">
+      <Pagination
+        v-slot="{ page }"
+        :total="pagination.value?.total ?? 0"
+        :items-per-page="10"
+        show-edges
+      >
+        <PaginationContent v-slot="{ items }">
+          <PaginationPrevious />
+          <template
+            v-for="(item, index) in items"
+            :key="index"
+          >
+            <PaginationItem
+              v-if="item.type === 'page'"
+              :key="index"
+              :value="item.value"
+              :is-active="item.value === page"
+            >
+              {{ item.value }}
+            </PaginationItem>
+            <PaginationEllipsis
+              v-else
+              :key="item.type"
+              :index="index"
+              class="w-9 h-9 flex items-center justify-center"
+            >
+              &#8230;
+            </PaginationEllipsis>
+          </template>
+
+          <PaginationNext />
+        </PaginationContent>
+      </Pagination>
     </div>
   </div>
 </template>
