@@ -3,7 +3,7 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "types": ["vite/client"],
-
+    "lib": ["DOM","ESNext"],
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,

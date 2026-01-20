@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // import type { Payment } from '@/components/columns'
-import { h, computed, ref, provide, watch } from 'vue'
+import { h, computed, ref, provide, watch, type ComputedRef, reactive } from 'vue'
 import CreateModel from '@/components/CreateModel/index.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
@@ -10,14 +10,12 @@ import {
   PaginationEllipsis,
   PaginationItem,
   PaginationNext,
-  PaginationPrevious
-
+  PaginationPrevious,
+  Checkbox
 } from '@memoh/ui'
 import DataTable from '@/components/DataTable/index.vue'
 import request from '@/utils/request'
 import { type ColumnDef } from '@tanstack/vue-table'
-
-
 
 
 interface ModelType {
@@ -27,7 +25,10 @@ interface ModelType {
   modelId: string,
   name: string,
   type: 'chat' | 'embedding',
-  id: string
+  id: string,
+  defaultChatModel: boolean,
+  defaultEmbeddingModel: boolean,
+  defaultSummaryModel: boolean
 }
 
 const openDialogModel = ref(false)
@@ -60,7 +61,48 @@ const {
   }
 })
 
-const columns: ColumnDef<ModelType>[] = [
+const {
+  mutate: setDefaultModel,
+} = useMutation({
+  mutation: (payload: { id: string, type: string }) =>
+    request({
+      url: `/model/${payload.type}/default?userId=${payload.id}`,
+      method: 'get'
+    }),
+  onSettled: () => {
+    cacheQuery.invalidateQueries({
+      key: ['models']
+    })
+  }
+})
+
+
+const renderCheckDefault = () => {
+  return [...[{ title: 'Chat', key: 'chat', type: 'defaultChatModel' },
+  { title: 'Summary', key: 'summary', type: 'defaultSummaryModel' },
+  { title: 'Embedding', key: 'embedding', type: 'defaultEmbeddingModel' }].map((modelSetting) => (
+    {
+      accessorKey: `${modelSetting.key}`,
+      header: () => h('div', { class: 'text-left' }, modelSetting.title),
+      cell({ row }) {
+        return h(Checkbox, {
+          state: row.original[modelSetting.type as 'defaultChatModel' | 'defaultSummaryModel' | 'defaultEmbeddingModel'],
+          disabled: row.original[modelSetting.type as 'defaultChatModel' | 'defaultSummaryModel' | 'defaultEmbeddingModel'] ? true : false,
+          'onUpdate:modelValue'(val) {
+            row.original[modelSetting.type as 'defaultChatModel' | 'defaultSummaryModel' | 'defaultEmbeddingModel'] = val as boolean
+            setDefaultModel({
+              id: row.original.id,
+              type: modelSetting.key
+            })
+          }
+        })
+      }
+    } as ColumnDef<ModelType>
+  ))]
+}
+const checkDefaultModel=ref(renderCheckDefault())
+
+const columns: ComputedRef<ColumnDef<ModelType>[]> = computed(() => [
   {
     accessorKey: 'modelId',
     header: () => h('div', { class: 'text-left py-4' }, 'Name'),
@@ -88,10 +130,14 @@ const columns: ColumnDef<ModelType>[] = [
     accessorKey: 'type',
     header: () => h('div', { class: 'text-left' }, 'Type'),
   },
+
+  
+  ...checkDefaultModel.value
+  ,
   {
     accessorKey: 'control',
     header: () => h('div', { class: 'text-center' }, '操作'),
-    cell: ({ row }) => h('div', { class: ' w-full flex justify-around' }, [h(Button, {
+    cell: ({ row }) => h('div', { class: ' w-full flex justify-center gap-4' }, [h(Button, {
       'onClick': () => {
         editModelInfo.value = row.original
         openDialogModel.value = true
@@ -99,19 +145,39 @@ const columns: ColumnDef<ModelType>[] = [
     }, () => '编辑'), h(Button, {
       variant: 'destructive', onClick() {
         deleteModel(row.original.id)
-
       }
     }, () => '删除')])
   }
-]
+])
 
 const { data: modelData } = useQuery({
   key: ['models'],
-  query() {
-    return request({
+  async query() {
+
+    const fetchModeData = await request({
       url: '/model'
     })
+    const defaultModel = await request({
+      url: '/settings'
+    })
+    const defaultModelValue = defaultModel?.data?.data
+    fetchModeData.data.items = fetchModeData.data.items.map((item: { model: ModelType, id: 'string' }) => ({
+      id: item.id,
+      model: {
+        ...item.model,
+        defaultChatModel: defaultModelValue?.defaultChatModel === item.id ? true : false,
+        defaultEmbeddingModel: defaultModelValue?.defaultEmbeddingModel === item.id ? true : false,
+        defaultSummaryModel: defaultModelValue?.defaultSummaryModel === item.id ? true : false
+      }
+
+    }))
+   
+    return fetchModeData
   }
+})
+
+watch(modelData, () => {
+  checkDefaultModel.value=renderCheckDefault()
 })
 
 
