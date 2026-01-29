@@ -57,5 +57,5 @@ depends = [
   "//:pnpm-install",
   "//:go-install",
 ]
-run = "echo '✓ Setup complete! Next: Copy config.toml.example to config.toml and configure, then run: mise run dev:web'"
+run = "echo '✓ Setup complete! Next: Copy config.toml.example to config.toml and configure, then run: mise run dev'"
 
