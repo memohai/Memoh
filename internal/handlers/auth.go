@@ -34,6 +34,8 @@ type LoginResponse struct {
 	TokenType   string `json:"token_type"`
 	ExpiresAt   string `json:"expires_at"`
 	UserID      string `json:"user_id"`
+	Role        string `json:"role"`
+	DisplayName string `json:"display_name"`
 	Username    string `json:"username"`
 }
 
@@ -109,6 +111,8 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		ExpiresAt:   expiresAt.Format(time.RFC3339),
 		UserID:      userID,
 		Username:    user.Username,
+		Role:        fmt.Sprintf("%v", user.Role),
+		DisplayName: user.DisplayName.String,
 	})
 }
 

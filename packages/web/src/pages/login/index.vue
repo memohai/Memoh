@@ -140,10 +140,10 @@ const login = form.handleSubmit(async (values) => {
       url: '/auth/login',
       method: 'post',
       data: { ...values }
-    },false)
-    const data = loginState?.data?.data
-    if (data?.token && data?.user) {
-      LoginHandle(data.user, data.token)
+    })
+    const data = loginState?.data
+    if (data?.access_token) {
+      LoginHandle({ id: data.user_id, username: data.username, role: data.role, displayName: data.display_name }, data.access_token)
     }    
     router.replace({
       name:'Main'

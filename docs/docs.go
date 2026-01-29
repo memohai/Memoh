@@ -1955,7 +1955,13 @@ const docTemplate = `{
                 "access_token": {
                     "type": "string"
                 },
+                "display_name": {
+                    "type": "string"
+                },
                 "expires_at": {
+                    "type": "string"
+                },
+                "role": {
                     "type": "string"
                 },
                 "token_type": {
