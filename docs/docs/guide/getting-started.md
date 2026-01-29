@@ -71,7 +71,7 @@ pnpm run db:push
 pnpm run api:dev
 ```
 
-API 服务将在 `http://localhost:7002` 启动。
+API 服务将在 `http://localhost:8080` 启动。
 
 ## 下一步
 

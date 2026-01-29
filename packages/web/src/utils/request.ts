@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 const router=useRouter()
 export default (function () {
   const axiosInstance = axios.create({
-    baseURL:'http://localhost:7002/'
+    baseURL: '/api'
   })
 
   axiosInstance.interceptors.response.use((response) => {

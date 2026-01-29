@@ -13,7 +13,7 @@
 
 - `QDRANT_URL` - Qdrant 连接字符串（默认：http://localhost:6333）
 - `REDIS_URL` - Redis 连接字符串（默认：redis://localhost:6379）
-- `API_PORT` - API 服务端口（默认：7002）
+- `API_PORT` - API 服务端口（默认：8080）
 
 ## 模型配置
 
