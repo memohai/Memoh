@@ -19,7 +19,7 @@ type ChatHandler struct {
 	logger   *slog.Logger
 }
 
-func NewChatHandler(resolver *chat.Resolver, log *slog.Logger) *ChatHandler {
+func NewChatHandler(log *slog.Logger, resolver *chat.Resolver) *ChatHandler {
 	return &ChatHandler{
 		resolver: resolver,
 		logger:   log,

@@ -16,7 +16,7 @@ type SettingsHandler struct {
 	logger  *slog.Logger
 }
 
-func NewSettingsHandler(service *settings.Service, log *slog.Logger) *SettingsHandler {
+func NewSettingsHandler(log *slog.Logger, service *settings.Service) *SettingsHandler {
 	return &SettingsHandler{
 		service: service,
 		logger:  log,

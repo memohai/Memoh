@@ -41,7 +41,7 @@ type LoginResponse struct {
 	Username    string `json:"username"`
 }
 
-func NewAuthHandler(db *pgxpool.Pool, log *slog.Logger, jwtSecret string, expiresIn time.Duration) *AuthHandler {
+func NewAuthHandler(log *slog.Logger, db *pgxpool.Pool, jwtSecret string, expiresIn time.Duration) *AuthHandler {
 	return &AuthHandler{
 		db:        db,
 		jwtSecret: jwtSecret,

@@ -15,7 +15,7 @@ type ModelsHandler struct {
 	logger  *slog.Logger
 }
 
-func NewModelsHandler(service *models.Service, log *slog.Logger) *ModelsHandler {
+func NewModelsHandler(log *slog.Logger, service *models.Service) *ModelsHandler {
 	return &ModelsHandler{
 		service: service,
 		logger:  log,

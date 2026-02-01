@@ -16,7 +16,7 @@ type SubagentHandler struct {
 	logger  *slog.Logger
 }
 
-func NewSubagentHandler(service *subagent.Service, log *slog.Logger) *SubagentHandler {
+func NewSubagentHandler(log *slog.Logger, service *subagent.Service) *SubagentHandler {
 	return &SubagentHandler{
 		service: service,
 		logger:  log,

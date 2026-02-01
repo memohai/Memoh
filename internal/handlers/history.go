@@ -17,7 +17,7 @@ type HistoryHandler struct {
 	logger  *slog.Logger
 }
 
-func NewHistoryHandler(service *history.Service, log *slog.Logger) *HistoryHandler {
+func NewHistoryHandler(log *slog.Logger, service *history.Service) *HistoryHandler {
 	return &HistoryHandler{
 		service: service,
 		logger:  log,

@@ -86,7 +86,7 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(service ctr.Service, log *slog.Logger, cfg config.MCPConfig, namespace string) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string) *ContainerdHandler {
 	return &ContainerdHandler{
 		service:   service,
 		cfg:       cfg,

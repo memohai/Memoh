@@ -17,7 +17,7 @@ type MemoryHandler struct {
 	logger  *slog.Logger
 }
 
-func NewMemoryHandler(service *memory.Service, log *slog.Logger) *MemoryHandler {
+func NewMemoryHandler(log *slog.Logger, service *memory.Service) *MemoryHandler {
 	return &MemoryHandler{
 		service: service,
 		logger:  log,

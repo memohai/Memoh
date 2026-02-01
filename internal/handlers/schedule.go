@@ -16,7 +16,7 @@ type ScheduleHandler struct {
 	logger  *slog.Logger
 }
 
-func NewScheduleHandler(service *schedule.Service, log *slog.Logger) *ScheduleHandler {
+func NewScheduleHandler(log *slog.Logger, service *schedule.Service) *ScheduleHandler {
 	return &ScheduleHandler{
 		service: service,
 		logger:  log,

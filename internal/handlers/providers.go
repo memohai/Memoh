@@ -14,7 +14,7 @@ type ProvidersHandler struct {
 	logger  *slog.Logger
 }
 
-func NewProvidersHandler(service *providers.Service, log *slog.Logger) *ProvidersHandler {
+func NewProvidersHandler(log *slog.Logger, service *providers.Service) *ProvidersHandler {
 	return &ProvidersHandler{
 		service: service,
 		logger:  log,
