@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -12,10 +13,14 @@ import (
 
 type SubagentHandler struct {
 	service *subagent.Service
+	logger  *slog.Logger
 }
 
-func NewSubagentHandler(service *subagent.Service) *SubagentHandler {
-	return &SubagentHandler{service: service}
+func NewSubagentHandler(log *slog.Logger, service *subagent.Service) *SubagentHandler {
+	return &SubagentHandler{
+		service: service,
+		logger:  log.With(slog.String("handler", "subagent")),
+	}
 }
 
 func (h *SubagentHandler) Register(e *echo.Echo) {

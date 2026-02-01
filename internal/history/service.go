@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -19,10 +20,14 @@ const defaultListLimit = 50
 
 type Service struct {
 	queries *sqlc.Queries
+	logger  *slog.Logger
 }
 
-func NewService(queries *sqlc.Queries) *Service {
-	return &Service{queries: queries}
+func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+	return &Service{
+		queries: queries,
+		logger:  log.With(slog.String("service", "history")),
+	}
 }
 
 func (s *Service) Create(ctx context.Context, userID string, req CreateRequest) (Record, error) {

@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -12,12 +13,14 @@ import (
 // Service provides CRUD operations for models
 type Service struct {
 	queries *sqlc.Queries
+	logger  *slog.Logger
 }
 
 // NewService creates a new models service
-func NewService(queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	return &Service{
 		queries: queries,
+		logger:  log.With(slog.String("service", "models")),
 	}
 }
 

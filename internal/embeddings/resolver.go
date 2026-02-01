@@ -3,6 +3,7 @@ package embeddings
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -55,13 +56,15 @@ type Resolver struct {
 	modelsService *models.Service
 	queries       *sqlc.Queries
 	timeout       time.Duration
+	logger        *slog.Logger
 }
 
-func NewResolver(modelsService *models.Service, queries *sqlc.Queries, timeout time.Duration) *Resolver {
+func NewResolver(log *slog.Logger, modelsService *models.Service, queries *sqlc.Queries, timeout time.Duration) *Resolver {
 	return &Resolver{
 		modelsService: modelsService,
 		queries:       queries,
 		timeout:       timeout,
+		logger:        log.With(slog.String("service", "embeddings")),
 	}
 }
 
@@ -127,7 +130,7 @@ func (r *Resolver) Embed(ctx context.Context, req Request) (Result, error) {
 		if strings.TrimSpace(provider.ApiKey) == "" {
 			return Result{}, errors.New("openai api key is required")
 		}
-		embedder := NewOpenAIEmbedder(provider.ApiKey, provider.BaseUrl, req.Model, req.Dimensions, timeout)
+		embedder := NewOpenAIEmbedder(r.logger, provider.ApiKey, provider.BaseUrl, req.Model, req.Dimensions, timeout)
 		vector, err := embedder.Embed(ctx, req.Input.Text)
 		if err != nil {
 			return Result{}, err
@@ -144,7 +147,7 @@ func (r *Resolver) Embed(ctx context.Context, req Request) (Result, error) {
 			if strings.TrimSpace(provider.ApiKey) == "" {
 				return Result{}, errors.New("dashscope api key is required")
 			}
-			dashscope := NewDashScopeEmbedder(provider.ApiKey, provider.BaseUrl, req.Model, timeout)
+			dashscope := NewDashScopeEmbedder(r.logger, provider.ApiKey, provider.BaseUrl, req.Model, timeout)
 			vector, usage, err := dashscope.Embed(ctx, req.Input.Text, req.Input.ImageURL, req.Input.VideoURL)
 			if err != nil {
 				return Result{}, err

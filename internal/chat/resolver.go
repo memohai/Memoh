@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -30,11 +31,12 @@ type Resolver struct {
 	memoryService   *memory.Service
 	gatewayBaseURL  string
 	timeout         time.Duration
+	logger          *slog.Logger
 	httpClient      *http.Client
 	streamingClient *http.Client
 }
 
-func NewResolver(modelsService *models.Service, queries *sqlc.Queries, memoryService *memory.Service, gatewayBaseURL string, timeout time.Duration) *Resolver {
+func NewResolver(log *slog.Logger, modelsService *models.Service, queries *sqlc.Queries, memoryService *memory.Service, gatewayBaseURL string, timeout time.Duration) *Resolver {
 	if strings.TrimSpace(gatewayBaseURL) == "" {
 		gatewayBaseURL = "http://127.0.0.1:8081"
 	}
@@ -48,6 +50,7 @@ func NewResolver(modelsService *models.Service, queries *sqlc.Queries, memorySer
 		memoryService:  memoryService,
 		gatewayBaseURL: gatewayBaseURL,
 		timeout:        timeout,
+		logger:         log.With(slog.String("service", "chat")),
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},

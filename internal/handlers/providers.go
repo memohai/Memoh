@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -10,10 +11,14 @@ import (
 
 type ProvidersHandler struct {
 	service *providers.Service
+	logger  *slog.Logger
 }
 
-func NewProvidersHandler(service *providers.Service) *ProvidersHandler {
-	return &ProvidersHandler{service: service}
+func NewProvidersHandler(log *slog.Logger, service *providers.Service) *ProvidersHandler {
+	return &ProvidersHandler{
+		service: service,
+		logger:  log.With(slog.String("handler", "providers")),
+	}
 }
 
 func (h *ProvidersHandler) Register(e *echo.Echo) {

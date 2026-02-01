@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -15,11 +16,15 @@ import (
 // Service handles provider operations
 type Service struct {
 	queries *sqlc.Queries
+	logger  *slog.Logger
 }
 
 // NewService creates a new provider service
-func NewService(queries *sqlc.Queries) *Service {
-	return &Service{queries: queries}
+func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+	return &Service{
+		queries: queries,
+		logger:  log.With(slog.String("service", "providers")),
+	}
 }
 
 // Create creates a new LLM provider

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -24,11 +25,12 @@ type Service struct {
 	parser    cron.Parser
 	chat      *chat.Resolver
 	jwtSecret string
+	logger    *slog.Logger
 	mu        sync.Mutex
 	jobs      map[string]cron.EntryID
 }
 
-func NewService(queries *sqlc.Queries, chatResolver *chat.Resolver, jwtSecret string) *Service {
+func NewService(log *slog.Logger, queries *sqlc.Queries, chatResolver *chat.Resolver, jwtSecret string) *Service {
 	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	c := cron.New(cron.WithParser(parser))
 	service := &Service{
@@ -37,6 +39,7 @@ func NewService(queries *sqlc.Queries, chatResolver *chat.Resolver, jwtSecret st
 		parser:    parser,
 		chat:      chatResolver,
 		jwtSecret: jwtSecret,
+		logger:    log.With(slog.String("service", "schedule")),
 		jobs:      map[string]cron.EntryID{},
 	}
 	c.Start()

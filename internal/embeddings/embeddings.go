@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ type OpenAIEmbedder struct {
 	baseURL string
 	model   string
 	dims    int
+	logger  *slog.Logger
 	http    *http.Client
 }
 
@@ -35,7 +37,7 @@ type openAIEmbeddingResponse struct {
 	} `json:"data"`
 }
 
-func NewOpenAIEmbedder(apiKey, baseURL, model string, dims int, timeout time.Duration) *OpenAIEmbedder {
+func NewOpenAIEmbedder(log *slog.Logger, apiKey, baseURL, model string, dims int, timeout time.Duration) *OpenAIEmbedder {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com"
 	}
@@ -53,6 +55,7 @@ func NewOpenAIEmbedder(apiKey, baseURL, model string, dims int, timeout time.Dur
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
 		dims:    dims,
+		logger:  log.With(slog.String("embedder", "openai")),
 		http: &http.Client{
 			Timeout: timeout,
 		},

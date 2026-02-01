@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/memohai/memoh/internal/chat"
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/logger"
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
@@ -36,15 +37,20 @@ func main() {
 	cfgPath := os.Getenv("CONFIG_PATH")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
 	}
 
+	logger.Init(cfg.Log.Level, cfg.Log.Format)
+
 	if strings.TrimSpace(cfg.Auth.JWTSecret) == "" {
-		log.Fatalf("jwt secret is required")
+		logger.Error("jwt secret is required")
+		os.Exit(1)
 	}
 	jwtExpiresIn, err := time.ParseDuration(cfg.Auth.JWTExpiresIn)
 	if err != nil {
-		log.Fatalf("invalid jwt expires in: %v", err)
+		logger.Error("invalid jwt expires in", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	addr := cfg.Server.Addr
@@ -59,30 +65,33 @@ func main() {
 	factory := ctr.DefaultClientFactory{SocketPath: socketPath}
 	client, err := factory.New(ctx)
 	if err != nil {
-		log.Fatalf("connect containerd: %v", err)
+		logger.Error("connect containerd", slog.Any("error", err))
+		os.Exit(1)
 	}
 	defer client.Close()
 
-	service := ctr.NewDefaultService(client, cfg.Containerd.Namespace)
-	manager := mcp.NewManager(service, cfg.MCP)
+	service := ctr.NewDefaultService(logger.L, client, cfg.Containerd.Namespace)
+	manager := mcp.NewManager(logger.L, service, cfg.MCP)
 
-	pingHandler := handlers.NewPingHandler()
-	containerdHandler := handlers.NewContainerdHandler(service, cfg.MCP, cfg.Containerd.Namespace)
+	pingHandler := handlers.NewPingHandler(logger.L)
+	containerdHandler := handlers.NewContainerdHandler(logger.L, service, cfg.MCP, cfg.Containerd.Namespace)
 
 	conn, err := db.Open(ctx, cfg.Postgres)
 	if err != nil {
-		log.Fatalf("db connect: %v", err)
+		logger.Error("db connect", slog.Any("error", err))
+		os.Exit(1)
 	}
 	defer conn.Close()
 	manager.WithDB(conn)
 	queries := dbsqlc.New(conn)
-	modelsService := models.NewService(queries)
+	modelsService := models.NewService(logger.L, queries)
 
-	if err := ensureAdminUser(ctx, queries, cfg); err != nil {
-		log.Fatalf("ensure admin user: %v", err)
+	if err := ensureAdminUser(ctx, logger.L, queries, cfg); err != nil {
+		logger.Error("ensure admin user", slog.Any("error", err))
+		os.Exit(1)
 	}
 
-	authHandler := handlers.NewAuthHandler(conn, cfg.Auth.JWTSecret, jwtExpiresIn)
+	authHandler := handlers.NewAuthHandler(logger.L, conn, cfg.Auth.JWTSecret, jwtExpiresIn)
 
 	// Initialize chat resolver after memory service is configured.
 	var chatResolver *chat.Resolver
@@ -92,27 +101,29 @@ func main() {
 		modelsService: modelsService,
 		queries:       queries,
 		timeout:       30 * time.Second,
+		logger:        logger.L,
 	}
 
-	resolver := embeddings.NewResolver(modelsService, queries, 10*time.Second)
+	resolver := embeddings.NewResolver(logger.L, modelsService, queries, 10*time.Second)
 	vectors, textModel, multimodalModel, hasModels, err := embeddings.CollectEmbeddingVectors(ctx, modelsService)
 	if err != nil {
-		log.Fatalf("embedding models: %v", err)
+		logger.Error("embedding models", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	var memoryService *memory.Service
 	var memoryHandler *handlers.MemoryHandler
 
 	if !hasModels {
-		log.Println("WARNING: No embedding models configured. Memory service will not be available.")
-		log.Println("You can add embedding models via the /models API endpoint.")
-		memoryHandler = handlers.NewMemoryHandler(nil)
+		logger.Warn("No embedding models configured. Memory service will not be available.")
+		logger.Warn("You can add embedding models via the /models API endpoint.")
+		memoryHandler = handlers.NewMemoryHandler(logger.L, nil)
 	} else {
 		if textModel.ModelID == "" {
-			log.Println("WARNING: No text embedding model configured. Text embedding features will be limited.")
+			logger.Warn("No text embedding model configured. Text embedding features will be limited.")
 		}
 		if multimodalModel.ModelID == "" {
-			log.Println("WARNING: No multimodal embedding model configured. Multimodal embedding features will be limited.")
+			logger.Warn("No multimodal embedding model configured. Multimodal embedding features will be limited.")
 		}
 
 		var textEmbedder embeddings.Embedder
@@ -127,6 +138,7 @@ func main() {
 
 			if len(vectors) > 0 {
 				store, err = memory.NewQdrantStoreWithVectors(
+					logger.L,
 					cfg.Qdrant.BaseURL,
 					cfg.Qdrant.APIKey,
 					cfg.Qdrant.Collection,
@@ -134,10 +146,12 @@ func main() {
 					time.Duration(cfg.Qdrant.TimeoutSeconds)*time.Second,
 				)
 				if err != nil {
-					log.Fatalf("qdrant named vectors init: %v", err)
+					logger.Error("qdrant named vectors init", slog.Any("error", err))
+					os.Exit(1)
 				}
 			} else {
 				store, err = memory.NewQdrantStore(
+					logger.L,
 					cfg.Qdrant.BaseURL,
 					cfg.Qdrant.APIKey,
 					cfg.Qdrant.Collection,
@@ -145,42 +159,45 @@ func main() {
 					time.Duration(cfg.Qdrant.TimeoutSeconds)*time.Second,
 				)
 				if err != nil {
-					log.Fatalf("qdrant init: %v", err)
+					logger.Error("qdrant init", slog.Any("error", err))
+					os.Exit(1)
 				}
 			}
 		}
 
-		memoryService = memory.NewService(llmClient, textEmbedder, store, resolver, textModel.ModelID, multimodalModel.ModelID)
-		memoryHandler = handlers.NewMemoryHandler(memoryService)
+		memoryService = memory.NewService(logger.L, llmClient, textEmbedder, store, resolver, textModel.ModelID, multimodalModel.ModelID)
+		memoryHandler = handlers.NewMemoryHandler(logger.L, memoryService)
 	}
-	chatResolver = chat.NewResolver(modelsService, queries, memoryService, cfg.AgentGateway.BaseURL(), 30*time.Second)
-	embeddingsHandler := handlers.NewEmbeddingsHandler(modelsService, queries)
-	swaggerHandler := handlers.NewSwaggerHandler()
-	chatHandler := handlers.NewChatHandler(chatResolver)
+	chatResolver = chat.NewResolver(logger.L, modelsService, queries, memoryService, cfg.AgentGateway.BaseURL(), 30*time.Second)
+	embeddingsHandler := handlers.NewEmbeddingsHandler(logger.L, modelsService, queries)
+	swaggerHandler := handlers.NewSwaggerHandler(logger.L)
+	chatHandler := handlers.NewChatHandler(logger.L, chatResolver)
 
 	// Initialize providers and models handlers
-	providersService := providers.NewService(queries)
-	providersHandler := handlers.NewProvidersHandler(providersService)
-	modelsHandler := handlers.NewModelsHandler(modelsService)
-	settingsService := settings.NewService(queries)
-	settingsHandler := handlers.NewSettingsHandler(settingsService)
-	historyService := history.NewService(queries)
-	historyHandler := handlers.NewHistoryHandler(historyService)
-	scheduleService := schedule.NewService(queries, chatResolver, cfg.Auth.JWTSecret)
+	providersService := providers.NewService(logger.L, queries)
+	providersHandler := handlers.NewProvidersHandler(logger.L, providersService)
+	modelsHandler := handlers.NewModelsHandler(logger.L, modelsService)
+	settingsService := settings.NewService(logger.L, queries)
+	settingsHandler := handlers.NewSettingsHandler(logger.L, settingsService)
+	historyService := history.NewService(logger.L, queries)
+	historyHandler := handlers.NewHistoryHandler(logger.L, historyService)
+	scheduleService := schedule.NewService(logger.L, queries, chatResolver, cfg.Auth.JWTSecret)
 	if err := scheduleService.Bootstrap(ctx); err != nil {
-		log.Fatalf("schedule bootstrap: %v", err)
+		logger.Error("schedule bootstrap", slog.Any("error", err))
+		os.Exit(1)
 	}
-	scheduleHandler := handlers.NewScheduleHandler(scheduleService)
-	subagentService := subagent.NewService(queries)
-	subagentHandler := handlers.NewSubagentHandler(subagentService)
-	srv := server.NewServer(addr, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, scheduleHandler, subagentHandler, containerdHandler)
+	scheduleHandler := handlers.NewScheduleHandler(logger.L, scheduleService)
+	subagentService := subagent.NewService(logger.L, queries)
+	subagentHandler := handlers.NewSubagentHandler(logger.L, subagentService)
+	srv := server.NewServer(logger.L, addr, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, scheduleHandler, subagentHandler, containerdHandler)
 
 	if err := srv.Start(); err != nil {
-		log.Fatalf("server failed: %v", err)
+		logger.Error("server failed", slog.Any("error", err))
+		os.Exit(1)
 	}
 }
 
-func ensureAdminUser(ctx context.Context, queries *dbsqlc.Queries, cfg config.Config) error {
+func ensureAdminUser(ctx context.Context, log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) error {
 	if queries == nil {
 		return fmt.Errorf("db queries not configured")
 	}
@@ -199,7 +216,7 @@ func ensureAdminUser(ctx context.Context, queries *dbsqlc.Queries, cfg config.Co
 		return fmt.Errorf("admin username/password required in config.toml")
 	}
 	if password == "change-your-password-here" {
-		log.Printf("WARNING: admin password uses default placeholder; please update config.toml")
+		log.Warn("admin password uses default placeholder; please update config.toml")
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -227,7 +244,7 @@ func ensureAdminUser(ctx context.Context, queries *dbsqlc.Queries, cfg config.Co
 	if err != nil {
 		return err
 	}
-	log.Printf("Admin user created: %s", username)
+	log.Info("Admin user created", slog.String("username", username))
 	return nil
 }
 
@@ -235,6 +252,7 @@ type lazyLLMClient struct {
 	modelsService *models.Service
 	queries       *dbsqlc.Queries
 	timeout       time.Duration
+	logger        *slog.Logger
 }
 
 func (c *lazyLLMClient) Extract(ctx context.Context, req memory.ExtractRequest) (memory.ExtractResponse, error) {
@@ -265,5 +283,5 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memory.LLM, error) {
 	if clientType != "openai" && clientType != "openai-compat" {
 		return nil, fmt.Errorf("memory provider client type not supported: %s", memoryProvider.ClientType)
 	}
-	return memory.NewLLMClient(memoryProvider.BaseUrl, memoryProvider.ApiKey, memoryModel.ModelID, c.timeout), nil
+	return memory.NewLLMClient(c.logger, memoryProvider.BaseUrl, memoryProvider.ApiKey, memoryModel.ModelID, c.timeout), nil
 }

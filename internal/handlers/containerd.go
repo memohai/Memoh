@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,6 +28,7 @@ type ContainerdHandler struct {
 	service   ctr.Service
 	cfg       config.MCPConfig
 	namespace string
+	logger    *slog.Logger
 	mcpMu     sync.Mutex
 	mcpSess   map[string]*mcpSession
 }
@@ -85,11 +86,12 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(service ctr.Service, cfg config.MCPConfig, namespace string) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string) *ContainerdHandler {
 	return &ContainerdHandler{
 		service:   service,
 		cfg:       cfg,
 		namespace: namespace,
+		logger:    log.With(slog.String("handler", "containerd")),
 		mcpSess:   make(map[string]*mcpSession),
 	}
 }
@@ -196,7 +198,10 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}); err == nil {
 		started = true
 	} else {
-		log.Printf("mcp container start failed: id=%s err=%v", req.ContainerID, err)
+		h.logger.Error("mcp container start failed",
+			slog.String("container_id", req.ContainerID),
+			slog.Any("error", err),
+		)
 	}
 
 	return c.JSON(http.StatusOK, CreateContainerResponse{

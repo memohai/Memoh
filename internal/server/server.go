@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -11,11 +12,12 @@ import (
 )
 
 type Server struct {
-	echo *echo.Echo
-	addr string
+	echo   *echo.Echo
+	addr   string
+	logger *slog.Logger
 }
 
-func NewServer(addr string, jwtSecret string, pingHandler *handlers.PingHandler, authHandler *handlers.AuthHandler, memoryHandler *handlers.MemoryHandler, embeddingsHandler *handlers.EmbeddingsHandler, chatHandler *handlers.ChatHandler, swaggerHandler *handlers.SwaggerHandler, providersHandler *handlers.ProvidersHandler, modelsHandler *handlers.ModelsHandler, settingsHandler *handlers.SettingsHandler, historyHandler *handlers.HistoryHandler, scheduleHandler *handlers.ScheduleHandler, subagentHandler *handlers.SubagentHandler, containerdHandler *handlers.ContainerdHandler) *Server {
+func NewServer(log *slog.Logger, addr string, jwtSecret string, pingHandler *handlers.PingHandler, authHandler *handlers.AuthHandler, memoryHandler *handlers.MemoryHandler, embeddingsHandler *handlers.EmbeddingsHandler, chatHandler *handlers.ChatHandler, swaggerHandler *handlers.SwaggerHandler, providersHandler *handlers.ProvidersHandler, modelsHandler *handlers.ModelsHandler, settingsHandler *handlers.SettingsHandler, historyHandler *handlers.HistoryHandler, scheduleHandler *handlers.ScheduleHandler, subagentHandler *handlers.SubagentHandler, containerdHandler *handlers.ContainerdHandler) *Server {
 	if addr == "" {
 		addr = ":8080"
 	}
@@ -23,7 +25,21 @@ func NewServer(addr string, jwtSecret string, pingHandler *handlers.PingHandler,
 	e := echo.New()
 	e.HideBanner = true
 	e.Use(middleware.Recover())
-	e.Use(middleware.RequestLogger())
+	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogStatus: true,
+		LogURI:    true,
+		LogMethod: true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			log.Info("request",
+				slog.String("method", v.Method),
+				slog.String("uri", v.URI),
+				slog.Int("status", v.Status),
+				slog.Duration("latency", v.Latency),
+				slog.String("remote_ip", c.RealIP()),
+			)
+			return nil
+		},
+	}))
 	e.Use(auth.JWTMiddleware(jwtSecret, func(c echo.Context) bool {
 		path := c.Request().URL.Path
 		if path == "/ping" || path == "/api/swagger.json" || path == "/auth/login" {
@@ -76,8 +92,9 @@ func NewServer(addr string, jwtSecret string, pingHandler *handlers.PingHandler,
 	}
 
 	return &Server{
-		echo: e,
-		addr: addr,
+		echo:   e,
+		addr:   addr,
+		logger: log.With(slog.String("component", "server")),
 	}
 }
 

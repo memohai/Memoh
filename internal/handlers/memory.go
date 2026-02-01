@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -13,10 +14,14 @@ import (
 
 type MemoryHandler struct {
 	service *memory.Service
+	logger  *slog.Logger
 }
 
-func NewMemoryHandler(service *memory.Service) *MemoryHandler {
-	return &MemoryHandler{service: service}
+func NewMemoryHandler(log *slog.Logger, service *memory.Service) *MemoryHandler {
+	return &MemoryHandler{
+		service: service,
+		logger:  log.With(slog.String("handler", "memory")),
+	}
 }
 
 func (h *MemoryHandler) Register(e *echo.Echo) {
@@ -51,7 +56,7 @@ func (h *MemoryHandler) EmbedUpsert(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
 	}
-	
+
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
@@ -86,7 +91,7 @@ func (h *MemoryHandler) Add(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
 	}
-	
+
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
@@ -121,7 +126,7 @@ func (h *MemoryHandler) Search(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
 	}
-	
+
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
@@ -156,7 +161,7 @@ func (h *MemoryHandler) Update(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
 	}
-	
+
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
@@ -196,7 +201,7 @@ func (h *MemoryHandler) Get(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
 	}
-	
+
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
@@ -233,7 +238,7 @@ func (h *MemoryHandler) GetAll(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
 	}
-	
+
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
@@ -274,7 +279,7 @@ func (h *MemoryHandler) Delete(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
 	}
-	
+
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
@@ -313,7 +318,7 @@ func (h *MemoryHandler) DeleteAll(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
 	}
-	
+
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
