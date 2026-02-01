@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -16,10 +17,14 @@ import (
 
 type Service struct {
 	queries *sqlc.Queries
+	logger  *slog.Logger
 }
 
-func NewService(queries *sqlc.Queries) *Service {
-	return &Service{queries: queries}
+func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+	return &Service{
+		queries: queries,
+		logger:  log.With(slog.String("service", "subagent")),
+	}
 }
 
 func (s *Service) Create(ctx context.Context, userID string, req CreateRequest) (Subagent, error) {

@@ -91,7 +91,7 @@ func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPC
 		service:   service,
 		cfg:       cfg,
 		namespace: namespace,
-		logger:    log,
+		logger:    log.With(slog.String("handler", "containerd")),
 		mcpSess:   make(map[string]*mcpSession),
 	}
 }

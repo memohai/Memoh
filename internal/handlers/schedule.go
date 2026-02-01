@@ -19,7 +19,7 @@ type ScheduleHandler struct {
 func NewScheduleHandler(log *slog.Logger, service *schedule.Service) *ScheduleHandler {
 	return &ScheduleHandler{
 		service: service,
-		logger:  log,
+		logger:  log.With(slog.String("handler", "schedule")),
 	}
 }
 

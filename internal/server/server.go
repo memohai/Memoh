@@ -94,7 +94,7 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string, pingHandler *han
 	return &Server{
 		echo:   e,
 		addr:   addr,
-		logger: log,
+		logger: log.With(slog.String("component", "server")),
 	}
 }
 

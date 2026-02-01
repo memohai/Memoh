@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -144,15 +145,17 @@ type Service interface {
 type DefaultService struct {
 	client    *containerd.Client
 	namespace string
+	logger    *slog.Logger
 }
 
-func NewDefaultService(client *containerd.Client, namespace string) *DefaultService {
+func NewDefaultService(log *slog.Logger, client *containerd.Client, namespace string) *DefaultService {
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}
 	return &DefaultService{
 		client:    client,
 		namespace: namespace,
+		logger:    log.With(slog.String("service", "containerd")),
 	}
 }
 

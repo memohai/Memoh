@@ -17,7 +17,7 @@ type ProvidersHandler struct {
 func NewProvidersHandler(log *slog.Logger, service *providers.Service) *ProvidersHandler {
 	return &ProvidersHandler{
 		service: service,
-		logger:  log,
+		logger:  log.With(slog.String("handler", "providers")),
 	}
 }
 

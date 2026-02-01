@@ -18,7 +18,7 @@ type ModelsHandler struct {
 func NewModelsHandler(log *slog.Logger, service *models.Service) *ModelsHandler {
 	return &ModelsHandler{
 		service: service,
-		logger:  log,
+		logger:  log.With(slog.String("handler", "models")),
 	}
 }
 

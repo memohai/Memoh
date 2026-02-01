@@ -25,7 +25,7 @@ type SwaggerHandler struct {
 }
 
 func NewSwaggerHandler(log *slog.Logger) *SwaggerHandler {
-	return &SwaggerHandler{logger: log}
+	return &SwaggerHandler{logger: log.With(slog.String("handler", "swagger"))}
 }
 
 func (h *SwaggerHandler) Register(e *echo.Echo) {

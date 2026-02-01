@@ -22,7 +22,7 @@ type ChatHandler struct {
 func NewChatHandler(log *slog.Logger, resolver *chat.Resolver) *ChatHandler {
 	return &ChatHandler{
 		resolver: resolver,
-		logger:   log,
+		logger:   log.With(slog.String("handler", "chat")),
 	}
 }
 

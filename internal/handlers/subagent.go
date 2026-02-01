@@ -19,7 +19,7 @@ type SubagentHandler struct {
 func NewSubagentHandler(log *slog.Logger, service *subagent.Service) *SubagentHandler {
 	return &SubagentHandler{
 		service: service,
-		logger:  log,
+		logger:  log.With(slog.String("handler", "subagent")),
 	}
 }
 

@@ -53,7 +53,7 @@ type EmbeddingsUsage struct {
 func NewEmbeddingsHandler(log *slog.Logger, modelsService *models.Service, queries *sqlc.Queries) *EmbeddingsHandler {
 	return &EmbeddingsHandler{
 		resolver: embeddings.NewResolver(modelsService, queries, DefaultEmbeddingTimeout),
-		logger:   log,
+		logger:   log.With(slog.String("handler", "embeddings")),
 	}
 }
 

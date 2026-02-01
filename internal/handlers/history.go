@@ -20,7 +20,7 @@ type HistoryHandler struct {
 func NewHistoryHandler(log *slog.Logger, service *history.Service) *HistoryHandler {
 	return &HistoryHandler{
 		service: service,
-		logger:  log,
+		logger:  log.With(slog.String("handler", "history")),
 	}
 }
 

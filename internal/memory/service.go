@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"strings"
@@ -20,16 +21,18 @@ type Service struct {
 	embedder                 embeddings.Embedder
 	store                    *QdrantStore
 	resolver                 *embeddings.Resolver
+	logger                   *slog.Logger
 	defaultTextModelID       string
 	defaultMultimodalModelID string
 }
 
-func NewService(llm LLM, embedder embeddings.Embedder, store *QdrantStore, resolver *embeddings.Resolver, defaultTextModelID, defaultMultimodalModelID string) *Service {
+func NewService(log *slog.Logger, llm LLM, embedder embeddings.Embedder, store *QdrantStore, resolver *embeddings.Resolver, defaultTextModelID, defaultMultimodalModelID string) *Service {
 	return &Service{
 		llm:                      llm,
 		embedder:                 embedder,
 		store:                    store,
 		resolver:                 resolver,
+		logger:                   log.With(slog.String("service", "memory")),
 		defaultTextModelID:       defaultTextModelID,
 		defaultMultimodalModelID: defaultMultimodalModelID,
 	}

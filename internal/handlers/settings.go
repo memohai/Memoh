@@ -19,7 +19,7 @@ type SettingsHandler struct {
 func NewSettingsHandler(log *slog.Logger, service *settings.Service) *SettingsHandler {
 	return &SettingsHandler{
 		service: service,
-		logger:  log,
+		logger:  log.With(slog.String("handler", "settings")),
 	}
 }
 

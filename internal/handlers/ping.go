@@ -12,7 +12,7 @@ type PingHandler struct {
 }
 
 func NewPingHandler(log *slog.Logger) *PingHandler {
-	return &PingHandler{logger: log}
+	return &PingHandler{logger: log.With(slog.String("handler", "ping"))}
 }
 
 func (h *PingHandler) Register(e *echo.Echo) {

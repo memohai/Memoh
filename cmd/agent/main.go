@@ -68,7 +68,7 @@ func main() {
 	}
 	defer client.Close()
 
-	service := ctr.NewDefaultService(client, cfg.Containerd.Namespace)
+	service := ctr.NewDefaultService(logger.L, client, cfg.Containerd.Namespace)
 	manager := mcp.NewManager(service, cfg.MCP)
 
 	pingHandler := handlers.NewPingHandler(logger.L)
@@ -82,7 +82,7 @@ func main() {
 	defer conn.Close()
 	manager.WithDB(conn)
 	queries := dbsqlc.New(conn)
-	modelsService := models.NewService(queries)
+	modelsService := models.NewService(logger.L, queries)
 
 	if err := ensureAdminUser(ctx, queries, cfg); err != nil {
 		logger.Error("ensure admin user", slog.Any("error", err))
@@ -160,29 +160,29 @@ func main() {
 			}
 		}
 
-		memoryService = memory.NewService(llmClient, textEmbedder, store, resolver, textModel.ModelID, multimodalModel.ModelID)
+		memoryService = memory.NewService(logger.L, llmClient, textEmbedder, store, resolver, textModel.ModelID, multimodalModel.ModelID)
 		memoryHandler = handlers.NewMemoryHandler(logger.L, memoryService)
 	}
-	chatResolver = chat.NewResolver(modelsService, queries, memoryService, cfg.AgentGateway.BaseURL(), 30*time.Second)
+	chatResolver = chat.NewResolver(logger.L, modelsService, queries, memoryService, cfg.AgentGateway.BaseURL(), 30*time.Second)
 	embeddingsHandler := handlers.NewEmbeddingsHandler(logger.L, modelsService, queries)
 	swaggerHandler := handlers.NewSwaggerHandler(logger.L)
 	chatHandler := handlers.NewChatHandler(logger.L, chatResolver)
 
 	// Initialize providers and models handlers
-	providersService := providers.NewService(queries)
+	providersService := providers.NewService(logger.L, queries)
 	providersHandler := handlers.NewProvidersHandler(logger.L, providersService)
 	modelsHandler := handlers.NewModelsHandler(logger.L, modelsService)
-	settingsService := settings.NewService(queries)
+	settingsService := settings.NewService(logger.L, queries)
 	settingsHandler := handlers.NewSettingsHandler(logger.L, settingsService)
-	historyService := history.NewService(queries)
+	historyService := history.NewService(logger.L, queries)
 	historyHandler := handlers.NewHistoryHandler(logger.L, historyService)
-	scheduleService := schedule.NewService(queries, chatResolver, cfg.Auth.JWTSecret)
+	scheduleService := schedule.NewService(logger.L, queries, chatResolver, cfg.Auth.JWTSecret)
 	if err := scheduleService.Bootstrap(ctx); err != nil {
 		logger.Error("schedule bootstrap", slog.Any("error", err))
 		os.Exit(1)
 	}
 	scheduleHandler := handlers.NewScheduleHandler(logger.L, scheduleService)
-	subagentService := subagent.NewService(queries)
+	subagentService := subagent.NewService(logger.L, queries)
 	subagentHandler := handlers.NewSubagentHandler(logger.L, subagentService)
 	srv := server.NewServer(logger.L, addr, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, scheduleHandler, subagentHandler, containerdHandler)
 

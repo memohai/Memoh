@@ -46,7 +46,7 @@ func NewAuthHandler(log *slog.Logger, db *pgxpool.Pool, jwtSecret string, expire
 		db:        db,
 		jwtSecret: jwtSecret,
 		expiresIn: expiresIn,
-		logger:    log,
+		logger:    log.With(slog.String("handler", "auth")),
 	}
 }
 
