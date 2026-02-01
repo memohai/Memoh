@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -13,10 +14,14 @@ import (
 
 type HistoryHandler struct {
 	service *history.Service
+	logger  *slog.Logger
 }
 
-func NewHistoryHandler(service *history.Service) *HistoryHandler {
-	return &HistoryHandler{service: service}
+func NewHistoryHandler(service *history.Service, log *slog.Logger) *HistoryHandler {
+	return &HistoryHandler{
+		service: service,
+		logger:  log,
+	}
 }
 
 func (h *HistoryHandler) Register(e *echo.Echo) {

@@ -21,7 +21,6 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
-	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
 )
 
@@ -29,6 +28,7 @@ type ContainerdHandler struct {
 	service   ctr.Service
 	cfg       config.MCPConfig
 	namespace string
+	logger    *slog.Logger
 	mcpMu     sync.Mutex
 	mcpSess   map[string]*mcpSession
 }
@@ -86,11 +86,12 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(service ctr.Service, cfg config.MCPConfig, namespace string) *ContainerdHandler {
+func NewContainerdHandler(service ctr.Service, log *slog.Logger, cfg config.MCPConfig, namespace string) *ContainerdHandler {
 	return &ContainerdHandler{
 		service:   service,
 		cfg:       cfg,
 		namespace: namespace,
+		logger:    log,
 		mcpSess:   make(map[string]*mcpSession),
 	}
 }
@@ -197,7 +198,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}); err == nil {
 		started = true
 	} else {
-		logger.FromContext(c.Request().Context()).Error("mcp container start failed",
+		h.logger.Error("mcp container start failed",
 			slog.String("container_id", req.ContainerID),
 			slog.Any("error", err),
 		)

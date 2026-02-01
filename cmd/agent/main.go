@@ -71,8 +71,8 @@ func main() {
 	service := ctr.NewDefaultService(client, cfg.Containerd.Namespace)
 	manager := mcp.NewManager(service, cfg.MCP)
 
-	pingHandler := handlers.NewPingHandler()
-	containerdHandler := handlers.NewContainerdHandler(service, cfg.MCP, cfg.Containerd.Namespace)
+	pingHandler := handlers.NewPingHandler(logger.L)
+	containerdHandler := handlers.NewContainerdHandler(service, logger.L, cfg.MCP, cfg.Containerd.Namespace)
 
 	conn, err := db.Open(ctx, cfg.Postgres)
 	if err != nil {
@@ -89,7 +89,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	authHandler := handlers.NewAuthHandler(conn, cfg.Auth.JWTSecret, jwtExpiresIn)
+	authHandler := handlers.NewAuthHandler(conn, logger.L, cfg.Auth.JWTSecret, jwtExpiresIn)
 
 	// Initialize chat resolver after memory service is configured.
 	var chatResolver *chat.Resolver
@@ -114,7 +114,7 @@ func main() {
 	if !hasModels {
 		logger.Warn("No embedding models configured. Memory service will not be available.")
 		logger.Warn("You can add embedding models via the /models API endpoint.")
-		memoryHandler = handlers.NewMemoryHandler(nil)
+		memoryHandler = handlers.NewMemoryHandler(nil, logger.L)
 	} else {
 		if textModel.ModelID == "" {
 			logger.Warn("No text embedding model configured. Text embedding features will be limited.")
@@ -161,30 +161,30 @@ func main() {
 		}
 
 		memoryService = memory.NewService(llmClient, textEmbedder, store, resolver, textModel.ModelID, multimodalModel.ModelID)
-		memoryHandler = handlers.NewMemoryHandler(memoryService)
+		memoryHandler = handlers.NewMemoryHandler(memoryService, logger.L)
 	}
 	chatResolver = chat.NewResolver(modelsService, queries, memoryService, cfg.AgentGateway.BaseURL(), 30*time.Second)
-	embeddingsHandler := handlers.NewEmbeddingsHandler(modelsService, queries)
-	swaggerHandler := handlers.NewSwaggerHandler()
-	chatHandler := handlers.NewChatHandler(chatResolver)
+	embeddingsHandler := handlers.NewEmbeddingsHandler(modelsService, logger.L, queries)
+	swaggerHandler := handlers.NewSwaggerHandler(logger.L)
+	chatHandler := handlers.NewChatHandler(chatResolver, logger.L)
 
 	// Initialize providers and models handlers
 	providersService := providers.NewService(queries)
-	providersHandler := handlers.NewProvidersHandler(providersService)
-	modelsHandler := handlers.NewModelsHandler(modelsService)
+	providersHandler := handlers.NewProvidersHandler(providersService, logger.L)
+	modelsHandler := handlers.NewModelsHandler(modelsService, logger.L)
 	settingsService := settings.NewService(queries)
-	settingsHandler := handlers.NewSettingsHandler(settingsService)
+	settingsHandler := handlers.NewSettingsHandler(settingsService, logger.L)
 	historyService := history.NewService(queries)
-	historyHandler := handlers.NewHistoryHandler(historyService)
+	historyHandler := handlers.NewHistoryHandler(historyService, logger.L)
 	scheduleService := schedule.NewService(queries, chatResolver, cfg.Auth.JWTSecret)
 	if err := scheduleService.Bootstrap(ctx); err != nil {
 		logger.Error("schedule bootstrap", slog.Any("error", err))
 		os.Exit(1)
 	}
-	scheduleHandler := handlers.NewScheduleHandler(scheduleService)
+	scheduleHandler := handlers.NewScheduleHandler(scheduleService, logger.L)
 	subagentService := subagent.NewService(queries)
-	subagentHandler := handlers.NewSubagentHandler(subagentService)
-	srv := server.NewServer(addr, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, scheduleHandler, subagentHandler, containerdHandler)
+	subagentHandler := handlers.NewSubagentHandler(subagentService, logger.L)
+	srv := server.NewServer(addr, logger.L, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, scheduleHandler, subagentHandler, containerdHandler)
 
 	if err := srv.Start(); err != nil {
 		logger.Error("server failed", slog.Any("error", err))

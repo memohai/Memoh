@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -13,10 +14,14 @@ import (
 
 type MemoryHandler struct {
 	service *memory.Service
+	logger  *slog.Logger
 }
 
-func NewMemoryHandler(service *memory.Service) *MemoryHandler {
-	return &MemoryHandler{service: service}
+func NewMemoryHandler(service *memory.Service, log *slog.Logger) *MemoryHandler {
+	return &MemoryHandler{
+		service: service,
+		logger:  log,
+	}
 }
 
 func (h *MemoryHandler) Register(e *echo.Echo) {

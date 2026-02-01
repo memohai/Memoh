@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 
@@ -11,10 +12,14 @@ import (
 
 type ModelsHandler struct {
 	service *models.Service
+	logger  *slog.Logger
 }
 
-func NewModelsHandler(service *models.Service) *ModelsHandler {
-	return &ModelsHandler{service: service}
+func NewModelsHandler(service *models.Service, log *slog.Logger) *ModelsHandler {
+	return &ModelsHandler{
+		service: service,
+		logger:  log,
+	}
 }
 
 func (h *ModelsHandler) Register(e *echo.Echo) {

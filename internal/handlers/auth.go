@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ type AuthHandler struct {
 	db        *pgxpool.Pool
 	jwtSecret string
 	expiresIn time.Duration
+	logger    *slog.Logger
 }
 
 type LoginRequest struct {
@@ -39,11 +41,12 @@ type LoginResponse struct {
 	Username    string `json:"username"`
 }
 
-func NewAuthHandler(db *pgxpool.Pool, jwtSecret string, expiresIn time.Duration) *AuthHandler {
+func NewAuthHandler(db *pgxpool.Pool, log *slog.Logger, jwtSecret string, expiresIn time.Duration) *AuthHandler {
 	return &AuthHandler{
 		db:        db,
 		jwtSecret: jwtSecret,
 		expiresIn: expiresIn,
+		logger:    log,
 	}
 }
 

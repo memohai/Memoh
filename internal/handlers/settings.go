@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -12,10 +13,14 @@ import (
 
 type SettingsHandler struct {
 	service *settings.Service
+	logger  *slog.Logger
 }
 
-func NewSettingsHandler(service *settings.Service) *SettingsHandler {
-	return &SettingsHandler{service: service}
+func NewSettingsHandler(service *settings.Service, log *slog.Logger) *SettingsHandler {
+	return &SettingsHandler{
+		service: service,
+		logger:  log,
+	}
 }
 
 func (h *SettingsHandler) Register(e *echo.Echo) {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ const DefaultEmbeddingTimeout = 10 * time.Second
 
 type EmbeddingsHandler struct {
 	resolver *embeddings.Resolver
+	logger   *slog.Logger
 }
 
 type EmbeddingsRequest struct {
@@ -48,9 +50,10 @@ type EmbeddingsUsage struct {
 	VideoTokens int `json:"video_tokens,omitempty"`
 }
 
-func NewEmbeddingsHandler(modelsService *models.Service, queries *sqlc.Queries) *EmbeddingsHandler {
+func NewEmbeddingsHandler(modelsService *models.Service, log *slog.Logger, queries *sqlc.Queries) *EmbeddingsHandler {
 	return &EmbeddingsHandler{
 		resolver: embeddings.NewResolver(modelsService, queries, DefaultEmbeddingTimeout),
+		logger:   log,
 	}
 }
 

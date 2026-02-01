@@ -1,15 +1,18 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 )
 
-type PingHandler struct{}
+type PingHandler struct {
+	logger *slog.Logger
+}
 
-func NewPingHandler() *PingHandler {
-	return &PingHandler{}
+func NewPingHandler(log *slog.Logger) *PingHandler {
+	return &PingHandler{logger: log}
 }
 
 func (h *PingHandler) Register(e *echo.Echo) {

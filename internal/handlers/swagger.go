@@ -4,6 +4,7 @@ package handlers
 // @version 1.0.0
 
 import (
+	"log/slog"
 	"net/http"
 	"os"
 	"sync"
@@ -19,10 +20,12 @@ var (
 	swaggerErr  error
 )
 
-type SwaggerHandler struct{}
+type SwaggerHandler struct {
+	logger *slog.Logger
+}
 
-func NewSwaggerHandler() *SwaggerHandler {
-	return &SwaggerHandler{}
+func NewSwaggerHandler(log *slog.Logger) *SwaggerHandler {
+	return &SwaggerHandler{logger: log}
 }
 
 func (h *SwaggerHandler) Register(e *echo.Echo) {

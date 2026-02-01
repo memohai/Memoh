@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -12,10 +13,14 @@ import (
 
 type ScheduleHandler struct {
 	service *schedule.Service
+	logger  *slog.Logger
 }
 
-func NewScheduleHandler(service *schedule.Service) *ScheduleHandler {
-	return &ScheduleHandler{service: service}
+func NewScheduleHandler(service *schedule.Service, log *slog.Logger) *ScheduleHandler {
+	return &ScheduleHandler{
+		service: service,
+		logger:  log,
+	}
 }
 
 func (h *ScheduleHandler) Register(e *echo.Echo) {

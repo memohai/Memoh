@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -15,10 +16,14 @@ import (
 
 type ChatHandler struct {
 	resolver *chat.Resolver
+	logger   *slog.Logger
 }
 
-func NewChatHandler(resolver *chat.Resolver) *ChatHandler {
-	return &ChatHandler{resolver: resolver}
+func NewChatHandler(resolver *chat.Resolver, log *slog.Logger) *ChatHandler {
+	return &ChatHandler{
+		resolver: resolver,
+		logger:   log,
+	}
 }
 
 func (h *ChatHandler) Register(e *echo.Echo) {
