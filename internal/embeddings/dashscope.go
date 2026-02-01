@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ type DashScopeEmbedder struct {
 	apiKey  string
 	baseURL string
 	model   string
+	logger  *slog.Logger
 	http    *http.Client
 }
 
@@ -53,7 +55,7 @@ type dashScopeResponse struct {
 	Message   string         `json:"message"`
 }
 
-func NewDashScopeEmbedder(apiKey, baseURL, model string, timeout time.Duration) *DashScopeEmbedder {
+func NewDashScopeEmbedder(log *slog.Logger, apiKey, baseURL, model string, timeout time.Duration) *DashScopeEmbedder {
 	if baseURL == "" {
 		baseURL = DefaultDashScopeBaseURL
 	}
@@ -64,6 +66,7 @@ func NewDashScopeEmbedder(apiKey, baseURL, model string, timeout time.Duration) 
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
+		logger:  log.With(slog.String("embedder", "dashscope")),
 		http: &http.Client{
 			Timeout: timeout,
 		},

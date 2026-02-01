@@ -84,7 +84,7 @@ func main() {
 	queries := dbsqlc.New(conn)
 	modelsService := models.NewService(logger.L, queries)
 
-	if err := ensureAdminUser(ctx, queries, cfg); err != nil {
+	if err := ensureAdminUser(ctx, logger.L, queries, cfg); err != nil {
 		logger.Error("ensure admin user", slog.Any("error", err))
 		os.Exit(1)
 	}
@@ -99,6 +99,7 @@ func main() {
 		modelsService: modelsService,
 		queries:       queries,
 		timeout:       30 * time.Second,
+		logger:        logger.L,
 	}
 
 	resolver := embeddings.NewResolver(logger.L, modelsService, queries, 10*time.Second)
@@ -135,6 +136,7 @@ func main() {
 
 			if len(vectors) > 0 {
 				store, err = memory.NewQdrantStoreWithVectors(
+					logger.L,
 					cfg.Qdrant.BaseURL,
 					cfg.Qdrant.APIKey,
 					cfg.Qdrant.Collection,
@@ -147,6 +149,7 @@ func main() {
 				}
 			} else {
 				store, err = memory.NewQdrantStore(
+					logger.L,
 					cfg.Qdrant.BaseURL,
 					cfg.Qdrant.APIKey,
 					cfg.Qdrant.Collection,
@@ -192,7 +195,7 @@ func main() {
 	}
 }
 
-func ensureAdminUser(ctx context.Context, queries *dbsqlc.Queries, cfg config.Config) error {
+func ensureAdminUser(ctx context.Context, log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) error {
 	if queries == nil {
 		return fmt.Errorf("db queries not configured")
 	}
@@ -211,7 +214,7 @@ func ensureAdminUser(ctx context.Context, queries *dbsqlc.Queries, cfg config.Co
 		return fmt.Errorf("admin username/password required in config.toml")
 	}
 	if password == "change-your-password-here" {
-		logger.Warn("admin password uses default placeholder; please update config.toml")
+		log.Warn("admin password uses default placeholder; please update config.toml")
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -239,7 +242,7 @@ func ensureAdminUser(ctx context.Context, queries *dbsqlc.Queries, cfg config.Co
 	if err != nil {
 		return err
 	}
-	logger.Info("Admin user created", slog.String("username", username))
+	log.Info("Admin user created", slog.String("username", username))
 	return nil
 }
 
@@ -247,6 +250,7 @@ type lazyLLMClient struct {
 	modelsService *models.Service
 	queries       *dbsqlc.Queries
 	timeout       time.Duration
+	logger        *slog.Logger
 }
 
 func (c *lazyLLMClient) Extract(ctx context.Context, req memory.ExtractRequest) (memory.ExtractResponse, error) {
@@ -277,5 +281,5 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memory.LLM, error) {
 	if clientType != "openai" && clientType != "openai-compat" {
 		return nil, fmt.Errorf("memory provider client type not supported: %s", memoryProvider.ClientType)
 	}
-	return memory.NewLLMClient(memoryProvider.BaseUrl, memoryProvider.ApiKey, memoryModel.ModelID, c.timeout), nil
+	return memory.NewLLMClient(c.logger, memoryProvider.BaseUrl, memoryProvider.ApiKey, memoryModel.ModelID, c.timeout), nil
 }

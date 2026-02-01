@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -15,10 +16,11 @@ type LLMClient struct {
 	baseURL string
 	apiKey  string
 	model   string
+	logger  *slog.Logger
 	http    *http.Client
 }
 
-func NewLLMClient(baseURL, apiKey, model string, timeout time.Duration) *LLMClient {
+func NewLLMClient(log *slog.Logger, baseURL, apiKey, model string, timeout time.Duration) *LLMClient {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
@@ -33,6 +35,7 @@ func NewLLMClient(baseURL, apiKey, model string, timeout time.Duration) *LLMClie
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		model:   model,
+		logger:  log.With(slog.String("client", "llm")),
 		http: &http.Client{
 			Timeout: timeout,
 		},

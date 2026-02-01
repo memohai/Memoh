@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -12,13 +13,14 @@ import (
 )
 
 type QdrantStore struct {
-	client     *qdrant.Client
-	collection string
-	dimension  int
-	baseURL    string
-	apiKey     string
-	timeout    time.Duration
-	vectorNames map[string]int
+	client           *qdrant.Client
+	collection       string
+	dimension        int
+	baseURL          string
+	apiKey           string
+	timeout          time.Duration
+	logger           *slog.Logger
+	vectorNames      map[string]int
 	usesNamedVectors bool
 }
 
@@ -29,7 +31,7 @@ type qdrantPoint struct {
 	Payload    map[string]interface{} `json:"payload,omitempty"`
 }
 
-func NewQdrantStore(baseURL, apiKey, collection string, dimension int, timeout time.Duration) (*QdrantStore, error) {
+func NewQdrantStore(log *slog.Logger, baseURL, apiKey, collection string, dimension int, timeout time.Duration) (*QdrantStore, error) {
 	host, port, useTLS, err := parseQdrantEndpoint(baseURL)
 	if err != nil {
 		return nil, err
@@ -59,6 +61,7 @@ func NewQdrantStore(baseURL, apiKey, collection string, dimension int, timeout t
 		baseURL:    baseURL,
 		apiKey:     apiKey,
 		timeout:    timeoutOrDefault(timeout),
+		logger:     log.With(slog.String("store", "qdrant")),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutOrDefault(timeout))
@@ -70,10 +73,10 @@ func NewQdrantStore(baseURL, apiKey, collection string, dimension int, timeout t
 }
 
 func (s *QdrantStore) NewSibling(collection string, dimension int) (*QdrantStore, error) {
-	return NewQdrantStore(s.baseURL, s.apiKey, collection, dimension, s.timeout)
+	return NewQdrantStore(s.logger, s.baseURL, s.apiKey, collection, dimension, s.timeout)
 }
 
-func NewQdrantStoreWithVectors(baseURL, apiKey, collection string, vectors map[string]int, timeout time.Duration) (*QdrantStore, error) {
+func NewQdrantStoreWithVectors(log *slog.Logger, baseURL, apiKey, collection string, vectors map[string]int, timeout time.Duration) (*QdrantStore, error) {
 	host, port, useTLS, err := parseQdrantEndpoint(baseURL)
 	if err != nil {
 		return nil, err
@@ -97,12 +100,13 @@ func NewQdrantStoreWithVectors(baseURL, apiKey, collection string, vectors map[s
 	}
 
 	store := &QdrantStore{
-		client:     client,
-		collection: collection,
-		baseURL:    baseURL,
-		apiKey:     apiKey,
-		timeout:    timeoutOrDefault(timeout),
-		vectorNames: vectors,
+		client:           client,
+		collection:       collection,
+		baseURL:          baseURL,
+		apiKey:           apiKey,
+		timeout:          timeoutOrDefault(timeout),
+		logger:           log.With(slog.String("store", "qdrant")),
+		vectorNames:      vectors,
 		usesNamedVectors: true,
 	}
 

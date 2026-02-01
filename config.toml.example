@@ -1,4 +1,8 @@
 ## Service configuration
+[log]
+level = "info"
+format = "text"
+
 [server]
 # HTTP listen address
 addr = ":8080"
