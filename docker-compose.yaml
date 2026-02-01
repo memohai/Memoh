@@ -1,0 +1,37 @@
+services:
+  # 关系型数据库：存储用户、配置、聊天记录等
+  postgres:
+    image: postgres:18-alpine
+    container_name: memoh-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=memoh
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d memoh"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 向量数据库：用于 AI 的长记忆搜索
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: memoh-qdrant
+    ports:
+      - "6333:6333" # HTTP API
+      - "6334:6334" # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  qdrant_data:

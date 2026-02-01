@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -30,11 +31,11 @@ func NewServer(addr string, jwtSecret string, pingHandler *handlers.PingHandler,
 		LogMethod: true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
 			logger.L.Info("request",
-				"method", v.Method,
-				"uri", v.URI,
-				"status", v.Status,
-				"latency", v.Latency,
-				"remote_ip", c.RealIP(),
+				slog.String("method", v.Method),
+				slog.String("uri", v.URI),
+				slog.Int("status", v.Status),
+				slog.Duration("latency", v.Latency),
+				slog.String("remote_ip", c.RealIP()),
 			)
 			return nil
 		},

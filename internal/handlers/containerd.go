@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -197,8 +198,8 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		started = true
 	} else {
 		logger.FromContext(c.Request().Context()).Error("mcp container start failed",
-			"container_id", req.ContainerID,
-			"error", err,
+			slog.String("container_id", req.ContainerID),
+			slog.Any("error", err),
 		)
 	}
 

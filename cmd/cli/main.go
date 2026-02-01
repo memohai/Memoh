@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -53,7 +54,7 @@ func main() {
 	if jwtToken == "" {
 		username, password, err := resolveLoginCredentials(opts, cfg)
 		if err != nil {
-			logger.Error("resolve login", "error", err)
+			logger.Error("resolve login", slog.Any("error", err))
 			os.Exit(1)
 		}
 		loginCtx := ctx
@@ -64,7 +65,7 @@ func main() {
 		}
 		jwtToken, err = resolveJWTToken(loginCtx, client, opts.apiBaseURL, username, password)
 		if err != nil {
-			logger.Error("resolve jwt", "error", err)
+			logger.Error("resolve jwt", slog.Any("error", err))
 			os.Exit(1)
 		}
 	}
@@ -72,13 +73,13 @@ func main() {
 	query := strings.TrimSpace(strings.Join(flag.Args(), " "))
 	if query != "" {
 		if err := sendChat(ctx, client, opts.apiBaseURL, jwtToken, query); err != nil {
-			logger.Error("chat failed", "error", err)
+			logger.Error("chat failed", slog.Any("error", err))
 			os.Exit(1)
 		}
 		return
 	}
 	if err := runInteractive(ctx, client, opts.apiBaseURL, jwtToken); err != nil {
-		logger.Error("chat failed", "error", err)
+		logger.Error("chat failed", slog.Any("error", err))
 		os.Exit(1)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -46,7 +47,7 @@ func main() {
 	}
 	jwtExpiresIn, err := time.ParseDuration(cfg.Auth.JWTExpiresIn)
 	if err != nil {
-		logger.Error("invalid jwt expires in", "error", err)
+		logger.Error("invalid jwt expires in", slog.Any("error", err))
 		os.Exit(1)
 	}
 
@@ -62,7 +63,7 @@ func main() {
 	factory := ctr.DefaultClientFactory{SocketPath: socketPath}
 	client, err := factory.New(ctx)
 	if err != nil {
-		logger.Error("connect containerd", "error", err)
+		logger.Error("connect containerd", slog.Any("error", err))
 		os.Exit(1)
 	}
 	defer client.Close()
@@ -75,7 +76,7 @@ func main() {
 
 	conn, err := db.Open(ctx, cfg.Postgres)
 	if err != nil {
-		logger.Error("db connect", "error", err)
+		logger.Error("db connect", slog.Any("error", err))
 		os.Exit(1)
 	}
 	defer conn.Close()
@@ -84,7 +85,7 @@ func main() {
 	modelsService := models.NewService(queries)
 
 	if err := ensureAdminUser(ctx, queries, cfg); err != nil {
-		logger.Error("ensure admin user", "error", err)
+		logger.Error("ensure admin user", slog.Any("error", err))
 		os.Exit(1)
 	}
 
@@ -103,7 +104,7 @@ func main() {
 	resolver := embeddings.NewResolver(modelsService, queries, 10*time.Second)
 	vectors, textModel, multimodalModel, hasModels, err := embeddings.CollectEmbeddingVectors(ctx, modelsService)
 	if err != nil {
-		logger.Error("embedding models", "error", err)
+		logger.Error("embedding models", slog.Any("error", err))
 		os.Exit(1)
 	}
 
@@ -141,7 +142,7 @@ func main() {
 					time.Duration(cfg.Qdrant.TimeoutSeconds)*time.Second,
 				)
 				if err != nil {
-					logger.Error("qdrant named vectors init", "error", err)
+					logger.Error("qdrant named vectors init", slog.Any("error", err))
 					os.Exit(1)
 				}
 			} else {
@@ -153,7 +154,7 @@ func main() {
 					time.Duration(cfg.Qdrant.TimeoutSeconds)*time.Second,
 				)
 				if err != nil {
-					logger.Error("qdrant init", "error", err)
+					logger.Error("qdrant init", slog.Any("error", err))
 					os.Exit(1)
 				}
 			}
@@ -177,7 +178,7 @@ func main() {
 	historyHandler := handlers.NewHistoryHandler(historyService)
 	scheduleService := schedule.NewService(queries, chatResolver, cfg.Auth.JWTSecret)
 	if err := scheduleService.Bootstrap(ctx); err != nil {
-		logger.Error("schedule bootstrap", "error", err)
+		logger.Error("schedule bootstrap", slog.Any("error", err))
 		os.Exit(1)
 	}
 	scheduleHandler := handlers.NewScheduleHandler(scheduleService)
@@ -186,7 +187,7 @@ func main() {
 	srv := server.NewServer(addr, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, scheduleHandler, subagentHandler, containerdHandler)
 
 	if err := srv.Start(); err != nil {
-		logger.Error("server failed", "error", err)
+		logger.Error("server failed", slog.Any("error", err))
 		os.Exit(1)
 	}
 }
@@ -238,7 +239,7 @@ func ensureAdminUser(ctx context.Context, queries *dbsqlc.Queries, cfg config.Co
 	if err != nil {
 		return err
 	}
-	logger.Info("Admin user created", "username", username)
+	logger.Info("Admin user created", slog.String("username", username))
 	return nil
 }
 

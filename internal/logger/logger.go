@@ -59,7 +59,7 @@ func parseLevel(level string) slog.Level {
 	}
 }
 
-// 快捷方法，直接使用全局 L
+// 快捷方法，支持强类型 slog.Attr 或松散的 key-value 对
 func Debug(msg string, args ...any) { L.Debug(msg, args...) }
 func Info(msg string, args ...any)  { L.Info(msg, args...) }
 func Warn(msg string, args ...any)  { L.Warn(msg, args...) }
