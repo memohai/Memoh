@@ -69,7 +69,7 @@ func main() {
 	defer client.Close()
 
 	service := ctr.NewDefaultService(logger.L, client, cfg.Containerd.Namespace)
-	manager := mcp.NewManager(service, cfg.MCP)
+	manager := mcp.NewManager(logger.L, service, cfg.MCP)
 
 	pingHandler := handlers.NewPingHandler(logger.L)
 	containerdHandler := handlers.NewContainerdHandler(logger.L, service, cfg.MCP, cfg.Containerd.Namespace)
@@ -101,7 +101,7 @@ func main() {
 		timeout:       30 * time.Second,
 	}
 
-	resolver := embeddings.NewResolver(modelsService, queries, 10*time.Second)
+	resolver := embeddings.NewResolver(logger.L, modelsService, queries, 10*time.Second)
 	vectors, textModel, multimodalModel, hasModels, err := embeddings.CollectEmbeddingVectors(ctx, modelsService)
 	if err != nil {
 		logger.Error("embedding models", slog.Any("error", err))

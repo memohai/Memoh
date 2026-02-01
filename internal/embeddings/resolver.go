@@ -3,6 +3,7 @@ package embeddings
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -55,13 +56,15 @@ type Resolver struct {
 	modelsService *models.Service
 	queries       *sqlc.Queries
 	timeout       time.Duration
+	logger        *slog.Logger
 }
 
-func NewResolver(modelsService *models.Service, queries *sqlc.Queries, timeout time.Duration) *Resolver {
+func NewResolver(log *slog.Logger, modelsService *models.Service, queries *sqlc.Queries, timeout time.Duration) *Resolver {
 	return &Resolver{
 		modelsService: modelsService,
 		queries:       queries,
 		timeout:       timeout,
+		logger:        log.With(slog.String("service", "embeddings")),
 	}
 }
 

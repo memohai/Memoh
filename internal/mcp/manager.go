@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,12 +44,14 @@ type Manager struct {
 	containerID func(string) string
 	db          *pgxpool.Pool
 	queries     *dbsqlc.Queries
+	logger      *slog.Logger
 }
 
-func NewManager(service ctr.Service, cfg config.MCPConfig) *Manager {
+func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig) *Manager {
 	return &Manager{
 		service: service,
 		cfg:     cfg,
+		logger:  log.With(slog.String("manager", "mcp")),
 		containerID: func(userID string) string {
 			return ContainerPrefix + userID
 		},
