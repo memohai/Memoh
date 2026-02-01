@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/memohai/memoh/internal/chat"
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/logger"
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
@@ -34,15 +34,20 @@ func main() {
 	cfgPath := os.Getenv("CONFIG_PATH")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
 	}
 
+	logger.Init(cfg.Log.Level, cfg.Log.Format)
+
 	if strings.TrimSpace(cfg.Auth.JWTSecret) == "" {
-		log.Fatalf("jwt secret is required")
+		logger.Error("jwt secret is required")
+		os.Exit(1)
 	}
 	jwtExpiresIn, err := time.ParseDuration(cfg.Auth.JWTExpiresIn)
 	if err != nil {
-		log.Fatalf("invalid jwt expires in: %v", err)
+		logger.Error("invalid jwt expires in", "error", err)
+		os.Exit(1)
 	}
 
 	addr := cfg.Server.Addr
@@ -57,7 +62,8 @@ func main() {
 	factory := ctr.DefaultClientFactory{SocketPath: socketPath}
 	client, err := factory.New(ctx)
 	if err != nil {
-		log.Fatalf("connect containerd: %v", err)
+		logger.Error("connect containerd", "error", err)
+		os.Exit(1)
 	}
 	defer client.Close()
 
@@ -69,7 +75,8 @@ func main() {
 
 	conn, err := db.Open(ctx, cfg.Postgres)
 	if err != nil {
-		log.Fatalf("db connect: %v", err)
+		logger.Error("db connect", "error", err)
+		os.Exit(1)
 	}
 	defer conn.Close()
 	manager.WithDB(conn)
@@ -77,7 +84,8 @@ func main() {
 	modelsService := models.NewService(queries)
 
 	if err := ensureAdminUser(ctx, queries, cfg); err != nil {
-		log.Fatalf("ensure admin user: %v", err)
+		logger.Error("ensure admin user", "error", err)
+		os.Exit(1)
 	}
 
 	authHandler := handlers.NewAuthHandler(conn, cfg.Auth.JWTSecret, jwtExpiresIn)
@@ -95,22 +103,23 @@ func main() {
 	resolver := embeddings.NewResolver(modelsService, queries, 10*time.Second)
 	vectors, textModel, multimodalModel, hasModels, err := embeddings.CollectEmbeddingVectors(ctx, modelsService)
 	if err != nil {
-		log.Fatalf("embedding models: %v", err)
+		logger.Error("embedding models", "error", err)
+		os.Exit(1)
 	}
 
 	var memoryService *memory.Service
 	var memoryHandler *handlers.MemoryHandler
 
 	if !hasModels {
-		log.Println("WARNING: No embedding models configured. Memory service will not be available.")
-		log.Println("You can add embedding models via the /models API endpoint.")
+		logger.Warn("No embedding models configured. Memory service will not be available.")
+		logger.Warn("You can add embedding models via the /models API endpoint.")
 		memoryHandler = handlers.NewMemoryHandler(nil)
 	} else {
 		if textModel.ModelID == "" {
-			log.Println("WARNING: No text embedding model configured. Text embedding features will be limited.")
+			logger.Warn("No text embedding model configured. Text embedding features will be limited.")
 		}
 		if multimodalModel.ModelID == "" {
-			log.Println("WARNING: No multimodal embedding model configured. Multimodal embedding features will be limited.")
+			logger.Warn("No multimodal embedding model configured. Multimodal embedding features will be limited.")
 		}
 
 		var textEmbedder embeddings.Embedder
@@ -132,7 +141,8 @@ func main() {
 					time.Duration(cfg.Qdrant.TimeoutSeconds)*time.Second,
 				)
 				if err != nil {
-					log.Fatalf("qdrant named vectors init: %v", err)
+					logger.Error("qdrant named vectors init", "error", err)
+					os.Exit(1)
 				}
 			} else {
 				store, err = memory.NewQdrantStore(
@@ -143,7 +153,8 @@ func main() {
 					time.Duration(cfg.Qdrant.TimeoutSeconds)*time.Second,
 				)
 				if err != nil {
-					log.Fatalf("qdrant init: %v", err)
+					logger.Error("qdrant init", "error", err)
+					os.Exit(1)
 				}
 			}
 		}
@@ -166,7 +177,8 @@ func main() {
 	historyHandler := handlers.NewHistoryHandler(historyService)
 	scheduleService := schedule.NewService(queries, chatResolver, cfg.Auth.JWTSecret)
 	if err := scheduleService.Bootstrap(ctx); err != nil {
-		log.Fatalf("schedule bootstrap: %v", err)
+		logger.Error("schedule bootstrap", "error", err)
+		os.Exit(1)
 	}
 	scheduleHandler := handlers.NewScheduleHandler(scheduleService)
 	subagentService := subagent.NewService(queries)
@@ -174,7 +186,8 @@ func main() {
 	srv := server.NewServer(addr, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, scheduleHandler, subagentHandler, containerdHandler)
 
 	if err := srv.Start(); err != nil {
-		log.Fatalf("server failed: %v", err)
+		logger.Error("server failed", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -197,7 +210,7 @@ func ensureAdminUser(ctx context.Context, queries *dbsqlc.Queries, cfg config.Co
 		return fmt.Errorf("admin username/password required in config.toml")
 	}
 	if password == "change-your-password-here" {
-		log.Printf("WARNING: admin password uses default placeholder; please update config.toml")
+		logger.Warn("admin password uses default placeholder; please update config.toml")
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -225,7 +238,7 @@ func ensureAdminUser(ctx context.Context, queries *dbsqlc.Queries, cfg config.Co
 	if err != nil {
 		return err
 	}
-	log.Printf("Admin user created: %s", username)
+	logger.Info("Admin user created", "username", username)
 	return nil
 }
 
