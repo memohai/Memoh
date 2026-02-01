@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/memohai/memoh/internal/chat"
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/logger"
 )
 
 type cliOptions struct {
@@ -33,13 +33,18 @@ func main() {
 
 	cfg, err := config.Load(opts.configPath)
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
 	}
+
+	logger.Init(cfg.Log.Level, cfg.Log.Format)
+
 	if strings.TrimSpace(opts.apiBaseURL) == "" {
 		opts.apiBaseURL = defaultAPIBaseURL(cfg.Server.Addr)
 	}
 	if strings.TrimSpace(opts.apiBaseURL) == "" {
-		log.Fatalf("api url is required")
+		logger.Error("api url is required")
+		os.Exit(1)
 	}
 	opts.apiBaseURL = normalizeBaseURL(opts.apiBaseURL)
 
@@ -48,7 +53,8 @@ func main() {
 	if jwtToken == "" {
 		username, password, err := resolveLoginCredentials(opts, cfg)
 		if err != nil {
-			log.Fatalf("resolve login: %v", err)
+			logger.Error("resolve login", "error", err)
+			os.Exit(1)
 		}
 		loginCtx := ctx
 		if opts.timeout > 0 {
@@ -58,19 +64,22 @@ func main() {
 		}
 		jwtToken, err = resolveJWTToken(loginCtx, client, opts.apiBaseURL, username, password)
 		if err != nil {
-			log.Fatalf("resolve jwt: %v", err)
+			logger.Error("resolve jwt", "error", err)
+			os.Exit(1)
 		}
 	}
 
 	query := strings.TrimSpace(strings.Join(flag.Args(), " "))
 	if query != "" {
 		if err := sendChat(ctx, client, opts.apiBaseURL, jwtToken, query); err != nil {
-			log.Fatalf("chat failed: %v", err)
+			logger.Error("chat failed", "error", err)
+			os.Exit(1)
 		}
 		return
 	}
 	if err := runInteractive(ctx, client, opts.apiBaseURL, jwtToken); err != nil {
-		log.Fatalf("chat failed: %v", err)
+		logger.Error("chat failed", "error", err)
+		os.Exit(1)
 	}
 }
 
