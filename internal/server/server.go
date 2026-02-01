@@ -8,6 +8,7 @@ import (
 
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/handlers"
+	"github.com/memohai/memoh/internal/logger"
 )
 
 type Server struct {
@@ -23,7 +24,21 @@ func NewServer(addr string, jwtSecret string, pingHandler *handlers.PingHandler,
 	e := echo.New()
 	e.HideBanner = true
 	e.Use(middleware.Recover())
-	e.Use(middleware.RequestLogger())
+	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogStatus: true,
+		LogURI:    true,
+		LogMethod: true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			logger.L.Info("request",
+				"method", v.Method,
+				"uri", v.URI,
+				"status", v.Status,
+				"latency", v.Latency,
+				"remote_ip", c.RealIP(),
+			)
+			return nil
+		},
+	}))
 	e.Use(auth.JWTMiddleware(jwtSecret, func(c echo.Context) bool {
 		path := c.Request().URL.Path
 		if path == "/ping" || path == "/api/swagger.json" || path == "/auth/login" {
