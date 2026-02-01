@@ -26,6 +26,7 @@ const (
 )
 
 type Config struct {
+	Log          LogConfig          `toml:"log"`
 	Server       ServerConfig       `toml:"server"`
 	Admin        AdminConfig        `toml:"admin"`
 	Auth         AuthConfig         `toml:"auth"`
@@ -34,6 +35,11 @@ type Config struct {
 	Postgres     PostgresConfig     `toml:"postgres"`
 	Qdrant       QdrantConfig       `toml:"qdrant"`
 	AgentGateway AgentGatewayConfig `toml:"agent_gateway"`
+}
+
+type LogConfig struct {
+	Level  string `toml:"level"`
+	Format string `toml:"format"`
 }
 
 type ServerConfig struct {
@@ -98,6 +104,10 @@ func (c AgentGatewayConfig) BaseURL() string {
 
 func Load(path string) (Config, error) {
 	cfg := Config{
+		Log: LogConfig{
+			Level:  "info",
+			Format: "text",
+		},
 		Server: ServerConfig{
 			Addr: DefaultHTTPAddr,
 		},
