@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
+	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
 )
 
@@ -196,7 +196,10 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}); err == nil {
 		started = true
 	} else {
-		log.Printf("mcp container start failed: id=%s err=%v", req.ContainerID, err)
+		logger.FromContext(c.Request().Context()).Error("mcp container start failed",
+			"container_id", req.ContainerID,
+			"error", err,
+		)
 	}
 
 	return c.JSON(http.StatusOK, CreateContainerResponse{
