@@ -1,20 +1,5 @@
 <template>
   <section class="h-[calc(100vh-calc(var(--spacing)*20))]  max-w-187 gap-8 w-full *:w-full m-auto flex flex-col">
-    <!-- <ScrollArea class="flex-none w-full rounded-md border">
-      <div class="p-4">
-        <h4 class="mb-4 text-sm leading-none font-medium">
-          Tags
-        </h4>
-        <template
-          v-for="tag in 1000"
-          :key="tag"
-        >
-          <div class="text-sm">
-            {{ tag }}
-          </div>
-        </template>
-</div>
-</ScrollArea> -->
     <section class="flex-1 h-0">
       <ScrollArea
         ref="chat-container"

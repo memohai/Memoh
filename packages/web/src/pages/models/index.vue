@@ -27,57 +27,86 @@ import { mdiMagnify } from '@mdi/js'
 // import DataTable from '@/components/DataTable/index.vue'
 import SvgIcon from '@jamescoyle/vue-icon'
 import request from '@/utils/request'
-import {type ProviderInfo } from '@memoh/shared'
+import { type ProviderInfo } from '@memoh/shared'
 import AddProvider from '@/components/AddProvider/index.vue'
-import {clientType } from '@memoh/shared'
+import { clientType } from '@memoh/shared'
 
 const filterProvider = ref('')
-const {data:providerData}=useQuery({
+const { data: providerData } = useQuery({
   key: ['provider'],
   query: () => request({
     url: `/providers?client_type=${filterProvider.value}`,
 
-  }).then(fetchValue=>fetchValue.data)
+  }).then(fetchValue => fetchValue.data)
 })
-const queryCache=useQueryCache()
+const queryCache = useQueryCache()
 
 watch(filterProvider, () => {
- 
+
   queryCache.invalidateQueries({
     key: ['provider']
   })
 }, {
-  immediate:true
+  immediate: true
 })
 
-const curProvider = ref<Partial<ProviderInfo>&{id:string}>()
+const curProvider = ref<Partial<ProviderInfo> & { id: string }>()
 const selectProvider = (value: string) => computed(() => {
   return curProvider.value?.name === value
 })
-watch(providerData, () => {
-  if (Array.isArray(providerData.value)&&providerData.value.length > 0) {
-    curProvider.value= providerData.value[0]
+
+const searchProviderTxt = reactive({
+  temp_value: '',
+  value: ''
+})
+
+const curFilterProvider = computed(() => {
+  if (!Array.isArray(providerData.value)) {
+    return []
+  }
+  const searchReg = new RegExp([...searchProviderTxt.value].map(v => `\\u{${v.codePointAt(0)?.toString(16)}}`).join(''), 'u')
+  return providerData.value.filter((provider: Partial<ProviderInfo> & { id: string }) => {
+    return searchReg.test(provider.name as string)
+  })
+})
+
+watch(curFilterProvider, () => {
+  if (Array.isArray(curFilterProvider.value) && curFilterProvider.value.length > 0) {
+    curProvider.value = curFilterProvider.value[0]
+  } else {
+    curProvider.value = {
+      id:''
+    }
   }
 }, {
-  immediate:true
+  immediate: true
 })
 provide('curProvider', curProvider)
 
 const openStatus = reactive({
-  provideOpen:false  
+  provideOpen: false
 })
 
 </script>
 
 <template>
   <div class="w-full  mx-auto">
-    <div class="[&_td:last-child]:w-45 relative model-select">
+    <div class="[&_td:last-child]:w-45 model-select">
       <SidebarProvider class="min-h-[initial]! flex **:data-[sidebar=sidebar]:bg-transparent">
         <Sidebar class="h-[calc(100vh-calc(var(--spacing)*16)-1px)]! relative top-0 ">
           <SidebarHeader>
             <InputGroup class="shadow-none">
-              <InputGroupInput placeholder="搜索模型平台" />
-              <InputGroupAddon align="inline-end">
+              <InputGroupInput
+                v-model="searchProviderTxt.temp_value"
+                placeholder="搜索模型平台"
+              />
+              <InputGroupAddon
+                align="inline-end"
+                class="cursor-pointer"
+                @click="() => {
+                  searchProviderTxt.value = searchProviderTxt.temp_value
+                }"
+              >
                 <svg-icon
                   type="mdi"
                   :path="mdiMagnify"
@@ -88,7 +117,7 @@ const openStatus = reactive({
           </SidebarHeader>
           <SidebarContent class="px-2 scrollbar-none">
             <SidebarMenu
-              v-for="providerItem in providerData"
+              v-for="providerItem in curFilterProvider"
               :key="providerItem.name"
             >
               <SidebarMenuItem>
@@ -97,7 +126,7 @@ const openStatus = reactive({
                   class="justify-start py-5! px-4"
                 >
                   <Toggle
-                    :class="`py-4 border border-transparent ${curProvider?.name===providerItem.name?'border-inherit':''}`"
+                    :class="`py-4 border border-transparent ${curProvider?.name === providerItem.name ? 'border-inherit' : ''}`"
                     :model-value="selectProvider(providerItem.name as string).value"
                     @update:model-value="(isSelect) => {
                       if (isSelect) {
@@ -137,6 +166,6 @@ const openStatus = reactive({
           </ScrollArea>
         </section>
       </SidebarProvider>
-    </div>   
+    </div>
   </div>
-</template>    
+</template>

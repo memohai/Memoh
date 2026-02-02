@@ -110,7 +110,10 @@
         <h4 class="scroll-m-20 font-semibold tracking-tight">
           模型
         </h4>
-        <CreateModel />
+        <CreateModel
+          v-if="curProvider?.id!==undefined"
+          :id="curProvider?.id as string"
+        />
       </section>
       <section class="flex flex-col gap-4">
         <Item variant="outline">
@@ -191,7 +194,7 @@ import {
 import CreateModel from '@/components/CreateModel/index.vue'
 import { computed, inject,ref, toValue, watch } from 'vue'
 import { type ProviderInfo } from '@memoh/shared'
-import { useMutation,useQueryCache } from '@pinia/colada'
+import { useMutation,useQuery,useQueryCache } from '@pinia/colada'
 import request from '@/utils/request'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -211,9 +214,8 @@ const form=useForm({
   validationSchema: providerSchema
 })
 
-
-
 const curProvider = inject('curProvider', ref<Partial<ProviderInfo & { id: string }>>())
+
 const queryCache=useQueryCache()
 const {mutate:deleteProvider,isLoading:deleteLoading}=useMutation({
   mutation:()=> request({
@@ -234,6 +236,11 @@ const { mutate: changeProvider, isLoading: editLoading } = useMutation({
   onSettled: () => queryCache.invalidateQueries({
     key: ['provider']
   })
+})
+
+useQuery({
+  key: ['model'],
+  
 })
 
 const editProvider = form.handleSubmit(async (value) => {
