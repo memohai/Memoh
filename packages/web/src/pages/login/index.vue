@@ -1,9 +1,6 @@
 <template>
   <section class="w-screen h-screen flex *:m-auto bg-linear-to-t from-[#BFA4A0] to-[#7784AC] ">
-    <section
-      v-if="!loading"
-      class="w-full max-w-sm flex flex-col gap-10 "
-    >
+    <section class="w-full max-w-sm flex flex-col gap-10 ">
       <section>
         <img
           src="../../../public/logo.png"
@@ -50,7 +47,7 @@
                 <FormControl>
                   <Input
                     type="password"
-                    :placeholder="$t('prompt.enter',{msg:$t(`login.password`).toLocaleLowerCase()})"
+                    :placeholder="$t('prompt.enter', { msg: $t(`login.password`).toLocaleLowerCase() })"
                     autocomplete="password"
                     v-bind="componentField"
                   />
@@ -75,6 +72,7 @@
               type="submit"
               @click="login"
             >
+              <Spinner v-if="loading" />
               {{ $t("login.login") }}
             </Button>
             <Button
@@ -86,17 +84,6 @@
           </CardFooter>
         </Card>
       </form>
-    </section>
-    <section
-      v-else
-      class="fixed inset-0 flex"
-    >
-      <img
-        src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJjdXJyZW50Q29sb3IiIGQ9Ik0xMiwxQTExLDExLDAsMSwwLDIzLDEyLDExLDExLDAsMCwwLDEyLDFabTAsMTlhOCw4LDAsMSwxLDgtOEE4LDgsMCwwLDEsMTIsMjBaIiBvcGFjaXR5PSIwLjI1Ii8+PHBhdGggZmlsbD0iY3VycmVudENvbG9yIiBkPSJNMTAuMTQsMS4xNmExMSwxMSwwLDAsMC05LDguOTJBMS41OSwxLjU5LDAsMCwwLDIuNDYsMTIsMS41MiwxLjUyLDAsMCwwLDQuMTEsMTAuN2E4LDgsMCwwLDEsNi42Ni02LjYxQTEuNDIsMS40MiwwLDAsMCwxMiwyLjY5aDBBMS41NywxLjU3LDAsMCwwLDEwLjE0LDEuMTZaIj48YW5pbWF0ZVRyYW5zZm9ybSBhdHRyaWJ1dGVOYW1lPSJ0cmFuc2Zvcm0iIGR1cj0iMC43NXMiIHJlcGVhdENvdW50PSJpbmRlZmluaXRlIiB0eXBlPSJyb3RhdGUiIHZhbHVlcz0iMCAxMiAxMjszNjAgMTIgMTIiLz48L3BhdGg+PC9zdmc+"
-        alt=""
-        width="80"
-        class="m-auto"
-      >
     </section>
   </section>
 </template>
@@ -113,6 +100,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  Spinner
 } from '@memoh/ui'
 import { useRouter } from 'vue-router'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -121,7 +109,7 @@ import * as z from 'zod'
 import request from '@/utils/request'
 import { useUserStore } from '@/store/User.ts'
 import { ref } from 'vue'
-
+import { toast } from 'vue-sonner'
 const router = useRouter()
 const formSchema = toTypedSchema(z.object({
   username: z.string().min(1),
@@ -132,26 +120,36 @@ const form = useForm({
 })
 
 const { login: LoginHandle } = useUserStore()
-const loading=ref(false)
+const loading = ref(false)
 const login = form.handleSubmit(async (values) => {
   try {
-    loading.value=true
+    loading.value = true
     const loginState = await request({
       url: '/auth/login',
       method: 'post',
       data: { ...values }
-    })
+    }, false)
     const data = loginState?.data
-    if (data?.access_token) {
-      LoginHandle({ id: data.user_id, username: data.username, role: data.role, displayName: data.display_name }, data.access_token)
-    }    
+    if (data?.access_token && data?.user_id) {
+      LoginHandle({
+        id: data?.user_id,
+        username: data?.username,
+        displayName: '',
+        role: ''
+      }, data.access_token)
+    } else {
+      throw new Error('用户名和密码错误')
+    }
     router.replace({
-      name:'Main'
+      name: 'Main'
     })
   } catch (error) {
+    toast.error('用户名或密码错误', {
+      description: '请重新输入用户名和密码',
+    })
     return error
   } finally {
-    loading.value=false
+    loading.value = false
   }
 })
 

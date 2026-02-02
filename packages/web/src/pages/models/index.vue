@@ -1,230 +1,146 @@
 <script setup lang="ts">
 // import type { Payment } from '@/components/columns'
-import { h, computed, ref, provide, watch, type ComputedRef, reactive } from 'vue'
+import { h, computed, ref, provide, watch, type ComputedRef, reactive, inject } from 'vue'
 import CreateModel from '@/components/CreateModel/index.vue'
-import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
+import modelSetting from './modelSetting.vue'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import {
-  Button,
-  // Pagination,
-  // PaginationContent,
-  // PaginationEllipsis,
-  // PaginationItem,
-  // PaginationNext,
-  // PaginationPrevious,
-  Checkbox
+  ScrollArea,
+  Sidebar,
+  SidebarContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  InputGroup, InputGroupAddon, InputGroupInput,
+  SidebarFooter,
+  Toggle,
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
 } from '@memoh/ui'
-import DataTable from '@/components/DataTable/index.vue'
+import { mdiMagnify } from '@mdi/js'
+// import DataTable from '@/components/DataTable/index.vue'
+import SvgIcon from '@jamescoyle/vue-icon'
 import request from '@/utils/request'
-import { type ColumnDef } from '@tanstack/vue-table'
-import {type  ModelTable  as ModelType} from '@memoh/shared'
-import { i18nRef } from '@/i18n'
+import {type ModelList } from '@memoh/shared'
+import AddProvider from '@/components/AddProvider/index.vue'
+import {clientType } from '@memoh/shared'
 
-const openDialogModel = ref(false)
-const editModelInfo = ref<ModelType & { id: string } | null>(null)
-provide('open', openDialogModel)
-provide('editModelInfo', editModelInfo)
+const filterProvider = ref('')
+const {data:providerData}=useQuery({
+  key: ['provider'],
+  query: () => request({
+    url: `/providers?client_type=${filterProvider.value}`,
 
-watch(openDialogModel, () => {
-  if (!openDialogModel.value) {
-    editModelInfo.value = null
+  }).then(fetchValue=>fetchValue.data)
+})
+const queryCache=useQueryCache()
+
+watch(filterProvider, () => {
+ 
+  queryCache.invalidateQueries({
+    key: ['provider']
+  })
+}, {
+  immediate:true
+})
+
+const curProvider = ref<Partial<ModelList>>()
+const selectProvider = (value: string) => computed(() => {
+  return curProvider.value?.name === value
+})
+watch(providerData, () => {
+  if (Array.isArray(providerData.value)&&providerData.value.length > 0) {
+    curProvider.value= providerData.value[0]
   }
 }, {
-  immediate: true
+  immediate:true
+})
+provide('curProvider', curProvider)
+
+const openStatus = reactive({
+  provideOpen:false  
 })
 
-
-const cacheQuery = useQueryCache()
-const {
-  mutate: deleteModel,
-} = useMutation({
-  mutation: (id: string) =>
-    request({
-      url: `model/${id}`,
-      method: 'DELETE'
-    }),
-  onSettled: () => {
-    cacheQuery.invalidateQueries({
-      key: ['models']
-    })
-  }
-})
-
-const {
-  mutate: setDefaultModel,
-} = useMutation({
-  mutation: (payload: { id: string, type: string }) =>
-    request({
-      url: `/model/${payload.type}/default?userId=${payload.id}`,
-      method: 'get'
-    }),
-  onSettled: () => {
-    cacheQuery.invalidateQueries({
-      key: ['models']
-    })
-  }
-})
-
-
-const renderCheckDefault = () => {
-  return [...[{ title: 'Chat', key: 'chat', type: 'defaultChatModel' },
-  { title: 'Summary', key: 'summary', type: 'defaultSummaryModel' },
-  { title: 'Embedding', key: 'embedding', type: 'defaultEmbeddingModel' }].map((modelSetting) => (
-    {
-      accessorKey: `${modelSetting.key}`,
-      header: () => h('div', { class: 'text-left' }, modelSetting.title),
-      cell({ row }) {
-        const type = modelSetting.type as 'defaultChatModel' | 'defaultSummaryModel' | 'defaultEmbeddingModel'
-        return row.original.type === modelSetting.key ? h(Checkbox, {
-          state: row.original[type],
-          disabled: row.original[type] ? true : false,
-          'onUpdate:modelValue'(val) {
-            row.original[type] = val as boolean
-            setDefaultModel({
-              id: row.original.id,
-              type: modelSetting.key
-            })
-          }
-        }) : h('div')
-      }
-    } as ColumnDef<ModelType>
-  ))]
-}
-const checkDefaultModel = ref(renderCheckDefault())
-
-const columns: ComputedRef<ColumnDef<ModelType>[]> = computed(() => [
-  {
-    accessorKey: 'modelId',
-    header: () => h('div', { class: 'text-left py-4' }, 'Name'),
-    cell({ row }) {
-      return h('div', { class: 'text-left' }, row.getValue('modelId'))
-    }
-  },
-  {
-    accessorKey: 'baseUrl',
-    header: () => h('div', { class: 'text-left' }, 'Base Url'),
-  },
-  {
-    accessorKey: 'apiKey',
-    header: () => h('div', { class: 'text-left' }, 'Api Key'),
-  },
-  {
-    accessorKey: 'clientType',
-    header: () => h('div', { class: 'text-left' }, 'Client Type'),
-  },
-  {
-    accessorKey: 'name',
-    header: () => h('div', { class: 'text-left' }, 'Name'),
-  },
-  {
-    accessorKey: 'type',
-    header: () => h('div', { class: 'text-left' }, 'Type'),
-  },
-
-
-  ...checkDefaultModel.value
-  ,
-  {
-    accessorKey: 'control',
-    header: () => h('div', { class: 'text-center' }, '操作'),
-    cell: ({ row }) => h('div', { class: ' w-full flex justify-center gap-4' }, [h(Button, {
-      'onClick': () => {
-        editModelInfo.value = row.original
-        openDialogModel.value = true
-      }
-    }, () => i18nRef('button.edit').value), h(Button, {
-      variant: 'destructive', onClick() {
-        deleteModel(row.original.id)
-      }
-    }, () => i18nRef('button.delete').value)])
-  }
-])
-
-const { data: modelData } = useQuery({
-  key: ['models'],
-  async query() {
-
-    const fetchModeData = await request({
-      url: '/model'
-    })
-    const defaultModel = await request({
-      url: '/settings'
-    })
-    const defaultModelValue = defaultModel?.data?.data
-    fetchModeData.data.items = fetchModeData.data.items.map((item: { model: ModelType, id: 'string' }) => ({
-      id: item.id,
-      model: {
-        ...item.model,
-        defaultChatModel: defaultModelValue?.defaultChatModel === item.id ? true : false,
-        defaultEmbeddingModel: defaultModelValue?.defaultEmbeddingModel === item.id ? true : false,
-        defaultSummaryModel: defaultModelValue?.defaultSummaryModel === item.id ? true : false
-      }
-
-    }))
-
-    return fetchModeData
-  }
-})
-
-watch(modelData, () => {
-  checkDefaultModel.value = renderCheckDefault()
-})
-
-
-const displayFormat = computed(() => {
-  return modelData.value?.data?.items?.map((currentModel: { model: Omit<ModelType, 'id'>, id: 'string' }) => ({ id: currentModel.id, ...currentModel.model })) ?? []
-})
-
-const pagination = computed(() => {
-  return modelData.value?.data.pagination ?? {}
+watch(providerData, () => {
+  console.log(providerData.value)
 })
 
 </script>
 
 <template>
-  <div class="w-full py-10 mx-auto">
-    <div class="flex mb-4">
-      <CreateModel />
-    </div>
-    <div class="[&_td:last-child]:w-45">
-      <DataTable
-        :columns="columns"
-        :data="displayFormat"
-      />
-    </div>
-    <!-- <div class="flex flex-col mt-4">
-      <Pagination
-        v-slot="{ page }"
-        :total="pagination.value?.total ?? 0"
-        :items-per-page="10"
-        show-edges
-      >
-        <PaginationContent v-slot="{ items }">
-          <PaginationPrevious />
-          <template
-            v-for="(item, index) in items"
-            :key="index"
-          >
-            <PaginationItem
-              v-if="item.type === 'page'"
-              :key="index"
-              :value="item.value"
-              :is-active="item.value === page"
+  <div class="w-full  mx-auto">
+    <div class="[&_td:last-child]:w-45 relative model-select">
+      <SidebarProvider class="min-h-[initial]! flex **:data-[sidebar=sidebar]:bg-transparent">
+        <Sidebar class="h-[calc(100vh-calc(var(--spacing)*16)-1px)]! relative top-0 ">
+          <SidebarHeader>
+            <InputGroup class="shadow-none">
+              <InputGroupInput placeholder="搜索模型平台" />
+              <InputGroupAddon align="inline-end">
+                <svg-icon
+                  type="mdi"
+                  :path="mdiMagnify"
+                  class="translate-icon"
+                />
+              </InputGroupAddon>
+            </InputGroup>
+          </SidebarHeader>
+          <SidebarContent class="px-2 scrollbar-none">
+            <SidebarMenu
+              v-for="providerItem in providerData"
+              :key="providerItem.name"
             >
-              {{ item.value }}
-            </PaginationItem>
-            <PaginationEllipsis
-              v-else
-              :key="item.type"
-              :index="index"
-              class="w-9 h-9 flex items-center justify-center"
-            >
-              &#8230;
-            </PaginationEllipsis>
-          </template>
-
-<PaginationNext />
-</PaginationContent>
-</Pagination>
-</div> -->
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  as-child
+                  class="justify-start py-5! px-4"
+                >
+                  <Toggle
+                    :class="`py-4 border border-transparent ${curProvider?.name===providerItem.name?'border-inherit':''}`"
+                    :model-value="selectProvider(providerItem.name as string).value"
+                    @update:model-value="(isSelect) => {
+                      if (isSelect) {
+                        curProvider = providerItem
+                      }
+                    }"
+                  >
+                    {{ providerItem.name }}
+                  </Toggle>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarContent>
+          <SidebarFooter>
+            <Select v-model:model-value="filterProvider">
+              <SelectTrigger class="w-full">
+                <SelectValue :placeholder="$t('prompt.select', { msg: 'Type' })" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem
+                    v-for="type in clientType"
+                    :key="type"
+                    :value="type"
+                  >
+                    {{ type }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <AddProvider v-model:open="openStatus.provideOpen" />
+          </SidebarFooter>
+        </Sidebar>
+        <section class="flex-1 h-[calc(100vh-calc(var(--spacing)*16)-1px)]! ">
+          <ScrollArea class="max-h-full h-full">
+            <model-setting />
+          </ScrollArea>
+        </section>
+      </SidebarProvider>
+    </div>   
   </div>
 </template>

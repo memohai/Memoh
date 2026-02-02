@@ -4,6 +4,19 @@
 
 @layer components {
   @import 'markstream-vue/index.css';
+  .scrollbar-none {
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+ 
+}
+
+@layer utilities{
+  .shadow-sm{
+    box-shadow: none;
+  }
 }
 
 :root {
@@ -121,6 +134,7 @@
   body {
     @apply bg-background text-foreground;
   }
+  
 }
 
 @source "../../ui/src";

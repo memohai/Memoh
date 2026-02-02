@@ -66,7 +66,7 @@ export type Model = EmbeddingModel | ChatModel
 
 
 // 表格当中model的类型
-export interface ModelTable {
+export interface ModelList {
   apiKey: string,
   baseUrl: string,
   clientType: 'OpenAI' | 'Anthropic' | 'Google',
@@ -78,3 +78,13 @@ export interface ModelTable {
   defaultEmbeddingModel: boolean,
   defaultSummaryModel: boolean
 }
+
+export interface ProviderInfo{
+  api_key: string;
+  base_url: string;
+  client_type: string;
+  metadata: Record<'additionalProp1',object>;
+  name: string;
+}
+
+export const clientType = ['openai', 'anthropic', 'google', 'ollama'] as const

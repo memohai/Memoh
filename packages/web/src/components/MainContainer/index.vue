@@ -34,7 +34,8 @@
         </Breadcrumb>
       </div>
     </header>
-    <main class="flex flex-1 flex-col gap-4 p-4 pt-0">
+    <Separator />
+    <main class="flex flex-1 flex-col gap-4 pt-0 ">
       <router-view v-slot="{ Component }">
         <KeepAlive>
           <component :is="Component" />

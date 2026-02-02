@@ -10,12 +10,12 @@ addr = ":8080"
 ## Admin
 [admin]
 username = "admin"
-password = "change-your-password-here"
-email = "you@example.com"
+password = "123456"
+email = "demo@demo.com"
 
 ## Auth configuration
 [auth]
-jwt_secret = "your-jwt-secret-key-change-in-production-use-long-random-string"
+jwt_secret = "YZq8kXrW5dFpNt9mLxQvHbRjKsMnOePw"
 jwt_expires_in = "168h"
 
 ## Containerd configuration
@@ -31,12 +31,13 @@ data_mount = "/data"
 
 ## Postgres configuration
 [postgres]
-host = "127.0.0.1"
+host = "localhost"
 port = 5432
 user = "postgres"
-password = ""
-database = "memoh"
+password = "1234"
+database = "postgres"
 sslmode = "disable"
+
 
 ## Qdrant configuration
 [qdrant]
