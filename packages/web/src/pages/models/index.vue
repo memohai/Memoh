@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // import type { Payment } from '@/components/columns'
-import { h, computed, ref, provide, watch, type ComputedRef, reactive, inject } from 'vue'
-import CreateModel from '@/components/CreateModel/index.vue'
+import { computed, ref, provide, watch, reactive } from 'vue'
 import modelSetting from './modelSetting.vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
@@ -22,8 +21,14 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
 } from '@memoh/ui'
-import { mdiMagnify } from '@mdi/js'
+import { mdiMagnify,mdiListBoxOutline } from '@mdi/js'
 // import DataTable from '@/components/DataTable/index.vue'
 import SvgIcon from '@jamescoyle/vue-icon'
 import request from '@/utils/request'
@@ -164,9 +169,31 @@ const openStatus = reactive({
           </SidebarFooter>
         </Sidebar>
         <section class="flex-1 h-full ">
-          <ScrollArea class="max-h-full h-full">
+          <ScrollArea
+            v-if="curProvider?.id"
+            class="max-h-full h-full"
+          >
             <model-setting />
           </ScrollArea>
+          <Empty
+            v-else
+            class="h-full flex justify-center items-center"
+          >
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <svg-icon
+                  type="mdi"
+                  :path="mdiListBoxOutline"
+                />
+              </EmptyMedia>
+            </EmptyHeader>
+            <EmptyTitle>No Provider</EmptyTitle>
+            <EmptyDescription>没有添加模型提供商,无法配置模型</EmptyDescription>
+            <EmptyContent>
+              <!-- <Button>Add data</Button> -->
+              <AddProvider v-model:open="openStatus.provideOpen" />
+            </EmptyContent>
+          </Empty>
         </section>
       </SidebarProvider>
     </div>

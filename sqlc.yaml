@@ -3,7 +3,6 @@ sql:
   - engine: "postgresql"
     schema:
       - "db/migrations/0001_init.up.sql"
-      # - "db/migrations/0002_channel.up.sql"
     queries: "db/queries"
     gen:
       go:

@@ -1,6 +1,6 @@
 <template>
   <section class="flex">
-    <sidebar-provider>
+    <sidebar-provider class="**:data-[sidebar=sidebar]:bg-transparent">
       <slot name="sidebar" />
       <slot name="main" />
     </sidebar-provider>

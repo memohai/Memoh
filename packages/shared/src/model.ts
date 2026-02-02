@@ -87,4 +87,14 @@ export interface ProviderInfo{
   name: string;
 }
 
+export interface ModelInfo{
+  dimensions:number
+  is_multimodal:boolean
+  llm_provider_id:string
+  model_id:string
+  name:string
+  type: string
+  enable_as?:string
+}
+
 export const clientType = ['openai', 'anthropic', 'google', 'ollama'] as const

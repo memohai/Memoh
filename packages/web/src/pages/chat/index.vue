@@ -1,6 +1,6 @@
 <template>
-  <section class="h-[calc(100vh-calc(var(--spacing)*20))]  max-w-187 gap-8 w-full *:w-full m-auto flex flex-col">
-    <section class="flex-1 h-0">
+  <section class="h-[calc(100vh-calc(var(--spacing)*20))] [&_s]  max-w-187 gap-8 w-full *:w-full m-auto flex flex-col ">
+    <section class="flex-1 h-0 [&:has(p)]:block! [&:has(p)+section_.logo-title]:hidden [&:has(p)+section]:mt-0! hidden">
       <ScrollArea
         ref="chat-container"
         class="max-h-full h-full w-full rounded-md  p-4 **:focus-visible:ring-0! "
@@ -8,7 +8,19 @@
         <ChatList />
       </ScrollArea>
     </section>
-    <section class="flex-none relative">
+    <section class="flex-none relative mt-60">
+      <section class="mb-8 logo-title">
+        <img
+          src="../../../public/logo.png"
+          width="100"
+          class="m-auto"
+          alt="logo.png"
+        >
+        <h4 class="scroll-m-20 text-xl font-semibold tracking-tight text-center text-muted-foreground title-container">
+          Memoh
+        </h4>
+      </section>
+     
       <Textarea
         v-model="curInputSay"
         class="pb-16 pt-4"

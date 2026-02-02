@@ -180,7 +180,6 @@
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import request from '@/utils/request'
 import { watch, reactive, computed } from 'vue'
-import { type ModelTable } from '@memoh/shared'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm, useFormValues } from 'vee-validate'
