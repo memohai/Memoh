@@ -77,8 +77,8 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateRequest) 
 		return Schedule{}, err
 	}
 	maxCalls := pgtype.Int4{Valid: false}
-	if req.MaxCalls != nil {
-		maxCalls = pgtype.Int4{Int32: int32(*req.MaxCalls), Valid: true}
+	if req.MaxCalls.Set && req.MaxCalls.Value != nil {
+		maxCalls = pgtype.Int4{Int32: int32(*req.MaxCalls.Value), Valid: true}
 	}
 	enabled := true
 	if req.Enabled != nil {
@@ -164,8 +164,12 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 		command = *req.Command
 	}
 	maxCalls := existing.MaxCalls
-	if req.MaxCalls != nil {
-		maxCalls = pgtype.Int4{Int32: int32(*req.MaxCalls), Valid: true}
+	if req.MaxCalls.Set {
+		if req.MaxCalls.Value == nil {
+			maxCalls = pgtype.Int4{Valid: false}
+		} else {
+			maxCalls = pgtype.Int4{Int32: int32(*req.MaxCalls.Value), Valid: true}
+		}
 	}
 	enabled := existing.Enabled
 	if req.Enabled != nil {

@@ -16,7 +16,7 @@ export interface Schedule {
   name: string
   description: string
   pattern: string
-  maxCalls?: number
+  maxCalls?: number | null
   command: string
 }
 

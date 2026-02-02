@@ -1,6 +1,9 @@
 package schedule
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Schedule struct {
 	ID           string    `json:"id"`
@@ -16,11 +19,41 @@ type Schedule struct {
 	UserID       string    `json:"user_id"`
 }
 
+type NullableInt struct {
+	Value *int
+	Set   bool
+}
+
+func (n NullableInt) IsZero() bool {
+	return !n.Set
+}
+
+func (n NullableInt) MarshalJSON() ([]byte, error) {
+	if !n.Set || n.Value == nil {
+		return []byte("null"), nil
+	}
+	return json.Marshal(*n.Value)
+}
+
+func (n *NullableInt) UnmarshalJSON(data []byte) error {
+	n.Set = true
+	if string(data) == "null" {
+		n.Value = nil
+		return nil
+	}
+	var value int
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	n.Value = &value
+	return nil
+}
+
 type CreateRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Pattern     string `json:"pattern"`
-	MaxCalls    *int   `json:"max_calls,omitempty"`
+	MaxCalls    NullableInt `json:"max_calls,omitempty"`
 	Command     string `json:"command"`
 	Enabled     *bool  `json:"enabled,omitempty"`
 }
@@ -29,7 +62,7 @@ type UpdateRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
 	Pattern     *string `json:"pattern,omitempty"`
-	MaxCalls    *int    `json:"max_calls,omitempty"`
+	MaxCalls    NullableInt `json:"max_calls,omitempty"`
 	Command     *string `json:"command,omitempty"`
 	Enabled     *bool   `json:"enabled,omitempty"`
 }

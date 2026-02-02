@@ -7,17 +7,12 @@ export type ScheduleToolParams = {
 }
 
 const ScheduleSchema = z.object({
-  id: z.string(),
   name: z.string(),
   description: z.string(),
   pattern: z.string(),
   max_calls: z.number().nullable().optional(),
-  current_calls: z.number().optional(),
-  created_at: z.string().optional(),
-  updated_at: z.string().optional(),
   enabled: z.boolean(),
   command: z.string(),
-  user_id: z.string().optional(),
 })
 
 export const getScheduleTools = ({ fetch }: ScheduleToolParams) => {
@@ -47,7 +42,7 @@ export const getScheduleTools = ({ fetch }: ScheduleToolParams) => {
       name: z.string(),
       description: z.string(),
       pattern: z.string(),
-      max_calls: z.number().optional(),
+      max_calls: z.number().nullable().optional().default(null).describe('Max calls (optional, empty for unlimited)'),
       enabled: z.boolean().optional(),
       command: z.string(),
     }),

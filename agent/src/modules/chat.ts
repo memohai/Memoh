@@ -41,7 +41,7 @@ const ScheduleBody = z.object({
     name: z.string().min(1, 'Schedule name is required'),
     description: z.string().min(1, 'Schedule description is required'),
     pattern: z.string().min(1, 'Schedule pattern is required'),
-    maxCalls: z.number().optional(),
+    maxCalls: z.number().nullable().optional(),
     command: z.string().min(1, 'Schedule command is required'),
   }),
 }).and(ChatBody)
