@@ -113,11 +113,7 @@
           模型
         </h4>
         <CreateModel
-<<<<<<< HEAD
           v-if="curProvider?.id !== undefined"
-=======
-          v-if="curProvider?.id!==undefined"
->>>>>>> fe80257 (feat: layout update)
           :id="curProvider?.id as string"
         />
       </section>
@@ -277,11 +273,7 @@ import {
 import CreateModel from '@/components/CreateModel/index.vue'
 import { computed, inject, provide, reactive, ref, toRef, toValue, watch } from 'vue'
 import { type ProviderInfo } from '@memoh/shared'
-<<<<<<< HEAD
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-=======
-import { useMutation,useQuery,useQueryCache } from '@pinia/colada'
->>>>>>> fe80257 (feat: layout update)
 import request from '@/utils/request'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -328,15 +320,9 @@ const form = useForm({
 
 const curProvider = inject('curProvider', ref<Partial<ProviderInfo & { id: string }>>())
 
-<<<<<<< HEAD
 const queryCache = useQueryCache()
 const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
   mutation: () => request({
-=======
-const queryCache=useQueryCache()
-const {mutate:deleteProvider,isLoading:deleteLoading}=useMutation({
-  mutation:()=> request({
->>>>>>> fe80257 (feat: layout update)
     url: `/providers/${curProvider.value?.id}`,
     method: 'DELETE'
   }),
@@ -356,7 +342,6 @@ const { mutate: changeProvider, isLoading: editLoading } = useMutation({
   })
 })
 
-<<<<<<< HEAD
 const { mutate: deleteModel, isLoading: deleteModelLoading } = useMutation({
   mutation: (id) => request({
     url: `/models/model/${id}`,
@@ -400,11 +385,6 @@ const { data: modelDataList } = useQuery({
     ...model,
     enable_as: model.enable_as ?? 'empty'
   })))
-=======
-useQuery({
-  key: ['model'],
-  
->>>>>>> fe80257 (feat: layout update)
 })
 
 const editProvider = form.handleSubmit(async (value) => {
