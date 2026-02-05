@@ -1,16 +1,18 @@
 import { tool } from 'ai'
 import { z } from 'zod'
-import { AgentAction, createAgent } from '../agent'
-import { BaseModelConfig } from '../types'
+import { createAgent } from '../agent'
+import { ModelConfig, BraveConfig } from '../types'
 import { AuthFetcher } from '..'
+import { AgentAction, IdentityContext } from '../types/agent'
 
-export interface SubagentToolParams extends BaseModelConfig {
+export interface SubagentToolParams {
   fetch: AuthFetcher
-  braveApiKey?: string
-  braveBaseUrl?: string
+  model: ModelConfig
+  brave?: BraveConfig
+  identity: IdentityContext
 }
 
-export const getSubagentTools = ({ fetch, apiKey, baseUrl, model, clientType, braveApiKey, braveBaseUrl }: SubagentToolParams) => {
+export const getSubagentTools = ({ fetch, model, brave, identity }: SubagentToolParams) => {
   const listSubagents = tool({
     description: 'List subagents for current user',
     inputSchema: z.object({}),
@@ -65,20 +67,19 @@ export const getSubagentTools = ({ fetch, apiKey, baseUrl, model, clientType, br
       const contextPayload = await contextResponse.json()
       const contextMessages = Array.isArray(contextPayload?.messages) ? contextPayload.messages : []
       const { askAsSubagent } = createAgent({
-        apiKey,
-        baseUrl,
         model,
-        clientType,
-        braveApiKey,
-        braveBaseUrl,
-        allowed: [
-          AgentAction.WebSearch,
-        ]
-      })
+        brave,
+        allowedActions: [
+          AgentAction.Web,
+        ],
+        identity,
+      }, fetch)
       const result = await askAsSubagent({
         messages: contextMessages,
-        query,
-      }, { name, description: target.description })
+        input: query,
+        name: target.name,
+        description: target.description,
+      })
       const updatedMessages = [...contextMessages, ...result.messages]
       await fetch(`/subagents/${target.id}/context`, {
         method: 'PUT',

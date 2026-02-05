@@ -3,12 +3,12 @@ import { z } from 'zod'
 import { Readability } from '@mozilla/readability'
 import { JSDOM } from 'jsdom'
 import TurndownService from 'turndown'
+import { BraveConfig } from '../types'
 
 const turndownService = new TurndownService()
 
 interface WebToolParams {
-  braveApiKey: string
-  braveBaseUrl?: string
+  brave: BraveConfig
 }
 
 interface BraveSearchResult {
@@ -25,7 +25,8 @@ interface BraveSearchResponse {
   }
 }
 
-export const getWebTools = ({ braveApiKey, braveBaseUrl = 'https://api.search.brave.com/res/v1/' }: WebToolParams) => {
+export const getWebTools = ({ brave }: WebToolParams) => {
+  const { apiKey, baseUrl = 'https://api.search.brave.com/res/v1/' } = brave
   const webSearch = tool({
     description: 'Search the web for information using Brave Search API. Use this when you need current information, facts, news, or any web content.',
     inputSchema: z.object({
@@ -34,7 +35,7 @@ export const getWebTools = ({ braveApiKey, braveBaseUrl = 'https://api.search.br
     }),
     execute: async ({ query, count = 10 }) => {
       try {
-        const url = new URL('web/search', braveBaseUrl)
+        const url = new URL('web/search', baseUrl)
         url.searchParams.append('q', query)
         url.searchParams.append('count', Math.min(count, 20).toString())
         
@@ -43,7 +44,7 @@ export const getWebTools = ({ braveApiKey, braveBaseUrl = 'https://api.search.br
           headers: {
             'Accept': 'application/json',
             'Accept-Encoding': 'gzip',
-            'X-Subscription-Token': braveApiKey,
+            'X-Subscription-Token': apiKey,
           },
         })
 

@@ -1,25 +1,23 @@
 import { Schedule } from '../types'
-import { time } from './shared'
 
 export interface ScheduleParams {
   schedule: Schedule
-  locale?: Intl.LocalesArgument
   date: Date
 }
 
 export const schedule = (params: ScheduleParams) => {
+  const headers = {
+    'schedule-name': params.schedule.name,
+    'schedule-description': params.schedule.description,
+    'schedule-id': params.schedule.id,
+    'max-calls': params.schedule.maxCalls ?? 'Unlimited',
+    'cron-pattern': params.schedule.pattern,
+  }
   return `
+** This is a scheduled task automatically send to you by the system **
 ---
-notice: **This is a scheduled task automatically send to you by the system, not the user input**
-${time({ date: params.date, locale: params.locale })}
-schedule-name: ${params.schedule.name}
-schedule-description: ${params.schedule.description}
-schedule-id: ${params.schedule.id}
-max-calls: ${params.schedule.maxCalls ?? 'Unlimited'}
-cron-pattern: ${params.schedule.pattern}
+${Bun.YAML.stringify(headers)}
 ---
-
-**COMMAND**
 
 ${params.schedule.command}
   `.trim()

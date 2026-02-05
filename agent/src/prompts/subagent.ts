@@ -1,5 +1,3 @@
-import { time } from './shared'
-
 export interface SubagentParams {
   date: Date
   name: string
@@ -7,11 +5,14 @@ export interface SubagentParams {
 }
 
 export const subagentSystem = ({ date, name, description }: SubagentParams) => {
+  const headers = {
+    'name': name,
+    'description': description,
+    'time-now': date.toISOString(),
+  }
   return `
 ---
-${time({ date })}
-name: ${name}
-description: ${description}
+${Bun.YAML.stringify(headers)}
 ---
 
 You are a subagent, which is a specialized assistant for a specific task.

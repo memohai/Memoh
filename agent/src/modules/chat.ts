@@ -2,219 +2,63 @@ import { Elysia, sse } from 'elysia'
 import z from 'zod'
 import { createAgent } from '../agent'
 import { createAuthFetcher } from '../index'
-import { ClientType } from '../types'
-import { ModelMessage } from 'ai'
+import { ModelConfig } from '../types'
 import { bearerMiddleware } from '../middlewares/bearer'
-import { loadConfig } from '../config'
+import { AllowedActionModel, IdentityContextModel, ModelConfigModel } from '../models'
+import { allActions } from '../types'
 
-const Skill = z.object({
-  name: z.string().min(1, 'Skill name is required'),
-  description: z.string().min(1, 'Skill description is required'),
-  content: z.string().min(1, 'Skill content is required'),
-})
-
-const ChatBody = z.object({
-  apiKey: z.string().min(1, 'API key is required'),
-  baseUrl: z.string().min(1, 'Base URL is required'),
-  model: z.string().min(1, 'Model is required'),
-  clientType: z.enum([
-    'openai',
-    'anthropic',
-    'google',
-  ]),
-  locale: z.string().optional(),
-  language: z.string().optional(),
-  maxSteps: z.number().optional(),
-  maxContextLoadTime: z.number().min(1, 'Max context load time is required'),
-  platforms: z.array(z.string()).optional(),
-  currentPlatform: z.string().optional(),
-  skills: z.array(Skill).optional(),
-  useSkills: z.array(z.string()).optional(),
-
+const AgentModel = z.object({
+  model: ModelConfigModel,
+  activeContextTime: z.number(),
+  platforms: z.array(z.string()),
+  currentPlatform: z.string(),
+  allowedActions: z.array(AllowedActionModel).optional().default(allActions),
   messages: z.array(z.any()),
-  query: z.string().min(1, 'Query is required'),
-  toolContext: z.object({
-    botId: z.string().optional(),
-    sessionId: z.string().optional(),
-    currentPlatform: z.string().optional(),
-    replyTarget: z.string().optional(),
-    sessionToken: z.string().optional(),
-    contactId: z.string().optional(),
-    contactName: z.string().optional(),
-    contactAlias: z.string().optional(),
-    userId: z.string().optional(),
-  }).optional(),
-  toolChoice: z.union([
-    z.literal('auto'),
-    z.literal('none'),
-    z.literal('required'),
-    z.object({
-      type: z.literal('tool'),
-      toolName: z.string(),
-    }),
-  ]).nullable().optional(),
+  skills: z.array(z.string()),
+  query: z.string(),
+  identity: IdentityContextModel,
 })
-
-const ScheduleBody = z.object({
-  schedule: z.object({
-    id: z.string().min(1, 'Schedule ID is required'),
-    name: z.string().min(1, 'Schedule name is required'),
-    description: z.string().min(1, 'Schedule description is required'),
-    pattern: z.string().min(1, 'Schedule pattern is required'),
-    maxCalls: z.number().nullable().optional(),
-    command: z.string().min(1, 'Schedule command is required'),
-  }),
-}).and(ChatBody)
-
-const config = loadConfig('../config.toml')
 
 export const chatModule = new Elysia({ prefix: '/chat' })
   .use(bearerMiddleware)
   .post('/', async ({ body, bearer }) => {
+    const authFetcher = createAuthFetcher(bearer)
     const { ask } = createAgent({
-      apiKey: body.apiKey,
-      baseUrl: body.baseUrl,
-      model: body.model,
-      clientType: body.clientType as ClientType,
-      locale: body.locale,
-      language: body.language,
-      maxSteps: body.maxSteps,
-      maxContextLoadTime: body.maxContextLoadTime,
+      model: body.model as ModelConfig,
+      activeContextTime: body.activeContextTime,
       platforms: body.platforms,
       currentPlatform: body.currentPlatform,
-      braveApiKey: config.brave?.api_key,
-      braveBaseUrl: config.brave?.base_url,
+      allowedActions: body.allowedActions,
+      identity: body.identity,
+    }, authFetcher)
+    return ask({
+      query: body.query,
+      messages: body.messages,
       skills: body.skills,
-      useSkills: body.useSkills,
-      toolContext: body.toolContext,
-      toolChoice: body.toolChoice,
-    }, createAuthFetcher(bearer))
-    try {
-      const result = await ask({
-        messages: body.messages as unknown as ModelMessage[],
-        query: body.query,
-      })
-      console.log('[Chat] response', {
-        type: 'chat',
-        messages: result.messages?.length ?? 0,
-        toolChoice: body.toolChoice ?? null,
-      })
-      // Debug: log message structure
-      if (result.messages?.length > 0) {
-        console.log('[Chat] message sample', JSON.stringify(result.messages[result.messages.length - 1], null, 2))
-      }
-      return result
-    } catch (error) {
-      console.error('[Chat] error', {
-        type: 'chat',
-        clientType: body.clientType,
-        model: body.model,
-        baseUrl: body.baseUrl,
-        error,
-      })
-      throw error
-    }
+      attachments: [],
+    })
   }, {
-    body: ChatBody,
+    body: AgentModel,
   })
   .post('/stream', async function* ({ body, bearer }) {
-    console.log('[Chat] request', {
-      type: 'stream',
-      clientType: body.clientType,
-      model: body.model,
-      baseUrl: body.baseUrl,
-      bearer,
-      toolChoice: body.toolChoice ?? null,
-    })
+    const authFetcher = createAuthFetcher(bearer)
     const { stream } = createAgent({
-      apiKey: body.apiKey,
-      baseUrl: body.baseUrl,
-      model: body.model,
-      clientType: body.clientType as ClientType,
-      locale: body.locale,
-      language: body.language,
-      maxSteps: body.maxSteps,
-      maxContextLoadTime: body.maxContextLoadTime,
+      model: body.model as ModelConfig,
+      activeContextTime: body.activeContextTime,
       platforms: body.platforms,
       currentPlatform: body.currentPlatform,
-      braveApiKey: config.brave?.api_key,
-      braveBaseUrl: config.brave?.base_url,
+      allowedActions: body.allowedActions,
+      identity: body.identity,
+    }, authFetcher)
+    for await (const action of stream({
+      query: body.query,
+      messages: body.messages,
       skills: body.skills,
-      useSkills: body.useSkills,
-      toolContext: body.toolContext,
-      toolChoice: body.toolChoice,
-    }, createAuthFetcher(bearer))
-    try {
-      const streanGenerator = stream({
-        messages: body.messages as unknown as ModelMessage[],
-        query: body.query,
-      })
-      while (true) {
-        const chunk = await streanGenerator.next()
-        if (chunk.done) {
-          console.log('[Chat] response', { type: 'stream', messages: chunk.value?.messages?.length ?? 0 })
-          yield sse({
-            type: 'done',
-            data: chunk.value,
-          })
-          break
-        }
-        yield sse({
-          type: 'delta',
-          data: chunk.value
-        })
-      }
-    } catch (error) {
-      console.error('[Chat] error', {
-        type: 'stream',
-        clientType: body.clientType,
-        model: body.model,
-        baseUrl: body.baseUrl,
-        error,
-      })
-      throw error
+      attachments: [],
+    })) {
+      yield sse(JSON.stringify(action))
     }
   }, {
-    body: ChatBody,
+    body: AgentModel,
   })
-  .post('/schedule', async ({ body, bearer }) => {
-    console.log('[Chat] schedule request', {
-      type: 'schedule',
-      bearer,
-      body,
-    })
-    const { triggerSchedule } = createAgent({
-      apiKey: body.apiKey,
-      baseUrl: body.baseUrl,
-      model: body.model,
-      clientType: body.clientType as ClientType,
-      locale: body.locale,
-      language: body.language,
-      maxSteps: body.maxSteps,
-      maxContextLoadTime: body.maxContextLoadTime,
-      platforms: body.platforms,
-      currentPlatform: body.currentPlatform,
-      braveApiKey: config.brave?.api_key,
-      braveBaseUrl: config.brave?.base_url,
-      skills: body.skills,
-      useSkills: body.useSkills,
-      toolContext: body.toolContext,
-      toolChoice: body.toolChoice,
-    }, createAuthFetcher(bearer))
-    try {
-      return await triggerSchedule({
-        messages: body.messages as unknown as ModelMessage[],
-        query: body.query,
-      }, body.schedule)
-    } catch (error) {
-      console.error('[Chat] schedule error', {
-        type: 'schedule',
-        bearer,
-        body,
-        error,
-      })
-      throw error
-    }
-  }, {
-    body: ScheduleBody,
-  })
+  

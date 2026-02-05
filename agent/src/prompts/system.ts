@@ -1,57 +1,42 @@
-import { time } from './shared'
 import { quote } from './utils'
 import { AgentSkill } from '../types'
 
 export interface SystemParams {
   date: Date
-  locale?: Intl.LocalesArgument
-  language?: string
+  language: string
   maxContextLoadTime: number
   platforms: string[]
-  currentPlatform?: string
   skills: AgentSkill[]
   enabledSkills: AgentSkill[]
-  toolContext?: ToolContext
-}
-
-export interface ToolContext {
-  botId?: string
-  sessionId?: string
-  currentPlatform?: string
-  replyTarget?: string
-  sessionToken?: string
-  contactId?: string
-  contactName?: string
-  contactAlias?: string
-  userId?: string
 }
 
 export const skillPrompt = (skill: AgentSkill) => {
   return `
-### ${skill.name}
+**${quote(skill.name)}**
 > ${skill.description}
 
 ${skill.content}
   `.trim()
 }
 
-export const system = ({ date, locale, language, maxContextLoadTime, platforms, currentPlatform, skills, enabledSkills, toolContext }: SystemParams) => {
-  const toolContextBlock = [
-    toolContext?.botId ? `bot-id: ${toolContext.botId}` : '',
-    toolContext?.sessionId ? `session-id: ${toolContext.sessionId}` : '',
-    toolContext?.replyTarget ? `reply-target: ${toolContext.replyTarget}` : '',
-    toolContext?.contactId ? `contact-id: ${toolContext.contactId}` : '',
-    toolContext?.contactName ? `contact-name: ${toolContext.contactName}` : '',
-    toolContext?.contactAlias ? `contact-alias: ${toolContext.contactAlias}` : '',
-  ].filter(Boolean).join('\n')
+export const system = ({ 
+  date,
+  language,
+  maxContextLoadTime,
+  platforms,
+  skills,
+  enabledSkills,
+}: SystemParams) => {
+  const headers = {
+    'language': language,
+    'available-platforms': platforms.join(','),
+    'max-context-load-time': maxContextLoadTime.toString(),
+    'time-now': date.toISOString(),
+  }
+
   return `
 ---
-${time({ date, locale })}
-language: ${language ?? 'Same as user input'}
-available-platforms:
-${platforms.map(platform => `  - ${platform}`).join('\n')}
-current-platform: ${currentPlatform ?? 'Unknown Platform'}
-${toolContextBlock ? toolContextBlock : ''}
+${Bun.YAML.stringify(headers)}
 ---
 You are a personal housekeeper assistant, which able to manage the master's daily affairs.
 
