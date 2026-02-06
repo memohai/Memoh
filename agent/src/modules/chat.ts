@@ -23,6 +23,7 @@ const AgentModel = z.object({
 export const chatModule = new Elysia({ prefix: '/chat' })
   .use(bearerMiddleware)
   .post('/', async ({ body, bearer }) => {
+    console.log('chat', body)
     const authFetcher = createAuthFetcher(bearer)
     const { ask } = createAgent({
       model: body.model as ModelConfig,
@@ -45,6 +46,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
     }),
   })
   .post('/stream', async function* ({ body, bearer }) {
+    console.log('stream', body)
     try {
       const authFetcher = createAuthFetcher(bearer)
       const { stream } = createAgent({

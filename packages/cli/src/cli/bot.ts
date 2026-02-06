@@ -102,16 +102,43 @@ const streamChat = async (query: string, botId: string, sessionId: string, token
   return true
 }
 
+const extractTextFromMessage = (message: unknown) => {
+  if (typeof message === 'string') return message
+  if (message && typeof message === 'object') {
+    const value = message as { text?: unknown; parts?: unknown[] }
+    if (typeof value.text === 'string') return value.text
+    if (Array.isArray(value.parts)) {
+      const lines = value.parts
+        .map((part) => {
+          if (!part || typeof part !== 'object') return ''
+          const typed = part as { text?: unknown; url?: unknown; emoji?: unknown }
+          if (typeof typed.text === 'string' && typed.text.trim()) return typed.text
+          if (typeof typed.url === 'string' && typed.url.trim()) return typed.url
+          if (typeof typed.emoji === 'string' && typed.emoji.trim()) return typed.emoji
+          return ''
+        })
+        .filter(Boolean)
+      if (lines.length) return lines.join('\n')
+    }
+  }
+  return null
+}
+
 const extractTextFromEvent = (payload: string) => {
   try {
     const event = JSON.parse(payload)
     if (typeof event === 'string') return event
     if (typeof event?.text === 'string') return event.text
+    const messageText = extractTextFromMessage(event?.message)
+    if (messageText) return messageText
+    if (typeof event?.delta === 'string') return event.delta
     if (typeof event?.delta?.content === 'string') return event.delta.content
     if (typeof event?.content === 'string') return event.content
     if (typeof event?.data === 'string') return event.data
     if (typeof event?.data?.text === 'string') return event.data.text
     if (typeof event?.data?.delta?.content === 'string') return event.data.delta.content
+    const nestedMessageText = extractTextFromMessage(event?.data?.message)
+    if (nestedMessageText) return nestedMessageText
     return null
   } catch {
     return payload
@@ -275,7 +302,11 @@ export const registerBotCommands = (program: Command) => {
       console.log(chalk.green(`Chatting with ${chalk.bold(botId)} (session ${sessionId}). Type \`exit\` to quit.`))
       while (true) {
         const line = (await rl.question(chalk.cyan('> '))).trim()
-        if (!line || line.toLowerCase() === 'exit') {
+        if (!line) {
+          if (input.readableEnded) break
+          continue
+        }
+        if (line.toLowerCase() === 'exit') {
           break
         }
         try {
