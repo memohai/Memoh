@@ -4,7 +4,7 @@ import { createAgent } from '../agent'
 import { createAuthFetcher } from '../index'
 import { ModelConfig } from '../types'
 import { bearerMiddleware } from '../middlewares/bearer'
-import { AllowedActionModel, AttachmentModel, IdentityContextModel, MCPConnectionModel, ModelConfigModel } from '../models'
+import { AllowedActionModel, AttachmentModel, IdentityContextModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
 import { allActions } from '../types'
 
 const AgentModel = z.object({
@@ -15,7 +15,6 @@ const AgentModel = z.object({
   allowedActions: z.array(AllowedActionModel).optional().default(allActions),
   messages: z.array(z.any()),
   skills: z.array(z.string()),
-  query: z.string(),
   identity: IdentityContextModel,
   attachments: z.array(AttachmentModel).optional().default([]),
   mcpConnections: z.array(MCPConnectionModel).optional().default([]),
@@ -41,7 +40,9 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       attachments: body.attachments,
     })
   }, {
-    body: AgentModel,
+    body: AgentModel.extend({
+      query: z.string(),
+    }),
   })
   .post('/stream', async function* ({ body, bearer }) {
     try {
@@ -71,5 +72,26 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       }))
     }
   }, {
-    body: AgentModel,
+    body: AgentModel.extend({
+      query: z.string(),
+    }),
+  })
+  .post('/trigger-schedule', async ({ body, bearer }) => {
+    const authFetcher = createAuthFetcher(bearer)
+    const { triggerSchedule } = createAgent({
+      model: body.model as ModelConfig,
+      activeContextTime: body.activeContextTime,
+      channels: body.channels,
+      currentChannel: body.currentChannel,
+      identity: body.identity,
+      mcpConnections: body.mcpConnections,
+    }, authFetcher)
+    return triggerSchedule({
+      schedule: body.schedule,
+      messages: body.messages,
+    })
+  }, {
+    body: AgentModel.extend({
+      schedule: ScheduleModel,
+    }),
   })
