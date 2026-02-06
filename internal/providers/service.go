@@ -211,7 +211,7 @@ func (s *Service) CountByClientType(ctx context.Context, clientType ClientType) 
 
 // toGetResponse converts a database provider to a response
 func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
-	var metadata map[string]interface{}
+	var metadata map[string]any
 	if len(provider.Metadata) > 0 {
 		_ = json.Unmarshal(provider.Metadata, &metadata)
 	}
@@ -268,4 +268,3 @@ func maskAPIKey(apiKey string) string {
 	}
 	return apiKey[:8] + strings.Repeat("*", len(apiKey)-8)
 }
-

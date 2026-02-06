@@ -30,7 +30,7 @@ func (m *Manager) CreateVersion(ctx context.Context, userID string) (*VersionInf
 	if m.db == nil || m.queries == nil {
 		return nil, fmt.Errorf("db is not configured")
 	}
-	if err := validateUserID(userID); err != nil {
+	if err := validateBotID(userID); err != nil {
 		return nil, err
 	}
 
@@ -67,7 +67,7 @@ func (m *Manager) CreateVersion(ctx context.Context, userID string) (*VersionInf
 		return nil, err
 	}
 
-	dataDir, err := m.ensureUserDir(userID)
+	dataDir, err := m.ensureBotDir(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func (m *Manager) ListVersions(ctx context.Context, userID string) ([]VersionInf
 	if m.db == nil || m.queries == nil {
 		return nil, fmt.Errorf("db is not configured")
 	}
-	if err := validateUserID(userID); err != nil {
+	if err := validateBotID(userID); err != nil {
 		return nil, err
 	}
 
@@ -159,7 +159,7 @@ func (m *Manager) RollbackVersion(ctx context.Context, userID string, version in
 	if m.db == nil || m.queries == nil {
 		return fmt.Errorf("db is not configured")
 	}
-	if err := validateUserID(userID); err != nil {
+	if err := validateBotID(userID); err != nil {
 		return err
 	}
 
@@ -194,7 +194,7 @@ func (m *Manager) RollbackVersion(ctx context.Context, userID string, version in
 		return err
 	}
 
-	dataDir, err := m.ensureUserDir(userID)
+	dataDir, err := m.ensureBotDir(userID)
 	if err != nil {
 		return err
 	}
@@ -241,7 +241,7 @@ func (m *Manager) VersionSnapshotID(ctx context.Context, userID string, version 
 	if m.db == nil || m.queries == nil {
 		return "", fmt.Errorf("db is not configured")
 	}
-	if err := validateUserID(userID); err != nil {
+	if err := validateBotID(userID); err != nil {
 		return "", err
 	}
 

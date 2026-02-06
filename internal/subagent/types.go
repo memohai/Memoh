@@ -7,8 +7,8 @@ type Subagent struct {
 	Name        string                   `json:"name"`
 	Description string                   `json:"description"`
 	BotID       string                   `json:"bot_id"`
-	Messages    []map[string]interface{} `json:"messages"`
-	Metadata    map[string]interface{}   `json:"metadata"`
+	Messages    []map[string]any `json:"messages"`
+	Metadata    map[string]any   `json:"metadata"`
 	Skills      []string                 `json:"skills"`
 	CreatedAt   time.Time                `json:"created_at"`
 	UpdatedAt   time.Time                `json:"updated_at"`
@@ -19,19 +19,19 @@ type Subagent struct {
 type CreateRequest struct {
 	Name        string                   `json:"name"`
 	Description string                   `json:"description"`
-	Messages    []map[string]interface{} `json:"messages,omitempty"`
-	Metadata    map[string]interface{}   `json:"metadata,omitempty"`
+	Messages    []map[string]any `json:"messages,omitempty"`
+	Metadata    map[string]any   `json:"metadata,omitempty"`
 	Skills      []string                 `json:"skills,omitempty"`
 }
 
 type UpdateRequest struct {
 	Name        *string                `json:"name,omitempty"`
 	Description *string                `json:"description,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 type UpdateContextRequest struct {
-	Messages []map[string]interface{} `json:"messages"`
+	Messages []map[string]any `json:"messages"`
 }
 
 type UpdateSkillsRequest struct {
@@ -47,7 +47,7 @@ type ListResponse struct {
 }
 
 type ContextResponse struct {
-	Messages []map[string]interface{} `json:"messages"`
+	Messages []map[string]any `json:"messages"`
 }
 
 type SkillsResponse struct {

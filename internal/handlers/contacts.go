@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -36,25 +35,6 @@ func (h *ContactsHandler) Register(e *echo.Echo) {
 	group.GET("/:id", h.Get)
 	group.POST("", h.Create)
 	group.PATCH("/:id", h.Update)
-	group.POST("/:id/bind", h.Bind)
-	group.POST("/:id/bind_token", h.IssueBindToken)
-	group.POST("/bind_confirm", h.ConfirmBind)
-}
-
-type contactBindRequest struct {
-	Platform   string `json:"platform"`
-	ExternalID string `json:"external_id"`
-	BindToken  string `json:"bind_token"`
-}
-
-type contactBindTokenRequest struct {
-	TargetPlatform   string `json:"target_platform"`
-	TargetExternalID string `json:"target_external_id"`
-	TTLSeconds       int    `json:"ttl_seconds"`
-}
-
-type contactBindConfirmRequest struct {
-	Token string `json:"token"`
 }
 
 func (h *ContactsHandler) List(c echo.Context) error {
@@ -74,7 +54,7 @@ func (h *ContactsHandler) List(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]interface{}{"items": items})
+	return c.JSON(http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *ContactsHandler) Get(c echo.Context) error {
@@ -125,16 +105,9 @@ func (h *ContactsHandler) Create(c echo.Context) error {
 }
 
 func (h *ContactsHandler) Update(c echo.Context) error {
-	userID, err := h.requireUserID(c)
-	if err != nil {
-		return err
-	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
-		return err
 	}
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -144,145 +117,37 @@ func (h *ContactsHandler) Update(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+
+	userID, err := h.requireUserID(c)
+	if err == nil {
+		if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+			return err
+		}
+		item, err := h.service.Update(c.Request().Context(), id, req)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		return c.JSON(http.StatusOK, item)
+	}
+
+	sessionToken, tokenErr := auth.SessionTokenFromContext(c)
+	if tokenErr != nil {
+		return err
+	}
+	if sessionToken.BotID != botID {
+		return echo.NewHTTPError(http.StatusForbidden, "session token mismatch")
+	}
+	if strings.TrimSpace(sessionToken.ContactID) == "" || sessionToken.ContactID != id {
+		return echo.NewHTTPError(http.StatusForbidden, "contact mismatch")
+	}
+	if req.Tags != nil || req.Status != nil {
+		return echo.NewHTTPError(http.StatusForbidden, "session token cannot update tags or status")
+	}
 	item, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, item)
-}
-
-func (h *ContactsHandler) Bind(c echo.Context) error {
-	userID, err := h.requireUserID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
-		return err
-	}
-	id := strings.TrimSpace(c.Param("id"))
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "contact id is required")
-	}
-	var req contactBindRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	if strings.TrimSpace(req.BindToken) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bind_token is required")
-	}
-	token, err := h.service.GetBindToken(c.Request().Context(), req.BindToken)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid bind token")
-	}
-	if token.UsedAt.IsZero() == false {
-		return echo.NewHTTPError(http.StatusBadRequest, "bind token already used")
-	}
-	if time.Now().UTC().After(token.ExpiresAt) {
-		return echo.NewHTTPError(http.StatusBadRequest, "bind token expired")
-	}
-	if token.BotID != botID || token.ContactID != id {
-		return echo.NewHTTPError(http.StatusBadRequest, "bind token mismatch")
-	}
-	platform := strings.TrimSpace(req.Platform)
-	externalID := strings.TrimSpace(req.ExternalID)
-	if platform == "" || externalID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "platform and external_id are required")
-	}
-	if token.TargetPlatform != "" && token.TargetPlatform != platform {
-		return echo.NewHTTPError(http.StatusBadRequest, "bind token platform mismatch")
-	}
-	if token.TargetExternalID != "" && token.TargetExternalID != externalID {
-		return echo.NewHTTPError(http.StatusBadRequest, "bind token external_id mismatch")
-	}
-	bound, err := h.service.UpsertChannel(c.Request().Context(), botID, id, platform, externalID, nil)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	_, _ = h.service.MarkBindTokenUsed(c.Request().Context(), token.ID)
-	return c.JSON(http.StatusOK, bound)
-}
-
-func (h *ContactsHandler) IssueBindToken(c echo.Context) error {
-	userID, err := h.requireUserID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
-		return err
-	}
-	id := strings.TrimSpace(c.Param("id"))
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "contact id is required")
-	}
-	var req contactBindTokenRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	ttl := 10 * time.Minute
-	if req.TTLSeconds > 0 {
-		ttl = time.Duration(req.TTLSeconds) * time.Second
-	}
-	token, err := h.service.CreateBindToken(c.Request().Context(), botID, id, req.TargetPlatform, req.TargetExternalID, userID, ttl)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, token)
-}
-
-func (h *ContactsHandler) ConfirmBind(c echo.Context) error {
-	userID, err := h.requireUserID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
-		return err
-	}
-	var req contactBindConfirmRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	token, err := h.service.GetBindToken(c.Request().Context(), req.Token)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid bind token")
-	}
-	if token.UsedAt.IsZero() == false {
-		return echo.NewHTTPError(http.StatusBadRequest, "bind token already used")
-	}
-	if time.Now().UTC().After(token.ExpiresAt) {
-		return echo.NewHTTPError(http.StatusBadRequest, "bind token expired")
-	}
-	if token.BotID != botID {
-		return echo.NewHTTPError(http.StatusBadRequest, "bind token mismatch")
-	}
-	if token.IssuedByUserID != "" && token.IssuedByUserID != userID {
-		return echo.NewHTTPError(http.StatusBadRequest, "bind token not issued for current user")
-	}
-	contact, err := h.service.GetByID(c.Request().Context(), token.ContactID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if contact.UserID != "" && contact.UserID != userID {
-		return echo.NewHTTPError(http.StatusBadRequest, "contact already bound to another user")
-	}
-	if contact.UserID == "" {
-		if _, err := h.service.BindUser(c.Request().Context(), contact.ID, userID); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-		}
-	}
-	_, _ = h.service.MarkBindTokenUsed(c.Request().Context(), token.ID)
-	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *ContactsHandler) requireUserID(c echo.Context) (string, error) {

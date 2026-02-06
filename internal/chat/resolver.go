@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db/sqlc"
@@ -24,6 +23,7 @@ import (
 
 const defaultMaxContextMinutes = 24 * 60
 
+// Resolver orchestrates chat with the agent gateway.
 type Resolver struct {
 	modelsService   *models.Service
 	queries         *sqlc.Queries
@@ -68,6 +68,48 @@ func NewResolver(log *slog.Logger, modelsService *models.Service, queries *sqlc.
 		streamingClient: &http.Client{},
 	}
 }
+
+// ---------- gateway payload types ----------
+
+type gatewayModelConfig struct {
+	ModelID    string   `json:"modelId"`
+	ClientType string   `json:"clientType"`
+	Input      []string `json:"input"`
+	APIKey     string   `json:"apiKey"`
+	BaseURL    string   `json:"baseUrl"`
+}
+
+type gatewayIdentity struct {
+	BotID           string `json:"botId"`
+	SessionID       string `json:"sessionId"`
+	ContainerID     string `json:"containerId"`
+	ContactID       string `json:"contactId"`
+	ContactName     string `json:"contactName"`
+	ContactAlias    string `json:"contactAlias,omitempty"`
+	UserID          string `json:"userId,omitempty"`
+	CurrentPlatform string `json:"currentPlatform,omitempty"`
+	ReplyTarget     string `json:"replyTarget,omitempty"`
+	SessionToken    string `json:"sessionToken,omitempty"`
+}
+
+type agentGatewayRequest struct {
+	Model             gatewayModelConfig `json:"model"`
+	ActiveContextTime int                `json:"activeContextTime"`
+	Platforms         []string           `json:"platforms"`
+	CurrentPlatform   string             `json:"currentPlatform"`
+	AllowedActions    []string           `json:"allowedActions,omitempty"`
+	Messages          []GatewayMessage   `json:"messages"`
+	Skills            []string           `json:"skills"`
+	Query             string             `json:"query"`
+	Identity          gatewayIdentity    `json:"identity"`
+}
+
+type agentGatewayResponse struct {
+	Messages []GatewayMessage `json:"messages"`
+	Skills   []string         `json:"skills"`
+}
+
+// ---------- Chat ----------
 
 func (r *Resolver) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	if strings.TrimSpace(req.Query) == "" {
@@ -122,27 +164,39 @@ func (r *Resolver) Chat(ctx context.Context, req ChatRequest) (ChatResponse, err
 	}
 	messages = sanitizeGatewayMessages(messages)
 	messages = normalizeGatewayMessagesForModel(messages)
-	useSkills := normalizeSkills(append(historySkills, req.UseSkills...))
+	skills := normalizeSkills(append(historySkills, req.Skills...))
+
+	containerID := r.resolveContainerID(ctx, req.BotID, req.ContainerID)
 
 	payload := agentGatewayRequest{
-		APIKey:             provider.ApiKey,
-		BaseURL:            provider.BaseUrl,
-		Model:              chatModel.ModelID,
-		ClientType:         clientType,
-		Locale:             req.Locale,
-		Language:           req.Language,
-		MaxSteps:           req.MaxSteps,
-		MaxContextLoadTime: normalizeMaxContextLoad(maxContextLoadTime),
-		Platforms:          req.Platforms,
-		CurrentPlatform:    req.CurrentPlatform,
-		Messages:           messages,
-		Query:              req.Query,
-		Skills:             req.Skills,
-		UseSkills:          useSkills,
-		ToolContext:        req.ToolContext,
-		ToolChoice:         req.ToolChoice,
+		Model: gatewayModelConfig{
+			ModelID:    chatModel.ModelID,
+			ClientType: clientType,
+			Input:      chatModel.Input,
+			APIKey:     provider.ApiKey,
+			BaseURL:    provider.BaseUrl,
+		},
+		ActiveContextTime: normalizeMaxContextLoad(maxContextLoadTime),
+		Platforms:         req.Platforms,
+		CurrentPlatform:   req.CurrentPlatform,
+		AllowedActions:    req.AllowedActions,
+		Messages:          messages,
+		Skills:            skills,
+		Query:             req.Query,
+		Identity: gatewayIdentity{
+			BotID:           req.BotID,
+			SessionID:       req.SessionID,
+			ContainerID:     containerID,
+			ContactID:       defaultString(req.ContactID, req.UserID, req.BotID),
+			ContactName:     defaultString(req.ContactName, "User"),
+			ContactAlias:    req.ContactAlias,
+			UserID:          req.UserID,
+			CurrentPlatform: req.CurrentPlatform,
+			ReplyTarget:     req.ReplyTarget,
+			SessionToken:    req.SessionToken,
+		},
 	}
-	payload.Language = language
+	_ = language // language is embedded in system prompt by the gateway
 
 	resp, err := r.postChat(ctx, payload, req.Token)
 	if err != nil {
@@ -165,6 +219,8 @@ func (r *Resolver) Chat(ctx context.Context, req ChatRequest) (ChatResponse, err
 	}, nil
 }
 
+// ---------- TriggerSchedule ----------
+
 func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, schedule SchedulePayload, token string) error {
 	if strings.TrimSpace(botID) == "" {
 		return fmt.Errorf("bot id is required")
@@ -177,8 +233,6 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, schedule S
 		BotID:     botID,
 		SessionID: "schedule:" + schedule.ID,
 		Query:     schedule.Command,
-		Locale:    "",
-		Language:  "",
 	}
 	settings, err := r.loadUserSettings(ctx, "")
 	if err != nil {
@@ -193,7 +247,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, schedule S
 		return err
 	}
 
-	maxContextLoadTime, language, err := r.loadBotSettings(ctx, botID)
+	maxContextLoadTime, _, err := r.loadBotSettings(ctx, botID)
 	if err != nil {
 		return err
 	}
@@ -206,26 +260,31 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, schedule S
 	if err != nil {
 		return err
 	}
-	useSkills := normalizeSkills(historySkills)
+	skills := normalizeSkills(historySkills)
+	containerID := r.resolveContainerID(ctx, botID, "")
 
-	payload := agentGatewayScheduleRequest{
-		APIKey:             provider.ApiKey,
-		BaseURL:            provider.BaseUrl,
-		Model:              chatModel.ModelID,
-		ClientType:         clientType,
-		Locale:             "",
-		Language:           language,
-		MaxSteps:           0,
-		MaxContextLoadTime: normalizeMaxContextLoad(maxContextLoadTime),
-		Platforms:          nil,
-		CurrentPlatform:    "",
-		Messages:           messages,
-		Query:              schedule.Command,
-		Schedule:           schedule,
-		UseSkills:          useSkills,
+	payload := agentGatewayRequest{
+		Model: gatewayModelConfig{
+			ModelID:    chatModel.ModelID,
+			ClientType: clientType,
+			Input:      chatModel.Input,
+			APIKey:     provider.ApiKey,
+			BaseURL:    provider.BaseUrl,
+		},
+		ActiveContextTime: normalizeMaxContextLoad(maxContextLoadTime),
+		Messages:          messages,
+		Skills:            skills,
+		Query:             schedule.Command,
+		Identity: gatewayIdentity{
+			BotID:       botID,
+			SessionID:   req.SessionID,
+			ContainerID: containerID,
+			ContactID:   botID,
+			ContactName: "Scheduler",
+		},
 	}
 
-	resp, err := r.postSchedule(ctx, payload, token)
+	resp, err := r.postChat(ctx, payload, token)
 	if err != nil {
 		return err
 	}
@@ -238,6 +297,8 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, schedule S
 	}
 	return nil
 }
+
+// ---------- StreamChat ----------
 
 func (r *Resolver) StreamChat(ctx context.Context, req ChatRequest) (<-chan StreamChunk, <-chan error) {
 	chunkChan := make(chan StreamChunk)
@@ -308,27 +369,38 @@ func (r *Resolver) StreamChat(ctx context.Context, req ChatRequest) (<-chan Stre
 		}
 		messages = sanitizeGatewayMessages(messages)
 		messages = normalizeGatewayMessagesForModel(messages)
-		useSkills := normalizeSkills(append(historySkills, req.UseSkills...))
+		skills := normalizeSkills(append(historySkills, req.Skills...))
+		containerID := r.resolveContainerID(ctx, req.BotID, req.ContainerID)
 
 		payload := agentGatewayRequest{
-			APIKey:             provider.ApiKey,
-			BaseURL:            provider.BaseUrl,
-			Model:              chatModel.ModelID,
-			ClientType:         clientType,
-			Locale:             req.Locale,
-			Language:           req.Language,
-			MaxSteps:           req.MaxSteps,
-			MaxContextLoadTime: normalizeMaxContextLoad(maxContextLoadTime),
-			Platforms:          req.Platforms,
-			CurrentPlatform:    req.CurrentPlatform,
-			Messages:           messages,
-			Query:              req.Query,
-			Skills:             req.Skills,
-			UseSkills:          useSkills,
-			ToolContext:        req.ToolContext,
-			ToolChoice:         req.ToolChoice,
+			Model: gatewayModelConfig{
+				ModelID:    chatModel.ModelID,
+				ClientType: clientType,
+				Input:      chatModel.Input,
+				APIKey:     provider.ApiKey,
+				BaseURL:    provider.BaseUrl,
+			},
+			ActiveContextTime: normalizeMaxContextLoad(maxContextLoadTime),
+			Platforms:         req.Platforms,
+			CurrentPlatform:   req.CurrentPlatform,
+			AllowedActions:    req.AllowedActions,
+			Messages:          messages,
+			Skills:            skills,
+			Query:             req.Query,
+			Identity: gatewayIdentity{
+				BotID:           req.BotID,
+				SessionID:       req.SessionID,
+				ContainerID:     containerID,
+				ContactID:       defaultString(req.ContactID, req.UserID, req.BotID),
+				ContactName:     defaultString(req.ContactName, "User"),
+				ContactAlias:    req.ContactAlias,
+				UserID:          req.UserID,
+				CurrentPlatform: req.CurrentPlatform,
+				ReplyTarget:     req.ReplyTarget,
+				SessionToken:    req.SessionToken,
+			},
 		}
-		payload.Language = language
+		_ = language
 
 		if err := r.streamChat(ctx, payload, req.BotID, req.SessionID, req.Query, req.Token, chunkChan); err != nil {
 			errChan <- err
@@ -339,54 +411,15 @@ func (r *Resolver) StreamChat(ctx context.Context, req ChatRequest) (<-chan Stre
 	return chunkChan, errChan
 }
 
-type agentGatewayRequest struct {
-	APIKey             string           `json:"apiKey"`
-	BaseURL            string           `json:"baseUrl"`
-	Model              string           `json:"model"`
-	ClientType         string           `json:"clientType"`
-	Locale             string           `json:"locale,omitempty"`
-	Language           string           `json:"language,omitempty"`
-	MaxSteps           int              `json:"maxSteps,omitempty"`
-	MaxContextLoadTime int              `json:"maxContextLoadTime"`
-	Platforms          []string         `json:"platforms,omitempty"`
-	CurrentPlatform    string           `json:"currentPlatform,omitempty"`
-	Messages           []GatewayMessage `json:"messages"`
-	Query              string           `json:"query"`
-	Skills             []AgentSkill     `json:"skills,omitempty"`
-	UseSkills          []string         `json:"useSkills,omitempty"`
-	ToolContext        *ToolContext     `json:"toolContext,omitempty"`
-	ToolChoice         interface{}      `json:"toolChoice,omitempty"`
-}
-
-type agentGatewayScheduleRequest struct {
-	APIKey             string           `json:"apiKey"`
-	BaseURL            string           `json:"baseUrl"`
-	Model              string           `json:"model"`
-	ClientType         string           `json:"clientType"`
-	Locale             string           `json:"locale,omitempty"`
-	Language           string           `json:"language,omitempty"`
-	MaxSteps           int              `json:"maxSteps,omitempty"`
-	MaxContextLoadTime int              `json:"maxContextLoadTime"`
-	Platforms          []string         `json:"platforms,omitempty"`
-	CurrentPlatform    string           `json:"currentPlatform,omitempty"`
-	Messages           []GatewayMessage `json:"messages"`
-	Query              string           `json:"query"`
-	Schedule           SchedulePayload  `json:"schedule"`
-	Skills             []AgentSkill     `json:"skills,omitempty"`
-	UseSkills          []string         `json:"useSkills,omitempty"`
-}
-
-type agentGatewayResponse struct {
-	Messages []GatewayMessage `json:"messages"`
-	Skills   []string         `json:"skills"`
-}
+// ---------- HTTP helpers ----------
 
 func (r *Resolver) postChat(ctx context.Context, payload agentGatewayRequest, token string) (agentGatewayResponse, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return agentGatewayResponse{}, err
 	}
-	url := r.gatewayBaseURL + "/chat"
+	url := r.gatewayBaseURL + "/chat/"
+	r.logger.Info("gateway request", slog.String("url", url), slog.String("body_prefix", truncate(string(body), 200)))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return agentGatewayResponse{}, err
@@ -408,50 +441,17 @@ func (r *Resolver) postChat(ctx context.Context, payload agentGatewayRequest, to
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		r.logger.Error("gateway request failed",
+			slog.String("url", url),
+			slog.Int("status", resp.StatusCode),
+			slog.String("body_prefix", truncate(string(respBody), 300)),
+		)
 		return agentGatewayResponse{}, fmt.Errorf("agent gateway error: %s", strings.TrimSpace(string(respBody)))
 	}
 
 	parsed, err := parseAgentGatewayResponse(respBody)
 	if err != nil {
 		r.logger.Error("failed to parse agent gateway response", slog.String("body", string(respBody)), slog.Any("error", err))
-		return agentGatewayResponse{}, err
-	}
-	return parsed, nil
-}
-
-func (r *Resolver) postSchedule(ctx context.Context, payload agentGatewayScheduleRequest, token string) (agentGatewayResponse, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return agentGatewayResponse{}, err
-	}
-	url := r.gatewayBaseURL + "/chat/schedule"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return agentGatewayResponse{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if strings.TrimSpace(token) != "" {
-		req.Header.Set("Authorization", token)
-	}
-
-	resp, err := r.httpClient.Do(req)
-	if err != nil {
-		return agentGatewayResponse{}, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return agentGatewayResponse{}, err
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return agentGatewayResponse{}, fmt.Errorf("agent gateway error: %s", strings.TrimSpace(string(respBody)))
-	}
-
-	parsed, err := parseAgentGatewayResponse(respBody)
-	if err != nil {
-		r.logger.Error("failed to parse schedule gateway response", slog.String("body", string(respBody)), slog.Any("error", err))
 		return agentGatewayResponse{}, err
 	}
 	return parsed, nil
@@ -524,6 +524,26 @@ func (r *Resolver) streamChat(ctx context.Context, payload agentGatewayRequest, 
 	return nil
 }
 
+// ---------- container resolution ----------
+
+func (r *Resolver) resolveContainerID(ctx context.Context, botID, explicit string) string {
+	if strings.TrimSpace(explicit) != "" {
+		return explicit
+	}
+	if r.queries != nil {
+		pgBotID, err := parseUUID(botID)
+		if err == nil {
+			row, err := r.queries.GetContainerByBotID(ctx, pgBotID)
+			if err == nil && strings.TrimSpace(row.ContainerID) != "" {
+				return row.ContainerID
+			}
+		}
+	}
+	return "mcp-" + botID
+}
+
+// ---------- history helpers ----------
+
 func (r *Resolver) loadHistoryMessages(ctx context.Context, botID, sessionID string, maxContextLoadTime int) ([]GatewayMessage, error) {
 	if r.historyService == nil {
 		return nil, fmt.Errorf("history service not configured")
@@ -567,6 +587,8 @@ func (r *Resolver) loadHistorySkills(ctx context.Context, botID, sessionID strin
 	return normalizeSkills(combined), nil
 }
 
+// ---------- store helpers ----------
+
 func (r *Resolver) storeHistory(ctx context.Context, botID, sessionID, query string, responseMessages []GatewayMessage, skills []string) error {
 	if r.historyService == nil {
 		return fmt.Errorf("history service not configured")
@@ -581,15 +603,19 @@ func (r *Resolver) storeHistory(ctx context.Context, botID, sessionID, query str
 	if strings.TrimSpace(query) == "" && len(responseMessages) == 0 {
 		return nil
 	}
-	messages := make([]map[string]interface{}, 0, len(responseMessages))
+	messages := make([]map[string]any, 0, len(responseMessages))
 	for _, msg := range responseMessages {
 		if msg == nil {
 			continue
 		}
-		messages = append(messages, map[string]interface{}(msg))
+		messages = append(messages, map[string]any(msg))
+	}
+	metadata := map[string]any{
+		"query": strings.TrimSpace(query),
 	}
 	_, err := r.historyService.Create(ctx, botID, trimmedSession, history.CreateRequest{
 		Messages: messages,
+		Metadata: metadata,
 		Skills:   skills,
 	})
 	return err
@@ -642,12 +668,23 @@ func (r *Resolver) tryStoreFromStreamPayload(ctx context.Context, botID, session
 		}
 	}
 
-	// Case 2: data: {"type":"done","data":{messages:[...]}}
+	// Case 2: data: {"type":"agent_end","messages":[...],"skills":[...]}
 	var envelope struct {
-		Type string          `json:"type"`
-		Data json.RawMessage `json:"data"`
+		Type     string          `json:"type"`
+		Data     json.RawMessage `json:"data"`
+		Messages json.RawMessage `json:"messages"`
+		Skills   []string        `json:"skills"`
 	}
 	if err := json.Unmarshal([]byte(data), &envelope); err == nil {
+		if envelope.Type == "agent_end" {
+			// agent_end with inline messages
+			if len(envelope.Messages) > 0 {
+				if parsed, ok := parseGatewayResponseFromRaw(envelope.Messages, envelope.Skills); ok {
+					parsed.Messages = normalizeGatewayMessages(parsed.Messages)
+					return r.storeRound(ctx, botID, sessionID, query, parsed.Messages, parsed.Skills)
+				}
+			}
+		}
 		if envelope.Type == "done" && len(envelope.Data) > 0 {
 			if parsed, ok := parseGatewayResponse(envelope.Data); ok {
 				parsed.Messages = normalizeGatewayMessages(parsed.Messages)
@@ -675,10 +712,27 @@ func parseGatewayResponse(payload []byte) (agentGatewayResponse, bool) {
 	return parsed, true
 }
 
+func parseGatewayResponseFromRaw(messagesRaw json.RawMessage, skills []string) (agentGatewayResponse, bool) {
+	var rawMessages []json.RawMessage
+	if err := json.Unmarshal(messagesRaw, &rawMessages); err != nil {
+		return agentGatewayResponse{}, false
+	}
+	messages := make([]GatewayMessage, 0, len(rawMessages))
+	for _, rawMsg := range rawMessages {
+		var msg map[string]any
+		if err := json.Unmarshal(rawMsg, &msg); err != nil {
+			continue
+		}
+		messages = append(messages, GatewayMessage(msg))
+	}
+	if len(messages) == 0 {
+		return agentGatewayResponse{}, false
+	}
+	return agentGatewayResponse{Messages: messages, Skills: skills}, true
+}
+
 // parseAgentGatewayResponse parses the agent gateway response with flexible message handling.
-// It can handle various message formats from different AI SDK versions.
 func parseAgentGatewayResponse(payload []byte) (agentGatewayResponse, error) {
-	// Use json.RawMessage to handle flexible message formats
 	var raw struct {
 		Messages []json.RawMessage `json:"messages"`
 		Skills   []string          `json:"skills"`
@@ -689,20 +743,17 @@ func parseAgentGatewayResponse(payload []byte) (agentGatewayResponse, error) {
 
 	messages := make([]GatewayMessage, 0, len(raw.Messages))
 	for _, rawMsg := range raw.Messages {
-		// Try parsing as object
-		var msg map[string]interface{}
+		var msg map[string]any
 		if err := json.Unmarshal(rawMsg, &msg); err != nil {
-			// If it's an array, try to extract messages from it
-			var arr []interface{}
+			var arr []any
 			if err := json.Unmarshal(rawMsg, &arr); err == nil {
 				for _, item := range arr {
-					if m, ok := item.(map[string]interface{}); ok {
+					if m, ok := item.(map[string]any); ok {
 						messages = append(messages, GatewayMessage(m))
 					}
 				}
 				continue
 			}
-			// Skip unparseable messages
 			continue
 		}
 		messages = append(messages, GatewayMessage(msg))
@@ -722,6 +773,154 @@ func (r *Resolver) storeRound(ctx context.Context, botID, sessionID, query strin
 		return true, err
 	}
 	return true, nil
+}
+
+// ---------- model selection ----------
+
+func (r *Resolver) selectChatModel(ctx context.Context, req ChatRequest, settings userSettings) (models.GetResponse, sqlc.LlmProvider, error) {
+	if r.modelsService == nil {
+		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("models service not configured")
+	}
+	modelID := strings.TrimSpace(req.Model)
+	providerFilter := strings.TrimSpace(req.Provider)
+
+	if modelID != "" && providerFilter == "" {
+		model, err := r.modelsService.GetByModelID(ctx, modelID)
+		if err != nil {
+			return models.GetResponse{}, sqlc.LlmProvider{}, err
+		}
+		if model.Type != models.ModelTypeChat {
+			return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("model is not a chat model")
+		}
+		provider, err := models.FetchProviderByID(ctx, r.queries, model.LlmProviderID)
+		if err != nil {
+			return models.GetResponse{}, sqlc.LlmProvider{}, err
+		}
+		return model, provider, nil
+	}
+
+	if providerFilter == "" && modelID == "" && strings.TrimSpace(settings.ChatModelID) != "" {
+		selected, err := r.modelsService.GetByModelID(ctx, settings.ChatModelID)
+		if err != nil {
+			return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("settings chat model not found: %w", err)
+		}
+		if selected.Type != models.ModelTypeChat {
+			return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("settings chat model is not a chat model")
+		}
+		provider, err := models.FetchProviderByID(ctx, r.queries, selected.LlmProviderID)
+		if err != nil {
+			return models.GetResponse{}, sqlc.LlmProvider{}, err
+		}
+		return selected, provider, nil
+	}
+
+	var candidates []models.GetResponse
+	var err error
+	if providerFilter != "" {
+		candidates, err = r.modelsService.ListByClientType(ctx, models.ClientType(providerFilter))
+	} else {
+		candidates, err = r.modelsService.ListByType(ctx, models.ModelTypeChat)
+	}
+	if err != nil {
+		return models.GetResponse{}, sqlc.LlmProvider{}, err
+	}
+
+	filtered := make([]models.GetResponse, 0, len(candidates))
+	for _, model := range candidates {
+		if model.Type != models.ModelTypeChat {
+			continue
+		}
+		filtered = append(filtered, model)
+	}
+	if len(filtered) == 0 {
+		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("no chat models available")
+	}
+
+	if modelID != "" {
+		for _, model := range filtered {
+			if model.ModelID == modelID {
+				provider, err := models.FetchProviderByID(ctx, r.queries, model.LlmProviderID)
+				if err != nil {
+					return models.GetResponse{}, sqlc.LlmProvider{}, err
+				}
+				return model, provider, nil
+			}
+		}
+		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("chat model not found")
+	}
+
+	selected := filtered[0]
+	provider, err := models.FetchProviderByID(ctx, r.queries, selected.LlmProviderID)
+	if err != nil {
+		return models.GetResponse{}, sqlc.LlmProvider{}, err
+	}
+	return selected, provider, nil
+}
+
+// ---------- settings helpers ----------
+
+func normalizeMaxContextLoad(value int) int {
+	if value <= 0 {
+		return defaultMaxContextMinutes
+	}
+	return value
+}
+
+func (r *Resolver) loadUserSettings(ctx context.Context, userID string) (userSettings, error) {
+	defaults := userSettings{
+		MaxContextLoadTime: defaultMaxContextMinutes,
+		Language:           settings.DefaultLanguage,
+	}
+	if r.settingsService == nil || strings.TrimSpace(userID) == "" {
+		return defaults, nil
+	}
+	settingsRow, err := r.settingsService.Get(ctx, userID)
+	if err != nil {
+		return userSettings{}, err
+	}
+	maxLoad := settingsRow.MaxContextLoadTime
+	if maxLoad <= 0 {
+		maxLoad = defaultMaxContextMinutes
+	}
+	language := strings.TrimSpace(settingsRow.Language)
+	if language == "" || language == "auto" {
+		language = settings.DefaultLanguage
+	}
+	return userSettings{
+		ChatModelID:        strings.TrimSpace(settingsRow.ChatModelID),
+		MemoryModelID:      strings.TrimSpace(settingsRow.MemoryModelID),
+		EmbeddingModelID:   strings.TrimSpace(settingsRow.EmbeddingModelID),
+		MaxContextLoadTime: maxLoad,
+		Language:           language,
+	}, nil
+}
+
+func (r *Resolver) loadBotSettings(ctx context.Context, botID string) (int, string, error) {
+	if r.settingsService == nil {
+		return settings.DefaultMaxContextLoadTime, settings.DefaultLanguage, nil
+	}
+	settingsRow, err := r.settingsService.GetBot(ctx, botID)
+	if err != nil {
+		return 0, "", err
+	}
+	return settingsRow.MaxContextLoadTime, settingsRow.Language, nil
+}
+
+// ---------- utility ----------
+
+func normalizeClientType(clientType string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(clientType)) {
+	case "openai":
+		return "openai", nil
+	case "openai-compat":
+		return "openai", nil
+	case "anthropic":
+		return "anthropic", nil
+	case "google":
+		return "google", nil
+	default:
+		return "", fmt.Errorf("unsupported agent gateway client type: %s", clientType)
+	}
 }
 
 func normalizeSkills(skills []string) []string {
@@ -832,13 +1031,13 @@ func isMeaningfulGatewayMessage(msg GatewayMessage) bool {
 	return false
 }
 
-func isEmptyValue(value interface{}) bool {
+func isEmptyValue(value any) bool {
 	switch v := value.(type) {
 	case nil:
 		return true
 	case string:
 		return strings.TrimSpace(v) == ""
-	case []interface{}:
+	case []any:
 		if len(v) == 0 {
 			return true
 		}
@@ -848,7 +1047,7 @@ func isEmptyValue(value interface{}) bool {
 			}
 		}
 		return true
-	case map[string]interface{}:
+	case map[string]any:
 		if len(v) == 0 {
 			return true
 		}
@@ -863,155 +1062,38 @@ func isEmptyValue(value interface{}) bool {
 	}
 }
 
-func (r *Resolver) selectChatModel(ctx context.Context, req ChatRequest, settings userSettings) (models.GetResponse, sqlc.LlmProvider, error) {
-	if r.modelsService == nil {
-		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("models service not configured")
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	modelID := strings.TrimSpace(req.Model)
-	providerFilter := strings.TrimSpace(req.Provider)
-
-	if modelID != "" && providerFilter == "" {
-		model, err := r.modelsService.GetByModelID(ctx, modelID)
-		if err != nil {
-			return models.GetResponse{}, sqlc.LlmProvider{}, err
-		}
-		if model.Type != models.ModelTypeChat {
-			return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("model is not a chat model")
-		}
-		provider, err := models.FetchProviderByID(ctx, r.queries, model.LlmProviderID)
-		if err != nil {
-			return models.GetResponse{}, sqlc.LlmProvider{}, err
-		}
-		return model, provider, nil
-	}
-
-	if providerFilter == "" && modelID == "" && strings.TrimSpace(settings.ChatModelID) != "" {
-		selected, err := r.modelsService.GetByModelID(ctx, settings.ChatModelID)
-		if err != nil {
-			return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("settings chat model not found: %w", err)
-		}
-		if selected.Type != models.ModelTypeChat {
-			return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("settings chat model is not a chat model")
-		}
-		provider, err := models.FetchProviderByID(ctx, r.queries, selected.LlmProviderID)
-		if err != nil {
-			return models.GetResponse{}, sqlc.LlmProvider{}, err
-		}
-		return selected, provider, nil
-	}
-
-	var candidates []models.GetResponse
-	var err error
-	if providerFilter != "" {
-		candidates, err = r.modelsService.ListByClientType(ctx, models.ClientType(providerFilter))
-	} else {
-		candidates, err = r.modelsService.ListByType(ctx, models.ModelTypeChat)
-	}
-	if err != nil {
-		return models.GetResponse{}, sqlc.LlmProvider{}, err
-	}
-
-	filtered := make([]models.GetResponse, 0, len(candidates))
-	for _, model := range candidates {
-		if model.Type != models.ModelTypeChat {
-			continue
-		}
-		filtered = append(filtered, model)
-	}
-	if len(filtered) == 0 {
-		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("no chat models available")
-	}
-
-	if modelID != "" {
-		for _, model := range filtered {
-			if model.ModelID == modelID {
-				provider, err := models.FetchProviderByID(ctx, r.queries, model.LlmProviderID)
-				if err != nil {
-					return models.GetResponse{}, sqlc.LlmProvider{}, err
-				}
-				return model, provider, nil
-			}
-		}
-		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("chat model not found")
-	}
-
-	selected := filtered[0]
-	provider, err := models.FetchProviderByID(ctx, r.queries, selected.LlmProviderID)
-	if err != nil {
-		return models.GetResponse{}, sqlc.LlmProvider{}, err
-	}
-	return selected, provider, nil
+	return s[:n] + "..."
 }
 
-func normalizeMaxContextLoad(value int) int {
-	if value <= 0 {
-		return defaultMaxContextMinutes
+func defaultString(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
 	}
-	return value
-}
-
-func (r *Resolver) loadUserSettings(ctx context.Context, userID string) (userSettings, error) {
-	defaults := userSettings{
-		MaxContextLoadTime: defaultMaxContextMinutes,
-		Language:           "Same as user input",
-	}
-	if r.settingsService == nil || strings.TrimSpace(userID) == "" {
-		return defaults, nil
-	}
-	settingsRow, err := r.settingsService.Get(ctx, userID)
-	if err != nil {
-		return userSettings{}, err
-	}
-	maxLoad := settingsRow.MaxContextLoadTime
-	if maxLoad <= 0 {
-		maxLoad = defaultMaxContextMinutes
-	}
-	language := strings.TrimSpace(settingsRow.Language)
-	if language == "" {
-		language = "Same as user input"
-	}
-	return userSettings{
-		ChatModelID:        strings.TrimSpace(settingsRow.ChatModelID),
-		MemoryModelID:      strings.TrimSpace(settingsRow.MemoryModelID),
-		EmbeddingModelID:   strings.TrimSpace(settingsRow.EmbeddingModelID),
-		MaxContextLoadTime: maxLoad,
-		Language:           language,
-	}, nil
-}
-
-func (r *Resolver) loadBotSettings(ctx context.Context, botID string) (int, string, error) {
-	if r.settingsService == nil {
-		return settings.DefaultMaxContextLoadTime, settings.DefaultLanguage, nil
-	}
-	settingsRow, err := r.settingsService.GetBot(ctx, botID)
-	if err != nil {
-		return 0, "", err
-	}
-	return settingsRow.MaxContextLoadTime, settingsRow.Language, nil
-}
-
-func normalizeClientType(clientType string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(clientType)) {
-	case "openai":
-		return "openai", nil
-	case "openai-compat":
-		return "openai", nil
-	case "anthropic":
-		return "anthropic", nil
-	case "google":
-		return "google", nil
-	default:
-		return "", fmt.Errorf("unsupported agent gateway client type: %s", clientType)
-	}
+	return ""
 }
 
 func parseUUID(id string) (pgtype.UUID, error) {
-	parsed, err := uuid.Parse(id)
+	parsed, err := parseUUIDHelper(id)
 	if err != nil {
 		return pgtype.UUID{}, fmt.Errorf("invalid UUID: %w", err)
 	}
+	return parsed, nil
+}
+
+func parseUUIDHelper(id string) (pgtype.UUID, error) {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return pgtype.UUID{}, fmt.Errorf("empty id")
+	}
 	var pgID pgtype.UUID
-	pgID.Valid = true
-	copy(pgID.Bytes[:], parsed[:])
+	if err := pgID.Scan(trimmed); err != nil {
+		return pgtype.UUID{}, err
+	}
 	return pgID, nil
 }

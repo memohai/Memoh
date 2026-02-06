@@ -117,8 +117,8 @@ func TestRankFusion_Logic(t *testing.T) {
 	// 测试 RRF (Reciprocal Rank Fusion) 逻辑
 	// 验证不同来源的结果是否能被正确合并和排序
 
-	p1 := qdrantPoint{ID: "1", Payload: map[string]interface{}{"data": "result 1"}}
-	p2 := qdrantPoint{ID: "2", Payload: map[string]interface{}{"data": "result 2"}}
+	p1 := qdrantPoint{ID: "1", Payload: map[string]any{"data": "result 1"}}
+	p2 := qdrantPoint{ID: "2", Payload: map[string]any{"data": "result 2"}}
 
 	// 来源 A: 1 号排第一，2 号排第二
 	// 来源 B: 2 号排第一，1 号排第二

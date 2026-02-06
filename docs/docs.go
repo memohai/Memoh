@@ -240,6 +240,193 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/container": {
+            "post": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Create and start MCP container for bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Create container payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CreateContainerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CreateContainerResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/list": {
+            "get": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "List containers for bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ListContainersResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/snapshots": {
+            "get": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "List snapshots",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Snapshotter name",
+                        "name": "snapshotter",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ListSnapshotsResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Create container snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Create snapshot payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CreateSnapshotRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CreateSnapshotResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/{id}": {
+            "delete": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Delete MCP container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Container ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/history": {
             "get": {
                 "description": "List history records for current user",
@@ -2128,28 +2315,53 @@ const docTemplate = `{
                 }
             }
         },
-        "/container": {
-            "post": {
+        "/channels": {
+            "get": {
+                "description": "List channel meta information including capabilities and schemas",
                 "tags": [
-                    "containerd"
+                    "channel"
                 ],
-                "summary": "Create and start MCP container",
+                "summary": "List channel capabilities and schemas",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handlers.ChannelMeta"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/channels/{platform}": {
+            "get": {
+                "description": "Get channel meta information including capabilities and schemas",
+                "tags": [
+                    "channel"
+                ],
+                "summary": "Get channel capabilities and schemas",
                 "parameters": [
                     {
-                        "description": "Create container payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CreateContainerRequest"
-                        }
+                        "type": "string",
+                        "description": "Channel platform",
+                        "name": "platform",
+                        "in": "path",
+                        "required": true
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.CreateContainerResponse"
+                            "$ref": "#/definitions/handlers.ChannelMeta"
                         }
                     },
                     "400": {
@@ -2158,8 +2370,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -2216,28 +2428,6 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/container/list": {
-            "get": {
-                "tags": [
-                    "containerd"
-                ],
-                "summary": "List containers",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ListContainersResponse"
                         }
                     },
                     "500": {
@@ -2347,119 +2537,6 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.skillsOpResponse"
                         }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/container/snapshots": {
-            "get": {
-                "tags": [
-                    "containerd"
-                ],
-                "summary": "List snapshots",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Snapshotter name",
-                        "name": "snapshotter",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ListSnapshotsResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "tags": [
-                    "containerd"
-                ],
-                "summary": "Create container snapshot",
-                "parameters": [
-                    {
-                        "description": "Create snapshot payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CreateSnapshotRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CreateSnapshotResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/container/{id}": {
-            "delete": {
-                "tags": [
-                    "containerd"
-                ],
-                "summary": "Delete MCP container",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Container ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -3808,7 +3885,7 @@ const docTemplate = `{
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "owner_user_id": {
                     "type": "string"
@@ -3852,7 +3929,7 @@ const docTemplate = `{
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "type": {
                     "type": "string"
@@ -3903,7 +3980,7 @@ const docTemplate = `{
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 }
             }
         },
@@ -3918,6 +3995,137 @@ const docTemplate = `{
                 }
             }
         },
+        "channel.Action": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "channel.Attachment": {
+            "type": "object",
+            "properties": {
+                "caption": {
+                    "type": "string"
+                },
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "mime": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "thumbnail_url": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/channel.AttachmentType"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "channel.AttachmentType": {
+            "type": "string",
+            "enum": [
+                "image",
+                "audio",
+                "video",
+                "voice",
+                "file",
+                "gif"
+            ],
+            "x-enum-varnames": [
+                "AttachmentImage",
+                "AttachmentAudio",
+                "AttachmentVideo",
+                "AttachmentVoice",
+                "AttachmentFile",
+                "AttachmentGIF"
+            ]
+        },
+        "channel.ChannelCapabilities": {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "boolean"
+                },
+                "block_streaming": {
+                    "type": "boolean"
+                },
+                "buttons": {
+                    "type": "boolean"
+                },
+                "chat_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "edit": {
+                    "type": "boolean"
+                },
+                "markdown": {
+                    "type": "boolean"
+                },
+                "media": {
+                    "type": "boolean"
+                },
+                "native_commands": {
+                    "type": "boolean"
+                },
+                "polls": {
+                    "type": "boolean"
+                },
+                "reactions": {
+                    "type": "boolean"
+                },
+                "reply": {
+                    "type": "boolean"
+                },
+                "rich_text": {
+                    "type": "boolean"
+                },
+                "streaming": {
+                    "type": "boolean"
+                },
+                "text": {
+                    "type": "boolean"
+                },
+                "threads": {
+                    "type": "boolean"
+                },
+                "unsend": {
+                    "type": "boolean"
+                }
+            }
+        },
         "channel.ChannelConfig": {
             "type": "object",
             "properties": {
@@ -3926,17 +4134,17 @@ const docTemplate = `{
                 },
                 "capabilities": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "channelType": {
-                    "$ref": "#/definitions/channel.ChannelType"
+                    "type": "string"
                 },
                 "createdAt": {
                     "type": "string"
                 },
                 "credentials": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "externalIdentity": {
                     "type": "string"
@@ -3946,11 +4154,11 @@ const docTemplate = `{
                 },
                 "routing": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "selfIdentity": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "status": {
                     "type": "string"
@@ -3963,30 +4171,15 @@ const docTemplate = `{
                 }
             }
         },
-        "channel.ChannelType": {
-            "type": "string",
-            "enum": [
-                "telegram",
-                "feishu",
-                "cli",
-                "web"
-            ],
-            "x-enum-varnames": [
-                "ChannelTelegram",
-                "ChannelFeishu",
-                "ChannelCLI",
-                "ChannelWeb"
-            ]
-        },
         "channel.ChannelUserBinding": {
             "type": "object",
             "properties": {
                 "channelType": {
-                    "$ref": "#/definitions/channel.ChannelType"
+                    "type": "string"
                 },
                 "config": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "createdAt": {
                     "type": "string"
@@ -4002,16 +4195,235 @@ const docTemplate = `{
                 }
             }
         },
+        "channel.ConfigSchema": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/channel.FieldSchema"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "channel.FieldSchema": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "enum": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "example": {},
+                "required": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/channel.FieldType"
+                }
+            }
+        },
+        "channel.FieldType": {
+            "type": "string",
+            "enum": [
+                "string",
+                "secret",
+                "bool",
+                "number",
+                "enum"
+            ],
+            "x-enum-varnames": [
+                "FieldString",
+                "FieldSecret",
+                "FieldBool",
+                "FieldNumber",
+                "FieldEnum"
+            ]
+        },
+        "channel.Message": {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/channel.Action"
+                    }
+                },
+                "attachments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/channel.Attachment"
+                    }
+                },
+                "format": {
+                    "$ref": "#/definitions/channel.MessageFormat"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "parts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/channel.MessagePart"
+                    }
+                },
+                "reply": {
+                    "$ref": "#/definitions/channel.ReplyRef"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "thread": {
+                    "$ref": "#/definitions/channel.ThreadRef"
+                }
+            }
+        },
+        "channel.MessageFormat": {
+            "type": "string",
+            "enum": [
+                "plain",
+                "markdown",
+                "rich"
+            ],
+            "x-enum-varnames": [
+                "MessageFormatPlain",
+                "MessageFormatMarkdown",
+                "MessageFormatRich"
+            ]
+        },
+        "channel.MessagePart": {
+            "type": "object",
+            "properties": {
+                "emoji": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "styles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/channel.MessageTextStyle"
+                    }
+                },
+                "text": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/channel.MessagePartType"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "channel.MessagePartType": {
+            "type": "string",
+            "enum": [
+                "text",
+                "link",
+                "code_block",
+                "mention",
+                "emoji"
+            ],
+            "x-enum-varnames": [
+                "MessagePartText",
+                "MessagePartLink",
+                "MessagePartCodeBlock",
+                "MessagePartMention",
+                "MessagePartEmoji"
+            ]
+        },
+        "channel.MessageTextStyle": {
+            "type": "string",
+            "enum": [
+                "bold",
+                "italic",
+                "strikethrough",
+                "code"
+            ],
+            "x-enum-varnames": [
+                "MessageStyleBold",
+                "MessageStyleItalic",
+                "MessageStyleStrikethrough",
+                "MessageStyleCode"
+            ]
+        },
+        "channel.ReplyRef": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                }
+            }
+        },
         "channel.SendRequest": {
             "type": "object",
             "properties": {
                 "message": {
+                    "$ref": "#/definitions/channel.Message"
+                },
+                "target": {
                     "type": "string"
                 },
-                "to": {
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "channel.TargetHint": {
+            "type": "object",
+            "properties": {
+                "example": {
                     "type": "string"
                 },
-                "to_user_id": {
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "channel.TargetSpec": {
+            "type": "object",
+            "properties": {
+                "format": {
+                    "type": "string"
+                },
+                "hints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/channel.TargetHint"
+                    }
+                }
+            }
+        },
+        "channel.ThreadRef": {
+            "type": "object",
+            "properties": {
+                "id": {
                     "type": "string"
                 }
             }
@@ -4021,22 +4433,22 @@ const docTemplate = `{
             "properties": {
                 "capabilities": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "credentials": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "external_identity": {
                     "type": "string"
                 },
                 "routing": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "self_identity": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "status": {
                     "type": "string"
@@ -4051,40 +4463,26 @@ const docTemplate = `{
             "properties": {
                 "config": {
                     "type": "object",
-                    "additionalProperties": true
-                }
-            }
-        },
-        "chat.AgentSkill": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
+                    "additionalProperties": {}
                 }
             }
         },
         "chat.ChatRequest": {
             "type": "object",
             "properties": {
+                "allowed_actions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "current_platform": {
                     "type": "string"
                 },
                 "language": {
                     "type": "string"
                 },
-                "locale": {
-                    "type": "string"
-                },
                 "max_context_load_time": {
-                    "type": "integer"
-                },
-                "max_steps": {
                     "type": "integer"
                 },
                 "messages": {
@@ -4109,19 +4507,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "skills": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/chat.AgentSkill"
-                    }
-                },
-                "toolChoice": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "toolContext": {
-                    "$ref": "#/definitions/chat.ToolContext"
-                },
-                "use_skills": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -4154,37 +4539,31 @@ const docTemplate = `{
         },
         "chat.GatewayMessage": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {}
         },
-        "chat.ToolContext": {
+        "handlers.ChannelMeta": {
             "type": "object",
             "properties": {
-                "botId": {
+                "capabilities": {
+                    "$ref": "#/definitions/channel.ChannelCapabilities"
+                },
+                "config_schema": {
+                    "$ref": "#/definitions/channel.ConfigSchema"
+                },
+                "configless": {
+                    "type": "boolean"
+                },
+                "display_name": {
                     "type": "string"
                 },
-                "contactAlias": {
+                "target_spec": {
+                    "$ref": "#/definitions/channel.TargetSpec"
+                },
+                "type": {
                     "type": "string"
                 },
-                "contactId": {
-                    "type": "string"
-                },
-                "contactName": {
-                    "type": "string"
-                },
-                "currentPlatform": {
-                    "type": "string"
-                },
-                "replyTarget": {
-                    "type": "string"
-                },
-                "sessionId": {
-                    "type": "string"
-                },
-                "sessionToken": {
-                    "type": "string"
-                },
-                "userId": {
-                    "type": "string"
+                "user_config_schema": {
+                    "$ref": "#/definitions/channel.ConfigSchema"
                 }
             }
         },
@@ -4515,7 +4894,7 @@ const docTemplate = `{
                 },
                 "filters": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "infer": {
                     "type": "boolean"
@@ -4531,7 +4910,7 @@ const docTemplate = `{
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "run_id": {
                     "type": "string"
@@ -4551,14 +4930,14 @@ const docTemplate = `{
             "properties": {
                 "filters": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "input": {
                     "$ref": "#/definitions/memory.EmbedInput"
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "model": {
                     "type": "string"
@@ -4585,7 +4964,7 @@ const docTemplate = `{
                 },
                 "filters": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "limit": {
                     "type": "integer"
@@ -4619,8 +4998,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {}
                     }
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "skills": {
                     "type": "array",
@@ -4654,8 +5037,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {}
                     }
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "session_id": {
                     "type": "string"
@@ -4733,7 +5120,7 @@ const docTemplate = `{
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "runId": {
                     "type": "string"
@@ -4795,6 +5182,12 @@ const docTemplate = `{
                 "dimensions": {
                     "type": "integer"
                 },
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "is_multimodal": {
                     "type": "boolean"
                 },
@@ -4837,6 +5230,12 @@ const docTemplate = `{
                 "dimensions": {
                     "type": "integer"
                 },
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "is_multimodal": {
                     "type": "boolean"
                 },
@@ -4870,6 +5269,12 @@ const docTemplate = `{
             "properties": {
                 "dimensions": {
                     "type": "integer"
+                },
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "is_multimodal": {
                     "type": "boolean"
@@ -4932,7 +5337,7 @@ const docTemplate = `{
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "name": {
                     "type": "string"
@@ -4960,7 +5365,7 @@ const docTemplate = `{
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "name": {
                     "type": "string"
@@ -4984,7 +5389,7 @@ const docTemplate = `{
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "name": {
                     "type": "string"
@@ -5161,7 +5566,7 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {}
                     }
                 }
             }
@@ -5176,12 +5581,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {}
                     }
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "name": {
                     "type": "string"
@@ -5241,12 +5646,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {}
                     }
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "name": {
                     "type": "string"
@@ -5269,7 +5674,7 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {}
                     }
                 }
             }
@@ -5282,7 +5687,7 @@ const docTemplate = `{
                 },
                 "metadata": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "name": {
                     "type": "string"

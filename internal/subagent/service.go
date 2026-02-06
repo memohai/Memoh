@@ -253,44 +253,44 @@ func toSubagent(row sqlc.Subagent) (Subagent, error) {
 	return item, nil
 }
 
-func marshalMessages(messages []map[string]interface{}) ([]byte, error) {
+func marshalMessages(messages []map[string]any) ([]byte, error) {
 	if messages == nil {
-		messages = []map[string]interface{}{}
+		messages = []map[string]any{}
 	}
 	return json.Marshal(messages)
 }
 
-func unmarshalMessages(payload []byte) ([]map[string]interface{}, error) {
+func unmarshalMessages(payload []byte) ([]map[string]any, error) {
 	if len(payload) == 0 {
-		return []map[string]interface{}{}, nil
+		return []map[string]any{}, nil
 	}
-	var messages []map[string]interface{}
+	var messages []map[string]any
 	if err := json.Unmarshal(payload, &messages); err != nil {
 		return nil, err
 	}
 	if messages == nil {
-		messages = []map[string]interface{}{}
+		messages = []map[string]any{}
 	}
 	return messages, nil
 }
 
-func marshalMetadata(metadata map[string]interface{}) ([]byte, error) {
+func marshalMetadata(metadata map[string]any) ([]byte, error) {
 	if metadata == nil {
-		metadata = map[string]interface{}{}
+		metadata = map[string]any{}
 	}
 	return json.Marshal(metadata)
 }
 
-func unmarshalMetadata(payload []byte) (map[string]interface{}, error) {
+func unmarshalMetadata(payload []byte) (map[string]any, error) {
 	if len(payload) == 0 {
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
-	var metadata map[string]interface{}
+	var metadata map[string]any
 	if err := json.Unmarshal(payload, &metadata); err != nil {
 		return nil, err
 	}
 	if metadata == nil {
-		metadata = map[string]interface{}{}
+		metadata = map[string]any{}
 	}
 	return metadata, nil
 }

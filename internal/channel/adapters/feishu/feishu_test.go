@@ -64,11 +64,11 @@ func TestExtractFeishuInboundP2P(t *testing.T) {
 		},
 	}
 	got := extractFeishuInbound(event)
-	if got.Text != "hi" {
-		t.Fatalf("unexpected text: %s", got.Text)
+	if got.Message.PlainText() != "hi" {
+		t.Fatalf("unexpected text: %s", got.Message.PlainText())
 	}
-	if got.ReplyTo != "ou_1" {
-		t.Fatalf("unexpected reply target: %s", got.ReplyTo)
+	if got.ReplyTarget != "ou_1" {
+		t.Fatalf("unexpected reply target: %s", got.ReplyTarget)
 	}
 }
 
@@ -98,8 +98,8 @@ func TestExtractFeishuInboundGroup(t *testing.T) {
 		},
 	}
 	got := extractFeishuInbound(event)
-	if got.ReplyTo != "chat_id:oc_2" {
-		t.Fatalf("unexpected reply target: %s", got.ReplyTo)
+	if got.ReplyTarget != "chat_id:oc_2" {
+		t.Fatalf("unexpected reply target: %s", got.ReplyTarget)
 	}
 }
 
@@ -115,7 +115,7 @@ func TestExtractFeishuInboundNonText(t *testing.T) {
 		},
 	}
 	got := extractFeishuInbound(event)
-	if got.Text != "" {
-		t.Fatalf("expected empty text, got %s", got.Text)
+	if got.Message.PlainText() != "" {
+		t.Fatalf("expected empty text, got %s", got.Message.PlainText())
 	}
 }

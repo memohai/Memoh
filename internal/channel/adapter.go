@@ -2,64 +2,80 @@ package channel
 
 import (
 	"context"
-	"strings"
+	"errors"
+	"sync/atomic"
 )
 
-type InboundMessage struct {
-	Channel    ChannelType
-	Text       string
-	Username   string
-	UserID     string
-	OpenID     string
-	ChatID     string
-	ChatType   string
-	ReplyTo    string
-	BotID      string // 增加 BotID 以支持多 Bot 隔离
-	SessionKey string
-}
-
-// SessionID 结构: platform:bot_id:chat_id[:sender_id]
-func (m InboundMessage) SessionID() string {
-	if strings.TrimSpace(m.SessionKey) != "" {
-		return strings.TrimSpace(m.SessionKey)
-	}
-	return GenerateSessionID(string(m.Channel), m.BotID, m.ChatID, m.ChatType, m.OpenID, m.UserID, m.Username)
-}
-
-// GenerateSessionID 统一生成 SessionID 的逻辑
-func GenerateSessionID(platform, botID, chatID, chatType, openID, userID, username string) string {
-	parts := []string{platform, botID, chatID}
-	// 如果是群聊，增加发送者 ID 以支持个人上下文
-	ct := strings.ToLower(strings.TrimSpace(chatType))
-	if ct != "" && ct != "p2p" && ct != "private" {
-		senderID := strings.TrimSpace(openID)
-		if senderID == "" {
-			senderID = strings.TrimSpace(userID)
-		}
-		if senderID == "" {
-			senderID = strings.TrimSpace(username)
-		}
-		if senderID != "" {
-			parts = append(parts, senderID)
-		}
-	}
-	return strings.Join(parts, ":")
-}
-
-type OutboundMessage struct {
-	To   string
-	Text string
-}
-
-type AdapterRunner struct {
-	Stop         func()
-	SupportsStop bool
-}
+var ErrStopNotSupported = errors.New("channel connection stop not supported")
 
 type InboundHandler func(ctx context.Context, cfg ChannelConfig, msg InboundMessage) error
 
+type ReplySender interface {
+	Send(ctx context.Context, msg OutboundMessage) error
+}
+
 type Adapter interface {
 	Type() ChannelType
-	Start(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (AdapterRunner, error)
+}
+
+type Sender interface {
 	Send(ctx context.Context, cfg ChannelConfig, msg OutboundMessage) error
+}
+
+type Receiver interface {
+	Connect(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (Connection, error)
+}
+
+type Connection interface {
+	ConfigID() string
+	BotID() string
+	ChannelType() ChannelType
+	Stop(ctx context.Context) error
+	Running() bool
+}
+
+type BaseConnection struct {
+	configID    string
+	botID       string
+	channelType ChannelType
+	stop        func(ctx context.Context) error
+	running     atomic.Bool
+}
+
+func NewConnection(cfg ChannelConfig, stop func(ctx context.Context) error) *BaseConnection {
+	conn := &BaseConnection{
+		configID:    cfg.ID,
+		botID:       cfg.BotID,
+		channelType: cfg.ChannelType,
+		stop:        stop,
+	}
+	conn.running.Store(true)
+	return conn
+}
+
+func (c *BaseConnection) ConfigID() string {
+	return c.configID
+}
+
+func (c *BaseConnection) BotID() string {
+	return c.botID
+}
+
+func (c *BaseConnection) ChannelType() ChannelType {
+	return c.channelType
+}
+
+func (c *BaseConnection) Stop(ctx context.Context) error {
+	if c.stop == nil {
+		return ErrStopNotSupported
+	}
+	err := c.stop(ctx)
+	if err == nil {
+		c.running.Store(false)
+	}
+	return err
+}
+
+func (c *BaseConnection) Running() bool {
+	return c.running.Load()
 }

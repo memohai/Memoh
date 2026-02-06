@@ -25,33 +25,33 @@ type MemoryHandler struct {
 }
 
 type memoryAddPayload struct {
-	Message          string                 `json:"message,omitempty"`
-	Messages         []memory.Message       `json:"messages,omitempty"`
-	RunID            string                 `json:"run_id,omitempty"`
-	Metadata         map[string]interface{} `json:"metadata,omitempty"`
-	Filters          map[string]interface{} `json:"filters,omitempty"`
-	Infer            *bool                  `json:"infer,omitempty"`
-	EmbeddingEnabled *bool                  `json:"embedding_enabled,omitempty"`
+	Message          string           `json:"message,omitempty"`
+	Messages         []memory.Message `json:"messages,omitempty"`
+	RunID            string           `json:"run_id,omitempty"`
+	Metadata         map[string]any   `json:"metadata,omitempty"`
+	Filters          map[string]any   `json:"filters,omitempty"`
+	Infer            *bool            `json:"infer,omitempty"`
+	EmbeddingEnabled *bool            `json:"embedding_enabled,omitempty"`
 }
 
 type memorySearchPayload struct {
-	Query            string                 `json:"query"`
-	RunID            string                 `json:"run_id,omitempty"`
-	Limit            int                    `json:"limit,omitempty"`
-	Filters          map[string]interface{} `json:"filters,omitempty"`
-	Sources          []string               `json:"sources,omitempty"`
-	EmbeddingEnabled *bool                  `json:"embedding_enabled,omitempty"`
+	Query            string         `json:"query"`
+	RunID            string         `json:"run_id,omitempty"`
+	Limit            int            `json:"limit,omitempty"`
+	Filters          map[string]any `json:"filters,omitempty"`
+	Sources          []string       `json:"sources,omitempty"`
+	EmbeddingEnabled *bool          `json:"embedding_enabled,omitempty"`
 }
 
 type memoryEmbedUpsertPayload struct {
-	Type     string                 `json:"type"`
-	Provider string                 `json:"provider,omitempty"`
-	Model    string                 `json:"model,omitempty"`
-	Input    memory.EmbedInput      `json:"input"`
-	Source   string                 `json:"source,omitempty"`
-	RunID    string                 `json:"run_id,omitempty"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-	Filters  map[string]interface{} `json:"filters,omitempty"`
+	Type     string            `json:"type"`
+	Provider string            `json:"provider,omitempty"`
+	Model    string            `json:"model,omitempty"`
+	Input    memory.EmbedInput `json:"input"`
+	Source   string            `json:"source,omitempty"`
+	RunID    string            `json:"run_id,omitempty"`
+	Metadata map[string]any    `json:"metadata,omitempty"`
+	Filters  map[string]any    `json:"filters,omitempty"`
 }
 
 type memoryDeleteAllPayload struct {

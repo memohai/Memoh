@@ -86,26 +86,15 @@ func (q *Queries) GetBotChannelConfigByExternalIdentity(ctx context.Context, arg
 }
 
 const getChannelSessionByID = `-- name: GetChannelSessionByID :one
-SELECT session_id, bot_id, channel_config_id, user_id, contact_id, platform, created_at, updated_at
+SELECT session_id, bot_id, channel_config_id, user_id, contact_id, platform, reply_target, thread_id, metadata, created_at, updated_at
 FROM channel_sessions
 WHERE session_id = $1
 LIMIT 1
 `
 
-type GetChannelSessionByIDRow struct {
-	SessionID       string             `json:"session_id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	ChannelConfigID pgtype.UUID        `json:"channel_config_id"`
-	UserID          pgtype.UUID        `json:"user_id"`
-	ContactID       pgtype.UUID        `json:"contact_id"`
-	Platform        string             `json:"platform"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-}
-
-func (q *Queries) GetChannelSessionByID(ctx context.Context, sessionID string) (GetChannelSessionByIDRow, error) {
+func (q *Queries) GetChannelSessionByID(ctx context.Context, sessionID string) (ChannelSession, error) {
 	row := q.db.QueryRow(ctx, getChannelSessionByID, sessionID)
-	var i GetChannelSessionByIDRow
+	var i ChannelSession
 	err := row.Scan(
 		&i.SessionID,
 		&i.BotID,
@@ -113,6 +102,9 @@ func (q *Queries) GetChannelSessionByID(ctx context.Context, sessionID string) (
 		&i.UserID,
 		&i.ContactID,
 		&i.Platform,
+		&i.ReplyTarget,
+		&i.ThreadID,
+		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -172,6 +164,50 @@ func (q *Queries) ListBotChannelConfigsByType(ctx context.Context, channelType s
 			&i.Capabilities,
 			&i.Status,
 			&i.VerifiedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChannelSessionsByBotPlatform = `-- name: ListChannelSessionsByBotPlatform :many
+SELECT session_id, bot_id, channel_config_id, user_id, contact_id, platform, reply_target, thread_id, metadata, created_at, updated_at
+FROM channel_sessions
+WHERE bot_id = $1 AND platform = $2
+ORDER BY updated_at DESC
+`
+
+type ListChannelSessionsByBotPlatformParams struct {
+	BotID    pgtype.UUID `json:"bot_id"`
+	Platform string      `json:"platform"`
+}
+
+func (q *Queries) ListChannelSessionsByBotPlatform(ctx context.Context, arg ListChannelSessionsByBotPlatformParams) ([]ChannelSession, error) {
+	rows, err := q.db.Query(ctx, listChannelSessionsByBotPlatform, arg.BotID, arg.Platform)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ChannelSession
+	for rows.Next() {
+		var i ChannelSession
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.BotID,
+			&i.ChannelConfigID,
+			&i.UserID,
+			&i.ContactID,
+			&i.Platform,
+			&i.ReplyTarget,
+			&i.ThreadID,
+			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -280,8 +316,8 @@ func (q *Queries) UpsertBotChannelConfig(ctx context.Context, arg UpsertBotChann
 }
 
 const upsertChannelSession = `-- name: UpsertChannelSession :one
-INSERT INTO channel_sessions (session_id, bot_id, channel_config_id, user_id, contact_id, platform)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO channel_sessions (session_id, bot_id, channel_config_id, user_id, contact_id, platform, reply_target, thread_id, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (session_id)
 DO UPDATE SET
   bot_id = EXCLUDED.bot_id,
@@ -289,8 +325,11 @@ DO UPDATE SET
   user_id = EXCLUDED.user_id,
   contact_id = EXCLUDED.contact_id,
   platform = EXCLUDED.platform,
+  reply_target = EXCLUDED.reply_target,
+  thread_id = EXCLUDED.thread_id,
+  metadata = EXCLUDED.metadata,
   updated_at = now()
-RETURNING session_id, bot_id, channel_config_id, user_id, contact_id, platform, created_at, updated_at
+RETURNING session_id, bot_id, channel_config_id, user_id, contact_id, platform, reply_target, thread_id, metadata, created_at, updated_at
 `
 
 type UpsertChannelSessionParams struct {
@@ -300,20 +339,12 @@ type UpsertChannelSessionParams struct {
 	UserID          pgtype.UUID `json:"user_id"`
 	ContactID       pgtype.UUID `json:"contact_id"`
 	Platform        string      `json:"platform"`
+	ReplyTarget     pgtype.Text `json:"reply_target"`
+	ThreadID        pgtype.Text `json:"thread_id"`
+	Metadata        []byte      `json:"metadata"`
 }
 
-type UpsertChannelSessionRow struct {
-	SessionID       string             `json:"session_id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	ChannelConfigID pgtype.UUID        `json:"channel_config_id"`
-	UserID          pgtype.UUID        `json:"user_id"`
-	ContactID       pgtype.UUID        `json:"contact_id"`
-	Platform        string             `json:"platform"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-}
-
-func (q *Queries) UpsertChannelSession(ctx context.Context, arg UpsertChannelSessionParams) (UpsertChannelSessionRow, error) {
+func (q *Queries) UpsertChannelSession(ctx context.Context, arg UpsertChannelSessionParams) (ChannelSession, error) {
 	row := q.db.QueryRow(ctx, upsertChannelSession,
 		arg.SessionID,
 		arg.BotID,
@@ -321,8 +352,11 @@ func (q *Queries) UpsertChannelSession(ctx context.Context, arg UpsertChannelSes
 		arg.UserID,
 		arg.ContactID,
 		arg.Platform,
+		arg.ReplyTarget,
+		arg.ThreadID,
+		arg.Metadata,
 	)
-	var i UpsertChannelSessionRow
+	var i ChannelSession
 	err := row.Scan(
 		&i.SessionID,
 		&i.BotID,
@@ -330,6 +364,9 @@ func (q *Queries) UpsertChannelSession(ctx context.Context, arg UpsertChannelSes
 		&i.UserID,
 		&i.ContactID,
 		&i.Platform,
+		&i.ReplyTarget,
+		&i.ThreadID,
+		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

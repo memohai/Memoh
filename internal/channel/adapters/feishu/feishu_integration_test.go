@@ -37,7 +37,7 @@ func TestFeishuGateway_Integration(t *testing.T) {
 	// 构造测试配置
 	cfg := channel.ChannelConfig{
 		ID: "integration-test-bot",
-		Credentials: map[string]interface{}{
+		Credentials: map[string]any{
 			"app_id":             appID,
 			"app_secret":         appSecret,
 			"encrypt_key":        encryptKey,
@@ -54,9 +54,10 @@ func TestFeishuGateway_Integration(t *testing.T) {
 
 	// 模拟 InboundHandler
 	handler := func(ctx context.Context, c channel.ChannelConfig, msg channel.InboundMessage) error {
+		plainText := msg.Message.PlainText()
 		logger.Info("测试收到消息",
-			slog.String("text", msg.Text),
-			slog.String("user_id", msg.UserID),
+			slog.String("text", plainText),
+			slog.String("user_id", msg.Sender.Attribute("user_id")),
 			slog.String("session_id", msg.SessionID()))
 
 		// 将消息放入通道，供主测试逻辑验证
@@ -67,8 +68,10 @@ func TestFeishuGateway_Integration(t *testing.T) {
 
 		// 自动回复测试 (验证下行链路)
 		reply := channel.OutboundMessage{
-			To:   msg.ReplyTo,
-			Text: fmt.Sprintf("【Memoh 集成测试】已收到消息: %s\n测试时间: %s", msg.Text, time.Now().Format("15:04:05")),
+			Target: msg.ReplyTarget,
+			Message: channel.Message{
+				Text: fmt.Sprintf("【Memoh 集成测试】已收到消息: %s\n测试时间: %s", plainText, time.Now().Format("15:04:05")),
+			},
 		}
 
 		if err := adapter.Send(ctx, c, reply); err != nil {
@@ -79,8 +82,10 @@ func TestFeishuGateway_Integration(t *testing.T) {
 		go func() {
 			time.Sleep(1 * time.Second)
 			pushMsg := channel.OutboundMessage{
-				To:   msg.ReplyTo,
-				Text: "【Memoh 集成测试】主动推送验证成功。",
+				Target: msg.ReplyTarget,
+				Message: channel.Message{
+					Text: "【Memoh 集成测试】主动推送验证成功。",
+				},
 			}
 			_ = adapter.Send(context.Background(), c, pushMsg)
 		}()
@@ -90,11 +95,13 @@ func TestFeishuGateway_Integration(t *testing.T) {
 
 	// 启动适配器
 	logger.Info("正在启动飞书适配器...", slog.String("app_id", appID))
-	runner, err := adapter.Start(ctx, cfg, handler)
+	runner, err := adapter.Connect(ctx, cfg, handler)
 	if err != nil {
 		t.Fatalf("适配器启动失败: %v", err)
 	}
-	defer runner.Stop()
+	defer func() {
+		_ = runner.Stop(context.Background())
+	}()
 
 	fmt.Println("==================================================================")
 	fmt.Println("🚀 飞书集成测试已就绪!")
@@ -105,7 +112,7 @@ func TestFeishuGateway_Integration(t *testing.T) {
 	// 等待测试结果
 	select {
 	case msg := <-receivedChan:
-		logger.Info("集成测试验证成功!", slog.String("received_text", msg.Text))
+		logger.Info("集成测试验证成功!", slog.String("received_text", msg.Message.PlainText()))
 		// 给一点时间让异步推送完成
 		time.Sleep(2 * time.Second)
 	case <-ctx.Done():

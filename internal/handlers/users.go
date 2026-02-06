@@ -715,7 +715,7 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if req.Credentials == nil {
-		req.Credentials = map[string]interface{}{}
+		req.Credentials = map[string]any{}
 	}
 	resp, err := h.channelService.UpsertConfig(c.Request().Context(), botID, channelType, req)
 	if err != nil {
@@ -760,7 +760,7 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if strings.TrimSpace(req.Message) == "" {
+	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
 	if err := h.channelManager.Send(c.Request().Context(), botID, channelType, req); err != nil {
@@ -805,14 +805,14 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if strings.TrimSpace(req.Message) == "" {
+	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
 	if strings.TrimSpace(sessionToken.ReplyTarget) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "reply target missing")
 	}
 	if err := h.channelManager.Send(c.Request().Context(), botID, channelType, channel.SendRequest{
-		To:      sessionToken.ReplyTarget,
+		Target:  sessionToken.ReplyTarget,
 		Message: req.Message,
 	}); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())

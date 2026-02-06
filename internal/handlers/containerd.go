@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -16,21 +17,30 @@ import (
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 	"github.com/opencontainers/runtime-spec/specs-go"
 
+	"github.com/memohai/memoh/internal/auth"
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
+	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/identity"
 	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/users"
 )
 
 type ContainerdHandler struct {
-	service   ctr.Service
-	cfg       config.MCPConfig
-	namespace string
-	logger    *slog.Logger
-	mcpMu     sync.Mutex
-	mcpSess   map[string]*mcpSession
+	service     ctr.Service
+	cfg         config.MCPConfig
+	namespace   string
+	logger      *slog.Logger
+	mcpMu       sync.Mutex
+	mcpSess     map[string]*mcpSession
+	botService  *bots.Service
+	userService *users.Service
+	queries     *dbsqlc.Queries
 }
 
 type CreateContainerRequest struct {
@@ -86,18 +96,21 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string, botService *bots.Service, userService *users.Service, queries *dbsqlc.Queries) *ContainerdHandler {
 	return &ContainerdHandler{
-		service:   service,
-		cfg:       cfg,
-		namespace: namespace,
-		logger:    log.With(slog.String("handler", "containerd")),
-		mcpSess:   make(map[string]*mcpSession),
+		service:     service,
+		cfg:         cfg,
+		namespace:   namespace,
+		logger:      log.With(slog.String("handler", "containerd")),
+		mcpSess:     make(map[string]*mcpSession),
+		botService:  botService,
+		userService: userService,
+		queries:     queries,
 	}
 }
 
 func (h *ContainerdHandler) Register(e *echo.Echo) {
-	group := e.Group("/container")
+	group := e.Group("/bots/:bot_id/container")
 	group.POST("", h.CreateContainer)
 	group.GET("/list", h.ListContainers)
 	group.DELETE("/:id", h.DeleteContainer)
@@ -110,15 +123,16 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 }
 
 // CreateContainer godoc
-// @Summary Create and start MCP container
+// @Summary Create and start MCP container for bot
 // @Tags containerd
+// @Param bot_id path string true "Bot ID"
 // @Param payload body CreateContainerRequest true "Create container payload"
 // @Success 200 {object} CreateContainerResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /container [post]
+// @Router /bots/{bot_id}/container [post]
 func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
-	userID, err := h.requireUserID(c)
+	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
 	}
@@ -129,7 +143,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}
 	req.ContainerID = strings.TrimSpace(req.ContainerID)
 	if req.ContainerID == "" {
-		req.ContainerID = uuid.NewString()
+		req.ContainerID = "mcp-" + botID
 	}
 
 	image := strings.TrimSpace(req.Image)
@@ -156,7 +170,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if dataMount == "" {
 		dataMount = config.DefaultDataMount
 	}
-	dataDir := filepath.Join(dataRoot, "bots", userID)
+	dataDir := filepath.Join(dataRoot, "bots", botID)
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -187,12 +201,34 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		ImageRef:    image,
 		Snapshotter: snapshotter,
 		Labels: map[string]string{
-			mcp.BotLabelKey: userID,
+			mcp.BotLabelKey: botID,
 		},
 		SpecOpts: specOpts,
 	})
 	if err != nil && !errdefs.IsAlreadyExists(err) {
 		return echo.NewHTTPError(http.StatusInternalServerError, "snapshotter="+snapshotter+" image="+image+" err="+err.Error())
+	}
+
+	// Persist container record in database
+	if h.queries != nil {
+		pgBotID, parseErr := parsePgUUID(botID)
+		if parseErr == nil {
+			ns := strings.TrimSpace(h.namespace)
+			if ns == "" {
+				ns = "default"
+			}
+			_ = h.queries.UpsertContainer(c.Request().Context(), dbsqlc.UpsertContainerParams{
+				BotID:         pgBotID,
+				ContainerID:   req.ContainerID,
+				ContainerName: req.ContainerID,
+				Image:         image,
+				Status:        "created",
+				Namespace:     ns,
+				AutoStart:     true,
+				HostPath:      pgtype.Text{String: dataDir, Valid: true},
+				ContainerPath: dataMount,
+			})
+		}
 	}
 
 	started := false
@@ -260,8 +296,19 @@ func (h *ContainerdHandler) ensureTaskRunning(ctx context.Context, containerID s
 	return err
 }
 
-func (h *ContainerdHandler) userContainerID(ctx context.Context, userID string) (string, error) {
-	containers, err := h.service.ListContainersByLabel(ctx, mcp.BotLabelKey, userID)
+// botContainerID resolves container_id for a bot from the database.
+func (h *ContainerdHandler) botContainerID(ctx context.Context, botID string) (string, error) {
+	if h.queries != nil {
+		pgBotID, err := parsePgUUID(botID)
+		if err == nil {
+			row, err := h.queries.GetContainerByBotID(ctx, pgBotID)
+			if err == nil && strings.TrimSpace(row.ContainerID) != "" {
+				return row.ContainerID, nil
+			}
+		}
+	}
+	// Fallback: search by containerd label
+	containers, err := h.service.ListContainersByLabel(ctx, mcp.BotLabelKey, botID)
 	if err != nil {
 		return "", err
 	}
@@ -288,14 +335,19 @@ func (h *ContainerdHandler) userContainerID(ctx context.Context, userID string) 
 }
 
 // ListContainers godoc
-// @Summary List containers
+// @Summary List containers for bot
 // @Tags containerd
+// @Param bot_id path string true "Bot ID"
 // @Success 200 {object} ListContainersResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /container/list [get]
+// @Router /bots/{bot_id}/container/list [get]
 func (h *ContainerdHandler) ListContainers(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
 	ctx := c.Request().Context()
-	containers, err := h.service.ListContainers(ctx)
+	containers, err := h.service.ListContainersByLabel(ctx, mcp.BotLabelKey, botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -328,13 +380,17 @@ func (h *ContainerdHandler) ListContainers(c echo.Context) error {
 // DeleteContainer godoc
 // @Summary Delete MCP container
 // @Tags containerd
+// @Param bot_id path string true "Bot ID"
 // @Param id path string true "Container ID"
 // @Success 204
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /container/{id} [delete]
+// @Router /bots/{bot_id}/container/{id} [delete]
 func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
+	if _, err := h.requireBotAccess(c); err != nil {
+		return err
+	}
 	containerID := strings.TrimSpace(c.Param("id"))
 	if containerID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "container id is required")
@@ -354,13 +410,14 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 // CreateSnapshot godoc
 // @Summary Create container snapshot
 // @Tags containerd
+// @Param bot_id path string true "Bot ID"
 // @Param payload body CreateSnapshotRequest true "Create snapshot payload"
 // @Success 200 {object} CreateSnapshotResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /container/snapshots [post]
+// @Router /bots/{bot_id}/container/snapshots [post]
 func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
+	if _, err := h.requireBotAccess(c); err != nil {
+		return err
+	}
 	var req CreateSnapshotRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -401,11 +458,14 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 // ListSnapshots godoc
 // @Summary List snapshots
 // @Tags containerd
+// @Param bot_id path string true "Bot ID"
 // @Param snapshotter query string false "Snapshotter name"
 // @Success 200 {object} ListSnapshotsResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /container/snapshots [get]
+// @Router /bots/{bot_id}/container/snapshots [get]
 func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
+	if _, err := h.requireBotAccess(c); err != nil {
+		return err
+	}
 	snapshotter := strings.TrimSpace(c.QueryParam("snapshotter"))
 	if snapshotter == "" {
 		snapshotter = strings.TrimSpace(h.cfg.Snapshotter)
@@ -439,4 +499,65 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 		Snapshotter: snapshotter,
 		Snapshots:   items,
 	})
+}
+
+// ---------- auth helpers ----------
+
+// requireBotAccess extracts bot_id from path, validates user auth, and authorizes bot access.
+func (h *ContainerdHandler) requireBotAccess(c echo.Context) (string, error) {
+	userID, err := h.requireUserID(c)
+	if err != nil {
+		return "", err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return "", err
+	}
+	return botID, nil
+}
+
+func (h *ContainerdHandler) requireUserID(c echo.Context) (string, error) {
+	userID, err := auth.UserIDFromContext(c)
+	if err != nil {
+		return "", err
+	}
+	if err := identity.ValidateUserID(userID); err != nil {
+		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return userID, nil
+}
+
+func (h *ContainerdHandler) authorizeBotAccess(ctx context.Context, actorID, botID string) (bots.Bot, error) {
+	if h.botService == nil || h.userService == nil {
+		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
+	}
+	isAdmin, err := h.userService.IsAdmin(ctx, actorID)
+	if err != nil {
+		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	bot, err := h.botService.AuthorizeAccess(ctx, actorID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: false})
+	if err != nil {
+		if errors.Is(err, bots.ErrBotNotFound) {
+			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")
+		}
+		if errors.Is(err, bots.ErrBotAccessDenied) {
+			return bots.Bot{}, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
+		}
+		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return bot, nil
+}
+
+func parsePgUUID(id string) (pgtype.UUID, error) {
+	parsed, err := uuid.Parse(strings.TrimSpace(id))
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	var pgID pgtype.UUID
+	pgID.Valid = true
+	copy(pgID.Bytes[:], parsed[:])
+	return pgID, nil
 }

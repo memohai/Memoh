@@ -77,12 +77,13 @@ func (m *Manager) Init(ctx context.Context) error {
 	return err
 }
 
-func (m *Manager) EnsureUser(ctx context.Context, userID string) error {
-	if err := validateUserID(userID); err != nil {
+// EnsureBot creates the MCP container for a bot if it does not exist.
+func (m *Manager) EnsureBot(ctx context.Context, botID string) error {
+	if err := validateBotID(botID); err != nil {
 		return err
 	}
 
-	dataDir, err := m.ensureUserDir(userID)
+	dataDir, err := m.ensureBotDir(botID)
 	if err != nil {
 		return err
 	}
@@ -115,11 +116,11 @@ func (m *Manager) EnsureUser(ctx context.Context, userID string) error {
 	}
 
 	_, err = m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
-		ID:          m.containerID(userID),
+		ID:          m.containerID(botID),
 		ImageRef:    image,
 		Snapshotter: m.cfg.Snapshotter,
 		Labels: map[string]string{
-			BotLabelKey: userID,
+			BotLabelKey: botID,
 		},
 		SpecOpts: specOpts,
 	})
@@ -134,13 +135,14 @@ func (m *Manager) EnsureUser(ctx context.Context, userID string) error {
 	return nil
 }
 
-func (m *Manager) ListUsers(ctx context.Context) ([]string, error) {
+// ListBots returns the bot IDs that have MCP containers.
+func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 	containers, err := m.service.ListContainers(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	users := make([]string, 0, len(containers))
+	botIDs := make([]string, 0, len(containers))
 	for _, container := range containers {
 		info, err := container.Info(ctx)
 		if err != nil {
@@ -148,47 +150,47 @@ func (m *Manager) ListUsers(ctx context.Context) ([]string, error) {
 		}
 		if strings.HasPrefix(info.ID, ContainerPrefix) {
 			if botID, ok := info.Labels[BotLabelKey]; ok {
-				users = append(users, botID)
+				botIDs = append(botIDs, botID)
 			}
 		}
 	}
-	return users, nil
+	return botIDs, nil
 }
 
-func (m *Manager) Start(ctx context.Context, userID string) error {
-	if err := m.EnsureUser(ctx, userID); err != nil {
+func (m *Manager) Start(ctx context.Context, botID string) error {
+	if err := m.EnsureBot(ctx, botID); err != nil {
 		return err
 	}
 
-	_, err := m.service.StartTask(ctx, m.containerID(userID), &ctr.StartTaskOptions{
+	_, err := m.service.StartTask(ctx, m.containerID(botID), &ctr.StartTaskOptions{
 		UseStdio: false,
 	})
 	return err
 }
 
-func (m *Manager) Stop(ctx context.Context, userID string, timeout time.Duration) error {
-	if err := validateUserID(userID); err != nil {
+func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration) error {
+	if err := validateBotID(botID); err != nil {
 		return err
 	}
-	return m.service.StopTask(ctx, m.containerID(userID), &ctr.StopTaskOptions{
+	return m.service.StopTask(ctx, m.containerID(botID), &ctr.StopTaskOptions{
 		Timeout: timeout,
 		Force:   true,
 	})
 }
 
-func (m *Manager) Delete(ctx context.Context, userID string) error {
-	if err := validateUserID(userID); err != nil {
+func (m *Manager) Delete(ctx context.Context, botID string) error {
+	if err := validateBotID(botID); err != nil {
 		return err
 	}
 
-	_ = m.service.DeleteTask(ctx, m.containerID(userID), &ctr.DeleteTaskOptions{Force: true})
-	return m.service.DeleteContainer(ctx, m.containerID(userID), &ctr.DeleteContainerOptions{
+	_ = m.service.DeleteTask(ctx, m.containerID(botID), &ctr.DeleteTaskOptions{Force: true})
+	return m.service.DeleteContainer(ctx, m.containerID(botID), &ctr.DeleteContainerOptions{
 		CleanupSnapshot: true,
 	})
 }
 
 func (m *Manager) Exec(ctx context.Context, req ExecRequest) (*ExecResult, error) {
-	if err := validateUserID(req.BotID); err != nil {
+	if err := validateBotID(req.BotID); err != nil {
 		return nil, err
 	}
 	if len(req.Command) == 0 {
@@ -227,8 +229,9 @@ func (m *Manager) Exec(ctx context.Context, req ExecRequest) (*ExecResult, error
 	return &ExecResult{ExitCode: result.ExitCode}, nil
 }
 
-func (m *Manager) DataDir(userID string) (string, error) {
-	if err := validateUserID(userID); err != nil {
+// DataDir returns the host data directory for a bot.
+func (m *Manager) DataDir(botID string) (string, error) {
+	if err := validateBotID(botID); err != nil {
 		return "", err
 	}
 
@@ -236,21 +239,21 @@ func (m *Manager) DataDir(userID string) (string, error) {
 	if root == "" {
 		root = config.DefaultDataRoot
 	}
-	return filepath.Join(root, "bots", userID), nil
+	return filepath.Join(root, "bots", botID), nil
 }
 
-func (m *Manager) ensureUserDir(userID string) (string, error) {
+func (m *Manager) ensureBotDir(botID string) (string, error) {
 	root := m.cfg.DataRoot
 	if root == "" {
 		root = config.DefaultDataRoot
 	}
-	dir := filepath.Join(root, "bots", userID)
+	dir := filepath.Join(root, "bots", botID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	return dir, nil
 }
 
-func validateUserID(userID string) error {
-	return identity.ValidateUserID(userID)
+func validateBotID(botID string) error {
+	return identity.ValidateUserID(botID)
 }

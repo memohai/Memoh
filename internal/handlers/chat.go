@@ -81,6 +81,12 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 	req.SessionID = sessionID
 	req.Token = c.Request().Header.Get("Authorization")
 	req.UserID = userID
+	if strings.TrimSpace(req.ContactID) == "" {
+		req.ContactID = userID
+	}
+	if strings.TrimSpace(req.ContactName) == "" {
+		req.ContactName = "User"
+	}
 
 	resp, err := h.resolver.Chat(c.Request().Context(), req)
 	if err != nil {
@@ -130,6 +136,12 @@ func (h *ChatHandler) StreamChat(c echo.Context) error {
 	req.SessionID = sessionID
 	req.Token = c.Request().Header.Get("Authorization")
 	req.UserID = userID
+	if strings.TrimSpace(req.ContactID) == "" {
+		req.ContactID = userID
+	}
+	if strings.TrimSpace(req.ContactName) == "" {
+		req.ContactName = "User"
+	}
 
 	// Set headers for SSE
 	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")

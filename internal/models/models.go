@@ -330,6 +330,7 @@ func convertToGetResponse(dbModel sqlc.Model) GetResponse {
 		Model: Model{
 			ModelID:      dbModel.ModelID,
 			IsMultimodal: dbModel.IsMultimodal,
+			Input:        modelInputFromMultimodal(dbModel.IsMultimodal),
 			Type:         ModelType(dbModel.Type),
 		},
 	}
@@ -355,6 +356,14 @@ func convertToGetResponseList(dbModels []sqlc.Model) []GetResponse {
 		responses = append(responses, convertToGetResponse(dbModel))
 	}
 	return responses
+}
+
+// modelInputFromMultimodal builds the input list based on multimodal support.
+func modelInputFromMultimodal(isMultimodal bool) []string {
+	if isMultimodal {
+		return []string{ModelInputText, ModelInputImage}
+	}
+	return []string{ModelInputText}
 }
 
 func isValidClientType(clientType ClientType) bool {

@@ -5,9 +5,9 @@ import "testing"
 func TestBuildQdrantFilter(t *testing.T) {
 	t.Parallel()
 
-	filter := buildQdrantFilter(map[string]interface{}{
+	filter := buildQdrantFilter(map[string]any{
 		"userId": "u1",
-		"score":  map[string]interface{}{"gte": 0.5},
+		"score":  map[string]any{"gte": 0.5},
 	})
 	if filter == nil {
 		t.Fatalf("expected filter")

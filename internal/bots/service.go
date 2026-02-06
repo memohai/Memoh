@@ -89,7 +89,7 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	}
 	metadata := req.Metadata
 	if metadata == nil {
-		metadata = map[string]interface{}{}
+		metadata = map[string]any{}
 	}
 	payload, err := json.Marshal(metadata)
 	if err != nil {
@@ -438,16 +438,16 @@ func toBotMember(row sqlc.BotMember) BotMember {
 	}
 }
 
-func decodeMetadata(payload []byte) (map[string]interface{}, error) {
+func decodeMetadata(payload []byte) (map[string]any, error) {
 	if len(payload) == 0 {
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
 		return nil, err
 	}
 	if data == nil {
-		data = map[string]interface{}{}
+		data = map[string]any{}
 	}
 	return data, nil
 }

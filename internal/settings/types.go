@@ -2,7 +2,7 @@ package settings
 
 const (
 	DefaultMaxContextLoadTime = 24 * 60
-	DefaultLanguage           = "Same as user input"
+	DefaultLanguage           = "auto"
 )
 
 type Settings struct {

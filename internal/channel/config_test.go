@@ -1,91 +1,134 @@
-package channel
+package channel_test
 
-import "testing"
+import (
+	"fmt"
+	"sync"
+	"testing"
 
-func TestNormalizeChannelConfigTelegram(t *testing.T) {
-	t.Parallel()
+	"github.com/memohai/memoh/internal/channel"
+)
 
-	got, err := NormalizeChannelConfig(ChannelTelegram, map[string]interface{}{
-		"bot_token": "token-123",
+const testChannelType = channel.ChannelType("test-config")
+
+var registerTestChannelOnce sync.Once
+
+func registerTestChannel() {
+	registerTestChannelOnce.Do(func() {
+		if _, ok := channel.GetChannelDescriptor(testChannelType); ok {
+			return
+		}
+		_ = channel.RegisterChannel(channel.ChannelDescriptor{
+			Type:                testChannelType,
+			DisplayName:         "Test",
+			NormalizeConfig:     normalizeTestConfig,
+			NormalizeUserConfig: normalizeTestUserConfig,
+			ResolveTarget:       resolveTestTarget,
+			MatchBinding:        matchTestBinding,
+			Capabilities: channel.ChannelCapabilities{
+				Text: true,
+			},
+			ConfigSchema: channel.ConfigSchema{
+				Version: 1,
+				Fields: map[string]channel.FieldSchema{
+					"value": {Type: channel.FieldString, Required: true},
+				},
+			},
+			UserConfigSchema: channel.ConfigSchema{
+				Version: 1,
+				Fields: map[string]channel.FieldSchema{
+					"user": {Type: channel.FieldString, Required: true},
+				},
+			},
+		})
 	})
+}
+
+func normalizeTestConfig(raw map[string]any) (map[string]any, error) {
+	value := channel.ReadString(raw, "value")
+	if value == "" {
+		return nil, fmt.Errorf("value is required")
+	}
+	return map[string]any{"value": value}, nil
+}
+
+func normalizeTestUserConfig(raw map[string]any) (map[string]any, error) {
+	value := channel.ReadString(raw, "user")
+	if value == "" {
+		return nil, fmt.Errorf("user is required")
+	}
+	return map[string]any{"user": value}, nil
+}
+
+func resolveTestTarget(raw map[string]any) (string, error) {
+	value := channel.ReadString(raw, "target")
+	if value == "" {
+		return "", fmt.Errorf("target is required")
+	}
+	return "resolved:" + value, nil
+}
+
+func matchTestBinding(raw map[string]any, criteria channel.BindingCriteria) bool {
+	value := channel.ReadString(raw, "user")
+	return value != "" && value == criteria.ExternalID
+}
+
+func TestParseChannelType(t *testing.T) {
+	t.Parallel()
+	registerTestChannel()
+
+	got, err := channel.ParseChannelType(" test-config ")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if got["botToken"] != "token-123" {
-		t.Fatalf("unexpected botToken: %#v", got["botToken"])
+	if got != testChannelType {
+		t.Fatalf("unexpected channel type: %s", got)
+	}
+	if _, err := channel.ParseChannelType("unknown"); err == nil {
+		t.Fatalf("expected error, got nil")
 	}
 }
 
-func TestNormalizeChannelConfigTelegramRequiresToken(t *testing.T) {
+func TestNormalizeChannelConfig(t *testing.T) {
 	t.Parallel()
+	registerTestChannel()
 
-	_, err := NormalizeChannelConfig(ChannelTelegram, map[string]interface{}{})
+	got, err := channel.NormalizeChannelConfig(testChannelType, map[string]any{"value": "ok"})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got["value"] != "ok" {
+		t.Fatalf("unexpected value: %#v", got["value"])
+	}
+}
+
+func TestNormalizeChannelConfigRequiresValue(t *testing.T) {
+	t.Parallel()
+	registerTestChannel()
+
+	_, err := channel.NormalizeChannelConfig(testChannelType, map[string]any{})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
 }
 
-func TestNormalizeChannelConfigFeishu(t *testing.T) {
+func TestNormalizeChannelUserConfig(t *testing.T) {
 	t.Parallel()
+	registerTestChannel()
 
-	got, err := NormalizeChannelConfig(ChannelFeishu, map[string]interface{}{
-		"app_id":     "app",
-		"app_secret": "secret",
-		"encrypt_key": "enc",
-		"verification_token": "verify",
-	})
+	got, err := channel.NormalizeChannelUserConfig(testChannelType, map[string]any{"user": "alice"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if got["appId"] != "app" || got["appSecret"] != "secret" {
-		t.Fatalf("unexpected feishu config: %#v", got)
-	}
-	if got["encryptKey"] != "enc" || got["verificationToken"] != "verify" {
-		t.Fatalf("unexpected feishu security config: %#v", got)
+	if got["user"] != "alice" {
+		t.Fatalf("unexpected user: %#v", got["user"])
 	}
 }
 
-func TestNormalizeChannelUserConfigTelegram(t *testing.T) {
+func TestNormalizeChannelUserConfigRequiresUser(t *testing.T) {
 	t.Parallel()
+	registerTestChannel()
 
-	got, err := NormalizeChannelUserConfig(ChannelTelegram, map[string]interface{}{
-		"username": "alice",
-	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if got["username"] != "alice" {
-		t.Fatalf("unexpected username: %#v", got["username"])
-	}
-}
-
-func TestNormalizeChannelUserConfigTelegramRequiresBinding(t *testing.T) {
-	t.Parallel()
-
-	_, err := NormalizeChannelUserConfig(ChannelTelegram, map[string]interface{}{})
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-}
-
-func TestNormalizeChannelUserConfigFeishu(t *testing.T) {
-	t.Parallel()
-
-	got, err := NormalizeChannelUserConfig(ChannelFeishu, map[string]interface{}{
-		"open_id": "ou_123",
-	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if got["open_id"] != "ou_123" {
-		t.Fatalf("unexpected open_id: %#v", got["open_id"])
-	}
-}
-
-func TestNormalizeChannelUserConfigFeishuRequiresBinding(t *testing.T) {
-	t.Parallel()
-
-	_, err := NormalizeChannelUserConfig(ChannelFeishu, map[string]interface{}{})
+	_, err := channel.NormalizeChannelUserConfig(testChannelType, map[string]any{})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}

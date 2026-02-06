@@ -7,33 +7,29 @@ type Message struct {
 	Content string `json:"content"`
 }
 
-type GatewayMessage map[string]interface{}
-
-type AgentSkill struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
-}
+type GatewayMessage map[string]any
 
 type ChatRequest struct {
 	BotID              string           `json:"-"`
 	SessionID          string           `json:"-"`
 	Token              string           `json:"-"`
 	UserID             string           `json:"-"`
+	ContainerID        string           `json:"-"`
+	ContactID          string           `json:"-"`
+	ContactName        string           `json:"-"`
+	ContactAlias       string           `json:"-"`
+	ReplyTarget        string           `json:"-"`
+	SessionToken       string           `json:"-"`
 	Query              string           `json:"query"`
 	Model              string           `json:"model,omitempty"`
 	Provider           string           `json:"provider,omitempty"`
 	MaxContextLoadTime int              `json:"max_context_load_time,omitempty"`
-	Locale             string           `json:"locale,omitempty"`
 	Language           string           `json:"language,omitempty"`
-	MaxSteps           int              `json:"max_steps,omitempty"`
 	Platforms          []string         `json:"platforms,omitempty"`
 	CurrentPlatform    string           `json:"current_platform,omitempty"`
 	Messages           []GatewayMessage `json:"messages,omitempty"`
-	Skills             []AgentSkill     `json:"skills,omitempty"`
-	UseSkills          []string         `json:"use_skills,omitempty"`
-	ToolContext        *ToolContext     `json:"toolContext,omitempty"`
-	ToolChoice         map[string]any   `json:"toolChoice,omitempty"`
+	Skills             []string         `json:"skills,omitempty"`
+	AllowedActions     []string         `json:"allowed_actions,omitempty"`
 }
 
 type ChatResponse struct {
@@ -54,19 +50,7 @@ type SchedulePayload struct {
 	Command     string `json:"command"`
 }
 
-type ToolContext struct {
-	BotID           string `json:"botId,omitempty"`
-	SessionID       string `json:"sessionId,omitempty"`
-	CurrentPlatform string `json:"currentPlatform,omitempty"`
-	ReplyTarget     string `json:"replyTarget,omitempty"`
-	SessionToken    string `json:"sessionToken,omitempty"`
-	ContactID       string `json:"contactId,omitempty"`
-	ContactName     string `json:"contactName,omitempty"`
-	ContactAlias    string `json:"contactAlias,omitempty"`
-	UserID          string `json:"userId,omitempty"`
-}
-
-// NormalizedMessage 是内部统一后的消息结构，屏蔽厂商差异。
+// NormalizedMessage is the internal unified message structure.
 type NormalizedMessage struct {
 	Role       string        `json:"role"`
 	Content    string        `json:"content,omitempty"`
@@ -77,8 +61,14 @@ type NormalizedMessage struct {
 }
 
 type ContentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string         `json:"type"`
+	Text     string         `json:"text,omitempty"`
+	URL      string         `json:"url,omitempty"`
+	Styles   []string       `json:"styles,omitempty"`
+	Language string         `json:"language,omitempty"`
+	UserID   string         `json:"user_id,omitempty"`
+	Emoji    string         `json:"emoji,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type ToolCall struct {

@@ -9,8 +9,18 @@ import (
 type ChannelDescriptor struct {
 	Type                ChannelType
 	DisplayName         string
-	NormalizeConfig     func(map[string]interface{}) (map[string]interface{}, error)
-	NormalizeUserConfig func(map[string]interface{}) (map[string]interface{}, error)
+	NormalizeConfig     func(map[string]any) (map[string]any, error)
+	NormalizeUserConfig func(map[string]any) (map[string]any, error)
+	ResolveTarget       func(map[string]any) (string, error)
+	MatchBinding        func(map[string]any, BindingCriteria) bool
+	BuildUserConfig     func(Identity) map[string]any
+	Configless          bool
+	Capabilities        ChannelCapabilities
+	OutboundPolicy      OutboundPolicy
+	ConfigSchema        ConfigSchema
+	UserConfigSchema    ConfigSchema
+	TargetSpec          TargetSpec
+	NormalizeTarget     func(string) string
 }
 
 type channelRegistry struct {
@@ -46,6 +56,20 @@ func MustRegisterChannel(desc ChannelDescriptor) {
 	}
 }
 
+func UnregisterChannel(channelType ChannelType) bool {
+	normalized := normalizeChannelType(channelType.String())
+	if normalized == "" {
+		return false
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if _, exists := registry.items[normalized]; !exists {
+		return false
+	}
+	delete(registry.items, normalized)
+	return true
+}
+
 func GetChannelDescriptor(channelType ChannelType) (ChannelDescriptor, bool) {
 	normalized := normalizeChannelType(channelType.String())
 	registry.mu.RLock()
@@ -62,6 +86,46 @@ func ListChannelDescriptors() []ChannelDescriptor {
 		items = append(items, item)
 	}
 	return items
+}
+
+func GetChannelCapabilities(channelType ChannelType) (ChannelCapabilities, bool) {
+	desc, ok := GetChannelDescriptor(channelType)
+	if !ok {
+		return ChannelCapabilities{}, false
+	}
+	return desc.Capabilities, true
+}
+
+func GetChannelOutboundPolicy(channelType ChannelType) (OutboundPolicy, bool) {
+	desc, ok := GetChannelDescriptor(channelType)
+	if !ok {
+		return OutboundPolicy{}, false
+	}
+	return desc.OutboundPolicy, true
+}
+
+func GetChannelConfigSchema(channelType ChannelType) (ConfigSchema, bool) {
+	desc, ok := GetChannelDescriptor(channelType)
+	if !ok {
+		return ConfigSchema{}, false
+	}
+	return desc.ConfigSchema, true
+}
+
+func GetChannelUserConfigSchema(channelType ChannelType) (ConfigSchema, bool) {
+	desc, ok := GetChannelDescriptor(channelType)
+	if !ok {
+		return ConfigSchema{}, false
+	}
+	return desc.UserConfigSchema, true
+}
+
+func IsConfigless(channelType ChannelType) bool {
+	desc, ok := GetChannelDescriptor(channelType)
+	if !ok {
+		return false
+	}
+	return desc.Configless
 }
 
 func normalizeChannelType(raw string) ChannelType {

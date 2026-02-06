@@ -5,10 +5,36 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func init() {
+	_ = RegisterChannel(ChannelDescriptor{
+		Type:                ChannelType("test"),
+		DisplayName:         "Test",
+		NormalizeConfig:     normalizeEmpty,
+		NormalizeUserConfig: normalizeEmpty,
+		ResolveTarget:       resolveTestTarget,
+		Capabilities: ChannelCapabilities{
+			Text: true,
+		},
+	})
+}
+
+func normalizeEmpty(map[string]any) (map[string]any, error) {
+	return map[string]any{}, nil
+}
+
+func resolveTestTarget(config map[string]any) (string, error) {
+	value := strings.TrimSpace(ReadString(config, "target"))
+	if value == "" {
+		return "", fmt.Errorf("missing target")
+	}
+	return "resolved:" + value, nil
+}
 
 type fakeConfigStore struct {
 	effectiveConfig ChannelConfig
@@ -47,6 +73,10 @@ func (f *fakeConfigStore) ResolveUserBinding(ctx context.Context, channelType Ch
 	return f.boundUserID, nil
 }
 
+func (f *fakeConfigStore) ListSessionsByBotPlatform(ctx context.Context, botID, platform string) ([]ChannelSession, error) {
+	return nil, nil
+}
+
 func (f *fakeConfigStore) GetChannelSession(ctx context.Context, sessionID string) (ChannelSession, error) {
 	if f.session.SessionID == sessionID {
 		return f.session, nil
@@ -54,7 +84,7 @@ func (f *fakeConfigStore) GetChannelSession(ctx context.Context, sessionID strin
 	return ChannelSession{}, nil
 }
 
-func (f *fakeConfigStore) UpsertChannelSession(ctx context.Context, sessionID string, botID string, channelConfigID string, userID string, contactID string, platform string) error {
+func (f *fakeConfigStore) UpsertChannelSession(ctx context.Context, sessionID string, botID string, channelConfigID string, userID string, contactID string, platform string, replyTarget string, threadID string, metadata map[string]any) error {
 	return nil
 }
 
@@ -65,10 +95,19 @@ type fakeInboundProcessorIntegration struct {
 	gotMsg InboundMessage
 }
 
-func (f *fakeInboundProcessorIntegration) HandleInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage) (*OutboundMessage, error) {
+func (f *fakeInboundProcessorIntegration) HandleInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage, sender ReplySender) error {
 	f.gotCfg = cfg
 	f.gotMsg = msg
-	return f.resp, f.err
+	if f.err != nil {
+		return f.err
+	}
+	if f.resp == nil {
+		return nil
+	}
+	if sender == nil {
+		return fmt.Errorf("sender missing")
+	}
+	return sender.Send(ctx, *f.resp)
 }
 
 type fakeAdapter struct {
@@ -83,18 +122,17 @@ func (f *fakeAdapter) Type() ChannelType {
 	return f.channelType
 }
 
-func (f *fakeAdapter) Start(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (AdapterRunner, error) {
+func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (Connection, error) {
 	f.mu.Lock()
 	f.started = append(f.started, cfg)
 	f.mu.Unlock()
-	return AdapterRunner{
-		Stop: func() {
-			f.mu.Lock()
-			f.stops++
-			f.mu.Unlock()
-		},
-		SupportsStop: true,
-	}, nil
+	stop := func(context.Context) error {
+		f.mu.Lock()
+		f.stops++
+		f.mu.Unlock()
+		return nil
+	}
+	return NewConnection(cfg, stop), nil
 }
 
 func (f *fakeAdapter) Send(ctx context.Context, cfg ChannelConfig, msg OutboundMessage) error {
@@ -117,33 +155,38 @@ func TestManagerHandleInboundIntegratesAdapter(t *testing.T) {
 	}
 	processor := &fakeInboundProcessorIntegration{
 		resp: &OutboundMessage{
-			To:   "123",
-			Text: "ok",
+			Target: "123",
+			Message: Message{
+				Text: "ok",
+			},
 		},
 	}
-	adapter := &fakeAdapter{channelType: ChannelTelegram}
+	adapter := &fakeAdapter{channelType: ChannelType("test")}
 	manager := NewManager(log, store, processor)
 	manager.RegisterAdapter(adapter)
 
 	cfg := ChannelConfig{
 		ID:          "cfg-1",
 		BotID:       "bot-1",
-		ChannelType: ChannelTelegram,
-		Credentials: map[string]interface{}{"botToken": "token"},
+		ChannelType: ChannelType("test"),
+		Credentials: map[string]any{"botToken": "token"},
 		UpdatedAt:   time.Now(),
 	}
 	err := manager.handleInbound(context.Background(), cfg, InboundMessage{
-		Channel: ChannelTelegram,
-		Text:    "hi",
-		ChatID:  "chat-1",
-		BotID:   "bot-1",
-		ReplyTo: "123",
+		Channel:     ChannelType("test"),
+		Message:     Message{Text: "hi"},
+		BotID:       "bot-1",
+		ReplyTarget: "123",
+		Conversation: Conversation{
+			ID:   "chat-1",
+			Type: "p2p",
+		},
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if processor.gotMsg.ChatID != "chat-1" || processor.gotMsg.Text != "hi" || processor.gotMsg.BotID != "bot-1" {
+	if processor.gotMsg.Conversation.ID != "chat-1" || processor.gotMsg.Message.PlainText() != "hi" || processor.gotMsg.BotID != "bot-1" {
 		t.Fatalf("unexpected inbound message: %+v", processor.gotMsg)
 	}
 
@@ -152,7 +195,7 @@ func TestManagerHandleInboundIntegratesAdapter(t *testing.T) {
 	if len(adapter.sent) != 1 {
 		t.Fatalf("expected 1 send, got %d", len(adapter.sent))
 	}
-	if adapter.sent[0].To != "123" || adapter.sent[0].Text != "ok" {
+	if adapter.sent[0].Target != "123" || adapter.sent[0].Message.PlainText() != "ok" {
 		t.Fatalf("unexpected outbound message: %+v", adapter.sent[0])
 	}
 }
@@ -165,22 +208,24 @@ func TestManagerSendUsesBinding(t *testing.T) {
 		effectiveConfig: ChannelConfig{
 			ID:          "cfg-1",
 			BotID:       "bot-1",
-			ChannelType: ChannelTelegram,
-			Credentials: map[string]interface{}{"botToken": "token"},
+			ChannelType: ChannelType("test"),
+			Credentials: map[string]any{"botToken": "token"},
 			UpdatedAt:   time.Now(),
 		},
 		userConfig: ChannelUserBinding{
 			ID:     "binding-1",
-			Config: map[string]interface{}{"username": "alice"},
+			Config: map[string]any{"target": "alice"},
 		},
 	}
-	adapter := &fakeAdapter{channelType: ChannelTelegram}
+	adapter := &fakeAdapter{channelType: ChannelType("test")}
 	manager := NewManager(log, store, &fakeInboundProcessorIntegration{})
 	manager.RegisterAdapter(adapter)
 
-	err := manager.Send(context.Background(), "bot-1", ChannelTelegram, SendRequest{
-		ToUserID: "user-1",
-		Message:  "hello",
+	err := manager.Send(context.Background(), "bot-1", ChannelType("test"), SendRequest{
+		UserID: "user-1",
+		Message: Message{
+			Text: "hello",
+		},
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -191,7 +236,7 @@ func TestManagerSendUsesBinding(t *testing.T) {
 	if len(adapter.sent) != 1 {
 		t.Fatalf("expected 1 send, got %d", len(adapter.sent))
 	}
-	if adapter.sent[0].To != "@alice" || adapter.sent[0].Text != "hello" {
+	if adapter.sent[0].Target != "resolved:alice" || adapter.sent[0].Message.PlainText() != "hello" {
 		t.Fatalf("unexpected outbound message: %+v", adapter.sent[0])
 	}
 }
@@ -201,15 +246,15 @@ func TestManagerReconcileStartsAndStops(t *testing.T) {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
 	store := &fakeConfigStore{}
-	adapter := &fakeAdapter{channelType: ChannelTelegram}
+	adapter := &fakeAdapter{channelType: ChannelType("test")}
 	manager := NewManager(log, store, &fakeInboundProcessorIntegration{})
 	manager.RegisterAdapter(adapter)
 
 	cfg := ChannelConfig{
 		ID:          "cfg-1",
 		BotID:       "bot-1",
-		ChannelType: ChannelTelegram,
-		Credentials: map[string]interface{}{"botToken": "token"},
+		ChannelType: ChannelType("test"),
+		Credentials: map[string]any{"botToken": "token"},
 		UpdatedAt:   time.Now(),
 	}
 	manager.reconcile(context.Background(), []ChannelConfig{cfg})

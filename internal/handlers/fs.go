@@ -17,9 +17,7 @@ import (
 	"github.com/containerd/errdefs"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/auth"
 	ctr "github.com/memohai/memoh/internal/containerd"
-	"github.com/memohai/memoh/internal/identity"
 	mcptools "github.com/memohai/memoh/internal/mcp"
 )
 
@@ -48,6 +46,10 @@ import (
 // @Failure 500 {object} ErrorResponse
 // @Router /container/fs/{id} [post]
 func (h *ContainerdHandler) HandleMCPFS(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
 	containerID := strings.TrimSpace(c.Param("id"))
 	if containerID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "container id is required")
@@ -65,11 +67,7 @@ func (h *ContainerdHandler) HandleMCPFS(c echo.Context) error {
 		})
 	}
 
-	userID, err := h.requireUserID(c)
-	if err != nil {
-		return err
-	}
-	if err := h.validateMCPContainer(c.Request().Context(), containerID, userID); err != nil {
+	if err := h.validateMCPContainer(c.Request().Context(), containerID, botID); err != nil {
 		return err
 	}
 	if err := h.ensureTaskRunning(c.Request().Context(), containerID); err != nil {
@@ -98,9 +96,9 @@ func (h *ContainerdHandler) HandleMCPFS(c echo.Context) error {
 	}
 }
 
-func (h *ContainerdHandler) validateMCPContainer(ctx context.Context, containerID, userID string) error {
-	if strings.TrimSpace(userID) == "" {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+func (h *ContainerdHandler) validateMCPContainer(ctx context.Context, containerID, botID string) error {
+	if strings.TrimSpace(botID) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
 	container, err := h.service.GetContainer(ctx, containerID)
 	if err != nil {
@@ -118,22 +116,11 @@ func (h *ContainerdHandler) validateMCPContainer(ctx context.Context, containerI
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	labelUserID := strings.TrimSpace(info.Labels[mcptools.BotLabelKey])
-	if labelUserID != "" && labelUserID != userID {
+	labelBotID := strings.TrimSpace(info.Labels[mcptools.BotLabelKey])
+	if labelBotID != "" && labelBotID != botID {
 		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
 	}
 	return nil
-}
-
-func (h *ContainerdHandler) requireUserID(c echo.Context) (string, error) {
-	userID, err := auth.UserIDFromContext(c)
-	if err != nil {
-		return "", err
-	}
-	if err := identity.ValidateUserID(userID); err != nil {
-		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	return userID, nil
 }
 
 func (h *ContainerdHandler) callMCPServer(ctx context.Context, containerID string, req mcptools.JSONRPCRequest) (map[string]any, error) {

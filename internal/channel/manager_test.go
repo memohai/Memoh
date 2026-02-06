@@ -1,50 +1,22 @@
-package channel
+package channel_test
 
 import (
 	"testing"
+
+	"github.com/memohai/memoh/internal/channel"
 )
 
-func TestResolveTargetFromUserConfigTelegram(t *testing.T) {
+func TestResolveTargetFromUserConfig(t *testing.T) {
 	t.Parallel()
+	registerTestChannel()
 
-	target, err := resolveTargetFromUserConfig(ChannelTelegram, map[string]interface{}{
-		"chat_id":  "123",
-		"user_id":  "456",
-		"username": "alice",
+	target, err := channel.ResolveTargetFromUserConfig(testChannelType, map[string]any{
+		"target": "alice",
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if target != "123" {
-		t.Fatalf("unexpected target: %s", target)
-	}
-}
-
-func TestResolveTargetFromUserConfigTelegramUsername(t *testing.T) {
-	t.Parallel()
-
-	target, err := resolveTargetFromUserConfig(ChannelTelegram, map[string]interface{}{
-		"username": "alice",
-	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if target != "@alice" {
-		t.Fatalf("unexpected target: %s", target)
-	}
-}
-
-func TestResolveTargetFromUserConfigFeishu(t *testing.T) {
-	t.Parallel()
-
-	target, err := resolveTargetFromUserConfig(ChannelFeishu, map[string]interface{}{
-		"open_id": "ou_123",
-		"user_id": "u_123",
-	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if target != "open_id:ou_123" {
+	if target != "resolved:alice" {
 		t.Fatalf("unexpected target: %s", target)
 	}
 }
@@ -52,7 +24,7 @@ func TestResolveTargetFromUserConfigFeishu(t *testing.T) {
 func TestResolveTargetFromUserConfigUnsupported(t *testing.T) {
 	t.Parallel()
 
-	_, err := resolveTargetFromUserConfig("unknown", map[string]interface{}{})
+	_, err := channel.ResolveTargetFromUserConfig("unknown", map[string]any{})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}

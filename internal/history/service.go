@@ -46,10 +46,19 @@ func (s *Service) Create(ctx context.Context, botID, sessionID string, req Creat
 	if err != nil {
 		return Record{}, err
 	}
+	meta := req.Metadata
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	metaPayload, err := json.Marshal(meta)
+	if err != nil {
+		return Record{}, err
+	}
 	row, err := s.queries.CreateHistory(ctx, sqlc.CreateHistoryParams{
 		BotID:     botUUID,
 		SessionID: trimmedSession,
 		Messages:  payload,
+		Metadata:  metaPayload,
 		Skills:    normalizeSkills(req.Skills),
 		Timestamp: pgtype.Timestamptz{
 			Time:  time.Now().UTC(),
@@ -163,14 +172,21 @@ func (s *Service) DeleteBySession(ctx context.Context, botID, sessionID string) 
 }
 
 func toRecord(row sqlc.History) (Record, error) {
-	var messages []map[string]interface{}
+	var messages []map[string]any
 	if len(row.Messages) > 0 {
 		if err := json.Unmarshal(row.Messages, &messages); err != nil {
 			return Record{}, err
 		}
 	}
+	var metadata map[string]any
+	if len(row.Metadata) > 0 {
+		if err := json.Unmarshal(row.Metadata, &metadata); err != nil {
+			return Record{}, err
+		}
+	}
 	record := Record{
 		Messages: messages,
+		Metadata: metadata,
 		Skills:   normalizeSkills(row.Skills),
 	}
 	if row.Timestamp.Valid {

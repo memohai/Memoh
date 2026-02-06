@@ -95,7 +95,7 @@ CREATE INDEX IF NOT EXISTS idx_bot_members_user_id ON bot_members(user_id);
 CREATE TABLE IF NOT EXISTS bot_settings (
   bot_id UUID PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
   max_context_load_time INTEGER NOT NULL DEFAULT 1440,
-  language TEXT NOT NULL DEFAULT 'Same as user input',
+  language TEXT NOT NULL DEFAULT 'auto',
   allow_guest BOOLEAN NOT NULL DEFAULT false
 );
 
@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS history (
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   session_id TEXT NOT NULL,
   messages JSONB NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   skills TEXT[] NOT NULL DEFAULT '{}'::text[],
   timestamp TIMESTAMPTZ NOT NULL
 );
@@ -187,6 +188,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_bot_user_unique
 
 CREATE INDEX IF NOT EXISTS idx_contacts_bot_id ON contacts(bot_id);
 
+CREATE TABLE IF NOT EXISTS bot_preauth_keys (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  token TEXT NOT NULL,
+  issued_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  expires_at TIMESTAMPTZ,
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT bot_preauth_keys_unique UNIQUE (token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_preauth_keys_bot_id ON bot_preauth_keys(bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_preauth_keys_expires ON bot_preauth_keys(expires_at);
+
 CREATE TABLE IF NOT EXISTS contact_channels (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -202,23 +217,6 @@ CREATE TABLE IF NOT EXISTS contact_channels (
 CREATE INDEX IF NOT EXISTS idx_contact_channels_contact_id ON contact_channels(contact_id);
 CREATE INDEX IF NOT EXISTS idx_contact_channels_platform_external ON contact_channels(platform, external_id);
 
-CREATE TABLE IF NOT EXISTS contact_bind_tokens (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  contact_id UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-  token TEXT NOT NULL,
-  target_platform TEXT,
-  target_external_id TEXT,
-  issued_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  expires_at TIMESTAMPTZ NOT NULL,
-  used_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT contact_bind_tokens_unique UNIQUE (token)
-);
-
-CREATE INDEX IF NOT EXISTS idx_contact_bind_tokens_contact_id ON contact_bind_tokens(contact_id);
-CREATE INDEX IF NOT EXISTS idx_contact_bind_tokens_expires ON contact_bind_tokens(expires_at);
-
 CREATE TABLE IF NOT EXISTS channel_sessions (
   session_id TEXT PRIMARY KEY,
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -226,6 +224,9 @@ CREATE TABLE IF NOT EXISTS channel_sessions (
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
   contact_id UUID REFERENCES contacts(id) ON DELETE SET NULL,
   platform TEXT NOT NULL,
+  reply_target TEXT,
+  thread_id TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -325,6 +326,9 @@ CREATE INDEX IF NOT EXISTS idx_subagents_deleted ON subagents(deleted);
 
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  chat_model_id TEXT,
+  memory_model_id TEXT,
+  embedding_model_id TEXT,
   max_context_load_time INTEGER NOT NULL DEFAULT 1440,
-  language TEXT NOT NULL DEFAULT 'Same as user input'
+  language TEXT NOT NULL DEFAULT 'auto'
 );

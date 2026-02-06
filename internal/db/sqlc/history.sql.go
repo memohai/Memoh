@@ -12,15 +12,16 @@ import (
 )
 
 const createHistory = `-- name: CreateHistory :one
-INSERT INTO history (bot_id, session_id, messages, skills, timestamp)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, bot_id, session_id, messages, skills, timestamp
+INSERT INTO history (bot_id, session_id, messages, metadata, skills, timestamp)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, bot_id, session_id, messages, metadata, skills, timestamp
 `
 
 type CreateHistoryParams struct {
 	BotID     pgtype.UUID        `json:"bot_id"`
 	SessionID string             `json:"session_id"`
 	Messages  []byte             `json:"messages"`
+	Metadata  []byte             `json:"metadata"`
 	Skills    []string           `json:"skills"`
 	Timestamp pgtype.Timestamptz `json:"timestamp"`
 }
@@ -30,6 +31,7 @@ func (q *Queries) CreateHistory(ctx context.Context, arg CreateHistoryParams) (H
 		arg.BotID,
 		arg.SessionID,
 		arg.Messages,
+		arg.Metadata,
 		arg.Skills,
 		arg.Timestamp,
 	)
@@ -39,6 +41,7 @@ func (q *Queries) CreateHistory(ctx context.Context, arg CreateHistoryParams) (H
 		&i.BotID,
 		&i.SessionID,
 		&i.Messages,
+		&i.Metadata,
 		&i.Skills,
 		&i.Timestamp,
 	)
@@ -71,7 +74,7 @@ func (q *Queries) DeleteHistoryByID(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getHistoryByID = `-- name: GetHistoryByID :one
-SELECT id, bot_id, session_id, messages, skills, timestamp
+SELECT id, bot_id, session_id, messages, metadata, skills, timestamp
 FROM history
 WHERE id = $1
 `
@@ -84,6 +87,7 @@ func (q *Queries) GetHistoryByID(ctx context.Context, id pgtype.UUID) (History, 
 		&i.BotID,
 		&i.SessionID,
 		&i.Messages,
+		&i.Metadata,
 		&i.Skills,
 		&i.Timestamp,
 	)
@@ -91,7 +95,7 @@ func (q *Queries) GetHistoryByID(ctx context.Context, id pgtype.UUID) (History, 
 }
 
 const listHistoryByBotSession = `-- name: ListHistoryByBotSession :many
-SELECT id, bot_id, session_id, messages, skills, timestamp
+SELECT id, bot_id, session_id, messages, metadata, skills, timestamp
 FROM history
 WHERE bot_id = $1 AND session_id = $2
 ORDER BY timestamp DESC
@@ -118,6 +122,7 @@ func (q *Queries) ListHistoryByBotSession(ctx context.Context, arg ListHistoryBy
 			&i.BotID,
 			&i.SessionID,
 			&i.Messages,
+			&i.Metadata,
 			&i.Skills,
 			&i.Timestamp,
 		); err != nil {
@@ -132,7 +137,7 @@ func (q *Queries) ListHistoryByBotSession(ctx context.Context, arg ListHistoryBy
 }
 
 const listHistoryByBotSessionSince = `-- name: ListHistoryByBotSessionSince :many
-SELECT id, bot_id, session_id, messages, skills, timestamp
+SELECT id, bot_id, session_id, messages, metadata, skills, timestamp
 FROM history
 WHERE bot_id = $1 AND session_id = $2 AND timestamp >= $3
 ORDER BY timestamp ASC
@@ -158,6 +163,7 @@ func (q *Queries) ListHistoryByBotSessionSince(ctx context.Context, arg ListHist
 			&i.BotID,
 			&i.SessionID,
 			&i.Messages,
+			&i.Metadata,
 			&i.Skills,
 			&i.Timestamp,
 		); err != nil {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -68,7 +69,7 @@ func (h *LocalChannelHandler) CreateSession(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel service not configured")
 	}
 	sessionID := fmt.Sprintf("%s:%s", h.channelType.String(), uuid.NewString())
-	if err := h.channelService.UpsertChannelSession(c.Request().Context(), sessionID, botID, "", userID, "", h.channelType.String()); err != nil {
+	if err := h.channelService.UpsertChannelSession(c.Request().Context(), sessionID, botID, "", userID, "", h.channelType.String(), sessionID, "", nil); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	streamURL := fmt.Sprintf("/bots/%s/%s/sessions/%s/stream", botID, h.channelType.String(), sessionID)
@@ -121,8 +122,8 @@ func (h *LocalChannelHandler) StreamSession(c echo.Context) error {
 				return nil
 			}
 			payload := map[string]any{
-				"text": msg.Text,
-				"to":   msg.To,
+				"target":  msg.Target,
+				"message": msg.Message,
 			}
 			data, err := json.Marshal(payload)
 			if err != nil {
@@ -136,8 +137,7 @@ func (h *LocalChannelHandler) StreamSession(c echo.Context) error {
 }
 
 type localMessageRequest struct {
-	Text    string `json:"text"`
-	Message string `json:"message"`
+	Message channel.Message `json:"message"`
 }
 
 func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
@@ -166,26 +166,32 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	text := strings.TrimSpace(req.Text)
+	text := strings.TrimSpace(req.Message.PlainText())
 	if text == "" {
-		text = strings.TrimSpace(req.Message)
-	}
-	if text == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "text is required")
+		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
 	cfg, err := h.channelService.ResolveEffectiveConfig(c.Request().Context(), botID, h.channelType)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	msg := channel.InboundMessage{
-		Channel:    h.channelType,
-		Text:       text,
-		ChatID:     sessionID,
-		ChatType:   "p2p",
-		ReplyTo:    sessionID,
-		BotID:      botID,
-		UserID:     userID,
-		SessionKey: sessionID,
+		Channel:     h.channelType,
+		Message:     req.Message,
+		BotID:       botID,
+		ReplyTarget: sessionID,
+		SessionKey:  sessionID,
+		Sender: channel.Identity{
+			ExternalID: userID,
+			Attributes: map[string]string{
+				"user_id": userID,
+			},
+		},
+		Conversation: channel.Conversation{
+			ID:   sessionID,
+			Type: "p2p",
+		},
+		ReceivedAt: time.Now().UTC(),
+		Source:     "local",
 	}
 	if err := h.channelManager.HandleInbound(c.Request().Context(), cfg, msg); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

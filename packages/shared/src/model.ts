@@ -90,6 +90,7 @@ export interface ProviderInfo{
 export interface ModelInfo{
   dimensions:number
   is_multimodal:boolean
+  input?: string[]
   llm_provider_id:string
   model_id:string
   name:string

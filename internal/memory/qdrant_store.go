@@ -38,7 +38,7 @@ type qdrantPoint struct {
 	SparseIndices    []uint32               `json:"sparse_indices,omitempty"`
 	SparseValues     []float32              `json:"sparse_values,omitempty"`
 	SparseVectorName string                 `json:"sparse_vector_name,omitempty"`
-	Payload          map[string]interface{} `json:"payload,omitempty"`
+	Payload          map[string]any `json:"payload,omitempty"`
 }
 
 func NewQdrantStore(log *slog.Logger, baseURL, apiKey, collection string, dimension int, sparseVectorName string, timeout time.Duration) (*QdrantStore, error) {
@@ -189,7 +189,7 @@ func (s *QdrantStore) Upsert(ctx context.Context, points []qdrantPoint) error {
 	return err
 }
 
-func (s *QdrantStore) Search(ctx context.Context, vector []float32, limit int, filters map[string]interface{}, vectorName string) ([]qdrantPoint, []float64, error) {
+func (s *QdrantStore) Search(ctx context.Context, vector []float32, limit int, filters map[string]any, vectorName string) ([]qdrantPoint, []float64, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -222,7 +222,7 @@ func (s *QdrantStore) Search(ctx context.Context, vector []float32, limit int, f
 	return points, scores, nil
 }
 
-func (s *QdrantStore) SearchSparse(ctx context.Context, indices []uint32, values []float32, limit int, filters map[string]interface{}) ([]qdrantPoint, []float64, error) {
+func (s *QdrantStore) SearchSparse(ctx context.Context, indices []uint32, values []float32, limit int, filters map[string]any) ([]qdrantPoint, []float64, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -257,7 +257,7 @@ func (s *QdrantStore) SearchSparse(ctx context.Context, indices []uint32, values
 	return points, scores, nil
 }
 
-func (s *QdrantStore) SearchBySources(ctx context.Context, vector []float32, limit int, filters map[string]interface{}, sources []string, vectorName string) (map[string][]qdrantPoint, map[string][]float64, error) {
+func (s *QdrantStore) SearchBySources(ctx context.Context, vector []float32, limit int, filters map[string]any, sources []string, vectorName string) (map[string][]qdrantPoint, map[string][]float64, error) {
 	pointsBySource := make(map[string][]qdrantPoint, len(sources))
 	scoresBySource := make(map[string][]float64, len(sources))
 	if len(sources) == 0 {
@@ -278,7 +278,7 @@ func (s *QdrantStore) SearchBySources(ctx context.Context, vector []float32, lim
 	return pointsBySource, scoresBySource, nil
 }
 
-func (s *QdrantStore) SearchSparseBySources(ctx context.Context, indices []uint32, values []float32, limit int, filters map[string]interface{}, sources []string) (map[string][]qdrantPoint, map[string][]float64, error) {
+func (s *QdrantStore) SearchSparseBySources(ctx context.Context, indices []uint32, values []float32, limit int, filters map[string]any, sources []string) (map[string][]qdrantPoint, map[string][]float64, error) {
 	pointsBySource := make(map[string][]qdrantPoint, len(sources))
 	scoresBySource := make(map[string][]float64, len(sources))
 	if len(sources) == 0 {
@@ -327,7 +327,7 @@ func (s *QdrantStore) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-func (s *QdrantStore) List(ctx context.Context, limit int, filters map[string]interface{}) ([]qdrantPoint, error) {
+func (s *QdrantStore) List(ctx context.Context, limit int, filters map[string]any) ([]qdrantPoint, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -352,7 +352,7 @@ func (s *QdrantStore) List(ctx context.Context, limit int, filters map[string]in
 	return result, nil
 }
 
-func (s *QdrantStore) Scroll(ctx context.Context, limit int, filters map[string]interface{}, offset *qdrant.PointId) ([]qdrantPoint, *qdrant.PointId, error) {
+func (s *QdrantStore) Scroll(ctx context.Context, limit int, filters map[string]any, offset *qdrant.PointId) ([]qdrantPoint, *qdrant.PointId, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -377,7 +377,7 @@ func (s *QdrantStore) Scroll(ctx context.Context, limit int, filters map[string]
 	return result, nextOffset, nil
 }
 
-func (s *QdrantStore) DeleteAll(ctx context.Context, filters map[string]interface{}) error {
+func (s *QdrantStore) DeleteAll(ctx context.Context, filters map[string]any) error {
 	filter := buildQdrantFilter(filters)
 	if filter == nil {
 		return fmt.Errorf("delete all requires filters")
@@ -542,7 +542,7 @@ func timeoutOrDefault(timeout time.Duration) time.Duration {
 	return timeout
 }
 
-func buildQdrantFilter(filters map[string]interface{}) *qdrant.Filter {
+func buildQdrantFilter(filters map[string]any) *qdrant.Filter {
 	if len(filters) == 0 {
 		return nil
 	}
@@ -560,18 +560,18 @@ func buildQdrantFilter(filters map[string]interface{}) *qdrant.Filter {
 	}
 }
 
-func cloneFilters(filters map[string]interface{}) map[string]interface{} {
+func cloneFilters(filters map[string]any) map[string]any {
 	if len(filters) == 0 {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
-	clone := make(map[string]interface{}, len(filters))
+	clone := make(map[string]any, len(filters))
 	for key, value := range filters {
 		clone[key] = value
 	}
 	return clone
 }
 
-func buildQdrantCondition(key string, value interface{}) *qdrant.Condition {
+func buildQdrantCondition(key string, value any) *qdrant.Condition {
 	switch typed := value.(type) {
 	case string:
 		return qdrant.NewMatch(key, typed)
@@ -586,7 +586,7 @@ func buildQdrantCondition(key string, value interface{}) *qdrant.Condition {
 		return qdrant.NewRange(key, &qdrant.Range{Gte: &v, Lte: &v})
 	case float64:
 		return qdrant.NewRange(key, &qdrant.Range{Gte: &typed, Lte: &typed})
-	case map[string]interface{}:
+	case map[string]any:
 		rangeValue := &qdrant.Range{}
 		for _, op := range []string{"gte", "gt", "lte", "lt"} {
 			if raw, ok := typed[op]; ok {
@@ -613,7 +613,7 @@ func buildQdrantCondition(key string, value interface{}) *qdrant.Condition {
 	return qdrant.NewMatch(key, fmt.Sprint(value))
 }
 
-func toFloat(value interface{}) (float64, bool) {
+func toFloat(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case float32:
 		return float64(typed), true
@@ -641,15 +641,15 @@ func pointIDToString(id *qdrant.PointId) string {
 	return ""
 }
 
-func valueMapToInterface(values map[string]*qdrant.Value) map[string]interface{} {
-	result := make(map[string]interface{}, len(values))
+func valueMapToInterface(values map[string]*qdrant.Value) map[string]any {
+	result := make(map[string]any, len(values))
 	for key, value := range values {
 		result[key] = valueToInterface(value)
 	}
 	return result
 }
 
-func valueToInterface(value *qdrant.Value) interface{} {
+func valueToInterface(value *qdrant.Value) any {
 	if value == nil {
 		return nil
 	}
@@ -667,7 +667,7 @@ func valueToInterface(value *qdrant.Value) interface{} {
 	case *qdrant.Value_StructValue:
 		return valueMapToInterface(kind.StructValue.GetFields())
 	case *qdrant.Value_ListValue:
-		items := make([]interface{}, 0, len(kind.ListValue.GetValues()))
+		items := make([]any, 0, len(kind.ListValue.GetValues()))
 		for _, item := range kind.ListValue.GetValues() {
 			items = append(items, valueToInterface(item))
 		}

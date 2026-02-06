@@ -49,6 +49,16 @@ type BotModelConfig struct {
 	MemoryModelID    pgtype.UUID `json:"memory_model_id"`
 }
 
+type BotPreauthKey struct {
+	ID             pgtype.UUID        `json:"id"`
+	BotID          pgtype.UUID        `json:"bot_id"`
+	Token          string             `json:"token"`
+	IssuedByUserID pgtype.UUID        `json:"issued_by_user_id"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	UsedAt         pgtype.Timestamptz `json:"used_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type BotSetting struct {
 	BotID              pgtype.UUID `json:"bot_id"`
 	MaxContextLoadTime int32       `json:"max_context_load_time"`
@@ -61,10 +71,13 @@ type ChannelSession struct {
 	BotID           pgtype.UUID        `json:"bot_id"`
 	ChannelConfigID pgtype.UUID        `json:"channel_config_id"`
 	UserID          pgtype.UUID        `json:"user_id"`
+	ContactID       pgtype.UUID        `json:"contact_id"`
 	Platform        string             `json:"platform"`
+	ReplyTarget     pgtype.Text        `json:"reply_target"`
+	ThreadID        pgtype.Text        `json:"thread_id"`
+	Metadata        []byte             `json:"metadata"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	ContactID       pgtype.UUID        `json:"contact_id"`
 }
 
 type Contact struct {
@@ -78,19 +91,6 @@ type Contact struct {
 	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
-type ContactBindToken struct {
-	ID               pgtype.UUID        `json:"id"`
-	BotID            pgtype.UUID        `json:"bot_id"`
-	ContactID        pgtype.UUID        `json:"contact_id"`
-	Token            string             `json:"token"`
-	TargetPlatform   pgtype.Text        `json:"target_platform"`
-	TargetExternalID pgtype.Text        `json:"target_external_id"`
-	IssuedByUserID   pgtype.UUID        `json:"issued_by_user_id"`
-	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
-	UsedAt           pgtype.Timestamptz `json:"used_at"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type ContactChannel struct {
@@ -145,6 +145,7 @@ type History struct {
 	BotID     pgtype.UUID        `json:"bot_id"`
 	SessionID string             `json:"session_id"`
 	Messages  []byte             `json:"messages"`
+	Metadata  []byte             `json:"metadata"`
 	Skills    []string           `json:"skills"`
 	Timestamp pgtype.Timestamptz `json:"timestamp"`
 }

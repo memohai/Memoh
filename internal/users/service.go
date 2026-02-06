@@ -22,9 +22,9 @@ type Service struct {
 }
 
 var (
-	ErrInvalidPassword     = errors.New("invalid password")
-	ErrInvalidCredentials  = errors.New("invalid credentials")
-	ErrInactiveUser        = errors.New("user is inactive")
+	ErrInvalidPassword    = errors.New("invalid password")
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrInactiveUser       = errors.New("user is inactive")
 )
 
 func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
@@ -325,7 +325,7 @@ func normalizeRole(raw string) (string, error) {
 	return role, nil
 }
 
-func isAdminRole(role interface{}) bool {
+func isAdminRole(role any) bool {
 	if role == nil {
 		return false
 	}

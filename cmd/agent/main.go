@@ -26,6 +26,8 @@ import (
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/memory"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/policy"
+	"github.com/memohai/memoh/internal/preauth"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/router"
 	"github.com/memohai/memoh/internal/schedule"
@@ -82,7 +84,7 @@ func main() {
 	manager := mcp.NewManager(logger.L, service, cfg.MCP)
 
 	pingHandler := handlers.NewPingHandler(logger.L)
-	containerdHandler := handlers.NewContainerdHandler(logger.L, service, cfg.MCP, cfg.Containerd.Namespace)
+	// containerdHandler is created later after DB services are initialized
 
 	conn, err := db.Open(ctx, cfg.Postgres)
 	if err != nil {
@@ -95,6 +97,8 @@ func main() {
 	modelsService := models.NewService(logger.L, queries)
 	botService := bots.NewService(logger.L, queries)
 	usersService := users.NewService(logger.L, queries)
+
+	containerdHandler := handlers.NewContainerdHandler(logger.L, service, cfg.MCP, cfg.Containerd.Namespace, botService, usersService, queries)
 
 	if err := ensureAdminUser(ctx, logger.L, queries, cfg); err != nil {
 		logger.Error("ensure admin user", slog.Any("error", err))
@@ -142,18 +146,24 @@ func main() {
 	settingsService := settings.NewService(logger.L, queries)
 	settingsHandler := handlers.NewSettingsHandler(logger.L, settingsService, botService, usersService)
 	modelsHandler := handlers.NewModelsHandler(logger.L, modelsService, settingsService)
+	policyService := policy.NewService(logger.L, botService, settingsService)
 	historyService := history.NewService(logger.L, queries)
 	historyHandler := handlers.NewHistoryHandler(logger.L, historyService, botService, usersService)
 	contactsService := contacts.NewService(queries)
 	contactsHandler := handlers.NewContactsHandler(contactsService, botService, usersService)
+	preauthService := preauth.NewService(queries)
+	preauthHandler := handlers.NewPreauthHandler(preauthService, botService, usersService)
 
 	chatResolver = chat.NewResolver(logger.L, modelsService, queries, memoryService, historyService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
 	embeddingsHandler := handlers.NewEmbeddingsHandler(logger.L, modelsService, queries)
 	swaggerHandler := handlers.NewSwaggerHandler(logger.L)
 	chatHandler := handlers.NewChatHandler(logger.L, chatResolver, botService, usersService)
 	channelService := channel.NewService(queries)
-	channelRouter := router.NewChannelInboundProcessor(logger.L, channelService, chatResolver, contactsService, settingsService, cfg.Auth.JWTSecret, 5*time.Minute)
+	channelRouter := router.NewChannelInboundProcessor(logger.L, channelService, chatResolver, contactsService, policyService, preauthService, cfg.Auth.JWTSecret, 5*time.Minute)
 	channelManager := channel.NewManager(logger.L, channelService, channelRouter)
+	if mw := channelRouter.IdentityMiddleware(); mw != nil {
+		channelManager.Use(mw)
+	}
 	sessionHub := channel.NewSessionHub()
 	channelManager.RegisterAdapter(telegram.NewTelegramAdapter(logger.L))
 	channelManager.RegisterAdapter(feishu.NewFeishuAdapter(logger.L))
@@ -162,8 +172,8 @@ func main() {
 	channelManager.Start(ctx)
 	channelHandler := handlers.NewChannelHandler(channelService)
 	usersHandler := handlers.NewUsersHandler(logger.L, usersService, botService, channelService, channelManager)
-	cliHandler := handlers.NewLocalChannelHandler(channel.ChannelCLI, channelManager, channelService, sessionHub, botService, usersService)
-	webHandler := handlers.NewLocalChannelHandler(channel.ChannelWeb, channelManager, channelService, sessionHub, botService, usersService)
+	cliHandler := handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelService, sessionHub, botService, usersService)
+	webHandler := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelService, sessionHub, botService, usersService)
 	scheduleGateway := chat.NewScheduleGateway(chatResolver)
 	scheduleService := schedule.NewService(logger.L, queries, scheduleGateway, cfg.Auth.JWTSecret)
 	if err := scheduleService.Bootstrap(ctx); err != nil {
@@ -173,7 +183,7 @@ func main() {
 	scheduleHandler := handlers.NewScheduleHandler(logger.L, scheduleService, botService, usersService)
 	subagentService := subagent.NewService(logger.L, queries)
 	subagentHandler := handlers.NewSubagentHandler(logger.L, subagentService, botService, usersService)
-	srv := server.NewServer(logger.L, addr, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, contactsHandler, scheduleHandler, subagentHandler, containerdHandler, channelHandler, usersHandler, cliHandler, webHandler)
+	srv := server.NewServer(logger.L, addr, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, contactsHandler, preauthHandler, scheduleHandler, subagentHandler, containerdHandler, channelHandler, usersHandler, cliHandler, webHandler)
 
 	if err := srv.Start(); err != nil {
 		logger.Error("server failed", slog.Any("error", err))

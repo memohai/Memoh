@@ -31,3 +31,6 @@ ON CONFLICT (container_id) DO UPDATE SET
 
 -- name: GetContainerByContainerID :one
 SELECT * FROM containers WHERE container_id = sqlc.arg(container_id);
+
+-- name: GetContainerByBotID :one
+SELECT * FROM containers WHERE bot_id = sqlc.arg(bot_id) ORDER BY updated_at DESC LIMIT 1;

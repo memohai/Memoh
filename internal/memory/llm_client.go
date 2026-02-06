@@ -86,15 +86,15 @@ func (c *LLMClient) Decide(ctx context.Context, req DecideRequest) (DecideRespon
 	}
 
 	cleaned := removeCodeBlocks(content)
-	var memoryItems []map[string]interface{}
+	var memoryItems []map[string]any
 
 	// Try parsing as object first
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal([]byte(cleaned), &raw); err == nil {
 		memoryItems = normalizeMemoryItems(raw["memory"])
 	} else {
 		// If object parsing fails, try parsing as array directly
-		var arr []interface{}
+		var arr []any
 		if err := json.Unmarshal([]byte(cleaned), &arr); err != nil {
 			return DecideResponse{}, fmt.Errorf("failed to parse LLM response: %w", err)
 		}
@@ -222,7 +222,7 @@ func formatMessages(messages []Message) []string {
 	return formatted
 }
 
-func asString(value interface{}) string {
+func asString(value any) string {
 	switch typed := value.(type) {
 	case string:
 		return typed
@@ -240,7 +240,7 @@ func asString(value interface{}) string {
 	}
 }
 
-func normalizeID(value interface{}) string {
+func normalizeID(value any) string {
 	id := asString(value)
 	if id == "" {
 		return ""
@@ -248,31 +248,31 @@ func normalizeID(value interface{}) string {
 	return id
 }
 
-func normalizeMemoryItems(value interface{}) []map[string]interface{} {
+func normalizeMemoryItems(value any) []map[string]any {
 	switch typed := value.(type) {
-	case []interface{}:
-		items := make([]map[string]interface{}, 0, len(typed))
+	case []any:
+		items := make([]map[string]any, 0, len(typed))
 		for _, item := range typed {
-			if m, ok := item.(map[string]interface{}); ok {
+			if m, ok := item.(map[string]any); ok {
 				items = append(items, m)
 			}
 		}
 		return items
-	case map[string]interface{}:
+	case map[string]any:
 		// If this map looks like a single item, wrap it.
 		if _, hasText := typed["text"]; hasText {
-			return []map[string]interface{}{typed}
+			return []map[string]any{typed}
 		}
 		if _, hasFact := typed["fact"]; hasFact {
-			return []map[string]interface{}{typed}
+			return []map[string]any{typed}
 		}
 		if _, hasEvent := typed["event"]; hasEvent {
-			return []map[string]interface{}{typed}
+			return []map[string]any{typed}
 		}
 		// Otherwise treat as map of items.
-		items := make([]map[string]interface{}, 0, len(typed))
+		items := make([]map[string]any, 0, len(typed))
 		for _, item := range typed {
-			if m, ok := item.(map[string]interface{}); ok {
+			if m, ok := item.(map[string]any); ok {
 				items = append(items, m)
 			}
 		}

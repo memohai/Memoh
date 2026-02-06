@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getContainerByBotID = `-- name: GetContainerByBotID :one
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, host_path, container_path, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE bot_id = $1 ORDER BY updated_at DESC LIMIT 1
+`
+
+func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (Container, error) {
+	row := q.db.QueryRow(ctx, getContainerByBotID, botID)
+	var i Container
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.ContainerID,
+		&i.ContainerName,
+		&i.Image,
+		&i.Status,
+		&i.Namespace,
+		&i.AutoStart,
+		&i.HostPath,
+		&i.ContainerPath,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastStartedAt,
+		&i.LastStoppedAt,
+	)
+	return i, err
+}
+
 const getContainerByContainerID = `-- name: GetContainerByContainerID :one
 SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, host_path, container_path, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE container_id = $1
 `

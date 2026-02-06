@@ -12,7 +12,7 @@ definitions:
       is_active:
         type: boolean
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       owner_user_id:
         type: string
@@ -41,7 +41,7 @@ definitions:
       is_active:
         type: boolean
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       type:
         type: string
@@ -74,7 +74,7 @@ definitions:
       is_active:
         type: boolean
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
     type: object
   bots.UpsertMemberRequest:
@@ -84,29 +84,119 @@ definitions:
       user_id:
         type: string
     type: object
+  channel.Action:
+    properties:
+      label:
+        type: string
+      type:
+        type: string
+      url:
+        type: string
+      value:
+        type: string
+    type: object
+  channel.Attachment:
+    properties:
+      caption:
+        type: string
+      duration_ms:
+        type: integer
+      height:
+        type: integer
+      metadata:
+        additionalProperties: {}
+        type: object
+      mime:
+        type: string
+      name:
+        type: string
+      size:
+        type: integer
+      thumbnail_url:
+        type: string
+      type:
+        $ref: '#/definitions/channel.AttachmentType'
+      url:
+        type: string
+      width:
+        type: integer
+    type: object
+  channel.AttachmentType:
+    enum:
+    - image
+    - audio
+    - video
+    - voice
+    - file
+    - gif
+    type: string
+    x-enum-varnames:
+    - AttachmentImage
+    - AttachmentAudio
+    - AttachmentVideo
+    - AttachmentVoice
+    - AttachmentFile
+    - AttachmentGIF
+  channel.ChannelCapabilities:
+    properties:
+      attachments:
+        type: boolean
+      block_streaming:
+        type: boolean
+      buttons:
+        type: boolean
+      chat_types:
+        items:
+          type: string
+        type: array
+      edit:
+        type: boolean
+      markdown:
+        type: boolean
+      media:
+        type: boolean
+      native_commands:
+        type: boolean
+      polls:
+        type: boolean
+      reactions:
+        type: boolean
+      reply:
+        type: boolean
+      rich_text:
+        type: boolean
+      streaming:
+        type: boolean
+      text:
+        type: boolean
+      threads:
+        type: boolean
+      unsend:
+        type: boolean
+    type: object
   channel.ChannelConfig:
     properties:
       botID:
         type: string
       capabilities:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       channelType:
-        $ref: '#/definitions/channel.ChannelType'
+        type: string
       createdAt:
         type: string
       credentials:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       externalIdentity:
         type: string
       id:
         type: string
       routing:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       selfIdentity:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       status:
         type: string
@@ -115,24 +205,12 @@ definitions:
       verifiedAt:
         type: string
     type: object
-  channel.ChannelType:
-    enum:
-    - telegram
-    - feishu
-    - cli
-    - web
-    type: string
-    x-enum-varnames:
-    - ChannelTelegram
-    - ChannelFeishu
-    - ChannelCLI
-    - ChannelWeb
   channel.ChannelUserBinding:
     properties:
       channelType:
-        $ref: '#/definitions/channel.ChannelType'
+        type: string
       config:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       createdAt:
         type: string
@@ -143,30 +221,183 @@ definitions:
       userID:
         type: string
     type: object
+  channel.ConfigSchema:
+    properties:
+      fields:
+        additionalProperties:
+          $ref: '#/definitions/channel.FieldSchema'
+        type: object
+      version:
+        type: integer
+    type: object
+  channel.FieldSchema:
+    properties:
+      description:
+        type: string
+      enum:
+        items:
+          type: string
+        type: array
+      example: {}
+      required:
+        type: boolean
+      title:
+        type: string
+      type:
+        $ref: '#/definitions/channel.FieldType'
+    type: object
+  channel.FieldType:
+    enum:
+    - string
+    - secret
+    - bool
+    - number
+    - enum
+    type: string
+    x-enum-varnames:
+    - FieldString
+    - FieldSecret
+    - FieldBool
+    - FieldNumber
+    - FieldEnum
+  channel.Message:
+    properties:
+      actions:
+        items:
+          $ref: '#/definitions/channel.Action'
+        type: array
+      attachments:
+        items:
+          $ref: '#/definitions/channel.Attachment'
+        type: array
+      format:
+        $ref: '#/definitions/channel.MessageFormat'
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      parts:
+        items:
+          $ref: '#/definitions/channel.MessagePart'
+        type: array
+      reply:
+        $ref: '#/definitions/channel.ReplyRef'
+      text:
+        type: string
+      thread:
+        $ref: '#/definitions/channel.ThreadRef'
+    type: object
+  channel.MessageFormat:
+    enum:
+    - plain
+    - markdown
+    - rich
+    type: string
+    x-enum-varnames:
+    - MessageFormatPlain
+    - MessageFormatMarkdown
+    - MessageFormatRich
+  channel.MessagePart:
+    properties:
+      emoji:
+        type: string
+      language:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      styles:
+        items:
+          $ref: '#/definitions/channel.MessageTextStyle'
+        type: array
+      text:
+        type: string
+      type:
+        $ref: '#/definitions/channel.MessagePartType'
+      url:
+        type: string
+      user_id:
+        type: string
+    type: object
+  channel.MessagePartType:
+    enum:
+    - text
+    - link
+    - code_block
+    - mention
+    - emoji
+    type: string
+    x-enum-varnames:
+    - MessagePartText
+    - MessagePartLink
+    - MessagePartCodeBlock
+    - MessagePartMention
+    - MessagePartEmoji
+  channel.MessageTextStyle:
+    enum:
+    - bold
+    - italic
+    - strikethrough
+    - code
+    type: string
+    x-enum-varnames:
+    - MessageStyleBold
+    - MessageStyleItalic
+    - MessageStyleStrikethrough
+    - MessageStyleCode
+  channel.ReplyRef:
+    properties:
+      message_id:
+        type: string
+      target:
+        type: string
+    type: object
   channel.SendRequest:
     properties:
       message:
+        $ref: '#/definitions/channel.Message'
+      target:
         type: string
-      to:
+      user_id:
         type: string
-      to_user_id:
+    type: object
+  channel.TargetHint:
+    properties:
+      example:
+        type: string
+      label:
+        type: string
+    type: object
+  channel.TargetSpec:
+    properties:
+      format:
+        type: string
+      hints:
+        items:
+          $ref: '#/definitions/channel.TargetHint'
+        type: array
+    type: object
+  channel.ThreadRef:
+    properties:
+      id:
         type: string
     type: object
   channel.UpsertConfigRequest:
     properties:
       capabilities:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       credentials:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       external_identity:
         type: string
       routing:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       self_identity:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       status:
         type: string
@@ -176,29 +407,20 @@ definitions:
   channel.UpsertUserConfigRequest:
     properties:
       config:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
-    type: object
-  chat.AgentSkill:
-    properties:
-      content:
-        type: string
-      description:
-        type: string
-      name:
-        type: string
     type: object
   chat.ChatRequest:
     properties:
+      allowed_actions:
+        items:
+          type: string
+        type: array
       current_platform:
         type: string
       language:
         type: string
-      locale:
-        type: string
       max_context_load_time:
-        type: integer
-      max_steps:
         type: integer
       messages:
         items:
@@ -215,15 +437,6 @@ definitions:
       query:
         type: string
       skills:
-        items:
-          $ref: '#/definitions/chat.AgentSkill'
-        type: array
-      toolChoice:
-        additionalProperties: {}
-        type: object
-      toolContext:
-        $ref: '#/definitions/chat.ToolContext'
-      use_skills:
         items:
           type: string
         type: array
@@ -244,28 +457,24 @@ definitions:
         type: array
     type: object
   chat.GatewayMessage:
-    additionalProperties: true
+    additionalProperties: {}
     type: object
-  chat.ToolContext:
+  handlers.ChannelMeta:
     properties:
-      botId:
+      capabilities:
+        $ref: '#/definitions/channel.ChannelCapabilities'
+      config_schema:
+        $ref: '#/definitions/channel.ConfigSchema'
+      configless:
+        type: boolean
+      display_name:
         type: string
-      contactAlias:
+      target_spec:
+        $ref: '#/definitions/channel.TargetSpec'
+      type:
         type: string
-      contactId:
-        type: string
-      contactName:
-        type: string
-      currentPlatform:
-        type: string
-      replyTarget:
-        type: string
-      sessionId:
-        type: string
-      sessionToken:
-        type: string
-      userId:
-        type: string
+      user_config_schema:
+        $ref: '#/definitions/channel.ConfigSchema'
     type: object
   handlers.ContainerInfo:
     properties:
@@ -478,7 +687,7 @@ definitions:
       embedding_enabled:
         type: boolean
       filters:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       infer:
         type: boolean
@@ -489,7 +698,7 @@ definitions:
           $ref: '#/definitions/memory.Message'
         type: array
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       run_id:
         type: string
@@ -502,12 +711,12 @@ definitions:
   handlers.memoryEmbedUpsertPayload:
     properties:
       filters:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       input:
         $ref: '#/definitions/memory.EmbedInput'
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       model:
         type: string
@@ -525,7 +734,7 @@ definitions:
       embedding_enabled:
         type: boolean
       filters:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       limit:
         type: integer
@@ -547,9 +756,12 @@ definitions:
     properties:
       messages:
         items:
-          additionalProperties: true
+          additionalProperties: {}
           type: object
         type: array
+      metadata:
+        additionalProperties: {}
+        type: object
       skills:
         items:
           type: string
@@ -570,9 +782,12 @@ definitions:
         type: string
       messages:
         items:
-          additionalProperties: true
+          additionalProperties: {}
           type: object
         type: array
+      metadata:
+        additionalProperties: {}
+        type: object
       session_id:
         type: string
       skills:
@@ -622,7 +837,7 @@ definitions:
       memory:
         type: string
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       runId:
         type: string
@@ -663,6 +878,10 @@ definitions:
     properties:
       dimensions:
         type: integer
+      input:
+        items:
+          type: string
+        type: array
       is_multimodal:
         type: boolean
       llm_provider_id:
@@ -690,6 +909,10 @@ definitions:
     properties:
       dimensions:
         type: integer
+      input:
+        items:
+          type: string
+        type: array
       is_multimodal:
         type: boolean
       llm_provider_id:
@@ -713,6 +936,10 @@ definitions:
     properties:
       dimensions:
         type: integer
+      input:
+        items:
+          type: string
+        type: array
       is_multimodal:
         type: boolean
       llm_provider_id:
@@ -752,7 +979,7 @@ definitions:
       client_type:
         $ref: '#/definitions/providers.ClientType'
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       name:
         type: string
@@ -775,7 +1002,7 @@ definitions:
       id:
         type: string
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       name:
         type: string
@@ -791,7 +1018,7 @@ definitions:
       client_type:
         $ref: '#/definitions/providers.ClientType'
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       name:
         type: string
@@ -906,7 +1133,7 @@ definitions:
     properties:
       messages:
         items:
-          additionalProperties: true
+          additionalProperties: {}
           type: object
         type: array
     type: object
@@ -916,11 +1143,11 @@ definitions:
         type: string
       messages:
         items:
-          additionalProperties: true
+          additionalProperties: {}
           type: object
         type: array
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       name:
         type: string
@@ -959,11 +1186,11 @@ definitions:
         type: string
       messages:
         items:
-          additionalProperties: true
+          additionalProperties: {}
           type: object
         type: array
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       name:
         type: string
@@ -978,7 +1205,7 @@ definitions:
     properties:
       messages:
         items:
-          additionalProperties: true
+          additionalProperties: {}
           type: object
         type: array
     type: object
@@ -987,7 +1214,7 @@ definitions:
       description:
         type: string
       metadata:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       name:
         type: string
@@ -1230,6 +1457,128 @@ paths:
       summary: Stream chat with AI
       tags:
       - chat
+  /bots/{bot_id}/container:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Create container payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateContainerRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.CreateContainerResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create and start MCP container for bot
+      tags:
+      - containerd
+  /bots/{bot_id}/container/{id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Container ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete MCP container
+      tags:
+      - containerd
+  /bots/{bot_id}/container/list:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ListContainersResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List containers for bot
+      tags:
+      - containerd
+  /bots/{bot_id}/container/snapshots:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Snapshotter name
+        in: query
+        name: snapshotter
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ListSnapshotsResponse'
+      summary: List snapshots
+      tags:
+      - containerd
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Create snapshot payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateSnapshotRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.CreateSnapshotResponse'
+      summary: Create container snapshot
+      tags:
+      - containerd
   /bots/{bot_id}/history:
     delete:
       description: Delete all history records for current user
@@ -2487,42 +2836,37 @@ paths:
       summary: Transfer bot owner (admin only)
       tags:
       - bots
-  /container:
-    post:
-      parameters:
-      - description: Create container payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CreateContainerRequest'
+  /channels:
+    get:
+      description: List channel meta information including capabilities and schemas
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.CreateContainerResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            items:
+              $ref: '#/definitions/handlers.ChannelMeta'
+            type: array
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create and start MCP container
+      summary: List channel capabilities and schemas
       tags:
-      - containerd
-  /container/{id}:
-    delete:
+      - channel
+  /channels/{platform}:
+    get:
+      description: Get channel meta information including capabilities and schemas
       parameters:
-      - description: Container ID
+      - description: Channel platform
         in: path
-        name: id
+        name: platform
         required: true
         type: string
       responses:
-        "204":
-          description: No Content
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ChannelMeta'
         "400":
           description: Bad Request
           schema:
@@ -2531,13 +2875,9 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete MCP container
+      summary: Get channel capabilities and schemas
       tags:
-      - containerd
+      - channel
   /container/fs/{id}:
     post:
       description: |-
@@ -2589,20 +2929,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: MCP filesystem tools (JSON-RPC)
-      tags:
-      - containerd
-  /container/list:
-    get:
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ListContainersResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List containers
       tags:
       - containerd
   /container/skills:
@@ -2681,53 +3007,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Upload skills into container
-      tags:
-      - containerd
-  /container/snapshots:
-    get:
-      parameters:
-      - description: Snapshotter name
-        in: query
-        name: snapshotter
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ListSnapshotsResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List snapshots
-      tags:
-      - containerd
-    post:
-      parameters:
-      - description: Create snapshot payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CreateSnapshotRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.CreateSnapshotResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create container snapshot
       tags:
       - containerd
   /embeddings:

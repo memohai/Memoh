@@ -128,7 +128,7 @@ func removeCodeBlocks(text string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(text, "```json", ""), "```", "")
 }
 
-func toJSON(value interface{}) string {
+func toJSON(value any) string {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return "[]"

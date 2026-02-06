@@ -103,7 +103,7 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (SearchResponse, erro
 			if err != nil {
 				return SearchResponse{}, err
 			}
-			item.Metadata = mergeMetadata(item.Metadata, map[string]interface{}{
+			item.Metadata = mergeMetadata(item.Metadata, map[string]any{
 				"event": "ADD",
 			})
 			results = append(results, item)
@@ -112,7 +112,7 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (SearchResponse, erro
 			if err != nil {
 				return SearchResponse{}, err
 			}
-			item.Metadata = mergeMetadata(item.Metadata, map[string]interface{}{
+			item.Metadata = mergeMetadata(item.Metadata, map[string]any{
 				"event":           "UPDATE",
 				"previous_memory": action.OldMemory,
 			})
@@ -122,7 +122,7 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (SearchResponse, erro
 			if err != nil {
 				return SearchResponse{}, err
 			}
-			item.Metadata = mergeMetadata(item.Metadata, map[string]interface{}{
+			item.Metadata = mergeMetadata(item.Metadata, map[string]any{
 				"event": "DELETE",
 			})
 			results = append(results, item)
@@ -294,7 +294,7 @@ func (s *Service) EmbedUpsert(ctx context.Context, req EmbedUpsertRequest) (Embe
 	id := uuid.NewString()
 	filters := buildEmbedFilters(req)
 	payload := buildEmbeddingPayload(req, filters)
-	if metadata, ok := payload["metadata"].(map[string]interface{}); ok && result.Model != "" {
+	if metadata, ok := payload["metadata"].(map[string]any); ok && result.Model != "" {
 		metadata["model_id"] = result.Model
 	}
 	if err := s.store.Upsert(ctx, []qdrantPoint{{
@@ -408,7 +408,7 @@ func (s *Service) Get(ctx context.Context, memoryID string) (MemoryItem, error) 
 }
 
 func (s *Service) GetAll(ctx context.Context, req GetAllRequest) (SearchResponse, error) {
-	filters := map[string]interface{}{}
+	filters := map[string]any{}
 	if req.BotID != "" {
 		filters["botId"] = req.BotID
 	}
@@ -444,7 +444,7 @@ func (s *Service) Delete(ctx context.Context, memoryID string) (DeleteResponse, 
 }
 
 func (s *Service) DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteResponse, error) {
-	filters := map[string]interface{}{}
+	filters := map[string]any{}
 	if req.BotID != "" {
 		filters["botId"] = req.BotID
 	}
@@ -499,14 +499,14 @@ func (s *Service) WarmupBM25(ctx context.Context, batchSize int) error {
 	return nil
 }
 
-func (s *Service) addRawMessages(ctx context.Context, messages []Message, filters map[string]interface{}, metadata map[string]interface{}, embeddingEnabled bool) (SearchResponse, error) {
+func (s *Service) addRawMessages(ctx context.Context, messages []Message, filters map[string]any, metadata map[string]any, embeddingEnabled bool) (SearchResponse, error) {
 	results := make([]MemoryItem, 0, len(messages))
 	for _, message := range messages {
 		item, err := s.applyAdd(ctx, message.Content, filters, metadata, embeddingEnabled)
 		if err != nil {
 			return SearchResponse{}, err
 		}
-		item.Metadata = mergeMetadata(item.Metadata, map[string]interface{}{
+		item.Metadata = mergeMetadata(item.Metadata, map[string]any{
 			"event": "ADD",
 		})
 		results = append(results, item)
@@ -514,7 +514,7 @@ func (s *Service) addRawMessages(ctx context.Context, messages []Message, filter
 	return SearchResponse{Results: results}, nil
 }
 
-func (s *Service) collectCandidates(ctx context.Context, facts []string, filters map[string]interface{}) ([]CandidateMemory, error) {
+func (s *Service) collectCandidates(ctx context.Context, facts []string, filters map[string]any) ([]CandidateMemory, error) {
 	unique := map[string]CandidateMemory{}
 	for _, fact := range facts {
 		if s.bm25 == nil {
@@ -550,7 +550,7 @@ func (s *Service) collectCandidates(ctx context.Context, facts []string, filters
 	return candidates, nil
 }
 
-func (s *Service) applyAdd(ctx context.Context, text string, filters map[string]interface{}, metadata map[string]interface{}, embeddingEnabled bool) (MemoryItem, error) {
+func (s *Service) applyAdd(ctx context.Context, text string, filters map[string]any, metadata map[string]any, embeddingEnabled bool) (MemoryItem, error) {
 	if s.store == nil {
 		return MemoryItem{}, fmt.Errorf("qdrant store not configured")
 	}
@@ -593,7 +593,7 @@ func (s *Service) applyAdd(ctx context.Context, text string, filters map[string]
 	return payloadToMemoryItem(id, payload), nil
 }
 
-func (s *Service) applyUpdate(ctx context.Context, id, text string, filters map[string]interface{}, metadata map[string]interface{}, embeddingEnabled bool) (MemoryItem, error) {
+func (s *Service) applyUpdate(ctx context.Context, id, text string, filters map[string]any, metadata map[string]any, embeddingEnabled bool) (MemoryItem, error) {
 	if strings.TrimSpace(id) == "" {
 		return MemoryItem{}, fmt.Errorf("update action missing id")
 	}
@@ -748,8 +748,8 @@ func isCJKRune(r rune) bool {
 	return false
 }
 
-func buildFilters(req AddRequest) map[string]interface{} {
-	filters := map[string]interface{}{}
+func buildFilters(req AddRequest) map[string]any {
+	filters := map[string]any{}
 	for key, value := range req.Filters {
 		filters[key] = value
 	}
@@ -765,8 +765,8 @@ func buildFilters(req AddRequest) map[string]interface{} {
 	return filters
 }
 
-func buildSearchFilters(req SearchRequest) map[string]interface{} {
-	filters := map[string]interface{}{}
+func buildSearchFilters(req SearchRequest) map[string]any {
+	filters := map[string]any{}
 	for key, value := range req.Filters {
 		filters[key] = value
 	}
@@ -782,8 +782,8 @@ func buildSearchFilters(req SearchRequest) map[string]interface{} {
 	return filters
 }
 
-func buildEmbedFilters(req EmbedUpsertRequest) map[string]interface{} {
-	filters := map[string]interface{}{}
+func buildEmbedFilters(req EmbedUpsertRequest) map[string]any {
+	filters := map[string]any{}
 	for key, value := range req.Filters {
 		filters[key] = value
 	}
@@ -799,7 +799,7 @@ func buildEmbedFilters(req EmbedUpsertRequest) map[string]interface{} {
 	return filters
 }
 
-func buildEmbeddingPayload(req EmbedUpsertRequest, filters map[string]interface{}) map[string]interface{} {
+func buildEmbeddingPayload(req EmbedUpsertRequest, filters map[string]any) map[string]any {
 	text := req.Input.Text
 	payload := buildPayload(text, filters, req.Metadata, "")
 	payload["hash"] = hashEmbeddingInput(req.Input.Text, req.Input.ImageURL, req.Input.VideoURL)
@@ -813,9 +813,9 @@ func buildEmbeddingPayload(req EmbedUpsertRequest, filters map[string]interface{
 	payload["modality"] = modality
 
 	if payload["metadata"] == nil {
-		payload["metadata"] = map[string]interface{}{}
+		payload["metadata"] = map[string]any{}
 	}
-	if metadata, ok := payload["metadata"].(map[string]interface{}); ok {
+	if metadata, ok := payload["metadata"].(map[string]any); ok {
 		if req.Source != "" {
 			metadata["source"] = req.Source
 		}
@@ -844,11 +844,11 @@ func (s *Service) vectorNameForMultimodal() string {
 	return strings.TrimSpace(s.defaultMultimodalModelID)
 }
 
-func buildPayload(text string, filters map[string]interface{}, metadata map[string]interface{}, createdAt string) map[string]interface{} {
+func buildPayload(text string, filters map[string]any, metadata map[string]any, createdAt string) map[string]any {
 	if createdAt == "" {
 		createdAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"data":      text,
 		"hash":      hashMemory(text),
 		"createdAt": createdAt,
@@ -860,13 +860,13 @@ func buildPayload(text string, filters map[string]interface{}, metadata map[stri
 	return payload
 }
 
-func applyFiltersToPayload(payload map[string]interface{}, filters map[string]interface{}) {
+func applyFiltersToPayload(payload map[string]any, filters map[string]any) {
 	for key, value := range filters {
 		payload[key] = value
 	}
 }
 
-func payloadToMemoryItem(id string, payload map[string]interface{}) MemoryItem {
+func payloadToMemoryItem(id string, payload map[string]any) MemoryItem {
 	item := MemoryItem{
 		ID:     id,
 		Memory: fmt.Sprint(payload["data"]),
@@ -889,10 +889,10 @@ func payloadToMemoryItem(id string, payload map[string]interface{}) MemoryItem {
 	if v, ok := payload["runId"].(string); ok {
 		item.RunID = v
 	}
-	if meta, ok := payload["metadata"].(map[string]interface{}); ok {
+	if meta, ok := payload["metadata"].(map[string]any); ok {
 		item.Metadata = meta
 	} else if payload["metadata"] == nil {
-		item.Metadata = map[string]interface{}{}
+		item.Metadata = map[string]any{}
 	}
 	if item.Metadata != nil {
 		if source, ok := payload["source"].(string); ok && source != "" {
@@ -920,9 +920,9 @@ func hashEmbeddingInput(text, imageURL, videoURL string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func mergeMetadata(base interface{}, extra map[string]interface{}) map[string]interface{} {
-	merged := map[string]interface{}{}
-	if baseMap, ok := base.(map[string]interface{}); ok {
+func mergeMetadata(base any, extra map[string]any) map[string]any {
+	merged := map[string]any{}
+	if baseMap, ok := base.(map[string]any); ok {
 		for k, v := range baseMap {
 			merged[k] = v
 		}
@@ -935,7 +935,7 @@ func mergeMetadata(base interface{}, extra map[string]interface{}) map[string]in
 
 type rerankCandidate struct {
 	ID      string
-	Payload map[string]interface{}
+	Payload map[string]any
 	Score   float64
 	Source  string
 	Rank    int

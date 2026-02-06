@@ -1,0 +1,142 @@
+package feishu
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/memohai/memoh/internal/channel"
+)
+
+type Config struct {
+	AppID             string
+	AppSecret         string
+	EncryptKey        string
+	VerificationToken string
+}
+
+type UserConfig struct {
+	OpenID string
+	UserID string
+}
+
+func NormalizeConfig(raw map[string]any) (map[string]any, error) {
+	cfg, err := parseConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]any{
+		"appId":     cfg.AppID,
+		"appSecret": cfg.AppSecret,
+	}
+	if cfg.EncryptKey != "" {
+		result["encryptKey"] = cfg.EncryptKey
+	}
+	if cfg.VerificationToken != "" {
+		result["verificationToken"] = cfg.VerificationToken
+	}
+	return result, nil
+}
+
+func NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
+	cfg, err := parseUserConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]any{}
+	if cfg.OpenID != "" {
+		result["open_id"] = cfg.OpenID
+	}
+	if cfg.UserID != "" {
+		result["user_id"] = cfg.UserID
+	}
+	return result, nil
+}
+
+func ResolveTarget(raw map[string]any) (string, error) {
+	cfg, err := parseUserConfig(raw)
+	if err != nil {
+		return "", err
+	}
+	if cfg.OpenID != "" {
+		return "open_id:" + cfg.OpenID, nil
+	}
+	if cfg.UserID != "" {
+		return "user_id:" + cfg.UserID, nil
+	}
+	return "", fmt.Errorf("feishu binding is incomplete")
+}
+
+func MatchBinding(raw map[string]any, criteria channel.BindingCriteria) bool {
+	cfg, err := parseUserConfig(raw)
+	if err != nil {
+		return false
+	}
+	if value := strings.TrimSpace(criteria.Attribute("open_id")); value != "" && value == cfg.OpenID {
+		return true
+	}
+	if value := strings.TrimSpace(criteria.Attribute("user_id")); value != "" && value == cfg.UserID {
+		return true
+	}
+	if criteria.ExternalID != "" {
+		if criteria.ExternalID == cfg.OpenID || criteria.ExternalID == cfg.UserID {
+			return true
+		}
+	}
+	return false
+}
+
+func BuildUserConfig(identity channel.Identity) map[string]any {
+	result := map[string]any{}
+	if value := strings.TrimSpace(identity.Attribute("open_id")); value != "" {
+		result["open_id"] = value
+	}
+	if value := strings.TrimSpace(identity.Attribute("user_id")); value != "" {
+		result["user_id"] = value
+	}
+	return result
+}
+
+func parseConfig(raw map[string]any) (Config, error) {
+	appID := strings.TrimSpace(channel.ReadString(raw, "appId", "app_id"))
+	appSecret := strings.TrimSpace(channel.ReadString(raw, "appSecret", "app_secret"))
+	encryptKey := strings.TrimSpace(channel.ReadString(raw, "encryptKey", "encrypt_key"))
+	verificationToken := strings.TrimSpace(channel.ReadString(raw, "verificationToken", "verification_token"))
+	if appID == "" || appSecret == "" {
+		return Config{}, fmt.Errorf("feishu appId and appSecret are required")
+	}
+	return Config{
+		AppID:             appID,
+		AppSecret:         appSecret,
+		EncryptKey:        encryptKey,
+		VerificationToken: verificationToken,
+	}, nil
+}
+
+func parseUserConfig(raw map[string]any) (UserConfig, error) {
+	openID := strings.TrimSpace(channel.ReadString(raw, "openId", "open_id"))
+	userID := strings.TrimSpace(channel.ReadString(raw, "userId", "user_id"))
+	if openID == "" && userID == "" {
+		return UserConfig{}, fmt.Errorf("feishu user config requires open_id or user_id")
+	}
+	return UserConfig{OpenID: openID, UserID: userID}, nil
+}
+
+func normalizeTarget(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, "open_id:") || strings.HasPrefix(value, "user_id:") || strings.HasPrefix(value, "chat_id:") {
+		return value
+	}
+	if strings.HasPrefix(value, "ou_") {
+		return "open_id:" + value
+	}
+	if strings.HasPrefix(value, "oc_") {
+		return "chat_id:" + value
+	}
+	if strings.HasPrefix(value, "user_id:") {
+		return value
+	}
+	return "open_id:" + value
+}

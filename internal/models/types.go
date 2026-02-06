@@ -13,6 +13,11 @@ const (
 	ModelTypeEmbedding ModelType = "embedding"
 )
 
+const (
+	ModelInputText  = "text"
+	ModelInputImage = "image"
+)
+
 type ClientType string
 
 const (
@@ -31,6 +36,7 @@ type Model struct {
 	Name          string    `json:"name"`
 	LlmProviderID string    `json:"llm_provider_id"`
 	IsMultimodal  bool      `json:"is_multimodal"`
+	Input         []string  `json:"input"`
 	Type          ModelType `json:"type"`
 	Dimensions    int       `json:"dimensions"`
 }

@@ -10,7 +10,7 @@ type Contact struct {
 	Alias       string
 	Tags        []string
 	Status      string
-	Metadata    map[string]interface{}
+	Metadata    map[string]any
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -21,22 +21,9 @@ type ContactChannel struct {
 	ContactID  string
 	Platform   string
 	ExternalID string
-	Metadata   map[string]interface{}
+	Metadata   map[string]any
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
-}
-
-type BindToken struct {
-	ID               string
-	BotID            string
-	ContactID        string
-	Token            string
-	TargetPlatform   string
-	TargetExternalID string
-	IssuedByUserID   string
-	ExpiresAt        time.Time
-	UsedAt           time.Time
-	CreatedAt        time.Time
 }
 
 type CreateRequest struct {
@@ -46,7 +33,7 @@ type CreateRequest struct {
 	Alias       string
 	Tags        []string
 	Status      string
-	Metadata    map[string]interface{}
+	Metadata    map[string]any
 }
 
 type UpdateRequest struct {
@@ -54,5 +41,5 @@ type UpdateRequest struct {
 	Alias       *string
 	Tags        *[]string
 	Status      *string
-	Metadata    map[string]interface{}
+	Metadata    map[string]any
 }

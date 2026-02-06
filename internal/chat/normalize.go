@@ -32,7 +32,7 @@ func normalizeGatewayMessage(msg GatewayMessage) []NormalizedMessage {
 	var textParts []ContentPart
 	var toolResults []toolResult
 
-	if rawCalls, ok := msg["tool_calls"].([]interface{}); ok {
+	if rawCalls, ok := msg["tool_calls"].([]any); ok {
 		for _, raw := range rawCalls {
 			if call := normalizeToolCall(raw); call.Function.Name != "" {
 				toolCalls = append(toolCalls, call)
@@ -52,16 +52,16 @@ func normalizeGatewayMessage(msg GatewayMessage) []NormalizedMessage {
 			}
 			return appendToolResults([]NormalizedMessage{normalized}, toolResults)
 		}
-	case []interface{}:
+	case []any:
 		for _, part := range content {
 			switch p := part.(type) {
 			case string:
 				if strings.TrimSpace(p) != "" {
 					textParts = append(textParts, ContentPart{Type: "text", Text: p})
 				}
-			case map[string]interface{}:
-				if text := normalizeTextPart(p); text != "" {
-					textParts = append(textParts, ContentPart{Type: "text", Text: text})
+			case map[string]any:
+				if contentPart, ok := normalizeContentPart(p); ok {
+					textParts = append(textParts, contentPart)
 					continue
 				}
 				if call := normalizeToolCall(p); call.Function.Name != "" {
@@ -81,9 +81,9 @@ func normalizeGatewayMessage(msg GatewayMessage) []NormalizedMessage {
 				}
 			}
 		}
-	case map[string]interface{}:
-		if text := normalizeTextPart(content); text != "" {
-			textParts = append(textParts, ContentPart{Type: "text", Text: text})
+	case map[string]any:
+		if contentPart, ok := normalizeContentPart(content); ok {
+			textParts = append(textParts, contentPart)
 		} else if encoded := toJSONString(content); encoded != "" {
 			textParts = append(textParts, ContentPart{Type: "text", Text: encoded})
 		}
@@ -126,7 +126,7 @@ func appendToolResults(messages []NormalizedMessage, results []toolResult) []Nor
 	return messages
 }
 
-func normalizeTextPart(part map[string]interface{}) string {
+func normalizeTextPart(part map[string]any) string {
 	if part == nil {
 		return ""
 	}
@@ -141,9 +141,60 @@ func normalizeTextPart(part map[string]interface{}) string {
 	return ""
 }
 
-func normalizeToolCall(part interface{}) ToolCall {
+func normalizeContentPart(part map[string]any) (ContentPart, bool) {
+	if part == nil {
+		return ContentPart{}, false
+	}
+	partType := getString(part["type"])
+	if partType == "" {
+		partType = "text"
+	}
+	if partType == "tool_use" || partType == "tool-call" || partType == "function_call" || partType == "tool_result" || partType == "tool-result" {
+		return ContentPart{}, false
+	}
+	text := normalizeTextPart(part)
+	url := getString(part["url"])
+	emoji := getString(part["emoji"])
+	if strings.TrimSpace(text) == "" && strings.TrimSpace(url) == "" && strings.TrimSpace(emoji) == "" {
+		return ContentPart{}, false
+	}
+	styles := normalizeStringSlice(part["styles"])
+	metadata := map[string]any{}
+	if raw, ok := part["metadata"].(map[string]any); ok && raw != nil {
+		metadata = raw
+	}
+	return ContentPart{
+		Type:     partType,
+		Text:     text,
+		URL:      url,
+		Styles:   styles,
+		Language: getString(part["language"]),
+		UserID:   getString(part["user_id"]),
+		Emoji:    emoji,
+		Metadata: metadata,
+	}, true
+}
+
+func normalizeStringSlice(raw any) []string {
+	switch value := raw.(type) {
+	case []string:
+		return value
+	case []any:
+		items := make([]string, 0, len(value))
+		for _, entry := range value {
+			if str, ok := entry.(string); ok && strings.TrimSpace(str) != "" {
+				items = append(items, strings.TrimSpace(str))
+			}
+		}
+		return items
+	default:
+		return nil
+	}
+}
+
+func normalizeToolCall(part any) ToolCall {
 	switch value := part.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if valueType, _ := value["type"].(string); valueType == "tool_use" || valueType == "tool-call" || valueType == "function_call" {
 			return ToolCall{
 				ID:   getString(value["id"]),
@@ -154,7 +205,7 @@ func normalizeToolCall(part interface{}) ToolCall {
 				},
 			}
 		}
-		if fc, ok := value["function_call"].(map[string]interface{}); ok {
+		if fc, ok := value["function_call"].(map[string]any); ok {
 			return ToolCall{
 				ID:   getString(value["id"]),
 				Type: "function",
@@ -164,7 +215,7 @@ func normalizeToolCall(part interface{}) ToolCall {
 				},
 			}
 		}
-		if fc, ok := value["functionCall"].(map[string]interface{}); ok {
+		if fc, ok := value["functionCall"].(map[string]any); ok {
 			return ToolCall{
 				ID:   getString(value["id"]),
 				Type: "function",
@@ -174,7 +225,7 @@ func normalizeToolCall(part interface{}) ToolCall {
 				},
 			}
 		}
-		if fn, ok := value["function"].(map[string]interface{}); ok {
+		if fn, ok := value["function"].(map[string]any); ok {
 			return ToolCall{
 				ID:   getString(value["id"]),
 				Type: "function",
@@ -188,7 +239,7 @@ func normalizeToolCall(part interface{}) ToolCall {
 	return ToolCall{}
 }
 
-func normalizeToolResult(part map[string]interface{}) toolResult {
+func normalizeToolResult(part map[string]any) toolResult {
 	if part == nil {
 		return toolResult{}
 	}
@@ -198,13 +249,13 @@ func normalizeToolResult(part map[string]interface{}) toolResult {
 			Content:    normalizeToolResultContent(part["content"], part["result"], part["output"]),
 		}
 	}
-	if raw, ok := part["toolResult"].(map[string]interface{}); ok {
+	if raw, ok := part["toolResult"].(map[string]any); ok {
 		return toolResult{
 			ToolCallID: firstString(raw["toolUseId"], raw["tool_call_id"], raw["id"]),
 			Content:    normalizeToolResultContent(raw["content"], raw["output"], raw["result"]),
 		}
 	}
-	if raw, ok := part["functionResponse"].(map[string]interface{}); ok {
+	if raw, ok := part["functionResponse"].(map[string]any); ok {
 		return toolResult{
 			ToolCallID: firstString(raw["id"]),
 			Content:    normalizeToolResultContent(raw["response"], raw["output"], raw["result"]),
@@ -213,7 +264,7 @@ func normalizeToolResult(part map[string]interface{}) toolResult {
 	return toolResult{}
 }
 
-func normalizeToolResultContent(values ...interface{}) string {
+func normalizeToolResultContent(values ...any) string {
 	for _, value := range values {
 		if value == nil {
 			continue
@@ -223,7 +274,7 @@ func normalizeToolResultContent(values ...interface{}) string {
 			if strings.TrimSpace(v) != "" {
 				return v
 			}
-		case []interface{}:
+		case []any:
 			parts := make([]string, 0, len(v))
 			for _, item := range v {
 				switch itemValue := item.(type) {
@@ -231,7 +282,7 @@ func normalizeToolResultContent(values ...interface{}) string {
 					if strings.TrimSpace(itemValue) != "" {
 						parts = append(parts, itemValue)
 					}
-				case map[string]interface{}:
+				case map[string]any:
 					if text := normalizeTextPart(itemValue); text != "" {
 						parts = append(parts, text)
 					} else if encoded := toJSONString(itemValue); encoded != "" {
@@ -246,7 +297,7 @@ func normalizeToolResultContent(values ...interface{}) string {
 			if len(parts) > 0 {
 				return strings.Join(parts, "\n")
 			}
-		case map[string]interface{}:
+		case map[string]any:
 			if text := normalizeTextPart(v); text != "" {
 				return text
 			}
@@ -271,9 +322,9 @@ func toGatewayMessages(messages []NormalizedMessage) []GatewayMessage {
 		if strings.TrimSpace(msg.Content) != "" {
 			item["content"] = msg.Content
 		} else if len(msg.Parts) > 0 {
-			parts := make([]map[string]interface{}, 0, len(msg.Parts))
+			parts := make([]map[string]any, 0, len(msg.Parts))
 			for _, part := range msg.Parts {
-				entry := map[string]interface{}{
+				entry := map[string]any{
 					"type": part.Type,
 				}
 				if strings.TrimSpace(part.Text) != "" {
@@ -284,14 +335,14 @@ func toGatewayMessages(messages []NormalizedMessage) []GatewayMessage {
 			item["content"] = parts
 		}
 		if len(msg.ToolCalls) > 0 {
-			payload := make([]map[string]interface{}, 0, len(msg.ToolCalls))
+			payload := make([]map[string]any, 0, len(msg.ToolCalls))
 			for _, call := range msg.ToolCalls {
 				if strings.TrimSpace(call.Function.Name) == "" {
 					continue
 				}
-				entry := map[string]interface{}{
+				entry := map[string]any{
 					"type": "function",
-					"function": map[string]interface{}{
+					"function": map[string]any{
 						"name":      call.Function.Name,
 						"arguments": call.Function.Arguments,
 					},
@@ -316,14 +367,14 @@ func toGatewayMessages(messages []NormalizedMessage) []GatewayMessage {
 	return converted
 }
 
-func getString(value interface{}) string {
+func getString(value any) string {
 	if raw, ok := value.(string); ok {
 		return raw
 	}
 	return ""
 }
 
-func firstString(values ...interface{}) string {
+func firstString(values ...any) string {
 	for _, value := range values {
 		if raw, ok := value.(string); ok && strings.TrimSpace(raw) != "" {
 			return raw
@@ -332,7 +383,7 @@ func firstString(values ...interface{}) string {
 	return ""
 }
 
-func toJSONString(values ...interface{}) string {
+func toJSONString(values ...any) string {
 	for _, value := range values {
 		if value == nil {
 			continue

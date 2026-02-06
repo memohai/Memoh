@@ -9,13 +9,18 @@ import (
 func TestResolveTelegramSender(t *testing.T) {
 	t.Parallel()
 
-	id, name := resolveTelegramSender(nil)
-	if id != "" || name != "" {
+	externalID, displayName, attrs := resolveTelegramSender(nil)
+	if externalID != "" || displayName != "" || len(attrs) != 0 {
 		t.Fatalf("expected empty sender")
 	}
-	user := &tgbotapi.User{ID: 123, UserName: "alice"}
-	id, name = resolveTelegramSender(user)
-	if id != "123" || name != "alice" {
-		t.Fatalf("unexpected sender: %s %s", id, name)
+	msg := &tgbotapi.Message{
+		From: &tgbotapi.User{ID: 123, UserName: "alice"},
+	}
+	externalID, displayName, attrs = resolveTelegramSender(msg)
+	if externalID != "123" || displayName != "alice" {
+		t.Fatalf("unexpected sender: %s %s", externalID, displayName)
+	}
+	if attrs["user_id"] != "123" || attrs["username"] != "alice" {
+		t.Fatalf("unexpected attrs: %#v", attrs)
 	}
 }

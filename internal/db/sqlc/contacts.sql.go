@@ -53,73 +53,6 @@ func (q *Queries) CreateContact(ctx context.Context, arg CreateContactParams) (C
 	return i, err
 }
 
-const createContactBindToken = `-- name: CreateContactBindToken :one
-INSERT INTO contact_bind_tokens (bot_id, contact_id, token, target_platform, target_external_id, issued_by_user_id, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, bot_id, contact_id, token, target_platform, target_external_id, issued_by_user_id, expires_at, used_at, created_at
-`
-
-type CreateContactBindTokenParams struct {
-	BotID            pgtype.UUID        `json:"bot_id"`
-	ContactID        pgtype.UUID        `json:"contact_id"`
-	Token            string             `json:"token"`
-	TargetPlatform   pgtype.Text        `json:"target_platform"`
-	TargetExternalID pgtype.Text        `json:"target_external_id"`
-	IssuedByUserID   pgtype.UUID        `json:"issued_by_user_id"`
-	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
-}
-
-func (q *Queries) CreateContactBindToken(ctx context.Context, arg CreateContactBindTokenParams) (ContactBindToken, error) {
-	row := q.db.QueryRow(ctx, createContactBindToken,
-		arg.BotID,
-		arg.ContactID,
-		arg.Token,
-		arg.TargetPlatform,
-		arg.TargetExternalID,
-		arg.IssuedByUserID,
-		arg.ExpiresAt,
-	)
-	var i ContactBindToken
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.ContactID,
-		&i.Token,
-		&i.TargetPlatform,
-		&i.TargetExternalID,
-		&i.IssuedByUserID,
-		&i.ExpiresAt,
-		&i.UsedAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getContactBindToken = `-- name: GetContactBindToken :one
-SELECT id, bot_id, contact_id, token, target_platform, target_external_id, issued_by_user_id, expires_at, used_at, created_at
-FROM contact_bind_tokens
-WHERE token = $1
-LIMIT 1
-`
-
-func (q *Queries) GetContactBindToken(ctx context.Context, token string) (ContactBindToken, error) {
-	row := q.db.QueryRow(ctx, getContactBindToken, token)
-	var i ContactBindToken
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.ContactID,
-		&i.Token,
-		&i.TargetPlatform,
-		&i.TargetExternalID,
-		&i.IssuedByUserID,
-		&i.ExpiresAt,
-		&i.UsedAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getContactByID = `-- name: GetContactByID :one
 SELECT id, bot_id, user_id, display_name, alias, tags, status, metadata, created_at, updated_at
 FROM contacts
@@ -276,31 +209,6 @@ func (q *Queries) ListContactsByBot(ctx context.Context, botID pgtype.UUID) ([]C
 		return nil, err
 	}
 	return items, nil
-}
-
-const markContactBindTokenUsed = `-- name: MarkContactBindTokenUsed :one
-UPDATE contact_bind_tokens
-SET used_at = now()
-WHERE id = $1
-RETURNING id, bot_id, contact_id, token, target_platform, target_external_id, issued_by_user_id, expires_at, used_at, created_at
-`
-
-func (q *Queries) MarkContactBindTokenUsed(ctx context.Context, id pgtype.UUID) (ContactBindToken, error) {
-	row := q.db.QueryRow(ctx, markContactBindTokenUsed, id)
-	var i ContactBindToken
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.ContactID,
-		&i.Token,
-		&i.TargetPlatform,
-		&i.TargetExternalID,
-		&i.IssuedByUserID,
-		&i.ExpiresAt,
-		&i.UsedAt,
-		&i.CreatedAt,
-	)
-	return i, err
 }
 
 const searchContacts = `-- name: SearchContacts :many

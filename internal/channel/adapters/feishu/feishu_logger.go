@@ -19,23 +19,23 @@ func newLarkSlogLogger(logger *slog.Logger) larkcore.Logger {
 	return &larkSlogLogger{logger: logger}
 }
 
-func (l *larkSlogLogger) Debug(ctx context.Context, args ...interface{}) {
+func (l *larkSlogLogger) Debug(ctx context.Context, args ...any) {
 	l.log(ctx, slog.LevelDebug, args...)
 }
 
-func (l *larkSlogLogger) Info(ctx context.Context, args ...interface{}) {
+func (l *larkSlogLogger) Info(ctx context.Context, args ...any) {
 	l.log(ctx, slog.LevelInfo, args...)
 }
 
-func (l *larkSlogLogger) Warn(ctx context.Context, args ...interface{}) {
+func (l *larkSlogLogger) Warn(ctx context.Context, args ...any) {
 	l.log(ctx, slog.LevelWarn, args...)
 }
 
-func (l *larkSlogLogger) Error(ctx context.Context, args ...interface{}) {
+func (l *larkSlogLogger) Error(ctx context.Context, args ...any) {
 	l.log(ctx, slog.LevelError, args...)
 }
 
-func (l *larkSlogLogger) log(ctx context.Context, level slog.Level, args ...interface{}) {
+func (l *larkSlogLogger) log(ctx context.Context, level slog.Level, args ...any) {
 	if l.logger == nil {
 		return
 	}

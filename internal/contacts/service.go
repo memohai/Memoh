@@ -77,6 +77,29 @@ func (s *Service) GetByChannelIdentity(ctx context.Context, botID, platform, ext
 	return normalizeContactChannel(row)
 }
 
+func (s *Service) ListChannelsByContact(ctx context.Context, contactID string) ([]ContactChannel, error) {
+	if s.queries == nil {
+		return nil, fmt.Errorf("contacts queries not configured")
+	}
+	pgContactID, err := parseUUID(contactID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListContactChannelsByContact(ctx, pgContactID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ContactChannel, 0, len(rows))
+	for _, row := range rows {
+		item, err := normalizeContactChannel(row)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 func (s *Service) ListByBot(ctx context.Context, botID string) ([]Contact, error) {
 	if s.queries == nil {
 		return nil, fmt.Errorf("contacts queries not configured")
@@ -242,7 +265,7 @@ func (s *Service) BindUser(ctx context.Context, contactID, userID string) (Conta
 	return normalizeContact(row)
 }
 
-func (s *Service) UpsertChannel(ctx context.Context, botID, contactID, platform, externalID string, metadata map[string]interface{}) (ContactChannel, error) {
+func (s *Service) UpsertChannel(ctx context.Context, botID, contactID, platform, externalID string, metadata map[string]any) (ContactChannel, error) {
 	if s.queries == nil {
 		return ContactChannel{}, fmt.Errorf("contacts queries not configured")
 	}
@@ -269,72 +292,6 @@ func (s *Service) UpsertChannel(ctx context.Context, botID, contactID, platform,
 		return ContactChannel{}, err
 	}
 	return normalizeContactChannel(row)
-}
-
-func (s *Service) CreateBindToken(ctx context.Context, botID, contactID, targetPlatform, targetExternalID, issuedByUserID string, ttl time.Duration) (BindToken, error) {
-	if s.queries == nil {
-		return BindToken{}, fmt.Errorf("contacts queries not configured")
-	}
-	if ttl <= 0 {
-		ttl = 10 * time.Minute
-	}
-	pgBotID, err := parseUUID(botID)
-	if err != nil {
-		return BindToken{}, err
-	}
-	pgContactID, err := parseUUID(contactID)
-	if err != nil {
-		return BindToken{}, err
-	}
-	pgIssuedBy := pgtype.UUID{Valid: false}
-	if strings.TrimSpace(issuedByUserID) != "" {
-		parsed, err := parseUUID(issuedByUserID)
-		if err != nil {
-			return BindToken{}, err
-		}
-		pgIssuedBy = parsed
-	}
-	token := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
-	expiresAt := time.Now().UTC().Add(ttl)
-	row, err := s.queries.CreateContactBindToken(ctx, sqlc.CreateContactBindTokenParams{
-		BotID:            pgBotID,
-		ContactID:        pgContactID,
-		Token:            token,
-		TargetPlatform:   pgtype.Text{String: strings.TrimSpace(targetPlatform), Valid: strings.TrimSpace(targetPlatform) != ""},
-		TargetExternalID: pgtype.Text{String: strings.TrimSpace(targetExternalID), Valid: strings.TrimSpace(targetExternalID) != ""},
-		IssuedByUserID:   pgIssuedBy,
-		ExpiresAt:        pgtype.Timestamptz{Time: expiresAt, Valid: true},
-	})
-	if err != nil {
-		return BindToken{}, err
-	}
-	return normalizeBindToken(row)
-}
-
-func (s *Service) GetBindToken(ctx context.Context, token string) (BindToken, error) {
-	if s.queries == nil {
-		return BindToken{}, fmt.Errorf("contacts queries not configured")
-	}
-	row, err := s.queries.GetContactBindToken(ctx, strings.TrimSpace(token))
-	if err != nil {
-		return BindToken{}, err
-	}
-	return normalizeBindToken(row)
-}
-
-func (s *Service) MarkBindTokenUsed(ctx context.Context, id string) (BindToken, error) {
-	if s.queries == nil {
-		return BindToken{}, fmt.Errorf("contacts queries not configured")
-	}
-	pgID, err := parseUUID(id)
-	if err != nil {
-		return BindToken{}, err
-	}
-	row, err := s.queries.MarkContactBindTokenUsed(ctx, pgID)
-	if err != nil {
-		return BindToken{}, err
-	}
-	return normalizeBindToken(row)
 }
 
 func normalizeContact(row sqlc.Contact) (Contact, error) {
@@ -373,38 +330,23 @@ func normalizeContactChannel(row sqlc.ContactChannel) (ContactChannel, error) {
 	}, nil
 }
 
-func normalizeBindToken(row sqlc.ContactBindToken) (BindToken, error) {
-	return BindToken{
-		ID:               toUUIDString(row.ID),
-		BotID:            toUUIDString(row.BotID),
-		ContactID:        toUUIDString(row.ContactID),
-		Token:            strings.TrimSpace(row.Token),
-		TargetPlatform:   strings.TrimSpace(row.TargetPlatform.String),
-		TargetExternalID: strings.TrimSpace(row.TargetExternalID.String),
-		IssuedByUserID:   toUUIDString(row.IssuedByUserID),
-		ExpiresAt:        timeFromPg(row.ExpiresAt),
-		UsedAt:           timeFromPg(row.UsedAt),
-		CreatedAt:        timeFromPg(row.CreatedAt),
-	}, nil
-}
-
-func decodeMetadata(raw []byte) (map[string]interface{}, error) {
+func decodeMetadata(raw []byte) (map[string]any, error) {
 	if len(raw) == 0 {
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, err
 	}
 	if payload == nil {
-		payload = map[string]interface{}{}
+		payload = map[string]any{}
 	}
 	return payload, nil
 }
 
-func defaultMetadata(value map[string]interface{}) map[string]interface{} {
+func defaultMetadata(value map[string]any) map[string]any {
 	if value == nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
 	return value
 }
