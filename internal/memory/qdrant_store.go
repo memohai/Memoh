@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/qdrant/go-client/qdrant"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -32,12 +34,12 @@ type QdrantStore struct {
 }
 
 type qdrantPoint struct {
-	ID               string                 `json:"id"`
-	Vector           []float32              `json:"vector"`
-	VectorName       string                 `json:"vector_name,omitempty"`
-	SparseIndices    []uint32               `json:"sparse_indices,omitempty"`
-	SparseValues     []float32              `json:"sparse_values,omitempty"`
-	SparseVectorName string                 `json:"sparse_vector_name,omitempty"`
+	ID               string         `json:"id"`
+	Vector           []float32      `json:"vector"`
+	VectorName       string         `json:"vector_name,omitempty"`
+	SparseIndices    []uint32       `json:"sparse_indices,omitempty"`
+	SparseValues     []float32      `json:"sparse_values,omitempty"`
+	SparseVectorName string         `json:"sparse_vector_name,omitempty"`
 	Payload          map[string]any `json:"payload,omitempty"`
 }
 
@@ -396,7 +398,10 @@ func (s *QdrantStore) ensureCollection(ctx context.Context, vectors map[string]i
 		return err
 	}
 	if exists {
-		return s.refreshCollectionSchema(ctx, vectors)
+		if err := s.refreshCollectionSchema(ctx, vectors); err != nil {
+			return err
+		}
+		return s.ensurePayloadIndexes(ctx)
 	}
 	var vectorsConfig *qdrant.VectorsConfig
 	if len(vectors) > 0 {
@@ -421,11 +426,14 @@ func (s *QdrantStore) ensureCollection(ctx context.Context, vectors map[string]i
 			sparseVocabVectorName: {Modifier: qdrant.PtrOf(qdrant.Modifier_None)},
 		})
 	}
-	return s.client.CreateCollection(ctx, &qdrant.CreateCollection{
+	if err := s.client.CreateCollection(ctx, &qdrant.CreateCollection{
 		CollectionName:      s.collection,
 		VectorsConfig:       vectorsConfig,
 		SparseVectorsConfig: sparseConfig,
-	})
+	}); err != nil {
+		return err
+	}
+	return s.ensurePayloadIndexes(ctx)
 }
 
 func (s *QdrantStore) refreshCollectionSchema(ctx context.Context, vectors map[string]int) error {
@@ -490,6 +498,34 @@ sparseCheck:
 			s.sparseVectorName = name
 			break
 		}
+	}
+	return nil
+}
+
+func (s *QdrantStore) ensurePayloadIndexes(ctx context.Context) error {
+	if s.client == nil {
+		return nil
+	}
+	fields := []string{"botId", "sessionId", "runId"}
+	wait := true
+	for _, field := range fields {
+		_, err := s.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+			CollectionName: s.collection,
+			FieldName:      field,
+			FieldType:      qdrant.FieldType_FieldTypeKeyword.Enum(),
+			Wait:           &wait,
+		})
+		if err == nil {
+			continue
+		}
+		if status.Code(err) == codes.AlreadyExists {
+			continue
+		}
+		// Fall back to string match when the backend wraps the error.
+		if strings.Contains(strings.ToLower(err.Error()), "already exists") {
+			continue
+		}
+		return err
 	}
 	return nil
 }
