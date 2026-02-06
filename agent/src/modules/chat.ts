@@ -4,7 +4,7 @@ import { createAgent } from '../agent'
 import { createAuthFetcher } from '../index'
 import { ModelConfig } from '../types'
 import { bearerMiddleware } from '../middlewares/bearer'
-import { AllowedActionModel, IdentityContextModel, ModelConfigModel } from '../models'
+import { AllowedActionModel, AttachmentModel, IdentityContextModel, ModelConfigModel } from '../models'
 import { allActions } from '../types'
 
 const AgentModel = z.object({
@@ -17,6 +17,7 @@ const AgentModel = z.object({
   skills: z.array(z.string()),
   query: z.string(),
   identity: IdentityContextModel,
+  attachments: z.array(AttachmentModel),
 })
 
 export const chatModule = new Elysia({ prefix: '/chat' })
@@ -35,7 +36,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       query: body.query,
       messages: body.messages,
       skills: body.skills,
-      attachments: [],
+      attachments: body.attachments,
     })
   }, {
     body: AgentModel,
@@ -54,7 +55,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       query: body.query,
       messages: body.messages,
       skills: body.skills,
-      attachments: [],
+      attachments: body.attachments,
     })) {
       yield sse(JSON.stringify(action))
     }

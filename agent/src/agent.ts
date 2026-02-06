@@ -37,14 +37,15 @@ export const createAgent = ({
   })
 
   const generateUserPrompt = (input: AgentInput) => {
+    const images = input.attachments.filter(attachment => attachment.type === 'image')
+    const files = input.attachments.filter(attachment => attachment.type === 'file')
     const text = user(input.query, {
       contactId: identity.contactId,
       contactName: identity.contactName,
       platform: currentPlatform,
       date: new Date(),
+      attachments: files,
     })
-    const images = input.attachments.filter(attachment => attachment.type === 'image')
-    // const files = input.attachments.filter(attachment => attachment.type === 'file')
     const userMessage: UserModelMessage = {
       role: 'user',
       content: [

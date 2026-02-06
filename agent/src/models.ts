@@ -41,3 +41,17 @@ export const ScheduleModel = z.object({
   maxCalls: z.number().nullable().optional(),
   command: z.string().min(1, 'Schedule command is required'),
 })
+
+export const ImageAttachmentModel = z.object({
+  type: z.literal('image'),
+  base64: z.string().min(1, 'Image base64 is required'),
+  metadata: z.record(z.string(), z.any()).optional(),
+})
+
+export const FileAttachmentModel = z.object({
+  type: z.literal('file'),
+  path: z.string().min(1, 'File path is required'),
+  metadata: z.record(z.string(), z.any()).optional(),
+})
+
+export const AttachmentModel = z.union([ImageAttachmentModel, FileAttachmentModel])

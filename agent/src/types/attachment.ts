@@ -1,6 +1,6 @@
 export interface BaseAgentAttachment {
   type: string
-  metadata: Record<string, unknown>
+  metadata?: Record<string, unknown>
 }
 
 export interface ImageAttachment extends BaseAgentAttachment {
