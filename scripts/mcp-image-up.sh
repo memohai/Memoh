@@ -5,6 +5,8 @@ IMAGE="memoh-mcp:dev"
 
 if [ "$(uname -s)" = "Darwin" ]; then
   limactl shell default -- nerdctl build -f cmd/mcp/Dockerfile -t "$IMAGE" .
+  # Import into rootful containerd so the Go agent can find the image
+  limactl shell default -- sh -c "nerdctl save $IMAGE | sudo nerdctl load"
   exit $?
 fi
 
