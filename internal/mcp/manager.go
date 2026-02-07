@@ -88,15 +88,8 @@ func (m *Manager) EnsureBot(ctx context.Context, botID string) error {
 		return err
 	}
 
-	dataMount := m.cfg.DataMount
-	if dataMount == "" {
-		dataMount = config.DefaultDataMount
-	}
-
-	image := m.cfg.BusyboxImage
-	if image == "" {
-		image = config.DefaultBusyboxImg
-	}
+	dataMount := m.dataMount()
+	image := m.imageRef()
 
 	specOpts := []oci.SpecOpts{
 		oci.WithMounts([]specs.Mount{
@@ -235,23 +228,36 @@ func (m *Manager) DataDir(botID string) (string, error) {
 		return "", err
 	}
 
-	root := m.cfg.DataRoot
-	if root == "" {
-		root = config.DefaultDataRoot
-	}
-	return filepath.Join(root, "bots", botID), nil
+	return filepath.Join(m.dataRoot(), "bots", botID), nil
 }
 
 func (m *Manager) ensureBotDir(botID string) (string, error) {
-	root := m.cfg.DataRoot
-	if root == "" {
-		root = config.DefaultDataRoot
-	}
-	dir := filepath.Join(root, "bots", botID)
+	dir := filepath.Join(m.dataRoot(), "bots", botID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	return dir, nil
+}
+
+func (m *Manager) dataRoot() string {
+	if m.cfg.DataRoot == "" {
+		return config.DefaultDataRoot
+	}
+	return m.cfg.DataRoot
+}
+
+func (m *Manager) dataMount() string {
+	if m.cfg.DataMount == "" {
+		return config.DefaultDataMount
+	}
+	return m.cfg.DataMount
+}
+
+func (m *Manager) imageRef() string {
+	if m.cfg.BusyboxImage == "" {
+		return config.DefaultBusyboxImg
+	}
+	return m.cfg.BusyboxImage
 }
 
 func validateBotID(botID string) error {
