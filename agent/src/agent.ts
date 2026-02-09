@@ -1,5 +1,5 @@
 import { generateText, ImagePart, LanguageModelUsage, ModelMessage, stepCountIs, streamText, UserModelMessage } from 'ai'
-import { AgentInput, AgentParams, AgentSkill, allActions, HTTPMCPConnection, MCPConnection, Schedule } from './types'
+import { AgentInput, AgentParams, AgentSkill, allActions, HTTPMCPConnection, MCPConnection, Schedule, StdioMCPConnection } from './types'
 import { system, schedule, user, subagentSystem } from './prompts'
 import { AuthFetcher } from './index'
 import { createModel } from './model'
@@ -56,7 +56,14 @@ export const createAgent = ({
         'Authorization': `Bearer ${auth.bearer}`,
       },
     }
-    return [fs]
+    const mcpFetch: StdioMCPConnection = {
+      type: 'stdio',
+      name: 'mcp-fetch',
+      command: 'npx',
+      args: ['fetch-mcp'],
+      env: {},
+    }
+    return [fs, mcpFetch]
   }
   
   const generateSystemPrompt = () => {
@@ -82,7 +89,11 @@ export const createAgent = ({
     const { tools: mcpTools, close: closeMCP } = await getMCPTools([
       ...defaultMCPConnections,
       ...mcpConnections,
-    ])
+    ], {
+      botId: identity.botId,
+      auth,
+      fetch,
+    })
     Object.assign(tools, mcpTools)
     return {
       tools,

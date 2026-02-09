@@ -32,15 +32,17 @@ import (
 )
 
 type ContainerdHandler struct {
-	service     ctr.Service
-	cfg         config.MCPConfig
-	namespace   string
-	logger      *slog.Logger
-	mcpMu       sync.Mutex
-	mcpSess     map[string]*mcpSession
-	botService  *bots.Service
-	userService *users.Service
-	queries     *dbsqlc.Queries
+	service      ctr.Service
+	cfg          config.MCPConfig
+	namespace    string
+	logger       *slog.Logger
+	mcpMu        sync.Mutex
+	mcpSess      map[string]*mcpSession
+	mcpStdioMu   sync.Mutex
+	mcpStdioSess map[string]*mcpStdioSession
+	botService   *bots.Service
+	userService  *users.Service
+	queries      *dbsqlc.Queries
 }
 
 type CreateContainerRequest struct {
@@ -94,14 +96,15 @@ type ListSnapshotsResponse struct {
 
 func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string, botService *bots.Service, userService *users.Service, queries *dbsqlc.Queries) *ContainerdHandler {
 	return &ContainerdHandler{
-		service:     service,
-		cfg:         cfg,
-		namespace:   namespace,
-		logger:      log.With(slog.String("handler", "containerd")),
-		mcpSess:     make(map[string]*mcpSession),
-		botService:  botService,
-		userService: userService,
-		queries:     queries,
+		service:      service,
+		cfg:          cfg,
+		namespace:    namespace,
+		logger:       log.With(slog.String("handler", "containerd")),
+		mcpSess:      make(map[string]*mcpSession),
+		mcpStdioSess: make(map[string]*mcpStdioSession),
+		botService:   botService,
+		userService:  userService,
+		queries:      queries,
 	}
 }
 
@@ -118,6 +121,10 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group.POST("/skills", h.UpsertSkills)
 	group.DELETE("/skills", h.DeleteSkills)
 	group.POST("/fs", h.HandleMCPFS)
+
+	root := e.Group("/bots/:bot_id")
+	root.POST("/mcp-stdio", h.CreateMCPStdio)
+	root.POST("/mcp-stdio/:session_id", h.HandleMCPStdio)
 }
 
 // CreateContainer godoc

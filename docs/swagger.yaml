@@ -668,6 +668,34 @@ definitions:
       username:
         type: string
     type: object
+  handlers.MCPStdioRequest:
+    properties:
+      args:
+        items:
+          type: string
+        type: array
+      command:
+        type: string
+      cwd:
+        type: string
+      env:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        type: string
+    type: object
+  handlers.MCPStdioResponse:
+    properties:
+      session_id:
+        type: string
+      tools:
+        items:
+          type: string
+        type: array
+      url:
+        type: string
+    type: object
   handlers.SkillItem:
     properties:
       content:
@@ -2012,6 +2040,82 @@ paths:
       summary: Create MCP connection
       tags:
       - mcp
+  /bots/{bot_id}/mcp-stdio:
+    post:
+      description: Start a stdio MCP process in the bot container and expose it as
+        MCP HTTP endpoint.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Stdio MCP payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.MCPStdioRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MCPStdioResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create MCP stdio proxy
+      tags:
+      - containerd
+  /bots/{bot_id}/mcp-stdio/{session_id}:
+    post:
+      description: Proxies MCP JSON-RPC requests to a stdio MCP process in the container.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: JSON-RPC request
+        in: body
+        name: payload
+        required: true
+        schema:
+          type: object
+      responses:
+        "200":
+          description: 'JSON-RPC response: {jsonrpc,id,result|error}'
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: MCP stdio proxy (JSON-RPC)
+      tags:
+      - containerd
   /bots/{bot_id}/mcp/{id}:
     delete:
       description: Delete a MCP connection by ID
