@@ -12,6 +12,7 @@ DROP TABLE IF EXISTS bot_channel_configs;
 DROP TABLE IF EXISTS user_channel_bindings;
 DROP TABLE IF EXISTS history;
 DROP TABLE IF EXISTS conversations;
+DROP TABLE IF EXISTS mcp_connections;
 DROP TABLE IF EXISTS bot_model_configs;
 DROP TABLE IF EXISTS bot_settings;
 DROP TABLE IF EXISTS bot_members;

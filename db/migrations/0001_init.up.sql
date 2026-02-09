@@ -106,6 +106,21 @@ CREATE TABLE IF NOT EXISTS bot_model_configs (
   memory_model_id UUID REFERENCES models(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS mcp_connections (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT mcp_connections_type_check CHECK (type IN ('stdio', 'http', 'sse')),
+  CONSTRAINT mcp_connections_unique UNIQUE (bot_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_connections_bot_id ON mcp_connections(bot_id);
+
 CREATE TABLE IF NOT EXISTS conversations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,

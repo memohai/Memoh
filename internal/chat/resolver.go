@@ -16,6 +16,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/history"
+	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/memory"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/schedule"
@@ -44,6 +45,7 @@ type Resolver struct {
 	memoryService   *memory.Service
 	historyService  *history.Service
 	settingsService *settings.Service
+	mcpService      *mcp.ConnectionService
 	skillLoader     SkillLoader
 	gatewayBaseURL  string
 	timeout         time.Duration
@@ -60,6 +62,7 @@ func NewResolver(
 	memoryService *memory.Service,
 	historyService *history.Service,
 	settingsService *settings.Service,
+	mcpService *mcp.ConnectionService,
 	gatewayBaseURL string,
 	timeout time.Duration,
 ) *Resolver {
@@ -76,6 +79,7 @@ func NewResolver(
 		memoryService:   memoryService,
 		historyService:  historyService,
 		settingsService: settingsService,
+		mcpService:      mcpService,
 		gatewayBaseURL:  gatewayBaseURL,
 		timeout:         timeout,
 		logger:          log.With(slog.String("service", "chat")),
@@ -125,6 +129,7 @@ type gatewayRequest struct {
 	Channels          []string           `json:"channels"`
 	CurrentChannel    string             `json:"currentChannel"`
 	AllowedActions    []string           `json:"allowedActions,omitempty"`
+	MCPConnections    []map[string]any   `json:"mcpConnections"`
 	Messages          []ModelMessage     `json:"messages"`
 	Skills            []string           `json:"skills"`
 	UsableSkills      []gatewaySkill     `json:"usableSkills"`
@@ -155,6 +160,7 @@ type triggerScheduleRequest struct {
 	Channels          []string           `json:"channels"`
 	CurrentChannel    string             `json:"currentChannel"`
 	AllowedActions    []string           `json:"allowedActions,omitempty"`
+	MCPConnections    []map[string]any   `json:"mcpConnections"`
 	Messages          []ModelMessage     `json:"messages"`
 	Skills            []string           `json:"skills"`
 	UsableSkills      []gatewaySkill     `json:"usableSkills"`
@@ -166,8 +172,8 @@ type triggerScheduleRequest struct {
 // --- resolved context (shared by Chat / StreamChat / TriggerSchedule) ---
 
 type resolvedContext struct {
-	payload gatewayRequest
-	model   models.GetResponse
+	payload  gatewayRequest
+	model    models.GetResponse
 	provider sqlc.LlmProvider
 }
 
@@ -240,6 +246,24 @@ func (r *Resolver) resolve(ctx context.Context, req ChatRequest) (resolvedContex
 		usableSkills = []gatewaySkill{}
 	}
 
+	mcpConnections := []map[string]any{}
+	if r.mcpService != nil {
+		items, err := r.mcpService.ListActiveByBot(ctx, req.BotID)
+		if err != nil {
+			r.logger.Warn("failed to load mcp connections", slog.String("bot_id", req.BotID), slog.Any("error", err))
+		} else {
+			for _, item := range items {
+				payload := map[string]any{}
+				for k, v := range item.Config {
+					payload[k] = v
+				}
+				payload["name"] = item.Name
+				payload["type"] = item.Type
+				mcpConnections = append(mcpConnections, payload)
+			}
+		}
+	}
+
 	payload := gatewayRequest{
 		Model: gatewayModelConfig{
 			ModelID:    chatModel.ModelID,
@@ -252,6 +276,7 @@ func (r *Resolver) resolve(ctx context.Context, req ChatRequest) (resolvedContex
 		Channels:          nonNilStrings(req.Channels),
 		CurrentChannel:    req.CurrentChannel,
 		AllowedActions:    req.AllowedActions,
+		MCPConnections:    mcpConnections,
 		Messages:          nonNilMessages(messages),
 		Skills:            nonNilStrings(skills),
 		UsableSkills:      usableSkills,
@@ -327,6 +352,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 		Channels:          rc.payload.Channels,
 		CurrentChannel:    rc.payload.CurrentChannel,
 		AllowedActions:    rc.payload.AllowedActions,
+		MCPConnections:    rc.payload.MCPConnections,
 		Messages:          rc.payload.Messages,
 		Skills:            rc.payload.Skills,
 		UsableSkills:      rc.payload.UsableSkills,

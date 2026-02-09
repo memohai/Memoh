@@ -483,6 +483,26 @@ definitions:
       name:
         type: string
     type: object
+  github_com_memohai_memoh_internal_mcp.Connection:
+    properties:
+      active:
+        type: boolean
+      bot_id:
+        type: string
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
   handlers.ChannelMeta:
     properties:
       capabilities:
@@ -813,6 +833,25 @@ definitions:
           type: string
         type: array
       timestamp:
+        type: string
+    type: object
+  mcp.ListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+        type: array
+    type: object
+  mcp.UpsertRequest:
+    properties:
+      active:
+        type: boolean
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      type:
         type: string
     type: object
   memory.DeleteResponse:
@@ -1913,6 +1952,167 @@ paths:
       summary: Get history record
       tags:
       - history
+  /bots/{bot_id}/mcp:
+    get:
+      description: List MCP connections for a bot
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.ListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List MCP connections
+      tags:
+      - mcp
+    post:
+      description: Create a MCP connection for a bot
+      parameters:
+      - description: MCP payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/mcp.UpsertRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create MCP connection
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp/{id}:
+    delete:
+      description: Delete a MCP connection by ID
+      parameters:
+      - description: MCP ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete MCP connection
+      tags:
+      - mcp
+    get:
+      description: Get a MCP connection by ID
+      parameters:
+      - description: MCP ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get MCP connection
+      tags:
+      - mcp
+    put:
+      description: Update a MCP connection by ID
+      parameters:
+      - description: MCP ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/mcp.UpsertRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update MCP connection
+      tags:
+      - mcp
   /bots/{bot_id}/memory/add:
     post:
       description: 'Add memory for a user via memory. Auth: Bearer JWT determines

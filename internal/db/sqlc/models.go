@@ -169,6 +169,17 @@ type LlmProvider struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type McpConnection struct {
+	ID        pgtype.UUID        `json:"id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	Name      string             `json:"name"`
+	Type      string             `json:"type"`
+	Config    []byte             `json:"config"`
+	IsActive  bool               `json:"is_active"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Model struct {
 	ID            pgtype.UUID        `json:"id"`
 	ModelID       string             `json:"model_id"`

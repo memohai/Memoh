@@ -154,8 +154,10 @@ func main() {
 	contactsHandler := handlers.NewContactsHandler(contactsService, botService, usersService)
 	preauthService := preauth.NewService(queries)
 	preauthHandler := handlers.NewPreauthHandler(preauthService, botService, usersService)
+	mcpConnectionsService := mcp.NewConnectionService(logger.L, queries)
+	mcpHandler := handlers.NewMCPHandler(logger.L, mcpConnectionsService, botService, usersService)
 
-	chatResolver = chat.NewResolver(logger.L, modelsService, queries, memoryService, historyService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
+	chatResolver = chat.NewResolver(logger.L, modelsService, queries, memoryService, historyService, settingsService, mcpConnectionsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
 	chatResolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	embeddingsHandler := handlers.NewEmbeddingsHandler(logger.L, modelsService, queries)
 	swaggerHandler := handlers.NewSwaggerHandler(logger.L)
@@ -186,7 +188,7 @@ func main() {
 	scheduleHandler := handlers.NewScheduleHandler(logger.L, scheduleService, botService, usersService)
 	subagentService := subagent.NewService(logger.L, queries)
 	subagentHandler := handlers.NewSubagentHandler(logger.L, subagentService, botService, usersService)
-	srv := server.NewServer(logger.L, addr, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, contactsHandler, preauthHandler, scheduleHandler, subagentHandler, containerdHandler, channelHandler, usersHandler, cliHandler, webHandler)
+	srv := server.NewServer(logger.L, addr, cfg.Auth.JWTSecret, pingHandler, authHandler, memoryHandler, embeddingsHandler, chatHandler, swaggerHandler, providersHandler, modelsHandler, settingsHandler, historyHandler, contactsHandler, preauthHandler, scheduleHandler, subagentHandler, containerdHandler, channelHandler, usersHandler, mcpHandler, cliHandler, webHandler)
 
 	if err := srv.Start(); err != nil {
 		logger.Error("server failed", slog.Any("error", err))
