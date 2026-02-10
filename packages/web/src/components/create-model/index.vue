@@ -9,8 +9,7 @@
       <DialogContent class="sm:max-w-106.25">
         <form @submit="addModel">
           <DialogHeader>
-            <DialogTitle> 
-              <!-- {{ $t("button.add", { msg: "Model" }) }} -->
+            <DialogTitle>
               {{ title === 'edit' ? '编辑Model' : '添加Model' }}
             </DialogTitle>
             <DialogDescription class="mb-4">
@@ -18,55 +17,7 @@
             </DialogDescription>
           </DialogHeader>
           <div class="flex flex-col gap-3">
-            <FormField
-              v-slot="{ componentField }"
-              name="name"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  Name
-                </Label>
-                <FormControl>
-                  <Input
-                    type="text"
-                    v-bind="componentField"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-            <FormField
-              v-slot="{ componentField }"
-              name="model_id"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  Model ID
-                </Label>
-                <FormControl>
-                  <Input
-                    type="text"
-                    v-bind="componentField"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-            <FormField
-              v-slot="{ componentField }"
-              name="dimensions"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  Dimensions
-                </Label>
-                <FormControl>
-                  <Input
-                    type="text"
-                    v-bind="componentField"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-        
+            <!-- 1. Type（先选类型） -->
             <FormField
               v-slot="{ componentField }"
               name="type"
@@ -78,7 +29,7 @@
                 <FormControl>
                   <Select v-bind="componentField">
                     <SelectTrigger class="w-full">
-                      <SelectValue />
+                      <SelectValue placeholder="选择模型类型" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
@@ -86,7 +37,7 @@
                           Chat
                         </SelectItem>
                         <SelectItem value="embedding">
-                          embedding
+                          Embedding
                         </SelectItem>
                       </SelectGroup>
                     </SelectContent>
@@ -94,16 +45,77 @@
                 </FormControl>
               </FormItem>
             </FormField>
+
+            <!-- 2. Model（原 Model ID） -->
             <FormField
               v-slot="{ componentField }"
-              name="is_multimodal"
+              name="model_id"
             >
               <FormItem>
                 <Label class="mb-2">
+                  Model
+                </Label>
+                <FormControl>
+                  <Input
+                    type="text"
+                    placeholder="e.g. gpt-4o"
+                    v-bind="componentField"
+                  />
+                </FormControl>
+              </FormItem>
+            </FormField>
+
+            <!-- 3. Display Name（可选） -->
+            <FormField
+              v-slot="{ componentField }"
+              name="name"
+            >
+              <FormItem>
+                <Label class="mb-2">
+                  Display Name
+                  <span class="text-muted-foreground text-xs ml-1">(optional)</span>
+                </Label>
+                <FormControl>
+                  <Input
+                    type="text"
+                    placeholder="自定义显示名称"
+                    v-bind="componentField"
+                  />
+                </FormControl>
+              </FormItem>
+            </FormField>
+
+            <!-- 4. Dimensions（仅 embedding 时显示） -->
+            <FormField
+              v-if="selectedType === 'embedding'"
+              v-slot="{ componentField }"
+              name="dimensions"
+            >
+              <FormItem>
+                <Label class="mb-2">
+                  Dimensions
+                </Label>
+                <FormControl>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 1536"
+                    v-bind="componentField"
+                  />
+                </FormControl>
+              </FormItem>
+            </FormField>
+
+            <!-- 5. 多模态（仅 chat 时显示） -->
+            <FormField
+              v-if="selectedType === 'chat'"
+              v-slot="{ componentField }"
+              name="is_multimodal"
+            >
+              <FormItem class="flex items-center justify-between">
+                <Label>
                   是否开启多模态
                 </Label>
                 <Switch
-                  id="airplane-mode"
                   v-model="componentField.modelValue"
                   @update:model-value="componentField['onUpdate:modelValue']"
                 />
@@ -121,7 +133,7 @@
               :disabled="!form.meta.value.valid"
             >
               <Spinner v-if="isLoading" />
-              {{ $t("button.add", { msg: "Model" }) }}
+              {{ title === 'edit' ? '保存' : $t("button.add", { msg: "Model" }) }}
             </Button>
           </DialogFooter>
         </form>
@@ -154,40 +166,54 @@ import {
   Switch,
   Separator,
   Label,
-  Spinner
+  Spinner,
 } from '@memoh/ui'
 import { useForm } from 'vee-validate'
-import { inject, watch, type Ref, ref } from 'vue'
+import { inject, computed, watch, type Ref, ref } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { type ModelInfo } from '@memoh/shared'
 import { useCreateModel } from '@/composables/api/useModels'
 
 const formSchema = toTypedSchema(z.object({
-  is_multimodal: z.coerce.boolean(),
+  type: z.string().min(1, '请选择模型类型'),
   model_id: z.string().min(1),
-  name: z.string().min(1),
-  type: z.string().min(1),
-  dimensions: z.coerce.number().min(1),
+  name: z.string().optional(),
+  dimensions: z.coerce.number().min(1).optional(),
+  is_multimodal: z.coerce.boolean().optional(),
 }))
 
 const form = useForm({
   validationSchema: formSchema,
-  initialValues: {
-    dimensions: 1,
-  },
 })
+
+const selectedType = computed(() => form.values.type)
 
 const { id } = defineProps<{ id: string }>()
 
 const { mutate: createModel, isLoading } = useCreateModel()
 
-const addModel = form.handleSubmit(async (modelInfo) => {
+const addModel = form.handleSubmit(async (values) => {
   try {
-    await createModel({
-      ...modelInfo,
+    const payload: Record<string, unknown> = {
+      type: values.type,
+      model_id: values.model_id,
       llm_provider_id: id,
-    })
+    }
+
+    if (values.name) {
+      payload.name = values.name
+    }
+
+    if (values.type === 'embedding' && values.dimensions) {
+      payload.dimensions = values.dimensions
+    }
+
+    if (values.type === 'chat') {
+      payload.is_multimodal = values.is_multimodal ?? false
+    }
+
+    await createModel(payload as any)
     open.value = false
   } catch {
     return
@@ -196,7 +222,7 @@ const addModel = form.handleSubmit(async (modelInfo) => {
 
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))
-const editInfo =inject<Ref<ModelInfo|null>>('openModelState',ref(null))
+const editInfo = inject<Ref<ModelInfo | null>>('openModelState', ref(null))
 
 watch(open, () => {
   if (open.value && editInfo?.value) {
@@ -207,9 +233,9 @@ watch(open, () => {
 
   if (!open.value) {
     title.value = 'title'
-    editInfo.value=null
+    editInfo.value = null
   }
 }, {
-  immediate: true
+  immediate: true,
 })
 </script>

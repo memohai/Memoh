@@ -6,12 +6,12 @@ import type { Ref } from 'vue'
 // ---- Types ----
 
 export interface CreateModelRequest {
-  name: string
   model_id: string
   type: string
-  dimensions: number
-  is_multimodal: boolean
   llm_provider_id: string
+  name?: string
+  dimensions?: number
+  is_multimodal?: boolean
 }
 
 // ---- Query: 获取 Provider 下的模型列表 ----
