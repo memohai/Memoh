@@ -162,8 +162,8 @@
                   <SelectItem value="embedding">
                     Embedding
                   </SelectItem>
-                  <SelectItem value="memery">
-                    Memery
+                  <SelectItem value="memory">
+                    Memory
                   </SelectItem>
                 </SelectGroup>
               </SelectContent>

@@ -114,7 +114,7 @@ mise run dev
 | ------- | ----------- |
 | `mise run dev` | Start development environment |
 | `mise run setup` | Setup development environment |
-| `mise run db-up` | Intialize and Migrate Database |
+| `mise run db-up` | Initialize and Migrate Database |
 | `mise run db-down` | Drop Database |
 | `mise run swagger-generate` | Generate Swagger documentation |
 | `mise run sqlc-generate` | Generate SQL code |

@@ -51,7 +51,7 @@ description = "Generate SQL code"
 run = "sqlc generate"
 
 [tasks.db-up]
-description = "Intialize and Migrate Database"
+description = "Initialize and Migrate Database"
 run = "scripts/db-up.sh"
 
 [tasks.db-down]
