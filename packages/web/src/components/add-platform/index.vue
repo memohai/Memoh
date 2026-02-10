@@ -1,35 +1,37 @@
 <template>
   <section class="flex">
-    <Dialog v-model:open="open ">
+    <Dialog v-model:open="open">
       <DialogTrigger as-child>
         <Button
           variant="default"
           class="ml-auto my-4"
         >
-          添加平台
+          {{ $t('platform.addTitle') }}
         </Button>
       </DialogTrigger>
       <DialogContent class="sm:max-w-106.25">
         <form @submit="addPlatform">
           <DialogHeader>
-            <DialogTitle>添加平台</DialogTitle>
+            <DialogTitle>{{ $t('platform.addTitle') }}</DialogTitle>
             <DialogDescription class="mb-4">
-              为模型添加使用平台
+              {{ $t('platform.addDescription') }}
             </DialogDescription>
           </DialogHeader>
-          <div>
+
+          <div class="flex flex-col gap-3">
+            <!-- Name -->
             <FormField
               v-slot="{ componentField }"
               name="name"
             >
               <FormItem>
                 <FormLabel class="mb-2">
-                  Name
+                  {{ $t('platform.name') }}
                 </FormLabel>
                 <FormControl>
                   <Input
                     type="text"
-                    placeholder="请输入Name"
+                    :placeholder="$t('platform.namePlaceholder')"
                     v-bind="componentField"
                     autocomplete="name"
                   />
@@ -39,46 +41,33 @@
                 </blockquote>
               </FormItem>
             </FormField>
+
+            <!-- Config (key:value tags) -->
             <FormField
               v-slot="{ componentField }"
               name="config"
             >
               <FormItem>
                 <FormLabel class="mb-2">
-                  Config
+                  {{ $t('platform.config') }}
                 </FormLabel>
                 <FormControl>
                   <TagsInput
                     :add-on-blur="true"
-                    :model-value="configList"
-                    :convert-value="tagStr => {
-                      if (/^\w+\:\w+$/.test(tagStr)) {
-                        return tagStr
-                      }
-                      return ''
-                    }"
-                    @update:model-value="(env) => {
-                      configList = env.filter(Boolean) as string[]
-                      const curConfig: Record<string,string> = {}
-                      configList.forEach(envItem => {
-                        const [key, value] = envItem.split(`:`);
-                        if (key && value) {
-                          curConfig[key] = value
-                        }
-                      })
-                      componentField['onUpdate:modelValue']?.(curConfig)
-                    }"
+                    :model-value="configTags.tagList.value"
+                    :convert-value="configTags.convertValue"
+                    @update:model-value="(tags) => configTags.handleUpdate(tags.map(String), componentField['onUpdate:modelValue'])"
                   >
                     <TagsInputItem
-                      v-for="(value, index) in configList"
+                      v-for="(value, index) in configTags.tagList.value"
                       :key="index"
-                      :value="value as string"
+                      :value="value"
                     >
                       <TagsInputItemText />
                       <TagsInputItemDelete />
                     </TagsInputItem>
                     <TagsInputInput
-                      placeholder="请输入Env"
+                      :placeholder="$t('platform.configPlaceholder')"
                       class="w-full py-1"
                     />
                   </TagsInput>
@@ -88,17 +77,18 @@
                 </blockquote>
               </FormItem>
             </FormField>
+
+            <!-- Active -->
             <FormField
               v-slot="{ componentField }"
               name="active"
             >
               <FormItem>
                 <FormLabel class="mb-2">
-                  是否立即使用
+                  {{ $t('platform.active') }}
                 </FormLabel>
                 <FormControl>
                   <Switch
-                    id="airplane-mode"
                     :model-value="componentField.modelValue"
                     @update:model-value="componentField['onUpdate:modelValue']"
                   />
@@ -109,14 +99,15 @@
               </FormItem>
             </FormField>
           </div>
+
           <DialogFooter class="mt-4">
             <DialogClose as-child>
               <Button variant="outline">
-                Cancel
+                {{ $t('common.cancel') }}
               </Button>
             </DialogClose>
             <Button type="submit">
-              添加MCP
+              {{ $t('platform.addTitle') }}
             </Button>
           </DialogFooter>
         </form>
@@ -126,7 +117,7 @@
 </template>
 
 <script setup lang="ts">
-import {  
+import {
   Button,
   Dialog,
   DialogClose,
@@ -147,42 +138,35 @@ import {
   TagsInputItem,
   TagsInputItemDelete,
   TagsInputItemText,
-  Switch,  
+  Switch,
 } from '@memoh/ui'
 import z from 'zod'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import { ref, inject } from 'vue'
-import { useMutation } from '@pinia/colada'
-import request from '@/utils/request'
+import { useKeyValueTags } from '@/composables/useKeyValueTags'
+import { useCreatePlatform } from '@/composables/api/usePlatform'
 
-const configList=ref<string[]>([])
-const validataSchema = toTypedSchema(z.object({
+const configTags = useKeyValueTags()
+
+const validationSchema = toTypedSchema(z.object({
   name: z.string().min(1),
   config: z.looseObject({}),
-  active:z.coerce.boolean()
+  active: z.coerce.boolean(),
 }))
 
-const form = useForm({
-  validationSchema:validataSchema
-})
+const form = useForm({ validationSchema })
 
+const { mutate: addFetchPlatform } = useCreatePlatform()
 
-const {mutate:addFetchPlatform}=useMutation({
-  mutation: (data: Parameters<(Parameters<typeof form.handleSubmit>)[0]>[0]) => request({
-    url: '/platform/',
-    data,
-    method:'post'
-  })
-})
 const addPlatform = form.handleSubmit(async (value) => {
   try {
-    await addFetchPlatform(value)  
-    open.value=false
+    await addFetchPlatform(value)
+    open.value = false
   } catch {
     return
-  }  
+  }
 })
 
-const open=inject('open',ref<boolean>(false))
+const open = inject('open', ref<boolean>(false))
 </script>

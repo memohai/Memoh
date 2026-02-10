@@ -1,39 +1,180 @@
 {
-  "login": {
-    "username": "Username",
-    "password": "Password",
-    "login": "Login",
-    "register": "Register",
-    "forget": "Forgot your password?",
-    "exit": "Sign Out"
-  },
-  "prompt": {
-    "enter": "Please enter {msg}",
-    "select": "Please select {msg}"
-  },
-  "slidebar": {
-    "setting": "Settings",
-    "platform": "Platform",
-    "chat": "Create Chat",
-    "model_setting": "Model Settings",
-    "home": "Home"
-  },
-  "desc": {
-    "question": "your question"
-  },
-  "chat": {
-    "send": "Send",
-    "chat": "Chat"
-  },
-  "breadcrumb": {
-    "main": "Main"
-  },
-  "button": {
+  "common": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "save": "Save",
+    "add": "Add",
     "edit": "Edit",
     "delete": "Delete",
-    "add": "Add {msg}"
+    "search": "Search",
+    "loading": "Loading...",
+    "operation": "Actions",
+    "enable": "Enable",
+    "optional": "optional"
   },
-  "state":{
-    "open":"Open"
+  "auth": {
+    "welcome": "Welcome Back",
+    "username": "Username",
+    "password": "Password",
+    "login": "Sign In",
+    "register": "Sign Up",
+    "forgotPassword": "Forgot password?",
+    "logout": "Sign Out",
+    "logoutConfirm": "Are you sure you want to sign out?",
+    "loginFailed": "Login failed",
+    "invalidCredentials": "Invalid username or password",
+    "retryHint": "Please check and try again"
+  },
+  "sidebar": {
+    "chat": "Chat",
+    "bots": "Bots",
+    "models": "Models",
+    "settings": "Settings",
+    "home": "Home",
+    "platform": "Platform",
+    "mcp": "MCP"
+  },
+  "breadcrumb": {
+    "main": "Home"
+  },
+  "settings": {
+    "display": "Display Settings",
+    "language": "Language",
+    "languagePlaceholder": "Select language",
+    "theme": "Theme",
+    "themePlaceholder": "Select theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "langZh": "中文",
+    "langEn": "English"
+  },
+  "chat": {
+    "greeting": "Hi! How can I help you today?",
+    "inputPlaceholder": "Type your question…",
+    "send": "Send"
+  },
+  "models": {
+    "title": "Models",
+    "searchPlaceholder": "Search providers…",
+    "addModel": "Add Model",
+    "editModel": "Edit Model",
+    "deleteModelConfirm": "Are you sure you want to delete this model?",
+    "emptyTitle": "No Models",
+    "emptyDescription": "Click the button above to add a model for this provider",
+    "type": "Type",
+    "typePlaceholder": "Select model type",
+    "model": "Model ID",
+    "modelPlaceholder": "e.g. gpt-4o",
+    "displayName": "Display Name",
+    "displayNamePlaceholder": "Custom display name",
+    "dimensions": "Dimensions",
+    "dimensionsPlaceholder": "e.g. 1536",
+    "multimodal": "Multimodal"
+  },
+  "provider": {
+    "add": "Add Provider",
+    "addBtn": "Add",
+    "name": "Name",
+    "namePlaceholder": "Enter provider name",
+    "apiKey": "API Key",
+    "apiKeyPlaceholder": "Enter API key",
+    "url": "Base URL",
+    "urlPlaceholder": "Enter base URL",
+    "type": "Type",
+    "typePlaceholder": "Select type",
+    "deleteConfirm": "Are you sure you want to delete this provider?",
+    "saveChanges": "Save Changes",
+    "emptyTitle": "No Providers",
+    "emptyDescription": "Add a model provider first to configure models"
+  },
+  "mcp": {
+    "addTitle": "Add MCP",
+    "addDescription": "Configure MCP server connection",
+    "name": "Name",
+    "namePlaceholder": "Enter name",
+    "type": "Type",
+    "typePlaceholder": "Select type",
+    "command": "Command",
+    "commandPlaceholder": "Enter start command",
+    "arguments": "Arguments",
+    "argumentsPlaceholder": "Enter arguments",
+    "cwd": "Working Directory",
+    "cwdPlaceholder": "Enter working directory path",
+    "env": "Environment",
+    "envPlaceholder": "Format: KEY:VALUE",
+    "active": "Enable Now"
+  },
+  "platform": {
+    "addTitle": "Add Platform",
+    "addDescription": "Configure a platform for model access",
+    "name": "Name",
+    "namePlaceholder": "Enter platform name",
+    "config": "Config",
+    "configPlaceholder": "Format: key:value",
+    "active": "Enable Now",
+    "running": "Running",
+    "platformLabel": "Platform",
+    "deleteConfirm": "Are you sure you want to delete this platform?"
+  },
+  "home": {
+    "title": "Home"
+  },
+  "bots": {
+    "title": "Bots",
+    "searchPlaceholder": "Search bots…",
+    "createBot": "New Bot",
+    "editBot": "Edit Bot",
+    "deleteConfirm": "Are you sure you want to delete this bot?",
+    "emptyTitle": "No Bots",
+    "emptyDescription": "Click the button above to create your first bot",
+    "displayName": "Name",
+    "displayNamePlaceholder": "Give your bot a name",
+    "avatarUrl": "Avatar URL",
+    "avatarUrlPlaceholder": "Enter avatar image URL",
+    "type": "Type",
+    "typePlaceholder": "Select bot type",
+    "active": "Active",
+    "inactive": "Inactive",
+    "createdAt": "Created at",
+    "tabs": {
+      "overview": "Overview",
+      "memory": "Memory",
+      "channels": "Channels",
+      "mcp": "MCP",
+      "subagents": "Subagents",
+      "history": "History",
+      "settings": "Settings"
+    },
+    "settings": {
+      "chatModel": "Chat Model",
+      "memoryModel": "Memory Model",
+      "embeddingModel": "Embedding Model",
+      "maxContextLoadTime": "Max Context Load Time",
+      "language": "Language",
+      "allowGuest": "Allow Guest Access",
+      "searchModel": "Search models…",
+      "noModel": "No models available",
+      "saveSuccess": "Settings saved",
+      "save": "Save Settings"
+    },
+    "channels": {
+      "title": "Channels",
+      "addChannel": "Add Channel",
+      "selectType": "Select channel type",
+      "configured": "Configured",
+      "notConfigured": "Not configured",
+      "emptyTitle": "No Channels",
+      "emptyDescription": "Click the button below to add a messaging channel",
+      "credentials": "Credentials",
+      "saveSuccess": "Channel configuration saved",
+      "saveFailed": "Failed to save",
+      "requiredField": "{field} is required",
+      "save": "Save Configuration",
+      "status": "Status",
+      "statusActive": "Active",
+      "statusInactive": "Inactive",
+      "deleteConfirm": "Are you sure you want to remove this channel?",
+      "noAvailableTypes": "All channel types have been configured"
+    }
   }
 }

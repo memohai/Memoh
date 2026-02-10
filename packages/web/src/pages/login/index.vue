@@ -3,13 +3,13 @@
     <section class="w-full max-w-sm flex flex-col gap-10 ">
       <section>
         <h3
-          class="scroll-m-20 text-3xl tracking-wide font-semibold  text-white text-center" 
+          class="scroll-m-20 text-3xl tracking-wide font-semibold  text-white text-center"
           style="font-family: 'Source Han Serif CN', 'Noto Serif SC', 'STSong', 'SimSun', serif;"
         >
-          欢迎使用
+          {{ $t('auth.welcome') }}
         </h3>
       </section>
-      <form            
+      <form
         @submit="login"
       >
         <Card class="py-14">
@@ -23,14 +23,14 @@
                   class="mb-2"
                   for="username"
                 >
-                  {{ $t("login.username") }}
+                  {{ $t('auth.username') }}
                 </Label>
                 <FormControl>
                   <Input
                     v-bind="componentField"
-                    id="username" 
+                    id="username"
                     type="text"
-                    :placeholder="$t('prompt.enter', { msg: $t(`login.username`).toLocaleLowerCase() })"
+                    :placeholder="$t('auth.username')"
                     autocomplete="new-password"
                   />
                 </FormControl>
@@ -45,14 +45,14 @@
                   class="mb-2"
                   for="password"
                 >
-                  {{ $t('login.password') }}
+                  {{ $t('auth.password') }}
                 </Label>
-                <FormControl>              
+                <FormControl>
                   <Input
                     id="password"
-                    type="password"                    
-                    :placeholder="$t('prompt.enter', { msg: $t(`login.password`).toLocaleLowerCase() })"
-                    autocomplete="new-password"                
+                    type="password"
+                    :placeholder="$t('auth.password')"
+                    autocomplete="new-password"
                     v-bind="componentField"
                   />
                 </FormControl>
@@ -63,11 +63,11 @@
                 href="#"
                 class="ml-auto inline-block text-sm underline mt-2"
               >
-                {{ $t('login.forget') }}
+                {{ $t('auth.forgotPassword') }}
               </a>
             </div>
           </CardContent>
-          
+
           <CardFooter class="flex flex-col gap-4">
             <Button
               class="w-full"
@@ -75,13 +75,13 @@
               @click="login"
             >
               <Spinner v-if="loading" />
-              {{ $t("login.login") }}
+              {{ $t('auth.login') }}
             </Button>
             <Button
               variant="outline"
               class="w-full"
             >
-              {{ $t("login.register") }}
+              {{ $t('auth.register') }}
             </Button>
           </CardFooter>
         </Card>
@@ -101,60 +101,53 @@ import {
   FormField,
   FormItem,
   Label,
-  Spinner
+  Spinner,
 } from '@memoh/ui'
 import { useRouter } from 'vue-router'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import * as z from 'zod'
-import request from '@/utils/request'
 import { useUserStore } from '@/store/user'
-import {  ref } from 'vue'
+import { ref } from 'vue'
 import { toast } from 'vue-sonner'
-const router = useRouter()
+import { useI18n } from 'vue-i18n'
+import { login as loginApi } from '@/composables/api/useAuth'
 
+const router = useRouter()
+const { t } = useI18n()
 
 const formSchema = toTypedSchema(z.object({
   username: z.string().min(1),
   password: z.string().min(1),
 }))
 const form = useForm({
-  validationSchema: formSchema
+  validationSchema: formSchema,
 })
 
-const { login: LoginHandle } = useUserStore()
+const { login: loginHandle } = useUserStore()
 const loading = ref(false)
+
 const login = form.handleSubmit(async (values) => {
   try {
     loading.value = true
-    const loginState = await request({
-      url: '/auth/login',
-      method: 'post',
-      data: { ...values }
-    }, false)
-    const data = loginState?.data
+    const data = await loginApi(values)
     if (data?.access_token && data?.user_id) {
-      LoginHandle({
-        id: data?.user_id,
-        username: data?.username,
+      loginHandle({
+        id: data.user_id,
+        username: data.username,
         displayName: '',
-        role: ''
+        role: '',
       }, data.access_token)
     } else {
-      throw new Error('用户名和密码错误')
+      throw new Error(t('auth.loginFailed'))
     }
-    router.replace({
-      name: 'Main'
+    router.replace({ name: 'Main' })
+  } catch {
+    toast.error(t('auth.invalidCredentials'), {
+      description: t('auth.retryHint'),
     })
-  } catch (error) {
-    toast.error('用户名或密码错误', {
-      description: '请重新输入用户名和密码',
-    })
-    return error
   } finally {
     loading.value = false
   }
 })
-
-
 </script>

@@ -3,11 +3,9 @@ import en from '@/i18n/locales/en.json'
 import zh from '@/i18n/locales/zh.json'
 import { computed } from 'vue'
 
-type enMessageSchema = typeof en
-type zhMessageSchema = typeof zh;
+export type Locale = 'en' | 'zh'
 
-
-const i18n = createI18n<[enMessageSchema, zhMessageSchema], 'en' | 'zh'>({
+const i18n = createI18n<typeof en | typeof zh, Locale>({
   locale: 'zh',
   legacy: false,
   fallbackLocale: 'en',
@@ -16,7 +14,6 @@ const i18n = createI18n<[enMessageSchema, zhMessageSchema], 'en' | 'zh'>({
     zh
   }
 })
-
 
 export default i18n
 

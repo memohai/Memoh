@@ -1,202 +1,94 @@
 <template>
-  <section>
-    <section class="max-w-187 m-auto">
-      <form
-        
-        @submit="changeSetting"
-      >
-        <section>
-          <section class="flex flex-col">
-            <h6 class=" mt-2 mb-2 align-middle">
-              <svg-icon
-                type="mdi"
-                :path="mdiRobotOutline"
-                class="inline mr-2 align-[-5px]"
-              />模型设置
-            </h6>
+  <div class="max-w-187 m-auto">
+    <h6 class="mt-6 mb-2 flex items-center">
+      <FontAwesomeIcon
+        :icon="['fas', 'gear']"
+        class="mr-2"
+      />
+      {{ $t('settings.display') }}
+    </h6>
+    <Separator />
 
-            <Separator />
-          </section>
+    <div class="mt-4 space-y-4">
+      <div class="flex items-center justify-between">
+        <Label>{{ $t('settings.language') }}</Label>
+        <Select
+          :model-value="language"
+          @update:model-value="(v) => v && setLanguage(v as Locale)"
+        >
+          <SelectTrigger class="w-40">
+            <SelectValue :placeholder="$t('settings.languagePlaceholder')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="zh">
+                {{ $t('settings.langZh') }}
+              </SelectItem>
+              <SelectItem value="en">
+                {{ $t('settings.langEn') }}
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
 
-          <section class="flex flex-col [&_:has(label)]:py-2">
-            <FormField
-              v-slot="{ componentField }"
-              name="chat_model_id"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  Chat Model ID
-                </Label>
-                <FormControl>
-                  <Input v-bind="componentField" />
-                </FormControl>
-              </FormItem>
-            </FormField>
-           
-            <FormField
-              v-slot="{ componentField }"
-              name="embedding_model_id"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  Embedding Model ID
-                </Label>
-                <FormControl>
-                  <Input v-bind="componentField" />
-                </FormControl>
-              </FormItem>
-            </FormField>
-           
-            <FormField
-              v-slot="{ componentField }"
-              name="memory_model_id"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  Memory Model ID
-                </Label>
-                <FormControl>
-                  <Input v-bind="componentField" />
-                </FormControl>
-              </FormItem>
-            </FormField>
-            
-            <FormField
-              v-slot="{ componentField }"
-              name="max_context_load_time"
-            >
-              <FormItem class="**:[input]:max-w-40!">
-                <Label class="mb-2">             
-                  Timeout
-                </Label>
-                <FormControl>
-                  <Input v-bind="componentField" />
-                </FormControl>
-              </FormItem>
-            </FormField>
-          </section>  
-        </section>
-        <section class="mt-4">
-          <section class="flex flex-col">
-            <h6 class=" mt-2 mb-2 align-middle">
-              <svg-icon
-                type="mdi"
-                :path="mdiCog"
-                class="inline mr-2 align-[-5px]"
-              />显示设置
-            </h6>
+      <Separator />
 
-            <Separator />
-          </section>
-          <section class="flex flex-col [&_:has(label)]:py-2">
-            <FormField
-              v-slot="{ componentField }"
-              name="language"
-            >
-              <FormItem class="**:[button]:min-w-40! flex justify-between items-ceneter">
-                <Label class="mb-2">
-                  语言
-                </Label>
-                <FormControl>
-                  <Select v-bind="componentField">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem
-                          value="zh"
-                          @click="$i18n.locale = 'zh'"
-                        >
-                          中文
-                        </SelectItem>
-                        <SelectItem
-                          value="en"
-                          @click="$i18n.locale = 'en'"
-                        >
-                          English
-                        </SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </FormControl>
-              </FormItem>
-            </FormField>
-            <Separator />
-            <section class="flex justify-between items-baseline">
-              <Label class="mb-4">
-                主题
-              </Label>
+      <div class="flex items-center justify-between">
+        <Label>{{ $t('settings.theme') }}</Label>
+        <Select
+          :model-value="theme"
+          @update:model-value="(v) => v && setTheme(v as 'light' | 'dark')"
+        >
+          <SelectTrigger class="w-40">
+            <SelectValue :placeholder="$t('settings.themePlaceholder')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="light">
+                {{ $t('settings.themeLight') }}
+              </SelectItem>
+              <SelectItem value="dark">
+                {{ $t('settings.themeDark') }}
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
 
-              <Switch
-                :model-value="curDark()"
-                @update:model-value="() => {
-                  toggleMode()
-                }
-                "
-              />
-            </section>
-          </section>
-        </section>
-        <section class="mt-4 flex gap-3">
-          <Popover>
-            <template #default="{ close }">
-              <PopoverTrigger as-child>
-                <Button
-                  class="ml-auto"
-                  variant="outline"
-                >
-                  {{ $t("login.exit") }}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent class="w-80">
-                <div class="grid gap-4">
-                  <p class="leading-7 not-first:mt-6  ">
-                    确认退出登录?
-                  </p>
-                  <section class="flex gap-4">
-                    <Button
-                      variant="outline"
-                      class="ml-auto"
-                      @click="() => { close() }"
-                    >
-                      取消
-                    </Button>
-                    <Button @click="() => { exit(); close() }">
-                      确定
-                    </Button>
-                  </section>
-                </div>
-              </PopoverContent>
-            </template>
-          </Popover>
-      
-          <Button
-         
-            :disabled="settingLoading"
-            type="submit"
-          >
-            <Spinner v-if="settingLoading" />
-            更改
-          </Button>
-        </section>
-      </form>
-    </section>
-  </section>
+    <div class="mt-6">
+      <Popover>
+        <template #default="{ close }">
+          <PopoverTrigger as-child>
+            <Button variant="outline">
+              {{ $t('auth.logout') }}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent class="w-80">
+            <p class="mb-4">
+              {{ $t('auth.logoutConfirm') }}
+            </p>
+            <div class="flex justify-end gap-3">
+              <Button
+                variant="outline"
+                @click="close"
+              >
+                {{ $t('common.cancel') }}
+              </Button>
+              <Button @click="exit(); close()">
+                {{ $t('common.confirm') }}
+              </Button>
+            </div>
+          </PopoverContent>
+        </template>
+      </Popover>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import request from '@/utils/request'
-import { watch } from 'vue'
-import { toTypedSchema } from '@vee-validate/zod'
-import z from 'zod'
-import { useForm } from 'vee-validate'
 import {
-  Input,
-  FormField,
-  FormItem,  
-  FormControl,
   Button,
   Select,
   SelectTrigger,
@@ -206,103 +98,24 @@ import {
   SelectItem,
   Label,
   Separator,
-  Switch,
-  Spinner,
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@memoh/ui'
-import SvgIcon from '@jamescoyle/vue-icon'
-import { mdiRobotOutline, mdiCog } from '@mdi/js'
-import { toast } from 'vue-sonner'
-import i18n from '@/i18n'
-import { useColorMode } from '@vueuse/core'
 import { useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import { useUserStore } from '../../store/user'
-const router=useRouter()
+import { useSettingsStore } from '@/store/settings'
+import type { Locale } from '@/i18n'
+
+const router = useRouter()
+const settingsStore = useSettingsStore()
+const { language, theme } = storeToRefs(settingsStore)
+const { setLanguage, setTheme } = settingsStore
 
 const { exitLogin } = useUserStore()
 const exit = () => {
   exitLogin()
   router.replace({ name: 'Login' })
 }
-
-const mode = useColorMode()
-const modeToggleMap: Record<'dark' | 'light', 'dark' | 'light'> = {
-  dark: 'light',
-  light: 'dark'
-}
-const toggleMode = () => {
-  if (mode.value !== 'auto') {
-    mode.value = modeToggleMap[mode.value]
-  }
-}
-
-const curDark = () => {
-  return mode.value==='dark'?true:false
-}
-
-
-const { data: settingData } = useQuery({
-  key: ['Setting'],
-  query: async () => request({
-    url: '/settings',
-    method: 'get'
-  }).then(fetchSetting => {
-    // if(f)
-  
-    if (fetchSetting?.data?.language&&!i18n.global.availableLocales.includes(fetchSetting?.data?.language)) {
-  
-      fetchSetting.data.language='zh'
-    }
-  
-    return fetchSetting?.data
-  })
-})
-
-const formSchema = toTypedSchema(z.object({
-  chat_model_id: z.coerce.string(),
-  embedding_model_id: z.coerce.string(),
-  language: z.coerce.string(),
-  max_context_load_time: z.coerce.number().min(1000),
-  memory_model_id: z.coerce.string()
-}))
-
-const form = useForm({
-  validationSchema: formSchema
-})
-
-watch(settingData, () => { 
-  form.setValues(settingData.value)
-  form.values=settingData.value
-})
-
-const cacheQuery = useQueryCache()
-const { mutate: fetchSetting,isLoading:settingLoading,status } = useMutation({
-  mutation: (data:typeof form.values) => request({
-    url: '/settings',
-    data,
-    method:'POST'
-  }),
-  onSettled: () => {
-    cacheQuery.invalidateQueries({
-      key: ['Setting']
-    })
-  }
-})
-
-watch(status, () => {
-  if (status.value === 'error') {
-    toast.error('保存失败') 
-  }
-})
-const changeSetting = form.handleSubmit(async (value) => {
-
-  try { 
-    await fetchSetting(value)
-  } catch {
-    return
-  }
-})
-
 </script>

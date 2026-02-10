@@ -22,16 +22,17 @@
 <script setup lang="ts">
 import UserChat from './user-chat/index.vue'
 import RobotChat from './robot-chat/index.vue'
-import { inject, nextTick, ref, watch } from 'vue'
-import { useElementBounding } from '@vueuse/core'
+import { inject, ref, watch } from 'vue'
 import { useChatList } from '@/store/chat-list'
-import { onBeforeRouteLeave } from 'vue-router'
 import { storeToRefs } from 'pinia'
-// 模拟一下数据
-const {chatList,sendMessage} = useChatList()
-const { loading}=storeToRefs(useChatList())
+import { useAutoScroll } from '@/composables/useAutoScroll'
+
+const { chatList, sendMessage } = useChatList()
+const { loading } = storeToRefs(useChatList())
+
+// ---- 消息发送 ----
 const chatSay = inject('chatSay', ref(''))
-// 模拟一下对话
+
 watch(chatSay, async () => {
   if (chatSay.value) {
     const text = chatSay.value
@@ -39,64 +40,12 @@ watch(chatSay, async () => {
     try {
       await sendMessage(text)
     } catch {
-      // ignore errors for now
+      // ignore
     }
   }
-}, {
-  immediate: true
-})
+}, { immediate: true })
 
-const displayContainer = ref()
-const { height,top } = useElementBounding(displayContainer)
-
-let prevScroll = 0, curScroll = 0, autoScroll = true,cacheScroll=0
-
-watch(top, () => {
-  const container = displayContainer.value?.parentElement?.parentElement
-  if (height.value === 0) {
-    autoScroll = false
-    prevScroll = curScroll=0
-  }
-  if ((container?.scrollHeight - container.clientHeight - container.scrollTop) < 1) {
-    autoScroll = true
-    prevScroll=curScroll=container.scrollTop
-  }  
-})
-
-watch(height, (newVal,oldVal) => {
-  const container = displayContainer.value?.parentElement?.parentElement
-  if (container) {
-    curScroll = container.scrollTop
-    if (curScroll < prevScroll) {
-      autoScroll = false
-    }
-    prevScroll = curScroll
-  }
- 
-  if (oldVal === 0 && newVal > container.clientHeight) {   
-    nextTick(() => {
-      container.scrollTo({
-        top: cacheScroll,
-      })       
-    })
-    return
-  }  
-  if (!(container && (container?.scrollHeight - container.clientHeight - container.scrollTop) < 1) && autoScroll&&loading.value) {
-    
-    container.scrollTo({
-      top: container?.scrollHeight - container.clientHeight,
-      behavior: 'smooth',
-    })
-  } 
-})
-
-
-
-onBeforeRouteLeave(() => {
-  const container = displayContainer.value?.parentElement?.parentElement
-  if (container) {
-    cacheScroll = container.scrollTop  
-  } 
-})
-
+// ---- 自动滚动 ----
+const displayContainer = ref<HTMLElement>()
+useAutoScroll(displayContainer, loading)
 </script>

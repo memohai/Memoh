@@ -6,23 +6,21 @@
           class="w-full shadow-none! text-muted-foreground mb-4"
           variant="outline"
         >
-          <svg-icon
-            type="mdi"
-            :path="mdiPlus"
+          <FontAwesomeIcon
+            :icon="['fas', 'plus']"
             class="mr-1"
-          /> 添加
+          /> {{ $t('provider.addBtn') }}
         </Button>
       </DialogTrigger>
       <DialogContent class="sm:max-w-106.25">
         <form @submit="createProvider">
           <DialogHeader>
-            <DialogTitle>添加提供商</DialogTitle>
+            <DialogTitle>{{ $t('provider.add') }}</DialogTitle>
             <DialogDescription>
               <Separator class="my-4" />
             </DialogDescription>
           </DialogHeader>
-        
-          
+
           <div class="flex-col gap-3 flex">
             <FormField
               v-slot="{ componentField }"
@@ -30,12 +28,12 @@
             >
               <FormItem>
                 <Label class="mb-2">
-                  Name
+                  {{ $t('provider.name') }}
                 </Label>
                 <FormControl>
                   <Input
                     type="text"
-                    placeholder="请输入Name"
+                    :placeholder="$t('provider.namePlaceholder')"
                     v-bind="componentField"
                   />
                 </FormControl>
@@ -47,12 +45,12 @@
             >
               <FormItem>
                 <Label class="mb-2">
-                  API 密钥
+                  {{ $t('provider.apiKey') }}
                 </Label>
                 <FormControl>
                   <Input
                     type="text"
-                    placeholder="请输入Api Key"
+                    :placeholder="$t('provider.apiKeyPlaceholder')"
                     v-bind="componentField"
                   />
                 </FormControl>
@@ -64,15 +62,15 @@
             >
               <FormItem>
                 <Label class="mb-2">
-                  URL
+                  {{ $t('provider.url') }}
                 </Label>
                 <FormControl>
                   <Input
                     type="text"
-                    placeholder="请输入URL"
+                    :placeholder="$t('provider.urlPlaceholder')"
                     v-bind="componentField"
                   />
-                </FormControl>             
+                </FormControl>
               </FormItem>
             </FormField>
             <FormField
@@ -81,12 +79,12 @@
             >
               <FormItem>
                 <Label class="mb-2">
-                  Type
+                  {{ $t('provider.type') }}
                 </Label>
                 <FormControl>
                   <Select v-bind="componentField">
                     <SelectTrigger class="w-full">
-                      <SelectValue :placeholder="$t('prompt.select', { msg: 'Type' })" />
+                      <SelectValue :placeholder="$t('provider.typePlaceholder')" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
@@ -107,7 +105,7 @@
           <DialogFooter class="mt-8">
             <DialogClose as-child>
               <Button variant="outline">
-                Cancel
+                {{ $t('common.cancel') }}
               </Button>
             </DialogClose>
             <Button
@@ -118,7 +116,7 @@
                 v-if="isLoading"
                 class="mr-1"
               />
-              添加MCP
+              {{ $t('provider.add') }}
             </Button>
           </DialogFooter>
         </form>
@@ -127,13 +125,11 @@
   </section>
 </template>
 <script setup lang="ts">
-import { mdiPlus } from '@mdi/js'
-import SvgIcon from '@jamescoyle/vue-icon'
 import {
   Button,
   Dialog,
   DialogClose,
-  DialogContent,  
+  DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -151,52 +147,38 @@ import {
   SelectItem,
   Separator,
   Label,
-  Spinner
+  Spinner,
 } from '@memoh/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
-import { useMutation, useQueryCache } from '@pinia/colada'
-import request from '@/utils/request'
-import { type ProviderInfo } from '@memoh/shared'
 import { clientType } from '@memoh/shared'
-
+import { useCreateProvider } from '@/composables/api/useProviders'
 
 const open = defineModel<boolean>('open')
 
-const cacheQuery=useQueryCache()
-const {mutate:providerFetch,isLoading}=useMutation({
-  mutation: (data: ProviderInfo) => request({
-    url: '/providers',
-    data,
-    method:'post'
-  }),
-  onSettled: () => cacheQuery.invalidateQueries({
-    key:['provider']
-  })
-})
+const { mutate: providerFetch, isLoading } = useCreateProvider()
+
 const providerSchema = toTypedSchema(z.object({
   api_key: z.string().min(1),
   base_url: z.string().min(1),
   client_type: z.string().min(1),
   name: z.string().min(1),
   metadata: z.object({
-    additionalProp1:z.object()
-  })
+    additionalProp1: z.object({}),
+  }),
 }))
 
 const form = useForm({
   validationSchema: providerSchema,
 })
 
-const createProvider=form.handleSubmit(async (value) => {
+const createProvider = form.handleSubmit(async (value) => {
   try {
-  
     await providerFetch(value)
-    open.value=false
+    open.value = false
   } catch {
     return
   }
 })
-
 </script>

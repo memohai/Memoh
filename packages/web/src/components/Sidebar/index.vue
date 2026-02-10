@@ -1,17 +1,17 @@
 <template>
   <aside class="[&_[data-state=collapsed]_:is(.title-container,.exist-btn)]:hidden">
     <Sidebar collapsible="icon">
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <img
-              src="../../../public/logo.png"
-              width="80"
-              class="m-auto"
-              alt="logo.png"
-            >
-          </SidebarMenuItem>
-        </SidebarMenu>
+      <SidebarHeader class="group-data-[state=collapsed]:hidden">
+        <div class="flex items-center gap-2 px-3 py-2">
+          <img
+            src="/logo.png"
+            class="size-8"
+            alt="logo"
+          >
+          <span class="text-xl font-bold text-gray-500 dark:text-gray-400">
+            Memoh
+          </span>
+        </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -36,10 +36,7 @@
                     }"
                     @click="router.push({ name: sidebarItem.name })"
                   >
-                    <svg-icon
-                      type="mdi"
-                      :path="sidebarItem.icon"
-                    />
+                    <FontAwesomeIcon :icon="sidebarItem.icon" />
                     <span>{{ sidebarItem.title }}</span>
                   </Toggle>
                 </SidebarMenuButton>
@@ -61,55 +58,43 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  
-  Toggle
+  Toggle,
 } from '@memoh/ui'
 import { computed } from 'vue'
-import SvgIcon from '@jamescoyle/vue-icon'
-import { mdiRobot, mdiChatOutline, mdiCogBox } from '@mdi/js'
-import { useRouter,useRoute } from 'vue-router'
-import { useUserStore } from '@/store/user'
+import { useRouter, useRoute } from 'vue-router'
 import i18n from '@/i18n'
 import { ref } from 'vue'
 
 
 const router = useRouter()
-const route=useRoute()
+const route = useRoute()
 
 const { t } = i18n.global
 const curSlider = ref()
 const curSelectSlide = (cur: string) => computed(() => {
-  return curSlider.value === cur||new RegExp(`^/main/${cur}$`).test(route.path)
+  return curSlider.value === cur || new RegExp(`^/main/${cur}$`).test(route.path)
 })
 const sidebarInfo = computed(() => [
   {
-    title: t('slidebar.chat'),
+    title: t('sidebar.chat'),
     name: 'chat',
-    icon: mdiChatOutline
+    icon: ['far', 'comments'],
   },
-  // {
-  //   title: t('slidebar.home'),
-  //   name: 'home',
-  //   icon: mdiHome
-  // },
   {
-    title: t('slidebar.model_setting'),
-    name: 'models',
-    icon: mdiRobot
-  }, {
-    title: t('slidebar.setting'),
-    name: 'settings',
-    icon: mdiCogBox
+    title: t('sidebar.bots'),
+    name: 'bots',
+    icon: ['fas', 'robot'],
   },
-  // {
-  //   title: 'MCP',
-  //   name: 'mcp',
-  //   icon: mdiListBox
-  // }, {
-  //   title: t('slidebar.platform'),
-  //   name: 'platform',
-  //   icon: mdiBookArrowDown
-  // }
+  {
+    title: t('sidebar.models'),
+    name: 'models',
+    icon: ['fas', 'cubes'],
+  },
+  {
+    title: t('sidebar.settings'),
+    name: 'settings',
+    icon: ['fas', 'gear'],
+  },
 ])
 
 </script>

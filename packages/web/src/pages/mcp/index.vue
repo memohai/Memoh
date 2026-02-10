@@ -9,9 +9,7 @@
 </template>
 
 <script setup lang="ts">
-import { useQuery,useMutation,useQueryCache } from '@pinia/colada'
-import request from '@/utils/request'
-import { h, provide,ref, computed } from 'vue'
+import { h, provide, ref, computed } from 'vue'
 import DataTable from '@/components/data-table/index.vue'
 import CreateMCP from '@/components/create-mcp/index.vue'
 import { type ColumnDef } from '@tanstack/vue-table'
@@ -21,30 +19,19 @@ import {
 } from '@memoh/ui'
 import { type MCPListItem as MCPType } from '@memoh/shared'
 import { i18nRef } from '@/i18n'
-
+import { useMcpList, useDeleteMcp } from '@/composables/api/useMcp'
 
 const open = ref(false)
 const editMCPData = ref<{
-  name: string,
-  config: MCPType['config'],
+  name: string
+  config: MCPType['config']
   active: boolean
-  id:string
-}|null>(null)
+  id: string
+} | null>(null)
 provide('open', open)
-provide('mcpEditData',editMCPData)
+provide('mcpEditData', editMCPData)
 
-const queryCache=useQueryCache()
-const { mutate:DeleteMCP}= useMutation({
-  mutation: (id:string) => request({
-    url: `/mcp/${id}`,
-    method:'DELETE'
-  }),
-  onSettled() {
-    queryCache.invalidateQueries({
-      key:['mcp']
-    })
-  }
-})
+const { mutate: DeleteMCP } = useDeleteMcp()
 const columns:ColumnDef<MCPType>[] = [
   {
     accessorKey: 'name',
@@ -83,7 +70,7 @@ const columns:ColumnDef<MCPType>[] = [
   },
   {
     accessorKey: 'control',
-    header: () => h('div', { class: 'text-center' }, '操作'),
+    header: () => h('div', { class: 'text-center' }, i18nRef('common.operation').value),
     cell: ({ row }) => h('div', {class:'flex gap-2'}, [
       h(Button, {
         onClick() {
@@ -95,7 +82,7 @@ const columns:ColumnDef<MCPType>[] = [
           }       
           open.value=true
         }
-      }, ()=>i18nRef('button.edit').value),
+      }, ()=>i18nRef('common.edit').value),
       h(Button, {
         variant: 'destructive',
         async onClick() {        
@@ -105,20 +92,13 @@ const columns:ColumnDef<MCPType>[] = [
             return
           }
         }
-      },()=>i18nRef('button.delete').value)
+      },()=>i18nRef('common.delete').value)
     ])
   }
 ]
 
-const { data: mcpData } = useQuery({
-  key: ['mcp'],
-  query: () => request({
-    url: '/mcp/'
-  })
-})
+const { data: mcpData } = useMcpList()
 
-const mcpFormatData = computed(() => {
-  return mcpData.value?.data?.items??[]
-})
+const mcpFormatData = computed(() => mcpData.value ?? [])
 
 </script>

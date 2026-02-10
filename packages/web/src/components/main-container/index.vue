@@ -71,10 +71,15 @@ import { computed } from 'vue'
 const route = useRoute()
 
 const curBreadcrumb = computed(() => {
-  return route.matched.map(routeItem => ({
-    path: routeItem.path,
-    breadcrumb: routeItem.meta['breadcrumb']
-  }))
+  return route.matched
+    .filter(routeItem => routeItem.meta['breadcrumb'])
+    .map(routeItem => {
+      const raw = routeItem.meta['breadcrumb']
+      return {
+        path: routeItem.path,
+        breadcrumb: typeof raw === 'function' ? raw(route) : raw,
+      }
+    })
 })
 
 </script>

@@ -6,30 +6,32 @@
           variant="default"
           class="ml-auto my-4"
         >
-          {{ $t("button.add",{msg:"MCP"}) }}
+          {{ $t('mcp.addTitle') }}
         </Button>
       </DialogTrigger>
       <DialogContent class="sm:max-w-106.25">
         <form @submit="createMCP">
           <DialogHeader>
-            <DialogTitle>  {{ $t("button.add", { msg: "MCP" }) }}</DialogTitle>
+            <DialogTitle>{{ $t('mcp.addTitle') }}</DialogTitle>
             <DialogDescription class="mb-4">
-              添加MCP完成操作
+              {{ $t('mcp.addDescription') }}
             </DialogDescription>
           </DialogHeader>
-          <div>
+
+          <div class="flex flex-col gap-3">
+            <!-- Name -->
             <FormField
               v-slot="{ componentField }"
               name="name"
             >
               <FormItem>
                 <FormLabel class="mb-2">
-                  Name
+                  {{ $t('mcp.name') }}
                 </FormLabel>
                 <FormControl>
                   <Input
                     type="text"
-                    :placeholder="$t('prompt.enter', { msg: 'Name' })"       
+                    :placeholder="$t('mcp.namePlaceholder')"
                     v-bind="componentField"
                     autocomplete="name"
                   />
@@ -39,20 +41,20 @@
                 </blockquote>
               </FormItem>
             </FormField>
+
+            <!-- Type -->
             <FormField
               v-slot="{ componentField }"
               name="config.type"
             >
               <FormItem>
                 <FormLabel class="mb-2">
-                  Type
+                  {{ $t('mcp.type') }}
                 </FormLabel>
                 <FormControl>
                   <Select v-bind="componentField">
                     <SelectTrigger class="w-full">
-                      <SelectValue                       
-                        :placeholder="$t('prompt.select', { msg: 'Type' })"
-                      />
+                      <SelectValue :placeholder="$t('mcp.typePlaceholder')" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
@@ -68,18 +70,20 @@
                 </blockquote>
               </FormItem>
             </FormField>
+
+            <!-- Cwd -->
             <FormField
               v-slot="{ componentField }"
               name="config.cwd"
             >
               <FormItem>
                 <FormLabel class="mb-2">
-                  Cwd
+                  {{ $t('mcp.cwd') }}
                 </FormLabel>
                 <FormControl>
                   <Input
                     type="text"
-                    :placeholder="$t('prompt.enter', { msg: 'cwd' })"                   
+                    :placeholder="$t('mcp.cwdPlaceholder')"
                     v-bind="componentField"
                     autocomplete="cwd"
                   />
@@ -89,17 +93,19 @@
                 </blockquote>
               </FormItem>
             </FormField>
+
+            <!-- Command -->
             <FormField
               v-slot="{ componentField }"
               name="config.command"
             >
               <FormItem>
                 <FormLabel class="mb-2">
-                  Command
+                  {{ $t('mcp.command') }}
                 </FormLabel>
                 <FormControl>
                   <Input
-                    :placeholder="$t('prompt.enter', { msg: 'Command' })"
+                    :placeholder="$t('mcp.commandPlaceholder')"
                     v-bind="componentField"
                   />
                 </FormControl>
@@ -108,13 +114,15 @@
                 </blockquote>
               </FormItem>
             </FormField>
+
+            <!-- Arguments -->
             <FormField
               v-slot="{ componentField }"
               name="config.args"
             >
               <FormItem>
                 <FormLabel class="mb-2">
-                  Arguments
+                  {{ $t('mcp.arguments') }}
                 </FormLabel>
                 <FormControl>
                   <TagsInput
@@ -131,8 +139,8 @@
                       <TagsInputItemText />
                       <TagsInputItemDelete />
                     </TagsInputItem>
-                    <TagsInputInput                      
-                      :placeholder="$t('prompt.enter', { msg: 'Arguments' })"
+                    <TagsInputInput
+                      :placeholder="$t('mcp.argumentsPlaceholder')"
                       class="w-full py-1"
                     />
                   </TagsInput>
@@ -142,46 +150,33 @@
                 </blockquote>
               </FormItem>
             </FormField>
+
+            <!-- Env (key:value tags) -->
             <FormField
               v-slot="{ componentField }"
               name="config.env"
             >
               <FormItem>
                 <FormLabel class="mb-2">
-                  Env
+                  {{ $t('mcp.env') }}
                 </FormLabel>
                 <FormControl>
                   <TagsInput
                     :add-on-blur="true"
-                    :model-value="envList"
-                    :convert-value="tagStr => {
-                      if (/^\w+\:\w+$/.test(tagStr)) {
-                        return tagStr
-                      }
-                      return ''
-                    }"
-                    @update:model-value="(env) => {
-                      envList = env.filter(Boolean) as string[]
-                      const curEnvObject: { [key in string]: string } = {}
-                      envList.forEach(envItem => {
-                        const [key, value] = envItem.split(`:`);
-                        if (key && value) {
-                          curEnvObject[key] = value
-                        }
-                      })
-                      componentField['onUpdate:modelValue']?.(curEnvObject)
-                    }"
+                    :model-value="envTags.tagList.value"
+                    :convert-value="envTags.convertValue"
+                    @update:model-value="(tags) => envTags.handleUpdate(tags.map(String), componentField['onUpdate:modelValue'])"
                   >
                     <TagsInputItem
-                      v-for="(value, index) in envList"
+                      v-for="(value, index) in envTags.tagList.value"
                       :key="index"
-                      :value="value as string"
+                      :value="value"
                     >
                       <TagsInputItemText />
                       <TagsInputItemDelete />
                     </TagsInputItem>
                     <TagsInputInput
-                      :placeholder="$t('prompt.enter', { msg: 'Env' })"
+                      :placeholder="$t('mcp.envPlaceholder')"
                       class="w-full py-1"
                     />
                   </TagsInput>
@@ -191,6 +186,8 @@
                 </blockquote>
               </FormItem>
             </FormField>
+
+            <!-- Active -->
             <FormField
               v-slot="{ componentField }"
               name="active"
@@ -198,9 +195,8 @@
               <FormItem>
                 <FormControl>
                   <section class="flex gap-4">
-                    <Label for="airplane-mode">{{ $t('state.open') }}</Label>
+                    <Label>{{ $t('mcp.active') }}</Label>
                     <Switch
-                      id="airplane-mode"
                       :model-value="componentField.modelValue"
                       @update:model-value="componentField['onUpdate:modelValue']"
                     />
@@ -212,14 +208,15 @@
               </FormItem>
             </FormField>
           </div>
+
           <DialogFooter class="mt-4">
             <DialogClose as-child>
               <Button variant="outline">
-                Cancel
+                {{ $t('common.cancel') }}
               </Button>
             </DialogClose>
             <Button type="submit">
-              {{ $t("button.add", { msg: "MCP" }) }}
+              {{ $t('mcp.addTitle') }}
             </Button>
           </DialogFooter>
         </form>
@@ -227,6 +224,7 @@
     </Dialog>
   </section>
 </template>
+
 <script setup lang="ts">
 import {
   Button,
@@ -256,16 +254,20 @@ import {
   TagsInputItemDelete,
   TagsInputItemText,
   Switch,
-  Label
+  Label,
 } from '@memoh/ui'
 import z from 'zod'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import { ref, inject, watch } from 'vue'
-import { useMutation, useQueryCache } from '@pinia/colada'
-import request from '@/utils/request'
 import { type MCPListItem as MCPType } from '@memoh/shared'
+import { useKeyValueTags } from '@/composables/useKeyValueTags'
+import { useCreateOrUpdateMcp } from '@/composables/api/useMcp'
 
+// ---- Env key:value 转换 ----
+const envTags = useKeyValueTags()
+
+// ---- 表单 ----
 const validateSchema = toTypedSchema(z.object({
   name: z.string().min(1),
   config: z.object({
@@ -273,55 +275,43 @@ const validateSchema = toTypedSchema(z.object({
     command: z.string().min(1),
     args: z.array(z.coerce.string().check(z.minLength(1))).min(1),
     env: z.looseObject({}),
-    cwd: z.string().min(1)
+    cwd: z.string().min(1),
   }),
-  active: z.coerce.boolean()
+  active: z.coerce.boolean(),
 }))
 
-const envList = ref<string[]>([])
 const form = useForm({
-  validationSchema: validateSchema
+  validationSchema: validateSchema,
 })
 
+// ---- API ----
+const { mutate: fetchMCP } = useCreateOrUpdateMcp()
 
-const queryCache = useQueryCache()
-const { mutate: fetchMCP } = useMutation({
-  mutation: (data: Parameters<(Parameters<typeof form.handleSubmit>)[0]>[0]) => request({
-    url: mcpEditData.value?.id ? `/mcp/${mcpEditData.value.id}` : '/mcp/',
-    method: mcpEditData.value?.id ? 'put' : 'post',
-    data
-  }),
-  onSettled: () => queryCache.invalidateQueries({ key: ['mcp'] })
-})
-
+// ---- Dialog & 编辑状态 ----
 const open = inject('open', ref(false))
 const mcpEditData = inject('mcpEditData', ref<{
-  name: string,
-  config: MCPType['config'],
+  name: string
+  config: MCPType['config']
   active: boolean
   id: string
 } | null>(null))
 
 watch(open, () => {
-  if (open.value && mcpEditData.value) {   
+  if (open.value && mcpEditData.value) {
     form.setValues(mcpEditData.value)
+    envTags.initFromObject(mcpEditData.value.config?.env as Record<string, string>)
   }
-
   if (!open.value) {
     mcpEditData.value = null
   }
-}, {
-  immediate: true
-})
+}, { immediate: true })
 
 const createMCP = form.handleSubmit(async (value) => {
   try {
-    console.log(mcpEditData.value)
-    fetchMCP(value)
+    await fetchMCP({ ...value, id: mcpEditData.value?.id })
     open.value = false
   } catch {
     return
   }
-
 })
 </script>

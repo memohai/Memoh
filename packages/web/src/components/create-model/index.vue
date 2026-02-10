@@ -3,82 +3,33 @@
     <Dialog v-model:open="open">
       <DialogTrigger as-child>
         <Button variant="default">
-          {{ $t("button.add", { msg: "Model" }) }}
+          {{ $t('models.addModel') }}
         </Button>
       </DialogTrigger>
       <DialogContent class="sm:max-w-106.25">
         <form @submit="addModel">
           <DialogHeader>
-            <DialogTitle> 
-              <!-- {{ $t("button.add", { msg: "Model" }) }} -->
-              {{ title === 'edit' ? '编辑Model' : '添加Model' }}
+            <DialogTitle>
+              {{ title === 'edit' ? $t('models.editModel') : $t('models.addModel') }}
             </DialogTitle>
             <DialogDescription class="mb-4">
               <Separator class="my-4" />
             </DialogDescription>
           </DialogHeader>
           <div class="flex flex-col gap-3">
-            <FormField
-              v-slot="{ componentField }"
-              name="name"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  Name
-                </Label>
-                <FormControl>
-                  <Input
-                    type="text"
-                    v-bind="componentField"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-            <FormField
-              v-slot="{ componentField }"
-              name="model_id"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  Model ID
-                </Label>
-                <FormControl>
-                  <Input
-                    type="text"
-                    v-bind="componentField"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-            <FormField
-              v-slot="{ componentField }"
-              name="dimensions"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  Dimensions
-                </Label>
-                <FormControl>
-                  <Input
-                    type="text"
-                    v-bind="componentField"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-        
+            <!-- Type -->
             <FormField
               v-slot="{ componentField }"
               name="type"
             >
               <FormItem>
                 <Label class="mb-2">
-                  Type
+                  {{ $t('models.type') }}
                 </Label>
                 <FormControl>
                   <Select v-bind="componentField">
                     <SelectTrigger class="w-full">
-                      <SelectValue />
+                      <SelectValue :placeholder="$t('models.typePlaceholder')" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
@@ -86,7 +37,7 @@
                           Chat
                         </SelectItem>
                         <SelectItem value="embedding">
-                          embedding
+                          Embedding
                         </SelectItem>
                       </SelectGroup>
                     </SelectContent>
@@ -94,16 +45,77 @@
                 </FormControl>
               </FormItem>
             </FormField>
+
+            <!-- Model -->
             <FormField
               v-slot="{ componentField }"
-              name="is_multimodal"
+              name="model_id"
             >
               <FormItem>
                 <Label class="mb-2">
-                  是否开启多模态
+                  {{ $t('models.model') }}
+                </Label>
+                <FormControl>
+                  <Input
+                    type="text"
+                    :placeholder="$t('models.modelPlaceholder')"
+                    v-bind="componentField"
+                  />
+                </FormControl>
+              </FormItem>
+            </FormField>
+
+            <!-- Display Name -->
+            <FormField
+              v-slot="{ componentField }"
+              name="name"
+            >
+              <FormItem>
+                <Label class="mb-2">
+                  {{ $t('models.displayName') }}
+                  <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+                </Label>
+                <FormControl>
+                  <Input
+                    type="text"
+                    :placeholder="$t('models.displayNamePlaceholder')"
+                    v-bind="componentField"
+                  />
+                </FormControl>
+              </FormItem>
+            </FormField>
+
+            <!-- Dimensions (embedding only) -->
+            <FormField
+              v-if="selectedType === 'embedding'"
+              v-slot="{ componentField }"
+              name="dimensions"
+            >
+              <FormItem>
+                <Label class="mb-2">
+                  {{ $t('models.dimensions') }}
+                </Label>
+                <FormControl>
+                  <Input
+                    type="number"
+                    :placeholder="$t('models.dimensionsPlaceholder')"
+                    v-bind="componentField"
+                  />
+                </FormControl>
+              </FormItem>
+            </FormField>
+
+            <!-- Multimodal (chat only) -->
+            <FormField
+              v-if="selectedType === 'chat'"
+              v-slot="{ componentField }"
+              name="is_multimodal"
+            >
+              <FormItem class="flex items-center justify-between">
+                <Label>
+                  {{ $t('models.multimodal') }}
                 </Label>
                 <Switch
-                  id="airplane-mode"
                   v-model="componentField.modelValue"
                   @update:model-value="componentField['onUpdate:modelValue']"
                 />
@@ -113,7 +125,7 @@
           <DialogFooter class="mt-4">
             <DialogClose as-child>
               <Button variant="outline">
-                Cancel
+                {{ $t('common.cancel') }}
               </Button>
             </DialogClose>
             <Button
@@ -121,7 +133,7 @@
               :disabled="!form.meta.value.valid"
             >
               <Spinner v-if="isLoading" />
-              {{ $t("button.add", { msg: "Model" }) }}
+              {{ title === 'edit' ? $t('common.save') : $t('models.addModel') }}
             </Button>
           </DialogFooter>
         </form>
@@ -154,57 +166,55 @@ import {
   Switch,
   Separator,
   Label,
-  Spinner
+  Spinner,
 } from '@memoh/ui'
 import { useForm } from 'vee-validate'
-import { inject, watch, type Ref, ref } from 'vue'
+import { inject, computed, watch, type Ref, ref } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
-import request from '@/utils/request'
-import { useMutation, useQueryCache } from '@pinia/colada'
-import {type ModelInfo } from '@memoh/shared'
+import { type ModelInfo } from '@memoh/shared'
+import { useCreateModel } from '@/composables/api/useModels'
 
 const formSchema = toTypedSchema(z.object({
-  'is_multimodal': z.coerce.boolean(),
-  'model_id': z.string().min(1),
-  'name': z.string().min(1),
-  'type': z.string().min(1),
-  'dimensions':z.coerce.number().min(1)
+  type: z.string().min(1),
+  model_id: z.string().min(1),
+  name: z.string().optional(),
+  dimensions: z.coerce.number().min(1).optional(),
+  is_multimodal: z.coerce.boolean().optional(),
 }))
 
 const form = useForm({
   validationSchema: formSchema,
-  initialValues: {
-    dimensions:1
-  }
 })
+
+const selectedType = computed(() => form.values.type)
 
 const { id } = defineProps<{ id: string }>()
 
-const queryCache = useQueryCache()
-type ModelInfoType = Parameters<(Parameters<typeof form.handleSubmit>)[0]>[0]
-const { mutate: createModel,isLoading } = useMutation({
-  mutation: (modelInfo: ModelInfoType & {
-    dimensions: number,
-    llm_provider_id: string
-  }) => request({
-    url: '/models',
-    data: {
-      ...modelInfo,
-    },
-    method: 'post'
-  }),
-  onSettled: () => { open.value = false; queryCache.invalidateQueries({ key: ['model'], exact: true }) }
-})
+const { mutate: createModel, isLoading } = useCreateModel()
 
-
-const addModel = form.handleSubmit(async (modelInfo) => {  
+const addModel = form.handleSubmit(async (values) => {
   try {
-    await createModel({
-      ...modelInfo,       
-      llm_provider_id: id
-    })
-    open.value=false
+    const payload: Record<string, unknown> = {
+      type: values.type,
+      model_id: values.model_id,
+      llm_provider_id: id,
+    }
+
+    if (values.name) {
+      payload.name = values.name
+    }
+
+    if (values.type === 'embedding' && values.dimensions) {
+      payload.dimensions = values.dimensions
+    }
+
+    if (values.type === 'chat') {
+      payload.is_multimodal = values.is_multimodal ?? false
+    }
+
+    await createModel(payload as any)
+    open.value = false
   } catch {
     return
   }
@@ -212,7 +222,7 @@ const addModel = form.handleSubmit(async (modelInfo) => {
 
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))
-const editInfo =inject<Ref<ModelInfo|null>>('openModelState',ref(null))
+const editInfo = inject<Ref<ModelInfo | null>>('openModelState', ref(null))
 
 watch(open, () => {
   if (open.value && editInfo?.value) {
@@ -223,9 +233,9 @@ watch(open, () => {
 
   if (!open.value) {
     title.value = 'title'
-    editInfo.value=null
+    editInfo.value = null
   }
 }, {
-  immediate: true
+  immediate: true,
 })
 </script>

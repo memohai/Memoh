@@ -2,7 +2,7 @@
 // import type { Payment } from '@/components/columns'
 import { computed, ref, provide, watch, reactive } from 'vue'
 import modelSetting from './model-setting.vue'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { useQueryCache } from '@pinia/colada'
 import {
   ScrollArea,
   Sidebar,
@@ -28,32 +28,18 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@memoh/ui'
-import { mdiMagnify,mdiListBoxOutline } from '@mdi/js'
-// import DataTable from '@/components/DataTable/index.vue'
-import SvgIcon from '@jamescoyle/vue-icon'
-import request from '@/utils/request'
 import { type ProviderInfo } from '@memoh/shared'
 import AddProvider from '@/components/add-provider/index.vue'
 import { clientType } from '@memoh/shared'
+import { useProviderList } from '@/composables/api/useProviders'
 
 const filterProvider = ref('')
-const { data: providerData } = useQuery({
-  key: ['provider'],
-  query: () => request({
-    url: `/providers?client_type=${filterProvider.value}`,
-
-  }).then(fetchValue => fetchValue.data)
-})
+const { data: providerData } = useProviderList(filterProvider)
 const queryCache = useQueryCache()
 
 watch(filterProvider, () => {
-
-  queryCache.invalidateQueries({
-    key: ['provider']
-  })
-}, {
-  immediate:true
-})
+  queryCache.invalidateQueries({ key: ['provider'] })
+}, { immediate: true })
 
 
 const curProvider = ref<Partial<ProviderInfo> & { id: string }>()
@@ -109,7 +95,7 @@ const openStatus = reactive({
             <InputGroup class="shadow-none">
               <InputGroupInput
                 v-model="searchProviderTxt.temp_value"
-                placeholder="搜索模型平台"
+                :placeholder="$t('models.searchPlaceholder')"
               />
               <InputGroupAddon
                 align="inline-end"
@@ -118,11 +104,7 @@ const openStatus = reactive({
                   searchProviderTxt.value = searchProviderTxt.temp_value
                 }"
               >
-                <svg-icon
-                  type="mdi"
-                  :path="mdiMagnify"
-                  class="translate-icon"
-                />
+                <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
               </InputGroupAddon>
             </InputGroup>
           </SidebarHeader>
@@ -154,7 +136,7 @@ const openStatus = reactive({
           <SidebarFooter>
             <Select v-model:model-value="filterProvider">
               <SelectTrigger class="w-full">
-                <SelectValue :placeholder="$t('prompt.select', { msg: 'Type' })" />
+                <SelectValue :placeholder="$t('provider.typePlaceholder')" />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
@@ -184,14 +166,11 @@ const openStatus = reactive({
           >
             <EmptyHeader>
               <EmptyMedia variant="icon">
-                <svg-icon
-                  type="mdi"
-                  :path="mdiListBoxOutline"
-                />
+                <FontAwesomeIcon :icon="['far', 'rectangle-list']" />
               </EmptyMedia>
             </EmptyHeader>
-            <EmptyTitle>No Provider</EmptyTitle>
-            <EmptyDescription>没有添加模型提供商,无法配置模型</EmptyDescription>
+            <EmptyTitle>{{ $t('provider.emptyTitle') }}</EmptyTitle>
+            <EmptyDescription>{{ $t('provider.emptyDescription') }}</EmptyDescription>
             <EmptyContent>
               <!-- <Button>Add data</Button> -->
               <AddProvider v-model:open="openStatus.provideOpen" />

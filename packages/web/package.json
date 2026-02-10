@@ -9,8 +9,6 @@
     "start": "vite preview"
   },
   "dependencies": {
-    "@jamescoyle/vue-icon": "^0.1.2",
-    "@mdi/js": "^7.4.47",
     "@memoh/shared": "workspace:*",
     "@memoh/ui": "workspace:*",
     "@pinia/colada": "^0.21.1",
@@ -18,7 +16,6 @@
     "@tanstack/vue-table": "^8.21.3",
     "@vee-validate/zod": "^4.15.1",
     "@vueuse/core": "^14.1.0",
-    "axios": "^1.13.2",
     "dotenv": "^17.2.3",
     "katex": "^0.16.28",
     "markstream-vue": "0.0.7-beta.2",
@@ -36,7 +33,12 @@
     "vue-i18n": "^11.2.8",
     "vue-router": "^4.6.4",
     "vue-sonner": "^2.0.9",
-    "zod": "^4.3.5"
+    "zod": "^4.3.5",
+    "@fortawesome/fontawesome-svg-core": "^7.0.0",
+    "@fortawesome/free-brands-svg-icons": "^7.0.0",
+    "@fortawesome/free-regular-svg-icons": "^7.0.0",
+    "@fortawesome/free-solid-svg-icons": "^7.0.0",
+    "@fortawesome/vue-fontawesome": "^3.1.1"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
