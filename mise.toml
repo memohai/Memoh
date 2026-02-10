@@ -9,6 +9,8 @@ node = "25"
 bun = "latest"
 # pnpm for workspace management
 pnpm = "10"
+# sqlc for sql management
+sqlc = "latest"
 # Lima for macOS
 lima = { version = "system", platform = "darwin" }
 
