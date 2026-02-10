@@ -47,21 +47,17 @@ type Manager struct {
 	logger      *slog.Logger
 }
 
-func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig) *Manager {
+func NewManager(log *slog.Logger, service ctr.Service, cfg config.Config, db *pgxpool.Pool) *Manager {
 	return &Manager{
+		db:      db,
+		queries: dbsqlc.New(db),
 		service: service,
-		cfg:     cfg,
+		cfg:     cfg.MCP,
 		logger:  log.With(slog.String("component", "mcp")),
 		containerID: func(botID string) string {
 			return ContainerPrefix + botID
 		},
 	}
-}
-
-func (m *Manager) WithDB(db *pgxpool.Pool) *Manager {
-	m.db = db
-	m.queries = dbsqlc.New(db)
-	return m
 }
 
 func (m *Manager) Init(ctx context.Context) error {

@@ -95,11 +95,11 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string, botService *bots.Service, userService *users.Service, queries *dbsqlc.Queries) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.Config, botService *bots.Service, userService *users.Service, queries *dbsqlc.Queries) *ContainerdHandler {
 	return &ContainerdHandler{
 		service:      service,
-		cfg:          cfg,
-		namespace:    namespace,
+		cfg:          cfg.MCP,
+		namespace:    cfg.Containerd.Namespace,
 		logger:       log.With(slog.String("handler", "containerd")),
 		mcpSess:      make(map[string]*mcpSession),
 		mcpStdioSess: make(map[string]*mcpStdioSession),

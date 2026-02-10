@@ -27,6 +27,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
+	"github.com/memohai/memoh/internal/config"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -148,7 +149,8 @@ type DefaultService struct {
 	logger    *slog.Logger
 }
 
-func NewDefaultService(log *slog.Logger, client *containerd.Client, namespace string) *DefaultService {
+func NewDefaultService(log *slog.Logger, client *containerd.Client, cfg config.Config) *DefaultService {
+	namespace := cfg.Containerd.Namespace
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 
@@ -8,7 +9,6 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/handlers"
 )
 
 type Server struct {
@@ -17,7 +17,13 @@ type Server struct {
 	logger *slog.Logger
 }
 
-func NewServer(log *slog.Logger, addr string, jwtSecret string, pingHandler *handlers.PingHandler, authHandler *handlers.AuthHandler, memoryHandler *handlers.MemoryHandler, embeddingsHandler *handlers.EmbeddingsHandler, chatHandler *handlers.ChatHandler, swaggerHandler *handlers.SwaggerHandler, providersHandler *handlers.ProvidersHandler, modelsHandler *handlers.ModelsHandler, settingsHandler *handlers.SettingsHandler, historyHandler *handlers.HistoryHandler, contactsHandler *handlers.ContactsHandler, preauthHandler *handlers.PreauthHandler, scheduleHandler *handlers.ScheduleHandler, subagentHandler *handlers.SubagentHandler, containerdHandler *handlers.ContainerdHandler, channelHandler *handlers.ChannelHandler, usersHandler *handlers.UsersHandler, mcpHandler *handlers.MCPHandler, cliHandler *handlers.LocalChannelHandler, webHandler *handlers.LocalChannelHandler) *Server {
+type Handler interface {
+	Register(e *echo.Echo)
+}
+
+func NewServer(log *slog.Logger, addr string, jwtSecret string,
+	handlers ...Handler,
+) *Server {
 	if addr == "" {
 		addr = ":8080"
 	}
@@ -51,65 +57,10 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string, pingHandler *han
 		return false
 	}))
 
-	if pingHandler != nil {
-		pingHandler.Register(e)
-	}
-	if authHandler != nil {
-		authHandler.Register(e)
-	}
-	if memoryHandler != nil {
-		memoryHandler.Register(e)
-	}
-	if embeddingsHandler != nil {
-		embeddingsHandler.Register(e)
-	}
-	if chatHandler != nil {
-		chatHandler.Register(e)
-	}
-	if swaggerHandler != nil {
-		swaggerHandler.Register(e)
-	}
-	if settingsHandler != nil {
-		settingsHandler.Register(e)
-	}
-	if historyHandler != nil {
-		historyHandler.Register(e)
-	}
-	if contactsHandler != nil {
-		contactsHandler.Register(e)
-	}
-	if preauthHandler != nil {
-		preauthHandler.Register(e)
-	}
-	if scheduleHandler != nil {
-		scheduleHandler.Register(e)
-	}
-	if subagentHandler != nil {
-		subagentHandler.Register(e)
-	}
-	if providersHandler != nil {
-		providersHandler.Register(e)
-	}
-	if modelsHandler != nil {
-		modelsHandler.Register(e)
-	}
-	if containerdHandler != nil {
-		containerdHandler.Register(e)
-	}
-	if channelHandler != nil {
-		channelHandler.Register(e)
-	}
-	if usersHandler != nil {
-		usersHandler.Register(e)
-	}
-	if mcpHandler != nil {
-		mcpHandler.Register(e)
-	}
-	if cliHandler != nil {
-		cliHandler.Register(e)
-	}
-	if webHandler != nil {
-		webHandler.Register(e)
+	for _, h := range handlers {
+		if h != nil {
+			h.Register(e)
+		}
 	}
 
 	return &Server{
@@ -121,4 +72,8 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string, pingHandler *han
 
 func (s *Server) Start() error {
 	return s.echo.Start(s.addr)
+}
+
+func (s *Server) Stop(ctx context.Context) error {
+	return s.echo.Shutdown(ctx)
 }

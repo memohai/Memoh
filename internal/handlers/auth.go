@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/auth"
+	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/users"
 )
 
@@ -35,11 +36,11 @@ type LoginResponse struct {
 	Username    string `json:"username"`
 }
 
-func NewAuthHandler(log *slog.Logger, userService *users.Service, jwtSecret string, expiresIn time.Duration) *AuthHandler {
+func NewAuthHandler(log *slog.Logger, userService *users.Service, runtimeConfig *boot.RuntimeConfig) *AuthHandler {
 	return &AuthHandler{
 		userService: userService,
-		jwtSecret:   jwtSecret,
-		expiresIn:   expiresIn,
+		jwtSecret:   runtimeConfig.JwtSecret,
+		expiresIn:   runtimeConfig.JwtExpiresIn,
 		logger:      log.With(slog.String("handler", "auth")),
 	}
 }

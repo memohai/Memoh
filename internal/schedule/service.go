@@ -15,6 +15,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/memohai/memoh/internal/auth"
+	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
@@ -29,7 +30,7 @@ type Service struct {
 	jobs      map[string]cron.EntryID
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, jwtSecret string) *Service {
+func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, runtimeConfig *boot.RuntimeConfig) *Service {
 	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	c := cron.New(cron.WithParser(parser))
 	service := &Service{
@@ -37,7 +38,7 @@ func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, jw
 		cron:      c,
 		parser:    parser,
 		triggerer: triggerer,
-		jwtSecret: jwtSecret,
+		jwtSecret: runtimeConfig.JwtSecret,
 		logger:    log.With(slog.String("service", "schedule")),
 		jobs:      map[string]cron.EntryID{},
 	}
