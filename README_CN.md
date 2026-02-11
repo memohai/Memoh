@@ -43,7 +43,21 @@ Memoh Bot 能够区分并记忆来自多个人类/Bot 的请求，可在任意�
 
 详情请参阅 [Roadmap Version 0.1](https://github.com/memohai/Memoh/issues/2)。
 
-## 开发
+## 快速开始
+
+### Docker 部署（推荐）
+
+最快的部署方式：
+
+```bash
+git clone https://github.com/memohai/Memoh.git
+cd Memoh
+./deploy.sh
+```
+
+部署完成后访问 http://localhost。详见 [Docker 部署指南](README_DOCKER.md)。
+
+### 开发环境
 
 详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 

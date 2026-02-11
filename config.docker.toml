@@ -1,0 +1,54 @@
+## Service configuration
+[log]
+level = "info"
+format = "text"
+
+[server]
+addr = ":8080"
+
+## Admin
+[admin]
+username = "admin"
+password = "admin123"
+email = "admin@memoh.local"
+
+## Auth configuration
+[auth]
+jwt_secret = "YZq8kXrW5dFpNt9mLxQvHbRjKsMnOePw"
+jwt_expires_in = "168h"
+
+## Docker configuration (使用宿主机 Docker socket)
+[containerd]
+socket_path = "unix:///var/run/docker.sock"
+namespace = "default"
+
+[mcp]
+busybox_image = "memoh-mcp:latest"
+snapshotter = "overlayfs"
+data_root = "/var/lib/memoh/data"
+data_mount = "/data"
+
+## Postgres configuration
+[postgres]
+host = "postgres"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh"
+sslmode = "disable"
+
+## Qdrant configuration
+[qdrant]
+base_url = "http://qdrant:6334"
+api_key = ""
+collection = "memory"
+timeout_seconds = 10
+
+## Agent Gateway
+[agent_gateway]
+host = "agent"
+port = 8081
+
+[brave]
+api_key = ""
+base_url = "https://api.search.brave.com/res/v1/"

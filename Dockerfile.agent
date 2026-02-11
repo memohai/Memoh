@@ -1,0 +1,28 @@
+FROM oven/bun:1 AS builder
+
+WORKDIR /build
+
+COPY agent/package.json agent/bun.lock* ./
+
+RUN bun install
+
+COPY agent/ ./
+
+RUN bun run build
+
+FROM oven/bun:1-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache ca-certificates wget
+
+COPY --from=builder /build/dist /app/dist
+COPY --from=builder /build/node_modules /app/node_modules
+COPY --from=builder /build/package.json /app/package.json
+
+EXPOSE 8081
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8081/health || exit 1
+
+CMD ["bun", "run", "dist/index.js"]

@@ -1,0 +1,60 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+docs/
+assets/
+
+# IDE
+.vscode/
+.cursor/
+.idea/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+**/dist/
+build/
+**/build/
+out/
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+
+# Test
+coverage/
+.nyc_output/
+
+# Mise
+.mise.toml.local
+
+# Data
+data/
+*.db
+*.sqlite
+
+# Docker
+docker-compose.override.yml

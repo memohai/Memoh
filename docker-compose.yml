@@ -1,0 +1,137 @@
+services:
+  
+  postgres:
+    image: postgres:16-alpine
+    container_name: memoh-postgres
+    environment:
+      POSTGRES_DB: memoh
+      POSTGRES_USER: memoh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-memoh123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memoh"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: memoh-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    expose:
+      - "6333"
+      - "6334"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  docker-cli:
+    image: docker:27-cli
+    container_name: memoh-docker-cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - memoh_bot_data:/var/lib/memoh/data
+    command: ["tail", "-f", "/dev/null"]
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: memoh-server
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - SERVER_ADDR=:8080
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=memoh
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-memoh123}
+      - POSTGRES_DB=memoh
+      - POSTGRES_SSLMODE=disable
+      - QDRANT_BASE_URL=http://qdrant:6334
+      - QDRANT_COLLECTION=memory
+      - CONTAINERD_SOCKET=unix:///var/run/docker.sock
+      - AGENT_GATEWAY_HOST=agent
+      - AGENT_GATEWAY_PORT=8081
+      - JWT_SECRET=${JWT_SECRET:-YZq8kXrW5dFpNt9mLxQvHbRjKsMnOePw}
+      - JWT_EXPIRES_IN=168h
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@memoh.local}
+      - MCP_BUSYBOX_IMAGE=memoh-mcp:latest
+      - MCP_DATA_ROOT=/var/lib/memoh/data
+      - MCP_DATA_MOUNT=/data
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - memoh_bot_data:/var/lib/memoh/data
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: memoh-agent
+    environment:
+      - NODE_ENV=production
+      - PORT=8081
+    ports:
+      - "8081:8081"
+    depends_on:
+      - server
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:8080}
+        - VITE_AGENT_URL=${VITE_AGENT_URL:-http://localhost:8081}
+    container_name: memoh-web
+    ports:
+      - "8090:80"
+    depends_on:
+      - server
+      - agent
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  memoh_bot_data:
+    driver: local
+
+networks:
+  memoh-network:
+    driver: bridge

@@ -43,9 +43,23 @@ Memoh Bot can distinguish and remember requests from multiple humans and bots, w
 
 Please refer to the [Roadmap Version 0.1](https://github.com/memohai/Memoh/issues/2) for more details.
 
-## Development
+## Quick Start
 
-Refer to [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
+### Docker Deployment (Recommended)
+
+The fastest way to deploy Memoh:
+
+```bash
+git clone https://github.com/memohai/Memoh.git
+cd Memoh
+./deploy.sh
+```
+
+Visit http://localhost after deployment. See [Docker Deployment Guide](README_DOCKER.md) for details.
+
+### Development
+
+Refer to [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ## Star History
 
