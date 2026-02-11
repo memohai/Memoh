@@ -116,7 +116,7 @@ services:
         - VITE_AGENT_URL=${VITE_AGENT_URL:-http://localhost:8081}
     container_name: memoh-web
     ports:
-      - "8090:80"
+      - "80:80"
     depends_on:
       - server
       - agent
