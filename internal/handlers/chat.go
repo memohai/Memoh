@@ -189,7 +189,8 @@ func (h *ChatHandler) SendMessage(c echo.Context) error {
 	req.BotID = chatObj.BotID
 	req.ChatID = chatID
 	req.Token = c.Request().Header.Get("Authorization")
-	req.ChannelIdentityID = channelIdentityID
+	req.UserID = channelIdentityID
+	req.SourceChannelIdentityID = channelIdentityID
 
 	resp, err := h.resolver.Chat(c.Request().Context(), req)
 	if err != nil {
@@ -224,7 +225,8 @@ func (h *ChatHandler) StreamMessage(c echo.Context) error {
 	req.BotID = chatObj.BotID
 	req.ChatID = chatID
 	req.Token = c.Request().Header.Get("Authorization")
-	req.ChannelIdentityID = channelIdentityID
+	req.UserID = channelIdentityID
+	req.SourceChannelIdentityID = channelIdentityID
 
 	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
@@ -258,7 +260,10 @@ func (h *ChatHandler) StreamMessage(c echo.Context) error {
 			if err != nil {
 				h.logger.Error("chat stream failed", slog.Any("error", err))
 				errData := map[string]string{"error": err.Error()}
-				data, _ := json.Marshal(errData)
+				data, marshalErr := json.Marshal(errData)
+				if marshalErr != nil {
+					return echo.NewHTTPError(http.StatusInternalServerError, marshalErr.Error())
+				}
 				writer.WriteString(fmt.Sprintf("data: %s\n\n", string(data)))
 				writer.Flush()
 				flusher.Flush()
@@ -500,7 +505,7 @@ func (h *ChatHandler) ListThreads(c echo.Context) error {
 // --- helpers ---
 
 func (h *ChatHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.ChannelIdentityIDFromContext(c)
+	channelIdentityID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return "", err
 	}
@@ -558,7 +563,10 @@ func (h *ChatHandler) requireParticipant(ctx context.Context, chatID, channelIde
 	}
 	// Admin bypass.
 	if h.accountService != nil {
-		isAdmin, _ := h.accountService.IsAdmin(ctx, channelIdentityID)
+		isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 		if isAdmin {
 			return nil
 		}
@@ -579,7 +587,10 @@ func (h *ChatHandler) requireReadable(ctx context.Context, chatID, channelIdenti
 	}
 	// Admin bypass.
 	if h.accountService != nil {
-		isAdmin, _ := h.accountService.IsAdmin(ctx, channelIdentityID)
+		isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 		if isAdmin {
 			return nil
 		}
@@ -600,7 +611,10 @@ func (h *ChatHandler) requireRole(ctx context.Context, chatID, channelIdentityID
 	}
 	// Admin bypass.
 	if h.accountService != nil {
-		isAdmin, _ := h.accountService.IsAdmin(ctx, channelIdentityID)
+		isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 		if isAdmin {
 			return nil
 		}

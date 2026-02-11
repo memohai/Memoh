@@ -164,7 +164,7 @@ func (h *ModelsHandler) Enable(c echo.Context) error {
 	if h.settingsService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings service not configured")
 	}
-	userID, err := auth.ChannelIdentityIDFromContext(c)
+	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return err
 	}

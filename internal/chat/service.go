@@ -70,7 +70,10 @@ func (s *Service) Create(ctx context.Context, botID, channelIdentityID string, r
 		}
 	}
 
-	metadata, _ := json.Marshal(nonNilMap(req.Metadata))
+	metadata, err := json.Marshal(nonNilMap(req.Metadata))
+	if err != nil {
+		return Chat{}, fmt.Errorf("marshal chat metadata: %w", err)
+	}
 
 	row, err := s.queries.CreateChat(ctx, sqlc.CreateChatParams{
 		BotID:           pgBotID,
@@ -393,7 +396,10 @@ func (s *Service) CreateRoute(ctx context.Context, chatID string, r Route) (Rout
 			return Route{}, err
 		}
 	}
-	metadata, _ := json.Marshal(nonNilMap(r.Metadata))
+	metadata, err := json.Marshal(nonNilMap(r.Metadata))
+	if err != nil {
+		return Route{}, fmt.Errorf("marshal route metadata: %w", err)
+	}
 	row, err := s.queries.CreateChatRoute(ctx, sqlc.CreateChatRouteParams{
 		ChatID:          pgChatID,
 		BotID:           pgBotID,
@@ -488,7 +494,10 @@ func (s *Service) ResolveChat(ctx context.Context, botID, platform, conversation
 	if err == nil {
 		// Route found, ensure the sender identity is a participant.
 		if strings.TrimSpace(channelIdentityID) != "" {
-			ok, _ := s.IsParticipant(ctx, route.ChatID, channelIdentityID)
+			ok, checkErr := s.IsParticipant(ctx, route.ChatID, channelIdentityID)
+			if checkErr != nil {
+				return ResolveChatResult{}, fmt.Errorf("check chat participant: %w", checkErr)
+			}
 			if !ok {
 				if _, err := s.AddParticipant(ctx, route.ChatID, channelIdentityID, RoleMember); err != nil {
 					s.logger.Warn("auto-add participant failed", slog.Any("error", err))
@@ -497,9 +506,17 @@ func (s *Service) ResolveChat(ctx context.Context, botID, platform, conversation
 		}
 		// Update reply target if changed.
 		if strings.TrimSpace(replyTarget) != "" && replyTarget != route.ReplyTarget {
-			_ = s.UpdateRouteReplyTarget(ctx, route.ID, replyTarget)
+			if err := s.UpdateRouteReplyTarget(ctx, route.ID, replyTarget); err != nil && s.logger != nil {
+				s.logger.Warn("update route reply target failed", slog.Any("error", err))
+			}
 		}
-		_ = s.queries.TouchChat(ctx, mustParseUUID(route.ChatID))
+		pgRouteChatID, parseErr := parseUUID(route.ChatID)
+		if parseErr != nil {
+			return ResolveChatResult{}, fmt.Errorf("parse route chat id: %w", parseErr)
+		}
+		if err := s.queries.TouchChat(ctx, pgRouteChatID); err != nil && s.logger != nil {
+			s.logger.Warn("touch chat failed", slog.Any("error", err))
+		}
 		return ResolveChatResult{ChatID: route.ChatID, RouteID: route.ID, Created: false}, nil
 	}
 
@@ -564,13 +581,22 @@ func (s *Service) PersistMessage(ctx context.Context, chatID, botID, routeID, se
 	}
 	var pgSender pgtype.UUID
 	if strings.TrimSpace(senderChannelIdentityID) != "" {
-		pgSender, _ = parseUUID(senderChannelIdentityID)
+		pgSender, err = parseUUID(senderChannelIdentityID)
+		if err != nil {
+			return Message{}, fmt.Errorf("invalid sender channel identity id: %w", err)
+		}
 	}
 	var pgSenderUser pgtype.UUID
 	if strings.TrimSpace(senderUserID) != "" {
-		pgSenderUser, _ = parseUUID(senderUserID)
+		pgSenderUser, err = parseUUID(senderUserID)
+		if err != nil {
+			return Message{}, fmt.Errorf("invalid sender user id: %w", err)
+		}
 	}
-	metaBytes, _ := json.Marshal(nonNilMap(metadata))
+	metaBytes, err := json.Marshal(nonNilMap(metadata))
+	if err != nil {
+		return Message{}, fmt.Errorf("marshal message metadata: %w", err)
+	}
 	if len(content) == 0 {
 		content = []byte("{}")
 	}
@@ -811,11 +837,6 @@ func pgTimePtr(ts pgtype.Timestamptz) *time.Time {
 	}
 	value := ts.Time
 	return &value
-}
-
-func mustParseUUID(id string) pgtype.UUID {
-	pgID, _ := parseUUID(id)
-	return pgID
 }
 
 func nonNilMap(m map[string]any) map[string]any {

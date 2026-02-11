@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -61,7 +60,10 @@ func createBotForBind(ctx context.Context, queries *sqlc.Queries, ownerUserID st
 	if err != nil {
 		return "", err
 	}
-	meta, _ := json.Marshal(map[string]any{"source": "bind-integration-test"})
+	meta, err := json.Marshal(map[string]any{"source": "bind-integration-test"})
+	if err != nil {
+		return "", err
+	}
 	row, err := queries.CreateBot(ctx, sqlc.CreateBotParams{
 		OwnerUserID: pgOwnerID,
 		Type:        "personal",
@@ -75,14 +77,6 @@ func createBotForBind(ctx context.Context, queries *sqlc.Queries, ownerUserID st
 	return db.UUIDToString(row.ID), nil
 }
 
-func isLegacyBindSchemaError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "relation \"users\" does not exist")
-}
-
 func TestBindConsumeLinksChannelIdentityToIssuerUser(t *testing.T) {
 	queries, channelIdentitySvc, bindSvc, cleanup := setupBindLinkIntegrationTest(t)
 	defer cleanup()
@@ -90,9 +84,6 @@ func TestBindConsumeLinksChannelIdentityToIssuerUser(t *testing.T) {
 	ctx := context.Background()
 	ownerUserID, err := createUserForBind(ctx, queries)
 	if err != nil {
-		if isLegacyBindSchemaError(err) {
-			t.Skipf("skip integration test on legacy schema: %v", err)
-		}
 		t.Fatalf("create owner user failed: %v", err)
 	}
 	sourceChannelIdentity, err := channelIdentitySvc.ResolveByChannelIdentity(ctx, "feishu", fmt.Sprintf("bind-src-%d", time.Now().UnixNano()), "source")
@@ -134,9 +125,6 @@ func TestBindConsumeConflictDoesNotMarkUsed(t *testing.T) {
 	ctx := context.Background()
 	issuerUserID, err := createUserForBind(ctx, queries)
 	if err != nil {
-		if isLegacyBindSchemaError(err) {
-			t.Skipf("skip integration test on legacy schema: %v", err)
-		}
 		t.Fatalf("create issuer user failed: %v", err)
 	}
 	otherUserID, err := createUserForBind(ctx, queries)

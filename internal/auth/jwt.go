@@ -52,15 +52,7 @@ func UserIDFromContext(c echo.Context) (string, error) {
 	if userID := claimString(claims, claimSubject); userID != "" {
 		return userID, nil
 	}
-	if legacyChannelIdentityID := claimString(claims, claimChannelIdentityID); legacyChannelIdentityID != "" {
-		return legacyChannelIdentityID, nil
-	}
 	return "", echo.NewHTTPError(http.StatusUnauthorized, "user id missing")
-}
-
-// ChannelIdentityIDFromContext is kept as compatibility alias and returns user id.
-func ChannelIdentityIDFromContext(c echo.Context) (string, error) {
-	return UserIDFromContext(c)
 }
 
 // GenerateToken creates a signed JWT for the user.
@@ -78,11 +70,10 @@ func GenerateToken(userID, secret string, expiresIn time.Duration) (string, time
 	now := time.Now().UTC()
 	expiresAt := now.Add(expiresIn)
 	claims := jwt.MapClaims{
-		claimSubject:           userID,
-		claimUserID:            userID,
-		claimChannelIdentityID: userID, // legacy compatibility for handlers still reading channel_identity_id
-		"iat":                  now.Unix(),
-		"exp":                  expiresAt.Unix(),
+		claimSubject: userID,
+		claimUserID:  userID,
+		"iat":        now.Unix(),
+		"exp":        expiresAt.Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString([]byte(secret))

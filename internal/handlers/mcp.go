@@ -218,7 +218,7 @@ func (h *MCPHandler) Delete(c echo.Context) error {
 }
 
 func (h *MCPHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	userID, err := auth.ChannelIdentityIDFromContext(c)
+	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return "", err
 	}

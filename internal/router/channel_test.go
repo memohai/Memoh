@@ -97,8 +97,11 @@ func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 	if gateway.gotReq.Query != "hello" {
 		t.Errorf("expected query 'hello', got: %s", gateway.gotReq.Query)
 	}
-	if gateway.gotReq.ChannelIdentityID != "channelIdentity-1" {
-		t.Errorf("expected channel_identity_id 'channelIdentity-1', got: %s", gateway.gotReq.ChannelIdentityID)
+	if gateway.gotReq.UserID != "channelIdentity-1" {
+		t.Errorf("expected user_id 'channelIdentity-1', got: %s", gateway.gotReq.UserID)
+	}
+	if gateway.gotReq.SourceChannelIdentityID != "channelIdentity-1" {
+		t.Errorf("expected source_channel_identity_id 'channelIdentity-1', got: %s", gateway.gotReq.SourceChannelIdentityID)
 	}
 	if gateway.gotReq.ChatID != "chat-1" {
 		t.Errorf("expected chat_id 'chat-1', got: %s", gateway.gotReq.ChatID)

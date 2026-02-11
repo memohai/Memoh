@@ -130,7 +130,7 @@ func (h *SettingsHandler) Delete(c echo.Context) error {
 }
 
 func (h *SettingsHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.ChannelIdentityIDFromContext(c)
+	channelIdentityID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return "", err
 	}

@@ -55,8 +55,8 @@ func TestGenerateTriggerToken(t *testing.T) {
 	if sub, _ := claims["sub"].(string); sub != userID {
 		t.Errorf("expected sub=%s, got=%s", userID, sub)
 	}
-	if uid, _ := claims["channel_identity_id"].(string); uid != userID {
-		t.Errorf("expected channel_identity_id=%s, got=%s", userID, uid)
+	if uid, _ := claims["user_id"].(string); uid != userID {
+		t.Errorf("expected user_id=%s, got=%s", userID, uid)
 	}
 	exp, _ := claims["exp"].(float64)
 	if exp == 0 {

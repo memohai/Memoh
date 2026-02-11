@@ -627,7 +627,7 @@ func (h *ContainerdHandler) requireBotAccess(c echo.Context) (string, error) {
 }
 
 func (h *ContainerdHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.ChannelIdentityIDFromContext(c)
+	channelIdentityID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return "", err
 	}

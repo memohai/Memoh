@@ -53,7 +53,7 @@ func (h *BindHandler) Issue(c echo.Context) error {
 	if h.service == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "bind service not available")
 	}
-	channelIdentityID, err := h.requireChannelIdentityID(c)
+	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func (h *BindHandler) Issue(c echo.Context) error {
 		ttl = time.Duration(req.TTLSeconds) * time.Second
 	}
 
-	code, err := h.service.Issue(c.Request().Context(), channelIdentityID, strings.TrimSpace(req.Platform), ttl)
+	code, err := h.service.Issue(c.Request().Context(), userID, strings.TrimSpace(req.Platform), ttl)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -79,13 +79,13 @@ func (h *BindHandler) Issue(c echo.Context) error {
 	})
 }
 
-func (h *BindHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.ChannelIdentityIDFromContext(c)
+func (h *BindHandler) requireUserID(c echo.Context) (string, error) {
+	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return "", err
 	}
-	if err := identity.ValidateChannelIdentityID(channelIdentityID); err != nil {
+	if err := identity.ValidateChannelIdentityID(userID); err != nil {
 		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	return channelIdentityID, nil
+	return userID, nil
 }

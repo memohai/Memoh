@@ -208,7 +208,7 @@ func (r *Resolver) resolve(ctx context.Context, req ChatRequest) (resolvedContex
 		r.enforceGroupMemoryPolicy(ctx, req.ChatID, &chatSettings)
 	}
 
-	userSettings, err := r.loadUserSettings(ctx, req.ChannelIdentityID)
+	userSettings, err := r.loadUserSettings(ctx, req.UserID)
 	if err != nil {
 		return resolvedContext{}, err
 	}
@@ -297,7 +297,7 @@ func (r *Resolver) resolve(ctx context.Context, req ChatRequest) (resolvedContex
 			BotID:             req.BotID,
 			SessionID:         req.ChatID,
 			ContainerID:       containerID,
-			ChannelIdentityID: firstNonEmpty(req.ChannelIdentityID, req.BotID),
+			ChannelIdentityID: firstNonEmpty(req.SourceChannelIdentityID, req.UserID),
 			DisplayName:       firstNonEmpty(req.DisplayName, "User"),
 			CurrentPlatform:   req.CurrentChannel,
 			ReplyTarget:       "",
@@ -348,11 +348,11 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 		chatID = "schedule-" + payload.ID
 	}
 	req := ChatRequest{
-		BotID:             botID,
-		ChatID:            chatID,
-		Query:             payload.Command,
-		ChannelIdentityID: payload.OwnerUserID,
-		Token:             token,
+		BotID:  botID,
+		ChatID: chatID,
+		Query:  payload.Command,
+		UserID: payload.OwnerUserID,
+		Token:  token,
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
@@ -373,7 +373,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 			BotID:             rc.payload.Identity.BotID,
 			SessionID:         rc.payload.Identity.SessionID,
 			ContainerID:       rc.payload.Identity.ContainerID,
-			ChannelIdentityID: firstNonEmpty(payload.OwnerUserID, botID),
+			ChannelIdentityID: strings.TrimSpace(payload.OwnerUserID),
 			DisplayName:       "Scheduler",
 		},
 		Attachments: rc.payload.Attachments,
@@ -676,8 +676,8 @@ func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req ChatRequest
 	if settings.EnableChatMemory {
 		scopes = append(scopes, memoryScope{Namespace: "chat", ScopeID: req.ChatID})
 	}
-	if settings.EnablePrivateMemory && strings.TrimSpace(req.ChannelIdentityID) != "" {
-		scopes = append(scopes, memoryScope{Namespace: "private", ScopeID: req.ChannelIdentityID})
+	if settings.EnablePrivateMemory && strings.TrimSpace(req.UserID) != "" {
+		scopes = append(scopes, memoryScope{Namespace: "private", ScopeID: req.UserID})
 	}
 	if settings.EnablePublicMemory {
 		scopes = append(scopes, memoryScope{Namespace: "public", ScopeID: req.BotID})
@@ -778,7 +778,7 @@ func (r *Resolver) storeRound(ctx context.Context, req ChatRequest, messages []M
 	fullRound = append(fullRound, messages...)
 
 	r.storeMessages(ctx, req, fullRound)
-	r.storeMemory(ctx, req.BotID, req.ChatID, req.ChannelIdentityID, req.Query, fullRound)
+	r.storeMemory(ctx, req.BotID, req.ChatID, req.UserID, req.Query, fullRound)
 	return nil
 }
 
@@ -805,10 +805,12 @@ func (r *Resolver) storeMessages(ctx context.Context, req ChatRequest, messages 
 		if err != nil {
 			continue
 		}
-		senderID := ""
+		senderChannelIdentityID := ""
+		senderUserID := ""
 		externalMessageID := ""
 		if msg.Role == "user" {
-			senderID = req.ChannelIdentityID
+			senderChannelIdentityID = req.SourceChannelIdentityID
+			senderUserID = req.UserID
 			externalMessageID = req.ExternalMessageID
 		}
 		if _, err := r.chatService.PersistMessage(
@@ -816,8 +818,8 @@ func (r *Resolver) storeMessages(ctx context.Context, req ChatRequest, messages 
 			req.ChatID,
 			req.BotID,
 			req.RouteID,
-			"",
-			senderID,
+			senderChannelIdentityID,
+			senderUserID,
 			req.CurrentChannel,
 			externalMessageID,
 			msg.Role,
@@ -829,7 +831,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req ChatRequest, messages 
 	}
 }
 
-func (r *Resolver) storeMemory(ctx context.Context, botID, chatID, channelIdentityID, query string, messages []ModelMessage) {
+func (r *Resolver) storeMemory(ctx context.Context, botID, chatID, userID, query string, messages []ModelMessage) {
 	if r.memoryService == nil {
 		return
 	}
@@ -869,9 +871,9 @@ func (r *Resolver) storeMemory(ctx context.Context, botID, chatID, channelIdenti
 		r.addMemory(ctx, botID, memMsgs, "chat", chatID)
 	}
 
-	// Write to private namespace if enabled and channel identity is known.
-	if cs.EnablePrivateMemory && strings.TrimSpace(channelIdentityID) != "" {
-		r.addMemory(ctx, botID, memMsgs, "private", channelIdentityID)
+	// Write to private namespace if enabled and user id is known.
+	if cs.EnablePrivateMemory && strings.TrimSpace(userID) != "" {
+		r.addMemory(ctx, botID, memMsgs, "private", userID)
 	}
 
 	// Write to public namespace if enabled.

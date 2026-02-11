@@ -234,15 +234,16 @@ type ToolCallFunction struct {
 
 // ChatRequest is the input for Chat and StreamChat.
 type ChatRequest struct {
-	BotID             string `json:"-"`
-	ChatID            string `json:"-"`
-	Token             string `json:"-"`
-	ChannelIdentityID string `json:"-"`
-	ContainerID       string `json:"-"`
-	DisplayName       string `json:"-"`
-	RouteID           string `json:"-"`
-	ChatToken         string `json:"-"`
-	ExternalMessageID string `json:"-"`
+	BotID                    string `json:"-"`
+	ChatID                   string `json:"-"`
+	Token                    string `json:"-"`
+	UserID                   string `json:"-"`
+	SourceChannelIdentityID  string `json:"-"`
+	ContainerID              string `json:"-"`
+	DisplayName              string `json:"-"`
+	RouteID                  string `json:"-"`
+	ChatToken                string `json:"-"`
+	ExternalMessageID        string `json:"-"`
 
 	Query              string         `json:"query"`
 	Model              string         `json:"model,omitempty"`

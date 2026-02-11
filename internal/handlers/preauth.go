@@ -40,7 +40,7 @@ type preauthIssueRequest struct {
 }
 
 func (h *PreauthHandler) Issue(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
+	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func (h *PreauthHandler) Issue(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	var req preauthIssueRequest
@@ -59,33 +59,33 @@ func (h *PreauthHandler) Issue(c echo.Context) error {
 	if req.TTLSeconds > 0 {
 		ttl = time.Duration(req.TTLSeconds) * time.Second
 	}
-	key, err := h.service.Issue(c.Request().Context(), botID, channelIdentityID, ttl)
+	key, err := h.service.Issue(c.Request().Context(), botID, userID, ttl)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, key)
 }
 
-func (h *PreauthHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.ChannelIdentityIDFromContext(c)
+func (h *PreauthHandler) requireUserID(c echo.Context) (string, error) {
+	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return "", err
 	}
-	if err := identity.ValidateChannelIdentityID(channelIdentityID); err != nil {
+	if err := identity.ValidateChannelIdentityID(userID); err != nil {
 		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	return channelIdentityID, nil
+	return userID, nil
 }
 
-func (h *PreauthHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
+func (h *PreauthHandler) authorizeBotAccess(ctx context.Context, userID, botID string) (bots.Bot, error) {
 	if h.botService == nil || h.accountService == nil {
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
-	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+	isAdmin, err := h.accountService.IsAdmin(ctx, userID)
 	if err != nil {
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	bot, err := h.botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: false})
+	bot, err := h.botService.AuthorizeAccess(ctx, userID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: false})
 	if err != nil {
 		if errors.Is(err, bots.ErrBotNotFound) {
 			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")

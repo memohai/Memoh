@@ -167,17 +167,18 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		desc, _ = p.registry.GetDescriptor(msg.Channel)
 	}
 	resp, err := p.chat.Chat(ctx, chat.ChatRequest{
-		BotID:             identity.BotID,
-		ChatID:            resolved.ChatID,
-		Token:             token,
-		ChannelIdentityID: identity.UserID,
-		DisplayName:       identity.DisplayName,
-		RouteID:           resolved.RouteID,
-		ChatToken:         chatToken,
-		ExternalMessageID: strings.TrimSpace(msg.Message.ID),
-		Query:             text,
-		CurrentChannel:    msg.Channel.String(),
-		Channels:          []string{msg.Channel.String()},
+		BotID:                   identity.BotID,
+		ChatID:                  resolved.ChatID,
+		Token:                   token,
+		UserID:                  identity.UserID,
+		SourceChannelIdentityID: identity.ChannelIdentityID,
+		DisplayName:             identity.DisplayName,
+		RouteID:                 resolved.RouteID,
+		ChatToken:               chatToken,
+		ExternalMessageID:       strings.TrimSpace(msg.Message.ID),
+		Query:                   text,
+		CurrentChannel:          msg.Channel.String(),
+		Channels:                []string{msg.Channel.String()},
 	})
 	if err != nil {
 		if p.logger != nil {

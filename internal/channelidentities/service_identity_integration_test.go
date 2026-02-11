@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -43,16 +42,6 @@ func formatUUID(bytes [16]byte) string {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", bytes[0:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:16])
 }
 
-func isLegacyChannelIdentitySchemaError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "channelidentities_kind_check") ||
-		strings.Contains(msg, "column \"user_id\" of relation \"channelidentities\" does not exist") ||
-		strings.Contains(msg, "column \"channel_subject_id\" of relation \"channelidentities\" does not exist")
-}
-
 func TestChannelIdentityResolveChannelIdentityStable(t *testing.T) {
 	svc, _, cleanup := setupChannelIdentityIdentityIntegrationTest(t)
 	defer cleanup()
@@ -61,9 +50,6 @@ func TestChannelIdentityResolveChannelIdentityStable(t *testing.T) {
 	externalID := fmt.Sprintf("stable_%d", time.Now().UnixNano())
 	first, err := svc.ResolveByChannelIdentity(ctx, "feishu", externalID, "first")
 	if err != nil {
-		if isLegacyChannelIdentitySchemaError(err) {
-			t.Skipf("skip integration test on legacy schema: %v", err)
-		}
 		t.Fatalf("first resolve failed: %v", err)
 	}
 	second, err := svc.ResolveByChannelIdentity(ctx, "feishu", externalID, "second")
@@ -82,9 +68,6 @@ func TestChannelIdentityLinkToUser(t *testing.T) {
 	ctx := context.Background()
 	channelIdentity, err := svc.ResolveByChannelIdentity(ctx, "telegram", fmt.Sprintf("link_%d", time.Now().UnixNano()), "tg")
 	if err != nil {
-		if isLegacyChannelIdentitySchemaError(err) {
-			t.Skipf("skip integration test on legacy schema: %v", err)
-		}
 		t.Fatalf("resolve channelIdentity failed: %v", err)
 	}
 	user, err := queries.CreateUser(ctx, sqlc.CreateUserParams{

@@ -51,7 +51,7 @@ func (h *ScheduleHandler) Register(e *echo.Echo) {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/schedule [post]
 func (h *ScheduleHandler) Create(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
+	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func (h *ScheduleHandler) Create(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	var req schedule.CreateRequest
@@ -82,7 +82,7 @@ func (h *ScheduleHandler) Create(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/schedule [get]
 func (h *ScheduleHandler) List(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
+	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func (h *ScheduleHandler) List(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	items, err := h.service.List(c.Request().Context(), botID)
@@ -111,7 +111,7 @@ func (h *ScheduleHandler) List(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/schedule/{id} [get]
 func (h *ScheduleHandler) Get(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
+	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 	if item.BotID != botID {
 		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, item)
@@ -147,7 +147,7 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/schedule/{id} [put]
 func (h *ScheduleHandler) Update(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
+	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 	if item.BotID != botID {
 		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
@@ -190,7 +190,7 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/schedule/{id} [delete]
 func (h *ScheduleHandler) Delete(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
+	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
 	}
@@ -209,7 +209,7 @@ func (h *ScheduleHandler) Delete(c echo.Context) error {
 	if item.BotID != botID {
 		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	if err := h.service.Delete(c.Request().Context(), id); err != nil {
@@ -218,26 +218,26 @@ func (h *ScheduleHandler) Delete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *ScheduleHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.ChannelIdentityIDFromContext(c)
+func (h *ScheduleHandler) requireUserID(c echo.Context) (string, error) {
+	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return "", err
 	}
-	if err := identity.ValidateChannelIdentityID(channelIdentityID); err != nil {
+	if err := identity.ValidateChannelIdentityID(userID); err != nil {
 		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	return channelIdentityID, nil
+	return userID, nil
 }
 
-func (h *ScheduleHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
+func (h *ScheduleHandler) authorizeBotAccess(ctx context.Context, userID, botID string) (bots.Bot, error) {
 	if h.botService == nil || h.accountService == nil {
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
-	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+	isAdmin, err := h.accountService.IsAdmin(ctx, userID)
 	if err != nil {
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	bot, err := h.botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: false})
+	bot, err := h.botService.AuthorizeAccess(ctx, userID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: false})
 	if err != nil {
 		if errors.Is(err, bots.ErrBotNotFound) {
 			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")

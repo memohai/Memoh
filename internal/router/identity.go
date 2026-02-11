@@ -209,7 +209,9 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 		state.Decision = &decision
 		return state, err
 	}
-	if r.policy != nil && isGroupConversationType(msg.Conversation.Type) {
+
+	// Personal bots are owner-only and must not depend on member/guest/preauth bypass.
+	if r.policy != nil {
 		botType, err := r.policy.BotType(ctx, botID)
 		if err != nil {
 			return state, err
@@ -219,20 +221,35 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 			if err != nil {
 				return state, err
 			}
-			if strings.TrimSpace(state.Identity.UserID) == "" || strings.TrimSpace(ownerUserID) != strings.TrimSpace(state.Identity.UserID) {
-				// Personal bots in group chats only answer owner messages.
-				state.Decision = &IdentityDecision{Stop: true}
+			isOwner := strings.TrimSpace(state.Identity.UserID) != "" &&
+				strings.TrimSpace(ownerUserID) == strings.TrimSpace(state.Identity.UserID)
+			if !isOwner {
+				if isGroupConversationType(msg.Conversation.Type) {
+					// Ignore non-owner group messages for personal bots.
+					state.Decision = &IdentityDecision{Stop: true}
+					return state, nil
+				}
+				state.Decision = &IdentityDecision{
+					Stop:  true,
+					Reply: channel.Message{Text: r.unboundReply},
+				}
 				return state, nil
 			}
-			// Owner can chat normally in group for personal bots.
-			state.Identity.ForceReply = true
+			if isGroupConversationType(msg.Conversation.Type) {
+				// Owner can chat in group for personal bots.
+				state.Identity.ForceReply = true
+			}
+			return state, nil
 		}
 	}
 
 	// Phase 2: Authorization (bot membership check).
 	if r.members != nil {
 		if strings.TrimSpace(state.Identity.UserID) != "" {
-			isMember, _ := r.members.IsMember(ctx, botID, state.Identity.UserID)
+			isMember, err := r.members.IsMember(ctx, botID, state.Identity.UserID)
+			if err != nil {
+				return state, fmt.Errorf("check bot membership: %w", err)
+			}
 			if isMember {
 				return state, nil
 			}
@@ -256,9 +273,6 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 			return state, err
 		}
 		if allowed {
-			if r.members != nil && strings.TrimSpace(state.Identity.UserID) != "" {
-				_ = r.members.UpsertMemberSimple(ctx, botID, state.Identity.UserID, "member")
-			}
 			return state, nil
 		}
 	}
@@ -312,9 +326,13 @@ func (r *IdentityResolver) tryHandlePreauthKey(ctx context.Context, msg channel.
 		return true, reply("Current channel account is not linked to a user."), nil
 	}
 	if r.members != nil {
-		_ = r.members.UpsertMemberSimple(ctx, botID, userID, "member")
+		if err := r.members.UpsertMemberSimple(ctx, botID, userID, "member"); err != nil {
+			return true, IdentityDecision{}, fmt.Errorf("upsert preauth member: %w", err)
+		}
 	}
-	_, _ = r.preauth.MarkUsed(ctx, key.ID)
+	if _, err := r.preauth.MarkUsed(ctx, key.ID); err != nil {
+		return true, IdentityDecision{}, fmt.Errorf("mark preauth key used: %w", err)
+	}
 	return true, reply(r.preauthReply), nil
 }
 
@@ -365,7 +383,11 @@ func (r *IdentityResolver) tryHandleBindCode(ctx context.Context, msg channel.In
 	// Resolve linked user after binding.
 	newUserID := code.IssuedByUserID
 	if r.channelIdentities != nil {
-		if linkedUserID, err := r.channelIdentities.GetLinkedUserID(ctx, channelIdentityID); err == nil && strings.TrimSpace(linkedUserID) != "" {
+		linkedUserID, err := r.channelIdentities.GetLinkedUserID(ctx, channelIdentityID)
+		if err != nil {
+			return true, IdentityDecision{}, "", fmt.Errorf("resolve linked user after bind: %w", err)
+		}
+		if strings.TrimSpace(linkedUserID) != "" {
 			newUserID = linkedUserID
 		}
 	}

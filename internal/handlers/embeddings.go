@@ -85,10 +85,10 @@ func (h *EmbeddingsHandler) Embed(c echo.Context) error {
 	req.Input.ImageURL = strings.TrimSpace(req.Input.ImageURL)
 	req.Input.VideoURL = strings.TrimSpace(req.Input.VideoURL)
 
-	channelIdentityID := ""
+	userID := ""
 	if c.Get("user") != nil {
-		if value, err := auth.ChannelIdentityIDFromContext(c); err == nil {
-			channelIdentityID = value
+		if value, err := auth.UserIDFromContext(c); err == nil {
+			userID = value
 		}
 	}
 	result, err := h.resolver.Embed(c.Request().Context(), embeddings.Request{
@@ -101,7 +101,7 @@ func (h *EmbeddingsHandler) Embed(c echo.Context) error {
 			ImageURL: req.Input.ImageURL,
 			VideoURL: req.Input.VideoURL,
 		},
-		ChannelIdentityID: channelIdentityID,
+		ChannelIdentityID: userID,
 	})
 	if err != nil {
 		message := err.Error()

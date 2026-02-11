@@ -364,7 +364,10 @@ func (h *MemoryHandler) requireChatParticipant(ctx context.Context, chatID, chan
 		return echo.NewHTTPError(http.StatusInternalServerError, "chat service not configured")
 	}
 	if h.accountService != nil {
-		isAdmin, _ := h.accountService.IsAdmin(ctx, channelIdentityID)
+		isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 		if isAdmin {
 			return nil
 		}
@@ -380,7 +383,7 @@ func (h *MemoryHandler) requireChatParticipant(ctx context.Context, chatID, chan
 }
 
 func (h *MemoryHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.ChannelIdentityIDFromContext(c)
+	channelIdentityID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return "", err
 	}

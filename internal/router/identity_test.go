@@ -145,7 +145,7 @@ func (f *fakeBindService) Consume(ctx context.Context, code bind.Code, channelCh
 	return f.consumeErr
 }
 
-func TestIdentityResolverAllowGuestUpsertsMember(t *testing.T) {
+func TestIdentityResolverAllowGuestWithoutMembershipSideEffect(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: channelidentities.ChannelIdentity{ID: "channelIdentity-1"}}
 	memberSvc := &fakeMemberService{isMember: false}
 	policySvc := &fakePolicyService{allow: true, botType: "public"}
@@ -165,8 +165,8 @@ func TestIdentityResolverAllowGuestUpsertsMember(t *testing.T) {
 	if state.Identity.ChannelIdentityID != "channelIdentity-1" {
 		t.Fatalf("expected channelIdentity-1, got: %s", state.Identity.ChannelIdentityID)
 	}
-	if !memberSvc.upsertCalled {
-		t.Fatal("expected UpsertMemberSimple to be called")
+	if memberSvc.upsertCalled {
+		t.Fatal("guest allow should not upsert membership")
 	}
 	if state.Decision != nil {
 		t.Fatal("expected no decision for allowed guest")
@@ -373,6 +373,35 @@ func TestIdentityResolverPersonalBotAllowsOwnerDirectWithoutMembership(t *testin
 	}
 	if state.Identity.ForceReply {
 		t.Fatal("owner direct message should not force reply")
+	}
+}
+
+func TestIdentityResolverPersonalBotRejectsNonOwnerDirectEvenIfMember(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: channelidentities.ChannelIdentity{ID: "channelIdentity-non-owner"}}
+	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{allow: true, botType: "personal", ownerUserID: "channelIdentity-owner"}
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, memberSvc, policySvc, nil, nil, "Access denied.", "")
+
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("feishu"),
+		Message: channel.Message{Text: "hello from non-owner"},
+		Sender:  channel.Identity{SubjectID: "ext-non-owner"},
+		Conversation: channel.Conversation{
+			ID:   "p2p-2",
+			Type: "p2p",
+		},
+	}
+
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state.Decision == nil || !state.Decision.Stop {
+		t.Fatal("non-owner direct message should be rejected for personal bot")
+	}
+	if state.Decision.Reply.Text != "Access denied." {
+		t.Fatalf("unexpected reject message: %s", state.Decision.Reply.Text)
 	}
 }
 

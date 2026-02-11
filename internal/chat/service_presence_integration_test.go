@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -56,17 +55,6 @@ func setupChatPresenceIntegrationTest(t *testing.T) chatPresenceFixture {
 	}
 }
 
-func isLegacyChatPresenceSchemaError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "relation \"chat_channelIdentity_presence\" does not exist") ||
-		strings.Contains(msg, "column \"user_id\" of relation \"channelidentities\" does not exist") ||
-		strings.Contains(msg, "column \"sender_user_id\" of relation \"chat_messages\" does not exist") ||
-		strings.Contains(msg, "column \"created_by_user_id\" of relation \"chats\" does not exist")
-}
-
 func createUserForChatPresence(ctx context.Context, queries *sqlc.Queries) (string, error) {
 	row, err := queries.CreateUser(ctx, sqlc.CreateUserParams{
 		IsActive: true,
@@ -83,7 +71,10 @@ func createBotForChatPresence(ctx context.Context, queries *sqlc.Queries, ownerU
 	if err != nil {
 		return "", err
 	}
-	meta, _ := json.Marshal(map[string]any{"source": "chat-presence-integration-test"})
+	meta, err := json.Marshal(map[string]any{"source": "chat-presence-integration-test"})
+	if err != nil {
+		return "", err
+	}
 	row, err := queries.CreateBot(ctx, sqlc.CreateBotParams{
 		OwnerUserID: pgOwnerID,
 		Type:        "personal",
@@ -105,10 +96,6 @@ func setupObservedChatScenario(t *testing.T) (chatPresenceFixture, string, strin
 
 	ownerUserID, err := createUserForChatPresence(ctx, fixture.queries)
 	if err != nil {
-		if isLegacyChatPresenceSchemaError(err) {
-			fixture.cleanup()
-			t.Skipf("skip integration test on legacy schema: %v", err)
-		}
 		fixture.cleanup()
 		t.Fatalf("create owner user failed: %v", err)
 	}
@@ -128,10 +115,6 @@ func setupObservedChatScenario(t *testing.T) (chatPresenceFixture, string, strin
 		Title: "presence-observed",
 	})
 	if err != nil {
-		if isLegacyChatPresenceSchemaError(err) {
-			fixture.cleanup()
-			t.Skipf("skip integration test on legacy schema: %v", err)
-		}
 		fixture.cleanup()
 		t.Fatalf("create chat failed: %v", err)
 	}
@@ -143,10 +126,6 @@ func setupObservedChatScenario(t *testing.T) (chatPresenceFixture, string, strin
 		"presence-observer",
 	)
 	if err != nil {
-		if isLegacyChatPresenceSchemaError(err) {
-			fixture.cleanup()
-			t.Skipf("skip integration test on legacy schema: %v", err)
-		}
 		fixture.cleanup()
 		t.Fatalf("resolve channelIdentity failed: %v", err)
 	}
@@ -165,10 +144,6 @@ func setupObservedChatScenario(t *testing.T) (chatPresenceFixture, string, strin
 		nil,
 	)
 	if err != nil {
-		if isLegacyChatPresenceSchemaError(err) {
-			fixture.cleanup()
-			t.Skipf("skip integration test on legacy schema: %v", err)
-		}
 		fixture.cleanup()
 		t.Fatalf("persist message failed: %v", err)
 	}

@@ -907,7 +907,7 @@ func (h *UsersHandler) authorizeBotAccess(ctx context.Context, channelIdentityID
 }
 
 func (h *UsersHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.ChannelIdentityIDFromContext(c)
+	channelIdentityID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return "", err
 	}
