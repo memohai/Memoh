@@ -104,7 +104,7 @@ import {
 } from '@memoh/ui'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { useUserStore } from '../../store/user'
+import { useUserStore } from '../../store/User'
 import { useSettingsStore } from '@/store/settings'
 import type { Locale } from '@/i18n'
 
