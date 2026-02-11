@@ -57,6 +57,15 @@ Memoh Bot 能够区分并记忆来自多个人类/Bot 的请求，可在任意�
   <img src="https://contrib.rocks/image?repo=memohai/Memoh" />
 </a>
 
+## 联系我们
+
+商务合作: [business@memoh.net](mailto:business@memoh.net)
+
+- Telegram Group: [MEMOHAI](https://t.me/memohai)
+  <br>
+  <a href="https://t.me/memohai">
+  <img width="200" src="./assets/telegram.jpg" >
+  </a>
 ---
 
 **LICENSE**: AGPLv3

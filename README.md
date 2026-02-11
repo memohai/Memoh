@@ -57,6 +57,15 @@ Refer to [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
   <img src="https://contrib.rocks/image?repo=memohai/Memoh" />
 </a>
 
+## Contacts
+
+Cooperation: [business@memoh.net](mailto:business@memoh.net)
+
+- Telegram Group: [MEMOHAI](https://t.me/memohai)
+  <br>
+  <a href="https://t.me/memohai">
+    <img width="200" src="./assets/telegram.jpg" >
+  </a>
 ---
 
 **LICENSE**: AGPLv3
