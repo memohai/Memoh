@@ -38,6 +38,30 @@ services:
     networks:
       - memoh-network
 
+  containerd:
+    image: docker.io/library/alpine:latest
+    container_name: memoh-containerd
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache containerd containerd-ctr
+        mkdir -p /run/containerd
+        containerd
+    privileged: true
+    volumes:
+      - containerd_sock:/run/containerd
+      - containerd_data:/var/lib/containerd
+      - memoh_data:/opt/memoh/data
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/containerd/containerd.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
   server:
     build:
       context: .
@@ -50,10 +74,10 @@ services:
     pid: host
     volumes:
       - ./config.toml:/app/config.toml:ro
-      - /run/containerd/containerd.sock:/run/containerd/containerd.sock
-      - /var/lib/containerd:/var/lib/containerd
+      - containerd_sock:/run/containerd
+      - containerd_data:/var/lib/containerd
       - server_cni_state:/var/lib/cni
-      - ${MEMOH_DATA_ROOT:-~/.memoh/data}:${MEMOH_DATA_ROOT:-/opt/memoh/data}
+      - memoh_data:/opt/memoh/data
     cap_add:
       - SYS_ADMIN
       - NET_ADMIN
@@ -66,6 +90,8 @@ services:
       postgres:
         condition: service_healthy
       qdrant:
+        condition: service_healthy
+      containerd:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -113,6 +139,12 @@ volumes:
   postgres_data:
     driver: local
   qdrant_data:
+    driver: local
+  containerd_sock:
+    driver: local
+  containerd_data:
+    driver: local
+  memoh_data:
     driver: local
   server_cni_state:
     driver: local
