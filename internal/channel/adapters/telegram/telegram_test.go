@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/memohai/memoh/internal/channel"
@@ -380,6 +381,69 @@ func TestGetTelegramRetryAfter(t *testing.T) {
 	}
 }
 
+func TestTruncateTelegramText(t *testing.T) {
+	t.Parallel()
+
+	short := "hello"
+	if got := truncateTelegramText(short); got != short {
+		t.Fatalf("short text should not be truncated: %q", got)
+	}
+
+	// Exactly at limit.
+	exact := strings.Repeat("a", telegramMaxMessageLength)
+	if got := truncateTelegramText(exact); got != exact {
+		t.Fatalf("exact-limit text should not be truncated, len=%d", len(got))
+	}
+
+	// Over limit with ASCII.
+	over := strings.Repeat("a", telegramMaxMessageLength+100)
+	got := truncateTelegramText(over)
+	if len(got) > telegramMaxMessageLength {
+		t.Fatalf("truncated text should be <= %d bytes: got %d", telegramMaxMessageLength, len(got))
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("truncated text should end with '...': %q", got[len(got)-10:])
+	}
+
+	// Over limit with multi-byte characters (Chinese: 3 bytes each).
+	multi := strings.Repeat("\u4f60", telegramMaxMessageLength)
+	got = truncateTelegramText(multi)
+	if len(got) > telegramMaxMessageLength {
+		t.Fatalf("truncated multi-byte text should be <= %d bytes: got %d", telegramMaxMessageLength, len(got))
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatal("truncated multi-byte text should end with '...'")
+	}
+	// Verify no broken runes.
+	trimmed := strings.TrimSuffix(got, "...")
+	for i := 0; i < len(trimmed); {
+		r, size := utf8.DecodeRuneInString(trimmed[i:])
+		if r == utf8.RuneError && size == 1 {
+			t.Fatalf("truncated text contains invalid UTF-8 at byte %d", i)
+		}
+		i += size
+	}
+}
+
+func TestSanitizeTelegramText(t *testing.T) {
+	t.Parallel()
+
+	valid := "hello world"
+	if got := sanitizeTelegramText(valid); got != valid {
+		t.Fatalf("valid text should not change: %q", got)
+	}
+
+	// Invalid UTF-8 byte sequence.
+	invalid := "hello\xff\xfeworld"
+	got := sanitizeTelegramText(invalid)
+	if !utf8.ValidString(got) {
+		t.Fatalf("sanitized text should be valid UTF-8: %q", got)
+	}
+	if got != "helloworld" {
+		t.Fatalf("expected invalid bytes stripped: %q", got)
+	}
+}
+
 func TestEditTelegramMessageText_429ReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -405,5 +469,53 @@ func TestEditTelegramMessageText_429ReturnsError(t *testing.T) {
 	}
 	if sendCalls != 1 {
 		t.Fatalf("send should be called once (no internal retry): got %d", sendCalls)
+	}
+}
+
+func TestTelegramAdapter_ImplementsProcessingStatusNotifier(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	var _ channel.ProcessingStatusNotifier = adapter
+}
+
+func TestProcessingStarted_EmptyParams(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	ctx := context.Background()
+	cfg := channel.ChannelConfig{}
+	msg := channel.InboundMessage{}
+
+	handle, err := adapter.ProcessingStarted(ctx, cfg, msg, channel.ProcessingStatusInfo{})
+	if err != nil {
+		t.Fatalf("empty params should not error: %v", err)
+	}
+	if handle.Token != "" {
+		t.Fatalf("empty params should return empty handle: %q", handle.Token)
+	}
+}
+
+func TestProcessingCompleted_EmptyHandle(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	ctx := context.Background()
+
+	err := adapter.ProcessingCompleted(ctx, channel.ChannelConfig{}, channel.InboundMessage{}, channel.ProcessingStatusInfo{}, channel.ProcessingStatusHandle{})
+	if err != nil {
+		t.Fatalf("empty handle should be no-op: %v", err)
+	}
+}
+
+func TestProcessingFailed_DelegatesToCompleted(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	ctx := context.Background()
+
+	err := adapter.ProcessingFailed(ctx, channel.ChannelConfig{}, channel.InboundMessage{}, channel.ProcessingStatusInfo{}, channel.ProcessingStatusHandle{}, fmt.Errorf("test"))
+	if err != nil {
+		t.Fatalf("empty handle should be no-op: %v", err)
 	}
 }

@@ -204,7 +204,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 				replyRef := buildTelegramReplyRef(update.Message, chatID)
 				isReplyToBot := update.Message.ReplyToMessage != nil &&
 					update.Message.ReplyToMessage.From != nil &&
-					update.Message.ReplyToMessage.From.IsBot
+					update.Message.ReplyToMessage.From.ID == bot.Self.ID
 				isMentioned := isTelegramBotMentioned(update.Message, bot.Self.UserName)
 				msg := channel.InboundMessage{
 					Channel: Type,
@@ -420,7 +420,7 @@ func sendTelegramText(bot *tgbotapi.BotAPI, target string, text string, replyTo 
 
 // sendTelegramTextReturnMessage sends a text message and returns the chat ID and message ID for later editing.
 func sendTelegramTextReturnMessage(bot *tgbotapi.BotAPI, target string, text string, replyTo int, parseMode string) (chatID int64, messageID int, err error) {
-	text = sanitizeTelegramText(text)
+	text = truncateTelegramText(sanitizeTelegramText(text))
 	var sent tgbotapi.Message
 	if strings.HasPrefix(target, "@") {
 		message := tgbotapi.NewMessageToChannel(target, text)
@@ -459,10 +459,7 @@ var sendEditForTest func(bot *tgbotapi.BotAPI, edit tgbotapi.EditMessageTextConf
 // editTelegramMessageText sends an edit request. It handles "message is not modified"
 // silently but returns 429 and other errors to the caller for higher-level retry decisions.
 func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, parseMode string) error {
-	text = sanitizeTelegramText(text)
-	if len(text) > telegramMaxMessageLength {
-		text = text[:telegramMaxMessageLength-3] + "..."
-	}
+	text = truncateTelegramText(sanitizeTelegramText(text))
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	edit.ParseMode = parseMode
 	send := sendEditForTest
@@ -825,4 +822,89 @@ func sanitizeTelegramText(text string) string {
 		return text
 	}
 	return strings.ToValidUTF8(text, "")
+}
+
+// truncateTelegramText truncates text to telegramMaxMessageLength on a valid
+// UTF-8 rune boundary, appending "..." when truncation occurs.
+func truncateTelegramText(text string) string {
+	if len(text) <= telegramMaxMessageLength {
+		return text
+	}
+	const suffix = "..."
+	limit := telegramMaxMessageLength - len(suffix)
+	// Walk backwards to a rune boundary.
+	for limit > 0 && !utf8.RuneStart(text[limit]) {
+		limit--
+	}
+	return text[:limit] + suffix
+}
+
+const processingReactionEmoji = "👀"
+
+// ProcessingStarted adds a reaction to the user's message to indicate processing.
+func (a *TelegramAdapter) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+	chatID := strings.TrimSpace(info.ReplyTarget)
+	messageID := strings.TrimSpace(info.SourceMessageID)
+	if chatID == "" || messageID == "" {
+		return channel.ProcessingStatusHandle{}, nil
+	}
+	telegramCfg, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return channel.ProcessingStatusHandle{}, err
+	}
+	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
+	if err != nil {
+		return channel.ProcessingStatusHandle{}, err
+	}
+	if err := setTelegramReaction(bot, chatID, messageID, processingReactionEmoji); err != nil {
+		if a.logger != nil {
+			a.logger.Warn("add processing reaction failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+		}
+		return channel.ProcessingStatusHandle{}, nil
+	}
+	return channel.ProcessingStatusHandle{Token: processingReactionEmoji}, nil
+}
+
+// ProcessingCompleted removes the processing reaction after reply is sent.
+func (a *TelegramAdapter) ProcessingCompleted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
+	if handle.Token == "" {
+		return nil
+	}
+	chatID := strings.TrimSpace(info.ReplyTarget)
+	messageID := strings.TrimSpace(info.SourceMessageID)
+	if chatID == "" || messageID == "" {
+		return nil
+	}
+	telegramCfg, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return err
+	}
+	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
+	if err != nil {
+		return err
+	}
+	return clearTelegramReaction(bot, chatID, messageID)
+}
+
+// ProcessingFailed removes the processing reaction on failure.
+func (a *TelegramAdapter) ProcessingFailed(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
+	return a.ProcessingCompleted(ctx, cfg, msg, info, handle)
+}
+
+func setTelegramReaction(bot *tgbotapi.BotAPI, chatID, messageID, emoji string) error {
+	params := tgbotapi.Params{}
+	params.AddNonEmpty("chat_id", chatID)
+	params.AddNonEmpty("message_id", messageID)
+	params.AddNonEmpty("reaction", fmt.Sprintf(`[{"type":"emoji","emoji":"%s"}]`, emoji))
+	_, err := bot.MakeRequest("setMessageReaction", params)
+	return err
+}
+
+func clearTelegramReaction(bot *tgbotapi.BotAPI, chatID, messageID string) error {
+	params := tgbotapi.Params{}
+	params.AddNonEmpty("chat_id", chatID)
+	params.AddNonEmpty("message_id", messageID)
+	params.AddNonEmpty("reaction", "[]")
+	_, err := bot.MakeRequest("setMessageReaction", params)
+	return err
 }
