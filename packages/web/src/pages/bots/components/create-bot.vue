@@ -65,7 +65,7 @@
           >
             <FormItem>
               <Label class="mb-2">
-                {{ $t('bots.type') }}
+                {{ $t('common.type') }}
               </Label>
               <FormControl>
                 <Select v-bind="componentField">
@@ -136,7 +136,8 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { watch } from 'vue'
-import { useCreateBot } from '@/composables/api/useBots'
+import { useMutation, useQueryCache } from '@pinia/colada'
+import { postBotsMutation, getBotsQueryKey } from '@memoh/sdk/colada'
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -155,7 +156,11 @@ const form = useForm({
   },
 })
 
-const { mutate: createBot, isLoading: submitLoading } = useCreateBot()
+const queryCache = useQueryCache()
+const { mutate: createBot, isLoading: submitLoading } = useMutation({
+  ...postBotsMutation(),
+  onSettled: () => queryCache.invalidateQueries({ key: getBotsQueryKey() }),
+})
 
 watch(open, (val) => {
   if (val) {
@@ -174,10 +179,12 @@ watch(open, (val) => {
 const handleSubmit = form.handleSubmit(async (values) => {
   try {
     await createBot({
-      display_name: values.display_name,
-      avatar_url: values.avatar_url || undefined,
-      type: values.type,
-      is_active: true,
+      body: {
+        display_name: values.display_name,
+        avatar_url: values.avatar_url || undefined,
+        type: values.type,
+        is_active: true,
+      },
     })
     open.value = false
   } catch {

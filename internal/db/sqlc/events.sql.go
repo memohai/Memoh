@@ -35,33 +35,3 @@ func (q *Queries) InsertLifecycleEvent(ctx context.Context, arg InsertLifecycleE
 	)
 	return err
 }
-
-const listLifecycleEventsByContainerID = `-- name: ListLifecycleEventsByContainerID :many
-SELECT id, container_id, event_type, payload, created_at FROM lifecycle_events WHERE container_id = $1 ORDER BY created_at ASC
-`
-
-func (q *Queries) ListLifecycleEventsByContainerID(ctx context.Context, containerID string) ([]LifecycleEvent, error) {
-	rows, err := q.db.Query(ctx, listLifecycleEventsByContainerID, containerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []LifecycleEvent
-	for rows.Next() {
-		var i LifecycleEvent
-		if err := rows.Scan(
-			&i.ID,
-			&i.ContainerID,
-			&i.EventType,
-			&i.Payload,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}

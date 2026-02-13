@@ -59,6 +59,7 @@ SELECT
   b.display_name AS title,
   b.owner_user_id AS created_by_user_id,
   b.metadata AS metadata,
+  chat_models.model_id AS model_id,
   b.created_at,
   b.updated_at,
   'participant'::text AS access_mode,
@@ -69,6 +70,7 @@ SELECT
   NULL::timestamptz AS last_observed_at
 FROM bots b
 LEFT JOIN bot_members bm ON bm.bot_id = b.id AND bm.user_id = sqlc.arg(user_id)
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = sqlc.arg(bot_id)
   AND (b.owner_user_id = sqlc.arg(user_id) OR bm.user_id IS NOT NULL)
 ORDER BY b.updated_at DESC;
@@ -102,25 +104,29 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = $1
-  AND false
 ORDER BY b.created_at DESC;
 
 -- name: UpdateChatTitle :one
-UPDATE bots
-SET display_name = sqlc.arg(title),
-    updated_at = now()
-WHERE id = sqlc.arg(id)
-RETURNING
-  id,
-  id AS bot_id,
-  CASE WHEN type = 'public' THEN 'group' ELSE 'direct' END AS kind,
+WITH updated AS (
+  UPDATE bots
+  SET display_name = sqlc.arg(title),
+      updated_at = now()
+  WHERE bots.id = sqlc.arg(bot_id)
+  RETURNING *
+)
+SELECT
+  updated.id AS id,
+  updated.id AS bot_id,
+  CASE WHEN updated.type = 'public' THEN 'group' ELSE 'direct' END AS kind,
   NULL::uuid AS parent_chat_id,
-  display_name AS title,
-  owner_user_id AS created_by_user_id,
-  metadata,
-  NULL::text AS model_id,
-  created_at,
-  updated_at;
+  updated.display_name AS title,
+  updated.owner_user_id AS created_by_user_id,
+  updated.metadata,
+  chat_models.model_id AS model_id,
+  updated.created_at,
+  updated.updated_at
+FROM updated
+LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id;
 
 -- name: TouchChat :exec
 UPDATE bots

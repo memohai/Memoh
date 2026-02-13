@@ -153,7 +153,7 @@
                   v-if="checksLoading"
                   class="mr-1.5"
                 />
-                {{ $t('bots.checks.actions.refresh') }}
+                {{ $t('common.refresh') }}
               </Button>
             </div>
             <div class="mt-3 flex items-center gap-2 text-sm">
@@ -191,20 +191,32 @@
               >
                 <div class="flex items-center justify-between gap-2">
                   <p class="font-mono text-xs">{{ checkKeyLabel(item.check_key) }}</p>
+                  <div v-if="isCheckLoading(item)">
+                    <Spinner class="size-3.5" />
+                  </div>
                   <Badge
+                    v-else
                     :variant="checkStatusVariant(item.status)"
                     class="text-[10px]"
                   >
                     {{ checkStatusLabel(item.status) }}
                   </Badge>
                 </div>
-                <p class="mt-2 text-sm">{{ item.summary }}</p>
                 <p
-                  v-if="item.detail"
-                  class="mt-1 text-xs text-muted-foreground break-all"
+                  v-if="isCheckLoading(item)"
+                  class="mt-2 text-sm text-muted-foreground"
                 >
-                  {{ item.detail }}
+                  {{ $t('common.loading') }}
                 </p>
+                <template v-else>
+                  <p class="mt-2 text-sm">{{ item.summary }}</p>
+                  <p
+                    v-if="item.detail"
+                    class="mt-1 text-xs text-muted-foreground break-all"
+                  >
+                    {{ item.detail }}
+                  </p>
+                </template>
               </li>
             </ul>
           </div>
@@ -247,7 +259,7 @@
                   v-if="containerLoading || containerAction === 'refresh'"
                   class="mr-1.5"
                 />
-                {{ $t('bots.container.actions.refresh') }}
+                {{ $t('common.refresh') }}
               </Button>
               <Button
                 v-if="containerMissing"
@@ -434,7 +446,7 @@
         value="mcp"
         class="mt-6"
       >
-        <!-- TODO: MCP content -->
+        <BotMcp :bot-id="botId" />
       </TabsContent>
       <TabsContent
         value="subagents"
@@ -454,7 +466,7 @@
       >
         <BotSettings
           :bot-id="botId"
-          :bot-type="bot?.type || ''"
+          :bot-type="bot?.type"
         />
       </TabsContent>
     </Tabs>
@@ -537,33 +549,68 @@ import {
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { ApiError } from '@/utils/request'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import { useI18n } from 'vue-i18n'
+import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
-  useBotDetail,
-  useUpdateBot,
-  type BotCheck,
-  type BotContainerInfo,
-  type BotContainerSnapshot,
-  fetchBotChecks,
-  fetchBotContainer,
-  createBotContainer,
-  deleteBotContainer,
-  startBotContainer,
-  stopBotContainer,
-  listBotContainerSnapshots,
-  createBotContainerSnapshot,
-} from '@/composables/api/useBots'
+  getBotsById, putBotsById,
+  getBotsByBotIdContainer, postBotsByBotIdContainer, deleteBotsByBotIdContainer,
+  postBotsByBotIdContainerStart, postBotsByBotIdContainerStop,
+  getBotsByBotIdContainerSnapshots, postBotsByBotIdContainerSnapshots,
+} from '@memoh/sdk'
+import { client } from '@memoh/sdk/client'
+import type {
+  BotsBotCheck, HandlersGetContainerResponse,
+  HandlersListSnapshotsResponse,
+} from '@memoh/sdk'
+import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import BotSettings from './components/bot-settings.vue'
 import BotChannels from './components/bot-channels.vue'
-import { useI18n } from 'vue-i18n'
+import BotMcp from './components/bot-mcp.vue'
+
+type BotCheck = BotsBotCheck
+type BotContainerInfo = HandlersGetContainerResponse
+type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
 
 const route = useRoute()
 const { t } = useI18n()
 const botId = computed(() => route.params.botId as string)
 
-const { data: bot } = useBotDetail(botId)
-const { mutate: updateBot, isLoading: updateBotLoading } = useUpdateBot()
+const { data: bot } = useQuery({
+  key: () => ['bot', botId.value],
+  query: async () => {
+    const { data } = await getBotsById({ path: { id: botId.value }, throwOnError: true })
+    return data
+  },
+  enabled: () => !!botId.value,
+})
+
+const queryCache = useQueryCache()
+const { mutateAsync: updateBot, isLoading: updateBotLoading } = useMutation({
+  mutation: async ({ id, ...body }: Record<string, unknown> & { id: string }) => {
+    const { data } = await putBotsById({ path: { id }, body: body as any, throwOnError: true })
+    return data
+  },
+  onSettled: () => {
+    queryCache.invalidateQueries({ key: ['bots'] })
+    queryCache.invalidateQueries({ key: ['bot'] })
+  },
+})
+
+async function fetchCheckKeys(id: string): Promise<string[]> {
+  const { data } = await client.get({
+    url: `/bots/${id}/checks/keys`,
+    throwOnError: true,
+  }) as { data: { keys: string[] } }
+  return data.keys ?? []
+}
+
+async function fetchSingleCheck(id: string, key: string): Promise<BotCheck> {
+  const { data } = await client.get({
+    url: `/bots/${id}/checks/run/${key}`,
+    throwOnError: true,
+  }) as { data: BotCheck }
+  return data
+}
 
 // Replace breadcrumb bot id with display name when available.
 watch(bot, (val) => {
@@ -673,7 +720,7 @@ const sortedSnapshots = computed(() => {
     const left = Date.parse(a.created_at ?? '')
     const right = Date.parse(b.created_at ?? '')
     if (Number.isNaN(left) && Number.isNaN(right)) {
-      return a.name.localeCompare(b.name)
+      return (a.name ?? '').localeCompare(b.name ?? '')
     }
     if (Number.isNaN(left)) return 1
     if (Number.isNaN(right)) return -1
@@ -734,15 +781,12 @@ function formatDate(value: string | undefined): string {
 }
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    const body = error.body as Record<string, unknown> | undefined
-    if (body && typeof body.message === 'string' && body.message.trim()) {
-      return body.message
-    }
-    return `${error.status} ${error.statusText}`
-  }
   if (error instanceof Error && error.message.trim()) {
     return error.message
+  }
+  if (error && typeof error === 'object' && 'message' in error) {
+    const msg = (error as { message?: string }).message
+    if (msg && msg.trim()) return msg
   }
   return fallback
 }
@@ -812,6 +856,10 @@ function checkStatusLabel(status: BotCheck['status']): string {
   return t('bots.checks.status.ok')
 }
 
+function isCheckLoading(item: BotCheck): boolean {
+  return item.status === 'unknown' && !item.summary
+}
+
 function checkKeyLabel(checkKey: string): string {
   const key = checkKeyI18nKeys[checkKey]
   if (!key) {
@@ -822,10 +870,43 @@ function checkKeyLabel(checkKey: string): string {
 
 async function loadChecks(showToast: boolean) {
   checksLoading.value = true
+  checks.value = []
   try {
-    checks.value = await fetchBotChecks(botId.value)
+    const keys = await fetchCheckKeys(botId.value)
+    if (keys.length === 0) return
+
+    // Maintain key order: pre-fill placeholders, replace as results arrive.
+    const keyOrder = new Map(keys.map((k, i) => [k, i]))
+    checks.value = keys.map((key) => ({
+      check_key: key,
+      status: 'unknown' as BotCheck['status'],
+      summary: '',
+    }))
+
+    const pending = keys.map(async (key) => {
+      try {
+        const result = await fetchSingleCheck(botId.value, key)
+        const idx = keyOrder.get(key)
+        if (idx !== undefined) {
+          const updated = [...checks.value]
+          updated[idx] = result
+          checks.value = updated
+        }
+      } catch {
+        const idx = keyOrder.get(key)
+        if (idx !== undefined) {
+          const updated = [...checks.value]
+          updated[idx] = {
+            check_key: key,
+            status: 'error' as BotCheck['status'],
+            summary: 'Check failed',
+          }
+          checks.value = updated
+        }
+      }
+    })
+    await Promise.all(pending)
   } catch (error) {
-    checks.value = []
     if (showToast) {
       toast.error(resolveErrorMessage(error, t('bots.checks.loadFailed')))
     }
@@ -841,17 +922,20 @@ async function handleRefreshChecks() {
 async function loadContainerData(showLoadingToast: boolean) {
   containerLoading.value = true
   try {
-    const info = await fetchBotContainer(botId.value)
-    containerInfo.value = info
+    const result = await getBotsByBotIdContainer({ path: { bot_id: botId.value } })
+    if (result.error !== undefined) {
+      if (result.response.status === 404) {
+        containerInfo.value = null
+        containerMissing.value = true
+        snapshots.value = []
+        return
+      }
+      throw result.error
+    }
+    containerInfo.value = result.data
     containerMissing.value = false
     await loadSnapshots()
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) {
-      containerInfo.value = null
-      containerMissing.value = true
-      snapshots.value = []
-      return
-    }
     if (showLoadingToast) {
       toast.error(resolveErrorMessage(error, t('bots.container.loadFailed')))
     }
@@ -867,7 +951,7 @@ async function loadSnapshots() {
   }
   snapshotsLoading.value = true
   try {
-    const data = await listBotContainerSnapshots(botId.value)
+    const { data } = await getBotsByBotIdContainerSnapshots({ path: { bot_id: botId.value }, throwOnError: true })
     snapshots.value = data.snapshots ?? []
   } catch (error) {
     snapshots.value = []
@@ -910,7 +994,7 @@ async function handleCreateContainer() {
   await runContainerAction(
     'create',
     async () => {
-      await createBotContainer(botId.value)
+      await postBotsByBotIdContainer({ path: { bot_id: botId.value }, body: {}, throwOnError: true })
       await loadContainerData(false)
     },
     t('bots.container.createSuccess'),
@@ -922,7 +1006,7 @@ async function handleStartContainer() {
   await runContainerAction(
     'start',
     async () => {
-      await startBotContainer(botId.value)
+      await postBotsByBotIdContainerStart({ path: { bot_id: botId.value }, throwOnError: true })
       await loadContainerData(false)
     },
     t('bots.container.startSuccess'),
@@ -934,7 +1018,7 @@ async function handleStopContainer() {
   await runContainerAction(
     'stop',
     async () => {
-      await stopBotContainer(botId.value)
+      await postBotsByBotIdContainerStop({ path: { bot_id: botId.value }, throwOnError: true })
       await loadContainerData(false)
     },
     t('bots.container.stopSuccess'),
@@ -946,7 +1030,7 @@ async function handleDeleteContainer() {
   await runContainerAction(
     'delete',
     async () => {
-      await deleteBotContainer(botId.value)
+      await deleteBotsByBotIdContainer({ path: { bot_id: botId.value }, throwOnError: true })
       containerInfo.value = null
       containerMissing.value = true
       snapshots.value = []
@@ -960,8 +1044,10 @@ async function handleCreateSnapshot() {
   await runContainerAction(
     'snapshot',
     async () => {
-      await createBotContainerSnapshot(botId.value, {
-        snapshot_name: newSnapshotName.value.trim(),
+      await postBotsByBotIdContainerSnapshots({
+        path: { bot_id: botId.value },
+        body: { snapshot_name: newSnapshotName.value.trim() },
+        throwOnError: true,
       })
       newSnapshotName.value = ''
       await loadSnapshots()

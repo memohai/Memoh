@@ -24,12 +24,12 @@
             >
               <FormItem>
                 <Label class="mb-2">
-                  {{ $t('models.type') }}
+                  {{ $t('common.type') }}
                 </Label>
                 <FormControl>
                   <Select v-bind="componentField">
                     <SelectTrigger class="w-full">
-                      <SelectValue :placeholder="$t('models.typePlaceholder')" />
+                      <SelectValue :placeholder="$t('common.typePlaceholder')" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
@@ -172,8 +172,9 @@ import { useForm } from 'vee-validate'
 import { inject, computed, watch, nextTick, type Ref, ref } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
-import { type ModelInfo } from '@memoh/shared'
-import { useCreateModel, useUpdateModel } from '@/composables/api/useModels'
+import { useMutation, useQueryCache } from '@pinia/colada'
+import { postModels, putModelsModelByModelId } from '@memoh/sdk'
+import type { ModelsGetResponse } from '@memoh/sdk'
 
 const formSchema = toTypedSchema(z.object({
   type: z.string().min(1),
@@ -191,14 +192,17 @@ const selectedType = computed(() => form.values.type || editInfo?.value?.type)
 
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))
-const editInfo = inject<Ref<ModelInfo | null>>('openModelState', ref(null))
+const editInfo = inject<Ref<ModelsGetResponse | null>>('openModelState', ref(null))
 
+// 保存按钮：编辑模式直接可提交（表单已预填充，handleSubmit 内部会校验）
+// 新建模式需要必填字段有值
 const canSubmit = computed(() => {
   if (title.value === 'edit') return true
   const { type, model_id } = form.values
   return !!type && !!model_id
 })
 
+// 新建时的空值
 const emptyValues = {
   type: '' as string,
   model_id: '' as string,
@@ -207,6 +211,7 @@ const emptyValues = {
   is_multimodal: undefined as boolean | undefined,
 }
 
+// Display Name 自动跟随 Model ID，除非用户主动修改过
 const userEditedName = ref(false)
 
 watch(
@@ -225,8 +230,25 @@ function onNameInput(e: Event) {
 
 const { id } = defineProps<{ id: string }>()
 
-const { mutateAsync: createModel, isLoading: createLoading } = useCreateModel()
-const { mutateAsync: updateModel, isLoading: updateLoading } = useUpdateModel()
+const queryCache = useQueryCache()
+const { mutateAsync: createModel, isLoading: createLoading } = useMutation({
+  mutation: async (data: Record<string, unknown>) => {
+    const { data: result } = await postModels({ body: data as any, throwOnError: true })
+    return result
+  },
+  onSettled: () => queryCache.invalidateQueries({ key: ['provider-models'] }),
+})
+const { mutateAsync: updateModel, isLoading: updateLoading } = useMutation({
+  mutation: async ({ modelId, data }: { modelId: string; data: Record<string, unknown> }) => {
+    const { data: result } = await putModelsModelByModelId({
+      path: { modelId },
+      body: data as any,
+      throwOnError: true,
+    })
+    return result
+  },
+  onSettled: () => queryCache.invalidateQueries({ key: ['provider-models'] }),
+})
 const isLoading = computed(() => createLoading.value || updateLoading.value)
 
 async function addModel(e: Event) {
@@ -235,6 +257,8 @@ async function addModel(e: Event) {
   const isEdit = title.value === 'edit' && !!editInfo?.value
   const fallback = editInfo?.value
 
+  // 从 form.values 读取，编辑模式用 editInfo 兜底
+  // （Dialog 异步渲染可能导致 vee-validate 内部状态未同步）
   const type = form.values.type || (isEdit ? fallback!.type : '')
   const model_id = form.values.model_id || (isEdit ? fallback!.model_id : '')
   const name = form.values.name ?? (isEdit ? fallback!.name : '')
@@ -280,13 +304,16 @@ watch(open, async () => {
     return
   }
 
+  // 等待 Dialog 内容和 FormField 组件挂载完成
   await nextTick()
 
   if (editInfo?.value) {
     const { type, model_id, name, dimensions, is_multimodal } = editInfo.value
     form.resetForm({ values: { type, model_id, name, dimensions, is_multimodal } })
+    // 编辑时，如果已有 name 且与 model_id 不同，视为用户自定义
     userEditedName.value = !!(name && name !== model_id)
   } else {
+    // 新建模式：显式传空值，避免复用上次编辑数据
     form.resetForm({ values: { ...emptyValues } })
     userEditedName.value = false
   }

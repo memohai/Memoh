@@ -18,18 +18,17 @@ import (
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 	"github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
-	"github.com/memohai/memoh/internal/identity"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
 )
@@ -152,7 +151,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}
 	containerID := mcp.ContainerPrefix + botID
 
-	image := mcp.DefaultImageRef
+	image := h.mcpImageRef()
 	snapshotter := strings.TrimSpace(req.Snapshotter)
 	if snapshotter == "" {
 		snapshotter = h.cfg.Snapshotter
@@ -166,7 +165,10 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if dataRoot == "" {
 		dataRoot = config.DefaultDataRoot
 	}
-	dataRoot, _ = filepath.Abs(dataRoot)
+	dataRoot, err = filepath.Abs(dataRoot)
+	if err != nil {
+		h.logger.Warn("filepath.Abs failed", slog.Any("error", err))
+	}
 	dataMount := strings.TrimSpace(h.cfg.DataMount)
 	if dataMount == "" {
 		dataMount = config.DefaultDataMount
@@ -242,22 +244,20 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if task, err := h.service.StartTask(ctx, containerID, &ctr.StartTaskOptions{
 		UseStdio: false,
 	}); err == nil {
-		if netErr := ctr.SetupNetwork(ctx, task, containerID); netErr == nil {
-			started = true
-			if h.queries != nil {
-				if pgBotID, parseErr := db.ParseUUID(botID); parseErr == nil {
-					if dbErr := h.queries.UpdateContainerStarted(c.Request().Context(), pgBotID); dbErr != nil {
-						h.logger.Error("failed to update container started status",
-							slog.String("bot_id", botID), slog.Any("error", dbErr))
-					}
-				}
-			}
-		} else {
-			_ = h.service.StopTask(ctx, containerID, &ctr.StopTaskOptions{Force: true})
-			h.logger.Error("mcp container network setup failed",
+		started = true
+		if netErr := ctr.SetupNetwork(ctx, task, containerID); netErr != nil {
+			h.logger.Warn("mcp container network setup failed, task kept running",
 				slog.String("container_id", containerID),
 				slog.Any("error", netErr),
 			)
+		}
+		if h.queries != nil {
+			if pgBotID, parseErr := db.ParseUUID(botID); parseErr == nil {
+				if dbErr := h.queries.UpdateContainerStarted(c.Request().Context(), pgBotID); dbErr != nil {
+					h.logger.Error("failed to update container started status",
+						slog.String("bot_id", botID), slog.Any("error", dbErr))
+				}
+			}
 		}
 	} else {
 		h.logger.Error("mcp container start failed",
@@ -303,7 +303,9 @@ func (h *ContainerdHandler) ensureContainerAndTask(ctx context.Context, containe
 		if tasks[0].Status == tasktypes.Status_RUNNING {
 			return nil
 		}
-		_ = h.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true})
+		if err := h.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
+			h.logger.Warn("cleanup: delete task failed", slog.String("container_id", containerID), slog.Any("error", err))
+		}
 	}
 
 	task, err := h.service.StartTask(ctx, containerID, &ctr.StartTaskOptions{
@@ -312,9 +314,9 @@ func (h *ContainerdHandler) ensureContainerAndTask(ctx context.Context, containe
 	if err != nil {
 		return err
 	}
-	if err := ctr.SetupNetwork(ctx, task, containerID); err != nil {
-		_ = h.service.StopTask(ctx, containerID, &ctr.StopTaskOptions{Force: true})
-		return err
+	if netErr := ctr.SetupNetwork(ctx, task, containerID); netErr != nil {
+		h.logger.Warn("network setup failed, task kept running",
+			slog.String("container_id", containerID), slog.Any("error", netErr))
 	}
 	return nil
 }
@@ -324,9 +326,13 @@ func (h *ContainerdHandler) botContainerID(ctx context.Context, botID string) (s
 	if h.queries != nil {
 		pgBotID, err := db.ParseUUID(botID)
 		if err == nil {
-			row, err := h.queries.GetContainerByBotID(ctx, pgBotID)
-			if err == nil && strings.TrimSpace(row.ContainerID) != "" {
+			row, dbErr := h.queries.GetContainerByBotID(ctx, pgBotID)
+			if dbErr == nil && strings.TrimSpace(row.ContainerID) != "" {
 				return row.ContainerID, nil
+			}
+			if dbErr != nil && !errors.Is(dbErr, pgx.ErrNoRows) {
+				h.logger.Warn("botContainerID: db lookup failed",
+					slog.String("bot_id", botID), slog.Any("error", dbErr))
 			}
 		}
 	}
@@ -510,7 +516,9 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	}); err != nil && !errdefs.IsNotFound(err) {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	_ = h.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true})
+	if err := h.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
+		h.logger.Warn("cleanup: delete task failed", slog.String("container_id", containerID), slog.Any("error", err))
+	}
 	if h.queries != nil {
 		if pgBotID, parseErr := db.ParseUUID(botID); parseErr == nil {
 			if dbErr := h.queries.UpdateContainerStopped(ctx, pgBotID); dbErr != nil {
@@ -622,6 +630,13 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 
 // ---------- auth helpers ----------
 
+func (h *ContainerdHandler) mcpImageRef() string {
+	if h.cfg.Image != "" {
+		return h.cfg.Image
+	}
+	return config.DefaultMCPImage
+}
+
 // requireBotAccess extracts bot_id from path, validates user auth, and authorizes bot access.
 func (h *ContainerdHandler) requireBotAccess(c echo.Context) (string, error) {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -639,51 +654,36 @@ func (h *ContainerdHandler) requireBotAccess(c echo.Context) (string, error) {
 }
 
 func (h *ContainerdHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.UserIDFromContext(c)
-	if err != nil {
-		return "", err
-	}
-	if err := identity.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	return channelIdentityID, nil
+	return RequireChannelIdentityID(c)
 }
 
 func (h *ContainerdHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	if h.botService == nil || h.accountService == nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
-	}
-	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
+}
+
+// requireBotAccessWithGuest is like requireBotAccess but also allows guest access
+// for public bots that have the allow_guest setting enabled.
+func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, error) {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return "", err
 	}
-	bot, err := h.botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: false})
-	if err != nil {
-		if errors.Is(err, bots.ErrBotNotFound) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")
-		}
-		if errors.Is(err, bots.ErrBotAccessDenied) && h.policyService != nil {
-			allowGuest, policyErr := h.policyService.AllowGuest(ctx, botID)
-			if policyErr == nil && allowGuest {
-				bot, getErr := h.botService.Get(ctx, botID)
-				if getErr == nil {
-					return bot, nil
-				}
-			}
-		}
-		if errors.Is(err, bots.ErrBotAccessDenied) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
-		}
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	return bot, nil
+	policy := bots.AccessPolicy{AllowPublicMember: true, AllowGuest: true}
+	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, policy); err != nil {
+		return "", err
+	}
+	return botID, nil
 }
 
 // SetupBotContainer creates and starts the MCP container for a bot.
 func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string) error {
 	containerID := mcp.ContainerPrefix + botID
 
-	image := mcp.DefaultImageRef
+	image := h.mcpImageRef()
 	snapshotter := strings.TrimSpace(h.cfg.Snapshotter)
 
 	if strings.TrimSpace(h.namespace) != "" {
@@ -694,7 +694,11 @@ func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string)
 	if dataRoot == "" {
 		dataRoot = config.DefaultDataRoot
 	}
-	dataRoot, _ = filepath.Abs(dataRoot)
+	if absRoot, absErr := filepath.Abs(dataRoot); absErr != nil {
+		h.logger.Warn("filepath.Abs failed", slog.Any("error", absErr))
+	} else {
+		dataRoot = absRoot
+	}
 	dataMount := strings.TrimSpace(h.cfg.DataMount)
 	if dataMount == "" {
 		dataMount = config.DefaultDataMount
@@ -769,22 +773,20 @@ func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string)
 	if task, err := h.service.StartTask(ctx, containerID, &ctr.StartTaskOptions{
 		UseStdio: false,
 	}); err == nil {
-		if netErr := ctr.SetupNetwork(ctx, task, containerID); netErr == nil {
-			if h.queries != nil {
-				if pgBotID, parseErr := db.ParseUUID(botID); parseErr == nil {
-					if dbErr := h.queries.UpdateContainerStarted(ctx, pgBotID); dbErr != nil {
-						h.logger.Error("setup bot container: failed to update container started status",
-							slog.String("bot_id", botID), slog.Any("error", dbErr))
-					}
-				}
-			}
-		} else {
-			_ = h.service.StopTask(ctx, containerID, &ctr.StopTaskOptions{Force: true})
-			h.logger.Error("setup bot container: network setup failed",
+		if netErr := ctr.SetupNetwork(ctx, task, containerID); netErr != nil {
+			h.logger.Warn("setup bot container: network setup failed, task kept running",
 				slog.String("bot_id", botID),
 				slog.String("container_id", containerID),
 				slog.Any("error", netErr),
 			)
+		}
+		if h.queries != nil {
+			if pgBotID, parseErr := db.ParseUUID(botID); parseErr == nil {
+				if dbErr := h.queries.UpdateContainerStarted(ctx, pgBotID); dbErr != nil {
+					h.logger.Error("setup bot container: failed to update container started status",
+						slog.String("bot_id", botID), slog.Any("error", dbErr))
+				}
+			}
 		}
 	} else {
 		h.logger.Error("setup bot container: task start failed",
@@ -823,15 +825,21 @@ func (h *ContainerdHandler) CleanupBotContainer(ctx context.Context, botID strin
 
 	if task, taskErr := h.service.GetTask(ctx, containerID); taskErr == nil {
 		h.logger.Info("CleanupBotContainer: removing network", slog.String("container_id", containerID))
-		_ = ctr.RemoveNetwork(ctx, task, containerID)
+		if err := ctr.RemoveNetwork(ctx, task, containerID); err != nil {
+			h.logger.Warn("cleanup: remove network failed", slog.String("container_id", containerID), slog.Any("error", err))
+		}
 	}
 	h.logger.Info("CleanupBotContainer: stopping task", slog.String("container_id", containerID))
-	_ = h.service.StopTask(ctx, containerID, &ctr.StopTaskOptions{
+	if err := h.service.StopTask(ctx, containerID, &ctr.StopTaskOptions{
 		Timeout: 5 * time.Second,
 		Force:   true,
-	})
+	}); err != nil {
+		h.logger.Warn("cleanup: stop task failed", slog.String("container_id", containerID), slog.Any("error", err))
+	}
 	h.logger.Info("CleanupBotContainer: deleting task", slog.String("container_id", containerID))
-	_ = h.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true})
+	if err := h.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
+		h.logger.Warn("cleanup: delete task failed", slog.String("container_id", containerID), slog.Any("error", err))
+	}
 
 	h.logger.Info("CleanupBotContainer: deleting container", slog.String("container_id", containerID))
 	if err := h.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{

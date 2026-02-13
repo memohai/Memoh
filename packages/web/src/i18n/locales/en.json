@@ -11,7 +11,29 @@
     "loading": "Loading...",
     "operation": "Actions",
     "enable": "Enable",
-    "optional": "optional"
+    "optional": "optional",
+    "import": "Import",
+    "export": "Export",
+    "copy": "Copy",
+    "copied": "Copied to clipboard",
+    "tabAddSingle": "Add single",
+    "tabImportJson": "Import JSON",
+    "copyAsJson": "Copy as JSON",
+    "fillForm": "Fill form",
+    "batchSelected": "{count} selected",
+    "batchDelete": "Batch delete",
+    "batchDeleteConfirm": "Delete {count} selected item(s)?",
+    "batchExport": "Batch export",
+    "cancelSelection": "Cancel selection",
+    "name": "Name",
+    "namePlaceholder": "Enter name",
+    "type": "Type",
+    "typePlaceholder": "Select type",
+    "refresh": "Refresh",
+    "status": "Status",
+    "loadFailed": "Failed to load",
+    "saveFailed": "Failed to save",
+    "createdAt": "Created at"
   },
   "auth": {
     "welcome": "Welcome Back",
@@ -32,7 +54,8 @@
     "models": "Models",
     "settings": "Settings",
     "home": "Home",
-    "mcp": "MCP"
+    "mcp": "MCP",
+    "platform": "Platform"
   },
   "breadcrumb": {
     "main": "Home"
@@ -83,8 +106,14 @@
   },
   "chat": {
     "greeting": "Hi! How can I help you today?",
+    "selectBot": "Select a Bot",
+    "selectBotHint": "Choose a bot from the sidebar to start chatting",
+    "thinking": "Thinking…",
+    "thinkingInProgress": "Thinking…",
+    "thinkingDone": "Thinking complete",
     "currentBot": "Current Bot",
     "inputPlaceholder": "Type your question…",
+    "readonlyHint": "This chat is read-only",
     "readonlyPlaceholder": "This chat is read-only. Sending messages is disabled.",
     "send": "Send",
     "startChat": "Start Chat",
@@ -93,7 +122,12 @@
     "history": "History",
     "historyParticipant": "Chats",
     "historyObserved": "Observed Chats",
-    "readonly": "Read-only"
+    "readonly": "Read-only",
+    "toolDone": "Done",
+    "toolRunning": "Running",
+    "toolInput": "Input",
+    "toolResult": "Result",
+    "unknownUser": "{platform} User"
   },
   "models": {
     "title": "Models",
@@ -103,8 +137,6 @@
     "deleteModelConfirm": "Are you sure you want to delete this model?",
     "emptyTitle": "No Models",
     "emptyDescription": "Click the button above to add a model for this provider",
-    "type": "Type",
-    "typePlaceholder": "Select model type",
     "model": "Model ID",
     "modelPlaceholder": "e.g. gpt-4o",
     "displayName": "Display Name",
@@ -116,14 +148,10 @@
   "provider": {
     "add": "Add Provider",
     "addBtn": "Add",
-    "name": "Name",
-    "namePlaceholder": "Enter provider name",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter API key",
     "url": "Base URL",
     "urlPlaceholder": "Enter base URL",
-    "type": "Type",
-    "typePlaceholder": "Select type",
     "deleteConfirm": "Are you sure you want to delete this provider?",
     "saveChanges": "Save Changes",
     "emptyTitle": "No Providers",
@@ -132,10 +160,6 @@
   "mcp": {
     "addTitle": "Add MCP",
     "addDescription": "Configure MCP server connection",
-    "name": "Name",
-    "namePlaceholder": "Enter name",
-    "type": "Type",
-    "typePlaceholder": "Select type",
     "command": "Command",
     "commandPlaceholder": "Enter start command",
     "arguments": "Arguments",
@@ -144,18 +168,29 @@
     "cwdPlaceholder": "Enter working directory path",
     "env": "Environment",
     "envPlaceholder": "Format: KEY:VALUE",
-    "active": "Enable Now",
+    "active": "Enabled",
     "types": {
-      "stdio": "Stdio"
+      "stdio": "Stdio (Local)",
+      "remote": "Remote (HTTP/SSE)"
     },
     "table": {
-      "name": "Name",
-      "type": "Type",
       "command": "Command",
       "cwd": "Working Directory",
       "arguments": "Arguments",
       "env": "Environment"
-    }
+    },
+    "empty": "No MCP servers configured yet.",
+    "deleteConfirm": "Are you sure you want to delete this MCP server?",
+    "loadFailed": "Failed to load MCP servers",
+    "saveFailed": "Failed to save MCP server",
+    "createSuccess": "MCP server created",
+    "updateSuccess": "MCP server updated",
+    "deleteSuccess": "MCP server deleted",
+    "deleteFailed": "Failed to delete MCP server",
+    "importHint": "Paste a standard mcpServers JSON configuration. Existing servers with the same name will be updated.",
+    "importSuccess": "MCP servers imported",
+    "importFailed": "Failed to import MCP servers",
+    "exportFailed": "Failed to export MCP servers"
   },
   "home": {
     "title": "Home"
@@ -179,7 +214,6 @@
     "editAvatarDescription": "Set the image URL for the bot avatar.",
     "avatarUpdateSuccess": "Avatar updated",
     "avatarUpdateFailed": "Failed to update avatar",
-    "type": "Type",
     "typePlaceholder": "Select bot type",
     "types": {
       "personal": "Personal",
@@ -201,9 +235,7 @@
       "issueCount": "{count} issues",
       "empty": "No check items",
       "loadFailed": "Failed to load runtime checks",
-      "actions": {
-        "refresh": "Refresh"
-      },
+      "actions": {},
       "keys": {
         "containerInit": "Container initialization",
         "containerRecord": "Container record",
@@ -218,7 +250,6 @@
         "unknown": "UNKNOWN"
       }
     },
-    "createdAt": "Created at",
     "tabs": {
       "overview": "Overview",
       "memory": "Memory",
@@ -271,7 +302,6 @@
         "createdAt": "Created At"
       },
       "actions": {
-        "refresh": "Refresh",
         "create": "Create Container",
         "start": "Start",
         "stop": "Stop",
@@ -306,10 +336,9 @@
       "credentials": "Credentials",
       "saveSuccess": "Platform configuration saved",
       "saveFailed": "Failed to save platform configuration",
-      "requiredField": "{field} is required",
-      "save": "Save Platform Configuration",
-      "status": "Status",
-      "statusActive": "Active",
+    "requiredField": "{field} is required",
+    "save": "Save Platform Configuration",
+    "statusActive": "Active",
       "statusInactive": "Inactive",
       "deleteConfirm": "Are you sure you want to remove this platform?",
       "noAvailableTypes": "All platform types have been configured",

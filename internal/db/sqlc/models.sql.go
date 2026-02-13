@@ -208,15 +208,6 @@ func (q *Queries) DeleteModelByModelID(ctx context.Context, modelID string) erro
 	return err
 }
 
-const deleteModelVariant = `-- name: DeleteModelVariant :exec
-DELETE FROM model_variants WHERE id = $1
-`
-
-func (q *Queries) DeleteModelVariant(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteModelVariant, id)
-	return err
-}
-
 const getLlmProviderByID = `-- name: GetLlmProviderByID :one
 SELECT id, name, client_type, base_url, api_key, metadata, created_at, updated_at FROM llm_providers WHERE id = $1
 `
@@ -293,25 +284,6 @@ func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model,
 		&i.Dimensions,
 		&i.IsMultimodal,
 		&i.Type,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getModelVariantByID = `-- name: GetModelVariantByID :one
-SELECT id, model_uuid, variant_id, weight, metadata, created_at, updated_at FROM model_variants WHERE id = $1
-`
-
-func (q *Queries) GetModelVariantByID(ctx context.Context, id pgtype.UUID) (ModelVariant, error) {
-	row := q.db.QueryRow(ctx, getModelVariantByID, id)
-	var i ModelVariant
-	err := row.Scan(
-		&i.ID,
-		&i.ModelUuid,
-		&i.VariantID,
-		&i.Weight,
-		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -395,40 +367,6 @@ ORDER BY weight DESC, created_at DESC
 
 func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid pgtype.UUID) ([]ModelVariant, error) {
 	rows, err := q.db.Query(ctx, listModelVariantsByModelUUID, modelUuid)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ModelVariant
-	for rows.Next() {
-		var i ModelVariant
-		if err := rows.Scan(
-			&i.ID,
-			&i.ModelUuid,
-			&i.VariantID,
-			&i.Weight,
-			&i.Metadata,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listModelVariantsByVariantID = `-- name: ListModelVariantsByVariantID :many
-SELECT id, model_uuid, variant_id, weight, metadata, created_at, updated_at FROM model_variants
-WHERE variant_id = $1
-ORDER BY created_at DESC
-`
-
-func (q *Queries) ListModelVariantsByVariantID(ctx context.Context, variantID string) ([]ModelVariant, error) {
-	rows, err := q.db.Query(ctx, listModelVariantsByVariantID, variantID)
 	if err != nil {
 		return nil, err
 	}
@@ -772,44 +710,6 @@ func (q *Queries) UpdateModelByModelID(ctx context.Context, arg UpdateModelByMod
 		&i.Dimensions,
 		&i.IsMultimodal,
 		&i.Type,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const updateModelVariant = `-- name: UpdateModelVariant :one
-UPDATE model_variants
-SET
-  variant_id = $1,
-  weight = $2,
-  metadata = $3,
-  updated_at = now()
-WHERE id = $4
-RETURNING id, model_uuid, variant_id, weight, metadata, created_at, updated_at
-`
-
-type UpdateModelVariantParams struct {
-	VariantID string      `json:"variant_id"`
-	Weight    int32       `json:"weight"`
-	Metadata  []byte      `json:"metadata"`
-	ID        pgtype.UUID `json:"id"`
-}
-
-func (q *Queries) UpdateModelVariant(ctx context.Context, arg UpdateModelVariantParams) (ModelVariant, error) {
-	row := q.db.QueryRow(ctx, updateModelVariant,
-		arg.VariantID,
-		arg.Weight,
-		arg.Metadata,
-		arg.ID,
-	)
-	var i ModelVariant
-	err := row.Scan(
-		&i.ID,
-		&i.ModelUuid,
-		&i.VariantID,
-		&i.Weight,
-		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

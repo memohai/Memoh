@@ -68,7 +68,7 @@
             </div>
           </CardContent>
 
-          <CardFooter class="flex flex-col gap-4">
+          <CardFooter>
             <Button
               class="w-full"
               type="submit"
@@ -76,12 +76,6 @@
             >
               <Spinner v-if="loading" />
               {{ $t('auth.login') }}
-            </Button>
-            <Button
-              variant="outline"
-              class="w-full"
-            >
-              {{ $t('auth.register') }}
             </Button>
           </CardFooter>
         </Card>
@@ -111,7 +105,7 @@ import { useUserStore } from '@/store/user'
 import { ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { login as loginApi } from '@/composables/api/useAuth'
+import { postAuthLogin } from '@memoh/sdk'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -130,7 +124,7 @@ const loading = ref(false)
 const login = form.handleSubmit(async (values) => {
   try {
     loading.value = true
-    const data = await loginApi(values)
+    const { data } = await postAuthLogin({ body: values })
     if (data?.access_token && data?.user_id) {
       loginHandle({
         id: data.user_id,
@@ -142,7 +136,7 @@ const login = form.handleSubmit(async (values) => {
     } else {
       throw new Error(t('auth.loginFailed'))
     }
-    router.replace({ name: 'Main' })
+    router.replace({ path: '/chat' })
   } catch {
     toast.error(t('auth.invalidCredentials'), {
       description: t('auth.retryHint'),

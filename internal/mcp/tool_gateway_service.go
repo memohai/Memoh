@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -106,7 +107,7 @@ func (s *ToolGatewayService) CallTool(ctx context.Context, session ToolSessionCo
 	}
 	result, err := executor.CallTool(ctx, session, toolName, arguments)
 	if err != nil {
-		if err == ErrToolNotFound {
+		if errors.Is(err, ErrToolNotFound) {
 			return BuildToolErrorResult("tool not found: " + toolName), nil
 		}
 		return BuildToolErrorResult(err.Error()), nil

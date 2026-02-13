@@ -23,15 +23,15 @@ func (f *fakeSearcher) Search(ctx context.Context, req memory.SearchRequest) (me
 }
 
 type fakeChatAccessor struct {
-	chat           conversation.Chat
+	chat           conversation.Conversation
 	getErr         error
 	participant    bool
 	participantErr error
 }
 
-func (f *fakeChatAccessor) Get(ctx context.Context, conversationID string) (conversation.Chat, error) {
+func (f *fakeChatAccessor) Get(ctx context.Context, conversationID string) (conversation.Conversation, error) {
 	if f.getErr != nil {
-		return conversation.Chat{}, f.getErr
+		return conversation.Conversation{}, f.getErr
 	}
 	return f.chat, nil
 }
@@ -43,8 +43,8 @@ func (f *fakeChatAccessor) IsParticipant(ctx context.Context, conversationID, ch
 	return f.participant, nil
 }
 
-func (f *fakeChatAccessor) GetReadAccess(ctx context.Context, conversationID, channelIdentityID string) (conversation.ChatReadAccess, error) {
-	return conversation.ChatReadAccess{}, nil
+func (f *fakeChatAccessor) GetReadAccess(ctx context.Context, conversationID, channelIdentityID string) (conversation.ConversationReadAccess, error) {
+	return conversation.ConversationReadAccess{}, nil
 }
 
 type fakeAdminChecker struct {
@@ -180,7 +180,7 @@ func TestExecutor_CallTool_ChatNotFound(t *testing.T) {
 
 func TestExecutor_CallTool_BotMismatch(t *testing.T) {
 	accessor := &fakeChatAccessor{
-		chat: conversation.Chat{BotID: "other-bot", ID: "c1"},
+		chat: conversation.Conversation{BotID: "other-bot", ID: "c1"},
 	}
 	searcher := &fakeSearcher{}
 	exec := NewExecutor(nil, searcher, accessor, nil)
@@ -196,7 +196,7 @@ func TestExecutor_CallTool_BotMismatch(t *testing.T) {
 
 func TestExecutor_CallTool_NotParticipant(t *testing.T) {
 	accessor := &fakeChatAccessor{
-		chat:        conversation.Chat{BotID: "bot1", ID: "c1"},
+		chat:        conversation.Conversation{BotID: "bot1", ID: "c1"},
 		participant: false,
 	}
 	searcher := &fakeSearcher{}
@@ -216,7 +216,7 @@ func TestExecutor_CallTool_AdminBypass(t *testing.T) {
 		resp: memory.SearchResponse{Results: []memory.MemoryItem{{ID: "id1", Memory: "m1", Score: 0.8}}},
 	}
 	accessor := &fakeChatAccessor{
-		chat:        conversation.Chat{BotID: "bot1", ID: "c1"},
+		chat:        conversation.Conversation{BotID: "bot1", ID: "c1"},
 		participant: false,
 	}
 	admin := &fakeAdminChecker{admin: true}

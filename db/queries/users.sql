@@ -8,13 +8,6 @@ SELECT *
 FROM users
 WHERE id = $1;
 
--- name: UpdateUserStatus :one
-UPDATE users
-SET is_active = $2,
-    updated_at = now()
-WHERE id = $1
-RETURNING *;
-
 -- name: CreateAccount :one
 UPDATE users
 SET username = sqlc.arg(username),
@@ -53,9 +46,6 @@ ON CONFLICT (username) DO UPDATE SET
   data_root = EXCLUDED.data_root,
   updated_at = now()
 RETURNING *;
-
--- name: GetAccountByUsername :one
-SELECT * FROM users WHERE username = sqlc.arg(username);
 
 -- name: GetAccountByIdentity :one
 SELECT * FROM users WHERE username = sqlc.arg(identity) OR email = sqlc.arg(identity);

@@ -1,6 +1,7 @@
 import { ModelMessage } from 'ai'
 import { ModelConfig } from './model'
 import { AgentAttachment } from './attachment'
+import { MCPConnection } from './mcp'
 
 export interface IdentityContext {
   botId: string
@@ -15,6 +16,7 @@ export interface IdentityContext {
   userId?: string
 
   currentPlatform?: string
+  conversationType?: string
   replyTarget?: string
   sessionToken?: string
 }
@@ -46,6 +48,7 @@ export interface AgentParams {
   language?: string
   activeContextTime?: number
   allowedActions?: AgentAction[]
+  mcpConnections?: MCPConnection[]
   brave?: BraveConfig
   channels?: string[]
   currentChannel?: string

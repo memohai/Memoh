@@ -50,7 +50,7 @@ import (
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/preauth"
 	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/router"
+	"github.com/memohai/memoh/internal/channel/inbound"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/server"
 	"github.com/memohai/memoh/internal/settings"
@@ -119,7 +119,7 @@ func main() {
 			// http handlers (group:"server_handlers")
 			provideServerHandler(handlers.NewPingHandler),
 			provideServerHandler(provideAuthHandler),
-			provideServerHandler(handlers.NewMemoryHandler),
+			provideServerHandler(provideMemoryHandler),
 			provideServerHandler(handlers.NewEmbeddingsHandler),
 			provideServerHandler(provideMessageHandler),
 			provideServerHandler(handlers.NewSwaggerHandler),
@@ -305,8 +305,8 @@ func provideScheduleTriggerer(resolver *flow.Resolver) schedule.Triggerer {
 // conversation flow
 // ---------------------------------------------------------------------------
 
-func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, memoryService *memory.Service, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mcpConnService *mcp.ConnectionService, containerdHandler *handlers.ContainerdHandler) *flow.Resolver {
-	resolver := flow.NewResolver(log, modelsService, queries, memoryService, chatService, msgService, settingsService, mcpConnService, cfg.AgentGateway.BaseURL(), 120*time.Second)
+func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, memoryService *memory.Service, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, containerdHandler *handlers.ContainerdHandler) *flow.Resolver {
+	resolver := flow.NewResolver(log, modelsService, queries, memoryService, chatService, msgService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	return resolver
 }
@@ -324,11 +324,11 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub) *channel.Regi
 	return registry
 }
 
-func provideChannelRouter(log *slog.Logger, registry *channel.Registry, routeService *route.DBService, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, policyService *policy.Service, preauthService *preauth.Service, bindService *bind.Service, rc *boot.RuntimeConfig) *router.ChannelInboundProcessor {
-	return router.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, botService, policyService, preauthService, bindService, rc.JwtSecret, 5*time.Minute)
+func provideChannelRouter(log *slog.Logger, registry *channel.Registry, routeService *route.DBService, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, policyService *policy.Service, preauthService *preauth.Service, bindService *bind.Service, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
+	return inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, botService, policyService, preauthService, bindService, rc.JwtSecret, 5*time.Minute)
 }
 
-func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelService *channel.Service, channelRouter *router.ChannelInboundProcessor) *channel.Manager {
+func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelService *channel.Service, channelRouter *inbound.ChannelInboundProcessor) *channel.Manager {
 	mgr := channel.NewManager(log, registry, channelService, channelRouter)
 	if mw := channelRouter.IdentityMiddleware(); mw != nil {
 		mgr.Use(mw)
@@ -371,6 +371,18 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 // handler providers (interface adaptation / config extraction)
 // ---------------------------------------------------------------------------
 
+func provideMemoryHandler(log *slog.Logger, service *memory.Service, chatService *conversation.Service, accountService *accounts.Service, cfg config.Config, manager *mcp.Manager) *handlers.MemoryHandler {
+	h := handlers.NewMemoryHandler(log, service, chatService, accountService)
+	if manager != nil {
+		execWorkDir := cfg.MCP.DataMount
+		if strings.TrimSpace(execWorkDir) == "" {
+			execWorkDir = config.DefaultDataMount
+		}
+		h.SetMemoryFS(memory.NewMemoryFS(log, manager, execWorkDir))
+	}
+	return h
+}
+
 func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *boot.RuntimeConfig) *handlers.AuthHandler {
 	return handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
 }
@@ -401,7 +413,7 @@ type serverParams struct {
 	Logger            *slog.Logger
 	RuntimeConfig     *boot.RuntimeConfig
 	Config            config.Config
-	ServerHandlers    []server.Handler          `group:"server_handlers"`
+	ServerHandlers    []server.Handler `group:"server_handlers"`
 	ContainerdHandler *handlers.ContainerdHandler
 }
 
@@ -460,7 +472,7 @@ func startContainerReconciliation(lc fx.Lifecycle, containerdHandler *handlers.C
 	})
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, containerdHandler *handlers.ContainerdHandler) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
@@ -469,6 +481,7 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 				return err
 			}
 			botService.SetContainerLifecycle(containerdHandler)
+			botService.AddRuntimeChecker(mcp.NewConnectionChecker(logger, mcpConnService, toolGateway))
 
 			go func() {
 				if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -593,6 +606,14 @@ func (c *lazyLLMClient) Decide(ctx context.Context, req memory.DecideRequest) (m
 	return client.Decide(ctx, req)
 }
 
+func (c *lazyLLMClient) Compact(ctx context.Context, req memory.CompactRequest) (memory.CompactResponse, error) {
+	client, err := c.resolve(ctx)
+	if err != nil {
+		return memory.CompactResponse{}, err
+	}
+	return client.Compact(ctx, req)
+}
+
 func (c *lazyLLMClient) DetectLanguage(ctx context.Context, text string) (string, error) {
 	client, err := c.resolve(ctx)
 	if err != nil {
@@ -610,7 +631,10 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memory.LLM, error) {
 		return nil, err
 	}
 	clientType := strings.ToLower(strings.TrimSpace(memoryProvider.ClientType))
-	if clientType != "openai" && clientType != "openai-compat" {
+	switch clientType {
+	case "openai", "openai-compat", "azure", "mistral", "xai", "ollama", "dashscope":
+		// These providers support OpenAI-compatible /chat/completions endpoint
+	default:
 		return nil, fmt.Errorf("memory provider client type not supported: %s", memoryProvider.ClientType)
 	}
 	return memory.NewLLMClient(c.logger, memoryProvider.BaseUrl, memoryProvider.ApiKey, memoryModel.ModelID, c.timeout)

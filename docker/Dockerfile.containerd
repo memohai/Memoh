@@ -1,0 +1,86 @@
+# syntax=docker/dockerfile:1
+
+# ---- Stage 1: Build MCP binary ----
+FROM golang:1.25-alpine AS mcp-builder
+
+WORKDIR /src
+RUN apk add --no-cache ca-certificates git
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+ARG TARGETARCH=amd64
+ARG COMMIT_HASH=unknown
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -trimpath \
+    -ldflags "-s -w -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH}" \
+    -o /out/mcp ./cmd/mcp
+
+# ---- Stage 2: Assemble MCP image rootfs ----
+FROM alpine:latest AS mcp-rootfs
+
+# Base utilities
+RUN apk add --no-cache grep curl bash
+
+# Node.js + npm (provides npx for JS/TS MCP servers)
+RUN apk add --no-cache nodejs npm
+
+# Python 3 + uv (provides uvx for Python MCP servers)
+RUN apk add --no-cache python3 && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ln -sf /root/.local/bin/uv /usr/local/bin/uv && \
+    ln -sf /root/.local/bin/uvx /usr/local/bin/uvx
+
+COPY --from=mcp-builder /out/mcp /opt/mcp
+COPY cmd/mcp/template /opt/mcp-template
+
+RUN printf '#!/bin/sh\n\
+[ -e /app/mcp ] || { mkdir -p /app; [ -f /opt/mcp ] && cp -a /opt/mcp /app/mcp 2>/dev/null || true; }\n\
+if [ -x /app/mcp ]; then exec /app/mcp "$@"; fi\n\
+exec /opt/mcp "$@"\n' > /opt/entrypoint.sh && chmod +x /opt/entrypoint.sh
+
+# Create rootfs tar excluding pseudo-filesystems
+RUN tar -cf /tmp/rootfs.tar \
+    --exclude='./proc' --exclude='./sys' --exclude='./dev' \
+    --exclude='./tmp' --exclude='./run' \
+    -C / .
+
+# ---- Stage 3: Package rootfs as Docker image tar ----
+FROM alpine:latest AS oci-exporter
+
+COPY --from=mcp-rootfs /tmp/rootfs.tar /tmp/layer.tar
+ARG MCP_IMAGE_TAG=docker.io/library/memoh-mcp:latest
+
+RUN set -e \
+    && LAYER_SHA=$(sha256sum /tmp/layer.tar | awk '{print $1}') \
+    && LAYER_SIZE=$(wc -c < /tmp/layer.tar) \
+    && mkdir -p "/tmp/image/${LAYER_SHA}" /out \
+    && mv /tmp/layer.tar "/tmp/image/${LAYER_SHA}/layer.tar" \
+    && printf '{"architecture":"amd64","os":"linux","created":"1970-01-01T00:00:00Z","config":{"Entrypoint":["/opt/entrypoint.sh"],"WorkingDir":"/app","Env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]},"rootfs":{"type":"layers","diff_ids":["sha256:%s"]},"history":[{"created":"1970-01-01T00:00:00Z","comment":"memoh-mcp image"}]}' \
+       "${LAYER_SHA}" > /tmp/config.json \
+    && CONFIG_SHA=$(sha256sum /tmp/config.json | awk '{print $1}') \
+    && mv /tmp/config.json "/tmp/image/${CONFIG_SHA}.json" \
+    && printf '[{"Config":"%s.json","RepoTags":["%s"],"Layers":["%s/layer.tar"]}]' \
+       "${CONFIG_SHA}" "${MCP_IMAGE_TAG}" "${LAYER_SHA}" > /tmp/image/manifest.json \
+    && cd /tmp/image && tar -cf /out/memoh-mcp.tar manifest.json "${CONFIG_SHA}.json" "${LAYER_SHA}/"
+
+# ---- Stage 4: Containerd runtime ----
+FROM alpine:latest
+
+RUN apk add --no-cache containerd containerd-ctr
+
+COPY --from=oci-exporter /out/memoh-mcp.tar /opt/images/memoh-mcp.tar
+COPY docker/containerd-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+VOLUME ["/run/containerd", "/var/lib/containerd", "/opt/memoh/data"]
+
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=10 \
+    CMD test -S /run/containerd/containerd.sock
+
+ENTRYPOINT ["/entrypoint.sh"]

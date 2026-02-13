@@ -7,9 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/identity"
 )
 
 type ChannelHandler struct {
@@ -161,12 +159,5 @@ func (h *ChannelHandler) GetChannel(c echo.Context) error {
 }
 
 func (h *ChannelHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.UserIDFromContext(c)
-	if err != nil {
-		return "", err
-	}
-	if err := identity.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	return channelIdentityID, nil
+	return RequireChannelIdentityID(c)
 }

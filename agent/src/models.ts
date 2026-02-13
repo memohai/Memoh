@@ -8,7 +8,10 @@ export const AgentSkillModel = z.object({
   metadata: z.record(z.string(), z.any()).optional(),
 })
 
-export const ClientTypeModel = z.enum(['openai', 'openai-compatible', 'anthropic', 'google'])
+export const ClientTypeModel = z.enum([
+  'openai', 'openai-compat', 'anthropic', 'google',
+  'azure', 'bedrock', 'mistral', 'xai', 'ollama', 'dashscope',
+])
 
 export const ModelConfigModel = z.object({
   modelId: z.string().min(1, 'Model ID is required'),
@@ -30,6 +33,7 @@ export const IdentityContextModel = z.object({
   contactAlias: z.string().optional(),
   userId: z.string().optional(),
   currentPlatform: z.string().optional(),
+  conversationType: z.string().optional(),
   replyTarget: z.string().optional(),
   sessionToken: z.string().optional(),
 })

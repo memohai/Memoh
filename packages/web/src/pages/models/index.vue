@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, provide, watch, reactive } from 'vue'
 import modelSetting from './model-setting.vue'
+import { useQueryCache } from '@pinia/colada'
 import {
   ScrollArea,
   Sidebar,
@@ -13,6 +14,12 @@ import {
   InputGroup, InputGroupAddon, InputGroupInput,
   SidebarFooter,
   Toggle,
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -20,48 +27,65 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@memoh/ui'
-import { type ProviderInfo } from '@memoh/shared'
+import { getProviders } from '@memoh/sdk'
+import type { ProvidersGetResponse, ProvidersClientType } from '@memoh/sdk'
 import AddProvider from '@/components/add-provider/index.vue'
-import { useProviderList } from '@/composables/api/useProviders'
+import { useQuery } from '@pinia/colada'
+
+const CLIENT_TYPES: ProvidersClientType[] = [
+  'openai', 'openai-compat', 'anthropic', 'google',
+  'azure', 'bedrock', 'mistral', 'xai', 'ollama', 'dashscope',
+]
 
 const filterProvider = ref('')
-const { data: providerData } = useProviderList(filterProvider)
+const { data: providerData } = useQuery({
+  key: () => ['providers', filterProvider.value],
+  query: async () => {
+    const { data } = await getProviders({
+      query: filterProvider.value ? { client_type: filterProvider.value } : undefined,
+      throwOnError: true,
+    })
+    return data
+  },
+})
+const queryCache = useQueryCache()
 
+watch(filterProvider, () => {
+  queryCache.invalidateQueries({ key: ['providers'] })
+}, { immediate: true })
 
-const curProvider = ref<Partial<ProviderInfo> & { id: string }>()
+const curProvider = ref<ProvidersGetResponse>()
 provide('curProvider', curProvider)
 
 const selectProvider = (value: string) => computed(() => {
   return curProvider.value?.name === value
 })
 
-const searchProviderTxt = reactive({
-  temp_value: '',
-  value: ''
-})
+const searchText = ref('')
+const searchInput = ref('')
 
 const curFilterProvider = computed(() => {
   if (!Array.isArray(providerData.value)) {
     return []
   }
-  const searchReg = new RegExp([...searchProviderTxt.value].map(v => `\\u{${v.codePointAt(0)?.toString(16)}}`).join(''), 'u')
-  return providerData.value.filter((provider: Partial<ProviderInfo> & { id: string }) => {
-    return searchReg.test(provider.name as string)
+  if (!searchText.value) {
+    return providerData.value
+  }
+  const keyword = searchText.value.toLowerCase()
+  return providerData.value.filter((provider: ProvidersGetResponse) => {
+    return (provider.name as string).toLowerCase().includes(keyword)
   })
 })
 
 watch(curFilterProvider, () => {
-  if (Array.isArray(curFilterProvider.value) && curFilterProvider.value.length > 0) {
+  if (curFilterProvider.value.length > 0) {
     curProvider.value = curFilterProvider.value[0]
   } else {
-    curProvider.value = {
-      id:''
-    }
+    curProvider.value = { id: '' }
   }
 }, {
   immediate: true
 })
-provide('curProvider', curProvider)
 
 const openStatus = reactive({
   provideOpen: false
@@ -80,15 +104,13 @@ const openStatus = reactive({
           <SidebarHeader>
             <InputGroup class="shadow-none">
               <InputGroupInput
-                v-model="searchProviderTxt.temp_value"
+                v-model="searchInput"
                 :placeholder="$t('models.searchPlaceholder')"
               />
               <InputGroupAddon
                 align="inline-end"
                 class="cursor-pointer"
-                @click="() => {
-                  searchProviderTxt.value = searchProviderTxt.temp_value
-                }"
+                @click="searchText = searchInput"
               >
                 <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
               </InputGroupAddon>
@@ -120,6 +142,22 @@ const openStatus = reactive({
             </SidebarMenu>
           </SidebarContent>
           <SidebarFooter>
+            <Select v-model:model-value="filterProvider">
+              <SelectTrigger class="w-full">
+                <SelectValue :placeholder="$t('common.typePlaceholder')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem
+                    v-for="type in CLIENT_TYPES"
+                    :key="type"
+                    :value="type"
+                  >
+                    {{ type }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
             <AddProvider v-model:open="openStatus.provideOpen" />
           </SidebarFooter>
         </Sidebar>
@@ -142,7 +180,6 @@ const openStatus = reactive({
             <EmptyTitle>{{ $t('provider.emptyTitle') }}</EmptyTitle>
             <EmptyDescription>{{ $t('provider.emptyDescription') }}</EmptyDescription>
             <EmptyContent>
-              <!-- <Button>Add data</Button> -->
               <AddProvider v-model:open="openStatus.provideOpen" />
             </EmptyContent>
           </Empty>

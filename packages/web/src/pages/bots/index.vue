@@ -63,30 +63,32 @@ import {
 import { ref, computed, watch, onUnmounted } from 'vue'
 import BotCard from './components/bot-card.vue'
 import CreateBot from './components/create-bot.vue'
-import {
-  useBotList,
-  isBotPendingStatus,
-} from '@/composables/api/useBots'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { getBotsQuery, getBotsQueryKey } from '@memoh/sdk/colada'
 
 const searchText = ref('')
 const dialogOpen = ref(false)
+const queryCache = useQueryCache()
 
-const { data: botData, status, invalidate } = useBotList()
+const { data: botData, status } = useQuery(getBotsQuery())
 
 const isLoading = computed(() => status.value === 'loading')
 
+const allBots = computed(() => botData.value?.items ?? [])
+
 const filteredBots = computed(() => {
-  const list = botData.value ?? []
   const keyword = searchText.value.trim().toLowerCase()
-  if (!keyword) return list
-  return list.filter((bot) =>
+  if (!keyword) return allBots.value
+  return allBots.value.filter((bot) =>
     bot.display_name?.toLowerCase().includes(keyword)
     || bot.id.toLowerCase().includes(keyword)
     || bot.type?.toLowerCase().includes(keyword),
   )
 })
 
-const hasPendingBots = computed(() => (botData.value ?? []).some((bot) => isBotPendingStatus(bot.status)))
+const hasPendingBots = computed(() =>
+  allBots.value.some((bot) => bot.status === 'creating' || bot.status === 'deleting'),
+)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -94,7 +96,7 @@ watch(hasPendingBots, (pending) => {
   if (pending) {
     if (pollTimer == null) {
       pollTimer = setInterval(() => {
-        void invalidate()
+        queryCache.invalidateQueries({ key: getBotsQueryKey() })
       }, 2000)
     }
     return
@@ -111,5 +113,4 @@ onUnmounted(() => {
     pollTimer = null
   }
 })
-
 </script>

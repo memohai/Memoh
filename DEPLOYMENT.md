@@ -1,11 +1,17 @@
 # Memoh Deployment Guide
 
-## Quick Deploy
+## One-Click Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sh
+```
+
+Or manually:
 
 ```bash
 git clone https://github.com/memohai/Memoh.git
 cd Memoh
-./deploy.sh
+docker compose up -d
 ```
 
 Access:
@@ -15,18 +21,22 @@ Access:
 
 Default credentials: `admin` / `admin123`
 
-## Manual Deploy
+## Prerequisites
+
+- Docker (with Docker Compose v2)
+- Git
+
+That's it. No containerd, nerdctl, or buildkit required on the host.
+
+## Custom Configuration
 
 ```bash
 cp docker/config/config.docker.toml config.toml
-nano config.toml  # Change passwords and secrets
-nerdctl build -f docker/Dockerfile.mcp -t docker.io/library/memoh-mcp:latest .
-docker compose up -d
+nano config.toml
+MEMOH_CONFIG=./config.toml docker compose up -d
 ```
 
-## Required Configuration
-
-Must change in `config.toml`:
+Recommended changes for production:
 - `admin.password` - Admin password
 - `auth.jwt_secret` - JWT secret (generate with `openssl rand -base64 32`)
 - `postgres.password` - Database password
@@ -37,7 +47,8 @@ Must change in `config.toml`:
 docker compose up -d          # Start
 docker compose down           # Stop
 docker compose logs -f        # View logs
-nerdctl images                # Ensure that memoh-mcp:latest exsits
+docker compose ps             # Status
+docker compose up -d --build  # Rebuild and restart
 ```
 
 ## Production
@@ -52,13 +63,13 @@ nerdctl images                # Ensure that memoh-mcp:latest exsits
 
 ```bash
 docker compose logs server    # View service logs
+docker compose logs containerd # View containerd logs
 docker compose config         # Check configuration
-docker compose build --no-cache && docker compose up -d  # Rebuild
+docker compose build --no-cache && docker compose up -d  # Full rebuild
 ```
 
 ## Security Warnings
 
-⚠️ Main service has host Docker access - only run in trusted environments
-⚠️ Must change all default passwords and secrets
-⚠️ Use HTTPS in production
-
+- Main service has privileged container access - only run in trusted environments
+- Must change all default passwords and secrets
+- Use HTTPS in production

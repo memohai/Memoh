@@ -8,6 +8,3 @@ VALUES (
   sqlc.arg(digest)
 )
 ON CONFLICT (id) DO NOTHING;
-
--- name: ListSnapshotsByContainerID :many
-SELECT * FROM snapshots WHERE container_id = sqlc.arg(container_id) ORDER BY created_at ASC;

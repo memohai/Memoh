@@ -21,14 +21,16 @@ const (
 type ClientType string
 
 const (
-	ClientTypeOpenAI    ClientType = "openai"
-	ClientTypeAnthropic ClientType = "anthropic"
-	ClientTypeGoogle    ClientType = "google"
-	ClientTypeBedrock   ClientType = "bedrock"
-	ClientTypeOllama    ClientType = "ollama"
-	ClientTypeAzure     ClientType = "azure"
-	ClientTypeDashscope ClientType = "dashscope"
-	ClientTypeOther     ClientType = "other"
+	ClientTypeOpenAI       ClientType = "openai"
+	ClientTypeOpenAICompat ClientType = "openai-compat"
+	ClientTypeAnthropic    ClientType = "anthropic"
+	ClientTypeGoogle       ClientType = "google"
+	ClientTypeAzure        ClientType = "azure"
+	ClientTypeBedrock      ClientType = "bedrock"
+	ClientTypeMistral      ClientType = "mistral"
+	ClientTypeXAI          ClientType = "xai"
+	ClientTypeOllama       ClientType = "ollama"
+	ClientTypeDashscope    ClientType = "dashscope"
 )
 
 type Model struct {
@@ -73,7 +75,7 @@ type GetRequest struct {
 }
 
 type GetResponse struct {
-	ModelId string `json:"model_id"`
+	ModelID string `json:"model_id"`
 	Model
 }
 

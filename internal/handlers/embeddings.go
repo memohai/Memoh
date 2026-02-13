@@ -8,7 +8,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/embeddings"
 	"github.com/memohai/memoh/internal/models"
@@ -48,7 +47,7 @@ type EmbeddingsResponse struct {
 type EmbeddingsUsage struct {
 	InputTokens int `json:"input_tokens,omitempty"`
 	ImageTokens int `json:"image_tokens,omitempty"`
-	VideoTokens int `json:"video_tokens,omitempty"`
+	Duration int `json:"duration,omitempty"`
 }
 
 func NewEmbeddingsHandler(log *slog.Logger, modelsService *models.Service, queries *sqlc.Queries) *EmbeddingsHandler {
@@ -85,12 +84,6 @@ func (h *EmbeddingsHandler) Embed(c echo.Context) error {
 	req.Input.ImageURL = strings.TrimSpace(req.Input.ImageURL)
 	req.Input.VideoURL = strings.TrimSpace(req.Input.VideoURL)
 
-	userID := ""
-	if c.Get("user") != nil {
-		if value, err := auth.UserIDFromContext(c); err == nil {
-			userID = value
-		}
-	}
 	result, err := h.resolver.Embed(c.Request().Context(), embeddings.Request{
 		Type:       req.Type,
 		Provider:   req.Provider,
@@ -101,7 +94,6 @@ func (h *EmbeddingsHandler) Embed(c echo.Context) error {
 			ImageURL: req.Input.ImageURL,
 			VideoURL: req.Input.VideoURL,
 		},
-		ChannelIdentityID: userID,
 	})
 	if err != nil {
 		message := err.Error()
@@ -137,7 +129,7 @@ func (h *EmbeddingsHandler) Embed(c echo.Context) error {
 		Usage: EmbeddingsUsage{
 			InputTokens: result.Usage.InputTokens,
 			ImageTokens: result.Usage.ImageTokens,
-			VideoTokens: result.Usage.VideoTokens,
+			Duration: result.Usage.Duration,
 		},
 	})
 }

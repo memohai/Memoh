@@ -106,6 +106,42 @@ Follow the instruction mentioned below:
 Do not return anything except the JSON format.`, toJSON(retrievedOldMemory), toJSON(newRetrievedFacts), "```json", "```")
 }
 
+func getCompactMemoryMessages(memories []map[string]string, targetCount int, decayDays int) (string, string) {
+	decayInstruction := ""
+	if decayDays > 0 {
+		decayInstruction = fmt.Sprintf(`
+10. TIME DECAY: Today's date is %s. Memories older than %d days are LOW PRIORITY.
+    - When deciding which facts to merge or drop, prefer dropping/merging older low-priority memories over newer ones.
+    - If an older memory and a newer memory convey similar information, keep the newer one.
+    - Very old memories should only be kept if they contain unique, still-relevant information (e.g. name, identity, long-term preferences).
+`, time.Now().UTC().Format("2006-01-02"), decayDays)
+	}
+
+	systemPrompt := fmt.Sprintf(`You are a Memory Compactor. Your job is to consolidate a list of memory entries into a smaller, more concise set.
+
+Guidelines:
+1. Merge similar or redundant entries into single, concise facts.
+2. If two entries contradict each other, keep only the more recent or more specific one.
+3. Preserve all unique, non-redundant information — do not lose important facts.
+4. Each output fact should be a single, self-contained statement.
+5. Target approximately %d output facts (but use fewer if the information naturally consolidates to less, and never produce more than the input count).
+6. Keep the same language as the original memories. Do not translate.
+7. Return a JSON object with a single key "facts" containing an array of strings.
+8. DO NOT RETURN ANYTHING ELSE OTHER THAN THE JSON FORMAT.
+9. DO NOT ADD ANY ADDITIONAL TEXT OR CODEBLOCK IN THE JSON FIELDS WHICH MAKE IT INVALID SUCH AS "%s" OR "%s".%s
+
+Example:
+Input memories:
+[{"id":"1","text":"User likes dark mode","created_at":"2026-01-01"},{"id":"2","text":"User prefers dark theme for all apps","created_at":"2026-02-10"},{"id":"3","text":"User is a software engineer","created_at":"2026-01-15"},{"id":"4","text":"User works as a developer","created_at":"2026-02-01"}]
+Target: 2
+
+Output: {"facts": ["User prefers dark theme for all apps", "User is a software engineer"]}
+`, targetCount, "```json", "```", decayInstruction)
+
+	userPrompt := fmt.Sprintf("Consolidate the following memories into approximately %d concise facts:\n\n%s", targetCount, toJSON(memories))
+	return systemPrompt, userPrompt
+}
+
 func getLanguageDetectionMessages(text string) (string, string) {
 	systemPrompt := `You are a language classifier for the given input text.
 Return a JSON object with a single key "language" whose value is one of the allowed codes.
@@ -118,10 +154,6 @@ Never output "zh", "zh-cn", "zh-tw", "ja", "ko", or any code not in the allowed 
 Before finalizing, verify the value is one of the allowed codes.`
 	userPrompt := fmt.Sprintf("Text:\n%s", text)
 	return systemPrompt, userPrompt
-}
-
-func parseMessages(messages []string) string {
-	return strings.Join(messages, "\n")
 }
 
 func removeCodeBlocks(text string) string {

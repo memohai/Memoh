@@ -12,15 +12,56 @@
     </div>
 
     <template v-else>
+      <!-- Bot info header -->
+      <div
+        v-if="currentBot"
+        class="flex items-center gap-3 px-4 py-2.5 border-b"
+      >
+        <Avatar class="size-8 shrink-0">
+          <AvatarImage
+            v-if="currentBot.avatar_url"
+            :src="currentBot.avatar_url"
+            :alt="currentBot.display_name"
+          />
+          <AvatarFallback class="text-xs">
+            {{ (currentBot.display_name || currentBot.id || '').slice(0, 2).toUpperCase() }}
+          </AvatarFallback>
+        </Avatar>
+        <div class="min-w-0">
+          <span class="font-medium text-sm truncate">
+            {{ currentBot.display_name || currentBot.id }}
+          </span>
+        </div>
+        <Badge
+          v-if="activeChatReadOnly"
+          variant="secondary"
+          class="ml-auto text-xs"
+        >
+          {{ $t('chat.readonly') }}
+        </Badge>
+      </div>
+
       <!-- Messages -->
       <div
         ref="scrollContainer"
         class="flex-1 overflow-y-auto"
+        @scroll="handleScroll"
       >
         <div class="max-w-3xl mx-auto px-4 py-6 space-y-6">
+          <!-- Load older indicator -->
+          <div
+            v-if="loadingOlder"
+            class="flex justify-center py-2"
+          >
+            <FontAwesomeIcon
+              :icon="['fas', 'spinner']"
+              class="size-3.5 animate-spin text-muted-foreground"
+            />
+          </div>
+
           <!-- Empty state -->
           <div
-            v-if="messages.length === 0"
+            v-if="messages.length === 0 && !loadingChats"
             class="flex items-center justify-center min-h-[300px]"
           >
             <p class="text-muted-foreground text-lg">
@@ -34,7 +75,6 @@
             :key="msg.id"
             :message="msg"
           />
-
         </div>
       </div>
 
@@ -44,15 +84,15 @@
           <Textarea
             v-model="inputText"
             class="pr-16 min-h-[60px] max-h-[200px] resize-none"
-            :placeholder="$t('chat.inputPlaceholder')"
-            :disabled="!currentBotId"
+            :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
+            :disabled="!currentBotId || activeChatReadOnly"
             @keydown.enter.exact="handleKeydown"
           />
           <div class="absolute right-2 bottom-2">
             <Button
               v-if="!streaming"
               size="sm"
-              :disabled="!inputText.trim() || !currentBotId"
+              :disabled="!inputText.trim() || !currentBotId || activeChatReadOnly"
               @click="handleSend"
             >
               <FontAwesomeIcon :icon="['fas', 'paper-plane']" class="size-3.5" />
@@ -73,17 +113,36 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
-import { Textarea, Button } from '@memoh/ui'
-import { useChatList } from '@/store/chat-list'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { Textarea, Button, Avatar, AvatarImage, AvatarFallback, Badge } from '@memoh/ui'
+import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import MessageItem from './message-item.vue'
 
-const chatStore = useChatList()
-const { messages, streaming, currentBotId } = storeToRefs(chatStore)
+const chatStore = useChatStore()
+const {
+  messages,
+  streaming,
+  currentBotId,
+  bots,
+  activeChatReadOnly,
+  loadingOlder,
+  loadingChats,
+  hasMoreOlder,
+} = storeToRefs(chatStore)
 
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
+
+const currentBot = computed(() =>
+  bots.value.find((b) => b.id === currentBotId.value) ?? null,
+)
+
+onMounted(() => {
+  void chatStore.initialize()
+})
+
+// ---- Auto-scroll ----
 
 let userScrolledUp = false
 
@@ -103,8 +162,21 @@ function handleScroll() {
   if (!el) return
   const distanceFromBottom = el.scrollHeight - el.clientHeight - el.scrollTop
   userScrolledUp = distanceFromBottom > 50
+
+  // Load older messages when scrolled near top
+  if (el.scrollTop < 200 && hasMoreOlder.value && !loadingOlder.value) {
+    const prevHeight = el.scrollHeight
+    chatStore.loadOlderMessages().then((count) => {
+      if (count > 0) {
+        nextTick(() => {
+          el.scrollTop = el.scrollHeight - prevHeight
+        })
+      }
+    })
+  }
 }
 
+// Stream content auto-scroll
 watch(
   () => {
     const last = messages.value[messages.value.length - 1]
@@ -119,6 +191,7 @@ watch(
   },
 )
 
+// New message auto-scroll
 watch(
   () => messages.value.length,
   () => {
@@ -126,10 +199,6 @@ watch(
     scrollToBottom()
   },
 )
-
-watch(scrollContainer, (el) => {
-  if (el) el.addEventListener('scroll', handleScroll, { passive: true })
-}, { immediate: true })
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.isComposing) return
@@ -139,7 +208,7 @@ function handleKeydown(e: KeyboardEvent) {
 
 function handleSend() {
   const text = inputText.value.trim()
-  if (!text || streaming.value) return
+  if (!text || streaming.value || activeChatReadOnly.value) return
   inputText.value = ''
   chatStore.sendMessage(text)
 }

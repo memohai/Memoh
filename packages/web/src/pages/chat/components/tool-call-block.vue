@@ -28,13 +28,13 @@
 
     <!-- Input (collapsible) -->
     <Collapsible v-if="block.input">
-      <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full">
+        <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full">
         <FontAwesomeIcon
           :icon="['fas', 'chevron-right']"
           class="size-2.5 transition-transform"
           :class="{ 'rotate-90': inputOpen }"
         />
-        Input
+        {{ $t('chat.toolInput') }}
       </CollapsibleTrigger>
       <CollapsibleContent>
         <pre class="px-3 pb-2 text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all">{{ formatJson(block.input) }}</pre>
@@ -43,13 +43,13 @@
 
     <!-- Result (collapsible) -->
     <Collapsible v-if="block.done && block.result != null">
-      <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full border-t border-muted">
+        <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full border-t border-muted">
         <FontAwesomeIcon
           :icon="['fas', 'chevron-right']"
           class="size-2.5 transition-transform"
           :class="{ 'rotate-90': resultOpen }"
         />
-        Result
+        {{ $t('chat.toolResult') }}
       </CollapsibleTrigger>
       <CollapsibleContent>
         <pre class="px-3 pb-2 text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all">{{ formatJson(block.result) }}</pre>

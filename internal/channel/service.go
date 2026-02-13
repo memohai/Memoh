@@ -53,6 +53,17 @@ func (s *Service) UpsertConfig(ctx context.Context, botID string, channelType Ch
 	if selfIdentity == nil {
 		selfIdentity = map[string]any{}
 	}
+	externalIdentity := strings.TrimSpace(req.ExternalIdentity)
+	if discovered, extID, err := s.registry.DiscoverSelf(ctx, channelType, normalized); err == nil && discovered != nil {
+		for k, v := range discovered {
+			if _, exists := selfIdentity[k]; !exists {
+				selfIdentity[k] = v
+			}
+		}
+		if externalIdentity == "" && strings.TrimSpace(extID) != "" {
+			externalIdentity = strings.TrimSpace(extID)
+		}
+	}
 	selfPayload, err := json.Marshal(selfIdentity)
 	if err != nil {
 		return ChannelConfig{}, err
@@ -73,7 +84,6 @@ func (s *Service) UpsertConfig(ctx context.Context, botID string, channelType Ch
 	if req.VerifiedAt != nil {
 		verifiedAt = pgtype.Timestamptz{Time: req.VerifiedAt.UTC(), Valid: true}
 	}
-	externalIdentity := strings.TrimSpace(req.ExternalIdentity)
 	row, err := s.queries.UpsertBotChannelConfig(ctx, sqlc.UpsertBotChannelConfigParams{
 		BotID:       botUUID,
 		ChannelType: channelType.String(),

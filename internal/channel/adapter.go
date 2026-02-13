@@ -103,6 +103,12 @@ type MessageEditor interface {
 	Unsend(ctx context.Context, cfg ChannelConfig, target string, messageID string) error
 }
 
+// SelfDiscoverer retrieves the adapter bot's own identity from the platform.
+// The returned map is merged into ChannelConfig.SelfIdentity and persisted.
+type SelfDiscoverer interface {
+	DiscoverSelf(ctx context.Context, credentials map[string]any) (identity map[string]any, externalID string, err error)
+}
+
 // Receiver is an adapter capable of establishing a long-lived connection to receive messages.
 type Receiver interface {
 	Connect(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (Connection, error)

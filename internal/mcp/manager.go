@@ -27,7 +27,6 @@ import (
 const (
 	BotLabelKey     = "mcp.bot_id"
 	ContainerPrefix = "mcp-"
-	DefaultImageRef = "memoh-mcp:dev"
 )
 
 type ExecRequest struct {
@@ -78,7 +77,7 @@ func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, nam
 }
 
 func (m *Manager) Init(ctx context.Context) error {
-	image := DefaultImageRef
+	image := m.imageRef()
 
 	_, err := m.service.PullImage(ctx, image, &ctr.PullImageOptions{
 		Unpack:      true,
@@ -176,7 +175,9 @@ func (m *Manager) Start(ctx context.Context, botID string) error {
 		return err
 	}
 	if err := ctr.SetupNetwork(ctx, task, m.containerID(botID)); err != nil {
-		_ = m.service.StopTask(ctx, m.containerID(botID), &ctr.StopTaskOptions{Force: true})
+		if stopErr := m.service.StopTask(ctx, m.containerID(botID), &ctr.StopTaskOptions{Force: true}); stopErr != nil {
+			m.logger.Warn("cleanup: stop task failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", stopErr))
+		}
 		return err
 	}
 	return nil
@@ -198,9 +199,13 @@ func (m *Manager) Delete(ctx context.Context, botID string) error {
 	}
 
 	if task, taskErr := m.service.GetTask(ctx, m.containerID(botID)); taskErr == nil {
-		_ = ctr.RemoveNetwork(ctx, task, m.containerID(botID))
+		if err := ctr.RemoveNetwork(ctx, task, m.containerID(botID)); err != nil {
+			m.logger.Warn("cleanup: remove network failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", err))
+		}
 	}
-	_ = m.service.DeleteTask(ctx, m.containerID(botID), &ctr.DeleteTaskOptions{Force: true})
+	if err := m.service.DeleteTask(ctx, m.containerID(botID), &ctr.DeleteTaskOptions{Force: true}); err != nil {
+		m.logger.Warn("cleanup: delete task failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", err))
+	}
 	return m.service.DeleteContainer(ctx, m.containerID(botID), &ctr.DeleteContainerOptions{
 		CleanupSnapshot: true,
 	})
@@ -348,14 +353,6 @@ func (m *Manager) execWithCaptureContainerd(ctx context.Context, req ExecRequest
 	}, nil
 }
 
-// sshShellQuote wraps a string in single quotes for safe SSH transport.
-func sshShellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
 // DataDir returns the host data directory for a bot.
 func (m *Manager) DataDir(botID string) (string, error) {
 	if err := validateBotID(botID); err != nil {
@@ -388,7 +385,10 @@ func (m *Manager) dataMount() string {
 }
 
 func (m *Manager) imageRef() string {
-	return DefaultImageRef
+	if m.cfg.Image != "" {
+		return m.cfg.Image
+	}
+	return config.DefaultMCPImage
 }
 
 func validateBotID(botID string) error {

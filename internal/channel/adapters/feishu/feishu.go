@@ -230,6 +230,48 @@ func removeProcessingReaction(ctx context.Context, gateway processingReactionGat
 	return gateway.Remove(ctx, msgID, rxID)
 }
 
+// DiscoverSelf retrieves the bot's own identity from the Feishu platform.
+func (a *FeishuAdapter) DiscoverSelf(ctx context.Context, credentials map[string]any) (map[string]any, string, error) {
+	cfg, err := parseConfig(credentials)
+	if err != nil {
+		return nil, "", err
+	}
+	client := lark.NewClient(cfg.AppID, cfg.AppSecret)
+	resp, err := client.Get(ctx, "/open-apis/bot/v3/info", nil, larkcore.AccessTokenTypeTenant)
+	if err != nil {
+		return nil, "", fmt.Errorf("feishu discover self: %w", err)
+	}
+	var body struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Bot  struct {
+			OpenID    string `json:"open_id"`
+			AppName   string `json:"app_name"`
+			AvatarURL string `json:"avatar_url"`
+		} `json:"bot"`
+	}
+	if err := json.Unmarshal(resp.RawBody, &body); err != nil {
+		return nil, "", fmt.Errorf("feishu discover self: parse response: %w", err)
+	}
+	if body.Code != 0 {
+		return nil, "", fmt.Errorf("feishu discover self: %s (code: %d)", body.Msg, body.Code)
+	}
+	openID := strings.TrimSpace(body.Bot.OpenID)
+	if openID == "" {
+		return nil, "", fmt.Errorf("feishu discover self: empty open_id")
+	}
+	identity := map[string]any{
+		"open_id": openID,
+	}
+	if name := strings.TrimSpace(body.Bot.AppName); name != "" {
+		identity["name"] = name
+	}
+	if avatar := strings.TrimSpace(body.Bot.AvatarURL); avatar != "" {
+		identity["avatar_url"] = avatar
+	}
+	return identity, openID, nil
+}
+
 // NormalizeConfig validates and normalizes a Feishu channel configuration map.
 func (a *FeishuAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeConfig(raw)
@@ -272,6 +314,19 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 		}
 		return nil, err
 	}
+	botOpenID := channel.ReadString(cfg.SelfIdentity, "open_id")
+	if botOpenID == "" {
+		if discovered, _, err := a.DiscoverSelf(ctx, cfg.Credentials); err == nil {
+			if id, ok := discovered["open_id"].(string); ok {
+				botOpenID = strings.TrimSpace(id)
+			}
+		} else if a.logger != nil {
+			a.logger.Warn("discover self fallback failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+		}
+	}
+	if a.logger != nil {
+		a.logger.Info("bot identity", slog.String("config_id", cfg.ID), slog.String("bot_open_id", botOpenID))
+	}
 	connCtx, cancel := context.WithCancel(ctx)
 	newClient := func() *larkws.Client {
 		eventDispatcher := dispatcher.NewEventDispatcher(
@@ -282,7 +337,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 			if connCtx.Err() != nil {
 				return nil
 			}
-			msg := extractFeishuInbound(event)
+			msg := extractFeishuInbound(event, botOpenID)
 			text := msg.Message.PlainText()
 			rawMessageID := ""
 			rawMessageType := ""

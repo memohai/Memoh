@@ -134,7 +134,7 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 		Filters: map[string]any{
 			"namespace": sharedMemoryNamespace,
 			"scopeId":   botID,
-			"botId":     botID,
+			"bot_id":    botID,
 		},
 	})
 	if err != nil {

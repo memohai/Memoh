@@ -39,78 +39,91 @@ RETURNING
 
 -- name: ListMessages :many
 SELECT
-  id,
-  bot_id,
-  route_id,
-  sender_channel_identity_id,
-  sender_account_user_id AS sender_user_id,
-  channel_type AS platform,
-  source_message_id AS external_message_id,
-  source_reply_to_message_id,
-  role,
-  content,
-  metadata,
-  created_at
-FROM bot_history_messages
-WHERE bot_id = sqlc.arg(bot_id)
-ORDER BY created_at ASC;
+  m.id,
+  m.bot_id,
+  m.route_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.channel_type AS platform,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+WHERE m.bot_id = sqlc.arg(bot_id)
+ORDER BY m.created_at ASC
+LIMIT 10000;
 
 -- name: ListMessagesSince :many
 SELECT
-  id,
-  bot_id,
-  route_id,
-  sender_channel_identity_id,
-  sender_account_user_id AS sender_user_id,
-  channel_type AS platform,
-  source_message_id AS external_message_id,
-  source_reply_to_message_id,
-  role,
-  content,
-  metadata,
-  created_at
-FROM bot_history_messages
-WHERE bot_id = sqlc.arg(bot_id)
-  AND created_at >= sqlc.arg(created_at)
-ORDER BY created_at ASC;
+  m.id,
+  m.bot_id,
+  m.route_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.channel_type AS platform,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.created_at >= sqlc.arg(created_at)
+ORDER BY m.created_at ASC;
 
 -- name: ListMessagesBefore :many
 SELECT
-  id,
-  bot_id,
-  route_id,
-  sender_channel_identity_id,
-  sender_account_user_id AS sender_user_id,
-  channel_type AS platform,
-  source_message_id AS external_message_id,
-  source_reply_to_message_id,
-  role,
-  content,
-  metadata,
-  created_at
-FROM bot_history_messages
-WHERE bot_id = sqlc.arg(bot_id)
-  AND created_at < sqlc.arg(created_at)
-ORDER BY created_at DESC
+  m.id,
+  m.bot_id,
+  m.route_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.channel_type AS platform,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.created_at < sqlc.arg(created_at)
+ORDER BY m.created_at DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesLatest :many
 SELECT
-  id,
-  bot_id,
-  route_id,
-  sender_channel_identity_id,
-  sender_account_user_id AS sender_user_id,
-  channel_type AS platform,
-  source_message_id AS external_message_id,
-  source_reply_to_message_id,
-  role,
-  content,
-  metadata,
-  created_at
-FROM bot_history_messages
-WHERE bot_id = sqlc.arg(bot_id)
-ORDER BY created_at DESC
+  m.id,
+  m.bot_id,
+  m.route_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.channel_type AS platform,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+WHERE m.bot_id = sqlc.arg(bot_id)
+ORDER BY m.created_at DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: DeleteMessagesByBot :exec

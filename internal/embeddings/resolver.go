@@ -3,16 +3,13 @@ package embeddings
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/models"
 )
@@ -27,12 +24,11 @@ const (
 )
 
 type Request struct {
-	Type              string
-	Provider          string
-	Model             string
-	Dimensions        int
-	Input             Input
-	ChannelIdentityID string
+	Type       string
+	Provider   string
+	Model      string
+	Dimensions int
+	Input      Input
 }
 
 type Input struct {
@@ -44,7 +40,7 @@ type Input struct {
 type Usage struct {
 	InputTokens int
 	ImageTokens int
-	VideoTokens int
+	Duration    int
 }
 
 type Result struct {
@@ -165,7 +161,7 @@ func (r *Resolver) Embed(ctx context.Context, req Request) (Result, error) {
 				Usage: Usage{
 					InputTokens: usage.InputTokens,
 					ImageTokens: usage.ImageTokens,
-					VideoTokens: usage.Duration,
+					Duration:    usage.Duration,
 				},
 			}, nil
 		}
@@ -178,30 +174,6 @@ func (r *Resolver) Embed(ctx context.Context, req Request) (Result, error) {
 func (r *Resolver) selectEmbeddingModel(ctx context.Context, req Request) (models.GetResponse, error) {
 	if r.modelsService == nil {
 		return models.GetResponse{}, errors.New("models service not configured")
-	}
-
-	// If no model specified and no provider specified, try to get per-user embedding model.
-	if req.Model == "" && req.Provider == "" && strings.TrimSpace(req.ChannelIdentityID) != "" {
-		modelID, err := r.loadChannelIdentityEmbeddingModelID(ctx, req.ChannelIdentityID)
-		if err != nil {
-			return models.GetResponse{}, err
-		}
-		if modelID != "" {
-			selected, err := r.modelsService.GetByModelID(ctx, modelID)
-			if err != nil {
-				return models.GetResponse{}, fmt.Errorf("settings embedding model not found: %w", err)
-			}
-			if selected.Type != models.ModelTypeEmbedding {
-				return models.GetResponse{}, errors.New("settings embedding model is not an embedding model")
-			}
-			if req.Type == TypeMultimodal && !selected.IsMultimodal {
-				return models.GetResponse{}, errors.New("settings embedding model does not support multimodal")
-			}
-			if req.Type == TypeText && selected.IsMultimodal {
-				return models.GetResponse{}, errors.New("settings embedding model does not support text embeddings")
-			}
-			return selected, nil
-		}
 	}
 
 	var candidates []models.GetResponse
@@ -257,22 +229,3 @@ func (r *Resolver) fetchProvider(ctx context.Context, providerID string) (sqlc.L
 	copy(pgID.Bytes[:], parsed[:])
 	return r.queries.GetLlmProviderByID(ctx, pgID)
 }
-
-func (r *Resolver) loadChannelIdentityEmbeddingModelID(ctx context.Context, channelIdentityID string) (string, error) {
-	if r.queries == nil {
-		return "", nil
-	}
-	pgChannelIdentityID, err := db.ParseUUID(channelIdentityID)
-	if err != nil {
-		return "", err
-	}
-	row, err := r.queries.GetSettingsByUserID(ctx, pgChannelIdentityID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", nil
-		}
-		return "", err
-	}
-	return strings.TrimSpace(row.EmbeddingModelID.String), nil
-}
-

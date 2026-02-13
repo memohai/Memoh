@@ -48,6 +48,8 @@ const getBotPreauthKey = `-- name: GetBotPreauthKey :one
 SELECT id, bot_id, token, issued_by_user_id, expires_at, used_at, created_at
 FROM bot_preauth_keys
 WHERE token = $1
+  AND used_at IS NULL
+  AND (expires_at IS NULL OR expires_at > now())
 LIMIT 1
 `
 

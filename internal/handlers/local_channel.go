@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -13,12 +12,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/local"
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/identity"
 )
 
 // LocalChannelHandler handles local channel (CLI/Web) routes backed by bot history.
@@ -103,7 +100,9 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 			if err != nil {
 				continue
 			}
-			_, _ = writer.WriteString(fmt.Sprintf("data: %s\n\n", string(data)))
+			if _, err := writer.WriteString(fmt.Sprintf("data: %s\n\n", string(data))); err != nil {
+				return nil // client disconnected
+			}
 			writer.Flush()
 			flusher.Flush()
 		}
@@ -185,33 +184,9 @@ func (h *LocalChannelHandler) ensureBotParticipant(ctx context.Context, botID, c
 }
 
 func (h *LocalChannelHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.UserIDFromContext(c)
-	if err != nil {
-		return "", err
-	}
-	if err := identity.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	return channelIdentityID, nil
+	return RequireChannelIdentityID(c)
 }
 
 func (h *LocalChannelHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	if h.botService == nil || h.accountService == nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
-	}
-	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
-	if err != nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	bot, err := h.botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: true})
-	if err != nil {
-		if errors.Is(err, bots.ErrBotNotFound) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")
-		}
-		if errors.Is(err, bots.ErrBotAccessDenied) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
-		}
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return bot, nil
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: true})
 }

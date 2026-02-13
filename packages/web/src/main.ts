@@ -3,6 +3,9 @@ import './style.css'
 import App from './App.vue'
 import router from './router'
 import { setupApiClient } from './lib/api-client'
+
+// Configure SDK client before anything else
+setupApiClient()
 import { createPinia } from 'pinia'
 import i18n from './i18n'
 import { PiniaColada } from '@pinia/colada'
@@ -25,6 +28,7 @@ import {
   faCheck,
   faEye,
   faEyeSlash,
+  faChevronRight,
   faChevronDown,
   faEllipsisVertical,
   faNetworkWired,
@@ -57,6 +61,7 @@ library.add(
   faCheck,
   faEye,
   faEyeSlash,
+  faChevronRight,
   faChevronDown,
   faEllipsisVertical,
   faNetworkWired,
@@ -74,8 +79,6 @@ library.add(
   faComment,
   faSlack,
 )
-
-setupApiClient()
 
 createApp(App)
   .component('FontAwesomeIcon', FontAwesomeIcon)

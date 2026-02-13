@@ -32,20 +32,15 @@ import { Separator } from '@memoh/ui'
 import ProviderForm from './components/provider-form.vue'
 import ModelList from './components/model-list.vue'
 import { computed, inject, provide, reactive, ref, toRef, watch } from 'vue'
-import { type ProviderInfo, type ModelInfo } from '@memoh/shared'
-import {
-  useUpdateProvider,
-  useDeleteProvider,
-} from '@/composables/api/useProviders'
-import {
-  useModelList,
-  useDeleteModel,
-} from '@/composables/api/useModels'
+import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
+import { putProvidersById, deleteProvidersById, getProvidersByIdModels, deleteModelsModelByModelId } from '@memoh/sdk'
+import type { ModelsGetResponse, ProvidersGetResponse } from '@memoh/sdk'
 
+// ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{
   state: boolean
   title: 'title' | 'edit'
-  curState: ModelInfo | null
+  curState: ModelsGetResponse | null
 }>({
   state: false,
   title: 'title',
@@ -56,21 +51,61 @@ provide('openModel', toRef(openModel, 'state'))
 provide('openModelTitle', toRef(openModel, 'title'))
 provide('openModelState', toRef(openModel, 'curState'))
 
-function handleEditModel(model: ModelInfo) {
+function handleEditModel(model: ModelsGetResponse) {
   openModel.state = true
   openModel.title = 'edit'
   openModel.curState = { ...model }
 }
 
-const curProvider = inject('curProvider', ref<Partial<ProviderInfo & { id: string }>>())
+// ---- 当前 Provider ----
+const curProvider = inject('curProvider', ref<ProvidersGetResponse>())
 const curProviderId = computed(() => curProvider.value?.id)
 
-const { mutate: deleteProvider, isLoading: deleteLoading } = useDeleteProvider(curProviderId)
-const { mutate: changeProvider, isLoading: editLoading } = useUpdateProvider(curProviderId)
-const { mutate: deleteModel, isLoading: deleteModelLoading } = useDeleteModel()
-const { data: modelDataList, invalidate: invalidateModels } = useModelList(curProviderId)
+// ---- API Hooks ----
+const queryCache = useQueryCache()
+
+const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
+  mutation: async () => {
+    if (!curProviderId.value) return
+    await deleteProvidersById({ path: { id: curProviderId.value }, throwOnError: true })
+  },
+  onSettled: () => queryCache.invalidateQueries({ key: ['providers'] }),
+})
+
+const { mutate: changeProvider, isLoading: editLoading } = useMutation({
+  mutation: async (data: Record<string, unknown>) => {
+    if (!curProviderId.value) return
+    const { data: result } = await putProvidersById({
+      path: { id: curProviderId.value },
+      body: data as any,
+      throwOnError: true,
+    })
+    return result
+  },
+  onSettled: () => queryCache.invalidateQueries({ key: ['providers'] }),
+})
+
+const { mutate: deleteModel, isLoading: deleteModelLoading } = useMutation({
+  mutation: async (modelName: string) => {
+    await deleteModelsModelByModelId({ path: { modelId: modelName }, throwOnError: true })
+  },
+  onSettled: () => queryCache.invalidateQueries({ key: ['provider-models'] }),
+})
+
+const { data: modelDataList } = useQuery({
+  key: () => ['provider-models', curProviderId.value ?? ''],
+  query: async () => {
+    if (!curProviderId.value) return []
+    const { data } = await getProvidersByIdModels({
+      path: { id: curProviderId.value },
+      throwOnError: true,
+    })
+    return data
+  },
+  enabled: () => !!curProviderId.value,
+})
 
 watch(curProvider, () => {
-  invalidateModels()
+  queryCache.invalidateQueries({ key: ['provider-models'] })
 }, { immediate: true })
 </script>

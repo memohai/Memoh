@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -233,6 +234,19 @@ func (r *Registry) GetProcessingStatusNotifier(channelType ChannelType) (Process
 	}
 	notifier, ok := adapter.(ProcessingStatusNotifier)
 	return notifier, ok
+}
+
+// DiscoverSelf calls the SelfDiscoverer for the given channel type if supported.
+func (r *Registry) DiscoverSelf(ctx context.Context, channelType ChannelType, credentials map[string]any) (map[string]any, string, error) {
+	adapter, ok := r.Get(channelType)
+	if !ok {
+		return nil, "", fmt.Errorf("unsupported channel type: %s", channelType)
+	}
+	discoverer, ok := adapter.(SelfDiscoverer)
+	if !ok {
+		return nil, "", nil
+	}
+	return discoverer.DiscoverSelf(ctx, credentials)
 }
 
 // --- Dispatch methods (replace former global functions in config.go / target.go) ---

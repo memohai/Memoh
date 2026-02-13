@@ -374,11 +374,6 @@ export type HandlersEmbeddingsUsage = {
     video_tokens?: number;
 };
 
-export type HandlersEnableModelRequest = {
-    as?: string;
-    model_id?: string;
-};
-
 export type HandlersErrorResponse = {
     message?: string;
 };
@@ -474,6 +469,7 @@ export type HandlersSkillsOpResponse = {
 };
 
 export type IdentitiesChannelIdentity = {
+    avatar_url?: string;
     channel?: string;
     channel_subject_id?: string;
     created_at?: string;
@@ -540,7 +536,7 @@ export type ModelsUpdateRequest = {
     type?: ModelsModelType;
 };
 
-export type ProvidersClientType = 'openai' | 'openai-compat' | 'anthropic' | 'google' | 'ollama';
+export type ProvidersClientType = 'openai' | 'openai-compat' | 'anthropic' | 'google' | 'azure' | 'bedrock' | 'mistral' | 'xai' | 'ollama' | 'dashscope';
 
 export type ProvidersCountResponse = {
     count?: number;
@@ -2827,7 +2823,7 @@ export type GetModelsData = {
          */
         type?: string;
         /**
-         * Client type (openai, anthropic, google)
+         * Client type (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)
          */
         client_type?: string;
     };
@@ -2921,42 +2917,6 @@ export type GetModelsCountResponses = {
 };
 
 export type GetModelsCountResponse = GetModelsCountResponses[keyof GetModelsCountResponses];
-
-export type PostModelsEnableData = {
-    /**
-     * Enable model payload
-     */
-    body: HandlersEnableModelRequest;
-    path?: never;
-    query?: never;
-    url: '/models/enable';
-};
-
-export type PostModelsEnableErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostModelsEnableError = PostModelsEnableErrors[keyof PostModelsEnableErrors];
-
-export type PostModelsEnableResponses = {
-    /**
-     * OK
-     */
-    200: SettingsSettings;
-};
-
-export type PostModelsEnableResponse = PostModelsEnableResponses[keyof PostModelsEnableResponses];
 
 export type DeleteModelsModelByModelIdData = {
     body?: never;
@@ -3193,7 +3153,7 @@ export type GetProvidersData = {
     path?: never;
     query?: {
         /**
-         * Client type filter (openai, anthropic, google, ollama)
+         * Client type filter (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)
          */
         client_type?: string;
     };
@@ -3259,7 +3219,7 @@ export type GetProvidersCountData = {
     path?: never;
     query?: {
         /**
-         * Client type filter (openai, anthropic, google, ollama)
+         * Client type filter (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)
          */
         client_type?: string;
     };

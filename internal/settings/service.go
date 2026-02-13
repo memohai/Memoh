@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
@@ -26,83 +25,6 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 		queries: queries,
 		logger:  log.With(slog.String("service", "settings")),
 	}
-}
-
-// Get returns user-level settings.
-func (s *Service) Get(ctx context.Context, userID string) (Settings, error) {
-	pgID, err := db.ParseUUID(userID)
-	if err != nil {
-		return Settings{}, err
-	}
-	row, err := s.queries.GetSettingsByUserID(ctx, pgID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Settings{
-				ChatModelID:        "",
-				MemoryModelID:      "",
-				EmbeddingModelID:   "",
-				MaxContextLoadTime: DefaultMaxContextLoadTime,
-				Language:           DefaultLanguage,
-			}, nil
-		}
-		return Settings{}, err
-	}
-	return normalizeUserSetting(row), nil
-}
-
-// Upsert creates or updates user-level settings.
-func (s *Service) Upsert(ctx context.Context, userID string, req UpsertRequest) (Settings, error) {
-	if s.queries == nil {
-		return Settings{}, fmt.Errorf("settings queries not configured")
-	}
-	pgID, err := db.ParseUUID(userID)
-	if err != nil {
-		return Settings{}, err
-	}
-
-	current := Settings{
-		ChatModelID:        "",
-		MemoryModelID:      "",
-		EmbeddingModelID:   "",
-		MaxContextLoadTime: DefaultMaxContextLoadTime,
-		Language:           DefaultLanguage,
-	}
-	existing, err := s.queries.GetSettingsByUserID(ctx, pgID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return Settings{}, err
-	}
-	if err == nil {
-		current = normalizeUserSetting(existing)
-	}
-
-	if value := strings.TrimSpace(req.ChatModelID); value != "" {
-		current.ChatModelID = value
-	}
-	if value := strings.TrimSpace(req.MemoryModelID); value != "" {
-		current.MemoryModelID = value
-	}
-	if value := strings.TrimSpace(req.EmbeddingModelID); value != "" {
-		current.EmbeddingModelID = value
-	}
-	if req.MaxContextLoadTime != nil && *req.MaxContextLoadTime > 0 {
-		current.MaxContextLoadTime = *req.MaxContextLoadTime
-	}
-	if strings.TrimSpace(req.Language) != "" {
-		current.Language = strings.TrimSpace(req.Language)
-	}
-
-	_, err = s.queries.UpsertUserSettings(ctx, sqlc.UpsertUserSettingsParams{
-		ID:                 pgID,
-		ChatModelID:        pgtype.Text{String: current.ChatModelID, Valid: current.ChatModelID != ""},
-		MemoryModelID:      pgtype.Text{String: current.MemoryModelID, Valid: current.MemoryModelID != ""},
-		EmbeddingModelID:   pgtype.Text{String: current.EmbeddingModelID, Valid: current.EmbeddingModelID != ""},
-		MaxContextLoadTime: int32(current.MaxContextLoadTime),
-		Language:           current.Language,
-	})
-	if err != nil {
-		return Settings{}, err
-	}
-	return current, nil
 }
 
 func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
@@ -198,23 +120,6 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return s.queries.DeleteSettingsByBotID(ctx, pgID)
 }
 
-func normalizeUserSetting(row sqlc.GetSettingsByUserIDRow) Settings {
-	settings := Settings{
-		ChatModelID:        strings.TrimSpace(row.ChatModelID.String),
-		MemoryModelID:      strings.TrimSpace(row.MemoryModelID.String),
-		EmbeddingModelID:   strings.TrimSpace(row.EmbeddingModelID.String),
-		MaxContextLoadTime: int(row.MaxContextLoadTime),
-		Language:           strings.TrimSpace(row.Language),
-	}
-	if settings.MaxContextLoadTime <= 0 {
-		settings.MaxContextLoadTime = DefaultMaxContextLoadTime
-	}
-	if settings.Language == "" {
-		settings.Language = DefaultLanguage
-	}
-	return settings
-}
-
 func normalizeBotSetting(maxContextLoadTime int32, language string, allowGuest bool) Settings {
 	settings := Settings{
 		MaxContextLoadTime: int(maxContextLoadTime),
@@ -277,4 +182,3 @@ func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.
 	}
 	return row.ID, nil
 }
-

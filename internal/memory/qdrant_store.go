@@ -55,7 +55,7 @@ func NewQdrantStore(log *slog.Logger, baseURL, apiKey, collection string, dimens
 		collection = "memory"
 	}
 	if dimension <= 0 && strings.TrimSpace(sparseVectorName) == "" {
-		dimension = 1536
+		return nil, fmt.Errorf("embedding dimension is required")
 	}
 
 	cfg := &qdrant.Config{
@@ -329,6 +329,22 @@ func (s *QdrantStore) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+func (s *QdrantStore) DeleteBatch(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	pointIDs := make([]*qdrant.PointId, 0, len(ids))
+	for _, id := range ids {
+		pointIDs = append(pointIDs, qdrant.NewIDUUID(id))
+	}
+	_, err := s.client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: s.collection,
+		Wait:           qdrant.PtrOf(true),
+		Points:         qdrant.NewPointsSelectorIDs(pointIDs),
+	})
+	return err
+}
+
 func (s *QdrantStore) List(ctx context.Context, limit int, filters map[string]any) ([]qdrantPoint, error) {
 	if limit <= 0 {
 		limit = 100
@@ -377,6 +393,19 @@ func (s *QdrantStore) Scroll(ctx context.Context, limit int, filters map[string]
 		})
 	}
 	return result, nextOffset, nil
+}
+
+func (s *QdrantStore) Count(ctx context.Context, filters map[string]any) (uint64, error) {
+	filter := buildQdrantFilter(filters)
+	result, err := s.client.Count(ctx, &qdrant.CountPoints{
+		CollectionName: s.collection,
+		Filter:         filter,
+		Exact:          qdrant.PtrOf(true),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return result, nil
 }
 
 func (s *QdrantStore) DeleteAll(ctx context.Context, filters map[string]any) error {
@@ -455,22 +484,19 @@ func (s *QdrantStore) refreshCollectionSchema(ctx context.Context, vectors map[s
 				s.vectorNames[name] = int(vec.GetSize())
 			}
 		}
-		if len(vectors) == 0 {
-			goto sparseCheck
-		}
-		for name, dim := range vectors {
-			if existing, ok := s.vectorNames[name]; ok && existing == dim {
-				continue
+		if len(vectors) > 0 {
+			for name, dim := range vectors {
+				if existing, ok := s.vectorNames[name]; ok && existing == dim {
+					continue
+				}
+				return fmt.Errorf("collection missing vector %s (dim %d); migration required", name, dim)
 			}
-			return fmt.Errorf("collection missing vector %s (dim %d); migration required", name, dim)
 		}
-	}
-	if vectorsConfig == nil || vectorsConfig.GetParamsMap() == nil {
+	} else {
 		s.usesNamedVectors = false
 		s.vectorNames = nil
 	}
 
-sparseCheck:
 	sparseConfig := params.GetSparseVectorsConfig()
 	if s.sparseVectorName != "" {
 		needsUpdate := false
@@ -506,7 +532,7 @@ func (s *QdrantStore) ensurePayloadIndexes(ctx context.Context) error {
 	if s.client == nil {
 		return nil
 	}
-	fields := []string{"botId", "runId"}
+	fields := []string{"bot_id", "run_id"}
 	wait := true
 	for _, field := range fields {
 		_, err := s.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{

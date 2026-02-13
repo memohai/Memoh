@@ -187,7 +187,9 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	if err != nil {
 		return Schedule{}, err
 	}
-	s.rescheduleJob(updated)
+	if err := s.rescheduleJob(updated); err != nil {
+		return Schedule{}, fmt.Errorf("reschedule job: %w", err)
+	}
 	return toSchedule(updated), nil
 }
 
@@ -287,7 +289,9 @@ func (s *Service) scheduleJob(schedule sqlc.Schedule) error {
 		return fmt.Errorf("schedule id missing")
 	}
 	job := func() {
-		_ = s.runSchedule(context.Background(), toSchedule(schedule))
+		if err := s.runSchedule(context.Background(), toSchedule(schedule)); err != nil {
+			s.logger.Error("scheduled job failed", slog.String("schedule_id", schedule.ID.String()), slog.Any("error", err))
+		}
 	}
 	entryID, err := s.cron.AddFunc(schedule.Pattern, job)
 	if err != nil {
@@ -299,15 +303,16 @@ func (s *Service) scheduleJob(schedule sqlc.Schedule) error {
 	return nil
 }
 
-func (s *Service) rescheduleJob(schedule sqlc.Schedule) {
+func (s *Service) rescheduleJob(schedule sqlc.Schedule) error {
 	id := schedule.ID.String()
 	if id == "" {
-		return
+		return nil
 	}
 	s.removeJob(id)
 	if schedule.Enabled {
-		_ = s.scheduleJob(schedule)
+		return s.scheduleJob(schedule)
 	}
+	return nil
 }
 
 func (s *Service) removeJob(id string) {

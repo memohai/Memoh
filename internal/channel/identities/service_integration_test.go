@@ -50,11 +50,11 @@ func TestIntegrationResolveByChannelIdentityStability(t *testing.T) {
 	ctx := context.Background()
 	key := fmt.Sprintf("ext_%d", time.Now().UnixNano())
 
-	first, err := svc.ResolveByChannelIdentity(ctx, "feishu", key, "first")
+	first, err := svc.ResolveByChannelIdentity(ctx, "feishu", key, "first", nil)
 	if err != nil {
 		t.Fatalf("first resolve failed: %v", err)
 	}
-	second, err := svc.ResolveByChannelIdentity(ctx, "feishu", key, "second")
+	second, err := svc.ResolveByChannelIdentity(ctx, "feishu", key, "second", nil)
 	if err != nil {
 		t.Fatalf("second resolve failed: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestIntegrationLinkChannelIdentityToUser(t *testing.T) {
 
 	ctx := context.Background()
 	key := fmt.Sprintf("bind_%d", time.Now().UnixNano())
-	channelIdentity, err := svc.ResolveByChannelIdentity(ctx, "telegram", key, "tg-user")
+	channelIdentity, err := svc.ResolveByChannelIdentity(ctx, "telegram", key, "tg-user", nil)
 	if err != nil {
 		t.Fatalf("resolve channelIdentity failed: %v", err)
 	}

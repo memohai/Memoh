@@ -4,7 +4,7 @@ import { createAgent } from '../agent'
 import { createAuthFetcher, getBaseUrl, getBraveConfig } from '../index'
 import { ModelConfig } from '../types'
 import { bearerMiddleware } from '../middlewares/bearer'
-import { AgentSkillModel, AllowedActionModel, AttachmentModel, IdentityContextModel, ModelConfigModel, ScheduleModel } from '../models'
+import { AgentSkillModel, AllowedActionModel, AttachmentModel, IdentityContextModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
 import { allActions } from '../types'
 
 const AgentModel = z.object({
@@ -18,6 +18,7 @@ const AgentModel = z.object({
   skills: z.array(z.string()),
   identity: IdentityContextModel,
   attachments: z.array(AttachmentModel).optional().default([]),
+  mcpConnections: z.array(MCPConnectionModel).optional().default([]),
 })
 
 export const chatModule = new Elysia({ prefix: '/chat' })
@@ -38,6 +39,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       },
       skills: body.usableSkills,
       brave: getBraveConfig(),
+      mcpConnections: body.mcpConnections,
     }, authFetcher)
     return ask({
       query: body.query,
@@ -67,6 +69,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
         },
         skills: body.usableSkills,
         brave: getBraveConfig(),
+        mcpConnections: body.mcpConnections,
       }, authFetcher)
       for await (const action of stream({
         query: body.query,
@@ -105,6 +108,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       },
       skills: body.usableSkills,
       brave: getBraveConfig(),
+      mcpConnections: body.mcpConnections,
     }, authFetcher)
     return triggerSchedule({
       schedule: body.schedule,

@@ -15,12 +15,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
-	"github.com/memohai/memoh/internal/identity"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 )
@@ -85,7 +83,7 @@ func (h *MessageHandler) SendMessage(c echo.Context) error {
 		return err
 	}
 
-	var req flow.ChatRequest
+	var req conversation.ChatRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -99,6 +97,9 @@ func (h *MessageHandler) SendMessage(c echo.Context) error {
 	req.SourceChannelIdentityID = channelIdentityID
 	if strings.TrimSpace(req.CurrentChannel) == "" {
 		req.CurrentChannel = "web"
+	}
+	if strings.TrimSpace(req.ConversationType) == "" {
+		req.ConversationType = "direct"
 	}
 	if len(req.Channels) == 0 {
 		req.Channels = []string{req.CurrentChannel}
@@ -132,7 +133,7 @@ func (h *MessageHandler) StreamMessage(c echo.Context) error {
 		return err
 	}
 
-	var req flow.ChatRequest
+	var req conversation.ChatRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -146,6 +147,9 @@ func (h *MessageHandler) StreamMessage(c echo.Context) error {
 	req.SourceChannelIdentityID = channelIdentityID
 	if strings.TrimSpace(req.CurrentChannel) == "" {
 		req.CurrentChannel = "web"
+	}
+	if strings.TrimSpace(req.ConversationType) == "" {
+		req.ConversationType = "direct"
 	}
 	if len(req.Channels) == 0 {
 		req.Channels = []string{req.CurrentChannel}
@@ -200,10 +204,12 @@ func (h *MessageHandler) StreamMessage(c echo.Context) error {
 				h.logger.Error("conversation stream failed", slog.Any("error", err))
 				if processingState == "started" {
 					processingState = "failed"
-					_ = writeSSEJSON(writer, flusher, map[string]string{
+					if writeErr := writeSSEJSON(writer, flusher, map[string]string{
 						"type":  "processing_failed",
 						"error": err.Error(),
-					})
+					}); writeErr != nil {
+						h.logger.Warn("write SSE processing_failed event failed", slog.Any("error", writeErr))
+					}
 				}
 				errData := map[string]string{
 					"type":    "error",
@@ -459,7 +465,7 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 // resolveWebChannelIdentity resolves (web, user_id) to a channel identity and sets req.SourceChannelIdentityID.
 // Web uses user_id as the channel subject id (like Feishu open_id); the resolved ci has display_name and is linked to the user.
 // Returns the channel_identity_id to use for the rest of the flow, or the original userID if resolution is skipped/fails.
-func (h *MessageHandler) resolveWebChannelIdentity(ctx context.Context, userID string, req *flow.ChatRequest) string {
+func (h *MessageHandler) resolveWebChannelIdentity(ctx context.Context, userID string, req *conversation.ChatRequest) string {
 	if strings.TrimSpace(req.CurrentChannel) != "web" || h.channelIdentitySvc == nil || strings.TrimSpace(userID) == "" {
 		return userID
 	}
@@ -472,66 +478,27 @@ func (h *MessageHandler) resolveWebChannelIdentity(ctx context.Context, userID s
 			}
 		}
 	}
-	ci, err := h.channelIdentitySvc.ResolveByChannelIdentity(ctx, "web", userID, displayName)
+	ci, err := h.channelIdentitySvc.ResolveByChannelIdentity(ctx, "web", userID, displayName, nil)
 	if err != nil {
 		return userID
 	}
-	_ = h.channelIdentitySvc.LinkChannelIdentityToUser(ctx, ci.ID, userID)
+	if err := h.channelIdentitySvc.LinkChannelIdentityToUser(ctx, ci.ID, userID); err != nil {
+		h.logger.Warn("link channel identity to user failed", slog.Any("error", err))
+	}
 	req.SourceChannelIdentityID = ci.ID
 	return ci.ID
 }
 
 func (h *MessageHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.UserIDFromContext(c)
-	if err != nil {
-		return "", err
-	}
-	if err := identity.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	return channelIdentityID, nil
+	return RequireChannelIdentityID(c)
 }
 
 func (h *MessageHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	if h.botService == nil || h.accountService == nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
-	}
-	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
-	if err != nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	bot, err := h.botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: true})
-	if err != nil {
-		if errors.Is(err, bots.ErrBotNotFound) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")
-		}
-		if errors.Is(err, bots.ErrBotAccessDenied) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
-		}
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return bot, nil
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: true})
 }
 
 func (h *MessageHandler) authorizeBotManage(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	if h.botService == nil || h.accountService == nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
-	}
-	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
-	if err != nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	bot, err := h.botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: false})
-	if err != nil {
-		if errors.Is(err, bots.ErrBotNotFound) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")
-		}
-		if errors.Is(err, bots.ErrBotAccessDenied) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusForbidden, "bot management access denied")
-		}
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return bot, nil
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
 }
 
 func (h *MessageHandler) requireParticipant(ctx context.Context, conversationID, channelIdentityID string) error {

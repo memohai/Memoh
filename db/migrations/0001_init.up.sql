@@ -19,11 +19,6 @@ CREATE TABLE IF NOT EXISTS users (
   avatar_url TEXT,
   data_root TEXT,
   last_login_at TIMESTAMPTZ,
-  chat_model_id TEXT,
-  memory_model_id TEXT,
-  embedding_model_id TEXT,
-  max_context_load_time INTEGER NOT NULL DEFAULT 1440,
-  language TEXT NOT NULL DEFAULT 'auto',
   is_active BOOLEAN NOT NULL DEFAULT true,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -39,6 +34,7 @@ CREATE TABLE IF NOT EXISTS channel_identities (
   channel_type TEXT NOT NULL,
   channel_subject_id TEXT NOT NULL,
   display_name TEXT,
+  avatar_url TEXT,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -70,7 +66,7 @@ CREATE TABLE IF NOT EXISTS llm_providers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT llm_providers_name_unique UNIQUE (name),
-  CONSTRAINT llm_providers_client_type_check CHECK (client_type IN ('openai', 'openai-compat', 'anthropic', 'google', 'ollama'))
+  CONSTRAINT llm_providers_client_type_check CHECK (client_type IN ('openai', 'openai-compat', 'anthropic', 'google', 'azure', 'bedrock', 'mistral', 'xai', 'ollama', 'dashscope'))
 );
 
 CREATE TABLE IF NOT EXISTS models (
@@ -211,6 +207,7 @@ CREATE TABLE IF NOT EXISTS bot_channel_routes (
   channel_config_id UUID REFERENCES bot_channel_configs(id) ON DELETE SET NULL,
   external_conversation_id TEXT NOT NULL,
   external_thread_id TEXT,
+  conversation_type TEXT,
   default_reply_target TEXT,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

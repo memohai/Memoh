@@ -168,3 +168,41 @@ func (q *Queries) UpdateMCPConnection(ctx context.Context, arg UpdateMCPConnecti
 	)
 	return i, err
 }
+
+const upsertMCPConnectionByName = `-- name: UpsertMCPConnectionByName :one
+INSERT INTO mcp_connections (bot_id, name, type, config)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (bot_id, name)
+DO UPDATE SET type = EXCLUDED.type,
+              config = EXCLUDED.config,
+              updated_at = now()
+RETURNING id, bot_id, name, type, config, is_active, created_at, updated_at
+`
+
+type UpsertMCPConnectionByNameParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	Name   string      `json:"name"`
+	Type   string      `json:"type"`
+	Config []byte      `json:"config"`
+}
+
+func (q *Queries) UpsertMCPConnectionByName(ctx context.Context, arg UpsertMCPConnectionByNameParams) (McpConnection, error) {
+	row := q.db.QueryRow(ctx, upsertMCPConnectionByName,
+		arg.BotID,
+		arg.Name,
+		arg.Type,
+		arg.Config,
+	)
+	var i McpConnection
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.Name,
+		&i.Type,
+		&i.Config,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

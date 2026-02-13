@@ -13,7 +13,8 @@ import (
 	mcpgw "github.com/memohai/memoh/internal/mcp"
 )
 
-type fileEntry struct {
+// FileEntry represents a filesystem entry returned by ExecList.
+type FileEntry struct {
 	Path    string
 	IsDir   bool
 	Size    int64
@@ -21,11 +22,11 @@ type fileEntry struct {
 	ModTime time.Time
 }
 
-// execRead reads a file inside the container via cat.
-func execRead(ctx context.Context, runner ExecRunner, botID, workDir, filePath string) (string, error) {
+// ExecRead reads a file inside the container via cat.
+func ExecRead(ctx context.Context, runner ExecRunner, botID, workDir, filePath string) (string, error) {
 	result, err := runner.ExecWithCapture(ctx, mcpgw.ExecRequest{
 		BotID:   botID,
-		Command: []string{"/bin/sh", "-c", "cat " + shellQuote(filePath)},
+		Command: []string{"/bin/sh", "-c", "cat " + ShellQuote(filePath)},
 		WorkDir: workDir,
 	})
 	if err != nil {
@@ -37,13 +38,13 @@ func execRead(ctx context.Context, runner ExecRunner, botID, workDir, filePath s
 	return result.Stdout, nil
 }
 
-// execWrite writes content to a file inside the container using base64 encoding
+// ExecWrite writes content to a file inside the container using base64 encoding
 // to avoid shell escaping issues.
-func execWrite(ctx context.Context, runner ExecRunner, botID, workDir, filePath, content string) error {
+func ExecWrite(ctx context.Context, runner ExecRunner, botID, workDir, filePath, content string) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	dir := path.Dir(filePath)
 	script := fmt.Sprintf("mkdir -p %s && echo %s | base64 -d > %s",
-		shellQuote(dir), shellQuote(encoded), shellQuote(filePath))
+		ShellQuote(dir), ShellQuote(encoded), ShellQuote(filePath))
 	result, err := runner.ExecWithCapture(ctx, mcpgw.ExecRequest{
 		BotID:   botID,
 		Command: []string{"/bin/sh", "-c", script},
@@ -58,9 +59,9 @@ func execWrite(ctx context.Context, runner ExecRunner, botID, workDir, filePath,
 	return nil
 }
 
-// execList lists directory entries inside the container via find + stat.
+// ExecList lists directory entries inside the container via find + stat.
 // Output format per line: <name>|<type>|<size>|<mode>|<mtime_epoch>
-func execList(ctx context.Context, runner ExecRunner, botID, workDir, dirPath string, recursive bool) ([]fileEntry, error) {
+func ExecList(ctx context.Context, runner ExecRunner, botID, workDir, dirPath string, recursive bool) ([]FileEntry, error) {
 	depthFlag := "-maxdepth 1"
 	if recursive {
 		depthFlag = ""
@@ -69,7 +70,7 @@ func execList(ctx context.Context, runner ExecRunner, botID, workDir, dirPath st
 	// busybox stat -c format: %n=name, %F=type, %s=size, %a=octal mode, %Y=mtime epoch
 	script := fmt.Sprintf(
 		`find %s %s ! -path %s -exec stat -c '%%n|%%F|%%s|%%a|%%Y' {} \;`,
-		shellQuote(dirPath), depthFlag, shellQuote(dirPath),
+		ShellQuote(dirPath), depthFlag, ShellQuote(dirPath),
 	)
 	result, err := runner.ExecWithCapture(ctx, mcpgw.ExecRequest{
 		BotID:   botID,
@@ -85,10 +86,10 @@ func execList(ctx context.Context, runner ExecRunner, botID, workDir, dirPath st
 	return parseStatOutput(result.Stdout, dirPath), nil
 }
 
-// parseStatOutput parses lines of "fullpath|type|size|mode|mtime" into fileEntry slices.
-func parseStatOutput(output, basePath string) []fileEntry {
+// parseStatOutput parses lines of "fullpath|type|size|mode|mtime" into FileEntry slices.
+func parseStatOutput(output, basePath string) []FileEntry {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
-	entries := make([]fileEntry, 0, len(lines))
+	entries := make([]FileEntry, 0, len(lines))
 	// Normalize base path for computing relative paths.
 	base := strings.TrimSuffix(basePath, "/")
 	if base == "" || base == "." {
@@ -124,7 +125,7 @@ func parseStatOutput(output, basePath string) []fileEntry {
 		mtimeEpoch, _ := strconv.ParseInt(mtimeStr, 10, 64)
 		modTime := time.Unix(mtimeEpoch, 0)
 
-		entries = append(entries, fileEntry{
+		entries = append(entries, FileEntry{
 			Path:    rel,
 			IsDir:   isDir,
 			Size:    size,
@@ -171,8 +172,8 @@ func applyEdit(raw, filePath, oldText, newText string) (string, error) {
 	return bom + restoreLineEndings(updated, originalEnding), nil
 }
 
-// shellQuote wraps a string in single quotes, escaping embedded single quotes.
-func shellQuote(s string) string {
+// ShellQuote wraps a string in single quotes, escaping embedded single quotes.
+func ShellQuote(s string) string {
 	if s == "" {
 		return "''"
 	}

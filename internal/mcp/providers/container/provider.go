@@ -154,7 +154,7 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 		if filePath == "" {
 			return mcpgw.BuildToolErrorResult("path is required"), nil
 		}
-		content, err := execRead(ctx, p.execRunner, botID, p.execWorkDir, filePath)
+		content, err := ExecRead(ctx, p.execRunner, botID, p.execWorkDir, filePath)
 		if err != nil {
 			return mcpgw.BuildToolErrorResult(err.Error()), nil
 		}
@@ -166,7 +166,7 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 		if filePath == "" {
 			return mcpgw.BuildToolErrorResult("path is required"), nil
 		}
-		if err := execWrite(ctx, p.execRunner, botID, p.execWorkDir, filePath, content); err != nil {
+		if err := ExecWrite(ctx, p.execRunner, botID, p.execWorkDir, filePath, content); err != nil {
 			return mcpgw.BuildToolErrorResult(err.Error()), nil
 		}
 		return mcpgw.BuildToolSuccessResult(map[string]any{"ok": true}), nil
@@ -177,7 +177,7 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 			dirPath = "."
 		}
 		recursive, _, _ := mcpgw.BoolArg(arguments, "recursive")
-		entries, err := execList(ctx, p.execRunner, botID, p.execWorkDir, dirPath, recursive)
+		entries, err := ExecList(ctx, p.execRunner, botID, p.execWorkDir, dirPath, recursive)
 		if err != nil {
 			return mcpgw.BuildToolErrorResult(err.Error()), nil
 		}
@@ -201,7 +201,7 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 			return mcpgw.BuildToolErrorResult("path, old_text and new_text are required"), nil
 		}
 		// Step 1: read via exec
-		raw, err := execRead(ctx, p.execRunner, botID, p.execWorkDir, filePath)
+		raw, err := ExecRead(ctx, p.execRunner, botID, p.execWorkDir, filePath)
 		if err != nil {
 			return mcpgw.BuildToolErrorResult(err.Error()), nil
 		}
@@ -211,7 +211,7 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 			return mcpgw.BuildToolErrorResult(err.Error()), nil
 		}
 		// Step 3: write back via exec
-		if err := execWrite(ctx, p.execRunner, botID, p.execWorkDir, filePath, updated); err != nil {
+		if err := ExecWrite(ctx, p.execRunner, botID, p.execWorkDir, filePath, updated); err != nil {
 			return mcpgw.BuildToolErrorResult(err.Error()), nil
 		}
 		return mcpgw.BuildToolSuccessResult(map[string]any{"ok": true}), nil

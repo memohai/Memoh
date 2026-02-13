@@ -1,4 +1,4 @@
-import { fetchApi } from '@/utils/request'
+import { client } from '@memoh/sdk/client'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 
 // ---- Types ----
@@ -20,7 +20,13 @@ export interface CreatePlatformRequest {
 export function usePlatformList() {
   return useQuery({
     key: ['platform'],
-    query: () => fetchApi<PlatformItem[]>('/platform/'),
+    query: async () => {
+      const { data } = await client.get({
+        url: '/platform/',
+        throwOnError: true,
+      }) as { data: PlatformItem[] }
+      return data
+    },
   })
 }
 
@@ -29,10 +35,8 @@ export function usePlatformList() {
 export function useCreatePlatform() {
   const queryCache = useQueryCache()
   return useMutation({
-    mutation: (data: CreatePlatformRequest) => fetchApi('/platform/', {
-      method: 'POST',
-      body: data,
-    }),
+    mutation: (data: CreatePlatformRequest) =>
+      client.post({ url: '/platform/', body: data, throwOnError: true }),
     onSettled: () => queryCache.invalidateQueries({ key: ['platform'] }),
   })
 }

@@ -11,9 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/identity"
 	"github.com/memohai/memoh/internal/mcp"
 )
 
@@ -40,6 +38,11 @@ func (h *MCPHandler) Register(e *echo.Echo) {
 	group.GET("/:id", h.Get)
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
+
+	ops := e.Group("/bots/:bot_id/mcp-ops")
+	ops.PUT("/import", h.Import)
+	ops.GET("/export", h.Export)
+	ops.POST("/batch-delete", h.BatchDelete)
 }
 
 // List godoc
@@ -217,34 +220,111 @@ func (h *MCPHandler) Delete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *MCPHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	userID, err := auth.UserIDFromContext(c)
+// Import godoc
+// @Summary Import MCP connections
+// @Description Batch import MCP connections from standard mcpServers format. Existing connections (matched by name) get config updated with is_active preserved. New connections are created as active.
+// @Tags mcp
+// @Param payload body mcp.ImportRequest true "mcpServers dict"
+// @Success 200 {object} mcp.ListResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/mcp/import [put]
+func (h *MCPHandler) Import(c echo.Context) error {
+	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if err := identity.ValidateChannelIdentityID(userID); err != nil {
-		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	return userID, nil
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+	var req mcp.ImportRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	items, err := h.service.Import(c.Request().Context(), botID, req)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.JSON(http.StatusOK, mcp.ListResponse{Items: items})
+}
+
+// BatchDeleteRequest is the body for batch delete.
+type BatchDeleteRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// BatchDelete godoc
+// @Summary Batch delete MCP connections
+// @Description Delete multiple MCP connections by IDs.
+// @Tags mcp
+// @Param payload body BatchDeleteRequest true "IDs to delete"
+// @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/mcp-ops/batch-delete [post]
+func (h *MCPHandler) BatchDelete(c echo.Context) error {
+	userID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+	var req BatchDeleteRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if len(req.IDs) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "ids are required")
+	}
+	if err := h.service.BatchDelete(c.Request().Context(), botID, req.IDs); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// Export godoc
+// @Summary Export MCP connections
+// @Description Export all MCP connections for a bot in standard mcpServers format.
+// @Tags mcp
+// @Success 200 {object} mcp.ExportResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/mcp/export [get]
+func (h *MCPHandler) Export(c echo.Context) error {
+	userID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+	resp, err := h.service.ExportByBot(c.Request().Context(), botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *MCPHandler) requireChannelIdentityID(c echo.Context) (string, error) {
+	return RequireChannelIdentityID(c)
 }
 
 func (h *MCPHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	if h.botService == nil || h.accountService == nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
-	}
-	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
-	if err != nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	bot, err := h.botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: false})
-	if err != nil {
-		if errors.Is(err, bots.ErrBotNotFound) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")
-		}
-		if errors.Is(err, bots.ErrBotAccessDenied) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
-		}
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return bot, nil
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
 }

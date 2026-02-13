@@ -167,6 +167,8 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.RouteID,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
+		pgtype.Text{},
+		pgtype.Text{},
 		row.Platform,
 		row.ExternalMessageID,
 		row.SourceReplyToMessageID,
@@ -184,6 +186,8 @@ func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
 		row.RouteID,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
 		row.Platform,
 		row.ExternalMessageID,
 		row.SourceReplyToMessageID,
@@ -201,6 +205,8 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 		row.RouteID,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
 		row.Platform,
 		row.ExternalMessageID,
 		row.SourceReplyToMessageID,
@@ -218,6 +224,8 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 		row.RouteID,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
 		row.Platform,
 		row.ExternalMessageID,
 		row.SourceReplyToMessageID,
@@ -234,6 +242,8 @@ func toMessageFields(
 	routeID pgtype.UUID,
 	senderChannelIdentityID pgtype.UUID,
 	senderUserID pgtype.UUID,
+	senderDisplayName pgtype.Text,
+	senderAvatarURL pgtype.Text,
 	platform pgtype.Text,
 	externalMessageID pgtype.Text,
 	sourceReplyToMessageID pgtype.Text,
@@ -248,6 +258,8 @@ func toMessageFields(
 		RouteID:                 routeID.String(),
 		SenderChannelIdentityID: senderChannelIdentityID.String(),
 		SenderUserID:            senderUserID.String(),
+		SenderDisplayName:       dbpkg.TextToString(senderDisplayName),
+		SenderAvatarURL:         dbpkg.TextToString(senderAvatarURL),
 		Platform:                dbpkg.TextToString(platform),
 		ExternalMessageID:       dbpkg.TextToString(externalMessageID),
 		SourceReplyToMessageID:  dbpkg.TextToString(sourceReplyToMessageID),
@@ -289,6 +301,8 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 		row.RouteID,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
 		row.Platform,
 		row.ExternalMessageID,
 		row.SourceReplyToMessageID,
@@ -335,7 +349,9 @@ func parseJSONMap(data []byte) map[string]any {
 		return nil
 	}
 	var m map[string]any
-	_ = json.Unmarshal(data, &m)
+	if err := json.Unmarshal(data, &m); err != nil {
+		slog.Warn("parseJSONMap: unmarshal failed", slog.Any("error", err))
+	}
 	return m
 }
 

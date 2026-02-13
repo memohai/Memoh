@@ -122,21 +122,25 @@ func (q *Queries) DeleteMessagesByBot(ctx context.Context, botID pgtype.UUID) er
 
 const listMessages = `-- name: ListMessages :many
 SELECT
-  id,
-  bot_id,
-  route_id,
-  sender_channel_identity_id,
-  sender_account_user_id AS sender_user_id,
-  channel_type AS platform,
-  source_message_id AS external_message_id,
-  source_reply_to_message_id,
-  role,
-  content,
-  metadata,
-  created_at
-FROM bot_history_messages
-WHERE bot_id = $1
-ORDER BY created_at ASC
+  m.id,
+  m.bot_id,
+  m.route_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.channel_type AS platform,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+WHERE m.bot_id = $1
+ORDER BY m.created_at ASC
+LIMIT 10000
 `
 
 type ListMessagesRow struct {
@@ -152,6 +156,8 @@ type ListMessagesRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 }
 
 func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]ListMessagesRow, error) {
@@ -176,6 +182,8 @@ func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]ListMe
 			&i.Content,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -189,22 +197,25 @@ func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]ListMe
 
 const listMessagesBefore = `-- name: ListMessagesBefore :many
 SELECT
-  id,
-  bot_id,
-  route_id,
-  sender_channel_identity_id,
-  sender_account_user_id AS sender_user_id,
-  channel_type AS platform,
-  source_message_id AS external_message_id,
-  source_reply_to_message_id,
-  role,
-  content,
-  metadata,
-  created_at
-FROM bot_history_messages
-WHERE bot_id = $1
-  AND created_at < $2
-ORDER BY created_at DESC
+  m.id,
+  m.bot_id,
+  m.route_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.channel_type AS platform,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+WHERE m.bot_id = $1
+  AND m.created_at < $2
+ORDER BY m.created_at DESC
 LIMIT $3
 `
 
@@ -227,6 +238,8 @@ type ListMessagesBeforeRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 }
 
 func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBeforeParams) ([]ListMessagesBeforeRow, error) {
@@ -251,6 +264,8 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 			&i.Content,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -264,21 +279,24 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 
 const listMessagesLatest = `-- name: ListMessagesLatest :many
 SELECT
-  id,
-  bot_id,
-  route_id,
-  sender_channel_identity_id,
-  sender_account_user_id AS sender_user_id,
-  channel_type AS platform,
-  source_message_id AS external_message_id,
-  source_reply_to_message_id,
-  role,
-  content,
-  metadata,
-  created_at
-FROM bot_history_messages
-WHERE bot_id = $1
-ORDER BY created_at DESC
+  m.id,
+  m.bot_id,
+  m.route_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.channel_type AS platform,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+WHERE m.bot_id = $1
+ORDER BY m.created_at DESC
 LIMIT $2
 `
 
@@ -300,6 +318,8 @@ type ListMessagesLatestRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 }
 
 func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatestParams) ([]ListMessagesLatestRow, error) {
@@ -324,6 +344,8 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 			&i.Content,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -337,22 +359,25 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 
 const listMessagesSince = `-- name: ListMessagesSince :many
 SELECT
-  id,
-  bot_id,
-  route_id,
-  sender_channel_identity_id,
-  sender_account_user_id AS sender_user_id,
-  channel_type AS platform,
-  source_message_id AS external_message_id,
-  source_reply_to_message_id,
-  role,
-  content,
-  metadata,
-  created_at
-FROM bot_history_messages
-WHERE bot_id = $1
-  AND created_at >= $2
-ORDER BY created_at ASC
+  m.id,
+  m.bot_id,
+  m.route_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.channel_type AS platform,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+WHERE m.bot_id = $1
+  AND m.created_at >= $2
+ORDER BY m.created_at ASC
 `
 
 type ListMessagesSinceParams struct {
@@ -373,6 +398,8 @@ type ListMessagesSinceRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 }
 
 func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSinceParams) ([]ListMessagesSinceRow, error) {
@@ -397,6 +424,8 @@ func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSincePa
 			&i.Content,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
 		); err != nil {
 			return nil, err
 		}

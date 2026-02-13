@@ -83,7 +83,7 @@ func ExampleService_UpdateByModelID() {
 	// if err != nil {
 	// 	// handle error
 	// }
-	// fmt.Printf("Updated model: %s\n", resp.ModelId)
+	// fmt.Printf("Updated model: %s\n", resp.ModelID)
 }
 
 func ExampleService_DeleteByModelID() {
@@ -191,83 +191,14 @@ func TestModelTypes(t *testing.T) {
 
 	t.Run("ClientType constants", func(t *testing.T) {
 		assert.Equal(t, models.ClientType("openai"), models.ClientTypeOpenAI)
+		assert.Equal(t, models.ClientType("openai-compat"), models.ClientTypeOpenAICompat)
 		assert.Equal(t, models.ClientType("anthropic"), models.ClientTypeAnthropic)
 		assert.Equal(t, models.ClientType("google"), models.ClientTypeGoogle)
-		assert.Equal(t, models.ClientType("bedrock"), models.ClientTypeBedrock)
-		assert.Equal(t, models.ClientType("ollama"), models.ClientTypeOllama)
 		assert.Equal(t, models.ClientType("azure"), models.ClientTypeAzure)
+		assert.Equal(t, models.ClientType("bedrock"), models.ClientTypeBedrock)
+		assert.Equal(t, models.ClientType("mistral"), models.ClientTypeMistral)
+		assert.Equal(t, models.ClientType("xai"), models.ClientTypeXAI)
+		assert.Equal(t, models.ClientType("ollama"), models.ClientTypeOllama)
 		assert.Equal(t, models.ClientType("dashscope"), models.ClientTypeDashscope)
-		assert.Equal(t, models.ClientType("other"), models.ClientTypeOther)
 	})
 }
-
-// Integration test example (requires actual database)
-// func TestService_Integration(t *testing.T) {
-// 	if testing.Short() {
-// 		t.Skip("Skipping integration test")
-// 	}
-//
-// 	ctx := context.Background()
-//
-// 	// Setup database connection
-// 	pool, err := db.Open(ctx, config.PostgresConfig{
-// 		Host:     "localhost",
-// 		Port:     5432,
-// 		User:     "test",
-// 		Password: "test",
-// 		Database: "test_db",
-// 		SSLMode:  "disable",
-// 	})
-// 	require.NoError(t, err)
-// 	defer pool.Close()
-//
-// 	queries := sqlc.New(pool)
-// 	service := models.NewService(queries)
-//
-// 	// Test Create
-// 	createReq := models.AddRequest{
-// 		ModelID:    "test-gpt-4",
-// 		Name:       "Test GPT-4",
-// 		BaseURL:    "https://api.openai.com/v1",
-// 		APIKey:     "sk-test",
-// 		ClientType: models.ClientTypeOpenAI,
-// 		Type:       models.ModelTypeChat,
-// 	}
-// 	createResp, err := service.Create(ctx, createReq)
-// 	require.NoError(t, err)
-// 	assert.NotEmpty(t, createResp.ID)
-// 	assert.Equal(t, "test-gpt-4", createResp.ModelID)
-//
-// 	// Test GetByModelID
-// 	getResp, err := service.GetByModelID(ctx, "test-gpt-4")
-// 	require.NoError(t, err)
-// 	assert.Equal(t, "test-gpt-4", getResp.ModelID)
-// 	assert.Equal(t, "Test GPT-4", getResp.Name)
-//
-// 	// Test List
-// 	models, err := service.List(ctx)
-// 	require.NoError(t, err)
-// 	assert.NotEmpty(t, models)
-//
-// 	// Test Update
-// 	updateReq := models.UpdateRequest{
-// 		ModelID:    "test-gpt-4",
-// 		Name:       "Updated GPT-4",
-// 		BaseURL:    "https://api.openai.com/v1",
-// 		APIKey:     "sk-test-updated",
-// 		ClientType: models.ClientTypeOpenAI,
-// 		Type:       models.ModelTypeChat,
-// 	}
-// 	updateResp, err := service.UpdateByModelID(ctx, "test-gpt-4", updateReq)
-// 	require.NoError(t, err)
-// 	assert.Equal(t, "Updated GPT-4", updateResp.Name)
-//
-// 	// Test Count
-// 	count, err := service.Count(ctx)
-// 	require.NoError(t, err)
-// 	assert.Greater(t, count, int64(0))
-//
-// 	// Test Delete
-// 	err = service.DeleteByModelID(ctx, "test-gpt-4")
-// 	require.NoError(t, err)
-// }

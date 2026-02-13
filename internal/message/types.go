@@ -13,6 +13,8 @@ type Message struct {
 	RouteID                 string          `json:"route_id,omitempty"`
 	SenderChannelIdentityID string          `json:"sender_channel_identity_id,omitempty"`
 	SenderUserID            string          `json:"sender_user_id,omitempty"`
+	SenderDisplayName       string          `json:"sender_display_name,omitempty"`
+	SenderAvatarURL         string          `json:"sender_avatar_url,omitempty"`
 	Platform                string          `json:"platform,omitempty"`
 	ExternalMessageID       string          `json:"external_message_id,omitempty"`
 	SourceReplyToMessageID  string          `json:"source_reply_to_message_id,omitempty"`

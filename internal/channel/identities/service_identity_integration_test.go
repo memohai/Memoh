@@ -45,11 +45,11 @@ func TestChannelIdentityResolveChannelIdentityStable(t *testing.T) {
 
 	ctx := context.Background()
 	externalID := fmt.Sprintf("stable_%d", time.Now().UnixNano())
-	first, err := svc.ResolveByChannelIdentity(ctx, "feishu", externalID, "first")
+	first, err := svc.ResolveByChannelIdentity(ctx, "feishu", externalID, "first", nil)
 	if err != nil {
 		t.Fatalf("first resolve failed: %v", err)
 	}
-	second, err := svc.ResolveByChannelIdentity(ctx, "feishu", externalID, "second")
+	second, err := svc.ResolveByChannelIdentity(ctx, "feishu", externalID, "second", nil)
 	if err != nil {
 		t.Fatalf("second resolve failed: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestChannelIdentityLinkToUser(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	channelIdentity, err := svc.ResolveByChannelIdentity(ctx, "telegram", fmt.Sprintf("link_%d", time.Now().UnixNano()), "tg")
+	channelIdentity, err := svc.ResolveByChannelIdentity(ctx, "telegram", fmt.Sprintf("link_%d", time.Now().UnixNano()), "tg", nil)
 	if err != nil {
 		t.Fatalf("resolve channelIdentity failed: %v", err)
 	}

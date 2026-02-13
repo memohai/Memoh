@@ -6,6 +6,3 @@ VALUES (
   sqlc.arg(event_type),
   sqlc.arg(payload)
 );
-
--- name: ListLifecycleEventsByContainerID :many
-SELECT * FROM lifecycle_events WHERE container_id = sqlc.arg(container_id) ORDER BY created_at ASC;

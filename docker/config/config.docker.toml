@@ -23,7 +23,7 @@ socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
 
 [mcp]
-busybox_image = "docker.io/library/memoh-mcp:latest"
+image = "docker.io/library/memoh-mcp:latest"
 snapshotter = "overlayfs"
 data_root = "/opt/memoh/data"
 data_mount = "/data"

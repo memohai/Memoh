@@ -16,6 +16,9 @@ UPDATE bots
 SET max_context_load_time = 1440,
     language = 'auto',
     allow_guest = false,
+    chat_model_id = NULL,
+    memory_model_id = NULL,
+    embedding_model_id = NULL,
     updated_at = now()
 WHERE id = $1
 `
@@ -62,35 +65,6 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.ChatModelID,
 		&i.MemoryModelID,
 		&i.EmbeddingModelID,
-	)
-	return i, err
-}
-
-const getSettingsByUserID = `-- name: GetSettingsByUserID :one
-SELECT id AS user_id, chat_model_id, memory_model_id, embedding_model_id, max_context_load_time, language
-FROM users
-WHERE id = $1
-`
-
-type GetSettingsByUserIDRow struct {
-	UserID             pgtype.UUID `json:"user_id"`
-	ChatModelID        pgtype.Text `json:"chat_model_id"`
-	MemoryModelID      pgtype.Text `json:"memory_model_id"`
-	EmbeddingModelID   pgtype.Text `json:"embedding_model_id"`
-	MaxContextLoadTime int32       `json:"max_context_load_time"`
-	Language           string      `json:"language"`
-}
-
-func (q *Queries) GetSettingsByUserID(ctx context.Context, id pgtype.UUID) (GetSettingsByUserIDRow, error) {
-	row := q.db.QueryRow(ctx, getSettingsByUserID, id)
-	var i GetSettingsByUserIDRow
-	err := row.Scan(
-		&i.UserID,
-		&i.ChatModelID,
-		&i.MemoryModelID,
-		&i.EmbeddingModelID,
-		&i.MaxContextLoadTime,
-		&i.Language,
 	)
 	return i, err
 }
@@ -161,57 +135,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.ChatModelID,
 		&i.MemoryModelID,
 		&i.EmbeddingModelID,
-	)
-	return i, err
-}
-
-const upsertUserSettings = `-- name: UpsertUserSettings :one
-UPDATE users
-SET chat_model_id = $2,
-    memory_model_id = $3,
-    embedding_model_id = $4,
-    max_context_load_time = $5,
-    language = $6,
-    updated_at = now()
-WHERE id = $1
-RETURNING id AS user_id, chat_model_id, memory_model_id, embedding_model_id, max_context_load_time, language
-`
-
-type UpsertUserSettingsParams struct {
-	ID                 pgtype.UUID `json:"id"`
-	ChatModelID        pgtype.Text `json:"chat_model_id"`
-	MemoryModelID      pgtype.Text `json:"memory_model_id"`
-	EmbeddingModelID   pgtype.Text `json:"embedding_model_id"`
-	MaxContextLoadTime int32       `json:"max_context_load_time"`
-	Language           string      `json:"language"`
-}
-
-type UpsertUserSettingsRow struct {
-	UserID             pgtype.UUID `json:"user_id"`
-	ChatModelID        pgtype.Text `json:"chat_model_id"`
-	MemoryModelID      pgtype.Text `json:"memory_model_id"`
-	EmbeddingModelID   pgtype.Text `json:"embedding_model_id"`
-	MaxContextLoadTime int32       `json:"max_context_load_time"`
-	Language           string      `json:"language"`
-}
-
-func (q *Queries) UpsertUserSettings(ctx context.Context, arg UpsertUserSettingsParams) (UpsertUserSettingsRow, error) {
-	row := q.db.QueryRow(ctx, upsertUserSettings,
-		arg.ID,
-		arg.ChatModelID,
-		arg.MemoryModelID,
-		arg.EmbeddingModelID,
-		arg.MaxContextLoadTime,
-		arg.Language,
-	)
-	var i UpsertUserSettingsRow
-	err := row.Scan(
-		&i.UserID,
-		&i.ChatModelID,
-		&i.MemoryModelID,
-		&i.EmbeddingModelID,
-		&i.MaxContextLoadTime,
-		&i.Language,
 	)
 	return i, err
 }

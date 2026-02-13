@@ -62,13 +62,6 @@ type ScheduleListResponse = {
   items: Schedule[]
 }
 
-type Settings = {
-  chat_model_id: string
-  memory_model_id: string
-  embedding_model_id: string
-  max_context_load_time: number
-  language: string
-}
 
 type Bot = {
   id: string
@@ -280,18 +273,6 @@ configCmd.action(async () => {
   const config = readConfig()
   console.log(`host = "${config.host}"`)
   console.log(`port = ${config.port}`)
-  const token = readToken()
-  if (!token?.access_token) return
-  try {
-    const settings = await apiRequest<Settings>('/settings', {}, token)
-    console.log(`chat_model_id = "${settings.chat_model_id || ''}"`)
-    console.log(`memory_model_id = "${settings.memory_model_id || ''}"`)
-    console.log(`embedding_model_id = "${settings.embedding_model_id || ''}"`)
-    console.log(`max_context_load_time = ${settings.max_context_load_time}`)
-    console.log(`language = "${settings.language}"`)
-  } catch (err: unknown) {
-    console.log(chalk.yellow(`Unable to load settings: ${getErrorMessage(err)}`))
-  }
 })
 
 configCmd
@@ -299,33 +280,12 @@ configCmd
   .description('Update config')
   .option('--host <host>')
   .option('--port <port>')
-  .option('--chat_model_id <model_id>')
-  .option('--memory_model_id <model_id>')
-  .option('--embedding_model_id <model_id>')
-  .option('--max_context_load_time <minutes>')
-  .option('--language <language>')
   .action(async (opts) => {
     const current = readConfig()
     let host = opts.host
     let port = opts.port ? Number.parseInt(opts.port, 10) : undefined
-    let maxContextLoadTime: number | undefined
-    if (opts.max_context_load_time !== undefined) {
-      const parsed = Number.parseInt(opts.max_context_load_time, 10)
-      if (Number.isNaN(parsed) || parsed <= 0) {
-        console.log(chalk.red('max_context_load_time must be a positive integer.'))
-        process.exit(1)
-      }
-      maxContextLoadTime = parsed
-    }
-    let language = opts.language
-    const hasSettingsInput = opts.max_context_load_time !== undefined
-      || opts.language !== undefined
-      || opts.chat_model_id !== undefined
-      || opts.memory_model_id !== undefined
-      || opts.embedding_model_id !== undefined
-    const hasConfigInput = Boolean(host || port)
 
-    if (!hasConfigInput && !hasSettingsInput) {
+    if (!host && !port) {
       const answers = await inquirer.prompt([
         { type: 'input', name: 'host', message: 'Host:', default: current.host },
         { type: 'input', name: 'port', message: 'Port:', default: current.port },
@@ -337,31 +297,8 @@ configCmd
     if (host) current.host = host
     if (port && !Number.isNaN(port)) current.port = port
 
-    if (host || (port && !Number.isNaN(port))) {
-      writeConfig(current)
-      console.log(chalk.green('Config updated'))
-    }
-
-    if (hasSettingsInput) {
-      if (language) {
-        language = String(language).trim()
-      }
-      const payload: Partial<Settings> = {}
-      if (opts.chat_model_id) payload.chat_model_id = String(opts.chat_model_id).trim()
-      if (opts.memory_model_id) payload.memory_model_id = String(opts.memory_model_id).trim()
-      if (opts.embedding_model_id) payload.embedding_model_id = String(opts.embedding_model_id).trim()
-      if (maxContextLoadTime !== undefined) payload.max_context_load_time = maxContextLoadTime
-      if (language) payload.language = language
-      const token = ensureAuth()
-      const spinner = ora('Updating settings...').start()
-      try {
-        await apiRequest('/settings', { method: 'PUT', body: JSON.stringify(payload) }, token)
-        spinner.succeed('Settings updated')
-      } catch (err: unknown) {
-        spinner.fail(getErrorMessage(err) || 'Failed to update settings')
-        process.exit(1)
-      }
-    }
+    writeConfig(current)
+    console.log(chalk.green('Config updated'))
   })
 
 const provider = program.command('provider').description('Provider management')
@@ -395,7 +332,7 @@ provider
         type: 'list',
         name: 'client_type',
         message: 'Client type:',
-        choices: ['openai', 'anthropic', 'google', 'ollama'],
+        choices: ['openai', 'openai-compat', 'anthropic', 'google', 'azure', 'bedrock', 'mistral', 'xai', 'ollama', 'dashscope'],
       })
     }
     if (!opts.base_url) questions.push({ type: 'input', name: 'base_url', message: 'Base URL:' })

@@ -41,34 +41,3 @@ func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) 
 	)
 	return err
 }
-
-const listSnapshotsByContainerID = `-- name: ListSnapshotsByContainerID :many
-SELECT id, container_id, parent_snapshot_id, snapshotter, digest, created_at FROM snapshots WHERE container_id = $1 ORDER BY created_at ASC
-`
-
-func (q *Queries) ListSnapshotsByContainerID(ctx context.Context, containerID string) ([]Snapshot, error) {
-	rows, err := q.db.Query(ctx, listSnapshotsByContainerID, containerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Snapshot
-	for rows.Next() {
-		var i Snapshot
-		if err := rows.Scan(
-			&i.ID,
-			&i.ContainerID,
-			&i.ParentSnapshotID,
-			&i.Snapshotter,
-			&i.Digest,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}

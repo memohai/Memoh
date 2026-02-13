@@ -13,9 +13,9 @@ func TestShellQuote(t *testing.T) {
 		{"a b", "'a b'"},
 	}
 	for _, tt := range tests {
-		got := shellQuote(tt.in)
+		got := ShellQuote(tt.in)
 		if got != tt.want {
-			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
+			t.Errorf("ShellQuote(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }

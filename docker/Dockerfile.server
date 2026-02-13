@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /build
@@ -5,12 +6,23 @@ WORKDIR /build
 RUN apk add --no-cache git make
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags "-s -w" \
+ARG VERSION=dev
+ARG COMMIT_HASH=unknown
+ARG BUILD_TIME=unknown
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath \
+    -ldflags "-s -w \
+      -X github.com/memohai/memoh/internal/version.Version=${VERSION} \
+      -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} \
+      -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
     -o memoh-server ./cmd/agent/main.go
 
 FROM alpine:latest

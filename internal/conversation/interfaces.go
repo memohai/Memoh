@@ -4,7 +4,7 @@ import "context"
 
 // Reader defines conversation lookup behavior.
 type Reader interface {
-	Get(ctx context.Context, conversationID string) (Chat, error)
+	Get(ctx context.Context, conversationID string) (Conversation, error)
 }
 
 // ParticipantChecker defines participant membership checks.
@@ -16,5 +16,5 @@ type ParticipantChecker interface {
 type Accessor interface {
 	Reader
 	ParticipantChecker
-	GetReadAccess(ctx context.Context, conversationID, channelIdentityID string) (ChatReadAccess, error)
+	GetReadAccess(ctx context.Context, conversationID, channelIdentityID string) (ConversationReadAccess, error)
 }

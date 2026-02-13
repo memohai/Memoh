@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/memory"
 )
 
@@ -14,7 +15,7 @@ func TestLoadMemoryContextMessage_NoMemoryService(t *testing.T) {
 		memoryService: nil,
 		logger:        slog.Default(),
 	}
-	msg := resolver.loadMemoryContextMessage(context.Background(), ChatRequest{
+	msg := resolver.loadMemoryContextMessage(context.Background(), conversation.ChatRequest{
 		Query:  "hello",
 		BotID:  "bot-1",
 		ChatID: "chat-1",
@@ -29,7 +30,7 @@ func TestLoadMemoryContextMessage_SearchFailureFallback(t *testing.T) {
 		memoryService: &memory.Service{},
 		logger:        slog.Default(),
 	}
-	msg := resolver.loadMemoryContextMessage(context.Background(), ChatRequest{
+	msg := resolver.loadMemoryContextMessage(context.Background(), conversation.ChatRequest{
 		Query:  "hello",
 		BotID:  "bot-1",
 		ChatID: "chat-1",

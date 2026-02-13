@@ -57,25 +57,17 @@
       />
     </div>
 
-    <!-- Allow Guest -->
-    <div class="space-y-2">
+    <!-- Allow Guest: only for public bot -->
+    <template v-if="isPublicBot">
       <div class="flex items-center justify-between">
         <Label>{{ $t('bots.settings.allowGuest') }}</Label>
         <Switch
           :model-value="form.allow_guest"
-          :disabled="isPersonalBot"
           @update:model-value="(val) => form.allow_guest = !!val"
         />
       </div>
-      <p
-        v-if="isPersonalBot"
-        class="text-xs text-muted-foreground"
-      >
-        {{ $t('bots.settings.allowGuestPersonalHint') }}
-      </p>
-    </div>
-
-    <Separator />
+      <Separator />
+    </template>
 
     <!-- Save -->
     <div class="flex justify-end">
@@ -90,18 +82,21 @@
 
     <Separator />
 
-    <!-- Danger zone -->
-    <div class="rounded-lg border border-red-200 bg-red-50/50 p-4 dark:border-red-900/50 dark:bg-red-950/20">
-      <h4 class="text-sm font-medium text-red-800 dark:text-red-200">
+    <!-- Danger Zone -->
+    <div
+      class="rounded-lg border border-destructive/50 bg-destructive/5 p-4 space-y-3"
+    >
+      <h3 class="text-sm font-semibold text-destructive">
         {{ $t('bots.settings.dangerZone') }}
-      </h4>
-      <p class="mt-1 text-sm text-red-700 dark:text-red-300">
+      </h3>
+      <p class="text-sm text-muted-foreground">
         {{ $t('bots.settings.deleteBotDescription') }}
       </p>
-      <div class="mt-3">
+      <div class="flex items-center justify-end">
         <ConfirmPopover
           :message="$t('bots.deleteConfirm')"
           :loading="deleteLoading"
+          :confirm-text="$t('common.delete')"
           @confirm="handleDeleteBot"
         >
           <template #trigger>
@@ -109,10 +104,7 @@
               variant="destructive"
               :disabled="deleteLoading"
             >
-              <Spinner
-                v-if="deleteLoading"
-                class="mr-1.5"
-              />
+              <Spinner v-if="deleteLoading" class="mr-1.5" />
               {{ $t('bots.settings.deleteBot') }}
             </Button>
           </template>
@@ -137,35 +129,78 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ModelSelect from './model-select.vue'
-import { useBotSettings, useUpdateBotSettings, type BotSettings } from '@/composables/api/useBotSettings'
-import { useDeleteBot } from '@/composables/api/useBots'
-import { useAllModels } from '@/composables/api/useModels'
-import { useAllProviders } from '@/composables/api/useProviders'
+import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
+import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders } from '@memoh/sdk'
+import type { SettingsSettings } from '@memoh/sdk'
 import type { Ref } from 'vue'
 
 const props = defineProps<{
   botId: string
-  botType: string
+  botType?: string
 }>()
 
-const { t } = useI18n()
+const isPublicBot = computed(() => props.botType === 'public')
 
+const { t } = useI18n()
 const router = useRouter()
+
 const botIdRef = computed(() => props.botId) as Ref<string>
-const isPersonalBot = computed(() => props.botType.trim().toLowerCase() === 'personal')
 
 // ---- Data ----
-const { data: settings } = useBotSettings(botIdRef)
-const { mutate: deleteBot, isLoading: deleteLoading } = useDeleteBot()
-const { data: modelData } = useAllModels()
-const { data: providerData } = useAllProviders()
-const { mutateAsync: updateSettings, isLoading } = useUpdateBotSettings(botIdRef)
+const queryCache = useQueryCache()
+
+const { data: settings } = useQuery({
+  key: () => ['bot-settings', botIdRef.value],
+  query: async () => {
+    const { data } = await getBotsByBotIdSettings({ path: { bot_id: botIdRef.value }, throwOnError: true })
+    return data
+  },
+  enabled: () => !!botIdRef.value,
+})
+
+const { data: modelData } = useQuery({
+  key: ['all-models'],
+  query: async () => {
+    const { data } = await getModels({ throwOnError: true })
+    return data
+  },
+})
+
+const { data: providerData } = useQuery({
+  key: ['all-providers'],
+  query: async () => {
+    const { data } = await getProviders({ throwOnError: true })
+    return data
+  },
+})
+
+const { mutateAsync: updateSettings, isLoading } = useMutation({
+  mutation: async (body: Partial<SettingsSettings>) => {
+    const { data } = await putBotsByBotIdSettings({
+      path: { bot_id: botIdRef.value },
+      body,
+      throwOnError: true,
+    })
+    return data
+  },
+  onSettled: () => queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] }),
+})
+
+const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
+  mutation: async () => {
+    await deleteBotsById({ path: { id: botIdRef.value }, throwOnError: true })
+  },
+  onSettled: () => {
+    queryCache.invalidateQueries({ key: ['bots'] })
+    queryCache.invalidateQueries({ key: ['bot'] })
+  },
+})
 
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 
 // ---- Form ----
-const form = reactive<BotSettings>({
+const form = reactive<SettingsSettings>({
   chat_model_id: '',
   memory_model_id: '',
   embedding_model_id: '',
@@ -174,6 +209,7 @@ const form = reactive<BotSettings>({
   allow_guest: false,
 })
 
+// 同步服务端数据到表单
 watch(settings, (val) => {
   if (val) {
     form.chat_model_id = val.chat_model_id ?? ''
@@ -182,29 +218,22 @@ watch(settings, (val) => {
     form.max_context_load_time = val.max_context_load_time ?? 0
     form.language = val.language ?? ''
     form.allow_guest = val.allow_guest ?? false
-    if (isPersonalBot.value) {
-      form.allow_guest = false
-    }
-  }
-}, { immediate: true })
-
-watch(isPersonalBot, (value) => {
-  if (value) {
-    form.allow_guest = false
   }
 }, { immediate: true })
 
 const hasChanges = computed(() => {
   if (!settings.value) return true
   const s = settings.value
-  return (
+  let changed =
     form.chat_model_id !== (s.chat_model_id ?? '')
     || form.memory_model_id !== (s.memory_model_id ?? '')
     || form.embedding_model_id !== (s.embedding_model_id ?? '')
     || form.max_context_load_time !== (s.max_context_load_time ?? 0)
     || form.language !== (s.language ?? '')
-    || form.allow_guest !== (s.allow_guest ?? false)
-  )
+  if (isPublicBot.value) {
+    changed = changed || form.allow_guest !== (s.allow_guest ?? false)
+  }
+  return changed
 })
 
 async function handleSave() {
@@ -216,13 +245,22 @@ async function handleSave() {
   }
 }
 
+function resolveErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message
+  if (error && typeof error === 'object' && 'message' in error) {
+    const msg = (error as { message?: string }).message
+    if (msg && msg.trim()) return msg
+  }
+  return fallback
+}
+
 async function handleDeleteBot() {
   try {
-    await deleteBot(props.botId)
+    await deleteBot()
     toast.success(t('bots.deleteSuccess'))
     await router.push({ name: 'bots' })
-  } catch {
-    toast.error(t('bots.lifecycle.deleteFailed'))
+  } catch (error) {
+    toast.error(resolveErrorMessage(error, t('bots.lifecycle.deleteFailed')))
   }
 }
 </script>

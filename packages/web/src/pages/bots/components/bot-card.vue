@@ -45,7 +45,7 @@
             class="text-muted-foreground/60"
           >·</span>
           <span v-if="formattedDate">
-            {{ $t('bots.createdAt') }} {{ formattedDate }}
+            {{ $t('common.createdAt') }} {{ formattedDate }}
           </span>
         </div>
       </div>
@@ -65,14 +65,14 @@ import {
 } from '@memoh/ui'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import type { BotInfo } from '@/composables/api/useBots'
 import { useI18n } from 'vue-i18n'
+import type { BotsBot } from '@memoh/sdk'
 
 const router = useRouter()
 const { t } = useI18n()
 
 const props = defineProps<{
-  bot: BotInfo
+  bot: BotsBot
 }>()
 
 const avatarFallback = computed(() => {

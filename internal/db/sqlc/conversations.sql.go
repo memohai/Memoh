@@ -428,7 +428,6 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = $1
-  AND false
 ORDER BY b.created_at DESC
 `
 
@@ -485,6 +484,7 @@ SELECT
   b.display_name AS title,
   b.owner_user_id AS created_by_user_id,
   b.metadata AS metadata,
+  chat_models.model_id AS model_id,
   b.created_at,
   b.updated_at,
   'participant'::text AS access_mode,
@@ -495,6 +495,7 @@ SELECT
   NULL::timestamptz AS last_observed_at
 FROM bots b
 LEFT JOIN bot_members bm ON bm.bot_id = b.id AND bm.user_id = $1
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = $2
   AND (b.owner_user_id = $1 OR bm.user_id IS NOT NULL)
 ORDER BY b.updated_at DESC
@@ -513,6 +514,7 @@ type ListVisibleChatsByBotAndUserRow struct {
 	Title           pgtype.Text        `json:"title"`
 	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
 	Metadata        []byte             `json:"metadata"`
+	ModelID         pgtype.Text        `json:"model_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	AccessMode      string             `json:"access_mode"`
@@ -537,6 +539,7 @@ func (q *Queries) ListVisibleChatsByBotAndUser(ctx context.Context, arg ListVisi
 			&i.Title,
 			&i.CreatedByUserID,
 			&i.Metadata,
+			&i.ModelID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AccessMode,
@@ -582,26 +585,31 @@ func (q *Queries) TouchChat(ctx context.Context, chatID pgtype.UUID) error {
 }
 
 const updateChatTitle = `-- name: UpdateChatTitle :one
-UPDATE bots
-SET display_name = $1,
-    updated_at = now()
-WHERE id = $2
-RETURNING
-  id,
-  id AS bot_id,
-  CASE WHEN type = 'public' THEN 'group' ELSE 'direct' END AS kind,
+WITH updated AS (
+  UPDATE bots
+  SET display_name = $1,
+      updated_at = now()
+  WHERE bots.id = $2
+  RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, metadata, created_at, updated_at
+)
+SELECT
+  updated.id AS id,
+  updated.id AS bot_id,
+  CASE WHEN updated.type = 'public' THEN 'group' ELSE 'direct' END AS kind,
   NULL::uuid AS parent_chat_id,
-  display_name AS title,
-  owner_user_id AS created_by_user_id,
-  metadata,
-  NULL::text AS model_id,
-  created_at,
-  updated_at
+  updated.display_name AS title,
+  updated.owner_user_id AS created_by_user_id,
+  updated.metadata,
+  chat_models.model_id AS model_id,
+  updated.created_at,
+  updated.updated_at
+FROM updated
+LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id
 `
 
 type UpdateChatTitleParams struct {
 	Title pgtype.Text `json:"title"`
-	ID    pgtype.UUID `json:"id"`
+	BotID pgtype.UUID `json:"bot_id"`
 }
 
 type UpdateChatTitleRow struct {
@@ -618,7 +626,7 @@ type UpdateChatTitleRow struct {
 }
 
 func (q *Queries) UpdateChatTitle(ctx context.Context, arg UpdateChatTitleParams) (UpdateChatTitleRow, error) {
-	row := q.db.QueryRow(ctx, updateChatTitle, arg.Title, arg.ID)
+	row := q.db.QueryRow(ctx, updateChatTitle, arg.Title, arg.BotID)
 	var i UpdateChatTitleRow
 	err := row.Scan(
 		&i.ID,

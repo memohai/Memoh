@@ -276,18 +276,29 @@ import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import {
-  getMyAccount,
-  issueMyBindCode,
-  listMyIdentities,
-  updateMyPassword,
-  updateMyProfile,
-  type ChannelIdentity,
-  type IssueBindCodeResponse,
-  type UserAccount,
-} from '@/composables/api/useUsers'
-import { ApiError } from '@/utils/request'
+import { getUsersMe, putUsersMe, putUsersMePassword, getUsersMeIdentities } from '@memoh/sdk'
+import { client } from '@memoh/sdk/client'
+import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest } from '@memoh/sdk'
 import { useUserStore } from '@/store/user'
+
+interface ChannelIdentity {
+  id: string
+  user_id?: string
+  channel: string
+  channel_subject_id: string
+  display_name?: string
+  metadata?: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+interface IssueBindCodeResponse {
+  token: string
+  platform?: string
+  expires_at: string
+}
+
+type UserAccount = AccountsAccount
 
 const anyPlatformValue = '__all__'
 
@@ -325,7 +336,7 @@ const bindForm = reactive({
 const displayUserID = computed(() => account.value?.id || userInfo.id || '')
 const displayUsername = computed(() => account.value?.username || userInfo.username || '')
 const displayTitle = computed(() => {
-  return profileForm.display_name.trim() || displayUsername.value || displayUserID.value || 'User'
+  return profileForm.display_name.trim() || displayUsername.value || displayUserID.value || t('settings.user')
 })
 const avatarFallback = computed(() => {
   const source = displayTitle.value.trim()
@@ -367,7 +378,7 @@ async function loadPageData() {
 }
 
 async function loadMyAccount() {
-  const data = await getMyAccount()
+  const { data } = await getUsersMe({ throwOnError: true })
   account.value = data
   profileForm.display_name = data.display_name || ''
   profileForm.avatar_url = data.avatar_url || ''
@@ -383,7 +394,7 @@ async function loadMyAccount() {
 async function loadMyIdentities() {
   loadingIdentities.value = true
   try {
-    const data = await listMyIdentities()
+    const { data } = await getUsersMeIdentities({ throwOnError: true })
     identities.value = data.items ?? []
   } finally {
     loadingIdentities.value = false
@@ -393,10 +404,11 @@ async function loadMyIdentities() {
 async function onSaveProfile() {
   savingProfile.value = true
   try {
-    const data = await updateMyProfile({
+    const body: AccountsUpdateProfileRequest = {
       display_name: profileForm.display_name.trim(),
       avatar_url: profileForm.avatar_url.trim(),
-    })
+    }
+    const { data } = await putUsersMe({ body, throwOnError: true })
     account.value = data
     profileForm.display_name = data.display_name || ''
     profileForm.avatar_url = data.avatar_url || ''
@@ -426,10 +438,11 @@ async function onUpdatePassword() {
   }
   savingPassword.value = true
   try {
-    await updateMyPassword({
+    const body: AccountsUpdatePasswordRequest = {
       current_password: currentPassword,
       new_password: newPassword,
-    })
+    }
+    await putUsersMePassword({ body, throwOnError: true })
     passwordForm.currentPassword = ''
     passwordForm.newPassword = ''
     passwordForm.confirmPassword = ''
@@ -449,10 +462,15 @@ async function onGenerateBindCode() {
   generatingBindCode.value = true
   try {
     const ttl = Number.isFinite(bindForm.ttlSeconds) ? Math.max(60, Number(bindForm.ttlSeconds)) : 3600
-    bindCode.value = await issueMyBindCode({
-      platform: bindForm.platform || undefined,
-      ttl_seconds: ttl,
-    })
+    const { data } = await client.post({
+      url: '/users/me/bind_codes',
+      body: {
+        platform: bindForm.platform || undefined,
+        ttl_seconds: ttl,
+      },
+      throwOnError: true,
+    }) as { data: IssueBindCodeResponse }
+    bindCode.value = data
     toast.success(t('settings.bindCodeGenerated'))
   } catch (error) {
     toast.error(resolveErrorMessage(error, t('settings.bindCodeGenerateFailed')))
@@ -487,8 +505,8 @@ function onLogout() {
 }
 
 function resolveErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError && error.body && typeof error.body === 'object') {
-    const body = error.body as { message?: string; error?: string; detail?: string }
+  if (error && typeof error === 'object') {
+    const body = error as { message?: string; error?: string; detail?: string }
     const detail = body.message || body.error || body.detail
     if (detail) {
       return `${fallback}: ${detail}`

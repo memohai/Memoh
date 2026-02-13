@@ -11,7 +11,6 @@ type TriggerPayload struct {
 	MaxCalls    *int
 	Command     string
 	OwnerUserID string
-	ChatID      string
 }
 
 // Triggerer triggers schedule execution for chat-related jobs.

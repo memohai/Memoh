@@ -32,7 +32,7 @@ type UsersHandler struct {
 }
 
 type listMyIdentitiesResponse struct {
-	UserID string                              `json:"user_id"`
+	UserID string                       `json:"user_id"`
 	Items  []identities.ChannelIdentity `json:"items"`
 }
 
@@ -70,6 +70,8 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	botGroup.GET("", h.ListBots)
 	botGroup.GET("/:id", h.GetBot)
 	botGroup.GET("/:id/checks", h.ListBotChecks)
+	botGroup.GET("/:id/checks/keys", h.ListBotCheckKeys)
+	botGroup.GET("/:id/checks/run/:key", h.RunBotCheck)
 	botGroup.PUT("/:id", h.UpdateBot)
 	botGroup.PUT("/:id/owner", h.TransferBotOwner)
 	botGroup.DELETE("/:id", h.DeleteBot)
@@ -542,6 +544,63 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 	return c.JSON(http.StatusOK, bots.ListChecksResponse{Items: items})
 }
 
+// ListBotCheckKeys godoc
+// @Summary List available check keys
+// @Description Returns all check keys available for a bot (builtin + MCP connections)
+// @Tags bots
+// @Param id path string true "Bot ID"
+// @Success 200 {object} bots.ListCheckKeysResponse
+// @Router /bots/{id}/checks/keys [get]
+func (h *UsersHandler) ListBotCheckKeys(c echo.Context) error {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+		return err
+	}
+	keys, err := h.botService.ListCheckKeys(c.Request().Context(), botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, bots.ListCheckKeysResponse{Keys: keys})
+}
+
+// RunBotCheck godoc
+// @Summary Run a single bot check
+// @Description Evaluate one check key for a bot
+// @Tags bots
+// @Param id path string true "Bot ID"
+// @Param key path string true "Check key"
+// @Success 200 {object} bots.BotCheck
+// @Router /bots/{id}/checks/run/{key} [get]
+func (h *UsersHandler) RunBotCheck(c echo.Context) error {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+		return err
+	}
+	key := strings.TrimSpace(c.Param("key"))
+	if key == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "check key is required")
+	}
+	result, err := h.botService.RunCheck(c.Request().Context(), botID, key)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
 // UpdateBot godoc
 // @Summary Update bot details
 // @Description Update bot profile (owner/admin only)
@@ -943,30 +1002,9 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 }
 
 func (h *UsersHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	isAdmin, err := h.service.IsAdmin(ctx, channelIdentityID)
-	if err != nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	bot, err := h.botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin, bots.AccessPolicy{AllowPublicMember: false})
-	if err != nil {
-		if errors.Is(err, bots.ErrBotNotFound) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")
-		}
-		if errors.Is(err, bots.ErrBotAccessDenied) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
-		}
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return bot, nil
+	return AuthorizeBotAccess(ctx, h.botService, h.service, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
 }
 
 func (h *UsersHandler) requireChannelIdentityID(c echo.Context) (string, error) {
-	channelIdentityID, err := auth.UserIDFromContext(c)
-	if err != nil {
-		return "", err
-	}
-	if err := identity.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	return channelIdentityID, nil
+	return RequireChannelIdentityID(c)
 }

@@ -90,13 +90,13 @@ func (s *Service) MarkUsed(ctx context.Context, id string) (Key, error) {
 
 func normalizeKey(row sqlc.BotPreauthKey) Key {
 	return Key{
-		ID:                        row.ID.String(),
-		BotID:                     row.BotID.String(),
-		Token:                     strings.TrimSpace(row.Token),
-		IssuedByChannelIdentityID: row.IssuedByUserID.String(),
-		ExpiresAt:                 timeFromPg(row.ExpiresAt),
-		UsedAt:                    timeFromPg(row.UsedAt),
-		CreatedAt:                 timeFromPg(row.CreatedAt),
+		ID:             row.ID.String(),
+		BotID:          row.BotID.String(),
+		Token:          strings.TrimSpace(row.Token),
+		IssuedByUserID: row.IssuedByUserID.String(),
+		ExpiresAt:      timeFromPg(row.ExpiresAt),
+		UsedAt:         timeFromPg(row.UsedAt),
+		CreatedAt:      timeFromPg(row.CreatedAt),
 	}
 }
 

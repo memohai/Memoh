@@ -10,7 +10,12 @@ const (
 	ClientTypeOpenAICompat ClientType = "openai-compat"
 	ClientTypeAnthropic    ClientType = "anthropic"
 	ClientTypeGoogle       ClientType = "google"
+	ClientTypeAzure        ClientType = "azure"
+	ClientTypeBedrock      ClientType = "bedrock"
+	ClientTypeMistral      ClientType = "mistral"
+	ClientTypeXAI          ClientType = "xai"
 	ClientTypeOllama       ClientType = "ollama"
+	ClientTypeDashscope    ClientType = "dashscope"
 )
 
 // CreateRequest represents a request to create a new LLM provider

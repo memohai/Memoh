@@ -51,6 +51,7 @@ func (s *Service) Create(ctx context.Context, channel, channelSubjectID, display
 		ChannelType:      channel,
 		ChannelSubjectID: channelSubjectID,
 		DisplayName:      toPgText(displayName),
+		AvatarUrl:        pgtype.Text{},
 		Metadata:         emptyMetadataBytes(),
 	})
 	if err != nil {
@@ -98,7 +99,8 @@ func (s *Service) Canonicalize(ctx context.Context, channelIdentityID string) (s
 }
 
 // ResolveByChannelIdentity looks up or creates a channel identity for (channel, channel_subject_id).
-func (s *Service) ResolveByChannelIdentity(ctx context.Context, channel, channelSubjectID, displayName string) (ChannelIdentity, error) {
+// Optional meta may contain avatar_url which is stored as a dedicated column.
+func (s *Service) ResolveByChannelIdentity(ctx context.Context, channel, channelSubjectID, displayName string, meta map[string]any) (ChannelIdentity, error) {
 	if s.queries == nil {
 		return ChannelIdentity{}, fmt.Errorf("channel identity queries not configured")
 	}
@@ -108,11 +110,19 @@ func (s *Service) ResolveByChannelIdentity(ctx context.Context, channel, channel
 		return ChannelIdentity{}, fmt.Errorf("channel and channel_subject_id are required")
 	}
 
+	avatarURL := ""
+	if meta != nil {
+		if raw, ok := meta["avatar_url"]; ok {
+			avatarURL = strings.TrimSpace(fmt.Sprint(raw))
+		}
+	}
+
 	row, err := s.queries.UpsertChannelIdentityByChannelSubject(ctx, sqlc.UpsertChannelIdentityByChannelSubjectParams{
 		UserID:           pgtype.UUID{},
 		ChannelType:      channel,
 		ChannelSubjectID: channelSubjectID,
 		DisplayName:      toPgText(displayName),
+		AvatarUrl:        toPgText(avatarURL),
 		Metadata:         emptyMetadataBytes(),
 	})
 	if err != nil {
@@ -135,11 +145,16 @@ func (s *Service) UpsertChannelIdentity(ctx context.Context, channel, channelSub
 	if err != nil {
 		return ChannelIdentity{}, err
 	}
+	avatarURL := ""
+	if raw, ok := metadata["avatar_url"]; ok {
+		avatarURL = strings.TrimSpace(fmt.Sprint(raw))
+	}
 	row, err := s.queries.UpsertChannelIdentityByChannelSubject(ctx, sqlc.UpsertChannelIdentityByChannelSubjectParams{
 		UserID:           pgtype.UUID{},
 		ChannelType:      channel,
 		ChannelSubjectID: channelSubjectID,
 		DisplayName:      toPgText(displayName),
+		AvatarUrl:        toPgText(avatarURL),
 		Metadata:         metaBytes,
 	})
 	if err != nil {
@@ -249,7 +264,9 @@ func (s *Service) LinkChannelIdentityToUser(ctx context.Context, channelIdentity
 func toChannelIdentity(row sqlc.ChannelIdentity) ChannelIdentity {
 	var metadata map[string]any
 	if len(row.Metadata) > 0 {
-		_ = json.Unmarshal(row.Metadata, &metadata)
+		if err := json.Unmarshal(row.Metadata, &metadata); err != nil {
+			slog.Warn("unmarshal channel identity metadata failed", slog.String("id", row.ID.String()), slog.Any("error", err))
+		}
 	}
 	if metadata == nil {
 		metadata = map[string]any{}
@@ -257,6 +274,10 @@ func toChannelIdentity(row sqlc.ChannelIdentity) ChannelIdentity {
 	displayName := ""
 	if row.DisplayName.Valid {
 		displayName = strings.TrimSpace(row.DisplayName.String)
+	}
+	avatarURL := ""
+	if row.AvatarUrl.Valid {
+		avatarURL = strings.TrimSpace(row.AvatarUrl.String)
 	}
 	userID := ""
 	if row.UserID.Valid {
@@ -268,6 +289,7 @@ func toChannelIdentity(row sqlc.ChannelIdentity) ChannelIdentity {
 		Channel:          row.ChannelType,
 		ChannelSubjectID: row.ChannelSubjectID,
 		DisplayName:      displayName,
+		AvatarURL:        avatarURL,
 		Metadata:         metadata,
 		CreatedAt:        db.TimeFromPg(row.CreatedAt),
 		UpdatedAt:        db.TimeFromPg(row.UpdatedAt),

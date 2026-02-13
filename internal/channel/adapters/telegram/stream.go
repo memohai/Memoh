@@ -134,8 +134,12 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 			finalText := strings.TrimSpace(s.buf.String())
 			s.mu.Unlock()
 			if finalText != "" {
-				_ = s.ensureStreamMessage(ctx, finalText)
-				_ = s.editStreamMessage(ctx, finalText)
+				if err := s.ensureStreamMessage(ctx, finalText); err != nil {
+					slog.Warn("telegram: ensure stream message failed", slog.Any("error", err))
+				}
+				if err := s.editStreamMessage(ctx, finalText); err != nil {
+					slog.Warn("telegram: edit stream message failed", slog.Any("error", err))
+				}
 			}
 			return nil
 		}

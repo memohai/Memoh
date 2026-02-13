@@ -100,7 +100,7 @@ func TestExtractFeishuInboundP2P(t *testing.T) {
 			},
 		},
 	}
-	got := extractFeishuInbound(event)
+	got := extractFeishuInbound(event, "")
 	if got.Message.PlainText() != "hi" {
 		t.Fatalf("unexpected text: %s", got.Message.PlainText())
 	}
@@ -149,7 +149,7 @@ func TestExtractFeishuInboundGroup(t *testing.T) {
 			},
 		},
 	}
-	got := extractFeishuInbound(event)
+	got := extractFeishuInbound(event, "ou_bot")
 	if got.ReplyTarget != "chat_id:oc_2" {
 		t.Fatalf("unexpected reply target: %s", got.ReplyTarget)
 	}
@@ -169,7 +169,7 @@ func TestExtractFeishuInboundNonText(t *testing.T) {
 			},
 		},
 	}
-	got := extractFeishuInbound(event)
+	got := extractFeishuInbound(event, "")
 	if got.Message.PlainText() != "" {
 		t.Fatalf("expected empty text, got %s", got.Message.PlainText())
 	}
@@ -188,7 +188,7 @@ func TestExtractFeishuInboundImageAttachmentReference(t *testing.T) {
 			},
 		},
 	}
-	got := extractFeishuInbound(event)
+	got := extractFeishuInbound(event, "")
 	if len(got.Message.Attachments) != 1 {
 		t.Fatalf("expected one attachment, got %d", len(got.Message.Attachments))
 	}
@@ -278,7 +278,7 @@ func TestProcessFeishuCardMarkdown(t *testing.T) {
 	}
 }
 
-func TestExtractFeishuInboundMention(t *testing.T) {
+func TestExtractFeishuInboundMentionFallbackNoBotID(t *testing.T) {
 	t.Parallel()
 
 	text := `{"text":"@bot hi","mentions":[{"key":"@bot"}]}`
@@ -295,21 +295,25 @@ func TestExtractFeishuInboundMention(t *testing.T) {
 			},
 		},
 	}
-	got := extractFeishuInbound(event)
+	got := extractFeishuInbound(event, "")
 	mentioned, ok := got.Metadata["is_mentioned"].(bool)
 	if !ok || !mentioned {
-		t.Fatalf("expected mention flag to be true")
+		t.Fatalf("expected mention flag to be true (fallback)")
 	}
 }
 
-func TestExtractFeishuInboundMentionFromEventMentions(t *testing.T) {
+func TestExtractFeishuInboundMentionBotMatched(t *testing.T) {
 	t.Parallel()
 
 	text := `{"text":"hello"}`
 	msgType := larkim.MsgTypeText
 	chatType := "group"
 	chatID := "oc_mention_event"
-	mention := larkim.NewMentionEventBuilder().Key("@_user_1").Build()
+	botOpenID := "ou_bot_123"
+	mention := larkim.NewMentionEventBuilder().
+		Key("@_user_1").
+		Id(larkim.NewUserIdBuilder().OpenId(botOpenID).Build()).
+		Build()
 	event := &larkim.P2MessageReceiveV1{
 		Event: &larkim.P2MessageReceiveV1Data{
 			Message: &larkim.EventMessage{
@@ -321,14 +325,43 @@ func TestExtractFeishuInboundMentionFromEventMentions(t *testing.T) {
 			},
 		},
 	}
-	got := extractFeishuInbound(event)
+	got := extractFeishuInbound(event, botOpenID)
 	mentioned, ok := got.Metadata["is_mentioned"].(bool)
 	if !ok || !mentioned {
-		t.Fatalf("expected mention flag from event mentions")
+		t.Fatalf("expected mention flag when bot is mentioned")
 	}
 }
 
-func TestExtractFeishuInboundPostMention(t *testing.T) {
+func TestExtractFeishuInboundMentionOtherUserIgnored(t *testing.T) {
+	t.Parallel()
+
+	text := `{"text":"hello"}`
+	msgType := larkim.MsgTypeText
+	chatType := "group"
+	chatID := "oc_mention_other"
+	otherOpenID := "ou_other_user"
+	mention := larkim.NewMentionEventBuilder().
+		Key("@_user_1").
+		Id(larkim.NewUserIdBuilder().OpenId(otherOpenID).Build()).
+		Build()
+	event := &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Message: &larkim.EventMessage{
+				MessageType: &msgType,
+				Content:     &text,
+				ChatType:    &chatType,
+				ChatId:      &chatID,
+				Mentions:    []*larkim.MentionEvent{mention},
+			},
+		},
+	}
+	got := extractFeishuInbound(event, "ou_bot_123")
+	if mentioned, _ := got.Metadata["is_mentioned"].(bool); mentioned {
+		t.Fatalf("expected no mention flag when another user is mentioned")
+	}
+}
+
+func TestExtractFeishuInboundPostMentionFallback(t *testing.T) {
 	t.Parallel()
 
 	content := `{"zh_cn":{"title":"","content":[[{"tag":"at","user_name":"bot"},{"tag":"text","text":" hi"}]]}}`
@@ -345,14 +378,61 @@ func TestExtractFeishuInboundPostMention(t *testing.T) {
 			},
 		},
 	}
-
-	got := extractFeishuInbound(event)
+	got := extractFeishuInbound(event, "")
 	if got.Message.PlainText() == "" {
 		t.Fatalf("expected post message to be converted into text")
 	}
 	mentioned, ok := got.Metadata["is_mentioned"].(bool)
 	if !ok || !mentioned {
-		t.Fatalf("expected mention flag for post message")
+		t.Fatalf("expected mention flag for post message (fallback)")
+	}
+}
+
+func TestExtractFeishuInboundPostMentionBotMatched(t *testing.T) {
+	t.Parallel()
+
+	botOpenID := "ou_bot_123"
+	content := `{"zh_cn":{"title":"","content":[[{"tag":"at","user_id":"ou_bot_123"},{"tag":"text","text":" hi"}]]}}`
+	msgType := larkim.MsgTypePost
+	chatType := "group"
+	chatID := "oc_post_bot"
+	event := &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Message: &larkim.EventMessage{
+				MessageType: &msgType,
+				Content:     &content,
+				ChatType:    &chatType,
+				ChatId:      &chatID,
+			},
+		},
+	}
+	got := extractFeishuInbound(event, botOpenID)
+	mentioned, ok := got.Metadata["is_mentioned"].(bool)
+	if !ok || !mentioned {
+		t.Fatalf("expected mention flag for post with bot user_id")
+	}
+}
+
+func TestExtractFeishuInboundPostMentionOtherIgnored(t *testing.T) {
+	t.Parallel()
+
+	content := `{"zh_cn":{"title":"","content":[[{"tag":"at","user_id":"ou_someone_else"},{"tag":"text","text":" hi"}]]}}`
+	msgType := larkim.MsgTypePost
+	chatType := "group"
+	chatID := "oc_post_other"
+	event := &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Message: &larkim.EventMessage{
+				MessageType: &msgType,
+				Content:     &content,
+				ChatType:    &chatType,
+				ChatId:      &chatID,
+			},
+		},
+	}
+	got := extractFeishuInbound(event, "ou_bot_123")
+	if mentioned, _ := got.Metadata["is_mentioned"].(bool); mentioned {
+		t.Fatalf("expected no mention for post mentioning other user")
 	}
 }
 

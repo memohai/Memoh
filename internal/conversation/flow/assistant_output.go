@@ -1,13 +1,17 @@
 package flow
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/memohai/memoh/internal/conversation"
+)
 
 // ExtractAssistantOutputs collects assistant-role outputs from a slice of ModelMessages.
-func ExtractAssistantOutputs(messages []ModelMessage) []AssistantOutput {
+func ExtractAssistantOutputs(messages []conversation.ModelMessage) []conversation.AssistantOutput {
 	if len(messages) == 0 {
 		return nil
 	}
-	outputs := make([]AssistantOutput, 0, len(messages))
+	outputs := make([]conversation.AssistantOutput, 0, len(messages))
 	for _, msg := range messages {
 		if msg.Role != "assistant" {
 			continue
@@ -17,16 +21,16 @@ func ExtractAssistantOutputs(messages []ModelMessage) []AssistantOutput {
 		if content == "" && len(parts) == 0 {
 			continue
 		}
-		outputs = append(outputs, AssistantOutput{Content: content, Parts: parts})
+		outputs = append(outputs, conversation.AssistantOutput{Content: content, Parts: parts})
 	}
 	return outputs
 }
 
-func filterContentParts(parts []ContentPart) []ContentPart {
+func filterContentParts(parts []conversation.ContentPart) []conversation.ContentPart {
 	if len(parts) == 0 {
 		return nil
 	}
-	filtered := make([]ContentPart, 0, len(parts))
+	filtered := make([]conversation.ContentPart, 0, len(parts))
 	for _, p := range parts {
 		if p.HasValue() {
 			filtered = append(filtered, p)

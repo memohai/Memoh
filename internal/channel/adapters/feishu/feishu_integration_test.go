@@ -106,3 +106,32 @@ func TestFeishuGateway_Integration(t *testing.T) {
 		}
 	}
 }
+
+// TestFeishuDiscoverSelf_Integration verifies the bot info API call.
+// Required env: FEISHU_APP_ID, FEISHU_APP_SECRET.
+func TestFeishuDiscoverSelf_Integration(t *testing.T) {
+	appID := os.Getenv("FEISHU_APP_ID")
+	appSecret := os.Getenv("FEISHU_APP_SECRET")
+	if appID == "" || appSecret == "" {
+		t.Skip("skipping integration test: FEISHU_APP_ID or FEISHU_APP_SECRET not set")
+	}
+	adapter := NewFeishuAdapter(nil)
+	credentials := map[string]any{
+		"app_id":     appID,
+		"app_secret": appSecret,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	identity, extID, err := adapter.DiscoverSelf(ctx, credentials)
+	if err != nil {
+		t.Fatalf("discover self failed: %v", err)
+	}
+	openID, _ := identity["open_id"].(string)
+	if openID == "" {
+		t.Fatalf("expected non-empty open_id")
+	}
+	if extID != openID {
+		t.Fatalf("expected external_id=%s, got %s", openID, extID)
+	}
+	t.Logf("bot identity: %+v", identity)
+}

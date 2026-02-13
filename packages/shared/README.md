@@ -1,1 +1,0 @@
-# @memoh/shared

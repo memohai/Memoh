@@ -12,7 +12,7 @@ const (
 	DefaultHTTPAddr         = ":8080"
 	DefaultNamespace        = "default"
 	DefaultSocketPath       = "/run/containerd/containerd.sock"
-	DefaultBusyboxImg       = "docker.io/library/busybox:latest"
+	DefaultMCPImage         = "docker.io/library/memoh-mcp:latest"
 	DefaultDataRoot         = "data"
 	DefaultDataMount        = "/data"
 	DefaultJWTExpiresIn     = "24h"
@@ -63,10 +63,10 @@ type ContainerdConfig struct {
 }
 
 type MCPConfig struct {
-	BusyboxImage string `toml:"busybox_image"`
-	Snapshotter  string `toml:"snapshotter"`
-	DataRoot     string `toml:"data_root"`
-	DataMount    string `toml:"data_mount"`
+	Image       string `toml:"image"`
+	Snapshotter string `toml:"snapshotter"`
+	DataRoot    string `toml:"data_root"`
+	DataMount   string `toml:"data_mount"`
 }
 
 type PostgresConfig struct {
@@ -124,9 +124,9 @@ func Load(path string) (Config, error) {
 			Namespace:  DefaultNamespace,
 		},
 		MCP: MCPConfig{
-			BusyboxImage: DefaultBusyboxImg,
-			DataRoot:     DefaultDataRoot,
-			DataMount:    DefaultDataMount,
+			Image:     DefaultMCPImage,
+			DataRoot:  DefaultDataRoot,
+			DataMount: DefaultDataMount,
 		},
 		Postgres: PostgresConfig{
 			Host:     DefaultPGHost,

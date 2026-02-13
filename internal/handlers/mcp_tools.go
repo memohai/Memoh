@@ -40,7 +40,7 @@ func (h *ContainerdHandler) HandleMCPTools(c echo.Context) error {
 	if h.toolGateway == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "tool gateway not configured")
 	}
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithGuest(c)
 	if err != nil {
 		return err
 	}

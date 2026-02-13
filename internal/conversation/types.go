@@ -3,11 +3,12 @@ package conversation
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"time"
 )
 
-// Chat kind constants.
+// Conversation kind constants.
 const (
 	KindDirect = "direct"
 	KindGroup  = "group"
@@ -21,7 +22,7 @@ const (
 	RoleMember = "member"
 )
 
-// Chat list access mode constants.
+// Conversation list access mode constants.
 const (
 	AccessModeParticipant             = "participant"
 	AccessModeChannelIdentityObserved = "channel_identity_observed"
@@ -62,11 +63,6 @@ type ConversationReadAccess struct {
 	ParticipantRole string
 	LastObservedAt  *time.Time
 }
-
-// Backward-compatible aliases while call sites migrate.
-type Chat = Conversation
-type ChatListItem = ConversationListItem
-type ChatReadAccess = ConversationReadAccess
 
 // Participant represents a chat member.
 type Participant struct {
@@ -155,7 +151,11 @@ func (m ModelMessage) HasContent() bool {
 
 // NewTextContent creates a json.RawMessage from a plain string.
 func NewTextContent(text string) json.RawMessage {
-	data, _ := json.Marshal(text)
+	data, err := json.Marshal(text)
+	if err != nil {
+		slog.Warn("NewTextContent: marshal failed", slog.Any("error", err))
+		return nil
+	}
 	return data
 }
 
@@ -203,13 +203,13 @@ type ChatRequest struct {
 	RouteID                 string `json:"-"`
 	ChatToken               string `json:"-"`
 	ExternalMessageID       string `json:"-"`
+	ConversationType        string `json:"-"`
 	UserMessagePersisted    bool   `json:"-"`
 
 	Query              string         `json:"query"`
 	Model              string         `json:"model,omitempty"`
 	Provider           string         `json:"provider,omitempty"`
 	MaxContextLoadTime int            `json:"max_context_load_time,omitempty"`
-	Language           string         `json:"language,omitempty"`
 	Channels           []string       `json:"channels,omitempty"`
 	CurrentChannel     string         `json:"current_channel,omitempty"`
 	Messages           []ModelMessage `json:"messages,omitempty"`

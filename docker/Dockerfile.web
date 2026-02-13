@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM node:25-alpine AS builder
 
 WORKDIR /build
@@ -8,7 +9,8 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 
 COPY packages ./packages
 
-RUN pnpm install
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install
 
 ARG VITE_API_URL=http://localhost:8080
 ARG VITE_AGENT_URL=http://localhost:8081

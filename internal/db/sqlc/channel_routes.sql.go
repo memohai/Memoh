@@ -13,7 +13,7 @@ import (
 
 const createChatRoute = `-- name: CreateChatRoute :one
 INSERT INTO bot_channel_routes (
-  bot_id, channel_type, channel_config_id, external_conversation_id, external_thread_id, default_reply_target, metadata
+  bot_id, channel_type, channel_config_id, external_conversation_id, external_thread_id, conversation_type, default_reply_target, metadata
 )
 VALUES (
   $1,
@@ -22,16 +22,18 @@ VALUES (
   $4,
   $5::text,
   $6::text,
-  $7
+  $7::text,
+  $8
 )
 RETURNING
   id,
-  $8::uuid AS chat_id,
+  $9::uuid AS chat_id,
   bot_id,
   channel_type AS platform,
   channel_config_id,
   external_conversation_id AS conversation_id,
   external_thread_id AS thread_id,
+  conversation_type,
   default_reply_target AS reply_target,
   metadata,
   created_at,
@@ -39,28 +41,30 @@ RETURNING
 `
 
 type CreateChatRouteParams struct {
-	BotID           pgtype.UUID `json:"bot_id"`
-	Platform        string      `json:"platform"`
-	ChannelConfigID pgtype.UUID `json:"channel_config_id"`
-	ConversationID  string      `json:"conversation_id"`
-	ThreadID        pgtype.Text `json:"thread_id"`
-	ReplyTarget     pgtype.Text `json:"reply_target"`
-	Metadata        []byte      `json:"metadata"`
-	ChatID          pgtype.UUID `json:"chat_id"`
+	BotID            pgtype.UUID `json:"bot_id"`
+	Platform         string      `json:"platform"`
+	ChannelConfigID  pgtype.UUID `json:"channel_config_id"`
+	ConversationID   string      `json:"conversation_id"`
+	ThreadID         pgtype.Text `json:"thread_id"`
+	ConversationType pgtype.Text `json:"conversation_type"`
+	ReplyTarget      pgtype.Text `json:"reply_target"`
+	Metadata         []byte      `json:"metadata"`
+	ChatID           pgtype.UUID `json:"chat_id"`
 }
 
 type CreateChatRouteRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	ChatID          pgtype.UUID        `json:"chat_id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	Platform        string             `json:"platform"`
-	ChannelConfigID pgtype.UUID        `json:"channel_config_id"`
-	ConversationID  string             `json:"conversation_id"`
-	ThreadID        pgtype.Text        `json:"thread_id"`
-	ReplyTarget     pgtype.Text        `json:"reply_target"`
-	Metadata        []byte             `json:"metadata"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID               pgtype.UUID        `json:"id"`
+	ChatID           pgtype.UUID        `json:"chat_id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	Platform         string             `json:"platform"`
+	ChannelConfigID  pgtype.UUID        `json:"channel_config_id"`
+	ConversationID   string             `json:"conversation_id"`
+	ThreadID         pgtype.Text        `json:"thread_id"`
+	ConversationType pgtype.Text        `json:"conversation_type"`
+	ReplyTarget      pgtype.Text        `json:"reply_target"`
+	Metadata         []byte             `json:"metadata"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams) (CreateChatRouteRow, error) {
@@ -70,6 +74,7 @@ func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams
 		arg.ChannelConfigID,
 		arg.ConversationID,
 		arg.ThreadID,
+		arg.ConversationType,
 		arg.ReplyTarget,
 		arg.Metadata,
 		arg.ChatID,
@@ -83,6 +88,7 @@ func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams
 		&i.ChannelConfigID,
 		&i.ConversationID,
 		&i.ThreadID,
+		&i.ConversationType,
 		&i.ReplyTarget,
 		&i.Metadata,
 		&i.CreatedAt,
@@ -110,6 +116,7 @@ SELECT
   channel_config_id,
   external_conversation_id AS conversation_id,
   external_thread_id AS thread_id,
+  conversation_type,
   default_reply_target AS reply_target,
   metadata,
   created_at,
@@ -130,17 +137,18 @@ type FindChatRouteParams struct {
 }
 
 type FindChatRouteRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	ChatID          pgtype.UUID        `json:"chat_id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	Platform        string             `json:"platform"`
-	ChannelConfigID pgtype.UUID        `json:"channel_config_id"`
-	ConversationID  string             `json:"conversation_id"`
-	ThreadID        pgtype.Text        `json:"thread_id"`
-	ReplyTarget     pgtype.Text        `json:"reply_target"`
-	Metadata        []byte             `json:"metadata"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID               pgtype.UUID        `json:"id"`
+	ChatID           pgtype.UUID        `json:"chat_id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	Platform         string             `json:"platform"`
+	ChannelConfigID  pgtype.UUID        `json:"channel_config_id"`
+	ConversationID   string             `json:"conversation_id"`
+	ThreadID         pgtype.Text        `json:"thread_id"`
+	ConversationType pgtype.Text        `json:"conversation_type"`
+	ReplyTarget      pgtype.Text        `json:"reply_target"`
+	Metadata         []byte             `json:"metadata"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) FindChatRoute(ctx context.Context, arg FindChatRouteParams) (FindChatRouteRow, error) {
@@ -159,6 +167,7 @@ func (q *Queries) FindChatRoute(ctx context.Context, arg FindChatRouteParams) (F
 		&i.ChannelConfigID,
 		&i.ConversationID,
 		&i.ThreadID,
+		&i.ConversationType,
 		&i.ReplyTarget,
 		&i.Metadata,
 		&i.CreatedAt,
@@ -176,6 +185,7 @@ SELECT
   channel_config_id,
   external_conversation_id AS conversation_id,
   external_thread_id AS thread_id,
+  conversation_type,
   default_reply_target AS reply_target,
   metadata,
   created_at,
@@ -185,17 +195,18 @@ WHERE id = $1
 `
 
 type GetChatRouteByIDRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	ChatID          pgtype.UUID        `json:"chat_id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	Platform        string             `json:"platform"`
-	ChannelConfigID pgtype.UUID        `json:"channel_config_id"`
-	ConversationID  string             `json:"conversation_id"`
-	ThreadID        pgtype.Text        `json:"thread_id"`
-	ReplyTarget     pgtype.Text        `json:"reply_target"`
-	Metadata        []byte             `json:"metadata"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID               pgtype.UUID        `json:"id"`
+	ChatID           pgtype.UUID        `json:"chat_id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	Platform         string             `json:"platform"`
+	ChannelConfigID  pgtype.UUID        `json:"channel_config_id"`
+	ConversationID   string             `json:"conversation_id"`
+	ThreadID         pgtype.Text        `json:"thread_id"`
+	ConversationType pgtype.Text        `json:"conversation_type"`
+	ReplyTarget      pgtype.Text        `json:"reply_target"`
+	Metadata         []byte             `json:"metadata"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) GetChatRouteByID(ctx context.Context, id pgtype.UUID) (GetChatRouteByIDRow, error) {
@@ -209,6 +220,7 @@ func (q *Queries) GetChatRouteByID(ctx context.Context, id pgtype.UUID) (GetChat
 		&i.ChannelConfigID,
 		&i.ConversationID,
 		&i.ThreadID,
+		&i.ConversationType,
 		&i.ReplyTarget,
 		&i.Metadata,
 		&i.CreatedAt,
@@ -226,6 +238,7 @@ SELECT
   channel_config_id,
   external_conversation_id AS conversation_id,
   external_thread_id AS thread_id,
+  conversation_type,
   default_reply_target AS reply_target,
   metadata,
   created_at,
@@ -236,17 +249,18 @@ ORDER BY created_at ASC
 `
 
 type ListChatRoutesRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	ChatID          pgtype.UUID        `json:"chat_id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	Platform        string             `json:"platform"`
-	ChannelConfigID pgtype.UUID        `json:"channel_config_id"`
-	ConversationID  string             `json:"conversation_id"`
-	ThreadID        pgtype.Text        `json:"thread_id"`
-	ReplyTarget     pgtype.Text        `json:"reply_target"`
-	Metadata        []byte             `json:"metadata"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID               pgtype.UUID        `json:"id"`
+	ChatID           pgtype.UUID        `json:"chat_id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	Platform         string             `json:"platform"`
+	ChannelConfigID  pgtype.UUID        `json:"channel_config_id"`
+	ConversationID   string             `json:"conversation_id"`
+	ThreadID         pgtype.Text        `json:"thread_id"`
+	ConversationType pgtype.Text        `json:"conversation_type"`
+	ReplyTarget      pgtype.Text        `json:"reply_target"`
+	Metadata         []byte             `json:"metadata"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]ListChatRoutesRow, error) {
@@ -266,6 +280,7 @@ func (q *Queries) ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]Lis
 			&i.ChannelConfigID,
 			&i.ConversationID,
 			&i.ThreadID,
+			&i.ConversationType,
 			&i.ReplyTarget,
 			&i.Metadata,
 			&i.CreatedAt,

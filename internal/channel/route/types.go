@@ -7,17 +7,18 @@ import (
 
 // Route maps external channel conversations to an internal conversation.
 type Route struct {
-	ID              string         `json:"id"`
-	ChatID          string         `json:"chat_id"`
-	BotID           string         `json:"bot_id"`
-	Platform        string         `json:"platform"`
-	ChannelConfigID string         `json:"channel_config_id,omitempty"`
-	ConversationID  string         `json:"conversation_id"`
-	ThreadID        string         `json:"thread_id,omitempty"`
-	ReplyTarget     string         `json:"reply_target,omitempty"`
-	Metadata        map[string]any `json:"metadata,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID               string         `json:"id"`
+	ChatID           string         `json:"chat_id"`
+	BotID            string         `json:"bot_id"`
+	Platform         string         `json:"platform"`
+	ChannelConfigID  string         `json:"channel_config_id,omitempty"`
+	ConversationID   string         `json:"conversation_id"`
+	ThreadID         string         `json:"thread_id,omitempty"`
+	ConversationType string         `json:"conversation_type,omitempty"`
+	ReplyTarget      string         `json:"reply_target,omitempty"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 // ResolveConversationResult is returned by ResolveConversation.
@@ -29,14 +30,15 @@ type ResolveConversationResult struct {
 
 // CreateInput is the input for creating a route.
 type CreateInput struct {
-	ChatID          string
-	BotID           string
-	Platform        string
-	ChannelConfigID string
-	ConversationID  string
-	ThreadID        string
-	ReplyTarget     string
-	Metadata        map[string]any
+	ChatID           string
+	BotID            string
+	Platform         string
+	ChannelConfigID  string
+	ConversationID   string
+	ThreadID         string
+	ConversationType string
+	ReplyTarget      string
+	Metadata         map[string]any
 }
 
 // ResolveInput is the input for route-to-conversation resolution.

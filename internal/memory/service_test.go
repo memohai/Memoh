@@ -11,6 +11,7 @@ import (
 type MockLLM struct {
 	ExtractFunc        func(ctx context.Context, req ExtractRequest) (ExtractResponse, error)
 	DecideFunc         func(ctx context.Context, req DecideRequest) (DecideResponse, error)
+	CompactFunc        func(ctx context.Context, req CompactRequest) (CompactResponse, error)
 	DetectLanguageFunc func(ctx context.Context, text string) (string, error)
 }
 
@@ -19,6 +20,12 @@ func (m *MockLLM) Extract(ctx context.Context, req ExtractRequest) (ExtractRespo
 }
 func (m *MockLLM) Decide(ctx context.Context, req DecideRequest) (DecideResponse, error) {
 	return m.DecideFunc(ctx, req)
+}
+func (m *MockLLM) Compact(ctx context.Context, req CompactRequest) (CompactResponse, error) {
+	if m.CompactFunc != nil {
+		return m.CompactFunc(ctx, req)
+	}
+	return CompactResponse{}, fmt.Errorf("compact not mocked")
 }
 func (m *MockLLM) DetectLanguage(ctx context.Context, text string) (string, error) {
 	return m.DetectLanguageFunc(ctx, text)

@@ -247,6 +247,6 @@ func sparseWeightsToVector(weights map[uint32]float32) ([]uint32, []float32) {
 
 func termHash(term string) uint32 {
 	hasher := fnv.New32a()
-	_, _ = hasher.Write([]byte(term))
+	hasher.Write([]byte(term)) //nolint:errcheck // hash.Write never returns error
 	return hasher.Sum32() & sparseDimMask
 }

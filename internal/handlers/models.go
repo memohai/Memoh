@@ -4,26 +4,21 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/settings"
 )
 
 type ModelsHandler struct {
-	service         *models.Service
-	settingsService *settings.Service
-	logger          *slog.Logger
+	service *models.Service
+	logger  *slog.Logger
 }
 
-func NewModelsHandler(log *slog.Logger, service *models.Service, settingsService *settings.Service) *ModelsHandler {
+func NewModelsHandler(log *slog.Logger, service *models.Service) *ModelsHandler {
 	return &ModelsHandler{
-		service:         service,
-		settingsService: settingsService,
-		logger:          log.With(slog.String("handler", "models")),
+		service: service,
+		logger:  log.With(slog.String("handler", "models")),
 	}
 }
 
@@ -33,7 +28,6 @@ func (h *ModelsHandler) Register(e *echo.Echo) {
 	group.GET("", h.List)
 	group.GET("/:id", h.GetByID)
 	group.GET("/model/:modelId", h.GetByModelID)
-	group.POST("/enable", h.Enable)
 	group.PUT("/:id", h.UpdateByID)
 	group.PUT("/model/:modelId", h.UpdateByModelID)
 	group.DELETE("/:id", h.DeleteByID)
@@ -68,7 +62,7 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 // @Description Get a list of all configured models, optionally filtered by type or client type
 // @Tags models
 // @Param type query string false "Model type (chat, embedding)"
-// @Param client_type query string false "Client type (openai, anthropic, google)"
+// @Param client_type query string false "Client type (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)"
 // @Success 200 {array} models.GetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -141,67 +135,6 @@ func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 	resp, err := h.service.GetByModelID(c.Request().Context(), modelID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	}
-	return c.JSON(http.StatusOK, resp)
-}
-
-type EnableModelRequest struct {
-	As      string `json:"as"`
-	ModelID string `json:"model_id"`
-}
-
-// Enable godoc
-// @Summary Enable model for chat/memory/embedding
-// @Description Update the current user's settings to use the selected model
-// @Tags models
-// @Param payload body handlers.EnableModelRequest true "Enable model payload"
-// @Success 200 {object} settings.Settings
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /models/enable [post]
-func (h *ModelsHandler) Enable(c echo.Context) error {
-	if h.settingsService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "settings service not configured")
-	}
-	userID, err := auth.UserIDFromContext(c)
-	if err != nil {
-		return err
-	}
-	var req EnableModelRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	req.As = strings.ToLower(strings.TrimSpace(req.As))
-	req.ModelID = strings.TrimSpace(req.ModelID)
-	if req.As == "" || req.ModelID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "as and model_id are required")
-	}
-	if req.As != "chat" && req.As != "memory" && req.As != "embedding" {
-		return echo.NewHTTPError(http.StatusBadRequest, "as must be one of chat, memory, embedding")
-	}
-	model, err := h.service.GetByModelID(c.Request().Context(), req.ModelID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	}
-	if req.As == "embedding" && model.Type != models.ModelTypeEmbedding {
-		return echo.NewHTTPError(http.StatusBadRequest, "model is not an embedding model")
-	}
-	if (req.As == "chat" || req.As == "memory") && model.Type != models.ModelTypeChat {
-		return echo.NewHTTPError(http.StatusBadRequest, "model is not a chat model")
-	}
-	upsert := settings.UpsertRequest{}
-	switch req.As {
-	case "chat":
-		upsert.ChatModelID = req.ModelID
-	case "memory":
-		upsert.MemoryModelID = req.ModelID
-	case "embedding":
-		upsert.EmbeddingModelID = req.ModelID
-	}
-	resp, err := h.settingsService.Upsert(c.Request().Context(), userID, upsert)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)
 }

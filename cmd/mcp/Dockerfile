@@ -11,7 +11,19 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath -ldflags "-s -w -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH}" -o /out/mcp ./cmd/mcp
 
 FROM alpine:latest
-RUN apk add --no-cache grep
+
+# Base utilities
+RUN apk add --no-cache grep curl bash
+
+# Node.js + npm (provides npx for JS/TS MCP servers)
+RUN apk add --no-cache nodejs npm
+
+# Python 3 + uv (provides uvx for Python MCP servers)
+RUN apk add --no-cache python3 && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ln -sf /root/.local/bin/uv /usr/local/bin/uv && \
+    ln -sf /root/.local/bin/uvx /usr/local/bin/uvx
+
 WORKDIR /app
 COPY --from=build /out/mcp /opt/mcp
 COPY cmd/mcp/template /opt/mcp-template

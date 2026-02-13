@@ -189,6 +189,8 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRe
 }
 
 // CreateHuman keeps compatibility with older call sites.
+//
+// Deprecated: use Create directly.
 func (s *Service) CreateHuman(ctx context.Context, userID string, req CreateAccountRequest) (Account, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -223,7 +225,7 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 	if err != nil {
 		return Account{}, err
 	}
-	role := fmt.Sprint(existing.Role)
+	role := existing.Role
 	if req.Role != nil {
 		role, err = normalizeRole(*req.Role)
 		if err != nil {
@@ -412,7 +414,7 @@ func toAccount(row sqlc.User) Account {
 		ID:          row.ID.String(),
 		Username:    username,
 		Email:       email,
-		Role:        fmt.Sprint(row.Role),
+		Role:        row.Role,
 		DisplayName: displayName,
 		AvatarURL:   avatarURL,
 		IsActive:    row.IsActive,

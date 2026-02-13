@@ -40,10 +40,6 @@ if [ "$(uname -s)" = "Darwin" ]; then
 fi
 """
 
-[tasks.containerd-install]
-description = "Install containerd or verify in Lima"
-run = "scripts/containerd-install.sh"
-
 [tasks.swagger-generate]
 description = "Generate Swagger documentation"
 run = "cd internal/handlers && go generate"
@@ -78,14 +74,6 @@ go build -trimpath -ldflags "-s -w" -o ~/.local/bin/memoh-cli ./cmd/cli
 chmod +x ~/.local/bin/memoh-cli
 echo "✓ CLI binary installed to ~/.local/bin/memoh-cli"
 """
-
-[tasks.mcp-image-up]
-description = "Build MCP container image"
-run = "scripts/mcp-image-up.sh"
-
-[tasks.mcp-image-down]
-description = "Remove MCP container image"
-run = "scripts/mcp-image-down.sh"
 
 [tasks.compile-mcp]
 description = "Build MCP binary into /app and signal container"

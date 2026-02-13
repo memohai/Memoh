@@ -25,6 +25,28 @@
 
 Memoh is a AI agent system platform. Users can create their own AI bots and chat with them via Telegram, Discord, Lark(Feishu), etc. Every bot has independent container and memory system which allows them to edit files, execute commands and build themselves - Like [OpenClaw](https://openclaw.ai), Memoh provides a more secure, flexible and scalable solution for multi-bot management.
 
+## Quick Start
+
+One-click install (requires Docker):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sh
+```
+
+Or manually:
+
+```bash
+git clone --depth 1 https://github.com/memohai/Memoh.git
+cd Memoh
+docker compose up -d
+```
+
+Visit http://localhost after startup. Default login: `admin` / `admin123`
+
+Silent install with all defaults: `curl -fsSL ... | sh -s -- -y`
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup.
+
 ## Why Memoh?
 
 OpenClaw, Clawdbot, and Moltbot are impressive, but they have notable drawbacks: stability issues, security concerns, cumbersome configuration, and high token costs. If you're looking for a stable, secure Bot SaaS solution, consider our open-source Memoh.
@@ -47,20 +69,6 @@ Memoh Bot can distinguish and remember requests from multiple humans and bots, w
 ## Roadmap
 
 Please refer to the [Roadmap Version 0.1](https://github.com/memohai/Memoh/issues/2) for more details.
-
-## Quick Start
-
-### Docker Deployment (Recommended)
-
-The fastest way to deploy Memoh:
-
-```bash
-git clone https://github.com/memohai/Memoh.git
-cd Memoh
-./deploy.sh
-```
-
-Visit http://localhost after deployment. See [Docker Deployment Guide](README_DOCKER.md) for details.
 
 ### Development
 

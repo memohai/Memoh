@@ -136,29 +136,9 @@ VALUES (
 )
 RETURNING *;
 
--- name: GetModelVariantByID :one
-SELECT * FROM model_variants WHERE id = sqlc.arg(id);
-
 -- name: ListModelVariantsByModelUUID :many
 SELECT * FROM model_variants
 WHERE model_uuid = sqlc.arg(model_uuid)
 ORDER BY weight DESC, created_at DESC;
 
--- name: ListModelVariantsByVariantID :many
-SELECT * FROM model_variants
-WHERE variant_id = sqlc.arg(variant_id)
-ORDER BY created_at DESC;
-
--- name: UpdateModelVariant :one
-UPDATE model_variants
-SET
-  variant_id = sqlc.arg(variant_id),
-  weight = sqlc.arg(weight),
-  metadata = sqlc.arg(metadata),
-  updated_at = now()
-WHERE id = sqlc.arg(id)
-RETURNING *;
-
--- name: DeleteModelVariant :exec
-DELETE FROM model_variants WHERE id = sqlc.arg(id);
 

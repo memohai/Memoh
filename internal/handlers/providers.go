@@ -79,7 +79,7 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 // @Tags providers
 // @Accept json
 // @Produce json
-// @Param client_type query string false "Client type filter (openai, anthropic, google, ollama)"
+// @Param client_type query string false "Client type filter (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)"
 // @Success 200 {array} providers.GetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -256,7 +256,7 @@ func (h *ProvidersHandler) Delete(c echo.Context) error {
 // @Tags providers
 // @Accept json
 // @Produce json
-// @Param client_type query string false "Client type filter (openai, anthropic, google, ollama)"
+// @Param client_type query string false "Client type filter (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)"
 // @Success 200 {object} providers.CountResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse

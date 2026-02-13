@@ -1,8 +1,14 @@
 export enum ClientType {
   OpenAI = 'openai',
-  OpenAICompatible = 'openai-compatible',
+  OpenAICompat = 'openai-compat',
   Anthropic = 'anthropic',
   Google = 'google',
+  Azure = 'azure',
+  Bedrock = 'bedrock',
+  Mistral = 'mistral',
+  XAI = 'xai',
+  Ollama = 'ollama',
+  Dashscope = 'dashscope',
 }
 
 export enum ModelInput {

@@ -314,7 +314,7 @@ func (s *Service) CountByType(ctx context.Context, modelType ModelType) (int64, 
 
 func convertToGetResponse(dbModel sqlc.Model) GetResponse {
 	resp := GetResponse{
-		ModelId: dbModel.ModelID,
+		ModelID: dbModel.ModelID,
 		Model: Model{
 			ModelID:      dbModel.ModelID,
 			IsMultimodal: dbModel.IsMultimodal,
@@ -357,13 +357,15 @@ func modelInputFromMultimodal(isMultimodal bool) []string {
 func isValidClientType(clientType ClientType) bool {
 	switch clientType {
 	case ClientTypeOpenAI,
+		ClientTypeOpenAICompat,
 		ClientTypeAnthropic,
 		ClientTypeGoogle,
-		ClientTypeBedrock,
-		ClientTypeOllama,
 		ClientTypeAzure,
-		ClientTypeDashscope,
-		ClientTypeOther:
+		ClientTypeBedrock,
+		ClientTypeMistral,
+		ClientTypeXAI,
+		ClientTypeOllama,
+		ClientTypeDashscope:
 		return true
 	default:
 		return false

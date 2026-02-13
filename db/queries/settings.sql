@@ -1,19 +1,3 @@
--- name: GetSettingsByUserID :one
-SELECT id AS user_id, chat_model_id, memory_model_id, embedding_model_id, max_context_load_time, language
-FROM users
-WHERE id = $1;
-
--- name: UpsertUserSettings :one
-UPDATE users
-SET chat_model_id = $2,
-    memory_model_id = $3,
-    embedding_model_id = $4,
-    max_context_load_time = $5,
-    language = $6,
-    updated_at = now()
-WHERE id = $1
-RETURNING id AS user_id, chat_model_id, memory_model_id, embedding_model_id, max_context_load_time, language;
-
 -- name: GetSettingsByBotID :one
 SELECT
   bots.id AS bot_id,
@@ -60,5 +44,8 @@ UPDATE bots
 SET max_context_load_time = 1440,
     language = 'auto',
     allow_guest = false,
+    chat_model_id = NULL,
+    memory_model_id = NULL,
+    embedding_model_id = NULL,
     updated_at = now()
 WHERE id = $1;

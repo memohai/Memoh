@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 
 /**
- * TagsInput key:value two-way conversion for add-platform config and create-mcp env.
+ * TagsInput key:value two-way conversion for platform config and MCP env/headers.
  * Input: string[] of "key:value"; output: Record<string, string> via callback.
  */
 export function useKeyValueTags() {

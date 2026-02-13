@@ -15,7 +15,6 @@
     "@fortawesome/free-solid-svg-icons": "^7.0.0",
     "@fortawesome/vue-fontawesome": "^3.1.1",
     "@memoh/sdk": "workspace:*",
-    "@memoh/shared": "workspace:*",
     "@memoh/ui": "workspace:*",
     "@pinia/colada": "^0.21.1",
     "@tailwindcss/vite": "^4.1.18",

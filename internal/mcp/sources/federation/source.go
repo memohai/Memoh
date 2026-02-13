@@ -91,7 +91,10 @@ func (s *Source) CallTool(ctx context.Context, session mcpgw.ToolSessionContext,
 
 	route, ok := s.getRoute(botID, toolName)
 	if !ok {
-		_, _ = s.ListTools(ctx, session)
+		// Refresh route cache; result intentionally discarded.
+		if _, err := s.ListTools(ctx, session); err != nil {
+			s.logger.Warn("federation: refresh tools cache failed", slog.Any("error", err))
+		}
 		route, ok = s.getRoute(botID, toolName)
 		if !ok {
 			return nil, mcpgw.ErrToolNotFound

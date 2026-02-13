@@ -16,7 +16,7 @@ import (
 
 // ConversationService contains the minimal conversation behavior required by route resolution.
 type ConversationService interface {
-	Create(ctx context.Context, botID, channelIdentityID string, req conversation.CreateRequest) (conversation.Chat, error)
+	Create(ctx context.Context, botID, channelIdentityID string, req conversation.CreateRequest) (conversation.Conversation, error)
 	IsParticipant(ctx context.Context, conversationID, channelIdentityID string) (bool, error)
 	AddParticipant(ctx context.Context, conversationID, channelIdentityID, role string) (conversation.Participant, error)
 }
@@ -63,14 +63,15 @@ func (s *DBService) Create(ctx context.Context, input CreateInput) (Route, error
 	}
 
 	row, err := s.queries.CreateChatRoute(ctx, sqlc.CreateChatRouteParams{
-		ChatID:          pgConversationID,
-		BotID:           pgBotID,
-		Platform:        input.Platform,
-		ChannelConfigID: pgConfigID,
-		ConversationID:  input.ConversationID,
-		ThreadID:        toPgText(input.ThreadID),
-		ReplyTarget:     toPgText(input.ReplyTarget),
-		Metadata:        metadata,
+		ChatID:           pgConversationID,
+		BotID:            pgBotID,
+		Platform:         input.Platform,
+		ChannelConfigID:  pgConfigID,
+		ConversationID:   input.ConversationID,
+		ThreadID:         toPgText(input.ThreadID),
+		ConversationType: toPgText(input.ConversationType),
+		ReplyTarget:      toPgText(input.ReplyTarget),
+		Metadata:         metadata,
 	})
 	if err != nil {
 		return Route{}, fmt.Errorf("create route: %w", err)
@@ -208,13 +209,14 @@ func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput)
 	}
 
 	newRoute, err := s.Create(ctx, CreateInput{
-		ChatID:          createdConversation.ID,
-		BotID:           input.BotID,
-		Platform:        input.Platform,
-		ChannelConfigID: input.ChannelConfigID,
-		ConversationID:  input.ConversationID,
-		ThreadID:        input.ThreadID,
-		ReplyTarget:     input.ReplyTarget,
+		ChatID:           createdConversation.ID,
+		BotID:            input.BotID,
+		Platform:         input.Platform,
+		ChannelConfigID:  input.ChannelConfigID,
+		ConversationID:   input.ConversationID,
+		ThreadID:         input.ThreadID,
+		ConversationType: input.ConversationType,
+		ReplyTarget:      input.ReplyTarget,
 	})
 	if err != nil {
 		return ResolveConversationResult{}, fmt.Errorf("create route: %w", err)
@@ -250,90 +252,60 @@ func (s *DBService) resolveConversationCreatorChannelIdentityID(ctx context.Cont
 		}
 		return fallback
 	}
-	ownerChannelIdentityID := row.OwnerUserID.String()
-	if strings.TrimSpace(ownerChannelIdentityID) == "" {
+	// NOTE: OwnerUserID is the bot owner's user ID. Used as fallback creator for group conversations.
+	ownerUserID := row.OwnerUserID.String()
+	if strings.TrimSpace(ownerUserID) == "" {
 		return fallback
 	}
-	return ownerChannelIdentityID
+	return ownerUserID
 }
 
 func toRouteFromCreate(row sqlc.CreateChatRouteRow) Route {
 	return toRouteFields(
-		row.ID,
-		row.ChatID,
-		row.BotID,
-		row.Platform,
-		row.ChannelConfigID,
-		row.ConversationID,
-		row.ThreadID,
-		row.ReplyTarget,
-		row.Metadata,
-		row.CreatedAt,
-		row.UpdatedAt,
+		row.ID, row.ChatID, row.BotID, row.Platform, row.ChannelConfigID,
+		row.ConversationID, row.ThreadID, row.ConversationType, row.ReplyTarget,
+		row.Metadata, row.CreatedAt, row.UpdatedAt,
 	)
 }
 
 func toRouteFromFind(row sqlc.FindChatRouteRow) Route {
 	return toRouteFields(
-		row.ID,
-		row.ChatID,
-		row.BotID,
-		row.Platform,
-		row.ChannelConfigID,
-		row.ConversationID,
-		row.ThreadID,
-		row.ReplyTarget,
-		row.Metadata,
-		row.CreatedAt,
-		row.UpdatedAt,
+		row.ID, row.ChatID, row.BotID, row.Platform, row.ChannelConfigID,
+		row.ConversationID, row.ThreadID, row.ConversationType, row.ReplyTarget,
+		row.Metadata, row.CreatedAt, row.UpdatedAt,
 	)
 }
 
 func toRouteFromGet(row sqlc.GetChatRouteByIDRow) Route {
 	return toRouteFields(
-		row.ID,
-		row.ChatID,
-		row.BotID,
-		row.Platform,
-		row.ChannelConfigID,
-		row.ConversationID,
-		row.ThreadID,
-		row.ReplyTarget,
-		row.Metadata,
-		row.CreatedAt,
-		row.UpdatedAt,
+		row.ID, row.ChatID, row.BotID, row.Platform, row.ChannelConfigID,
+		row.ConversationID, row.ThreadID, row.ConversationType, row.ReplyTarget,
+		row.Metadata, row.CreatedAt, row.UpdatedAt,
 	)
 }
 
 func toRouteFromList(row sqlc.ListChatRoutesRow) Route {
 	return toRouteFields(
-		row.ID,
-		row.ChatID,
-		row.BotID,
-		row.Platform,
-		row.ChannelConfigID,
-		row.ConversationID,
-		row.ThreadID,
-		row.ReplyTarget,
-		row.Metadata,
-		row.CreatedAt,
-		row.UpdatedAt,
+		row.ID, row.ChatID, row.BotID, row.Platform, row.ChannelConfigID,
+		row.ConversationID, row.ThreadID, row.ConversationType, row.ReplyTarget,
+		row.Metadata, row.CreatedAt, row.UpdatedAt,
 	)
 }
 
-func toRouteFields(id, conversationID, botID pgtype.UUID, platform string, channelConfigID pgtype.UUID, externalConversationID string, threadID, replyTarget pgtype.Text, metadata []byte, createdAt, updatedAt pgtype.Timestamptz) Route {
+func toRouteFields(id, conversationID, botID pgtype.UUID, platform string, channelConfigID pgtype.UUID, externalConversationID string, threadID, conversationType, replyTarget pgtype.Text, metadata []byte, createdAt, updatedAt pgtype.Timestamptz) Route {
 	return Route{
-		ID:              id.String(),
-		ChatID:          conversationID.String(),
-		BotID:           botID.String(),
-		Platform:        platform,
-		ChannelConfigID: channelConfigID.String(),
-		ConversationID:  externalConversationID,
-		ThreadID:        dbpkg.TextToString(threadID),
-		ReplyTarget:     dbpkg.TextToString(replyTarget),
-		Metadata:        parseJSONMap(metadata),
-		CreatedAt:       createdAt.Time,
-		UpdatedAt:       updatedAt.Time,
+		ID:               id.String(),
+		ChatID:           conversationID.String(),
+		BotID:            botID.String(),
+		Platform:         platform,
+		ChannelConfigID:  channelConfigID.String(),
+		ConversationID:   externalConversationID,
+		ThreadID:         dbpkg.TextToString(threadID),
+		ConversationType: dbpkg.TextToString(conversationType),
+		ReplyTarget:      dbpkg.TextToString(replyTarget),
+		Metadata:         parseJSONMap(metadata),
+		CreatedAt:        createdAt.Time,
+		UpdatedAt:        updatedAt.Time,
 	}
 }
 
@@ -357,6 +329,8 @@ func parseJSONMap(data []byte) map[string]any {
 		return nil
 	}
 	var m map[string]any
-	_ = json.Unmarshal(data, &m)
+	if err := json.Unmarshal(data, &m); err != nil {
+		slog.Warn("parseJSONMap: unmarshal failed", slog.Any("error", err))
+	}
 	return m
 }

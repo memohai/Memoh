@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/memohai/memoh/internal/conversation"
 )
 
 func TestPostTriggerSchedule_Endpoint(t *testing.T) {
@@ -21,7 +23,7 @@ func TestPostTriggerSchedule_Endpoint(t *testing.T) {
 		capturedAuth = r.Header.Get("Authorization")
 		capturedBody, _ = io.ReadAll(r.Body)
 		resp := gatewayResponse{
-			Messages: []ModelMessage{{Role: "assistant", Content: NewTextContent("ok")}},
+			Messages: []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("ok")}},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -36,23 +38,25 @@ func TestPostTriggerSchedule_Endpoint(t *testing.T) {
 
 	maxCalls := 5
 	req := triggerScheduleRequest{
-		Model: gatewayModelConfig{
-			ModelID:    "gpt-4",
-			ClientType: "openai",
-			APIKey:     "sk-test",
-			BaseURL:    "https://api.openai.com",
+		gatewayRequest: gatewayRequest{
+			Model: gatewayModelConfig{
+				ModelID:    "gpt-4",
+				ClientType: "openai",
+				APIKey:     "sk-test",
+				BaseURL:    "https://api.openai.com",
+			},
+			ActiveContextTime: 1440,
+			Channels:          []string{},
+			Messages:          []conversation.ModelMessage{},
+			Skills:            []string{},
+			Identity: gatewayIdentity{
+				BotID:             "bot-123",
+				ContainerID:       "mcp-bot-123",
+				ChannelIdentityID: "owner-user-1",
+				DisplayName:       "Scheduler",
+			},
+			Attachments: []any{},
 		},
-		ActiveContextTime: 1440,
-		Channels:          []string{},
-		Messages:          []ModelMessage{},
-		Skills:            []string{},
-		Identity: gatewayIdentity{
-			BotID:             "bot-123",
-			ContainerID:       "mcp-bot-123",
-			ChannelIdentityID: "owner-user-1",
-			DisplayName:       "Scheduler",
-		},
-		Attachments: []any{},
 		Schedule: gatewaySchedule{
 			ID:          "sched-1",
 			Name:        "daily report",
@@ -102,7 +106,7 @@ func TestPostTriggerSchedule_NoAuth(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedAuth = r.Header.Get("Authorization")
-		resp := gatewayResponse{Messages: []ModelMessage{}}
+		resp := gatewayResponse{Messages: []conversation.ModelMessage{}}
 		json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
@@ -114,11 +118,13 @@ func TestPostTriggerSchedule_NoAuth(t *testing.T) {
 	}
 
 	req := triggerScheduleRequest{
-		Channels:    []string{},
-		Messages:    []ModelMessage{},
-		Skills:      []string{},
-		Attachments: []any{},
-		Schedule:    gatewaySchedule{ID: "s1", Command: "test"},
+		gatewayRequest: gatewayRequest{
+			Channels:    []string{},
+			Messages:    []conversation.ModelMessage{},
+			Skills:      []string{},
+			Attachments: []any{},
+		},
+		Schedule: gatewaySchedule{ID: "s1", Command: "test"},
 	}
 
 	_, err := resolver.postTriggerSchedule(context.Background(), req, "")
@@ -144,11 +150,13 @@ func TestPostTriggerSchedule_GatewayError(t *testing.T) {
 	}
 
 	req := triggerScheduleRequest{
-		Channels:    []string{},
-		Messages:    []ModelMessage{},
-		Skills:      []string{},
-		Attachments: []any{},
-		Schedule:    gatewaySchedule{ID: "s1", Command: "test"},
+		gatewayRequest: gatewayRequest{
+			Channels:    []string{},
+			Messages:    []conversation.ModelMessage{},
+			Skills:      []string{},
+			Attachments: []any{},
+		},
+		Schedule: gatewaySchedule{ID: "s1", Command: "test"},
 	}
 
 	_, err := resolver.postTriggerSchedule(context.Background(), req, "Bearer tok")

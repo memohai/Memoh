@@ -10,9 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bind"
-	"github.com/memohai/memoh/internal/identity"
 )
 
 // BindHandler manages channel identity bind code issuance via REST API.
@@ -80,12 +78,5 @@ func (h *BindHandler) Issue(c echo.Context) error {
 }
 
 func (h *BindHandler) requireUserID(c echo.Context) (string, error) {
-	userID, err := auth.UserIDFromContext(c)
-	if err != nil {
-		return "", err
-	}
-	if err := identity.ValidateChannelIdentityID(userID); err != nil {
-		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	return userID, nil
+	return RequireChannelIdentityID(c)
 }

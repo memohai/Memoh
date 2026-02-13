@@ -287,7 +287,7 @@ func (s *Service) EmbedUpsert(ctx context.Context, req EmbedUpsertRequest) (Embe
 	}
 
 	vectorName := ""
-	if s.store != nil && s.store.usesNamedVectors {
+	if s.store.usesNamedVectors {
 		vectorName = result.Model
 	}
 
@@ -336,19 +336,22 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (MemoryItem, er
 	if existing == nil {
 		return MemoryItem{}, fmt.Errorf("memory not found")
 	}
-	if s.bm25 == nil {
-		return MemoryItem{}, fmt.Errorf("bm25 indexer not configured")
-	}
 
 	payload := existing.Payload
 	oldText := fmt.Sprint(payload["data"])
 	oldLang := fmt.Sprint(payload["lang"])
 	if oldLang == "" && strings.TrimSpace(oldText) != "" {
-		oldLang, _ = s.detectLanguage(ctx, oldText)
+		var detectErr error
+		oldLang, detectErr = s.detectLanguage(ctx, oldText)
+		if detectErr != nil {
+			s.logger.Warn("detect language failed for old text", slog.Any("error", detectErr))
+		}
 	}
 	if strings.TrimSpace(oldText) != "" && strings.TrimSpace(oldLang) != "" {
 		oldFreq, oldLen, err := s.bm25.TermFrequencies(oldLang, oldText)
-		if err == nil {
+		if err != nil {
+			s.logger.Warn("bm25 term frequencies failed", slog.String("lang", oldLang), slog.Any("error", err))
+		} else {
 			s.bm25.RemoveDocument(oldLang, oldFreq, oldLen)
 		}
 	}
@@ -365,7 +368,7 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (MemoryItem, er
 
 	payload["data"] = req.Memory
 	payload["hash"] = hashMemory(req.Memory)
-	payload["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+	payload["updated_at"] = time.Now().UTC().Format(time.RFC3339)
 	payload["lang"] = newLang
 
 	embeddingEnabled := req.EmbeddingEnabled != nil && *req.EmbeddingEnabled
@@ -413,10 +416,13 @@ func (s *Service) GetAll(ctx context.Context, req GetAllRequest) (SearchResponse
 		filters[k] = v
 	}
 	if req.BotID != "" {
-		filters["botId"] = req.BotID
+		filters["bot_id"] = req.BotID
+	}
+	if req.AgentID != "" {
+		filters["agent_id"] = req.AgentID
 	}
 	if req.RunID != "" {
-		filters["runId"] = req.RunID
+		filters["run_id"] = req.RunID
 	}
 	if len(filters) == 0 {
 		return SearchResponse{}, fmt.Errorf("bot_id, agent_id or run_id is required")
@@ -443,16 +449,39 @@ func (s *Service) Delete(ctx context.Context, memoryID string) (DeleteResponse, 
 	return DeleteResponse{Message: "Memory deleted successfully!"}, nil
 }
 
+func (s *Service) DeleteBatch(ctx context.Context, memoryIDs []string) (DeleteResponse, error) {
+	if len(memoryIDs) == 0 {
+		return DeleteResponse{}, fmt.Errorf("memory_ids is required")
+	}
+	cleaned := make([]string, 0, len(memoryIDs))
+	for _, id := range memoryIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleaned = append(cleaned, id)
+		}
+	}
+	if len(cleaned) == 0 {
+		return DeleteResponse{}, fmt.Errorf("memory_ids is required")
+	}
+	if err := s.store.DeleteBatch(ctx, cleaned); err != nil {
+		return DeleteResponse{}, err
+	}
+	return DeleteResponse{Message: fmt.Sprintf("%d memories deleted successfully!", len(cleaned))}, nil
+}
+
 func (s *Service) DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteResponse, error) {
 	filters := map[string]any{}
 	for k, v := range req.Filters {
 		filters[k] = v
 	}
 	if req.BotID != "" {
-		filters["botId"] = req.BotID
+		filters["bot_id"] = req.BotID
+	}
+	if req.AgentID != "" {
+		filters["agent_id"] = req.AgentID
 	}
 	if req.RunID != "" {
-		filters["runId"] = req.RunID
+		filters["run_id"] = req.RunID
 	}
 	if len(filters) == 0 {
 		return DeleteResponse{}, fmt.Errorf("bot_id, agent_id or run_id is required")
@@ -461,6 +490,142 @@ func (s *Service) DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteRe
 		return DeleteResponse{}, err
 	}
 	return DeleteResponse{Message: "Memories deleted successfully!"}, nil
+}
+
+func (s *Service) Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (CompactResult, error) {
+	if s.llm == nil {
+		return CompactResult{}, fmt.Errorf("llm not configured")
+	}
+	if s.store == nil {
+		return CompactResult{}, fmt.Errorf("qdrant store not configured")
+	}
+	if ratio <= 0 || ratio > 1 {
+		ratio = 0.5
+	}
+
+	// Fetch all existing memories.
+	points, err := s.store.List(ctx, 0, filters)
+	if err != nil {
+		return CompactResult{}, err
+	}
+	beforeCount := len(points)
+	if beforeCount <= 1 {
+		// Nothing to compact.
+		items := make([]MemoryItem, 0, len(points))
+		for _, p := range points {
+			items = append(items, payloadToMemoryItem(p.ID, p.Payload))
+		}
+		return CompactResult{
+			BeforeCount: beforeCount,
+			AfterCount:  beforeCount,
+			Ratio:       1.0,
+			Results:     items,
+		}, nil
+	}
+
+	// Build candidate list and compute target.
+	candidates := make([]CandidateMemory, 0, beforeCount)
+	for _, p := range points {
+		candidates = append(candidates, CandidateMemory{
+			ID:        p.ID,
+			Memory:    fmt.Sprint(p.Payload["data"]),
+			CreatedAt: fmt.Sprint(p.Payload["created_at"]),
+		})
+	}
+	targetCount := int(math.Round(float64(beforeCount) * ratio))
+	if targetCount < 1 {
+		targetCount = 1
+	}
+
+	// Ask LLM to consolidate.
+	compactResp, err := s.llm.Compact(ctx, CompactRequest{
+		Memories:    candidates,
+		TargetCount: targetCount,
+		DecayDays:   decayDays,
+	})
+	if err != nil {
+		return CompactResult{}, fmt.Errorf("compact llm call failed: %w", err)
+	}
+	if len(compactResp.Facts) == 0 {
+		return CompactResult{}, fmt.Errorf("compact returned no facts")
+	}
+
+	// Delete old memories.
+	if err := s.store.DeleteAll(ctx, filters); err != nil {
+		return CompactResult{}, fmt.Errorf("compact delete old failed: %w", err)
+	}
+
+	// Reset BM25 stats for deleted documents.
+	if s.bm25 != nil {
+		for _, p := range points {
+			text := fmt.Sprint(p.Payload["data"])
+			lang := fmt.Sprint(p.Payload["lang"])
+			if strings.TrimSpace(text) == "" || strings.TrimSpace(lang) == "" {
+				continue
+			}
+			freq, docLen, err := s.bm25.TermFrequencies(lang, text)
+			if err != nil {
+				continue
+			}
+			s.bm25.RemoveDocument(lang, freq, docLen)
+		}
+	}
+
+	// Add compacted facts.
+	results := make([]MemoryItem, 0, len(compactResp.Facts))
+	for _, fact := range compactResp.Facts {
+		if strings.TrimSpace(fact) == "" {
+			continue
+		}
+		item, err := s.applyAdd(ctx, fact, filters, nil, false)
+		if err != nil {
+			return CompactResult{}, fmt.Errorf("compact add failed: %w", err)
+		}
+		results = append(results, item)
+	}
+
+	afterCount := len(results)
+	actualRatio := float64(afterCount) / float64(beforeCount)
+	return CompactResult{
+		BeforeCount: beforeCount,
+		AfterCount:  afterCount,
+		Ratio:       math.Round(actualRatio*100) / 100,
+		Results:     results,
+	}, nil
+}
+
+const (
+	// Estimated sparse vector overhead per point: ~200 dims * 8 bytes (4 index + 4 value).
+	sparseVectorOverheadBytes = 1600
+	// Estimated payload metadata overhead per point (hash, dates, filters, lang, metadata JSON).
+	payloadMetadataOverheadBytes = 256
+)
+
+func (s *Service) Usage(ctx context.Context, filters map[string]any) (UsageResponse, error) {
+	if s.store == nil {
+		return UsageResponse{}, fmt.Errorf("qdrant store not configured")
+	}
+	points, err := s.store.List(ctx, 0, filters)
+	if err != nil {
+		return UsageResponse{}, err
+	}
+	count := len(points)
+	var totalTextBytes int64
+	for _, p := range points {
+		text := fmt.Sprint(p.Payload["data"])
+		totalTextBytes += int64(len(text))
+	}
+	var avgTextBytes int64
+	if count > 0 {
+		avgTextBytes = totalTextBytes / int64(count)
+	}
+	estimatedStorage := totalTextBytes + int64(count)*(sparseVectorOverheadBytes+payloadMetadataOverheadBytes)
+	return UsageResponse{
+		Count:                 count,
+		TotalTextBytes:        totalTextBytes,
+		AvgTextBytes:          avgTextBytes,
+		EstimatedStorageBytes: estimatedStorage,
+	}, nil
 }
 
 func (s *Service) WarmupBM25(ctx context.Context, batchSize int) error {
@@ -487,6 +652,7 @@ func (s *Service) WarmupBM25(ctx context.Context, batchSize int) error {
 			}
 			termFreq, docLen, err := s.bm25.TermFrequencies(lang, text)
 			if err != nil {
+				s.logger.Warn("bm25 warmup: term frequencies failed", slog.String("id", point.ID), slog.Any("error", err))
 				continue
 			}
 			s.bm25.AddDocument(lang, termFreq, docLen)
@@ -593,6 +759,42 @@ func (s *Service) applyAdd(ctx context.Context, text string, filters map[string]
 	return payloadToMemoryItem(id, payload), nil
 }
 
+// RebuildAdd inserts a memory with a specific ID (from filesystem recovery).
+// Like applyAdd but preserves the given ID instead of generating a new UUID.
+func (s *Service) RebuildAdd(ctx context.Context, id, text string, filters map[string]any) (MemoryItem, error) {
+	if s.store == nil {
+		return MemoryItem{}, fmt.Errorf("qdrant store not configured")
+	}
+	if s.bm25 == nil {
+		return MemoryItem{}, fmt.Errorf("bm25 indexer not configured")
+	}
+	if strings.TrimSpace(id) == "" {
+		return MemoryItem{}, fmt.Errorf("id is required for rebuild")
+	}
+	lang, err := s.detectLanguage(ctx, text)
+	if err != nil {
+		return MemoryItem{}, err
+	}
+	termFreq, docLen, err := s.bm25.TermFrequencies(lang, text)
+	if err != nil {
+		return MemoryItem{}, err
+	}
+	sparseIndices, sparseValues := s.bm25.AddDocument(lang, termFreq, docLen)
+	payload := buildPayload(text, filters, nil, "")
+	payload["lang"] = lang
+	point := qdrantPoint{
+		ID:               id,
+		SparseIndices:    sparseIndices,
+		SparseValues:     sparseValues,
+		SparseVectorName: s.store.sparseVectorName,
+		Payload:          payload,
+	}
+	if err := s.store.Upsert(ctx, []qdrantPoint{point}); err != nil {
+		return MemoryItem{}, err
+	}
+	return payloadToMemoryItem(id, payload), nil
+}
+
 func (s *Service) applyUpdate(ctx context.Context, id, text string, filters map[string]any, metadata map[string]any, embeddingEnabled bool) (MemoryItem, error) {
 	if strings.TrimSpace(id) == "" {
 		return MemoryItem{}, fmt.Errorf("update action missing id")
@@ -609,11 +811,17 @@ func (s *Service) applyUpdate(ctx context.Context, id, text string, filters map[
 	oldText := fmt.Sprint(payload["data"])
 	oldLang := fmt.Sprint(payload["lang"])
 	if oldLang == "" && strings.TrimSpace(oldText) != "" {
-		oldLang, _ = s.detectLanguage(ctx, oldText)
+		var detectErr error
+		oldLang, detectErr = s.detectLanguage(ctx, oldText)
+		if detectErr != nil {
+			s.logger.Warn("detect language failed for old text", slog.Any("error", detectErr))
+		}
 	}
 	if strings.TrimSpace(oldText) != "" && strings.TrimSpace(oldLang) != "" {
 		oldFreq, oldLen, err := s.bm25.TermFrequencies(oldLang, oldText)
-		if err == nil {
+		if err != nil {
+			s.logger.Warn("bm25 term frequencies failed", slog.String("lang", oldLang), slog.Any("error", err))
+		} else {
 			s.bm25.RemoveDocument(oldLang, oldFreq, oldLen)
 		}
 	}
@@ -628,7 +836,7 @@ func (s *Service) applyUpdate(ctx context.Context, id, text string, filters map[
 	sparseIndices, sparseValues := s.bm25.AddDocument(newLang, newFreq, newLen)
 	payload["data"] = text
 	payload["hash"] = hashMemory(text)
-	payload["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+	payload["updated_at"] = time.Now().UTC().Format(time.RFC3339)
 	payload["lang"] = newLang
 	if metadata != nil {
 		payload["metadata"] = mergeMetadata(payload["metadata"], metadata)
@@ -676,11 +884,17 @@ func (s *Service) applyDelete(ctx context.Context, id string) (MemoryItem, error
 		oldText := fmt.Sprint(existing.Payload["data"])
 		oldLang := fmt.Sprint(existing.Payload["lang"])
 		if oldLang == "" && strings.TrimSpace(oldText) != "" {
-			oldLang, _ = s.detectLanguage(ctx, oldText)
+			var detectErr error
+			oldLang, detectErr = s.detectLanguage(ctx, oldText)
+			if detectErr != nil {
+				s.logger.Warn("detect language failed for old text", slog.Any("error", detectErr))
+			}
 		}
 		if strings.TrimSpace(oldText) != "" && strings.TrimSpace(oldLang) != "" {
 			oldFreq, oldLen, err := s.bm25.TermFrequencies(oldLang, oldText)
-			if err == nil {
+			if err != nil {
+				s.logger.Warn("bm25 term frequencies failed", slog.String("lang", oldLang), slog.Any("error", err))
+			} else {
 				s.bm25.RemoveDocument(oldLang, oldFreq, oldLen)
 			}
 		}
@@ -754,10 +968,13 @@ func buildFilters(req AddRequest) map[string]any {
 		filters[key] = value
 	}
 	if req.BotID != "" {
-		filters["botId"] = req.BotID
+		filters["bot_id"] = req.BotID
+	}
+	if req.AgentID != "" {
+		filters["agent_id"] = req.AgentID
 	}
 	if req.RunID != "" {
-		filters["runId"] = req.RunID
+		filters["run_id"] = req.RunID
 	}
 	return filters
 }
@@ -768,10 +985,13 @@ func buildSearchFilters(req SearchRequest) map[string]any {
 		filters[key] = value
 	}
 	if req.BotID != "" {
-		filters["botId"] = req.BotID
+		filters["bot_id"] = req.BotID
+	}
+	if req.AgentID != "" {
+		filters["agent_id"] = req.AgentID
 	}
 	if req.RunID != "" {
-		filters["runId"] = req.RunID
+		filters["run_id"] = req.RunID
 	}
 	return filters
 }
@@ -782,10 +1002,13 @@ func buildEmbedFilters(req EmbedUpsertRequest) map[string]any {
 		filters[key] = value
 	}
 	if req.BotID != "" {
-		filters["botId"] = req.BotID
+		filters["bot_id"] = req.BotID
+	}
+	if req.AgentID != "" {
+		filters["agent_id"] = req.AgentID
 	}
 	if req.RunID != "" {
-		filters["runId"] = req.RunID
+		filters["run_id"] = req.RunID
 	}
 	return filters
 }
@@ -840,9 +1063,9 @@ func buildPayload(text string, filters map[string]any, metadata map[string]any, 
 		createdAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	payload := map[string]any{
-		"data":      text,
-		"hash":      hashMemory(text),
-		"createdAt": createdAt,
+		"data":       text,
+		"hash":       hashMemory(text),
+		"created_at": createdAt,
 	}
 	if metadata != nil {
 		payload["metadata"] = metadata
@@ -865,16 +1088,19 @@ func payloadToMemoryItem(id string, payload map[string]any) MemoryItem {
 	if v, ok := payload["hash"].(string); ok {
 		item.Hash = v
 	}
-	if v, ok := payload["createdAt"].(string); ok {
+	if v, ok := payload["created_at"].(string); ok {
 		item.CreatedAt = v
 	}
-	if v, ok := payload["updatedAt"].(string); ok {
+	if v, ok := payload["updated_at"].(string); ok {
 		item.UpdatedAt = v
 	}
-	if v, ok := payload["botId"].(string); ok {
+	if v, ok := payload["bot_id"].(string); ok {
 		item.BotID = v
 	}
-	if v, ok := payload["runId"].(string); ok {
+	if v, ok := payload["agent_id"].(string); ok {
+		item.AgentID = v
+	}
+	if v, ok := payload["run_id"].(string); ok {
 		item.RunID = v
 	}
 	if meta, ok := payload["metadata"].(map[string]any); ok {
@@ -924,76 +1150,33 @@ func mergeMetadata(base any, extra map[string]any) map[string]any {
 type rerankCandidate struct {
 	ID      string
 	Payload map[string]any
-	Score   float64
-	Source  string
-	Rank    int
 }
 
 const (
-	fusionModeRRF     = "rrf"
-	fusionModeCombMNZ = "combmnz"
-	fusionMode        = fusionModeRRF
-	rrfK              = 60.0
+	rrfK = 60.0
 )
 
-func fuseByRankFusion(pointsBySource map[string][]qdrantPoint, scoresBySource map[string][]float64) []MemoryItem {
+func fuseByRankFusion(pointsBySource map[string][]qdrantPoint, _ map[string][]float64) []MemoryItem {
 	candidates := map[string]*rerankCandidate{}
 	rrfScores := map[string]float64{}
-	combScores := map[string]float64{}
-	combCounts := map[string]int{}
 
-	for source, points := range pointsBySource {
-		scores := scoresBySource[source]
-		minScore := math.MaxFloat64
-		maxScore := -math.MaxFloat64
+	for _, points := range pointsBySource {
 		for idx, point := range points {
-			if idx >= len(scores) {
-				continue
-			}
-			score := scores[idx]
-			if score < minScore {
-				minScore = score
-			}
-			if score > maxScore {
-				maxScore = score
-			}
 			if _, ok := candidates[point.ID]; !ok {
 				candidates[point.ID] = &rerankCandidate{
 					ID:      point.ID,
 					Payload: point.Payload,
 				}
 			}
-		}
-		if minScore == math.MaxFloat64 {
-			minScore = 0
-		}
-		if maxScore == -math.MaxFloat64 {
-			maxScore = minScore
-		}
-
-		for idx, point := range points {
-			if idx >= len(scores) {
-				continue
-			}
-			score := scores[idx]
 			rank := float64(idx + 1)
 			rrfScores[point.ID] += 1.0 / (rrfK + rank)
-
-			scoreNorm := normalizeScore(score, minScore, maxScore)
-			combScores[point.ID] += scoreNorm
-			combCounts[point.ID]++
 		}
 	}
 
 	items := make([]MemoryItem, 0, len(candidates))
 	for id, candidate := range candidates {
 		item := payloadToMemoryItem(candidate.ID, candidate.Payload)
-		switch fusionMode {
-		case fusionModeCombMNZ:
-			item.Score = combScores[id] * float64(combCounts[id])
-		default:
-			item.Score = rrfScores[id]
-		}
+		item.Score = rrfScores[id]
 		items = append(items, item)
 	}
 
@@ -1001,11 +1184,4 @@ func fuseByRankFusion(pointsBySource map[string][]qdrantPoint, scoresBySource ma
 		return items[i].Score > items[j].Score
 	})
 	return items
-}
-
-func normalizeScore(score, minScore, maxScore float64) float64 {
-	if maxScore <= minScore {
-		return 1
-	}
-	return (score - minScore) / (maxScore - minScore)
 }

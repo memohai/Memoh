@@ -78,6 +78,8 @@ definitions:
     type: object
   bots.Bot:
     properties:
+      allow_guest:
+        type: boolean
       avatar_url:
         type: string
       check_issue_count:
@@ -148,6 +150,13 @@ definitions:
       items:
         items:
           $ref: '#/definitions/bots.Bot'
+        type: array
+    type: object
+  bots.ListCheckKeysResponse:
+    properties:
+      keys:
+        items:
+          type: string
         type: array
     type: object
   bots.ListChecksResponse:
@@ -514,8 +523,6 @@ definitions:
     type: object
   github_com_memohai_memoh_internal_mcp.Connection:
     properties:
-      active:
-        type: boolean
       bot_id:
         type: string
       config:
@@ -525,12 +532,21 @@ definitions:
         type: string
       id:
         type: string
+      is_active:
+        type: boolean
       name:
         type: string
       type:
         type: string
       updated_at:
         type: string
+    type: object
+  handlers.BatchDeleteRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
     type: object
   handlers.ChannelMeta:
     properties:
@@ -622,19 +638,12 @@ definitions:
     type: object
   handlers.EmbeddingsUsage:
     properties:
+      duration:
+        type: integer
       image_tokens:
         type: integer
       input_tokens:
         type: integer
-      video_tokens:
-        type: integer
-    type: object
-  handlers.EnableModelRequest:
-    properties:
-      as:
-        type: string
-      model_id:
-        type: string
     type: object
   handlers.ErrorResponse:
     properties:
@@ -784,6 +793,61 @@ definitions:
       user_id:
         type: string
     type: object
+  handlers.memoryAddPayload:
+    properties:
+      embedding_enabled:
+        type: boolean
+      filters:
+        additionalProperties: {}
+        type: object
+      infer:
+        type: boolean
+      message:
+        type: string
+      messages:
+        items:
+          $ref: '#/definitions/memory.Message'
+        type: array
+      metadata:
+        additionalProperties: {}
+        type: object
+      namespace:
+        type: string
+      run_id:
+        type: string
+    type: object
+  handlers.memoryCompactPayload:
+    properties:
+      decay_days:
+        type: integer
+      ratio:
+        type: number
+    type: object
+  handlers.memoryDeletePayload:
+    properties:
+      memory_ids:
+        items:
+          type: string
+        type: array
+    type: object
+  handlers.memorySearchPayload:
+    properties:
+      embedding_enabled:
+        type: boolean
+      filters:
+        additionalProperties: {}
+        type: object
+      limit:
+        type: integer
+      query:
+        type: string
+      run_id:
+        type: string
+      sources:
+        items:
+          type: string
+        type: array
+    type: object
   handlers.skillsOpResponse:
     properties:
       ok:
@@ -791,6 +855,8 @@ definitions:
     type: object
   identities.ChannelIdentity:
     properties:
+      avatar_url:
+        type: string
       channel:
         type: string
       channel_subject_id:
@@ -809,6 +875,20 @@ definitions:
       user_id:
         type: string
     type: object
+  mcp.ExportResponse:
+    properties:
+      mcpServers:
+        additionalProperties:
+          $ref: '#/definitions/mcp.MCPServerEntry'
+        type: object
+    type: object
+  mcp.ImportRequest:
+    properties:
+      mcpServers:
+        additionalProperties:
+          $ref: '#/definitions/mcp.MCPServerEntry'
+        type: object
+    type: object
   mcp.ListResponse:
     properties:
       items:
@@ -816,17 +896,136 @@ definitions:
           $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
         type: array
     type: object
+  mcp.MCPServerEntry:
+    properties:
+      args:
+        items:
+          type: string
+        type: array
+      command:
+        type: string
+      cwd:
+        type: string
+      env:
+        additionalProperties:
+          type: string
+        type: object
+      headers:
+        additionalProperties:
+          type: string
+        type: object
+      transport:
+        type: string
+      url:
+        type: string
+    type: object
   mcp.UpsertRequest:
     properties:
-      active:
-        type: boolean
-      config:
-        additionalProperties: {}
+      args:
+        items:
+          type: string
+        type: array
+      command:
+        type: string
+      cwd:
+        type: string
+      env:
+        additionalProperties:
+          type: string
         type: object
+      headers:
+        additionalProperties:
+          type: string
+        type: object
+      is_active:
+        type: boolean
       name:
         type: string
-      type:
+      transport:
         type: string
+      url:
+        type: string
+    type: object
+  memory.CompactResult:
+    properties:
+      after_count:
+        type: integer
+      before_count:
+        type: integer
+      ratio:
+        type: number
+      results:
+        items:
+          $ref: '#/definitions/memory.MemoryItem'
+        type: array
+    type: object
+  memory.DeleteResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  memory.MemoryItem:
+    properties:
+      agent_id:
+        type: string
+      bot_id:
+        type: string
+      created_at:
+        type: string
+      hash:
+        type: string
+      id:
+        type: string
+      memory:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      run_id:
+        type: string
+      score:
+        type: number
+      updated_at:
+        type: string
+    type: object
+  memory.Message:
+    properties:
+      content:
+        type: string
+      role:
+        type: string
+    type: object
+  memory.RebuildResult:
+    properties:
+      fs_count:
+        type: integer
+      missing_count:
+        type: integer
+      qdrant_count:
+        type: integer
+      restored_count:
+        type: integer
+    type: object
+  memory.SearchResponse:
+    properties:
+      relations:
+        items: {}
+        type: array
+      results:
+        items:
+          $ref: '#/definitions/memory.MemoryItem'
+        type: array
+    type: object
+  memory.UsageResponse:
+    properties:
+      avg_text_bytes:
+        type: integer
+      count:
+        type: integer
+      estimated_storage_bytes:
+        type: integer
+      total_text_bytes:
+        type: integer
     type: object
   models.AddRequest:
     properties:
@@ -911,14 +1110,24 @@ definitions:
     - openai-compat
     - anthropic
     - google
+    - azure
+    - bedrock
+    - mistral
+    - xai
     - ollama
+    - dashscope
     type: string
     x-enum-varnames:
     - ClientTypeOpenAI
     - ClientTypeOpenAICompat
     - ClientTypeAnthropic
     - ClientTypeGoogle
+    - ClientTypeAzure
+    - ClientTypeBedrock
+    - ClientTypeMistral
+    - ClientTypeXAI
     - ClientTypeOllama
+    - ClientTypeDashscope
   providers.CountResponse:
     properties:
       count:
@@ -1597,6 +1806,34 @@ paths:
       summary: Create MCP connection
       tags:
       - mcp
+  /bots/{bot_id}/mcp-ops/batch-delete:
+    post:
+      description: Delete multiple MCP connections by IDs.
+      parameters:
+      - description: IDs to delete
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.BatchDeleteRequest'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Batch delete MCP connections
+      tags:
+      - mcp
   /bots/{bot_id}/mcp-stdio:
     post:
       description: Start a stdio MCP process in the bot container and expose it as
@@ -1774,6 +2011,390 @@ paths:
       summary: Update MCP connection
       tags:
       - mcp
+  /bots/{bot_id}/mcp/export:
+    get:
+      description: Export all MCP connections for a bot in standard mcpServers format.
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.ExportResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Export MCP connections
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp/import:
+    put:
+      description: Batch import MCP connections from standard mcpServers format. Existing
+        connections (matched by name) get config updated with is_active preserved.
+        New connections are created as active.
+      parameters:
+      - description: mcpServers dict
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/mcp.ImportRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.ListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Import MCP connections
+      tags:
+      - mcp
+  /bots/{bot_id}/memory:
+    delete:
+      consumes:
+      - application/json
+      description: Delete specific memories by IDs, or delete all memories if no IDs
+        are provided
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: 'Optional: specify memory_ids to delete; if omitted, deletes
+          all'
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.memoryDeletePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/memory.DeleteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete memories
+      tags:
+      - memory
+    get:
+      description: List all memories in the bot-shared namespace
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/memory.SearchResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get all memories
+      tags:
+      - memory
+    post:
+      consumes:
+      - application/json
+      description: Add memory into the bot-shared namespace
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Memory add payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.memoryAddPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/memory.SearchResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Add memory
+      tags:
+      - memory
+  /bots/{bot_id}/memory/{id}:
+    delete:
+      description: Delete a single memory by its ID
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Memory ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/memory.DeleteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a single memory
+      tags:
+      - memory
+  /bots/{bot_id}/memory/compact:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Consolidate memories by merging similar/redundant entries using LLM.
+
+        **ratio** (required, range (0,1]):
+        - 0.8 = light compression, mostly dedup, keep ~80% of entries
+        - 0.5 = moderate compression, merge similar facts, keep ~50%
+        - 0.3 = aggressive compression, heavily consolidate, keep ~30%
+
+        **decay_days** (optional): enable time decay — memories older than N days are treated as low priority and more likely to be merged/dropped.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: ratio (0,1] required; decay_days optional
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.memoryCompactPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/memory.CompactResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Compact memories
+      tags:
+      - memory
+  /bots/{bot_id}/memory/rebuild:
+    post:
+      description: Read memory files from the container filesystem (source of truth)
+        and restore missing entries to Qdrant
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/memory.RebuildResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Rebuild memories from filesystem
+      tags:
+      - memory
+  /bots/{bot_id}/memory/search:
+    post:
+      consumes:
+      - application/json
+      description: Search memory in the bot-shared namespace
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Memory search payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.memorySearchPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/memory.SearchResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Search memory
+      tags:
+      - memory
+  /bots/{bot_id}/memory/usage:
+    get:
+      description: Query the estimated storage usage of current memories
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/memory.UsageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get memory usage
+      tags:
+      - memory
   /bots/{bot_id}/schedule:
     get:
       description: List schedules for current user
@@ -2623,6 +3244,45 @@ paths:
       summary: List bot runtime checks
       tags:
       - bots
+  /bots/{id}/checks/keys:
+    get:
+      description: Returns all check keys available for a bot (builtin + MCP connections)
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/bots.ListCheckKeysResponse'
+      summary: List available check keys
+      tags:
+      - bots
+  /bots/{id}/checks/run/{key}:
+    get:
+      description: Evaluate one check key for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Check key
+        in: path
+        name: key
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/bots.BotCheck'
+      summary: Run a single bot check
+      tags:
+      - bots
   /bots/{id}/members:
     get:
       description: List members for a bot
@@ -2850,7 +3510,8 @@ paths:
         in: query
         name: type
         type: string
-      - description: Client type (openai, anthropic, google)
+      - description: Client type (openai, openai-compat, anthropic, google, azure,
+          bedrock, mistral, xai, ollama, dashscope)
         in: query
         name: client_type
         type: string
@@ -3010,36 +3671,6 @@ paths:
       summary: Get model count
       tags:
       - models
-  /models/enable:
-    post:
-      description: Update the current user's settings to use the selected model
-      parameters:
-      - description: Enable model payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.EnableModelRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/settings.Settings'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Enable model for chat/memory/embedding
-      tags:
-      - models
   /models/model/{modelId}:
     delete:
       description: Delete a model configuration by its model_id field (e.g., gpt-4)
@@ -3136,7 +3767,8 @@ paths:
       description: Get a list of all configured LLM providers, optionally filtered
         by client type
       parameters:
-      - description: Client type filter (openai, anthropic, google, ollama)
+      - description: Client type filter (openai, openai-compat, anthropic, google,
+          azure, bedrock, mistral, xai, ollama, dashscope)
         in: query
         name: client_type
         type: string
@@ -3332,7 +3964,8 @@ paths:
       description: Get the total count of providers, optionally filtered by client
         type
       parameters:
-      - description: Client type filter (openai, anthropic, google, ollama)
+      - description: Client type filter (openai, openai-compat, anthropic, google,
+          azure, bedrock, mistral, xai, ollama, dashscope)
         in: query
         name: client_type
         type: string

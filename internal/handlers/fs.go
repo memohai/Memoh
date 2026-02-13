@@ -53,22 +53,6 @@ func (h *ContainerdHandler) validateMCPContainer(ctx context.Context, containerI
 	return nil
 }
 
-func (h *ContainerdHandler) callMCPServer(ctx context.Context, containerID string, req mcptools.JSONRPCRequest) (map[string]any, error) {
-	session, err := h.getMCPSession(ctx, containerID)
-	if err != nil {
-		return nil, err
-	}
-	return session.call(ctx, req)
-}
-
-func (h *ContainerdHandler) notifyMCPServer(ctx context.Context, containerID string, req mcptools.JSONRPCRequest) error {
-	session, err := h.getMCPSession(ctx, containerID)
-	if err != nil {
-		return err
-	}
-	return session.notify(ctx, req)
-}
-
 type mcpSession struct {
 	stdin     io.WriteCloser
 	stdout    io.ReadCloser
