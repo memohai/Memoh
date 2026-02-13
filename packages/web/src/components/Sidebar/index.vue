@@ -77,7 +77,7 @@ import { computed, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import ChatListMenu from './lists/chat-list-menu.vue'
 import SettingsListMenu from './lists/settings-list-menu.vue'
-import { useUserStore } from '@/store/User'
+import { useUserStore } from '@/store/user'
 
 const router = useRouter()
 const route = useRoute()

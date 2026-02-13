@@ -287,7 +287,7 @@ import {
   type UserAccount,
 } from '@/composables/api/useUsers'
 import { ApiError } from '@/utils/request'
-import { useUserStore } from '@/store/User'
+import { useUserStore } from '@/store/user'
 
 const anyPlatformValue = '__all__'
 

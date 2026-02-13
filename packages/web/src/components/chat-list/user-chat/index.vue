@@ -25,7 +25,7 @@
 import type { user } from '@memoh/shared'
 import { Avatar, AvatarFallback, AvatarImage } from '@memoh/ui'
 import { computed } from 'vue'
-import { useUserStore } from '@/store/User'
+import { useUserStore } from '@/store/user'
 import ChannelBadge from '../channel-badge/index.vue'
 
 const { userSay } = defineProps<{
