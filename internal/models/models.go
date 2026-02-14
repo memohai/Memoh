@@ -235,7 +235,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 
 	params := sqlc.UpdateModelByModelIDParams{
 		ModelID:      modelID,
-		NewModelID:   model.ModelID, // 更新 model_id 字段
+		NewModelID:   model.ModelID,
 		IsMultimodal: model.IsMultimodal,
 		Type:         string(model.Type),
 	}
