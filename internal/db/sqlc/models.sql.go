@@ -673,17 +673,19 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 const updateModelByModelID = `-- name: UpdateModelByModelID :one
 UPDATE models
 SET
-  name = $1,
-  llm_provider_id = $2,
-  dimensions = $3,
-  is_multimodal = $4,
-  type = $5,
+  model_id = $1,
+  name = $2,
+  llm_provider_id = $3,
+  dimensions = $4,
+  is_multimodal = $5,
+  type = $6,
   updated_at = now()
-WHERE model_id = $6
+WHERE model_id = $7
 RETURNING id, model_id, name, llm_provider_id, dimensions, is_multimodal, type, created_at, updated_at
 `
 
 type UpdateModelByModelIDParams struct {
+	NewModelID    string      `json:"new_model_id"`
 	Name          pgtype.Text `json:"name"`
 	LlmProviderID pgtype.UUID `json:"llm_provider_id"`
 	Dimensions    pgtype.Int4 `json:"dimensions"`
@@ -694,6 +696,7 @@ type UpdateModelByModelIDParams struct {
 
 func (q *Queries) UpdateModelByModelID(ctx context.Context, arg UpdateModelByModelIDParams) (Model, error) {
 	row := q.db.QueryRow(ctx, updateModelByModelID,
+		arg.NewModelID,
 		arg.Name,
 		arg.LlmProviderID,
 		arg.Dimensions,

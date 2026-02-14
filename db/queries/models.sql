@@ -104,6 +104,7 @@ RETURNING *;
 -- name: UpdateModelByModelID :one
 UPDATE models
 SET
+  model_id = sqlc.arg(new_model_id),
   name = sqlc.arg(name),
   llm_provider_id = sqlc.arg(llm_provider_id),
   dimensions = sqlc.arg(dimensions),
