@@ -43,7 +43,7 @@ cd Memoh
 docker compose up -d
 ```
 
-启动后访问 http://localhost。默认登录：`admin` / `admin123`
+启动后访问 <http://localhost:8082>。默认登录：`admin` / `admin123`
 
 自定义配置与生产部署请参阅 [DEPLOYMENT.md](DEPLOYMENT.md)。
 

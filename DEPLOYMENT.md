@@ -15,7 +15,7 @@ docker compose up -d
 ```
 
 Access:
-- Web UI: http://localhost
+- Web UI: http://localhost:8082
 - API: http://localhost:8080
 - Agent: http://localhost:8081
 

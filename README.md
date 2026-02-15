@@ -43,7 +43,7 @@ cd Memoh
 docker compose up -d
 ```
 
-Visit http://localhost after startup. Default login: `admin` / `admin123`
+Visit <http://localhost8082> after startup. Default login: `admin` / `admin123`
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup.
 
