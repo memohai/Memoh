@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 import { Command } from 'commander'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
@@ -8,77 +7,44 @@ import readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 
 import packageJson from '../../package.json'
-import { apiRequest } from '../core/api'
+import { setupClient, client } from '../core/client'
 import { registerBotCommands } from './bot'
 import { registerChannelCommands } from './channel'
 import { streamChat } from './stream'
 import {
   readConfig,
   writeConfig,
-  readToken,
   writeToken,
   clearToken,
-  TokenInfo,
-  getBaseURL,
+  type TokenInfo,
 } from '../utils/store'
+import { ensureAuth, getErrorMessage, resolveBotId } from './shared'
 
-type Provider = {
-  id: string
-  name: string
-  client_type: string
-  base_url: string
-  api_key?: string
-}
+import {
+  postAuthLogin,
+  getUsersMe,
+  getProviders,
+  postProviders,
+  getProvidersNameByName,
+  deleteProvidersById,
+  getModels,
+  postModels,
+  deleteModelsModelByModelId,
+  type ProvidersGetResponse,
+  type ModelsGetResponse,
+  type ScheduleSchedule,
+  type ScheduleListResponse,
+} from '@memoh/sdk'
 
-type Model = {
-  model_id: string
-  name?: string
-  llm_provider_id: string
-  is_multimodal: boolean
-  type: 'chat' | 'embedding'
-  dimensions?: number
-}
+// ---------------------------------------------------------------------------
+// Initialize SDK client
+// ---------------------------------------------------------------------------
 
-type ModelResponse = Partial<Model> & {
-  model_id?: string
-  model?: Model
-}
+setupClient()
 
-type Schedule = {
-  id: string
-  name: string
-  description: string
-  pattern: string
-  max_calls?: number | null
-  current_calls?: number
-  created_at?: string
-  updated_at?: string
-  enabled: boolean
-  command: string
-  user_id?: string
-}
-
-type ScheduleListResponse = {
-  items: Schedule[]
-}
-
-
-type Bot = {
-  id: string
-  name?: string
-  display_name?: string
-  description?: string
-  avatar?: string
-  type?: string
-  owner_user_id: string
-  is_public?: boolean
-  created_at: string
-  updated_at: string
-}
-
-type BotListResponse = {
-  items: Bot[]
-}
+// ---------------------------------------------------------------------------
+// Program setup
+// ---------------------------------------------------------------------------
 
 const program = new Command()
 program
@@ -89,90 +55,48 @@ program
 registerBotCommands(program)
 registerChannelCommands(program)
 
-const ensureAuth = () => {
-  const token = readToken()
-  if (!token?.access_token) {
-    console.log(chalk.red('Not logged in. Run `memoh login` first.'))
-    process.exit(1)
-  }
-  return token
-}
+// ---------------------------------------------------------------------------
+// Model/Provider helpers
+// ---------------------------------------------------------------------------
+
+const getModelId = (item: ModelsGetResponse) => item.model_id ?? ''
+const getProviderId = (item: ModelsGetResponse) => item.llm_provider_id ?? ''
+const getModelType = (item: ModelsGetResponse) => item.type ?? 'chat'
+const getModelMultimodal = (item: ModelsGetResponse) => item.is_multimodal ?? false
 
 const ensureModelsReady = async () => {
-  const token = ensureAuth()
-  const [chatModels, embeddingModels] = await Promise.all([
-    apiRequest<ModelResponse[]>('/models?type=chat', {}, token),
-    apiRequest<ModelResponse[]>('/models?type=embedding', {}, token),
+  ensureAuth()
+  const [chatResult, embeddingResult] = await Promise.all([
+    getModels({ query: { type: 'chat' }, throwOnError: true }),
+    getModels({ query: { type: 'embedding' }, throwOnError: true }),
   ])
-  if (chatModels.length === 0 || embeddingModels.length === 0) {
+  const chatModels = chatResult.data ?? []
+  const embeddingModels = embeddingResult.data ?? []
+  if (!Array.isArray(chatModels) || chatModels.length === 0 ||
+      !Array.isArray(embeddingModels) || embeddingModels.length === 0) {
     console.log(chalk.red('Model configuration incomplete.'))
     console.log(chalk.yellow('At least one chat model and one embedding model are required.'))
     process.exit(1)
   }
 }
 
-const getErrorMessage = (err: unknown) => {
-  if (err && typeof err === 'object' && 'message' in err) {
-    const value = (err as { message?: unknown }).message
-    if (typeof value === 'string') return value
-  }
-  return 'Unknown error'
-}
-
-const resolveBotId = async (token: TokenInfo, preset?: string) => {
-  if (preset && preset.trim()) {
-    return preset.trim()
-  }
-  const spinner = ora('Fetching bots...').start()
-  let bots: Bot[] = []
-  try {
-    const resp = await apiRequest<BotListResponse>('/bots', {}, token)
-    bots = resp.items
-    spinner.stop()
-  } catch (err: unknown) {
-    spinner.fail(`Failed to fetch bots: ${getErrorMessage(err)}`)
-    process.exit(1)
-  }
-  if (bots.length === 0) {
-    console.log(chalk.yellow('No bots found. Please create a bot first.'))
-    process.exit(0)
-  }
-  const { botId } = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'botId',
-      message: 'Select a bot to chat with:',
-      choices: bots.map(b => ({
-        name: `${b.display_name || b.name || b.id || 'unknown'} ${b.type ? chalk.gray(b.type) : ''}`.trim(),
-        value: b.id,
-      })),
-    },
-  ])
-  return botId as string
-}
-
-const getModelId = (item: ModelResponse) => item.model?.model_id ?? item.model_id ?? ''
-const getProviderId = (item: ModelResponse) => item.model?.llm_provider_id ?? item.llm_provider_id ?? ''
-const getModelType = (item: ModelResponse) => item.model?.type ?? item.type ?? 'chat'
-const getModelMultimodal = (item: ModelResponse) => item.model?.is_multimodal ?? item.is_multimodal ?? false
-
-const renderProvidersTable = (providers: Provider[], models: ModelResponse[]) => {
+const renderProvidersTable = (providers: ProvidersGetResponse[], models: ModelsGetResponse[]) => {
   const rows: string[][] = [['Provider', 'Type', 'Base URL', 'Models']]
   for (const provider of providers) {
     const providerModels = models
       .filter(m => getProviderId(m) === provider.id)
       .map(m => `${getModelId(m)} (${getModelType(m)})`)
     rows.push([
-      provider.name,
-      provider.client_type,
-      provider.base_url,
+      provider.name ?? '',
+      provider.client_type ?? '',
+      provider.base_url ?? '',
       providerModels.join(', ') || '-',
     ])
   }
   return table(rows)
 }
 
-const renderModelsTable = (models: ModelResponse[], providers: Provider[]) => {
+const renderModelsTable = (models: ModelsGetResponse[], providers: ProvidersGetResponse[]) => {
   const providerMap = new Map(providers.map(p => [p.id, p.name]))
   const rows: string[][] = [['Model ID', 'Type', 'Provider', 'Multimodal']]
   for (const item of models) {
@@ -186,21 +110,25 @@ const renderModelsTable = (models: ModelResponse[], providers: Provider[]) => {
   return table(rows)
 }
 
-const renderSchedulesTable = (items: Schedule[]) => {
+const renderSchedulesTable = (items: ScheduleSchedule[]) => {
   const rows: string[][] = [['ID', 'Name', 'Pattern', 'Enabled', 'Max Calls', 'Current Calls', 'Command']]
   for (const item of items) {
     rows.push([
-      item.id,
-      item.name,
-      item.pattern,
+      item.id ?? '',
+      item.name ?? '',
+      item.pattern ?? '',
       item.enabled ? 'yes' : 'no',
       item.max_calls === null || item.max_calls === undefined ? '-' : String(item.max_calls),
       item.current_calls === undefined ? '-' : String(item.current_calls),
-      item.command,
+      item.command ?? '',
     ])
   }
   return table(rows)
 }
+
+// ---------------------------------------------------------------------------
+// Auth commands
+// ---------------------------------------------------------------------------
 
 program
   .command('login')
@@ -212,14 +140,21 @@ program
     ])
     const spinner = ora('Logging in...').start()
     try {
-      const resp = await apiRequest<TokenInfo>('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({
+      const { data } = await postAuthLogin({
+        body: {
           username: answers.username,
           password: answers.password,
-        }),
-      }, null)
-      writeToken(resp)
+        },
+        throwOnError: true,
+      })
+      const tokenInfo: TokenInfo = {
+        access_token: data.access_token ?? '',
+        token_type: data.token_type ?? 'bearer',
+        expires_at: data.expires_at ?? '',
+        user_id: data.user_id ?? '',
+        username: data.username,
+      }
+      writeToken(tokenInfo)
       spinner.succeed('Logged in')
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Login failed')
@@ -238,32 +173,24 @@ program
 program
   .command('whoami')
   .description('Show current user')
-  .action(() => {
-    const token = readToken()
-    if (!token?.access_token) {
-      console.log(chalk.red('Not logged in.'))
-      process.exit(1)
-    }
-    if (token.username) {
-      console.log(`username: ${token.username}`)
-    }
-    if (token.user_id) {
-      console.log(`user_id: ${token.user_id}`)
-      return
-    }
-    const payload = token.access_token.split('.')[1]
-    if (!payload) {
-      console.log(chalk.yellow('Token found but payload missing.'))
-      return
-    }
-    const decoded = Buffer.from(payload, 'base64').toString('utf-8')
+  .action(async () => {
+    const token = ensureAuth()
     try {
-      const data = JSON.parse(decoded)
-      console.log(`user_id: ${data.user_id ?? data.sub ?? 'unknown'}`)
+      const { data } = await getUsersMe({ throwOnError: true })
+      if (data.username) console.log(`username: ${data.username}`)
+      if (data.display_name) console.log(`display_name: ${data.display_name}`)
+      if (data.id) console.log(`user_id: ${data.id}`)
+      if (data.role) console.log(`role: ${data.role}`)
     } catch {
-      console.log(chalk.yellow('Unable to parse token payload.'))
+      // Fallback to token info if API call fails
+      if (token.username) console.log(`username: ${token.username}`)
+      if (token.user_id) console.log(`user_id: ${token.user_id}`)
     }
   })
+
+// ---------------------------------------------------------------------------
+// Config commands
+// ---------------------------------------------------------------------------
 
 const configCmd = program
   .command('config')
@@ -301,6 +228,10 @@ configCmd
     console.log(chalk.green('Config updated'))
   })
 
+// ---------------------------------------------------------------------------
+// Provider commands
+// ---------------------------------------------------------------------------
+
 const provider = program.command('provider').description('Provider management')
 
 provider
@@ -308,12 +239,20 @@ provider
   .description('List providers')
   .option('--provider <name>', 'Filter by provider name')
   .action(async (opts) => {
-    const token = ensureAuth()
-    const providers = opts.provider
-      ? [await apiRequest<Provider>(`/providers/name/${encodeURIComponent(opts.provider)}`, {}, token)]
-      : await apiRequest<Provider[]>('/providers', {}, token)
-    const models = await apiRequest<ModelResponse[]>('/models', {}, token)
-    console.log(renderProvidersTable(providers, models))
+    ensureAuth()
+    let providers: ProvidersGetResponse[]
+    if (opts.provider) {
+      const { data } = await getProvidersNameByName({
+        path: { name: opts.provider },
+        throwOnError: true,
+      })
+      providers = [data]
+    } else {
+      const { data } = await getProviders({ throwOnError: true })
+      providers = data as ProvidersGetResponse[]
+    }
+    const { data: models } = await getModels({ throwOnError: true })
+    console.log(renderProvidersTable(providers, models as ModelsGetResponse[]))
   })
 
 provider
@@ -324,7 +263,7 @@ provider
   .option('--base_url <url>')
   .option('--api_key <key>')
   .action(async (opts) => {
-    const token = ensureAuth()
+    ensureAuth()
     const questions = []
     if (!opts.name) questions.push({ type: 'input', name: 'name', message: 'Provider name:' })
     if (!opts.type) {
@@ -338,15 +277,17 @@ provider
     if (!opts.base_url) questions.push({ type: 'input', name: 'base_url', message: 'Base URL:' })
     if (!opts.api_key) questions.push({ type: 'password', name: 'api_key', message: 'API key:' })
     const answers = questions.length ? await inquirer.prompt(questions) : {}
-    const payload = {
-      name: opts.name ?? answers.name,
-      client_type: opts.type ?? answers.client_type,
-      base_url: opts.base_url ?? answers.base_url,
-      api_key: opts.api_key ?? answers.api_key,
-    }
     const spinner = ora('Creating provider...').start()
     try {
-      await apiRequest('/providers', { method: 'POST', body: JSON.stringify(payload) }, token)
+      await postProviders({
+        body: {
+          name: opts.name ?? answers.name,
+          client_type: opts.type ?? answers.client_type,
+          base_url: opts.base_url ?? answers.base_url,
+          api_key: opts.api_key ?? answers.api_key,
+        },
+        throwOnError: true,
+      })
       spinner.succeed('Provider created')
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Failed to create provider')
@@ -359,15 +300,21 @@ provider
   .description('Delete provider')
   .option('--provider <name>', 'Provider name')
   .action(async (opts) => {
-    const token = ensureAuth()
+    ensureAuth()
     if (!opts.provider) {
       console.log(chalk.red('Provider name is required.'))
       process.exit(1)
     }
-    const providerInfo = await apiRequest<Provider>(`/providers/name/${encodeURIComponent(opts.provider)}`, {}, token)
+    const { data: providerInfo } = await getProvidersNameByName({
+      path: { name: opts.provider },
+      throwOnError: true,
+    })
     const spinner = ora('Deleting provider...').start()
     try {
-      await apiRequest(`/providers/${providerInfo.id}`, { method: 'DELETE' }, token)
+      await deleteProvidersById({
+        path: { id: providerInfo.id! },
+        throwOnError: true,
+      })
       spinner.succeed('Provider deleted')
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Failed to delete provider')
@@ -375,18 +322,25 @@ provider
     }
   })
 
+// ---------------------------------------------------------------------------
+// Model commands
+// ---------------------------------------------------------------------------
+
 const model = program.command('model').description('Model management')
 
 model
   .command('list')
   .description('List models')
   .action(async () => {
-    const token = ensureAuth()
-    const [models, providers] = await Promise.all([
-      apiRequest<ModelResponse[]>('/models', {}, token),
-      apiRequest<Provider[]>('/providers', {}, token),
+    ensureAuth()
+    const [modelsResult, providersResult] = await Promise.all([
+      getModels({ throwOnError: true }),
+      getProviders({ throwOnError: true }),
     ])
-    console.log(renderModelsTable(models, providers))
+    console.log(renderModelsTable(
+      modelsResult.data as ModelsGetResponse[],
+      providersResult.data as ProvidersGetResponse[],
+    ))
   })
 
 model
@@ -399,8 +353,9 @@ model
   .option('--dimensions <dimensions>')
   .option('--multimodal', 'Is multimodal')
   .action(async (opts) => {
-    const token = ensureAuth()
-    const providers = await apiRequest<Provider[]>('/providers', {}, token)
+    ensureAuth()
+    const { data: providerList } = await getProviders({ throwOnError: true })
+    const providers = providerList as ProvidersGetResponse[]
     let provider = providers.find(p => p.name === opts.provider)
     if (!provider) {
       const answer = await inquirer.prompt([{
@@ -435,17 +390,19 @@ model
       process.exit(1)
     }
     const isMultimodal = Boolean(opts.multimodal)
-    const payload = {
-      model_id: modelId,
-      name: opts.name ?? modelId,
-      llm_provider_id: provider.id,
-      is_multimodal: isMultimodal,
-      type: modelType,
-      dimensions,
-    }
     const spinner = ora('Creating model...').start()
     try {
-      await apiRequest('/models', { method: 'POST', body: JSON.stringify(payload) }, token)
+      await postModels({
+        body: {
+          model_id: modelId,
+          name: opts.name ?? modelId,
+          llm_provider_id: provider.id,
+          is_multimodal: isMultimodal,
+          type: modelType,
+          dimensions,
+        },
+        throwOnError: true,
+      })
       spinner.succeed('Model created')
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Failed to create model')
@@ -458,14 +415,17 @@ model
   .description('Delete model')
   .option('--model <model>')
   .action(async (opts) => {
-    const token = ensureAuth()
+    ensureAuth()
     if (!opts.model) {
       console.log(chalk.red('Model name is required.'))
       process.exit(1)
     }
     const spinner = ora('Deleting model...').start()
     try {
-      await apiRequest(`/models/model/${encodeURIComponent(opts.model)}`, { method: 'DELETE' }, token)
+      await deleteModelsModelByModelId({
+        path: { modelId: opts.model },
+        throwOnError: true,
+      })
       spinner.succeed('Model deleted')
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Failed to delete model')
@@ -473,15 +433,29 @@ model
     }
   })
 
+// ---------------------------------------------------------------------------
+// Schedule commands (uses raw client due to untyped bot_id path param)
+// ---------------------------------------------------------------------------
+
 const schedule = program.command('schedule').description('Schedule management')
+  .option('--bot <id>', 'Bot ID (required for schedule operations)')
+
+const resolveScheduleBotId = async (opts: { bot?: string }) => {
+  return await resolveBotId(opts.bot)
+}
 
 schedule
   .command('list')
   .description('List schedules')
   .action(async () => {
-    const token = ensureAuth()
-    const resp = await apiRequest<ScheduleListResponse>('/schedule', {}, token)
-    if (!resp.items.length) {
+    ensureAuth()
+    const botId = await resolveScheduleBotId(schedule.opts())
+    const { data } = await client.get({
+      url: `/bots/${encodeURIComponent(botId)}/schedule`,
+      throwOnError: true,
+    })
+    const resp = data as ScheduleListResponse
+    if (!resp.items?.length) {
       console.log(chalk.yellow('No schedules found.'))
       return
     }
@@ -493,9 +467,13 @@ schedule
   .description('Get schedule')
   .argument('<id>')
   .action(async (id) => {
-    const token = ensureAuth()
-    const resp = await apiRequest<Schedule>(`/schedule/${encodeURIComponent(id)}`, {}, token)
-    console.log(JSON.stringify(resp, null, 2))
+    ensureAuth()
+    const botId = await resolveScheduleBotId(schedule.opts())
+    const { data } = await client.get({
+      url: `/bots/${encodeURIComponent(botId)}/schedule/${encodeURIComponent(id)}`,
+      throwOnError: true,
+    })
+    console.log(JSON.stringify(data, null, 2))
   })
 
 schedule
@@ -542,13 +520,19 @@ schedule
       description: opts.description ?? answers.description,
       pattern: opts.pattern ?? answers.pattern,
       command: opts.command ?? answers.command,
-      max_calls: maxCalls,
+      max_calls: maxCalls !== undefined ? { set: true, value: maxCalls } : undefined,
       enabled: opts.enabled ? true : (opts.disabled ? false : undefined),
     }
-    const token = ensureAuth()
+    ensureAuth()
+    const botId = await resolveScheduleBotId(schedule.opts())
     const spinner = ora('Creating schedule...').start()
     try {
-      await apiRequest('/schedule', { method: 'POST', body: JSON.stringify(payload) }, token)
+      await client.post({
+        url: `/bots/${encodeURIComponent(botId)}/schedule`,
+        body: payload,
+        headers: { 'Content-Type': 'application/json' },
+        throwOnError: true,
+      })
       spinner.succeed('Schedule created')
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Failed to create schedule')
@@ -583,7 +567,7 @@ schedule
         console.log(chalk.red('max_calls must be a positive integer.'))
         process.exit(1)
       }
-      payload.max_calls = parsed
+      payload.max_calls = { set: true, value: parsed }
     }
     if (opts.enabled) payload.enabled = true
     if (opts.disabled) payload.enabled = false
@@ -591,13 +575,16 @@ schedule
       console.log(chalk.red('No updates provided.'))
       process.exit(1)
     }
-    const token = ensureAuth()
+    ensureAuth()
+    const botId = await resolveScheduleBotId(schedule.opts())
     const spinner = ora('Updating schedule...').start()
     try {
-      await apiRequest(`/schedule/${encodeURIComponent(id)}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      }, token)
+      await client.put({
+        url: `/bots/${encodeURIComponent(botId)}/schedule/${encodeURIComponent(id)}`,
+        body: payload,
+        headers: { 'Content-Type': 'application/json' },
+        throwOnError: true,
+      })
       spinner.succeed('Schedule updated')
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Failed to update schedule')
@@ -610,15 +597,22 @@ schedule
   .description('Enable/disable schedule')
   .argument('<id>')
   .action(async (id) => {
-    const token = ensureAuth()
-    const current = await apiRequest<Schedule>(`/schedule/${encodeURIComponent(id)}`, {}, token)
+    ensureAuth()
+    const botId = await resolveScheduleBotId(schedule.opts())
+    const { data: current } = await client.get({
+      url: `/bots/${encodeURIComponent(botId)}/schedule/${encodeURIComponent(id)}`,
+      throwOnError: true,
+    })
+    const currentSchedule = current as ScheduleSchedule
     const spinner = ora('Updating schedule...').start()
     try {
-      await apiRequest(`/schedule/${encodeURIComponent(id)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ enabled: !current.enabled }),
-      }, token)
-      spinner.succeed(`Schedule ${current.enabled ? 'disabled' : 'enabled'}`)
+      await client.put({
+        url: `/bots/${encodeURIComponent(botId)}/schedule/${encodeURIComponent(id)}`,
+        body: { enabled: !currentSchedule.enabled },
+        headers: { 'Content-Type': 'application/json' },
+        throwOnError: true,
+      })
+      spinner.succeed(`Schedule ${currentSchedule.enabled ? 'disabled' : 'enabled'}`)
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Failed to update schedule')
       process.exit(1)
@@ -630,10 +624,14 @@ schedule
   .description('Delete schedule')
   .argument('<id>')
   .action(async (id) => {
-    const token = ensureAuth()
+    ensureAuth()
+    const botId = await resolveScheduleBotId(schedule.opts())
     const spinner = ora('Deleting schedule...').start()
     try {
-      await apiRequest(`/schedule/${encodeURIComponent(id)}`, { method: 'DELETE' }, token)
+      await client.delete({
+        url: `/bots/${encodeURIComponent(botId)}/schedule/${encodeURIComponent(id)}`,
+        throwOnError: true,
+      })
       spinner.succeed('Schedule deleted')
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Failed to delete schedule')
@@ -641,14 +639,16 @@ schedule
     }
   })
 
+// ---------------------------------------------------------------------------
+// Default action: interactive chat
+// ---------------------------------------------------------------------------
+
 program
   .option('--bot <id>', 'Bot id to chat with')
   .action(async () => {
     await ensureModelsReady()
-    const token = ensureAuth()
-    const botId = await resolveBotId(token, program.opts().bot)
-    const config = readConfig()
-    const sessionId = config.session_id
+    ensureAuth()
+    const botId = await resolveBotId(program.opts().bot)
 
     const rl = readline.createInterface({ input, output })
     console.log(chalk.green(`Chatting with ${chalk.bold(botId)}. Type \`exit\` to quit.`))
@@ -662,17 +662,14 @@ program
       if (line.toLowerCase() === 'exit') {
         break
       }
-      try {
-        const ok = await streamChat(line, botId, sessionId, token)
-        if (!ok) {
-          console.log(chalk.red('Chat failed or stream unavailable.'))
-        }
-      } catch (err: unknown) {
-        console.log(chalk.red(getErrorMessage(err) || 'Chat failed'))
-      }
+      await streamChat(line, botId)
     }
     rl.close()
   })
+
+// ---------------------------------------------------------------------------
+// Version command
+// ---------------------------------------------------------------------------
 
 program
   .command('version')
@@ -681,25 +678,24 @@ program
     console.log(`Memoh CLI v${packageJson.version}`)
   })
 
+// ---------------------------------------------------------------------------
+// TUI command
+// ---------------------------------------------------------------------------
+
 program
   .command('tui')
   .description('Terminal UI chat session')
   .option('--bot <id>', 'Bot id to chat with')
   .action(async (opts: { bot?: string }) => {
     await ensureModelsReady()
-    const token = ensureAuth()
-    const botId = await resolveBotId(token, opts.bot)
-    await runTui(botId, token)
+    ensureAuth()
+    const botId = await resolveBotId(opts.bot)
+    await runTui(botId)
   })
 
 program.parseAsync(process.argv)
 
-// streamChat is imported from ./stream
-
-const runTui = async (botId: string, token: TokenInfo) => {
-  const config = readConfig()
-  const sessionId = config.session_id
-
+const runTui = async (botId: string) => {
   const rl = readline.createInterface({ input, output })
   console.log(chalk.green(`TUI session (line mode) with ${chalk.bold(botId)}. Type \`exit\` to quit.`))
   while (true) {
@@ -711,15 +707,7 @@ const runTui = async (botId: string, token: TokenInfo) => {
     if (line.toLowerCase() === 'exit') {
       break
     }
-    try {
-      const ok = await streamChat(line, botId, sessionId, token)
-      if (!ok) {
-        console.log(chalk.red('Chat failed or stream unavailable.'))
-      }
-    } catch (err: unknown) {
-      console.log(chalk.red(getErrorMessage(err) || 'Chat failed'))
-    }
+    await streamChat(line, botId)
   }
   rl.close()
 }
-

@@ -1,5 +1,5 @@
 {
-  "name": "@memoh/client",
+  "name": "@memoh/cli",
   "version": "1.0.0",
   "description": "Command line interface and core API for Memoh",
   "exports": {
@@ -10,26 +10,27 @@
     "./cli": "./src/cli/index.ts"
   },
   "bin": {
-    "memoh": "./src/cli/index.ts"
+    "memoh": "./dist/cli.js"
   },
   "scripts": {
     "start": "bun run src/cli/index.ts",
-    "dev": "bun run --watch src/cli/index.ts"
+    "dev": "bun run --watch src/cli/index.ts",
+    "build": "tsup",
+    "build:watch": "tsup --watch"
   },
   "dependencies": {
-    "@elysiajs/eden": "^1.4.6",
-    "elysia": "latest",
+    "@memoh/sdk": "workspace:*",
     "commander": "^12.1.0",
     "chalk": "^5.4.1",
     "ora": "^8.1.1",
     "inquirer": "^12.3.0",
-    "table": "^6.8.2",
-    "node-fetch": "^3.3.2"
+    "table": "^6.8.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "bun-types": "latest",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "tsup": "^8.4.0"
   },
   "packageManager": "pnpm@10.27.0",
   "module": "src/index.ts",

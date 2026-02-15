@@ -2,21 +2,10 @@ import chalk from 'chalk'
 import inquirer from 'inquirer'
 import ora from 'ora'
 
-import { apiRequest } from '../core/api'
-import { readToken, TokenInfo } from '../utils/store'
+import { getBots, type BotsBot } from '@memoh/sdk'
+import { readToken, type TokenInfo } from '../utils/store'
 
-export type BotSummary = {
-  id: string
-  owner_user_id: string
-  type: string
-  display_name: string
-  avatar_url?: string
-  is_active: boolean
-}
-
-type BotListResponse = {
-  items: BotSummary[]
-}
+export type BotSummary = BotsBot
 
 export const ensureAuth = (): TokenInfo => {
   const token = readToken()
@@ -35,18 +24,18 @@ export const getErrorMessage = (err: unknown) => {
   return 'Unknown error'
 }
 
-export const fetchBots = async (token: TokenInfo) => {
-  const resp = await apiRequest<BotListResponse>('/bots', {}, token)
-  return resp.items
+export const fetchBots = async () => {
+  const { data } = await getBots({ throwOnError: true })
+  return data.items ?? []
 }
 
-export const resolveBotId = async (token: TokenInfo, preset?: string) => {
+export const resolveBotId = async (preset?: string) => {
   if (preset && preset.trim()) {
     return preset.trim()
   }
   const spinner = ora('Fetching bots...').start()
   try {
-    const bots = await fetchBots(token)
+    const bots = await fetchBots()
     spinner.stop()
     if (bots.length === 0) {
       console.log(chalk.yellow('No bots found. Please create a bot first.'))
@@ -58,7 +47,7 @@ export const resolveBotId = async (token: TokenInfo, preset?: string) => {
         name: 'botId',
         message: 'Select a bot:',
         choices: bots.map(bot => ({
-          name: `${bot.display_name || bot.id} ${chalk.gray(bot.type)}`,
+          name: `${bot.display_name || bot.id} ${chalk.gray(bot.type ?? '')}`,
           value: bot.id,
         })),
       },
@@ -69,4 +58,3 @@ export const resolveBotId = async (token: TokenInfo, preset?: string) => {
     process.exit(1)
   }
 }
-
