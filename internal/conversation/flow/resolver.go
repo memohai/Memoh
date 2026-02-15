@@ -778,7 +778,9 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 	}
 
 	r.storeMessages(ctx, req, fullRound)
-	r.storeMemory(ctx, req.BotID, fullRound)
+	// Run memory extraction in the background so that the SSE stream can
+	// finish immediately after messages are persisted.
+	go r.storeMemory(context.WithoutCancel(ctx), req.BotID, fullRound)
 	return nil
 }
 
