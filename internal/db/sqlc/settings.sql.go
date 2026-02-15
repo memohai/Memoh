@@ -38,7 +38,7 @@ SELECT
   chat_models.model_id AS chat_model_id,
   memory_models.model_id AS memory_model_id,
   embedding_models.model_id AS embedding_model_id,
-  search_providers.id::text AS search_provider_id
+  search_providers.id AS search_provider_id
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
 LEFT JOIN models AS memory_models ON memory_models.id = bots.memory_model_id
@@ -55,7 +55,7 @@ type GetSettingsByBotIDRow struct {
 	ChatModelID        pgtype.Text `json:"chat_model_id"`
 	MemoryModelID      pgtype.Text `json:"memory_model_id"`
 	EmbeddingModelID   pgtype.Text `json:"embedding_model_id"`
-	SearchProviderID   string      `json:"search_provider_id"`
+	SearchProviderID   pgtype.UUID `json:"search_provider_id"`
 }
 
 func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSettingsByBotIDRow, error) {
@@ -96,7 +96,7 @@ SELECT
   chat_models.model_id AS chat_model_id,
   memory_models.model_id AS memory_model_id,
   embedding_models.model_id AS embedding_model_id,
-  search_providers.id::text AS search_provider_id
+  search_providers.id AS search_provider_id
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id
 LEFT JOIN models AS memory_models ON memory_models.id = updated.memory_model_id
@@ -123,7 +123,7 @@ type UpsertBotSettingsRow struct {
 	ChatModelID        pgtype.Text `json:"chat_model_id"`
 	MemoryModelID      pgtype.Text `json:"memory_model_id"`
 	EmbeddingModelID   pgtype.Text `json:"embedding_model_id"`
-	SearchProviderID   string      `json:"search_provider_id"`
+	SearchProviderID   pgtype.UUID `json:"search_provider_id"`
 }
 
 func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsParams) (UpsertBotSettingsRow, error) {

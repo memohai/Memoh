@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
@@ -175,13 +176,15 @@ func normalizeBotSettingsFields(
 	chatModelID pgtype.Text,
 	memoryModelID pgtype.Text,
 	embeddingModelID pgtype.Text,
-	searchProviderID string,
+	searchProviderID pgtype.UUID,
 ) Settings {
 	settings := normalizeBotSetting(maxContextLoadTime, language, allowGuest)
 	settings.ChatModelID = strings.TrimSpace(chatModelID.String)
 	settings.MemoryModelID = strings.TrimSpace(memoryModelID.String)
 	settings.EmbeddingModelID = strings.TrimSpace(embeddingModelID.String)
-	settings.SearchProviderID = strings.TrimSpace(searchProviderID)
+	if searchProviderID.Valid {
+		settings.SearchProviderID = uuid.UUID(searchProviderID.Bytes).String()
+	}
 	return settings
 }
 

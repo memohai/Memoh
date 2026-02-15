@@ -7,7 +7,7 @@ SELECT
   chat_models.model_id AS chat_model_id,
   memory_models.model_id AS memory_model_id,
   embedding_models.model_id AS embedding_model_id,
-  search_providers.id::text AS search_provider_id
+  search_providers.id AS search_provider_id
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
 LEFT JOIN models AS memory_models ON memory_models.id = bots.memory_model_id
@@ -37,7 +37,7 @@ SELECT
   chat_models.model_id AS chat_model_id,
   memory_models.model_id AS memory_model_id,
   embedding_models.model_id AS embedding_model_id,
-  search_providers.id::text AS search_provider_id
+  search_providers.id AS search_provider_id
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id
 LEFT JOIN models AS memory_models ON memory_models.id = updated.memory_model_id
