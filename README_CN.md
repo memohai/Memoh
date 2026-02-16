@@ -7,6 +7,7 @@
   <img src="./assets/logo.png" alt="Memoh" width="100" height="100">
   <h1>Memoh</h1>
   <p>多用户、结构化记忆、容器化的 AI Agent 系统。</p>
+  <p>📌 <a href="/blogs/2026-02-16.md">Introduction to Memoh - A Multi-Member, Structured Long-Memory, Containerized AI Agent System Platform</a></p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
     <img src="https://img.shields.io/github/license/memohai/Memoh" alt="License" />

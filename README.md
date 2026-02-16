@@ -7,6 +7,7 @@
   <img src="./assets/logo.png" alt="Memoh" width="100" height="100">
   <h1>Memoh</h1>
   <p>Multi-Member, Structured Long-Memory, Containerized AI Agent System.</p>
+  <p>📌 <a href="/blogs/2026-02-16.md">Introduction to Memoh - A Multi-Member, Structured Long-Memory, Containerized AI Agent System Platform</a></p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
     <img src="https://img.shields.io/github/license/memohai/Memoh" alt="License" />
@@ -22,6 +23,8 @@
   </div>
   <hr>
 </div>
+
+
 
 Memoh is a AI agent system platform. Users can create their own AI bots and chat with them via Telegram, Discord, Lark(Feishu), etc. Every bot has independent container and memory system which allows them to edit files, execute commands and build themselves - Like [OpenClaw](https://openclaw.ai), Memoh provides a more secure, flexible and scalable solution for multi-bot management.
 
