@@ -35,6 +35,15 @@ export default defineConfig({
           link: '/getting-started.md'
         },
         {
+          text: 'Blog',
+          items: [
+            {
+              text: 'Introduction (Feb 2026)',
+              link: '/blog/2026-02-16.md'
+            }
+          ]
+        },
+        {
           text: 'Installation',
           items: [
             {
