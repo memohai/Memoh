@@ -15,6 +15,7 @@ import (
 )
 
 const telegramStreamEditThrottle = 5000 * time.Millisecond
+const telegramStreamToolHintText = "Calling tools..."
 
 var testEditFunc func(bot *tgbotapi.BotAPI, chatID int64, msgID int, text string, parseMode string) error
 
@@ -184,6 +185,15 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 	switch event.Type {
 	case channel.StreamEventStatus:
 		return nil
+	case channel.StreamEventToolCallStart:
+		if err := s.ensureStreamMessage(ctx, telegramStreamToolHintText); err != nil {
+			return err
+		}
+		return s.editStreamMessageFinal(ctx, telegramStreamToolHintText)
+	case channel.StreamEventToolCallEnd:
+		return nil
+	case channel.StreamEventAttachment, channel.StreamEventProcessingFailed, channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
+		return nil
 	case channel.StreamEventDelta:
 		if event.Delta == "" {
 			return nil
@@ -265,7 +275,7 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 		}
 		return s.editStreamMessage(ctx, display)
 	default:
-		return fmt.Errorf("unsupported stream event type: %s", event.Type)
+		return nil
 	}
 }
 

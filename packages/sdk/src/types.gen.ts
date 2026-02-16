@@ -139,6 +139,7 @@ export type ChannelAction = {
 };
 
 export type ChannelAttachment = {
+    asset_id?: string;
     caption?: string;
     duration_ms?: number;
     height?: number;
@@ -184,6 +185,7 @@ export type ChannelChannelConfig = {
     credentials?: {
         [key: string]: unknown;
     };
+    disabled?: boolean;
     external_identity?: string;
     id?: string;
     routing?: {
@@ -192,7 +194,6 @@ export type ChannelChannelConfig = {
     self_identity?: {
         [key: string]: unknown;
     };
-    status?: string;
     updated_at?: string;
     verified_at?: string;
 };
@@ -284,6 +285,10 @@ export type ChannelThreadRef = {
     id?: string;
 };
 
+export type ChannelUpdateChannelStatusRequest = {
+    disabled?: boolean;
+};
+
 export type ChannelUpsertChannelIdentityConfigRequest = {
     config?: {
         [key: string]: unknown;
@@ -294,6 +299,7 @@ export type ChannelUpsertConfigRequest = {
     credentials?: {
         [key: string]: unknown;
     };
+    disabled?: boolean;
     external_identity?: string;
     routing?: {
         [key: string]: unknown;
@@ -301,7 +307,6 @@ export type ChannelUpsertConfigRequest = {
     self_identity?: {
         [key: string]: unknown;
     };
-    status?: string;
     verified_at?: string;
 };
 
@@ -648,6 +653,7 @@ export type MemoryUsageResponse = {
 };
 
 export type MessageMessage = {
+    assets?: Array<MessageMessageAsset>;
     bot_id?: string;
     content?: Array<number>;
     created_at?: string;
@@ -666,10 +672,23 @@ export type MessageMessage = {
     source_reply_to_message_id?: string;
 };
 
+export type MessageMessageAsset = {
+    asset_id?: string;
+    duration_ms?: number;
+    height?: number;
+    media_type?: string;
+    mime?: string;
+    ordinal?: number;
+    original_name?: string;
+    role?: string;
+    size_bytes?: number;
+    storage_key?: string;
+    width?: number;
+};
+
 export type ModelsAddRequest = {
     dimensions?: number;
-    input?: Array<string>;
-    is_multimodal?: boolean;
+    input_modalities?: Array<string>;
     llm_provider_id?: string;
     model_id?: string;
     name?: string;
@@ -687,8 +706,7 @@ export type ModelsCountResponse = {
 
 export type ModelsGetResponse = {
     dimensions?: number;
-    input?: Array<string>;
-    is_multimodal?: boolean;
+    input_modalities?: Array<string>;
     llm_provider_id?: string;
     model_id?: string;
     name?: string;
@@ -699,8 +717,7 @@ export type ModelsModelType = 'chat' | 'embedding';
 
 export type ModelsUpdateRequest = {
     dimensions?: number;
-    input?: Array<string>;
-    is_multimodal?: boolean;
+    input_modalities?: Array<string>;
     llm_provider_id?: string;
     model_id?: string;
     name?: string;
@@ -3040,6 +3057,46 @@ export type PutBotsByIdResponses = {
 
 export type PutBotsByIdResponse = PutBotsByIdResponses[keyof PutBotsByIdResponses];
 
+export type DeleteBotsByIdChannelByPlatformData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+        /**
+         * Channel platform
+         */
+        platform: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/{platform}';
+};
+
+export type DeleteBotsByIdChannelByPlatformErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByIdChannelByPlatformError = DeleteBotsByIdChannelByPlatformErrors[keyof DeleteBotsByIdChannelByPlatformErrors];
+
+export type DeleteBotsByIdChannelByPlatformResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
 export type GetBotsByIdChannelByPlatformData = {
     body?: never;
     path: {
@@ -3236,6 +3293,55 @@ export type PostBotsByIdChannelByPlatformSendChatResponses = {
 };
 
 export type PostBotsByIdChannelByPlatformSendChatResponse = PostBotsByIdChannelByPlatformSendChatResponses[keyof PostBotsByIdChannelByPlatformSendChatResponses];
+
+export type PatchBotsByIdChannelByPlatformStatusData = {
+    /**
+     * Channel status payload
+     */
+    body: ChannelUpdateChannelStatusRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+        /**
+         * Channel platform
+         */
+        platform: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/{platform}/status';
+};
+
+export type PatchBotsByIdChannelByPlatformStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PatchBotsByIdChannelByPlatformStatusError = PatchBotsByIdChannelByPlatformStatusErrors[keyof PatchBotsByIdChannelByPlatformStatusErrors];
+
+export type PatchBotsByIdChannelByPlatformStatusResponses = {
+    /**
+     * OK
+     */
+    200: ChannelChannelConfig;
+};
+
+export type PatchBotsByIdChannelByPlatformStatusResponse = PatchBotsByIdChannelByPlatformStatusResponses[keyof PatchBotsByIdChannelByPlatformStatusResponses];
 
 export type GetBotsByIdChecksData = {
     body?: never;

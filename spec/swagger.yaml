@@ -210,6 +210,11 @@ definitions:
     type: object
   channel.Attachment:
     properties:
+      asset_id:
+        type: string
+      base64:
+        description: data URL for agent delivery
+        type: string
       caption:
         type: string
       duration_ms:
@@ -302,6 +307,8 @@ definitions:
       credentials:
         additionalProperties: {}
         type: object
+      disabled:
+        type: boolean
       external_identity:
         type: string
       id:
@@ -312,8 +319,6 @@ definitions:
       self_identity:
         additionalProperties: {}
         type: object
-      status:
-        type: string
       updated_at:
         type: string
       verified_at:
@@ -497,6 +502,11 @@ definitions:
       id:
         type: string
     type: object
+  channel.UpdateChannelStatusRequest:
+    properties:
+      disabled:
+        type: boolean
+    type: object
   channel.UpsertChannelIdentityConfigRequest:
     properties:
       config:
@@ -508,6 +518,8 @@ definitions:
       credentials:
         additionalProperties: {}
         type: object
+      disabled:
+        type: boolean
       external_identity:
         type: string
       routing:
@@ -516,8 +528,6 @@ definitions:
       self_identity:
         additionalProperties: {}
         type: object
-      status:
-        type: string
       verified_at:
         type: string
     type: object
@@ -1057,6 +1067,10 @@ definitions:
     type: object
   message.Message:
     properties:
+      assets:
+        items:
+          $ref: '#/definitions/message.MessageAsset'
+        type: array
       bot_id:
         type: string
       content:
@@ -1089,16 +1103,39 @@ definitions:
       source_reply_to_message_id:
         type: string
     type: object
+  message.MessageAsset:
+    properties:
+      asset_id:
+        type: string
+      duration_ms:
+        type: integer
+      height:
+        type: integer
+      media_type:
+        type: string
+      mime:
+        type: string
+      ordinal:
+        type: integer
+      original_name:
+        type: string
+      role:
+        type: string
+      size_bytes:
+        type: integer
+      storage_key:
+        type: string
+      width:
+        type: integer
+    type: object
   models.AddRequest:
     properties:
       dimensions:
         type: integer
-      input:
+      input_modalities:
         items:
           type: string
         type: array
-      is_multimodal:
-        type: boolean
       llm_provider_id:
         type: string
       model_id:
@@ -1124,12 +1161,10 @@ definitions:
     properties:
       dimensions:
         type: integer
-      input:
+      input_modalities:
         items:
           type: string
         type: array
-      is_multimodal:
-        type: boolean
       llm_provider_id:
         type: string
       model_id:
@@ -1151,12 +1186,10 @@ definitions:
     properties:
       dimensions:
         type: integer
-      input:
+      input_modalities:
         items:
           type: string
         type: array
-      is_multimodal:
-        type: boolean
       llm_provider_id:
         type: string
       model_id:
@@ -3227,6 +3260,37 @@ paths:
       tags:
       - bots
   /bots/{id}/channel/{platform}:
+    delete:
+      description: Remove bot channel configuration
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Channel platform
+        in: path
+        name: platform
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete bot channel config
+      tags:
+      - bots
     get:
       description: Get bot channel configuration
       parameters:
@@ -3397,6 +3461,50 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Send message via bot channel session token
+      tags:
+      - bots
+  /bots/{id}/channel/{platform}/status:
+    patch:
+      description: Update bot channel enabled/disabled status
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Channel platform
+        in: path
+        name: platform
+        required: true
+        type: string
+      - description: Channel status payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/channel.UpdateChannelStatusRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/channel.ChannelConfig'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update bot channel status
       tags:
       - bots
   /bots/{id}/checks:

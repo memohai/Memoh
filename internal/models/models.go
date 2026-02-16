@@ -39,11 +39,15 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 		return AddResponse{}, fmt.Errorf("invalid llm provider ID: %w", err)
 	}
 
+	inputMod := []string{}
+	if model.Type == ModelTypeChat {
+		inputMod = normalizeModalities(model.InputModalities, []string{ModelInputText})
+	}
 	params := sqlc.CreateModelParams{
-		ModelID:       model.ModelID,
-		LlmProviderID: llmProviderID,
-		IsMultimodal:  model.IsMultimodal,
-		Type:          string(model.Type),
+		ModelID:         model.ModelID,
+		LlmProviderID:   llmProviderID,
+		InputModalities: inputMod,
+		Type:            string(model.Type),
 	}
 
 	// Handle optional name field
@@ -194,10 +198,14 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		return GetResponse{}, fmt.Errorf("validation failed: %w", err)
 	}
 
+	inputMod := []string{}
+	if model.Type == ModelTypeChat {
+		inputMod = normalizeModalities(model.InputModalities, []string{ModelInputText})
+	}
 	params := sqlc.UpdateModelParams{
-		ID:           uuid,
-		IsMultimodal: model.IsMultimodal,
-		Type:         string(model.Type),
+		ID:              uuid,
+		InputModalities: inputMod,
+		Type:            string(model.Type),
 	}
 
 	llmProviderID, err := db.ParseUUID(model.LlmProviderID)
@@ -233,11 +241,15 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 		return GetResponse{}, fmt.Errorf("validation failed: %w", err)
 	}
 
+	inputMod := []string{}
+	if model.Type == ModelTypeChat {
+		inputMod = normalizeModalities(model.InputModalities, []string{ModelInputText})
+	}
 	params := sqlc.UpdateModelByModelIDParams{
-		ModelID:      modelID,
-		NewModelID:   model.ModelID,
-		IsMultimodal: model.IsMultimodal,
-		Type:         string(model.Type),
+		ModelID:         modelID,
+		NewModelID:      model.ModelID,
+		InputModalities: inputMod,
+		Type:            string(model.Type),
 	}
 
 	llmProviderID, err := db.ParseUUID(model.LlmProviderID)
@@ -317,11 +329,12 @@ func convertToGetResponse(dbModel sqlc.Model) GetResponse {
 	resp := GetResponse{
 		ModelID: dbModel.ModelID,
 		Model: Model{
-			ModelID:      dbModel.ModelID,
-			IsMultimodal: dbModel.IsMultimodal,
-			Input:        modelInputFromMultimodal(dbModel.IsMultimodal),
-			Type:         ModelType(dbModel.Type),
+			ModelID: dbModel.ModelID,
+			Type:    ModelType(dbModel.Type),
 		},
+	}
+	if resp.Model.Type == ModelTypeChat {
+		resp.Model.InputModalities = normalizeModalities(dbModel.InputModalities, []string{ModelInputText})
 	}
 
 	if dbModel.LlmProviderID.Valid {
@@ -347,12 +360,12 @@ func convertToGetResponseList(dbModels []sqlc.Model) []GetResponse {
 	return responses
 }
 
-// modelInputFromMultimodal builds the input list based on multimodal support.
-func modelInputFromMultimodal(isMultimodal bool) []string {
-	if isMultimodal {
-		return []string{ModelInputText, ModelInputImage}
+// normalizeModalities returns modalities if non-empty, otherwise the provided fallback.
+func normalizeModalities(modalities []string, fallback []string) []string {
+	if len(modalities) == 0 {
+		return fallback
 	}
-	return []string{ModelInputText}
+	return modalities
 }
 
 func isValidClientType(clientType ClientType) bool {

@@ -40,8 +40,20 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string) ch
 				msg.Text = txt
 			}
 		case larkim.MsgTypePost:
-			if postText := extractFeishuPostText(contentMap); postText != "" {
+			postText := extractFeishuPostText(contentMap)
+			if postText != "" {
 				msg.Text = postText
+			}
+			postAtts := extractFeishuPostAttachments(contentMap, msg.ID)
+			for _, att := range postAtts {
+				msg.Attachments = append(msg.Attachments, att)
+			}
+			if len(postAtts) > 0 || postText != "" {
+				slog.Debug("feishu post extracted",
+					"message_id", msg.ID,
+					"text_len", len(postText),
+					"attachments", len(postAtts),
+				)
 			}
 		case larkim.MsgTypeImage:
 			if key, ok := contentMap["image_key"].(string); ok {
@@ -49,6 +61,7 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string) ch
 					Type:           channel.AttachmentImage,
 					PlatformKey:    key,
 					SourcePlatform: Type.String(),
+					Metadata:       map[string]any{"message_id": msg.ID},
 				})
 			}
 		case larkim.MsgTypeFile, larkim.MsgTypeAudio, larkim.MsgTypeMedia:
@@ -66,6 +79,7 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string) ch
 					PlatformKey:    key,
 					SourcePlatform: Type.String(),
 					Name:           name,
+					Metadata:       map[string]any{"message_id": msg.ID},
 				})
 			}
 		}
@@ -232,13 +246,63 @@ func hasFeishuAtTag(raw any) bool {
 	return false
 }
 
-func extractFeishuPostText(contentMap map[string]any) string {
-	zhCN, ok := contentMap["zh_cn"].(map[string]any)
-	if !ok {
-		return ""
+// getFeishuPostContentLines returns content lines from post message.
+// Feishu event payload uses root-level content: {"title":"","content":[[...],[...]]}.
+func getFeishuPostContentLines(contentMap map[string]any) []any {
+	if lines, ok := contentMap["content"].([]any); ok {
+		return lines
 	}
-	linesRaw, ok := zhCN["content"].([]any)
-	if !ok {
+	return nil
+}
+
+// extractFeishuPostAttachments extracts image/file attachments from post content (e.g. img elements).
+func extractFeishuPostAttachments(contentMap map[string]any, messageID string) []channel.Attachment {
+	var result []channel.Attachment
+	linesRaw := getFeishuPostContentLines(contentMap)
+	if linesRaw == nil {
+		return result
+	}
+	for _, rawLine := range linesRaw {
+		line, ok := rawLine.([]any)
+		if !ok {
+			continue
+		}
+		for _, rawPart := range line {
+			part, ok := rawPart.(map[string]any)
+			if !ok {
+				continue
+			}
+			tag := strings.ToLower(strings.TrimSpace(stringValue(part["tag"])))
+			if tag == "img" {
+				if key, ok := part["image_key"].(string); ok && strings.TrimSpace(key) != "" {
+					result = append(result, channel.Attachment{
+						Type:           channel.AttachmentImage,
+						PlatformKey:    strings.TrimSpace(key),
+						SourcePlatform: Type.String(),
+						Metadata:       map[string]any{"message_id": messageID},
+					})
+				}
+			}
+			if tag == "file" {
+				if key, ok := part["file_key"].(string); ok && strings.TrimSpace(key) != "" {
+					name := strings.TrimSpace(stringValue(part["file_name"]))
+					result = append(result, channel.Attachment{
+						Type:           channel.AttachmentFile,
+						PlatformKey:    strings.TrimSpace(key),
+						SourcePlatform: Type.String(),
+						Name:           name,
+						Metadata:       map[string]any{"message_id": messageID},
+					})
+				}
+			}
+		}
+	}
+	return result
+}
+
+func extractFeishuPostText(contentMap map[string]any) string {
+	linesRaw := getFeishuPostContentLines(contentMap)
+	if linesRaw == nil {
 		return ""
 	}
 	parts := make([]string, 0, 8)

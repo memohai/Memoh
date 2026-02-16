@@ -77,7 +77,7 @@ func NewManager(log *slog.Logger, registry *Registry, service ManagerStore, proc
 		registry:        registry,
 		service:         service,
 		processor:       processor,
-		refreshInterval: 30 * time.Second,
+		refreshInterval: 5 * time.Minute,
 		connections:     map[string]*connectionEntry{},
 		logger:          log.With(slog.String("component", "channel")),
 		middlewares:     []Middleware{},
@@ -140,6 +140,15 @@ func (m *Manager) RemoveAdapter(ctx context.Context, channelType ChannelType) {
 	m.registry.Unregister(channelType)
 }
 
+// Refresh performs a full reconcile of all adapter connections against the DB.
+// Prefer EnsureConnection / RemoveConnection for targeted changes after API operations.
+// Refresh is mainly used at startup and as a periodic safety net.
+func (m *Manager) Refresh(ctx context.Context) {
+	if ctx != nil {
+		m.refresh(ctx)
+	}
+}
+
 // Start begins the periodic config refresh loop and inbound worker pool.
 func (m *Manager) Start(ctx context.Context) {
 	if m.logger != nil {
@@ -182,7 +191,7 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 	if target == "" {
 		targetChannelIdentityID := strings.TrimSpace(req.ChannelIdentityID)
 		if targetChannelIdentityID == "" {
-			return fmt.Errorf("target or user_id is required")
+			return fmt.Errorf("target or channel_identity_id is required")
 		}
 		userCfg, err := m.service.GetChannelIdentityConfig(ctx, targetChannelIdentityID, channelType)
 		if err != nil {

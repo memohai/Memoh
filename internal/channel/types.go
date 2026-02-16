@@ -90,10 +90,20 @@ type OutboundMessage struct {
 type StreamEventType string
 
 const (
-	StreamEventStatus StreamEventType = "status"
-	StreamEventDelta  StreamEventType = "delta"
-	StreamEventFinal  StreamEventType = "final"
-	StreamEventError  StreamEventType = "error"
+	StreamEventStatus              StreamEventType = "status"
+	StreamEventDelta               StreamEventType = "delta"
+	StreamEventFinal               StreamEventType = "final"
+	StreamEventError               StreamEventType = "error"
+	StreamEventToolCallStart       StreamEventType = "tool_call_start"
+	StreamEventToolCallEnd         StreamEventType = "tool_call_end"
+	StreamEventPhaseStart          StreamEventType = "phase_start"
+	StreamEventPhaseEnd            StreamEventType = "phase_end"
+	StreamEventAttachment          StreamEventType = "attachment"
+	StreamEventAgentStart          StreamEventType = "agent_start"
+	StreamEventAgentEnd            StreamEventType = "agent_end"
+	StreamEventProcessingStarted   StreamEventType = "processing_started"
+	StreamEventProcessingCompleted StreamEventType = "processing_completed"
+	StreamEventProcessingFailed    StreamEventType = "processing_failed"
 )
 
 // StreamStatus indicates the lifecycle state of a streaming reply.
@@ -110,14 +120,33 @@ type StreamFinalizePayload struct {
 	Message Message `json:"message"`
 }
 
+// StreamToolCall carries tool invocation data for tool_call_start / tool_call_end events.
+type StreamToolCall struct {
+	Name   string `json:"name"`
+	CallID string `json:"call_id,omitempty"`
+	Input  any    `json:"input,omitempty"`
+	Result any    `json:"result,omitempty"`
+}
+
+// StreamPhase labels a processing stage within a stream (e.g., reasoning, text).
+type StreamPhase string
+
+const (
+	StreamPhaseReasoning StreamPhase = "reasoning"
+	StreamPhaseText      StreamPhase = "text"
+)
+
 // StreamEvent represents a unified stream event routed through the channel layer.
 type StreamEvent struct {
-	Type     StreamEventType        `json:"type"`
-	Status   StreamStatus           `json:"status,omitempty"`
-	Delta    string                 `json:"delta,omitempty"`
-	Final    *StreamFinalizePayload `json:"final,omitempty"`
-	Error    string                 `json:"error,omitempty"`
-	Metadata map[string]any         `json:"metadata,omitempty"`
+	Type        StreamEventType        `json:"type"`
+	Status      StreamStatus           `json:"status,omitempty"`
+	Delta       string                 `json:"delta,omitempty"`
+	Final       *StreamFinalizePayload `json:"final,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	ToolCall    *StreamToolCall        `json:"tool_call,omitempty"`
+	Phase       StreamPhase            `json:"phase,omitempty"`
+	Attachments []Attachment           `json:"attachments,omitempty"`
+	Metadata    map[string]any         `json:"metadata,omitempty"`
 }
 
 // StreamOptions configures how an outbound stream is initialized.
@@ -187,6 +216,8 @@ type Attachment struct {
 	URL            string         `json:"url,omitempty"`
 	PlatformKey    string         `json:"platform_key,omitempty"`
 	SourcePlatform string         `json:"source_platform,omitempty"`
+	AssetID        string         `json:"asset_id,omitempty"`
+	Base64         string         `json:"base64,omitempty"` // data URL for agent delivery
 	Name           string         `json:"name,omitempty"`
 	Size           int64          `json:"size,omitempty"`
 	Mime           string         `json:"mime,omitempty"`
@@ -305,6 +336,7 @@ func BindingCriteriaFromIdentity(identity Identity) BindingCriteria {
 }
 
 // ChannelConfig holds the configuration for a bot's channel integration.
+// Disabled: true means the channel is stopped (not connected); false means enabled.
 type ChannelConfig struct {
 	ID               string         `json:"id"`
 	BotID            string         `json:"bot_id"`
@@ -313,7 +345,7 @@ type ChannelConfig struct {
 	ExternalIdentity string         `json:"external_identity"`
 	SelfIdentity     map[string]any `json:"self_identity"`
 	Routing          map[string]any `json:"routing"`
-	Status           string         `json:"status"`
+	Disabled         bool           `json:"disabled"`
 	VerifiedAt       time.Time      `json:"verified_at"`
 	CreatedAt        time.Time      `json:"created_at"`
 	UpdatedAt        time.Time      `json:"updated_at"`
@@ -330,18 +362,24 @@ type ChannelIdentityBinding struct {
 }
 
 // UpsertConfigRequest is the input for creating or updating a channel configuration.
+// Disabled: true to stop the channel, false to enable it. Omitted is treated as false (enabled).
 type UpsertConfigRequest struct {
 	Credentials      map[string]any `json:"credentials"`
 	ExternalIdentity string         `json:"external_identity,omitempty"`
 	SelfIdentity     map[string]any `json:"self_identity,omitempty"`
 	Routing          map[string]any `json:"routing,omitempty"`
-	Status           string         `json:"status,omitempty"`
+	Disabled         *bool          `json:"disabled,omitempty"`
 	VerifiedAt       *time.Time     `json:"verified_at,omitempty"`
 }
 
 // UpsertChannelIdentityConfigRequest is the input for creating or updating a channel-identity binding.
 type UpsertChannelIdentityConfigRequest struct {
 	Config map[string]any `json:"config"`
+}
+
+// UpdateChannelStatusRequest is the input for enabling/disabling a bot channel config.
+type UpdateChannelStatusRequest struct {
+	Disabled bool `json:"disabled"`
 }
 
 // SendRequest is the input for sending an outbound message through a channel.

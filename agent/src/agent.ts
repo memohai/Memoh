@@ -16,6 +16,7 @@ import {
   MCPConnection,
   Schedule,
 } from './types'
+import { ModelInput, hasInputModality } from './types/model'
 import { system, schedule, user, subagentSystem } from './prompts'
 import { AuthFetcher } from './index'
 import { createModel } from './model'
@@ -26,7 +27,8 @@ import {
   dedupeAttachments,
   AttachmentsStreamExtractor,
 } from './utils/attachments'
-import type { ContainerFileAttachment } from './types/attachment'
+import type { ContainerFileAttachment, ImageAttachment } from './types/attachment'
+import { readFileSync } from 'fs'
 import { getMCPTools } from './tools/mcp'
 import { getTools } from './tools'
 import { buildIdentityHeaders } from './utils/headers'
@@ -167,27 +169,59 @@ export const createAgent = (
   }
 
   const generateUserPrompt = (input: AgentInput) => {
-    const images = input.attachments.filter(
-      (attachment) => attachment.type === 'image',
-    )
-    const files = input.attachments.filter(
+    const supportsImage = hasInputModality(modelConfig, ModelInput.Image)
+
+    // Separate attachments by model capability: native images vs fallback file paths.
+    const nativeImages = supportsImage
+      ? input.attachments.filter((a) => a.type === 'image')
+      : []
+    const fallbackFiles = input.attachments.filter(
       (a): a is ContainerFileAttachment => a.type === 'file',
     )
+    // Images the model cannot handle natively are mentioned as path references.
+    const unsupportedImages: ContainerFileAttachment[] = supportsImage
+      ? []
+      : input.attachments
+          .filter((a) => a.type === 'image')
+          .map((a) => ({
+            type: 'file' as const,
+            path: String((a as ImageAttachment).path || a.metadata?.path || '[image]'),
+            metadata: a.metadata,
+          }))
+    const allFiles: ContainerFileAttachment[] = [...fallbackFiles, ...unsupportedImages]
+
     const text = user(input.query, {
       channelIdentityId: identity.channelIdentityId || identity.contactId || '',
       displayName: identity.displayName || identity.contactName || 'User',
       channel: currentChannel,
       conversationType: identity.conversationType || 'direct',
       date: new Date(),
-      attachments: files,
+      attachments: allFiles,
     })
+    const imageParts: ImagePart[] = nativeImages.map((image) => {
+      const img = image as ImageAttachment
+      if (img.base64) {
+        return { type: 'image', image: img.base64 } as ImagePart
+      }
+      if (img.path) {
+        try {
+          const data = readFileSync(img.path)
+          const mime = img.mime || 'image/png'
+          return { type: 'image', image: `data:${mime};base64,${data.toString('base64')}` } as ImagePart
+        } catch {
+          return { type: 'image', image: '' } as ImagePart
+        }
+      }
+      if (img.url) {
+        return { type: 'image', image: img.url } as ImagePart
+      }
+      return { type: 'image', image: '' } as ImagePart
+    }).filter((p) => p.image !== '')
     const userMessage: UserModelMessage = {
       role: 'user',
       content: [
         { type: 'text', text },
-        ...images.map(
-          (image) => ({ type: 'image', image: image.base64 }) as ImagePart,
-        ),
+        ...imageParts,
       ],
     }
     return userMessage
@@ -461,9 +495,12 @@ export const createAgent = (
           break
         case 'file':
           yield {
-            type: 'image_delta',
-            image: chunk.file.base64,
-            metadata: chunk,
+            type: 'attachment_delta',
+            attachments: [{
+              type: 'image',
+              url: `data:${chunk.file.mediaType ?? 'image/png'};base64,${chunk.file.base64}`,
+              mime: chunk.file.mediaType ?? 'image/png',
+            }],
           }
       }
     }

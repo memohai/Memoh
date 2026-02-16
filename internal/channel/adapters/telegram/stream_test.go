@@ -64,7 +64,7 @@ func TestTelegramOutboundStream_PushNilAdapter(t *testing.T) {
 	}
 }
 
-func TestTelegramOutboundStream_PushUnsupportedEventType(t *testing.T) {
+func TestTelegramOutboundStream_PushUnknownEventTypeSkipped(t *testing.T) {
 	t.Parallel()
 
 	adapter := NewTelegramAdapter(nil)
@@ -72,11 +72,8 @@ func TestTelegramOutboundStream_PushUnsupportedEventType(t *testing.T) {
 	ctx := context.Background()
 
 	err := s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventType("unknown")})
-	if err == nil {
-		t.Fatal("Push with unknown event type should return error")
-	}
-	if !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("expected unsupported error: %v", err)
+	if err != nil {
+		t.Fatalf("Push with unknown event type should be silently skipped: %v", err)
 	}
 }
 

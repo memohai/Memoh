@@ -18,6 +18,20 @@ export interface ChatSummary {
   last_observed_at?: string
 }
 
+export interface MessageAsset {
+  asset_id: string
+  role: string
+  ordinal: number
+  media_type: string
+  mime: string
+  size_bytes: number
+  storage_key: string
+  original_name?: string
+  width?: number
+  height?: number
+  duration_ms?: number
+}
+
 export interface Message {
   id: string
   bot_id: string
@@ -32,6 +46,7 @@ export interface Message {
   role: string
   content?: unknown
   metadata?: Record<string, unknown>
+  assets?: MessageAsset[]
   created_at?: string
 }
 
@@ -40,13 +55,16 @@ export interface StreamEvent {
     | 'text_start' | 'text_delta' | 'text_end'
     | 'reasoning_start' | 'reasoning_delta' | 'reasoning_end'
     | 'tool_call_start' | 'tool_call_end'
+    | 'attachment_delta'
     | 'agent_start' | 'agent_end'
     | 'processing_started' | 'processing_completed' | 'processing_failed'
     | 'error'
   delta?: string
+  toolCallId?: string
   toolName?: string
   input?: unknown
   result?: unknown
+  attachments?: Array<Record<string, unknown>>
   error?: string
   message?: string
   [key: string]: unknown
@@ -199,6 +217,13 @@ export async function fetchMessages(
  * Stream a chat message via SSE. Sends parsed StreamEvents to onEvent callback.
  * Returns an abort function.
  */
+export interface ChatAttachment {
+  type: string
+  base64: string
+  mime?: string
+  name?: string
+}
+
 export function streamMessage(
   botId: string,
   _chatId: string,
@@ -206,15 +231,20 @@ export function streamMessage(
   onEvent: StreamEventHandler,
   onDone: () => void,
   onError: (err: Error) => void,
+  attachments?: ChatAttachment[],
 ): () => void {
   const controller = new AbortController()
 
   ;(async () => {
     try {
+      const reqBody: Record<string, unknown> = { query: text, current_channel: 'web', channels: ['web'] }
+      if (attachments?.length) {
+        reqBody.attachments = attachments
+      }
       const { data: body } = await client.post({
         url: '/bots/{bot_id}/messages/stream',
         path: { bot_id: botId },
-        body: { query: text, current_channel: 'web', channels: ['web'] },
+        body: reqBody,
         parseAs: 'stream',
         signal: controller.signal,
         throwOnError: true,

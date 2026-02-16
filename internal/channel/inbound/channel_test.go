@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/schedule"
 )
@@ -168,6 +172,73 @@ type fakeChatService struct {
 	resolveResult route.ResolveConversationResult
 	resolveErr    error
 	persisted     []messagepkg.Message
+	persistedIn   []messagepkg.PersistInput
+}
+
+type fakeMediaIngestor struct {
+	nextID    string
+	nextMime  string
+	ingestErr error
+	calls     int
+	inputs    []media.IngestInput
+}
+
+func (f *fakeMediaIngestor) Ingest(ctx context.Context, input media.IngestInput) (media.Asset, error) {
+	f.calls++
+	f.inputs = append(f.inputs, input)
+	if input.Reader != nil {
+		_, _ = io.ReadAll(input.Reader)
+	}
+	if f.ingestErr != nil {
+		return media.Asset{}, f.ingestErr
+	}
+	id := strings.TrimSpace(f.nextID)
+	if id == "" {
+		id = "asset-test-id"
+	}
+	mime := strings.TrimSpace(f.nextMime)
+	if mime == "" {
+		mime = strings.TrimSpace(input.Mime)
+	}
+	return media.Asset{
+		ID:         id,
+		Mime:       mime,
+		StorageKey: input.BotID + "/" + string(input.MediaType) + "/test/" + id,
+	}, nil
+}
+
+func (f *fakeMediaIngestor) AccessPath(asset media.Asset) string {
+	sub := asset.StorageKey
+	if idx := strings.IndexByte(sub, '/'); idx >= 0 {
+		sub = sub[idx+1:]
+	}
+	return "/data/media/" + sub
+}
+
+type fakeAttachmentResolverAdapter struct{}
+
+func (a *fakeAttachmentResolverAdapter) Type() channel.ChannelType {
+	return channel.ChannelType("resolver-test")
+}
+
+func (a *fakeAttachmentResolverAdapter) Descriptor() channel.Descriptor {
+	return channel.Descriptor{
+		Type:        channel.ChannelType("resolver-test"),
+		DisplayName: "ResolverTest",
+		Capabilities: channel.ChannelCapabilities{
+			Text:        true,
+			Attachments: true,
+		},
+	}
+}
+
+func (a *fakeAttachmentResolverAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
+	return channel.AttachmentPayload{
+		Reader: io.NopCloser(strings.NewReader("resolver-bytes")),
+		Mime:   "application/octet-stream",
+		Name:   "resolver.bin",
+		Size:   int64(len("resolver-bytes")),
+	}, nil
 }
 
 func (f *fakeChatService) ResolveConversation(ctx context.Context, input route.ResolveInput) (route.ResolveConversationResult, error) {
@@ -178,6 +249,7 @@ func (f *fakeChatService) ResolveConversation(ctx context.Context, input route.R
 }
 
 func (f *fakeChatService) Persist(ctx context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	f.persistedIn = append(f.persistedIn, input)
 	msg := messagepkg.Message{
 		BotID:                   input.BotID,
 		RouteID:                 input.RouteID,
@@ -429,6 +501,125 @@ func TestChannelInboundProcessorGroupMentionTriggersReply(t *testing.T) {
 	}
 	if !gateway.gotReq.UserMessagePersisted {
 		t.Fatalf("expected UserMessagePersisted=true for pre-persisted inbound message")
+	}
+}
+
+func TestChannelInboundProcessorPersistsAttachmentAssetRefs(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-asset"}}
+	memberSvc := &fakeMemberService{isMember: true}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-asset", RouteID: "route-asset"}}
+	gateway := &fakeChatGateway{
+		resp: conversation.ChatResponse{
+			Messages: []conversation.ModelMessage{
+				{Role: "assistant", Content: conversation.NewTextContent("ok")},
+			},
+		},
+	}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-asset", BotID: "bot-1"}
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("feishu"),
+		Message: channel.Message{
+			ID:   "msg-asset-1",
+			Text: "attachment test",
+			Attachments: []channel.Attachment{
+				{
+					Type:    channel.AttachmentImage,
+					URL:     "https://example.com/img.png",
+					AssetID: "asset-1",
+					Name:    "img.png",
+					Mime:    "image/png",
+				},
+			},
+		},
+		ReplyTarget: "chat_id:oc_asset",
+		Sender:      channel.Identity{SubjectID: "ext-asset"},
+		Conversation: channel.Conversation{
+			ID:   "oc_asset",
+			Type: "p2p",
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(chatSvc.persistedIn) != 1 {
+		t.Fatalf("expected one persisted input, got %d", len(chatSvc.persistedIn))
+	}
+	if len(chatSvc.persistedIn[0].Assets) != 1 {
+		t.Fatalf("expected one persisted asset ref, got %d", len(chatSvc.persistedIn[0].Assets))
+	}
+	if got := chatSvc.persistedIn[0].Assets[0].AssetID; got != "asset-1" {
+		t.Fatalf("expected persisted asset id asset-1, got %q", got)
+	}
+	if len(gateway.gotReq.Attachments) != 1 {
+		t.Fatalf("expected one gateway attachment, got %d", len(gateway.gotReq.Attachments))
+	}
+	if got := gateway.gotReq.Attachments[0].AssetID; got != "asset-1" {
+		t.Fatalf("expected gateway attachment asset_id asset-1, got %q", got)
+	}
+}
+
+func TestChannelInboundProcessorIngestsPlatformKeyWithResolver(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-resolver"}}
+	memberSvc := &fakeMemberService{isMember: true}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-resolver", RouteID: "route-resolver"}}
+	gateway := &fakeChatGateway{
+		resp: conversation.ChatResponse{
+			Messages: []conversation.ModelMessage{
+				{Role: "assistant", Content: conversation.NewTextContent("ok")},
+			},
+		},
+	}
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeAttachmentResolverAdapter{})
+	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	mediaSvc := &fakeMediaIngestor{nextID: "asset-resolved-1", nextMime: "application/octet-stream"}
+	processor.SetMediaService(mediaSvc)
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-resolver", BotID: "bot-1", ChannelType: channel.ChannelType("resolver-test")}
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("resolver-test"),
+		Message: channel.Message{
+			ID:   "msg-resolver-1",
+			Text: "attachment resolver test",
+			Attachments: []channel.Attachment{
+				{
+					Type:        channel.AttachmentFile,
+					PlatformKey: "platform-file-1",
+				},
+			},
+		},
+		ReplyTarget: "resolver-target",
+		Sender:      channel.Identity{SubjectID: "resolver-user"},
+		Conversation: channel.Conversation{
+			ID:   "resolver-conv",
+			Type: "p2p",
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mediaSvc.calls != 1 {
+		t.Fatalf("expected media ingest to be called once, got %d", mediaSvc.calls)
+	}
+	if len(gateway.gotReq.Attachments) != 1 {
+		t.Fatalf("expected one gateway attachment, got %d", len(gateway.gotReq.Attachments))
+	}
+	if got := gateway.gotReq.Attachments[0].AssetID; got != "asset-resolved-1" {
+		t.Fatalf("expected resolved asset id, got %q", got)
+	}
+	if len(chatSvc.persistedIn) != 1 || len(chatSvc.persistedIn[0].Assets) != 1 {
+		t.Fatalf("expected one persisted asset ref, got %+v", chatSvc.persistedIn)
+	}
+	if got := chatSvc.persistedIn[0].Assets[0].AssetID; got != "asset-resolved-1" {
+		t.Fatalf("expected persisted asset id asset-resolved-1, got %q", got)
 	}
 }
 
@@ -702,5 +893,244 @@ func TestChannelInboundProcessorProcessingFailedNotifyErrorDoesNotOverrideChatEr
 	}
 	if len(notifier.events) != 2 || notifier.events[0] != "started" || notifier.events[1] != "failed" {
 		t.Fatalf("unexpected processing status lifecycle: %+v", notifier.events)
+	}
+}
+
+func TestDownloadInboundAttachmentURLTooLarge(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", "999999999")
+		_, _ = w.Write([]byte("x"))
+	}))
+	defer server.Close()
+
+	_, err := openInboundAttachmentURL(context.Background(), server.URL)
+	if err == nil {
+		t.Fatalf("expected too-large error")
+	}
+	if !errors.Is(err, media.ErrAssetTooLarge) {
+		t.Fatalf("expected ErrAssetTooLarge, got %v", err)
+	}
+}
+
+func TestMapStreamChunkToChannelEvents(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		chunk         string
+		wantType      channel.StreamEventType
+		wantDelta     string
+		wantPhase     channel.StreamPhase
+		wantToolName  string
+		wantAttCount  int
+		wantError     string
+		wantNilEvents bool
+	}{
+		{
+			name:      "text_delta",
+			chunk:     `{"type":"text_delta","delta":"hello"}`,
+			wantType:  channel.StreamEventDelta,
+			wantDelta: "hello",
+			wantPhase: channel.StreamPhaseText,
+		},
+		{
+			name:          "text_delta empty",
+			chunk:         `{"type":"text_delta","delta":""}`,
+			wantNilEvents: true,
+		},
+		{
+			name:      "reasoning_delta",
+			chunk:     `{"type":"reasoning_delta","delta":"thinking"}`,
+			wantType:  channel.StreamEventDelta,
+			wantDelta: "thinking",
+			wantPhase: channel.StreamPhaseReasoning,
+		},
+		{
+			name:          "reasoning_delta empty",
+			chunk:         `{"type":"reasoning_delta","delta":""}`,
+			wantNilEvents: true,
+		},
+		{
+			name:      "reasoning_start",
+			chunk:     `{"type":"reasoning_start"}`,
+			wantType:  channel.StreamEventPhaseStart,
+			wantPhase: channel.StreamPhaseReasoning,
+		},
+		{
+			name:      "reasoning_end",
+			chunk:     `{"type":"reasoning_end"}`,
+			wantType:  channel.StreamEventPhaseEnd,
+			wantPhase: channel.StreamPhaseReasoning,
+		},
+		{
+			name:      "text_start",
+			chunk:     `{"type":"text_start"}`,
+			wantType:  channel.StreamEventPhaseStart,
+			wantPhase: channel.StreamPhaseText,
+		},
+		{
+			name:      "text_end",
+			chunk:     `{"type":"text_end"}`,
+			wantType:  channel.StreamEventPhaseEnd,
+			wantPhase: channel.StreamPhaseText,
+		},
+		{
+			name:         "tool_call_start",
+			chunk:        `{"type":"tool_call_start","toolName":"search_web","toolCallId":"tc_1","input":{"query":"test"}}`,
+			wantType:     channel.StreamEventToolCallStart,
+			wantToolName: "search_web",
+		},
+		{
+			name:         "tool_call_end",
+			chunk:        `{"type":"tool_call_end","toolName":"search_web","toolCallId":"tc_1","input":{"query":"test"},"result":{"ok":true}}`,
+			wantType:     channel.StreamEventToolCallEnd,
+			wantToolName: "search_web",
+		},
+		{
+			name:         "attachment_delta",
+			chunk:        `{"type":"attachment_delta","attachments":[{"type":"image","url":"https://example.com/img.png"}]}`,
+			wantType:     channel.StreamEventAttachment,
+			wantAttCount: 1,
+		},
+		{
+			name:          "attachment_delta empty",
+			chunk:         `{"type":"attachment_delta","attachments":[]}`,
+			wantNilEvents: true,
+		},
+		{
+			name:      "error",
+			chunk:     `{"type":"error","error":"something failed"}`,
+			wantType:  channel.StreamEventError,
+			wantError: "something failed",
+		},
+		{
+			name:      "error fallback to message",
+			chunk:     `{"type":"error","message":"fallback msg"}`,
+			wantType:  channel.StreamEventError,
+			wantError: "fallback msg",
+		},
+		{
+			name:     "agent_start",
+			chunk:    `{"type":"agent_start","input":{"agent":"planner"}}`,
+			wantType: channel.StreamEventAgentStart,
+		},
+		{
+			name:     "agent_end",
+			chunk:    `{"type":"agent_end","result":{"ok":true}}`,
+			wantType: channel.StreamEventAgentEnd,
+		},
+		{
+			name:     "processing_started",
+			chunk:    `{"type":"processing_started"}`,
+			wantType: channel.StreamEventProcessingStarted,
+		},
+		{
+			name:     "processing_completed",
+			chunk:    `{"type":"processing_completed"}`,
+			wantType: channel.StreamEventProcessingCompleted,
+		},
+		{
+			name:      "processing_failed",
+			chunk:     `{"type":"processing_failed","error":"failed"}`,
+			wantType:  channel.StreamEventProcessingFailed,
+			wantError: "failed",
+		},
+		{
+			name:          "empty chunk",
+			chunk:         ``,
+			wantNilEvents: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			events, _, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(tt.chunk)))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantNilEvents {
+				if len(events) > 0 {
+					t.Fatalf("expected nil/empty events, got %d", len(events))
+				}
+				return
+			}
+			if len(events) != 1 {
+				t.Fatalf("expected 1 event, got %d", len(events))
+			}
+			ev := events[0]
+			if ev.Type != tt.wantType {
+				t.Fatalf("expected type %q, got %q", tt.wantType, ev.Type)
+			}
+			if tt.wantDelta != "" && ev.Delta != tt.wantDelta {
+				t.Fatalf("expected delta %q, got %q", tt.wantDelta, ev.Delta)
+			}
+			if tt.wantPhase != "" && ev.Phase != tt.wantPhase {
+				t.Fatalf("expected phase %q, got %q", tt.wantPhase, ev.Phase)
+			}
+			if tt.wantToolName != "" {
+				if ev.ToolCall == nil {
+					t.Fatal("expected non-nil ToolCall")
+				}
+				if ev.ToolCall.Name != tt.wantToolName {
+					t.Fatalf("expected tool name %q, got %q", tt.wantToolName, ev.ToolCall.Name)
+				}
+			}
+			if tt.wantAttCount > 0 && len(ev.Attachments) != tt.wantAttCount {
+				t.Fatalf("expected %d attachments, got %d", tt.wantAttCount, len(ev.Attachments))
+			}
+			if tt.wantError != "" && ev.Error != tt.wantError {
+				t.Fatalf("expected error %q, got %q", tt.wantError, ev.Error)
+			}
+		})
+	}
+}
+
+func TestMapStreamChunkToChannelEvents_ToolCallFields(t *testing.T) {
+	t.Parallel()
+
+	chunk := `{"type":"tool_call_end","toolName":"calc","toolCallId":"c1","input":{"x":1},"result":{"sum":2}}`
+	events, _, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(chunk)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	tc := events[0].ToolCall
+	if tc == nil {
+		t.Fatal("expected non-nil ToolCall")
+	}
+	if tc.Name != "calc" || tc.CallID != "c1" {
+		t.Fatalf("unexpected name/callID: %q / %q", tc.Name, tc.CallID)
+	}
+	if tc.Input == nil || tc.Result == nil {
+		t.Fatal("expected non-nil Input and Result")
+	}
+}
+
+func TestMapStreamChunkToChannelEvents_FinalMessages(t *testing.T) {
+	t.Parallel()
+
+	chunk := `{"type":"agent_end","messages":[{"role":"assistant","content":"done"}]}`
+	events, messages, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(chunk)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != channel.StreamEventAgentEnd {
+		t.Fatalf("expected event type %q, got %q", channel.StreamEventAgentEnd, events[0].Type)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 final message, got %d", len(messages))
+	}
+	if messages[0].Role != "assistant" {
+		t.Fatalf("expected role assistant, got %q", messages[0].Role)
 	}
 }

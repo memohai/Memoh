@@ -6,6 +6,21 @@ import (
 	"time"
 )
 
+// MessageAsset carries media asset metadata attached to a message.
+type MessageAsset struct {
+	AssetID      string `json:"asset_id"`
+	Role         string `json:"role"`
+	Ordinal      int    `json:"ordinal"`
+	MediaType    string `json:"media_type"`
+	Mime         string `json:"mime"`
+	SizeBytes    int64  `json:"size_bytes"`
+	StorageKey   string `json:"storage_key"`
+	OriginalName string `json:"original_name,omitempty"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	DurationMs   int64  `json:"duration_ms,omitempty"`
+}
+
 // Message represents a single persisted bot message.
 type Message struct {
 	ID                      string          `json:"id"`
@@ -21,7 +36,15 @@ type Message struct {
 	Role                    string          `json:"role"`
 	Content                 json.RawMessage `json:"content"`
 	Metadata                map[string]any  `json:"metadata,omitempty"`
+	Assets                  []MessageAsset  `json:"assets,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
+}
+
+// AssetRef links a media asset to a persisted message.
+type AssetRef struct {
+	AssetID string `json:"asset_id"`
+	Role    string `json:"role"`
+	Ordinal int    `json:"ordinal"`
 }
 
 // PersistInput is the input for persisting a message.
@@ -36,6 +59,7 @@ type PersistInput struct {
 	Role                    string
 	Content                 json.RawMessage
 	Metadata                map[string]any
+	Assets                  []AssetRef
 }
 
 // Writer defines write behavior needed by the inbound router.

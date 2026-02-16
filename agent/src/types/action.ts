@@ -39,11 +39,6 @@ export interface AttachmentDeltaAction extends BaseAction {
   attachments: AgentAttachment[]
 }
 
-export interface ImageDeltaAction extends BaseAction {
-  type: 'image_delta'
-  image: string
-}
-
 export interface TextEndAction extends BaseAction {
   type: 'text_end'
 }
@@ -79,7 +74,6 @@ export type AgentAction =
   | TextStartAction
   | TextDeltaAction
   | AttachmentDeltaAction
-  | ImageDeltaAction
   | TextEndAction
   | ToolCallStartAction
   | ToolCallEndAction

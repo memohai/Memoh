@@ -22,7 +22,7 @@ import (
 type LocalChannelHandler struct {
 	channelType    channel.ChannelType
 	channelManager *channel.Manager
-	channelService *channel.Service
+	channelStore   *channel.Store
 	chatService    *conversation.Service
 	routeHub       *local.RouteHub
 	botService     *bots.Service
@@ -30,11 +30,11 @@ type LocalChannelHandler struct {
 }
 
 // NewLocalChannelHandler creates a local channel handler.
-func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *channel.Manager, channelService *channel.Service, chatService *conversation.Service, routeHub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *LocalChannelHandler {
+func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, routeHub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *LocalChannelHandler {
 	return &LocalChannelHandler{
 		channelType:    channelType,
 		channelManager: channelManager,
-		channelService: channelService,
+		channelStore:   channelStore,
 		chatService:    chatService,
 		routeHub:       routeHub,
 		botService:     botService,
@@ -129,7 +129,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	if err := h.ensureBotParticipant(c.Request().Context(), botID, channelIdentityID); err != nil {
 		return err
 	}
-	if h.channelManager == nil || h.channelService == nil {
+	if h.channelManager == nil || h.channelStore == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel manager not configured")
 	}
 	var req localMessageRequest
@@ -139,7 +139,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
-	cfg, err := h.channelService.ResolveEffectiveConfig(c.Request().Context(), botID, h.channelType)
+	cfg, err := h.channelStore.ResolveEffectiveConfig(c.Request().Context(), botID, h.channelType)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

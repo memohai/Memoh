@@ -18,8 +18,9 @@ import (
 
 const (
 	feishuStreamThinkingText  = "Thinking..."
+	feishuStreamToolHintText  = "Calling tools..."
 	feishuStreamPatchInterval = 700 * time.Millisecond
-	feishuStreamMaxRunes       = 8000
+	feishuStreamMaxRunes      = 8000
 )
 
 type feishuOutboundStream struct {
@@ -68,6 +69,26 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEve
 			return nil
 		}
 		return s.patchCard(ctx, s.textBuffer.String())
+	case channel.StreamEventToolCallStart:
+		if err := s.ensureCard(ctx, feishuStreamToolHintText); err != nil {
+			return err
+		}
+		return s.patchCard(ctx, feishuStreamToolHintText)
+	case channel.StreamEventToolCallEnd:
+		return nil
+	case channel.StreamEventAttachment:
+		if len(event.Attachments) == 0 {
+			return nil
+		}
+		media := channel.Message{
+			Attachments: event.Attachments,
+		}
+		return s.adapter.Send(ctx, s.cfg, channel.OutboundMessage{
+			Target:  s.target,
+			Message: media,
+		})
+	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted, channel.StreamEventProcessingFailed:
+		return nil
 	case channel.StreamEventFinal:
 		if event.Final == nil || event.Final.Message.IsEmpty() {
 			return nil
@@ -108,7 +129,7 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		}
 		return s.patchCard(ctx, "Error: "+errText)
 	default:
-		return fmt.Errorf("unsupported stream event type: %s", event.Type)
+		return nil
 	}
 }
 
@@ -227,9 +248,51 @@ func (s *feishuOutboundStream) patchCard(ctx context.Context, text string) error
 	return nil
 }
 
+// extractReadableFromJSON tries to extract human-readable text from JSON-like content.
+// Returns the original text if not JSON or extraction fails.
+func extractReadableFromJSON(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return text
+	}
+	first := strings.TrimLeft(trimmed, " \t\n\r")
+	if (len(first) > 0 && first[0] != '{' && first[0] != '[') || len(first) < 2 {
+		return text
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+		var arr []any
+		if err := json.Unmarshal([]byte(trimmed), &arr); err != nil {
+			return text
+		}
+		if len(arr) == 0 {
+			return text
+		}
+		if s, ok := arr[0].(string); ok && strings.TrimSpace(s) != "" {
+			return s
+		}
+		return text
+	}
+	for _, key := range []string{"text", "message", "content", "result", "output", "response", "answer"} {
+		if v, ok := raw[key]; ok && v != nil {
+			switch val := v.(type) {
+			case string:
+				if strings.TrimSpace(val) != "" {
+					return val
+				}
+			case map[string]any:
+				if b, err := json.Marshal(val); err == nil {
+					return string(b)
+				}
+			}
+		}
+	}
+	return text
+}
+
 func buildFeishuStreamCardContent(text string) (string, error) {
-	content := normalizeFeishuStreamText(text)
-	content = processFeishuCardMarkdown(content)
+	content := normalizeFeishuStreamText(extractReadableFromJSON(text))
+	body := processFeishuCardMarkdown(content)
 	card := map[string]any{
 		"config": map[string]any{
 			"wide_screen_mode": true,
@@ -244,7 +307,7 @@ func buildFeishuStreamCardContent(text string) (string, error) {
 						"is_short": false,
 						"text": map[string]any{
 							"tag":     "lark_md",
-							"content": content,
+							"content": body,
 						},
 					},
 				},

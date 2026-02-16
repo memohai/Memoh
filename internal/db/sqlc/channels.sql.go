@@ -11,8 +11,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteBotChannelConfig = `-- name: DeleteBotChannelConfig :exec
+DELETE FROM bot_channel_configs
+WHERE bot_id = $1 AND channel_type = $2
+`
+
+type DeleteBotChannelConfigParams struct {
+	BotID       pgtype.UUID `json:"bot_id"`
+	ChannelType string      `json:"channel_type"`
+}
+
+func (q *Queries) DeleteBotChannelConfig(ctx context.Context, arg DeleteBotChannelConfigParams) error {
+	_, err := q.db.Exec(ctx, deleteBotChannelConfig, arg.BotID, arg.ChannelType)
+	return err
+}
+
 const getBotChannelConfig = `-- name: GetBotChannelConfig :one
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, status, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
 FROM bot_channel_configs
 WHERE bot_id = $1 AND channel_type = $2
 LIMIT 1
@@ -35,7 +50,7 @@ func (q *Queries) GetBotChannelConfig(ctx context.Context, arg GetBotChannelConf
 		&i.SelfIdentity,
 		&i.Routing,
 		&i.Capabilities,
-		&i.Status,
+		&i.Disabled,
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -44,7 +59,7 @@ func (q *Queries) GetBotChannelConfig(ctx context.Context, arg GetBotChannelConf
 }
 
 const getBotChannelConfigByExternalIdentity = `-- name: GetBotChannelConfigByExternalIdentity :one
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, status, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
 FROM bot_channel_configs
 WHERE channel_type = $1 AND external_identity = $2
 LIMIT 1
@@ -67,7 +82,7 @@ func (q *Queries) GetBotChannelConfigByExternalIdentity(ctx context.Context, arg
 		&i.SelfIdentity,
 		&i.Routing,
 		&i.Capabilities,
-		&i.Status,
+		&i.Disabled,
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -102,7 +117,7 @@ func (q *Queries) GetUserChannelBinding(ctx context.Context, arg GetUserChannelB
 }
 
 const listBotChannelConfigsByType = `-- name: ListBotChannelConfigsByType :many
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, status, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
 FROM bot_channel_configs
 WHERE channel_type = $1
 ORDER BY created_at DESC
@@ -126,7 +141,7 @@ func (q *Queries) ListBotChannelConfigsByType(ctx context.Context, channelType s
 			&i.SelfIdentity,
 			&i.Routing,
 			&i.Capabilities,
-			&i.Status,
+			&i.Disabled,
 			&i.VerifiedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -175,9 +190,44 @@ func (q *Queries) ListUserChannelBindingsByPlatform(ctx context.Context, channel
 	return items, nil
 }
 
+const updateBotChannelConfigDisabled = `-- name: UpdateBotChannelConfigDisabled :one
+UPDATE bot_channel_configs
+SET
+  disabled = $3,
+  updated_at = now()
+WHERE bot_id = $1 AND channel_type = $2
+RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+`
+
+type UpdateBotChannelConfigDisabledParams struct {
+	BotID       pgtype.UUID `json:"bot_id"`
+	ChannelType string      `json:"channel_type"`
+	Disabled    bool        `json:"disabled"`
+}
+
+func (q *Queries) UpdateBotChannelConfigDisabled(ctx context.Context, arg UpdateBotChannelConfigDisabledParams) (BotChannelConfig, error) {
+	row := q.db.QueryRow(ctx, updateBotChannelConfigDisabled, arg.BotID, arg.ChannelType, arg.Disabled)
+	var i BotChannelConfig
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.ChannelType,
+		&i.Credentials,
+		&i.ExternalIdentity,
+		&i.SelfIdentity,
+		&i.Routing,
+		&i.Capabilities,
+		&i.Disabled,
+		&i.VerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertBotChannelConfig = `-- name: UpsertBotChannelConfig :one
 INSERT INTO bot_channel_configs (
-  bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, status, verified_at
+  bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (bot_id, channel_type)
@@ -187,10 +237,10 @@ DO UPDATE SET
   self_identity = EXCLUDED.self_identity,
   routing = EXCLUDED.routing,
   capabilities = EXCLUDED.capabilities,
-  status = EXCLUDED.status,
+  disabled = EXCLUDED.disabled,
   verified_at = EXCLUDED.verified_at,
   updated_at = now()
-RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, status, verified_at, created_at, updated_at
+RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
 `
 
 type UpsertBotChannelConfigParams struct {
@@ -201,7 +251,7 @@ type UpsertBotChannelConfigParams struct {
 	SelfIdentity     []byte             `json:"self_identity"`
 	Routing          []byte             `json:"routing"`
 	Capabilities     []byte             `json:"capabilities"`
-	Status           string             `json:"status"`
+	Disabled         bool               `json:"disabled"`
 	VerifiedAt       pgtype.Timestamptz `json:"verified_at"`
 }
 
@@ -214,7 +264,7 @@ func (q *Queries) UpsertBotChannelConfig(ctx context.Context, arg UpsertBotChann
 		arg.SelfIdentity,
 		arg.Routing,
 		arg.Capabilities,
-		arg.Status,
+		arg.Disabled,
 		arg.VerifiedAt,
 	)
 	var i BotChannelConfig
@@ -227,7 +277,7 @@ func (q *Queries) UpsertBotChannelConfig(ctx context.Context, arg UpsertBotChann
 		&i.SelfIdentity,
 		&i.Routing,
 		&i.Capabilities,
-		&i.Status,
+		&i.Disabled,
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,

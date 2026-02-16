@@ -28,7 +28,7 @@ func JWTMiddleware(secret string, skipper middleware.Skipper) echo.MiddlewareFun
 	return echojwt.WithConfig(echojwt.Config{
 		SigningKey:    []byte(secret),
 		SigningMethod: "HS256",
-		TokenLookup:   "header:Authorization:Bearer ",
+		TokenLookup:   "header:Authorization:Bearer ,query:token",
 		Skipper:       skipper,
 		NewClaimsFunc: func(c echo.Context) jwt.Claims {
 			return jwt.MapClaims{}

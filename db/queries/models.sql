@@ -46,13 +46,13 @@ SELECT COUNT(*) FROM llm_providers;
 SELECT COUNT(*) FROM llm_providers WHERE client_type = sqlc.arg(client_type);
 
 -- name: CreateModel :one
-INSERT INTO models (model_id, name, llm_provider_id, dimensions, is_multimodal, type)
+INSERT INTO models (model_id, name, llm_provider_id, dimensions, input_modalities, type)
 VALUES (
   sqlc.arg(model_id),
   sqlc.arg(name),
   sqlc.arg(llm_provider_id),
   sqlc.arg(dimensions),
-  sqlc.arg(is_multimodal),
+  sqlc.arg(input_modalities),
   sqlc.arg(type)
 )
 RETURNING *;
@@ -95,7 +95,7 @@ SET
   name = sqlc.arg(name),
   llm_provider_id = sqlc.arg(llm_provider_id),
   dimensions = sqlc.arg(dimensions),
-  is_multimodal = sqlc.arg(is_multimodal),
+  input_modalities = sqlc.arg(input_modalities),
   type = sqlc.arg(type),
   updated_at = now()
 WHERE id = sqlc.arg(id)
@@ -108,7 +108,7 @@ SET
   name = sqlc.arg(name),
   llm_provider_id = sqlc.arg(llm_provider_id),
   dimensions = sqlc.arg(dimensions),
-  is_multimodal = sqlc.arg(is_multimodal),
+  input_modalities = sqlc.arg(input_modalities),
   type = sqlc.arg(type),
   updated_at = now()
 WHERE model_id = sqlc.arg(model_id)

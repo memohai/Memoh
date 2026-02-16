@@ -96,6 +96,19 @@ func TestBuildTelegramAttachmentIncludesPlatformReference(t *testing.T) {
 	}
 }
 
+func TestTelegramResolveAttachmentRequiresReference(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	_, err := adapter.ResolveAttachment(context.Background(), channel.ChannelConfig{}, channel.Attachment{})
+	if err == nil {
+		t.Fatal("expected error when attachment has no platform_key/url")
+	}
+	if !strings.Contains(err.Error(), "platform_key") {
+		t.Fatalf("expected platform_key error, got: %v", err)
+	}
+}
+
 func TestParseReplyToMessageID(t *testing.T) {
 	t.Parallel()
 

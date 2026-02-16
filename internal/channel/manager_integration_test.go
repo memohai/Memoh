@@ -73,6 +73,7 @@ type fakeAdapter struct {
 	channelType ChannelType
 	mu          sync.Mutex
 	started     []ChannelConfig
+	connectCtxs []context.Context
 	sent        []OutboundMessage
 	stops       int
 }
@@ -98,6 +99,7 @@ func (f *fakeAdapter) NormalizeTarget(raw string) string { return strings.TrimSp
 func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (Connection, error) {
 	f.mu.Lock()
 	f.started = append(f.started, cfg)
+	f.connectCtxs = append(f.connectCtxs, ctx)
 	f.mu.Unlock()
 	stop := func(context.Context) error {
 		f.mu.Lock()
@@ -237,5 +239,39 @@ func TestManagerReconcileStartsAndStops(t *testing.T) {
 	}
 	if adapter.stops != 1 {
 		t.Fatalf("expected 1 stop, got %d", adapter.stops)
+	}
+}
+
+func TestManagerEnsureConnectionDetachesRequestContext(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+	store := &fakeConfigStore{}
+	reg := NewRegistry()
+	adapter := &fakeAdapter{channelType: ChannelType("test")}
+	manager := NewManager(log, reg, store, &fakeInboundProcessorIntegration{})
+	manager.RegisterAdapter(adapter)
+
+	cfg := ChannelConfig{
+		ID:          "cfg-1",
+		BotID:       "bot-1",
+		ChannelType: ChannelType("test"),
+		Credentials: map[string]any{"token": "x"},
+		UpdatedAt:   time.Now(),
+	}
+	reqCtx, cancel := context.WithCancel(context.Background())
+	if err := manager.EnsureConnection(reqCtx, cfg); err != nil {
+		cancel()
+		t.Fatalf("expected no error, got %v", err)
+	}
+	cancel()
+
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.connectCtxs) != 1 {
+		t.Fatalf("expected 1 connect context, got %d", len(adapter.connectCtxs))
+	}
+	if err := adapter.connectCtxs[0].Err(); err != nil {
+		t.Fatalf("expected detached context to remain active, got %v", err)
 	}
 }

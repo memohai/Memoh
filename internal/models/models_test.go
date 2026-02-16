@@ -115,6 +115,17 @@ func TestModel_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid chat model with modalities",
+			model: models.Model{
+				ModelID:         "gpt-4o",
+				Name:            "GPT-4o",
+				LlmProviderID:   "11111111-1111-1111-1111-111111111111",
+				InputModalities: []string{"text", "image", "audio"},
+				Type:            models.ModelTypeChat,
+			},
+			wantErr: false,
+		},
+		{
 			name: "valid embedding model",
 			model: models.Model{
 				ModelID:       "text-embedding-ada-002",
@@ -169,6 +180,16 @@ func TestModel_Validate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "invalid input modality",
+			model: models.Model{
+				ModelID:         "gpt-4",
+				LlmProviderID:   "11111111-1111-1111-1111-111111111111",
+				Type:            models.ModelTypeChat,
+				InputModalities: []string{"text", "smell"},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -181,6 +202,57 @@ func TestModel_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestModel_IsMultimodal(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    models.Model
+		expected bool
+	}{
+		{
+			name: "text only",
+			model: models.Model{
+				InputModalities: []string{"text"},
+			},
+			expected: false,
+		},
+		{
+			name: "text and image",
+			model: models.Model{
+				InputModalities: []string{"text", "image"},
+			},
+			expected: true,
+		},
+		{
+			name: "text image audio video",
+			model: models.Model{
+				InputModalities: []string{"text", "image", "audio", "video"},
+			},
+			expected: true,
+		},
+		{
+			name:     "empty modalities",
+			model:    models.Model{},
+			expected: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.model.IsMultimodal())
+		})
+	}
+}
+
+func TestModel_HasInputModality(t *testing.T) {
+	m := models.Model{
+		InputModalities: []string{"text", "image", "audio"},
+	}
+	assert.True(t, m.HasInputModality("text"))
+	assert.True(t, m.HasInputModality("image"))
+	assert.True(t, m.HasInputModality("audio"))
+	assert.False(t, m.HasInputModality("video"))
+	assert.False(t, m.HasInputModality("file"))
 }
 
 func TestModelTypes(t *testing.T) {

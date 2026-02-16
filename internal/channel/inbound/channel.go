@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
@@ -33,11 +36,19 @@ type RouteResolver interface {
 	ResolveConversation(ctx context.Context, input route.ResolveInput) (route.ResolveConversationResult, error)
 }
 
+type mediaIngestor interface {
+	Ingest(ctx context.Context, input media.IngestInput) (media.Asset, error)
+	// AccessPath returns a consumer-accessible reference for a persisted asset.
+	// The format depends on the storage backend (e.g. container path, URL).
+	AccessPath(asset media.Asset) string
+}
+
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
 	runner        flow.Runner
 	routeResolver RouteResolver
 	message       messagepkg.Writer
+	mediaService  mediaIngestor
 	registry      *channel.Registry
 	logger        *slog.Logger
 	jwtSecret     string
@@ -87,6 +98,14 @@ func (p *ChannelInboundProcessor) IdentityMiddleware() channel.Middleware {
 	return p.identity.Middleware()
 }
 
+// SetMediaService configures media ingestion support for inbound attachments.
+func (p *ChannelInboundProcessor) SetMediaService(mediaService mediaIngestor) {
+	if p == nil {
+		return
+	}
+	p.mediaService = mediaService
+}
+
 // HandleInbound processes an inbound channel message through identity resolution and chat gateway.
 func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, sender channel.StreamReplySender) error {
 	if p.runner == nil {
@@ -96,7 +115,20 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return fmt.Errorf("reply sender not configured")
 	}
 	text := buildInboundQuery(msg.Message)
-	if strings.TrimSpace(text) == "" {
+	if p.logger != nil {
+		p.logger.Debug("inbound handle start",
+			slog.String("channel", msg.Channel.String()),
+			slog.String("message_id", strings.TrimSpace(msg.Message.ID)),
+			slog.String("query", strings.TrimSpace(text)),
+			slog.Int("attachments", len(msg.Message.Attachments)),
+			slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
+			slog.String("conversation_id", strings.TrimSpace(msg.Conversation.ID)),
+		)
+	}
+	if strings.TrimSpace(text) == "" && len(msg.Message.Attachments) == 0 {
+		if p.logger != nil {
+			p.logger.Debug("inbound dropped empty", slog.String("channel", msg.Channel.String()))
+		}
 		return nil
 	}
 	state, err := p.requireIdentity(ctx, cfg, msg)
@@ -123,6 +155,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	identity := state.Identity
+	resolvedAttachments := p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Attachments)
+	attachments := mapChannelAttachments(resolvedAttachments)
 
 	// Resolve or create the route via channel_routes.
 	if p.routeResolver == nil {
@@ -157,12 +191,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				slog.Bool("is_mentioned", metadataBool(msg.Metadata, "is_mentioned")),
 				slog.Bool("is_reply_to_bot", metadataBool(msg.Metadata, "is_reply_to_bot")),
 				slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
+				slog.String("query", strings.TrimSpace(text)),
+				slog.Int("attachments", len(attachments)),
 			)
 		}
-		p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, "passive_sync")
+		p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, attachments, "passive_sync")
 		return nil
 	}
-	userMessagePersisted := p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, "active_chat")
+	userMessagePersisted := p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, attachments, "active_chat")
 
 	// Issue chat token for reply routing.
 	chatToken := ""
@@ -284,6 +320,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		CurrentChannel:          msg.Channel.String(),
 		Channels:                []string{msg.Channel.String()},
 		UserMessagePersisted:    userMessagePersisted,
+		Attachments:             attachments,
 	})
 
 	var (
@@ -507,7 +544,15 @@ func metadataBool(metadata map[string]any, key string) bool {
 	}
 }
 
-func (p *ChannelInboundProcessor) persistInboundUser(ctx context.Context, routeID string, identity InboundIdentity, msg channel.InboundMessage, query string, triggerMode string) bool {
+func (p *ChannelInboundProcessor) persistInboundUser(
+	ctx context.Context,
+	routeID string,
+	identity InboundIdentity,
+	msg channel.InboundMessage,
+	query string,
+	attachments []conversation.ChatAttachment,
+	triggerMode string,
+) bool {
 	if p.message == nil {
 		return false
 	}
@@ -540,6 +585,7 @@ func (p *ChannelInboundProcessor) persistInboundUser(ctx context.Context, routeI
 		Role:                    "user",
 		Content:                 payload,
 		Metadata:                meta,
+		Assets:                  chatAttachmentsToAssetRefs(attachments),
 	}); err != nil && p.logger != nil {
 		p.logger.Warn("persist inbound user message failed", slog.Any("error", err))
 		return false
@@ -651,8 +697,15 @@ type gatewayStreamEnvelope struct {
 	Delta    string                      `json:"delta"`
 	Error    string                      `json:"error"`
 	Message  string                      `json:"message"`
+	Image    string                      `json:"image"`
 	Data     json.RawMessage             `json:"data"`
 	Messages []conversation.ModelMessage `json:"messages"`
+
+	ToolName    string          `json:"toolName"`
+	ToolCallID  string          `json:"toolCallId"`
+	Input       json.RawMessage `json:"input"`
+	Result      json.RawMessage `json:"result"`
+	Attachments json.RawMessage `json:"attachments"`
 }
 
 type gatewayStreamDoneData struct {
@@ -685,6 +738,7 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 			{
 				Type:  channel.StreamEventDelta,
 				Delta: envelope.Delta,
+				Phase: channel.StreamPhaseText,
 			},
 		}, finalMessages, nil
 	case "reasoning_delta":
@@ -695,9 +749,93 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 			{
 				Type:  channel.StreamEventDelta,
 				Delta: envelope.Delta,
-				Metadata: map[string]any{
-					"phase": "reasoning",
+				Phase: channel.StreamPhaseReasoning,
+			},
+		}, finalMessages, nil
+	case "tool_call_start":
+		return []channel.StreamEvent{
+			{
+				Type: channel.StreamEventToolCallStart,
+				ToolCall: &channel.StreamToolCall{
+					Name:   strings.TrimSpace(envelope.ToolName),
+					CallID: strings.TrimSpace(envelope.ToolCallID),
+					Input:  parseRawJSON(envelope.Input),
 				},
+			},
+		}, finalMessages, nil
+	case "tool_call_end":
+		return []channel.StreamEvent{
+			{
+				Type: channel.StreamEventToolCallEnd,
+				ToolCall: &channel.StreamToolCall{
+					Name:   strings.TrimSpace(envelope.ToolName),
+					CallID: strings.TrimSpace(envelope.ToolCallID),
+					Input:  parseRawJSON(envelope.Input),
+					Result: parseRawJSON(envelope.Result),
+				},
+			},
+		}, finalMessages, nil
+	case "reasoning_start":
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventPhaseStart, Phase: channel.StreamPhaseReasoning},
+		}, finalMessages, nil
+	case "reasoning_end":
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseReasoning},
+		}, finalMessages, nil
+	case "text_start":
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventPhaseStart, Phase: channel.StreamPhaseText},
+		}, finalMessages, nil
+	case "text_end":
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText},
+		}, finalMessages, nil
+	case "attachment_delta":
+		attachments := parseAttachmentDelta(envelope.Attachments)
+		if len(attachments) == 0 {
+			return nil, finalMessages, nil
+		}
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventAttachment, Attachments: attachments},
+		}, finalMessages, nil
+	case "agent_start":
+		return []channel.StreamEvent{
+			{
+				Type: channel.StreamEventAgentStart,
+				Metadata: map[string]any{
+					"input": parseRawJSON(envelope.Input),
+					"data":  parseRawJSON(envelope.Data),
+				},
+			},
+		}, finalMessages, nil
+	case "agent_end":
+		return []channel.StreamEvent{
+			{
+				Type: channel.StreamEventAgentEnd,
+				Metadata: map[string]any{
+					"result": parseRawJSON(envelope.Result),
+					"data":   parseRawJSON(envelope.Data),
+				},
+			},
+		}, finalMessages, nil
+	case "processing_started":
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventProcessingStarted},
+		}, finalMessages, nil
+	case "processing_completed":
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventProcessingCompleted},
+		}, finalMessages, nil
+	case "processing_failed":
+		streamError := strings.TrimSpace(envelope.Error)
+		if streamError == "" {
+			streamError = strings.TrimSpace(envelope.Message)
+		}
+		return []channel.StreamEvent{
+			{
+				Type:  channel.StreamEventProcessingFailed,
+				Error: streamError,
 			},
 		}, finalMessages, nil
 	case "error":
@@ -720,25 +858,7 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 }
 
 func buildInboundQuery(message channel.Message) string {
-	text := strings.TrimSpace(message.PlainText())
-	if len(message.Attachments) == 0 {
-		return text
-	}
-	lines := make([]string, 0, len(message.Attachments)+1)
-	if text != "" {
-		lines = append(lines, text)
-	}
-	for _, att := range message.Attachments {
-		label := strings.TrimSpace(att.Name)
-		if label == "" {
-			label = strings.TrimSpace(att.Reference())
-		}
-		if label == "" {
-			label = "unknown"
-		}
-		lines = append(lines, fmt.Sprintf("[attachment:%s] %s", att.Type, label))
-	}
-	return strings.Join(lines, "\n")
+	return strings.TrimSpace(message.PlainText())
 }
 
 func normalizeContentPartType(raw string) channel.MessagePartType {
@@ -1042,4 +1162,299 @@ func (p *ChannelInboundProcessor) logProcessingStatusError(
 		slog.String("user_id", identity.UserID),
 		slog.Any("error", err),
 	)
+}
+
+// parseRawJSON converts raw JSON bytes to a typed value for StreamToolCall fields.
+func parseRawJSON(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return string(raw)
+	}
+	return v
+}
+
+// mapChannelAttachments converts channel.Attachment slice to conversation.ChatAttachment slice.
+// When an attachment has been ingested (AssetID is set), the URL field contains
+// the container-internal path; it is mapped to Path for downstream consumers.
+func mapChannelAttachments(attachments []channel.Attachment) []conversation.ChatAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	result := make([]conversation.ChatAttachment, 0, len(attachments))
+	for _, att := range attachments {
+		ca := conversation.ChatAttachment{
+			Type:        string(att.Type),
+			PlatformKey: att.PlatformKey,
+			AssetID:     att.AssetID,
+			Name:        att.Name,
+			Mime:        att.Mime,
+			Size:        att.Size,
+			Metadata:    att.Metadata,
+		}
+		if strings.TrimSpace(att.AssetID) != "" {
+			ca.Path = att.URL
+			ca.Base64 = att.Base64
+		} else {
+			ca.URL = att.URL
+		}
+		result = append(result, ca)
+	}
+	return result
+}
+
+func (p *ChannelInboundProcessor) ingestInboundAttachments(
+	ctx context.Context,
+	cfg channel.ChannelConfig,
+	msg channel.InboundMessage,
+	botID string,
+	attachments []channel.Attachment,
+) []channel.Attachment {
+	if len(attachments) == 0 || p == nil || p.mediaService == nil || strings.TrimSpace(botID) == "" {
+		return attachments
+	}
+	result := make([]channel.Attachment, 0, len(attachments))
+	for _, att := range attachments {
+		item := att
+		if strings.TrimSpace(item.AssetID) != "" {
+			result = append(result, item)
+			continue
+		}
+		payload, err := p.loadInboundAttachmentPayload(ctx, cfg, msg, item)
+		if err != nil {
+			if p.logger != nil {
+				p.logger.Warn(
+					"inbound attachment ingest skipped",
+					slog.Any("error", err),
+					slog.String("attachment_type", strings.TrimSpace(string(item.Type))),
+					slog.String("attachment_url", strings.TrimSpace(item.URL)),
+					slog.String("platform_key", strings.TrimSpace(item.PlatformKey)),
+				)
+			}
+			result = append(result, item)
+			continue
+		}
+		if strings.TrimSpace(item.Mime) == "" {
+			item.Mime = strings.TrimSpace(payload.mime)
+		}
+		if strings.TrimSpace(item.Name) == "" {
+			item.Name = strings.TrimSpace(payload.name)
+		}
+		if item.Size == 0 && payload.size > 0 {
+			item.Size = payload.size
+		}
+		maxBytes := media.MaxAssetBytes
+		asset, err := p.mediaService.Ingest(ctx, media.IngestInput{
+			BotID:        botID,
+			MediaType:    mapInboundAttachmentMediaType(string(item.Type)),
+			Mime:         strings.TrimSpace(item.Mime),
+			OriginalName: strings.TrimSpace(item.Name),
+			Metadata:     item.Metadata,
+			Reader:       payload.reader,
+			MaxBytes:     maxBytes,
+		})
+		if payload.reader != nil {
+			_ = payload.reader.Close()
+		}
+		if err != nil {
+			if p.logger != nil {
+				p.logger.Warn(
+					"inbound attachment ingest failed",
+					slog.Any("error", err),
+					slog.String("attachment_type", strings.TrimSpace(string(item.Type))),
+					slog.String("attachment_url", strings.TrimSpace(item.URL)),
+					slog.String("platform_key", strings.TrimSpace(item.PlatformKey)),
+				)
+			}
+			result = append(result, item)
+			continue
+		}
+		item.AssetID = asset.ID
+		item.URL = p.mediaService.AccessPath(asset)
+		item.PlatformKey = ""
+		if strings.TrimSpace(item.Mime) == "" {
+			item.Mime = strings.TrimSpace(asset.Mime)
+		}
+		if item.Size == 0 && asset.SizeBytes > 0 {
+			item.Size = asset.SizeBytes
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+type inboundAttachmentPayload struct {
+	reader io.ReadCloser
+	mime   string
+	name   string
+	size   int64
+}
+
+func (p *ChannelInboundProcessor) loadInboundAttachmentPayload(
+	ctx context.Context,
+	cfg channel.ChannelConfig,
+	msg channel.InboundMessage,
+	att channel.Attachment,
+) (inboundAttachmentPayload, error) {
+	rawURL := strings.TrimSpace(att.URL)
+	if rawURL != "" {
+		payload, err := openInboundAttachmentURL(ctx, rawURL)
+		if err == nil {
+			if strings.TrimSpace(att.Mime) != "" {
+				payload.mime = strings.TrimSpace(att.Mime)
+			}
+			if strings.TrimSpace(payload.name) == "" {
+				payload.name = strings.TrimSpace(att.Name)
+			}
+			return payload, nil
+		}
+		// When URL download fails and platform_key exists, attempt resolver fallback.
+		if strings.TrimSpace(att.PlatformKey) == "" {
+			return inboundAttachmentPayload{}, err
+		}
+	}
+	platformKey := strings.TrimSpace(att.PlatformKey)
+	if platformKey == "" {
+		return inboundAttachmentPayload{}, fmt.Errorf("attachment has no ingestible payload")
+	}
+	resolver := p.resolveAttachmentResolver(msg.Channel)
+	if resolver == nil {
+		return inboundAttachmentPayload{}, fmt.Errorf("attachment resolver not supported for channel: %s", msg.Channel.String())
+	}
+	resolved, err := resolver.ResolveAttachment(ctx, cfg, att)
+	if err != nil {
+		return inboundAttachmentPayload{}, fmt.Errorf("resolve attachment by platform key: %w", err)
+	}
+	if resolved.Reader == nil {
+		return inboundAttachmentPayload{}, fmt.Errorf("resolved attachment reader is nil")
+	}
+	mime := strings.TrimSpace(att.Mime)
+	if mime == "" {
+		mime = strings.TrimSpace(resolved.Mime)
+	}
+	name := strings.TrimSpace(att.Name)
+	if name == "" {
+		name = strings.TrimSpace(resolved.Name)
+	}
+	return inboundAttachmentPayload{
+		reader: resolved.Reader,
+		mime:   mime,
+		name:   name,
+		size:   resolved.Size,
+	}, nil
+}
+
+func openInboundAttachmentURL(ctx context.Context, rawURL string) (inboundAttachmentPayload, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return inboundAttachmentPayload{}, fmt.Errorf("build request: %w", err)
+	}
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return inboundAttachmentPayload{}, fmt.Errorf("download attachment: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		_ = resp.Body.Close()
+		return inboundAttachmentPayload{}, fmt.Errorf("download attachment status: %d", resp.StatusCode)
+	}
+	maxBytes := media.MaxAssetBytes
+	if resp.ContentLength > maxBytes {
+		_ = resp.Body.Close()
+		return inboundAttachmentPayload{}, fmt.Errorf("%w: max %d bytes", media.ErrAssetTooLarge, maxBytes)
+	}
+	mime := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if idx := strings.Index(mime, ";"); idx >= 0 {
+		mime = strings.TrimSpace(mime[:idx])
+	}
+	return inboundAttachmentPayload{
+		reader: resp.Body,
+		mime:   mime,
+		size:   resp.ContentLength,
+	}, nil
+}
+
+func (p *ChannelInboundProcessor) resolveAttachmentResolver(channelType channel.ChannelType) channel.AttachmentResolver {
+	if p == nil || p.registry == nil {
+		return nil
+	}
+	resolver, ok := p.registry.GetAttachmentResolver(channelType)
+	if !ok {
+		return nil
+	}
+	return resolver
+}
+
+func mapInboundAttachmentMediaType(t string) media.MediaType {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "image", "gif":
+		return media.MediaTypeImage
+	case "audio", "voice":
+		return media.MediaTypeAudio
+	case "video":
+		return media.MediaTypeVideo
+	default:
+		return media.MediaTypeFile
+	}
+}
+
+func chatAttachmentsToAssetRefs(attachments []conversation.ChatAttachment) []messagepkg.AssetRef {
+	if len(attachments) == 0 {
+		return nil
+	}
+	refs := make([]messagepkg.AssetRef, 0, len(attachments))
+	for idx, att := range attachments {
+		assetID := strings.TrimSpace(att.AssetID)
+		if assetID == "" {
+			continue
+		}
+		refs = append(refs, messagepkg.AssetRef{
+			AssetID: assetID,
+			Role:    "attachment",
+			Ordinal: idx,
+		})
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	return refs
+}
+
+// parseAttachmentDelta converts raw JSON attachment data to channel Attachments.
+func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
+	if len(raw) == 0 {
+		return nil
+	}
+	var items []struct {
+		Type        string `json:"type"`
+		URL         string `json:"url"`
+		Path        string `json:"path"`
+		PlatformKey string `json:"platform_key"`
+		AssetID     string `json:"asset_id"`
+		Name        string `json:"name"`
+		Mime        string `json:"mime"`
+		Size        int64  `json:"size"`
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	attachments := make([]channel.Attachment, 0, len(items))
+	for _, item := range items {
+		url := strings.TrimSpace(item.URL)
+		if url == "" {
+			url = strings.TrimSpace(item.Path)
+		}
+		attachments = append(attachments, channel.Attachment{
+			Type:        channel.AttachmentType(strings.TrimSpace(item.Type)),
+			URL:         url,
+			PlatformKey: strings.TrimSpace(item.PlatformKey),
+			AssetID:     strings.TrimSpace(item.AssetID),
+			Name:        strings.TrimSpace(item.Name),
+			Mime:        strings.TrimSpace(item.Mime),
+			Size:        item.Size,
+		})
+	}
+	return attachments
 }

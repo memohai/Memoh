@@ -246,6 +246,17 @@ func (r *Registry) GetProcessingStatusNotifier(channelType ChannelType) (Process
 	return notifier, ok
 }
 
+// GetAttachmentResolver returns the AttachmentResolver for the given channel
+// type, or nil if unsupported.
+func (r *Registry) GetAttachmentResolver(channelType ChannelType) (AttachmentResolver, bool) {
+	adapter, ok := r.Get(channelType)
+	if !ok {
+		return nil, false
+	}
+	resolver, ok := adapter.(AttachmentResolver)
+	return resolver, ok
+}
+
 // DiscoverSelf calls the SelfDiscoverer for the given channel type if supported.
 func (r *Registry) DiscoverSelf(ctx context.Context, channelType ChannelType, credentials map[string]any) (map[string]any, string, error) {
 	adapter, ok := r.Get(channelType)

@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"errors"
+	"io"
 	"sync/atomic"
 )
 
@@ -48,6 +49,21 @@ type ProcessingStatusNotifier interface {
 	ProcessingStarted(ctx context.Context, cfg ChannelConfig, msg InboundMessage, info ProcessingStatusInfo) (ProcessingStatusHandle, error)
 	ProcessingCompleted(ctx context.Context, cfg ChannelConfig, msg InboundMessage, info ProcessingStatusInfo, handle ProcessingStatusHandle) error
 	ProcessingFailed(ctx context.Context, cfg ChannelConfig, msg InboundMessage, info ProcessingStatusInfo, handle ProcessingStatusHandle, cause error) error
+}
+
+// AttachmentPayload contains resolved attachment bytes and optional metadata.
+// Caller must close Reader.
+type AttachmentPayload struct {
+	Reader io.ReadCloser
+	Mime   string
+	Name   string
+	Size   int64
+}
+
+// AttachmentResolver resolves attachment references (for example platform_key)
+// into readable bytes for persistence or transformation pipelines.
+type AttachmentResolver interface {
+	ResolveAttachment(ctx context.Context, cfg ChannelConfig, attachment Attachment) (AttachmentPayload, error)
 }
 
 // Adapter is the base interface every channel adapter must implement.

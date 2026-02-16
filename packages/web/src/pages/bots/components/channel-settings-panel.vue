@@ -10,9 +10,41 @@
           {{ channelItem.meta.type }}
         </p>
       </div>
-      <Badge :variant="channelItem.configured ? 'default' : 'secondary'">
-        {{ channelItem.configured ? $t('bots.channels.configured') : $t('bots.channels.notConfigured') }}
-      </Badge>
+      <div class="flex items-center gap-2">
+        <template v-if="isEditMode">
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="isBusy"
+            @click="handleToggleDisabled"
+          >
+            <Spinner
+              v-if="action === 'toggle'"
+              class="mr-1.5"
+            />
+            {{ form.disabled ? $t('bots.channels.actionEnable') : $t('bots.channels.actionDisable') }}
+          </Button>
+          <ConfirmPopover
+            :message="$t('bots.channels.deleteConfirm')"
+            :loading="action === 'delete'"
+            @confirm="handleDelete"
+          >
+            <template #trigger>
+              <Button
+                variant="destructive"
+                size="sm"
+                :disabled="isBusy"
+              >
+                <Spinner
+                  v-if="action === 'delete'"
+                  class="mr-1.5"
+                />
+                {{ $t('common.delete') }}
+              </Button>
+            </template>
+          </ConfirmPopover>
+        </template>
+      </div>
     </div>
 
     <Separator />
@@ -111,31 +143,48 @@
 
     <Separator />
 
-    <!-- Status -->
-    <div class="flex items-center justify-between">
-      <Label>{{ $t('common.status') }}</Label>
-      <Switch
-        :model-value="form.status === 'active'"
-        @update:model-value="(val) => form.status = val ? 'active' : 'inactive'"
-      />
-    </div>
-
-    <!-- Save -->
-    <div class="flex justify-end">
-      <Button
-        :disabled="isLoading"
-        @click="handleSave"
-      >
-        <Spinner v-if="isLoading" />
-        {{ $t('bots.channels.save') }}
-      </Button>
+    <div class="flex justify-end gap-2">
+      <template v-if="isEditMode">
+        <Button
+          :disabled="isBusy"
+          @click="handleEditSave"
+        >
+          <Spinner
+            v-if="action === 'save'"
+            class="mr-1.5"
+          />
+          {{ $t('common.save') }}
+        </Button>
+      </template>
+      <template v-else>
+        <Button
+          variant="outline"
+          :disabled="isBusy"
+          @click="handleCreateSaveOnly"
+        >
+          <Spinner
+            v-if="action === 'save'"
+            class="mr-1.5"
+          />
+          {{ $t('bots.channels.saveOnly') }}
+        </Button>
+        <Button
+          :disabled="isBusy"
+          @click="handleCreateSaveAndEnable"
+        >
+          <Spinner
+            v-if="action === 'save'"
+            class="mr-1.5"
+          />
+          {{ $t('bots.channels.saveAndEnable') }}
+        </Button>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import {
-  Badge,
   Button,
   Input,
   Label,
@@ -148,13 +197,14 @@ import {
   SelectContent,
   SelectItem,
 } from '@memoh/ui'
-import { reactive, watch, computed } from 'vue'
+import { reactive, watch, computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { putBotsByIdChannelByPlatform } from '@memoh/sdk'
+import { client } from '@memoh/sdk/client'
 import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema } from '@memoh/sdk'
-import type { Ref } from 'vue'
+import ConfirmPopover from '@/components/confirm-popover/index.vue'
 
 interface BotChannelItem {
   meta: HandlersChannelMeta
@@ -172,7 +222,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const botIdRef = computed(() => props.botId) as Ref<string>
+const botIdRef = computed(() => props.botId)
 const queryCache = useQueryCache()
 const { mutateAsync: upsertChannel, isLoading } = useMutation({
   mutation: async ({ platform, data }: { platform: string; data: Record<string, unknown> }) => {
@@ -185,23 +235,37 @@ const { mutateAsync: upsertChannel, isLoading } = useMutation({
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['bot-channels', botIdRef.value] }),
 })
+const { mutateAsync: updateChannelStatus, isLoading: isStatusLoading } = useMutation({
+  mutation: async ({ platform, disabled }: { platform: string; disabled: boolean }) => {
+    const { data } = await client.patch({
+      url: `/bots/${botIdRef.value}/channel/${platform}/status`,
+      body: { disabled },
+      throwOnError: true,
+    })
+    return data as ChannelChannelConfig
+  },
+  onSettled: () => queryCache.invalidateQueries({ key: ['bot-channels', botIdRef.value] }),
+})
+const action = ref<'save' | 'toggle' | 'delete' | ''>('')
+const isBusy = computed(() => isLoading.value || isStatusLoading.value || action.value !== '')
+const isEditMode = computed(() => props.channelItem.configured)
 
 // ---- Form state ----
 
 const form = reactive<{
   credentials: Record<string, unknown>
-  status: string
+  disabled: boolean
 }>({
   credentials: {},
-  status: 'inactive',
+  disabled: false,
 })
 
 const visibleSecrets = reactive<Record<string, boolean>>({})
 
-// Schema fields sorted: required first
+// Schema fields sorted: required first. Exclude "status"/"disabled" from credential form.
 const orderedFields = computed(() => {
   const fields = props.channelItem.meta.config_schema?.fields ?? {}
-  const entries = Object.entries(fields)
+  const entries = Object.entries(fields).filter(([key]) => key !== 'status' && key !== 'disabled')
   entries.sort(([, a], [, b]) => {
     if (a.required && !b.required) return -1
     if (!a.required && b.required) return 1
@@ -210,7 +274,6 @@ const orderedFields = computed(() => {
   return Object.fromEntries(entries) as Record<string, ChannelFieldSchema>
 })
 
-// 初始化表单
 function initForm() {
   const schema = props.channelItem.meta.config_schema?.fields ?? {}
   const existingCredentials = props.channelItem.config?.credentials ?? {}
@@ -220,8 +283,7 @@ function initForm() {
     creds[key] = existingCredentials[key] ?? ''
   }
   form.credentials = creds
-  const rawStatus = props.channelItem.config?.status ?? 'inactive'
-  form.status = (rawStatus === 'active' || rawStatus === 'verified') ? 'active' : 'inactive'
+  form.disabled = props.channelItem.config?.disabled ?? false
 }
 
 watch(
@@ -230,7 +292,6 @@ watch(
   { immediate: true },
 )
 
-// 客户端校验必填字段
 function validateRequired(): boolean {
   const schema = props.channelItem.meta.config_schema?.fields ?? {}
   for (const [key, field] of Object.entries(schema)) {
@@ -245,24 +306,28 @@ function validateRequired(): boolean {
   return true
 }
 
-async function handleSave() {
+function buildCredentials(): Record<string, unknown> {
+  const credentials: Record<string, unknown> = {}
+  for (const [key, val] of Object.entries(form.credentials)) {
+    if (key === 'status' || key === 'disabled') continue
+    if (val === '' || val === undefined || val === null) continue
+    credentials[key] = val
+  }
+  return credentials
+}
+
+async function saveChannel(disabled: boolean, nextAction: 'save' | 'toggle') {
   if (!validateRequired()) return
-
+  action.value = nextAction
   try {
-    const credentials: Record<string, unknown> = {}
-    for (const [key, val] of Object.entries(form.credentials)) {
-      if (val !== '' && val !== undefined && val !== null) {
-        credentials[key] = val
-      }
-    }
-
     await upsertChannel({
       platform: props.channelItem.meta.type,
       data: {
-        credentials,
-        status: form.status,
+        credentials: buildCredentials(),
+        disabled,
       },
     })
+    form.disabled = disabled
     toast.success(t('bots.channels.saveSuccess'))
     emit('saved')
   } catch (err) {
@@ -271,6 +336,56 @@ async function handleSave() {
       detail = err.message
     }
     toast.error(detail ? `${t('bots.channels.saveFailed')}: ${detail}` : t('bots.channels.saveFailed'))
+  } finally {
+    action.value = ''
+  }
+}
+
+async function handleCreateSaveOnly() {
+  await saveChannel(true, 'save')
+}
+
+async function handleCreateSaveAndEnable() {
+  await saveChannel(false, 'save')
+}
+
+async function handleEditSave() {
+  await saveChannel(form.disabled, 'save')
+}
+
+async function handleToggleDisabled() {
+  action.value = 'toggle'
+  try {
+    const nextDisabled = !form.disabled
+    const result = await updateChannelStatus({
+      platform: props.channelItem.meta.type,
+      disabled: nextDisabled,
+    })
+    form.disabled = !!result?.disabled
+    toast.success(t('bots.channels.saveSuccess'))
+    emit('saved')
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : ''
+    toast.error(detail ? `${t('bots.channels.saveFailed')}: ${detail}` : t('bots.channels.saveFailed'))
+  } finally {
+    action.value = ''
+  }
+}
+
+async function handleDelete() {
+  action.value = 'delete'
+  try {
+    await client.delete({
+      url: `/bots/${botIdRef.value}/channel/${props.channelItem.meta.type}`,
+      throwOnError: true,
+    })
+    toast.success(t('bots.channels.deleteSuccess'))
+    emit('saved')
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : ''
+    toast.error(detail ? `${t('bots.channels.deleteFailed')}: ${detail}` : t('bots.channels.deleteFailed'))
+  } finally {
+    action.value = ''
   }
 }
 </script>

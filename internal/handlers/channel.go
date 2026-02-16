@@ -11,12 +11,12 @@ import (
 )
 
 type ChannelHandler struct {
-	service  *channel.Service
+	store    *channel.Store
 	registry *channel.Registry
 }
 
-func NewChannelHandler(service *channel.Service, registry *channel.Registry) *ChannelHandler {
-	return &ChannelHandler{service: service, registry: registry}
+func NewChannelHandler(store *channel.Store, registry *channel.Registry) *ChannelHandler {
+	return &ChannelHandler{store: store, registry: registry}
 }
 
 func (h *ChannelHandler) Register(e *echo.Echo) {
@@ -48,7 +48,7 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	resp, err := h.service.GetChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType)
+	resp, err := h.store.GetChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
@@ -84,7 +84,7 @@ func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	if req.Config == nil {
 		req.Config = map[string]any{}
 	}
-	resp, err := h.service.UpsertChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType, req)
+	resp, err := h.store.UpsertChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType, req)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

@@ -105,22 +105,26 @@
               </FormItem>
             </FormField>
 
-            <!-- Multimodal (chat only) -->
-            <FormField
-              v-if="selectedType === 'chat'"
-              v-slot="{ componentField }"
-              name="is_multimodal"
-            >
-              <FormItem class="flex items-center justify-between">
-                <Label>
-                  {{ $t('models.multimodal') }}
-                </Label>
-                <Switch
-                  v-model="componentField.modelValue"
-                  @update:model-value="componentField['onUpdate:modelValue']"
-                />
-              </FormItem>
-            </FormField>
+            <!-- Input Modalities (chat only) -->
+            <div v-if="selectedType === 'chat'">
+              <Label class="mb-2">
+                {{ $t('models.inputModalities') }}
+              </Label>
+              <div class="flex flex-wrap gap-3 mt-2">
+                <label
+                  v-for="mod in availableInputModalities"
+                  :key="mod"
+                  class="flex items-center gap-1.5 text-sm"
+                >
+                  <Checkbox
+                    :model-value="selectedModalities.includes(mod)"
+                    :disabled="mod === 'text'"
+                    @update:model-value="(val: boolean) => toggleModality(mod, val)"
+                  />
+                  {{ $t(`models.modality.${mod}`) }}
+                </label>
+              </div>
+            </div>
           </div>
           <DialogFooter class="mt-4">
             <DialogClose as-child>
@@ -163,7 +167,7 @@ import {
   SelectTrigger,
   SelectValue,
   FormItem,
-  Switch,
+  Checkbox,
   Separator,
   Label,
   Spinner,
@@ -176,12 +180,14 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { postModels, putModelsModelByModelId } from '@memoh/sdk'
 import type { ModelsGetResponse } from '@memoh/sdk'
 
+const availableInputModalities = ['text', 'image', 'audio', 'video', 'file'] as const
+const selectedModalities = ref<string[]>(['text'])
+
 const formSchema = toTypedSchema(z.object({
   type: z.string().min(1),
   model_id: z.string().min(1),
   name: z.string().optional(),
   dimensions: z.coerce.number().min(1).optional(),
-  is_multimodal: z.coerce.boolean().optional(),
 }))
 
 const form = useForm({
@@ -202,13 +208,19 @@ const canSubmit = computed(() => {
   return !!type && !!model_id
 })
 
-// 新建时的空值
+function toggleModality(mod: string, checked: boolean) {
+  if (checked) {
+    selectedModalities.value = [...selectedModalities.value, mod]
+  } else {
+    selectedModalities.value = selectedModalities.value.filter(m => m !== mod)
+  }
+}
+
 const emptyValues = {
   type: '' as string,
   model_id: '' as string,
   name: '' as string,
   dimensions: undefined as number | undefined,
-  is_multimodal: undefined as boolean | undefined,
 }
 
 // Display Name 自动跟随 Model ID，除非用户主动修改过
@@ -263,7 +275,6 @@ async function addModel(e: Event) {
   const model_id = form.values.model_id || (isEdit ? fallback!.model_id : '')
   const name = form.values.name ?? (isEdit ? fallback!.name : '')
   const dimensions = form.values.dimensions ?? (isEdit ? fallback!.dimensions : undefined)
-  const is_multimodal = form.values.is_multimodal ?? (isEdit ? fallback!.is_multimodal : undefined)
 
   if (!type || !model_id) return
 
@@ -283,7 +294,7 @@ async function addModel(e: Event) {
     }
 
     if (type === 'chat') {
-      payload.is_multimodal = is_multimodal ?? false
+      payload.input_modalities = selectedModalities.value.length > 0 ? selectedModalities.value : ['text']
     }
 
     if (isEdit) {
@@ -308,13 +319,13 @@ watch(open, async () => {
   await nextTick()
 
   if (editInfo?.value) {
-    const { type, model_id, name, dimensions, is_multimodal } = editInfo.value
-    form.resetForm({ values: { type, model_id, name, dimensions, is_multimodal } })
-    // 编辑时，如果已有 name 且与 model_id 不同，视为用户自定义
+    const { type, model_id, name, dimensions, input_modalities } = editInfo.value
+    form.resetForm({ values: { type, model_id, name, dimensions } })
+    selectedModalities.value = input_modalities ?? ['text']
     userEditedName.value = !!(name && name !== model_id)
   } else {
-    // 新建模式：显式传空值，避免复用上次编辑数据
     form.resetForm({ values: { ...emptyValues } })
+    selectedModalities.value = ['text']
     userEditedName.value = false
   }
 }, {

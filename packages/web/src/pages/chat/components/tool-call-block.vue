@@ -27,7 +27,7 @@
     </div>
 
     <!-- Input (collapsible) -->
-    <Collapsible v-if="block.input">
+    <Collapsible v-if="block.input" v-model:open="inputOpen">
         <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full">
         <FontAwesomeIcon
           :icon="['fas', 'chevron-right']"
@@ -42,7 +42,7 @@
     </Collapsible>
 
     <!-- Result (collapsible) -->
-    <Collapsible v-if="block.done && block.result != null">
+    <Collapsible v-if="block.done && block.result != null" v-model:open="resultOpen">
         <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full border-t border-muted">
         <FontAwesomeIcon
           :icon="['fas', 'chevron-right']"

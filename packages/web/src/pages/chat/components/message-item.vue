@@ -52,6 +52,7 @@
     <div
       class="min-w-0"
       :class="contentClass"
+      data-chat-content
     >
       <!-- Sender name for non-self user messages -->
       <p
@@ -64,12 +65,27 @@
       <!-- User message -->
       <div
         v-if="message.role === 'user'"
-        class="rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap"
-        :class="isSelf
-          ? 'rounded-tr-sm bg-primary text-primary-foreground'
-          : 'rounded-tl-sm bg-accent/60 text-foreground'"
+        class="space-y-2"
       >
-        {{ (message.blocks[0] as TextBlock)?.content }}
+        <div
+          v-for="(block, i) in message.blocks"
+          :key="i"
+        >
+          <div
+            v-if="block.type === 'text' && cleanUserText(block.content)"
+            class="rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap"
+            :class="isSelf
+              ? 'rounded-tr-sm bg-primary text-primary-foreground'
+              : 'rounded-tl-sm bg-accent/60 text-foreground'"
+          >
+            {{ cleanUserText(block.content) }}
+          </div>
+          <AttachmentBlock
+            v-else-if="block.type === 'attachment'"
+            :block="(block as AttachmentBlockType)"
+            :on-open-media="onOpenMedia"
+          />
+        </div>
       </div>
 
       <!-- Assistant message blocks -->
@@ -112,6 +128,13 @@
               custom-id="chat-msg"
             />
           </div>
+
+          <!-- Attachment block -->
+          <AttachmentBlock
+            v-else-if="block.type === 'attachment'"
+            :block="(block as AttachmentBlockType)"
+            :on-open-media="onOpenMedia"
+          />
         </template>
 
         <!-- Streaming indicator -->
@@ -157,6 +180,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import ThinkingBlock from './thinking-block.vue'
 import ToolCallBlock from './tool-call-block.vue'
+import AttachmentBlock from './attachment-block.vue'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 import { useUserStore } from '@/store/user'
 import { useChatStore } from '@/store/chat-list'
@@ -164,9 +188,9 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import type {
   ChatMessage,
-  TextBlock,
   ThinkingBlock as ThinkingBlockType,
   ToolCallBlock as ToolCallBlockType,
+  AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
 
 enableKatex()
@@ -174,6 +198,7 @@ enableMermaid()
 
 const props = defineProps<{
   message: ChatMessage
+  onOpenMedia?: (src: string) => void
 }>()
 
 const userStore = useUserStore()
@@ -189,7 +214,6 @@ const currentBot = computed(() =>
 const botAvatarUrl = computed(() => currentBot.value?.avatar_url ?? '')
 const botName = computed(() => currentBot.value?.display_name ?? '')
 
-// For isSelf messages: prefer channel avatar/name over web platform avatar
 const selfAvatarUrl = computed(() =>
   props.message.senderAvatarUrl || userStore.userInfo.avatarUrl || '',
 )
@@ -216,10 +240,17 @@ const senderFallback = computed(() => {
   return name.slice(0, 2).toUpperCase() || '?'
 })
 
+function cleanUserText(content?: string): string {
+  if (!content) return ''
+  return content
+    .split('\n')
+    .filter((line) => !/^\[attachment:\w+\]\s/.test(line.trim()))
+    .join('\n')
+    .trim()
+}
+
 const contentClass = computed(() => {
-  if (props.message.role === 'user') {
-    return isSelf.value ? 'max-w-[80%]' : 'max-w-[80%]'
-  }
+  if (props.message.role === 'user') return 'max-w-[80%]'
   return 'flex-1 max-w-full'
 })
 </script>

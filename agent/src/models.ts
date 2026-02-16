@@ -16,7 +16,7 @@ export const ClientTypeModel = z.enum([
 export const ModelConfigModel = z.object({
   modelId: z.string().min(1, 'Model ID is required'),
   clientType: ClientTypeModel,
-  input: z.array(z.enum(['text', 'image'])),
+  input: z.array(z.enum(['text', 'image', 'audio', 'video', 'file'])),
   apiKey: z.string().min(1, 'API key is required'),
   baseUrl: z.string(),
 })
@@ -49,7 +49,10 @@ export const ScheduleModel = z.object({
 
 export const ImageAttachmentModel = z.object({
   type: z.literal('image'),
-  base64: z.string().min(1, 'Image base64 is required'),
+  base64: z.string().optional(),
+  path: z.string().optional(),
+  mime: z.string().optional(),
+  name: z.string().optional(),
   metadata: z.record(z.string(), z.any()).optional(),
 })
 

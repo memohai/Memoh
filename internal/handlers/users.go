@@ -25,7 +25,8 @@ type UsersHandler struct {
 	channelIdentityService *identities.Service
 	botService             *bots.Service
 	routeService           route.Service
-	channelService         *channel.Service
+	channelStore           *channel.Store
+	channelLifecycle       *channel.Lifecycle
 	channelManager         *channel.Manager
 	registry               *channel.Registry
 	logger                 *slog.Logger
@@ -37,7 +38,7 @@ type listMyIdentitiesResponse struct {
 }
 
 // NewUsersHandler creates a UsersHandler with channel identity support.
-func NewUsersHandler(log *slog.Logger, service *accounts.Service, channelIdentityService *identities.Service, botService *bots.Service, routeService route.Service, channelService *channel.Service, channelManager *channel.Manager, registry *channel.Registry) *UsersHandler {
+func NewUsersHandler(log *slog.Logger, service *accounts.Service, channelIdentityService *identities.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry) *UsersHandler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -46,7 +47,8 @@ func NewUsersHandler(log *slog.Logger, service *accounts.Service, channelIdentit
 		channelIdentityService: channelIdentityService,
 		botService:             botService,
 		routeService:           routeService,
-		channelService:         channelService,
+		channelStore:           channelStore,
+		channelLifecycle:       channelLifecycle,
 		channelManager:         channelManager,
 		registry:               registry,
 		logger:                 log.With(slog.String("handler", "users")),
@@ -80,6 +82,8 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	botGroup.DELETE("/:id/members/:user_id", h.DeleteBotMember)
 	botGroup.GET("/:id/channel/:platform", h.GetBotChannelConfig)
 	botGroup.PUT("/:id/channel/:platform", h.UpsertBotChannelConfig)
+	botGroup.PATCH("/:id/channel/:platform/status", h.UpdateBotChannelStatus)
+	botGroup.DELETE("/:id/channel/:platform", h.DeleteBotChannelConfig)
 	botGroup.POST("/:id/channel/:platform/send", h.SendBotMessage)
 	botGroup.POST("/:id/channel/:platform/send_chat", h.SendBotMessageSession)
 }
@@ -847,7 +851,10 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	resp, err := h.channelService.ResolveEffectiveConfig(c.Request().Context(), botID, channelType)
+	if h.channelStore == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "channel store not configured")
+	}
+	resp, err := h.channelStore.ResolveEffectiveConfig(c.Request().Context(), botID, channelType)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
@@ -893,11 +900,104 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 	if req.Credentials == nil {
 		req.Credentials = map[string]any{}
 	}
-	resp, err := h.channelService.UpsertConfig(c.Request().Context(), botID, channelType, req)
+	if h.channelLifecycle == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "channel lifecycle not configured")
+	}
+	resp, err := h.channelLifecycle.UpsertBotChannelConfig(c.Request().Context(), botID, channelType, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		status := http.StatusInternalServerError
+		if errors.Is(err, channel.ErrEnableChannelFailed) {
+			status = http.StatusBadRequest
+		}
+		return echo.NewHTTPError(status, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+// UpdateBotChannelStatus godoc
+// @Summary Update bot channel status
+// @Description Update bot channel enabled/disabled status
+// @Tags bots
+// @Param id path string true "Bot ID"
+// @Param platform path string true "Channel platform"
+// @Param payload body channel.UpdateChannelStatusRequest true "Channel status payload"
+// @Success 200 {object} channel.ChannelConfig
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{id}/channel/{platform}/status [patch]
+func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+		return err
+	}
+	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	var req channel.UpdateChannelStatusRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if h.channelLifecycle == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "channel lifecycle not configured")
+	}
+	resp, err := h.channelLifecycle.SetBotChannelStatus(c.Request().Context(), botID, channelType, req.Disabled)
+	if err != nil {
+		if errors.Is(err, channel.ErrChannelConfigNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		}
+		status := http.StatusInternalServerError
+		if errors.Is(err, channel.ErrEnableChannelFailed) {
+			status = http.StatusBadRequest
+		}
+		return echo.NewHTTPError(status, err.Error())
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+// DeleteBotChannelConfig godoc
+// @Summary Delete bot channel config
+// @Description Remove bot channel configuration
+// @Tags bots
+// @Param id path string true "Bot ID"
+// @Param platform path string true "Channel platform"
+// @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{id}/channel/{platform} [delete]
+func (h *UsersHandler) DeleteBotChannelConfig(c echo.Context) error {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+		return err
+	}
+	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if h.channelLifecycle == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "channel lifecycle not configured")
+	}
+	if err := h.channelLifecycle.DeleteBotChannelConfig(c.Request().Context(), botID, channelType); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // SendBotMessage godoc

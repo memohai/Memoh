@@ -45,6 +45,8 @@ import (
 	mcpschedule "github.com/memohai/memoh/internal/mcp/providers/schedule"
 	mcpweb "github.com/memohai/memoh/internal/mcp/providers/web"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
+	"github.com/memohai/memoh/internal/media"
+	"github.com/memohai/memoh/internal/media/providers/containerfs"
 	"github.com/memohai/memoh/internal/memory"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
@@ -102,13 +104,15 @@ func main() {
 			// services requiring provide functions
 			provideRouteService,
 			provideMessageService,
+			provideMediaService,
 
 			// channel infrastructure
 			local.NewRouteHub,
 			provideChannelRegistry,
-			channel.NewService,
+			channel.NewStore,
 			provideChannelRouter,
 			provideChannelManager,
+			provideChannelLifecycleService,
 
 			// conversation flow
 			provideChatResolver,
@@ -328,16 +332,35 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub) *channel.Regi
 	return registry
 }
 
-func provideChannelRouter(log *slog.Logger, registry *channel.Registry, routeService *route.DBService, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, policyService *policy.Service, preauthService *preauth.Service, bindService *bind.Service, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
-	return inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, botService, policyService, preauthService, bindService, rc.JwtSecret, 5*time.Minute)
+func provideChannelRouter(
+	log *slog.Logger,
+	registry *channel.Registry,
+	routeService *route.DBService,
+	msgService *message.DBService,
+	resolver *flow.Resolver,
+	identityService *identities.Service,
+	botService *bots.Service,
+	policyService *policy.Service,
+	preauthService *preauth.Service,
+	bindService *bind.Service,
+	mediaService *media.Service,
+	rc *boot.RuntimeConfig,
+) *inbound.ChannelInboundProcessor {
+	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, botService, policyService, preauthService, bindService, rc.JwtSecret, 5*time.Minute)
+	processor.SetMediaService(mediaService)
+	return processor
 }
 
-func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelService *channel.Service, channelRouter *inbound.ChannelInboundProcessor) *channel.Manager {
-	mgr := channel.NewManager(log, registry, channelService, channelRouter)
+func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor) *channel.Manager {
+	mgr := channel.NewManager(log, registry, channelStore, channelRouter)
 	if mw := channelRouter.IdentityMiddleware(); mw != nil {
 		mgr.Use(mw)
 	}
 	return mgr
+}
+
+func provideChannelLifecycleService(channelStore *channel.Store, channelManager *channel.Manager) *channel.Lifecycle {
+	return channel.NewLifecycle(channelStore, channelManager)
 }
 
 // ---------------------------------------------------------------------------
@@ -348,9 +371,9 @@ func provideContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.
 	return handlers.NewContainerdHandler(log, service, cfg.MCP, cfg.Containerd.Namespace, botService, accountService, policyService, queries)
 }
 
-func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, channelService *channel.Service, scheduleService *schedule.Service, memoryService *memory.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, channelStore *channel.Store, scheduleService *schedule.Service, memoryService *memory.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService) *mcp.ToolGatewayService {
 	messageExec := mcpmessage.NewExecutor(log, channelManager, channelManager, registry)
-	directoryExec := mcpdirectory.NewExecutor(log, registry, channelService, registry)
+	directoryExec := mcpdirectory.NewExecutor(log, registry, channelStore, registry)
 	scheduleExec := mcpschedule.NewExecutor(log, scheduleService)
 	memoryExec := mcpmemory.NewExecutor(log, memoryService, chatService, accountService)
 	webExec := mcpweb.NewExecutor(log, settingsService, searchProviderService)
@@ -392,20 +415,34 @@ func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *
 	return handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
 }
 
-func provideMessageHandler(log *slog.Logger, resolver *flow.Resolver, chatService *conversation.Service, msgService *message.DBService, botService *bots.Service, accountService *accounts.Service, identityService *identities.Service, hub *event.Hub) *handlers.MessageHandler {
-	return handlers.NewMessageHandler(log, resolver, chatService, msgService, botService, accountService, identityService, hub)
+func provideMessageHandler(log *slog.Logger, resolver *flow.Resolver, chatService *conversation.Service, msgService *message.DBService, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, identityService *identities.Service, hub *event.Hub) *handlers.MessageHandler {
+	h := handlers.NewMessageHandler(log, resolver, chatService, msgService, botService, accountService, identityService, hub)
+	h.SetMediaService(mediaService)
+	return h
 }
 
-func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, identityService *identities.Service, botService *bots.Service, routeService *route.DBService, channelService *channel.Service, channelManager *channel.Manager, registry *channel.Registry) *handlers.UsersHandler {
-	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelService, channelManager, registry)
+func provideMediaService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) (*media.Service, error) {
+	dataRoot := strings.TrimSpace(cfg.MCP.DataRoot)
+	if dataRoot == "" {
+		dataRoot = config.DefaultDataRoot
+	}
+	provider, err := containerfs.New(dataRoot)
+	if err != nil {
+		return nil, fmt.Errorf("init media provider: %w", err)
+	}
+	return media.NewService(log, queries, provider), nil
 }
 
-func provideCLIHandler(channelManager *channel.Manager, channelService *channel.Service, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *handlers.LocalChannelHandler {
-	return handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelService, chatService, hub, botService, accountService)
+func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, identityService *identities.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry) *handlers.UsersHandler {
+	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelStore, channelLifecycle, channelManager, registry)
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelService *channel.Service, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *handlers.LocalChannelHandler {
-	return handlers.NewLocalChannelHandler(local.WebType, channelManager, channelService, chatService, hub, botService, accountService)
+func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *handlers.LocalChannelHandler {
+	return handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelStore, chatService, hub, botService, accountService)
+}
+
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *handlers.LocalChannelHandler {
+	return handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
 }
 
 // ---------------------------------------------------------------------------

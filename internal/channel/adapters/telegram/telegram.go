@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/common"
+	"github.com/memohai/memoh/internal/media"
 )
 
 const telegramMaxMessageLength = 4096
@@ -795,6 +798,71 @@ func (a *TelegramAdapter) buildTelegramAttachment(bot *tgbotapi.BotAPI, attType 
 		att.Metadata["file_id"] = fileID
 	}
 	return att
+}
+
+// ResolveAttachment resolves a Telegram attachment reference to a byte stream.
+// It supports platform_key-based references and URL fallback.
+func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
+	fileID := strings.TrimSpace(attachment.PlatformKey)
+	if fileID == "" && strings.TrimSpace(attachment.URL) == "" {
+		return channel.AttachmentPayload{}, fmt.Errorf("telegram attachment requires platform_key or url")
+	}
+	telegramCfg, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return channel.AttachmentPayload{}, err
+	}
+	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
+	if err != nil {
+		return channel.AttachmentPayload{}, err
+	}
+	downloadURL := strings.TrimSpace(attachment.URL)
+	if downloadURL == "" {
+		downloadURL, err = bot.GetFileDirectURL(fileID)
+		if err != nil {
+			return channel.AttachmentPayload{}, fmt.Errorf("resolve telegram file url: %w", err)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return channel.AttachmentPayload{}, fmt.Errorf("build download request: %w", err)
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return channel.AttachmentPayload{}, fmt.Errorf("download attachment: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer func() {
+			_ = resp.Body.Close()
+		}()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return channel.AttachmentPayload{}, fmt.Errorf("download attachment status: %d", resp.StatusCode)
+	}
+	maxBytes := media.MaxAssetBytes
+	if resp.ContentLength > maxBytes {
+		defer func() {
+			_ = resp.Body.Close()
+		}()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return channel.AttachmentPayload{}, fmt.Errorf("%w: max %d bytes", media.ErrAssetTooLarge, maxBytes)
+	}
+	mime := strings.TrimSpace(attachment.Mime)
+	if mime == "" {
+		mime = strings.TrimSpace(resp.Header.Get("Content-Type"))
+		if idx := strings.Index(mime, ";"); idx >= 0 {
+			mime = strings.TrimSpace(mime[:idx])
+		}
+	}
+	size := attachment.Size
+	if size <= 0 && resp.ContentLength > 0 {
+		size = resp.ContentLength
+	}
+	return channel.AttachmentPayload{
+		Reader: resp.Body,
+		Mime:   mime,
+		Name:   strings.TrimSpace(attachment.Name),
+		Size:   size,
+	}, nil
 }
 
 func pickTelegramPhoto(items []tgbotapi.PhotoSize) tgbotapi.PhotoSize {

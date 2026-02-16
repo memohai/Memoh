@@ -85,6 +85,36 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	}
 
 	result := toMessageFromCreate(row)
+
+	// Persist asset links if provided.
+	for _, ref := range input.Assets {
+		pgMsgID := row.ID
+		pgAssetID, assetErr := dbpkg.ParseUUID(ref.AssetID)
+		if assetErr != nil {
+			s.logger.Warn("skip invalid asset ref", slog.String("asset_id", ref.AssetID), slog.Any("error", assetErr))
+			continue
+		}
+		role := ref.Role
+		if strings.TrimSpace(role) == "" {
+			role = "attachment"
+		}
+		if _, assetErr := s.queries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
+			MessageID: pgMsgID,
+			AssetID:   pgAssetID,
+			Role:      role,
+			Ordinal:   int32(ref.Ordinal),
+		}); assetErr != nil {
+			s.logger.Warn("create message asset link failed", slog.String("message_id", result.ID), slog.Any("error", assetErr))
+		}
+	}
+
+	// Enrich assets before publishing so SSE consumers see them immediately.
+	if len(input.Assets) > 0 {
+		enriched := []Message{result}
+		s.enrichAssets(ctx, enriched)
+		result = enriched[0]
+	}
+
 	s.publishMessageCreated(result)
 	return result, nil
 }
@@ -99,7 +129,9 @@ func (s *DBService) List(ctx context.Context, botID string) ([]Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	return toMessagesFromList(rows), nil
+	msgs := toMessagesFromList(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
 }
 
 // ListSince returns bot messages since a given time.
@@ -115,7 +147,9 @@ func (s *DBService) ListSince(ctx context.Context, botID string, since time.Time
 	if err != nil {
 		return nil, err
 	}
-	return toMessagesFromSince(rows), nil
+	msgs := toMessagesFromSince(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
 }
 
 // ListLatest returns the latest N bot messages (newest first in DB; caller may reverse for ASC).
@@ -131,7 +165,9 @@ func (s *DBService) ListLatest(ctx context.Context, botID string, limit int32) (
 	if err != nil {
 		return nil, err
 	}
-	return toMessagesFromLatest(rows), nil
+	msgs := toMessagesFromLatest(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
 }
 
 // ListBefore returns up to limit messages older than before (created_at < before), ordered oldest-first.
@@ -148,7 +184,9 @@ func (s *DBService) ListBefore(ctx context.Context, botID string, before time.Ti
 	if err != nil {
 		return nil, err
 	}
-	return toMessagesFromBefore(rows), nil
+	msgs := toMessagesFromBefore(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
 }
 
 // DeleteByBot deletes all messages for a bot.
@@ -371,4 +409,49 @@ func (s *DBService) publishMessageCreated(message Message) {
 		BotID: strings.TrimSpace(message.BotID),
 		Data:  payload,
 	})
+}
+
+// enrichAssets batch-loads asset links for a list of messages.
+func (s *DBService) enrichAssets(ctx context.Context, messages []Message) {
+	if len(messages) == 0 {
+		return
+	}
+	ids := make([]pgtype.UUID, 0, len(messages))
+	for _, m := range messages {
+		pgID, err := dbpkg.ParseUUID(m.ID)
+		if err != nil {
+			continue
+		}
+		ids = append(ids, pgID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	rows, err := s.queries.ListMessageAssetsBatch(ctx, ids)
+	if err != nil {
+		s.logger.Warn("enrich assets failed", slog.Any("error", err))
+		return
+	}
+	assetMap := map[string][]MessageAsset{}
+	for _, row := range rows {
+		msgID := row.MessageID.String()
+		assetMap[msgID] = append(assetMap[msgID], MessageAsset{
+			AssetID:      row.AssetID.String(),
+			Role:         row.Role,
+			Ordinal:      int(row.Ordinal),
+			MediaType:    row.MediaType,
+			Mime:         row.Mime,
+			SizeBytes:    row.SizeBytes,
+			StorageKey:   row.StorageKey,
+			OriginalName: dbpkg.TextToString(row.OriginalName),
+			Width:        int(row.Width.Int32),
+			Height:       int(row.Height.Int32),
+			DurationMs:   row.DurationMs.Int64,
+		})
+	}
+	for i := range messages {
+		if assets, ok := assetMap[messages[i].ID]; ok {
+			messages[i].Assets = assets
+		}
+	}
 }

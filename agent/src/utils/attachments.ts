@@ -10,7 +10,7 @@ const ATTACHMENTS_END = '</attachments>'
 const getAttachmentKey = (a: AgentAttachment): string => {
   switch (a.type) {
     case 'file': return `file:${a.path}`
-    case 'image': return `image:${a.base64.slice(0, 64)}`
+    case 'image': return `image:${(a.base64 ?? a.url ?? '').slice(0, 64)}`
   }
 }
 

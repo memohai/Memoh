@@ -51,7 +51,7 @@
               </div>
               <div class="text-xs">
                 <span
-                  v-if="item.config?.status === 'active' || item.config?.status === 'verified'"
+                  v-if="!item.config?.disabled"
                   class="text-green-600 dark:text-green-400"
                 >
                   {{ $t('bots.channels.statusActive') }}
@@ -142,7 +142,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from '@memoh/ui'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { useQuery } from '@pinia/colada'
 import { getChannels, getBotsByIdChannelByPlatform } from '@memoh/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig } from '@memoh/sdk'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
@@ -190,13 +190,13 @@ const addPopoverOpen = ref(false)
 
 const allChannels = computed<BotChannelItem[]>(() => channels.value ?? [])
 const configuredChannels = computed(() => allChannels.value.filter((c) => c.configured))
+
 const unconfiguredChannels = computed(() => allChannels.value.filter((c) => !c.configured))
 
 const selectedItem = computed(() =>
   allChannels.value.find((c) => c.meta.type === selectedType.value) ?? null,
 )
 
-// 自动选中第一个已配置的渠道
 watch(configuredChannels, (list) => {
   if (list.length > 0 && !selectedType.value) {
     selectedType.value = list[0].meta.type

@@ -42,7 +42,7 @@ func CollectEmbeddingVectors(ctx context.Context, service *models.Service) (map[
 		if model.Dimensions > 0 && model.ModelID != "" {
 			vectors[model.ModelID] = model.Dimensions
 		}
-		if model.IsMultimodal {
+		if model.IsMultimodal() {
 			if multimodalModel.ModelID == "" {
 				multimodalModel = model
 			}

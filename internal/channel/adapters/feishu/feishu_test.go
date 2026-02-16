@@ -202,6 +202,9 @@ func TestExtractFeishuInboundImageAttachmentReference(t *testing.T) {
 	if att.SourcePlatform != Type.String() {
 		t.Fatalf("unexpected source platform: %s", att.SourcePlatform)
 	}
+	if att.Metadata == nil || att.Metadata["message_id"] == nil {
+		t.Fatal("expected message_id in attachment metadata")
+	}
 }
 
 func TestFeishuDescriptorIncludesStreamingAndMedia(t *testing.T) {
@@ -214,6 +217,54 @@ func TestFeishuDescriptorIncludesStreamingAndMedia(t *testing.T) {
 	}
 	if !caps.Media {
 		t.Fatal("expected media capability")
+	}
+}
+
+func TestFeishuResolveAttachmentRequiresPlatformKey(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewFeishuAdapter(nil)
+	_, err := adapter.ResolveAttachment(context.Background(), channel.ChannelConfig{}, channel.Attachment{})
+	if err == nil {
+		t.Fatal("expected error when platform_key is missing")
+	}
+	if !strings.Contains(err.Error(), "platform_key") {
+		t.Fatalf("expected platform_key error, got: %v", err)
+	}
+}
+
+func TestFeishuResolveAttachmentRequiresMessageID(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewFeishuAdapter(nil)
+	_, err := adapter.ResolveAttachment(context.Background(), channel.ChannelConfig{}, channel.Attachment{
+		PlatformKey: "img_123",
+	})
+	if err == nil {
+		t.Fatal("expected error when message_id is missing")
+	}
+	if !strings.Contains(err.Error(), "message_id") {
+		t.Fatalf("expected message_id error, got: %v", err)
+	}
+}
+
+func TestIsFeishuImageAttachment(t *testing.T) {
+	t.Parallel()
+
+	if !isFeishuImageAttachment(channel.Attachment{Type: channel.AttachmentImage}) {
+		t.Fatal("expected image type to be identified as image")
+	}
+	if !isFeishuImageAttachment(channel.Attachment{Type: channel.AttachmentGIF}) {
+		t.Fatal("expected gif type to be identified as image")
+	}
+	if !isFeishuImageAttachment(channel.Attachment{Mime: "image/jpeg"}) {
+		t.Fatal("expected image/ mime to be identified as image")
+	}
+	if isFeishuImageAttachment(channel.Attachment{Type: channel.AttachmentFile}) {
+		t.Fatal("expected file type to not be identified as image")
+	}
+	if isFeishuImageAttachment(channel.Attachment{Type: channel.AttachmentAudio}) {
+		t.Fatal("expected audio type to not be identified as image")
 	}
 }
 
@@ -235,6 +286,21 @@ func TestBuildFeishuStreamCardContent(t *testing.T) {
 	value, ok := cfg["update_multi"].(bool)
 	if !ok || !value {
 		t.Fatalf("expected update_multi=true, got: %#v", cfg["update_multi"])
+	}
+}
+
+func TestBuildFeishuStreamCardContentWithState(t *testing.T) {
+	t.Parallel()
+
+	payload, err := buildFeishuStreamCardContent("answer body")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(payload, "answer body") {
+		t.Fatalf("expected stream body content in payload: %s", payload)
+	}
+	if strings.Contains(payload, "Tools:**") || strings.Contains(payload, "Calling:") {
+		t.Fatalf("expected no tool/process panel in payload: %s", payload)
 	}
 }
 
@@ -364,7 +430,7 @@ func TestExtractFeishuInboundMentionOtherUserIgnored(t *testing.T) {
 func TestExtractFeishuInboundPostMentionFallback(t *testing.T) {
 	t.Parallel()
 
-	content := `{"zh_cn":{"title":"","content":[[{"tag":"at","user_name":"bot"},{"tag":"text","text":" hi"}]]}}`
+	content := `{"title":"","content":[[{"tag":"at","user_name":"bot"},{"tag":"text","text":" hi"}]]}`
 	msgType := larkim.MsgTypePost
 	chatType := "group"
 	chatID := "oc_post_1"
@@ -392,7 +458,7 @@ func TestExtractFeishuInboundPostMentionBotMatched(t *testing.T) {
 	t.Parallel()
 
 	botOpenID := "ou_bot_123"
-	content := `{"zh_cn":{"title":"","content":[[{"tag":"at","user_id":"ou_bot_123"},{"tag":"text","text":" hi"}]]}}`
+	content := `{"title":"","content":[[{"tag":"at","user_id":"ou_bot_123"},{"tag":"text","text":" hi"}]]}`
 	msgType := larkim.MsgTypePost
 	chatType := "group"
 	chatID := "oc_post_bot"
@@ -413,10 +479,42 @@ func TestExtractFeishuInboundPostMentionBotMatched(t *testing.T) {
 	}
 }
 
+func TestExtractFeishuInboundPostRootContent(t *testing.T) {
+	t.Parallel()
+
+	// Feishu event payload uses root-level content
+	content := `{"title":"","content":[[{"tag":"img","image_key":"img_v3_02uv_81bc4785-24d6-4fe2-b841-c3c4c691fc0g","width":1438,"height":810}],[{"tag":"text","text":"这是什么作品","style":[]}]]}`
+	msgType := larkim.MsgTypePost
+	chatType := "p2p"
+	chatID := "oc_eb2b5e623f3a21e288fce40878564f8e"
+	msgID := "om_x100b5606f7fc6ca4b376e5432634210"
+	event := &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Message: &larkim.EventMessage{
+				MessageId:   &msgID,
+				MessageType: &msgType,
+				Content:     &content,
+				ChatType:    &chatType,
+				ChatId:      &chatID,
+			},
+		},
+	}
+	got := extractFeishuInbound(event, "")
+	if got.Message.PlainText() != "这是什么作品" {
+		t.Fatalf("expected text 这是什么作品, got %q", got.Message.PlainText())
+	}
+	if len(got.Message.Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(got.Message.Attachments))
+	}
+	if got.Message.Attachments[0].PlatformKey != "img_v3_02uv_81bc4785-24d6-4fe2-b841-c3c4c691fc0g" {
+		t.Fatalf("unexpected platform_key: %q", got.Message.Attachments[0].PlatformKey)
+	}
+}
+
 func TestExtractFeishuInboundPostMentionOtherIgnored(t *testing.T) {
 	t.Parallel()
 
-	content := `{"zh_cn":{"title":"","content":[[{"tag":"at","user_id":"ou_someone_else"},{"tag":"text","text":" hi"}]]}}`
+	content := `{"title":"","content":[[{"tag":"at","user_id":"ou_someone_else"},{"tag":"text","text":" hi"}]]}`
 	msgType := larkim.MsgTypePost
 	chatType := "group"
 	chatID := "oc_post_other"

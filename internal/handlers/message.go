@@ -3,9 +3,11 @@ package handlers
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -19,6 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 )
@@ -29,6 +32,7 @@ type MessageHandler struct {
 	conversationService conversation.Accessor
 	messageService      messagepkg.Service
 	messageEvents       messageevent.Subscriber
+	mediaService        *media.Service
 	botService          *bots.Service
 	accountService      *accounts.Service
 	channelIdentitySvc  *identities.Service
@@ -53,6 +57,11 @@ func NewMessageHandler(log *slog.Logger, runner flow.Runner, conversationService
 	}
 }
 
+// SetMediaService sets the optional media service for asset serving.
+func (h *MessageHandler) SetMediaService(svc *media.Service) {
+	h.mediaService = svc
+}
+
 // Register registers all conversation routes.
 func (h *MessageHandler) Register(e *echo.Echo) {
 	// Bot-scoped message container (single shared history per bot).
@@ -62,6 +71,7 @@ func (h *MessageHandler) Register(e *echo.Echo) {
 	botGroup.GET("/messages", h.ListMessages)
 	botGroup.GET("/messages/events", h.StreamMessageEvents)
 	botGroup.DELETE("/messages", h.DeleteMessages)
+	botGroup.GET("/media/:asset_id", h.ServeMedia)
 }
 
 // --- Messages ---
@@ -87,8 +97,8 @@ func (h *MessageHandler) SendMessage(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if req.Query == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "query is required")
+	if strings.TrimSpace(req.Query) == "" && len(req.Attachments) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "query or attachments is required")
 	}
 	req.BotID = botID
 	req.ChatID = botID
@@ -105,6 +115,9 @@ func (h *MessageHandler) SendMessage(c echo.Context) error {
 		req.Channels = []string{req.CurrentChannel}
 	}
 	channelIdentityID = h.resolveWebChannelIdentity(c.Request().Context(), channelIdentityID, &req)
+	if req.Attachments, err = h.ingestInlineAttachments(c.Request().Context(), botID, req.Attachments); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 
 	if h.runner == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "conversation runner not configured")
@@ -137,8 +150,8 @@ func (h *MessageHandler) StreamMessage(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if req.Query == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "query is required")
+	if strings.TrimSpace(req.Query) == "" && len(req.Attachments) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "query or attachments is required")
 	}
 	req.BotID = botID
 	req.ChatID = botID
@@ -155,6 +168,9 @@ func (h *MessageHandler) StreamMessage(c echo.Context) error {
 		req.Channels = []string{req.CurrentChannel}
 	}
 	channelIdentityID = h.resolveWebChannelIdentity(c.Request().Context(), channelIdentityID, &req)
+	if req.Attachments, err = h.ingestInlineAttachments(c.Request().Context(), botID, req.Attachments); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 
 	if h.runner == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "conversation runner not configured")
@@ -242,6 +258,92 @@ func writeSSEJSON(writer *bufio.Writer, flusher http.Flusher, payload any) error
 		return err
 	}
 	return writeSSEData(writer, flusher, string(data))
+}
+
+func (h *MessageHandler) ingestInlineAttachments(ctx context.Context, botID string, attachments []conversation.ChatAttachment) ([]conversation.ChatAttachment, error) {
+	if len(attachments) == 0 || h.mediaService == nil {
+		return attachments, nil
+	}
+	result := make([]conversation.ChatAttachment, 0, len(attachments))
+	for _, att := range attachments {
+		item := att
+		if strings.TrimSpace(item.AssetID) != "" || strings.TrimSpace(item.Base64) == "" {
+			result = append(result, item)
+			continue
+		}
+		mediaType := mapAttachmentMediaType(item.Type)
+		maxBytes := media.MaxAssetBytes
+		raw, err := decodeAttachmentBase64(item.Base64, maxBytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid attachment base64: %w", err)
+		}
+		asset, err := h.mediaService.Ingest(ctx, media.IngestInput{
+			BotID:        botID,
+			MediaType:    mediaType,
+			Mime:         strings.TrimSpace(item.Mime),
+			OriginalName: strings.TrimSpace(item.Name),
+			Metadata:     item.Metadata,
+			Reader:       raw,
+			MaxBytes:     maxBytes,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("ingest attachment failed: %w", err)
+		}
+		item.AssetID = asset.ID
+		item.Path = h.mediaService.AccessPath(asset)
+		mime := strings.TrimSpace(item.Mime)
+		if mime == "" {
+			mime = strings.TrimSpace(asset.Mime)
+		}
+		item.Base64 = normalizeBase64DataURL(item.Base64, mime)
+		if strings.TrimSpace(item.Mime) == "" {
+			item.Mime = asset.Mime
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+func decodeAttachmentBase64(input string, maxBytes int64) (io.Reader, error) {
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return nil, fmt.Errorf("base64 payload is empty")
+	}
+	if strings.HasPrefix(strings.ToLower(value), "data:") {
+		if idx := strings.Index(value, ","); idx >= 0 {
+			value = value[idx+1:]
+		}
+	}
+	decoder := base64.NewDecoder(base64.StdEncoding, strings.NewReader(value))
+	return io.LimitReader(decoder, maxBytes+1), nil
+}
+
+func normalizeBase64DataURL(input, mime string) string {
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(value), "data:") {
+		return value
+	}
+	mime = strings.TrimSpace(mime)
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	return "data:" + mime + ";base64," + value
+}
+
+func mapAttachmentMediaType(t string) media.MediaType {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "image", "gif":
+		return media.MediaTypeImage
+	case "audio", "voice":
+		return media.MediaTypeAudio
+	case "video":
+		return media.MediaTypeVideo
+	default:
+		return media.MediaTypeFile
+	}
 }
 
 func parseSinceParam(raw string) (time.Time, bool, error) {
@@ -555,6 +657,57 @@ func (h *MessageHandler) requireReadable(ctx context.Context, conversationID, ch
 			return echo.NewHTTPError(http.StatusForbidden, "not allowed to read conversation")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return nil
+}
+
+// ServeMedia streams a media asset by bot_id + asset_id with read-access authorization.
+func (h *MessageHandler) ServeMedia(c echo.Context) error {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	assetID := strings.TrimSpace(c.Param("asset_id"))
+	if assetID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "asset id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+		return err
+	}
+	if err := h.requireReadable(c.Request().Context(), botID, channelIdentityID); err != nil {
+		return err
+	}
+	if h.mediaService == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "media service not configured")
+	}
+	reader, asset, err := h.mediaService.Open(c.Request().Context(), assetID)
+	if err != nil {
+		if errors.Is(err, media.ErrAssetNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "asset not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	defer reader.Close()
+	// Verify asset belongs to the authorized bot.
+	if strings.TrimSpace(asset.BotID) != botID {
+		return echo.NewHTTPError(http.StatusForbidden, "asset does not belong to bot")
+	}
+	contentType := asset.Mime
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	c.Response().Header().Set("Content-Type", contentType)
+	c.Response().Header().Set("Cache-Control", "private, max-age=86400")
+	if asset.OriginalName != "" {
+		c.Response().Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", asset.OriginalName))
+	}
+	c.Response().WriteHeader(http.StatusOK)
+	if _, err := io.Copy(c.Response().Writer, reader); err != nil {
+		h.logger.Warn("serve media stream failed", slog.Any("error", err))
 	}
 	return nil
 }

@@ -149,7 +149,15 @@
     "displayNamePlaceholder": "Custom display name",
     "dimensions": "Dimensions",
     "dimensionsPlaceholder": "e.g. 1536",
-    "multimodal": "Multimodal"
+    "multimodal": "Multimodal",
+    "inputModalities": "Input Modalities",
+    "modality": {
+      "text": "Text",
+      "image": "Image",
+      "audio": "Audio",
+      "video": "Video",
+      "file": "File"
+    }
   },
   "provider": {
     "add": "Add Provider",
@@ -363,7 +371,13 @@
       "save": "Save Platform Configuration",
       "statusActive": "Active",
       "statusInactive": "Inactive",
+      "actionEnable": "Enable",
+      "actionDisable": "Disable",
+      "saveOnly": "Save only",
+      "saveAndEnable": "Save and enable",
       "deleteConfirm": "Are you sure you want to remove this platform?",
+      "deleteSuccess": "Platform removed",
+      "deleteFailed": "Failed to remove platform",
       "noAvailableTypes": "All platform types have been configured",
       "types": {
         "feishu": "Feishu",

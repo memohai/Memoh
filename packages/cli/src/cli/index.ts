@@ -62,7 +62,7 @@ registerChannelCommands(program)
 const getModelId = (item: ModelsGetResponse) => item.model_id ?? ''
 const getProviderId = (item: ModelsGetResponse) => item.llm_provider_id ?? ''
 const getModelType = (item: ModelsGetResponse) => item.type ?? 'chat'
-const getModelMultimodal = (item: ModelsGetResponse) => item.is_multimodal ?? false
+const getModelInputModalities = (item: ModelsGetResponse) => item.input_modalities ?? ['text']
 
 const ensureModelsReady = async () => {
   ensureAuth()
@@ -98,13 +98,13 @@ const renderProvidersTable = (providers: ProvidersGetResponse[], models: ModelsG
 
 const renderModelsTable = (models: ModelsGetResponse[], providers: ProvidersGetResponse[]) => {
   const providerMap = new Map(providers.map(p => [p.id, p.name]))
-  const rows: string[][] = [['Model ID', 'Type', 'Provider', 'Multimodal']]
+  const rows: string[][] = [['Model ID', 'Type', 'Provider', 'Input Modalities']]
   for (const item of models) {
     rows.push([
       getModelId(item),
       getModelType(item),
       providerMap.get(getProviderId(item)) ?? getProviderId(item),
-      getModelMultimodal(item) ? 'yes' : 'no',
+      getModelInputModalities(item).join(', '),
     ])
   }
   return table(rows)
@@ -389,7 +389,7 @@ model
       console.log(chalk.red('Embedding models require a valid dimensions value.'))
       process.exit(1)
     }
-    const isMultimodal = Boolean(opts.multimodal)
+    const inputModalities = opts.multimodal ? ['text', 'image'] : ['text']
     const spinner = ora('Creating model...').start()
     try {
       await postModels({
@@ -397,7 +397,7 @@ model
           model_id: modelId,
           name: opts.name ?? modelId,
           llm_provider_id: provider.id,
-          is_multimodal: isMultimodal,
+          input_modalities: inputModalities,
           type: modelType,
           dimensions,
         },

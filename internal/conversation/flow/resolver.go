@@ -177,8 +177,8 @@ type resolvedContext struct {
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
-	if strings.TrimSpace(req.Query) == "" {
-		return resolvedContext{}, fmt.Errorf("query is required")
+	if strings.TrimSpace(req.Query) == "" && len(req.Attachments) == 0 {
+		return resolvedContext{}, fmt.Errorf("query or attachments is required")
 	}
 	if strings.TrimSpace(req.BotID) == "" {
 		return resolvedContext{}, fmt.Errorf("bot id is required")
@@ -253,7 +253,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		Model: gatewayModelConfig{
 			ModelID:    chatModel.ModelID,
 			ClientType: clientType,
-			Input:      chatModel.Input,
+			Input:      chatModel.InputModalities,
 			APIKey:     provider.ApiKey,
 			BaseURL:    provider.BaseUrl,
 		},
@@ -274,7 +274,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			ConversationType:  strings.TrimSpace(req.ConversationType),
 			SessionToken:      req.ChatToken,
 		},
-		Attachments: []any{},
+		Attachments: r.routeAndMergeAttachments(chatModel, req),
 	}
 
 	return resolvedContext{payload: payload, model: chatModel, provider: provider}, nil
@@ -584,6 +584,50 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	return false, nil
 }
 
+// routeAndMergeAttachments applies CapabilityFallbackPolicy to split
+// request attachments by model input modalities, then merges the results
+// into a single []any for the gateway request.
+func (r *Resolver) routeAndMergeAttachments(model models.GetResponse, req conversation.ChatRequest) []any {
+	if len(req.Attachments) == 0 {
+		return []any{}
+	}
+	typed := make([]gatewayAttachment, 0, len(req.Attachments))
+	for _, raw := range req.Attachments {
+		typed = append(typed, gatewayAttachment{
+			Type:     raw.Type,
+			Base64:   raw.Base64,
+			Path:     raw.Path,
+			Mime:     raw.Mime,
+			Name:     raw.Name,
+			Metadata: raw.Metadata,
+		})
+	}
+	routed := routeAttachmentsByCapability(model.InputModalities, typed)
+	// Convert unsupported attachments to file-path references.
+	for i := range routed.Fallback {
+		if routed.Fallback[i].Path == "" && routed.Fallback[i].Base64 != "" {
+			// Cannot downgrade base64-only to path; keep as native so the agent can
+			// attempt best-effort processing or skip.
+			routed.Native = append(routed.Native, routed.Fallback[i])
+			routed.Fallback[i] = gatewayAttachment{}
+			continue
+		}
+		routed.Fallback[i].Type = "file"
+	}
+	merged := make([]any, 0, len(routed.Native)+len(routed.Fallback))
+	merged = append(merged, attachmentsToAny(routed.Native)...)
+	for _, fb := range routed.Fallback {
+		if fb.Type == "" {
+			continue
+		}
+		merged = append(merged, fb)
+	}
+	if len(merged) == 0 {
+		return []any{}
+	}
+	return merged
+}
+
 // --- container resolution ---
 
 func (r *Resolver) resolveContainerID(ctx context.Context, botID, explicit string) string {
@@ -721,7 +765,7 @@ func (r *Resolver) persistUserMessage(ctx context.Context, req conversation.Chat
 		return fmt.Errorf("bot id is required for persistence")
 	}
 	text := strings.TrimSpace(req.Query)
-	if text == "" {
+	if text == "" && len(req.Attachments) == 0 {
 		return nil
 	}
 
@@ -744,6 +788,7 @@ func (r *Resolver) persistUserMessage(ctx context.Context, req conversation.Chat
 		Role:                    "user",
 		Content:                 content,
 		Metadata:                buildRouteMetadata(req),
+		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
 	})
 	return err
 }
@@ -759,7 +804,9 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 			break
 		}
 	}
-	if !req.UserMessagePersisted && !hasUserQuery && strings.TrimSpace(req.Query) != "" {
+	needUserInRound := !req.UserMessagePersisted && !hasUserQuery &&
+		(strings.TrimSpace(req.Query) != "" || len(req.Attachments) > 0)
+	if needUserInRound {
 		fullRound = append(fullRound, conversation.ModelMessage{
 			Role:    "user",
 			Content: conversation.NewTextContent(req.Query),
@@ -802,10 +849,14 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		messageSenderUserID := ""
 		externalMessageID := ""
 		sourceReplyToMessageID := ""
+		assets := []messagepkg.AssetRef(nil)
 		if msg.Role == "user" {
 			messageSenderChannelIdentityID = senderChannelIdentityID
 			messageSenderUserID = senderUserID
 			externalMessageID = req.ExternalMessageID
+			if strings.TrimSpace(msg.TextContent()) == strings.TrimSpace(req.Query) {
+				assets = chatAttachmentsToAssetRefs(req.Attachments)
+			}
 		} else if strings.TrimSpace(req.ExternalMessageID) != "" {
 			// Assistant/tool/system outputs are linked to the inbound source message for cross-channel reply threading.
 			sourceReplyToMessageID = req.ExternalMessageID
@@ -821,10 +872,32 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			Role:                    msg.Role,
 			Content:                 content,
 			Metadata:                meta,
+			Assets:                  assets,
 		}); err != nil {
 			r.logger.Warn("persist message failed", slog.Any("error", err))
 		}
 	}
+}
+
+// chatAttachmentsToAssetRefs converts ChatAttachment slice to message AssetRef slice.
+// Only attachments that carry an asset_id are included; others have not been ingested yet.
+func chatAttachmentsToAssetRefs(attachments []conversation.ChatAttachment) []messagepkg.AssetRef {
+	if len(attachments) == 0 {
+		return nil
+	}
+	refs := make([]messagepkg.AssetRef, 0, len(attachments))
+	for i, att := range attachments {
+		id := strings.TrimSpace(att.AssetID)
+		if id == "" {
+			continue
+		}
+		refs = append(refs, messagepkg.AssetRef{
+			AssetID: id,
+			Role:    "attachment",
+			Ordinal: i,
+		})
+	}
+	return refs
 }
 
 func buildRouteMetadata(req conversation.ChatRequest) map[string]any {

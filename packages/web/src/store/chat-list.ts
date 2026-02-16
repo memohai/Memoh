@@ -17,6 +17,7 @@ import {
   extractAllToolResults,
   streamMessage,
   streamMessageEvents,
+  type ChatAttachment,
 } from '@/composables/api/useChat'
 
 // ---- Message model (blocks-based, aligned with main branch) ----
@@ -34,13 +35,19 @@ export interface ThinkingBlock {
 
 export interface ToolCallBlock {
   type: 'tool_call'
+  toolCallId: string
   toolName: string
   input: unknown
   result: unknown | null
   done: boolean
 }
 
-export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock
+export interface AttachmentBlock {
+  type: 'attachment'
+  attachments: Array<Record<string, unknown>>
+}
+
+export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock
 
 export interface ChatMessage {
   id: string
@@ -108,11 +115,32 @@ export const useChatStore = defineStore('chat', () => {
 
   // ---- Message adapter: convert server Message to ChatMessage ----
 
+  function buildAssetBlocks(raw: Message): AttachmentBlock[] {
+    if (!raw.assets?.length) return []
+    const items: Array<Record<string, unknown>> = raw.assets.map((a) => ({
+      type: a.media_type,
+      asset_id: a.asset_id,
+      bot_id: raw.bot_id,
+      mime: a.mime,
+      size: a.size_bytes,
+      name: a.original_name ?? '',
+      storage_key: a.storage_key,
+      width: a.width,
+      height: a.height,
+    }))
+    return [{ type: 'attachment', attachments: items }]
+  }
+
   function messageToChat(raw: Message): ChatMessage | null {
     if (raw.role !== 'user' && raw.role !== 'assistant') return null
 
     const text = extractMessageText(raw)
-    if (!text) return null
+    const assetBlocks = buildAssetBlocks(raw)
+    if (!text && assetBlocks.length === 0) return null
+
+    const blocks: ContentBlock[] = []
+    if (text) blocks.push({ type: 'text', content: text })
+    blocks.push(...assetBlocks)
 
     const createdAt = raw.created_at ? new Date(raw.created_at) : new Date()
     const timestamp = Number.isNaN(createdAt.getTime()) ? new Date() : createdAt
@@ -126,7 +154,7 @@ export const useChatStore = defineStore('chat', () => {
       return {
         id: raw.id || nextId(),
         role: 'user',
-        blocks: [{ type: 'text', content: text }],
+        blocks,
         timestamp,
         streaming: false,
         isSelf,
@@ -138,7 +166,7 @@ export const useChatStore = defineStore('chat', () => {
     return {
       id: raw.id || nextId(),
       role: 'assistant',
-      blocks: [{ type: 'text', content: text }],
+      blocks,
       timestamp,
       streaming: false,
       ...(channelTag && { platform: channelTag }),
@@ -201,6 +229,7 @@ export const useChatStore = defineStore('chat', () => {
           for (const tc of toolCalls) {
             const block: ToolCallBlock = {
               type: 'tool_call',
+              toolCallId: tc.id ?? '',
               toolName: tc.name,
               input: tc.input,
               result: null,
@@ -528,9 +557,9 @@ export const useChatStore = defineStore('chat', () => {
 
   // ---- Send message (blocks-based streaming) ----
 
-  async function sendMessage(text: string) {
+  async function sendMessage(text: string, attachments?: ChatAttachment[]) {
     const trimmed = text.trim()
-    if (!trimmed || streaming.value || !currentBotId.value) return
+    if ((!trimmed && !attachments?.length) || streaming.value || !currentBotId.value) return
 
     loading.value = true
     streaming.value = true
@@ -543,10 +572,23 @@ export const useChatStore = defineStore('chat', () => {
       const cid = chatId.value!
 
       // Add user message
+      const userBlocks: ContentBlock[] = []
+      if (trimmed) userBlocks.push({ type: 'text', content: trimmed })
+      if (attachments?.length) {
+        userBlocks.push({
+          type: 'attachment',
+          attachments: attachments.map((a) => ({
+            type: a.type,
+            name: a.name ?? '',
+            mime: a.mime ?? '',
+            url: a.base64,
+          })),
+        })
+      }
       messages.push({
         id: nextId(),
         role: 'user',
-        blocks: [{ type: 'text', content: trimmed }],
+        blocks: userBlocks,
         timestamp: new Date(),
         streaming: false,
       })
@@ -615,6 +657,7 @@ export const useChatStore = defineStore('chat', () => {
             case 'tool_call_start':
               pushBlock({
                 type: 'tool_call',
+                toolCallId: (event.toolCallId as string) ?? '',
                 toolName: (event.toolName as string) ?? 'unknown',
                 input: event.input ?? null,
                 result: null,
@@ -623,16 +666,47 @@ export const useChatStore = defineStore('chat', () => {
               textBlockIdx = -1
               break
 
-            case 'tool_call_end':
-              for (let i = 0; i < assistantMsg.blocks.length; i++) {
-                const b = assistantMsg.blocks[i]
-                if (b && b.type === 'tool_call' && b.toolName === event.toolName && !b.done) {
-                  b.result = event.result ?? null
-                  b.done = true
-                  break
+            case 'tool_call_end': {
+              const callId = (event.toolCallId as string) ?? ''
+              let matched = false
+              if (callId) {
+                for (let i = 0; i < assistantMsg.blocks.length; i++) {
+                  const b = assistantMsg.blocks[i]
+                  if (b && b.type === 'tool_call' && b.toolCallId === callId && !b.done) {
+                    b.result = event.result ?? null
+                    b.input = event.input ?? b.input
+                    b.done = true
+                    matched = true
+                    break
+                  }
+                }
+              }
+              if (!matched) {
+                for (let i = 0; i < assistantMsg.blocks.length; i++) {
+                  const b = assistantMsg.blocks[i]
+                  if (b && b.type === 'tool_call' && b.toolName === event.toolName && !b.done) {
+                    b.result = event.result ?? null
+                    b.input = event.input ?? b.input
+                    b.done = true
+                    break
+                  }
                 }
               }
               break
+            }
+
+            case 'attachment_delta': {
+              const items = event.attachments
+              if (Array.isArray(items) && items.length > 0) {
+                const lastBlock = assistantMsg.blocks[assistantMsg.blocks.length - 1]
+                if (lastBlock && lastBlock.type === 'attachment') {
+                  lastBlock.attachments.push(...items)
+                } else {
+                  pushBlock({ type: 'attachment', attachments: [...items] })
+                }
+              }
+              break
+            }
 
             case 'processing_started':
               if (assistantMsg.blocks.length === 0) {
@@ -642,10 +716,24 @@ export const useChatStore = defineStore('chat', () => {
               break
 
             case 'processing_completed':
-            case 'processing_failed':
             case 'agent_start':
             case 'agent_end':
               break
+
+            case 'processing_failed': {
+              const failMsg = typeof event.message === 'string'
+                ? event.message
+                : typeof event.error === 'string'
+                  ? event.error
+                  : ''
+              if (failMsg) {
+                if (textBlockIdx < 0 || assistantMsg.blocks[textBlockIdx]?.type !== 'text') {
+                  textBlockIdx = pushBlock({ type: 'text', content: '' })
+                }
+                ;(assistantMsg.blocks[textBlockIdx] as TextBlock).content += `\n\n**Error:** ${failMsg}`
+              }
+              break
+            }
 
             case 'error': {
               const errMsg = typeof event.message === 'string'
@@ -691,6 +779,7 @@ export const useChatStore = defineStore('chat', () => {
           loading.value = false
           abortFn = null
         },
+        attachments,
       )
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'Unknown error'

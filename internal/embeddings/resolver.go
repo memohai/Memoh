@@ -192,10 +192,10 @@ func (r *Resolver) selectEmbeddingModel(ctx context.Context, req Request) (model
 		if model.Type != models.ModelTypeEmbedding {
 			continue
 		}
-		if req.Type == TypeMultimodal && !model.IsMultimodal {
+		if req.Type == TypeMultimodal && !model.IsMultimodal() {
 			continue
 		}
-		if req.Type == TypeText && model.IsMultimodal {
+		if req.Type == TypeText && model.IsMultimodal() {
 			continue
 		}
 		filtered = append(filtered, model)

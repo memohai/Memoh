@@ -191,6 +191,20 @@ type ToolCallFunction struct {
 	Arguments string `json:"arguments"`
 }
 
+// ChatAttachment is a media attachment carried in a chat request.
+type ChatAttachment struct {
+	Type        string         `json:"type"`
+	Base64      string         `json:"base64,omitempty"`
+	Path        string         `json:"path,omitempty"`
+	URL         string         `json:"url,omitempty"`
+	PlatformKey string         `json:"platform_key,omitempty"`
+	AssetID     string         `json:"asset_id,omitempty"`
+	Name        string         `json:"name,omitempty"`
+	Mime        string         `json:"mime,omitempty"`
+	Size        int64          `json:"size,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
 // ChatRequest is the input for Chat and StreamChat.
 type ChatRequest struct {
 	BotID                   string `json:"-"`
@@ -206,15 +220,16 @@ type ChatRequest struct {
 	ConversationType        string `json:"-"`
 	UserMessagePersisted    bool   `json:"-"`
 
-	Query              string         `json:"query"`
-	Model              string         `json:"model,omitempty"`
-	Provider           string         `json:"provider,omitempty"`
-	MaxContextLoadTime int            `json:"max_context_load_time,omitempty"`
-	Channels           []string       `json:"channels,omitempty"`
-	CurrentChannel     string         `json:"current_channel,omitempty"`
-	Messages           []ModelMessage `json:"messages,omitempty"`
-	Skills             []string       `json:"skills,omitempty"`
-	AllowedActions     []string       `json:"allowed_actions,omitempty"`
+	Query              string           `json:"query"`
+	Model              string           `json:"model,omitempty"`
+	Provider           string           `json:"provider,omitempty"`
+	MaxContextLoadTime int              `json:"max_context_load_time,omitempty"`
+	Channels           []string         `json:"channels,omitempty"`
+	CurrentChannel     string           `json:"current_channel,omitempty"`
+	Messages           []ModelMessage   `json:"messages,omitempty"`
+	Skills             []string         `json:"skills,omitempty"`
+	AllowedActions     []string         `json:"allowed_actions,omitempty"`
+	Attachments        []ChatAttachment `json:"attachments,omitempty"`
 }
 
 // ChatResponse is the output of a non-streaming chat call.

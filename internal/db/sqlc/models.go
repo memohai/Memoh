@@ -37,7 +37,7 @@ type BotChannelConfig struct {
 	SelfIdentity     []byte             `json:"self_identity"`
 	Routing          []byte             `json:"routing"`
 	Capabilities     []byte             `json:"capabilities"`
-	Status           string             `json:"status"`
+	Disabled         bool               `json:"disabled"`
 	VerifiedAt       pgtype.Timestamptz `json:"verified_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
@@ -72,6 +72,15 @@ type BotHistoryMessage struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
+type BotHistoryMessageAsset struct {
+	ID        pgtype.UUID        `json:"id"`
+	MessageID pgtype.UUID        `json:"message_id"`
+	AssetID   pgtype.UUID        `json:"asset_id"`
+	Role      string             `json:"role"`
+	Ordinal   int32              `json:"ordinal"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type BotMember struct {
 	BotID     pgtype.UUID        `json:"bot_id"`
 	UserID    pgtype.UUID        `json:"user_id"`
@@ -87,6 +96,15 @@ type BotPreauthKey struct {
 	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
 	UsedAt         pgtype.Timestamptz `json:"used_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type BotStorageBinding struct {
+	ID                pgtype.UUID        `json:"id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	StorageProviderID pgtype.UUID        `json:"storage_provider_id"`
+	BasePath          string             `json:"base_path"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ChannelIdentity struct {
@@ -167,16 +185,33 @@ type McpConnection struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type MediaAsset struct {
+	ID                pgtype.UUID        `json:"id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	StorageProviderID pgtype.UUID        `json:"storage_provider_id"`
+	ContentHash       string             `json:"content_hash"`
+	MediaType         string             `json:"media_type"`
+	Mime              string             `json:"mime"`
+	SizeBytes         int64              `json:"size_bytes"`
+	StorageKey        string             `json:"storage_key"`
+	OriginalName      pgtype.Text        `json:"original_name"`
+	Width             pgtype.Int4        `json:"width"`
+	Height            pgtype.Int4        `json:"height"`
+	DurationMs        pgtype.Int8        `json:"duration_ms"`
+	Metadata          []byte             `json:"metadata"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type Model struct {
-	ID            pgtype.UUID        `json:"id"`
-	ModelID       string             `json:"model_id"`
-	Name          pgtype.Text        `json:"name"`
-	LlmProviderID pgtype.UUID        `json:"llm_provider_id"`
-	Dimensions    pgtype.Int4        `json:"dimensions"`
-	IsMultimodal  bool               `json:"is_multimodal"`
-	Type          string             `json:"type"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID              pgtype.UUID        `json:"id"`
+	ModelID         string             `json:"model_id"`
+	Name            pgtype.Text        `json:"name"`
+	LlmProviderID   pgtype.UUID        `json:"llm_provider_id"`
+	Dimensions      pgtype.Int4        `json:"dimensions"`
+	InputModalities []string           `json:"input_modalities"`
+	Type            string             `json:"type"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ModelVariant struct {
@@ -219,6 +254,15 @@ type Snapshot struct {
 	Snapshotter      string             `json:"snapshotter"`
 	Digest           pgtype.Text        `json:"digest"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type StorageProvider struct {
+	ID        pgtype.UUID        `json:"id"`
+	Name      string             `json:"name"`
+	Provider  string             `json:"provider"`
+	Config    []byte             `json:"config"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Subagent struct {

@@ -14,6 +14,9 @@ export enum ClientType {
 export enum ModelInput {
   Text = 'text',
   Image = 'image',
+  Audio = 'audio',
+  Video = 'video',
+  File = 'file',
 }
 
 export interface ModelConfig {
@@ -23,3 +26,6 @@ export interface ModelConfig {
   clientType: ClientType
   input: ModelInput[]
 }
+
+export const hasInputModality = (config: ModelConfig, modality: ModelInput): boolean =>
+  config.input.includes(modality)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/common"
+	"github.com/memohai/memoh/internal/media"
 )
 
 // FeishuAdapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Feishu.
@@ -367,6 +369,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 			text := msg.Message.PlainText()
 			rawMessageID := ""
 			rawMessageType := ""
+			rawContent := ""
 			if event != nil && event.Event != nil && event.Event.Message != nil {
 				if event.Event.Message.MessageId != nil {
 					rawMessageID = strings.TrimSpace(*event.Event.Message.MessageId)
@@ -374,6 +377,19 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 				if event.Event.Message.MessageType != nil {
 					rawMessageType = strings.TrimSpace(string(*event.Event.Message.MessageType))
 				}
+				if event.Event.Message.Content != nil {
+					rawContent = common.SummarizeText(*event.Event.Message.Content)
+				}
+			}
+			if a.logger != nil {
+				a.logger.Debug("feishu inbound extracted",
+					slog.String("config_id", cfg.ID),
+					slog.String("message_id", rawMessageID),
+					slog.String("message_type", rawMessageType),
+					slog.String("text", common.SummarizeText(text)),
+					slog.Int("attachments", len(msg.Message.Attachments)),
+					slog.String("raw_content_prefix", rawContent),
+				)
 			}
 			if text == "" && len(msg.Message.Attachments) == 0 {
 				if a.logger != nil {
@@ -659,6 +675,10 @@ func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client,
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("failed to download attachment, status: %d", resp.StatusCode)
 		}
+		maxBytes := media.MaxAssetBytes
+		if resp.ContentLength > maxBytes {
+			return fmt.Errorf("%w: max %d bytes", media.ErrAssetTooLarge, maxBytes)
+		}
 		if strings.HasPrefix(att.Mime, "image/") || att.Type == channel.AttachmentImage {
 			uploadReq := larkim.NewCreateImageReqBuilder().
 				Body(larkim.NewCreateImageReqBodyBuilder().
@@ -724,6 +744,76 @@ func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client,
 
 	sendResp, err := client.Im.V1.Message.Create(ctx, req)
 	return a.handleResponse("", sendResp, err)
+}
+
+// ResolveAttachment resolves a Feishu attachment reference to a byte stream.
+// User-sent resources must be fetched via the message-resource API which
+// requires both message_id and file_key. The message_id is expected in
+// attachment.Metadata["message_id"].
+func (a *FeishuAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
+	platformKey := strings.TrimSpace(attachment.PlatformKey)
+	if platformKey == "" {
+		return channel.AttachmentPayload{}, fmt.Errorf("feishu attachment platform_key is required")
+	}
+	messageID := ""
+	if attachment.Metadata != nil {
+		if v, ok := attachment.Metadata["message_id"].(string); ok {
+			messageID = strings.TrimSpace(v)
+		}
+	}
+	if messageID == "" {
+		return channel.AttachmentPayload{}, fmt.Errorf("feishu attachment metadata.message_id is required")
+	}
+	feishuCfg, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return channel.AttachmentPayload{}, err
+	}
+	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret)
+
+	resourceType := "file"
+	if isFeishuImageAttachment(attachment) {
+		resourceType = "image"
+	}
+	req := larkim.NewGetMessageResourceReqBuilder().
+		MessageId(messageID).
+		FileKey(platformKey).
+		Type(resourceType).
+		Build()
+	resp, err := client.Im.V1.MessageResource.Get(ctx, req)
+	if err != nil {
+		return channel.AttachmentPayload{}, fmt.Errorf("download feishu resource: %w", err)
+	}
+	if !resp.Success() {
+		return channel.AttachmentPayload{}, fmt.Errorf("download feishu resource: %s (code: %d)", resp.Msg, resp.Code)
+	}
+	if resp.File == nil {
+		return channel.AttachmentPayload{}, fmt.Errorf("download feishu resource: empty payload")
+	}
+	mime := strings.TrimSpace(attachment.Mime)
+	if mime == "" {
+		if isFeishuImageAttachment(attachment) {
+			mime = "image/png"
+		} else {
+			mime = "application/octet-stream"
+		}
+	}
+	name := strings.TrimSpace(attachment.Name)
+	if name == "" {
+		name = strings.TrimSpace(resp.FileName)
+	}
+	return channel.AttachmentPayload{
+		Reader: io.NopCloser(resp.File),
+		Mime:   mime,
+		Name:   name,
+		Size:   attachment.Size,
+	}, nil
+}
+
+func isFeishuImageAttachment(att channel.Attachment) bool {
+	if att.Type == channel.AttachmentImage || att.Type == channel.AttachmentGIF {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(att.Mime)), "image/")
 }
 
 // resolveFeishuFileType maps MIME type and filename to a Feishu file type constant.
