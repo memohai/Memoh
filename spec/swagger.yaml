@@ -108,16 +108,22 @@ definitions:
     type: object
   bots.BotCheck:
     properties:
-      check_key:
-        type: string
       detail:
+        type: string
+      id:
         type: string
       metadata:
         additionalProperties: {}
         type: object
       status:
         type: string
+      subtitle:
+        type: string
       summary:
+        type: string
+      title_key:
+        type: string
+      type:
         type: string
     type: object
   bots.BotMember:
@@ -150,13 +156,6 @@ definitions:
       items:
         items:
           $ref: '#/definitions/bots.Bot'
-        type: array
-    type: object
-  bots.ListCheckKeysResponse:
-    properties:
-      keys:
-        items:
-          type: string
         type: array
     type: object
   bots.ListChecksResponse:
@@ -3538,45 +3537,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: List bot runtime checks
-      tags:
-      - bots
-  /bots/{id}/checks/keys:
-    get:
-      description: Returns all check keys available for a bot (builtin + MCP connections)
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/bots.ListCheckKeysResponse'
-      summary: List available check keys
-      tags:
-      - bots
-  /bots/{id}/checks/run/{key}:
-    get:
-      description: Evaluate one check key for a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Check key
-        in: path
-        name: key
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/bots.BotCheck'
-      summary: Run a single bot check
       tags:
       - bots
   /bots/{id}/members:

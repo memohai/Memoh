@@ -254,13 +254,22 @@
     },
     "checks": {
       "title": "运行时检查",
-      "subtitle": "附属资源健康状态在请求时实时检查。",
+      "subtitle": "查看当前健康状态与异常详情。",
       "ok": "无异常",
       "hasIssue": "存在异常",
       "issueCount": "{count} 个异常",
       "empty": "暂无检查项",
       "loadFailed": "加载运行时检查失败",
       "actions": {},
+      "titles": {
+        "containerInit": "容器初始化",
+        "containerRecord": "容器记录",
+        "containerTask": "容器任务",
+        "containerDataPath": "容器数据路径",
+        "botDelete": "Bot 删除",
+        "mcpConnection": "MCP 连接",
+        "channelConnection": "平台连接"
+      },
       "keys": {
         "containerInit": "容器初始化",
         "containerRecord": "容器记录",

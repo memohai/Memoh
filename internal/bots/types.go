@@ -32,7 +32,10 @@ type BotMember struct {
 
 // BotCheck represents one resource check row for a bot.
 type BotCheck struct {
-	CheckKey string         `json:"check_key"`
+	ID       string         `json:"id"`
+	Type     string         `json:"type"`
+	TitleKey string         `json:"title_key"`
+	Subtitle string         `json:"subtitle,omitempty"`
 	Status   string         `json:"status"`
 	Summary  string         `json:"summary"`
 	Detail   string         `json:"detail,omitempty"`
@@ -82,11 +85,6 @@ type ListChecksResponse struct {
 	Items []BotCheck `json:"items"`
 }
 
-// ListCheckKeysResponse wraps the list of available check keys.
-type ListCheckKeysResponse struct {
-	Keys []string `json:"keys"`
-}
-
 // ContainerLifecycle handles container lifecycle events bound to bot operations.
 type ContainerLifecycle interface {
 	SetupBotContainer(ctx context.Context, botID string) error
@@ -95,10 +93,8 @@ type ContainerLifecycle interface {
 
 // RuntimeChecker produces runtime check items for a bot.
 type RuntimeChecker interface {
-	// CheckKeys returns the check keys this checker can evaluate for a bot.
-	CheckKeys(ctx context.Context, botID string) []string
-	// RunCheck evaluates a single check key and returns the result.
-	RunCheck(ctx context.Context, botID, key string) BotCheck
+	// ListChecks evaluates dynamic runtime checks for a bot.
+	ListChecks(ctx context.Context, botID string) []BotCheck
 }
 
 const (
@@ -126,11 +122,13 @@ const (
 )
 
 const (
-	BotCheckKeyContainerInit   = "container.init"
-	BotCheckKeyContainerRecord = "container.record"
-	BotCheckKeyContainerTask   = "container.task"
-	BotCheckKeyContainerData   = "container.data_path"
-	BotCheckKeyDelete          = "bot.delete"
+	BotCheckTypeContainerInit   = "container.init"
+	BotCheckTypeContainerRecord = "container.record"
+	BotCheckTypeContainerTask   = "container.task"
+	BotCheckTypeContainerData   = "container.data_path"
+	BotCheckTypeDelete          = "bot.delete"
+	BotCheckTypeMCPConnection   = "mcp.connection"
+	BotCheckTypeChannelConn     = "channel.connection"
 )
 
 const (

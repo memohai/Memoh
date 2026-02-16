@@ -72,8 +72,6 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	botGroup.GET("", h.ListBots)
 	botGroup.GET("/:id", h.GetBot)
 	botGroup.GET("/:id/checks", h.ListBotChecks)
-	botGroup.GET("/:id/checks/keys", h.ListBotCheckKeys)
-	botGroup.GET("/:id/checks/run/:key", h.RunBotCheck)
 	botGroup.PUT("/:id", h.UpdateBot)
 	botGroup.PUT("/:id/owner", h.TransferBotOwner)
 	botGroup.DELETE("/:id", h.DeleteBot)
@@ -546,63 +544,6 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, bots.ListChecksResponse{Items: items})
-}
-
-// ListBotCheckKeys godoc
-// @Summary List available check keys
-// @Description Returns all check keys available for a bot (builtin + MCP connections)
-// @Tags bots
-// @Param id path string true "Bot ID"
-// @Success 200 {object} bots.ListCheckKeysResponse
-// @Router /bots/{id}/checks/keys [get]
-func (h *UsersHandler) ListBotCheckKeys(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
-		return err
-	}
-	keys, err := h.botService.ListCheckKeys(c.Request().Context(), botID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, bots.ListCheckKeysResponse{Keys: keys})
-}
-
-// RunBotCheck godoc
-// @Summary Run a single bot check
-// @Description Evaluate one check key for a bot
-// @Tags bots
-// @Param id path string true "Bot ID"
-// @Param key path string true "Check key"
-// @Success 200 {object} bots.BotCheck
-// @Router /bots/{id}/checks/run/{key} [get]
-func (h *UsersHandler) RunBotCheck(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
-		return err
-	}
-	key := strings.TrimSpace(c.Param("key"))
-	if key == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "check key is required")
-	}
-	result, err := h.botService.RunCheck(c.Request().Context(), botID, key)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, result)
 }
 
 // UpdateBot godoc

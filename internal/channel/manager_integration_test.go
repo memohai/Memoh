@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -71,6 +72,7 @@ func (f *fakeInboundProcessorIntegration) HandleInbound(ctx context.Context, cfg
 
 type fakeAdapter struct {
 	channelType ChannelType
+	connectErr  error
 	mu          sync.Mutex
 	started     []ChannelConfig
 	connectCtxs []context.Context
@@ -97,6 +99,9 @@ func (f *fakeAdapter) ResolveTarget(channelIdentityConfig map[string]any) (strin
 func (f *fakeAdapter) NormalizeTarget(raw string) string { return strings.TrimSpace(raw) }
 
 func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (Connection, error) {
+	if f.connectErr != nil {
+		return nil, f.connectErr
+	}
 	f.mu.Lock()
 	f.started = append(f.started, cfg)
 	f.connectCtxs = append(f.connectCtxs, ctx)
@@ -230,7 +235,18 @@ func TestManagerReconcileStartsAndStops(t *testing.T) {
 		UpdatedAt:   time.Now(),
 	}
 	manager.reconcile(context.Background(), []ChannelConfig{cfg})
+	statuses := manager.ConnectionStatusesByBot("bot-1")
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 status after start, got %d", len(statuses))
+	}
+	if !statuses[0].Running {
+		t.Fatalf("expected running status after start")
+	}
 	manager.reconcile(context.Background(), nil)
+	statuses = manager.ConnectionStatusesByBot("bot-1")
+	if len(statuses) != 0 {
+		t.Fatalf("expected 0 status after remove, got %d", len(statuses))
+	}
 
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
@@ -239,6 +255,40 @@ func TestManagerReconcileStartsAndStops(t *testing.T) {
 	}
 	if adapter.stops != 1 {
 		t.Fatalf("expected 1 stop, got %d", adapter.stops)
+	}
+}
+
+func TestManagerConnectionStatusesByBotTracksConnectFailure(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+	store := &fakeConfigStore{}
+	reg := NewRegistry()
+	adapter := &fakeAdapter{
+		channelType: ChannelType("test"),
+		connectErr:  errors.New("dial failed"),
+	}
+	manager := NewManager(log, reg, store, &fakeInboundProcessorIntegration{})
+	manager.RegisterAdapter(adapter)
+
+	cfg := ChannelConfig{
+		ID:          "cfg-fail-1",
+		BotID:       "bot-1",
+		ChannelType: ChannelType("test"),
+		Credentials: map[string]any{"botToken": "token"},
+		UpdatedAt:   time.Now(),
+	}
+	manager.reconcile(context.Background(), []ChannelConfig{cfg})
+
+	statuses := manager.ConnectionStatusesByBot("bot-1")
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 status, got %d", len(statuses))
+	}
+	if statuses[0].Running {
+		t.Fatalf("expected non-running status on connect failure")
+	}
+	if statuses[0].LastError == "" {
+		t.Fatalf("expected last error on connect failure")
 	}
 }
 

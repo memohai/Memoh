@@ -2976,65 +2976,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{id}/checks/keys": {
-            "get": {
-                "description": "Returns all check keys available for a bot (builtin + MCP connections)",
-                "tags": [
-                    "bots"
-                ],
-                "summary": "List available check keys",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/bots.ListCheckKeysResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{id}/checks/run/{key}": {
-            "get": {
-                "description": "Evaluate one check key for a bot",
-                "tags": [
-                    "bots"
-                ],
-                "summary": "Run a single bot check",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Check key",
-                        "name": "key",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/bots.BotCheck"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{id}/members": {
             "get": {
                 "description": "List members for a bot",
@@ -5019,10 +4960,10 @@ const docTemplate = `{
         "bots.BotCheck": {
             "type": "object",
             "properties": {
-                "check_key": {
+                "detail": {
                     "type": "string"
                 },
-                "detail": {
+                "id": {
                     "type": "string"
                 },
                 "metadata": {
@@ -5032,7 +4973,16 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
+                "subtitle": {
+                    "type": "string"
+                },
                 "summary": {
+                    "type": "string"
+                },
+                "title_key": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }
@@ -5082,17 +5032,6 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/bots.Bot"
-                    }
-                }
-            }
-        },
-        "bots.ListCheckKeysResponse": {
-            "type": "object",
-            "properties": {
-                "keys": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
                     }
                 }
             }

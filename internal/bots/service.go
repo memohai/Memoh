@@ -387,7 +387,7 @@ func (s *Service) ListChecks(ctx context.Context, botID string) ([]BotCheck, err
 	if err != nil {
 		return nil, err
 	}
-	return s.buildRuntimeChecks(ctx, row)
+	return s.buildRuntimeChecks(ctx, row, true)
 }
 
 func (s *Service) enqueueCreateLifecycle(botID string) {
@@ -683,7 +683,7 @@ func decodeMetadata(payload []byte) (map[string]any, error) {
 }
 
 func (s *Service) attachCheckSummary(ctx context.Context, bot *Bot, row sqlc.Bot) error {
-	checks, err := s.buildRuntimeChecks(ctx, row)
+	checks, err := s.buildRuntimeChecks(ctx, row, false)
 	if err != nil {
 		return err
 	}
@@ -693,67 +693,93 @@ func (s *Service) attachCheckSummary(ctx context.Context, bot *Bot, row sqlc.Bot
 	return nil
 }
 
-func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot) ([]BotCheck, error) {
+// buildRuntimeChecks composes builtin checks and optional dynamic checker results.
+// includeDynamic is disabled when computing list summary to avoid expensive runtime probes.
+func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeDynamic bool) ([]BotCheck, error) {
 	status := strings.TrimSpace(row.Status)
 	checks := make([]BotCheck, 0, 4)
 
 	if status == BotStatusCreating {
 		checks = append(checks, BotCheck{
-			CheckKey: BotCheckKeyContainerInit,
+			ID:       BotCheckTypeContainerInit,
+			Type:     BotCheckTypeContainerInit,
+			TitleKey: "bots.checks.titles.containerInit",
 			Status:   BotCheckStatusUnknown,
 			Summary:  "Initialization is in progress.",
 			Detail:   "Bot resources are still being provisioned.",
 		})
 		checks = append(checks, BotCheck{
-			CheckKey: BotCheckKeyContainerRecord,
+			ID:       BotCheckTypeContainerRecord,
+			Type:     BotCheckTypeContainerRecord,
+			TitleKey: "bots.checks.titles.containerRecord",
 			Status:   BotCheckStatusUnknown,
 			Summary:  "Container record is pending.",
 			Detail:   "Container record will be checked after initialization.",
 		})
 		checks = append(checks, BotCheck{
-			CheckKey: BotCheckKeyContainerTask,
+			ID:       BotCheckTypeContainerTask,
+			Type:     BotCheckTypeContainerTask,
+			TitleKey: "bots.checks.titles.containerTask",
 			Status:   BotCheckStatusUnknown,
 			Summary:  "Container task state is pending.",
 			Detail:   "Task state will be checked after initialization.",
 		})
 		checks = append(checks, BotCheck{
-			CheckKey: BotCheckKeyContainerData,
+			ID:       BotCheckTypeContainerData,
+			Type:     BotCheckTypeContainerData,
+			TitleKey: "bots.checks.titles.containerDataPath",
 			Status:   BotCheckStatusUnknown,
 			Summary:  "Container host path check is pending.",
 			Detail:   "Data path will be checked after initialization.",
 		})
+		if includeDynamic {
+			checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
+		}
 		return checks, nil
 	}
 	if status == BotStatusDeleting {
 		checks = append(checks, BotCheck{
-			CheckKey: BotCheckKeyDelete,
+			ID:       BotCheckTypeDelete,
+			Type:     BotCheckTypeDelete,
+			TitleKey: "bots.checks.titles.botDelete",
 			Status:   BotCheckStatusUnknown,
 			Summary:  "Deletion is in progress.",
 			Detail:   "Bot resources are being cleaned up.",
 		})
 		checks = append(checks, BotCheck{
-			CheckKey: BotCheckKeyContainerRecord,
+			ID:       BotCheckTypeContainerRecord,
+			Type:     BotCheckTypeContainerRecord,
+			TitleKey: "bots.checks.titles.containerRecord",
 			Status:   BotCheckStatusUnknown,
 			Summary:  "Container record check is skipped.",
 			Detail:   "Bot is deleting and container checks are paused.",
 		})
 		checks = append(checks, BotCheck{
-			CheckKey: BotCheckKeyContainerTask,
+			ID:       BotCheckTypeContainerTask,
+			Type:     BotCheckTypeContainerTask,
+			TitleKey: "bots.checks.titles.containerTask",
 			Status:   BotCheckStatusUnknown,
 			Summary:  "Container task check is skipped.",
 			Detail:   "Bot is deleting and task checks are paused.",
 		})
 		checks = append(checks, BotCheck{
-			CheckKey: BotCheckKeyContainerData,
+			ID:       BotCheckTypeContainerData,
+			Type:     BotCheckTypeContainerData,
+			TitleKey: "bots.checks.titles.containerDataPath",
 			Status:   BotCheckStatusUnknown,
 			Summary:  "Container host path check is skipped.",
 			Detail:   "Bot is deleting and data path checks are paused.",
 		})
+		if includeDynamic {
+			checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
+		}
 		return checks, nil
 	}
 
 	checks = append(checks, BotCheck{
-		CheckKey: BotCheckKeyContainerInit,
+		ID:       BotCheckTypeContainerInit,
+		Type:     BotCheckTypeContainerInit,
+		TitleKey: "bots.checks.titles.containerInit",
 		Status:   BotCheckStatusOK,
 		Summary:  "Initialization finished.",
 	})
@@ -762,30 +788,41 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot) ([]BotCh
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			checks = append(checks, BotCheck{
-				CheckKey: BotCheckKeyContainerRecord,
+				ID:       BotCheckTypeContainerRecord,
+				Type:     BotCheckTypeContainerRecord,
+				TitleKey: "bots.checks.titles.containerRecord",
 				Status:   BotCheckStatusError,
 				Summary:  "Container record is missing.",
 				Detail:   "No container is attached to this bot.",
 			})
 			checks = append(checks, BotCheck{
-				CheckKey: BotCheckKeyContainerTask,
+				ID:       BotCheckTypeContainerTask,
+				Type:     BotCheckTypeContainerTask,
+				TitleKey: "bots.checks.titles.containerTask",
 				Status:   BotCheckStatusUnknown,
 				Summary:  "Container task state is unknown.",
 				Detail:   "Task state cannot be determined without a container record.",
 			})
 			checks = append(checks, BotCheck{
-				CheckKey: BotCheckKeyContainerData,
+				ID:       BotCheckTypeContainerData,
+				Type:     BotCheckTypeContainerData,
+				TitleKey: "bots.checks.titles.containerDataPath",
 				Status:   BotCheckStatusUnknown,
 				Summary:  "Container data path is unknown.",
 				Detail:   "Data path cannot be determined without a container record.",
 			})
+			if includeDynamic {
+				checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
+			}
 			return checks, nil
 		}
 		return nil, err
 	}
 
 	checks = append(checks, BotCheck{
-		CheckKey: BotCheckKeyContainerRecord,
+		ID:       BotCheckTypeContainerRecord,
+		Type:     BotCheckTypeContainerRecord,
+		TitleKey: "bots.checks.titles.containerRecord",
 		Status:   BotCheckStatusOK,
 		Summary:  "Container record exists.",
 		Detail:   fmt.Sprintf("container_id=%s", strings.TrimSpace(containerRow.ContainerID)),
@@ -798,7 +835,9 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot) ([]BotCh
 
 	taskStatus := strings.TrimSpace(strings.ToLower(containerRow.Status))
 	taskCheck := BotCheck{
-		CheckKey: BotCheckKeyContainerTask,
+		ID:       BotCheckTypeContainerTask,
+		Type:     BotCheckTypeContainerTask,
+		TitleKey: "bots.checks.titles.containerTask",
 		Status:   BotCheckStatusWarn,
 		Summary:  "Container task state needs attention.",
 	}
@@ -820,7 +859,9 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot) ([]BotCh
 		hostPath = strings.TrimSpace(containerRow.HostPath.String)
 	}
 	dataCheck := BotCheck{
-		CheckKey: BotCheckKeyContainerData,
+		ID:       BotCheckTypeContainerData,
+		Type:     BotCheckTypeContainerData,
+		TitleKey: "bots.checks.titles.containerDataPath",
 		Status:   BotCheckStatusWarn,
 		Summary:  "Container host path needs attention.",
 		Metadata: map[string]any{"host_path": hostPath},
@@ -828,6 +869,9 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot) ([]BotCh
 	if hostPath == "" {
 		dataCheck.Detail = "host path is empty"
 		checks = append(checks, dataCheck)
+		if includeDynamic {
+			checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
+		}
 		return checks, nil
 	}
 	info, statErr := os.Stat(hostPath)
@@ -850,53 +894,42 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot) ([]BotCh
 		dataCheck.Detail = statErr.Error()
 	}
 	checks = append(checks, dataCheck)
+	if includeDynamic {
+		checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
+	}
 
 	return checks, nil
 }
 
-// builtinCheckKeys returns keys produced by buildRuntimeChecks.
-var builtinCheckKeys = []string{
-	BotCheckKeyContainerInit,
-	BotCheckKeyContainerRecord,
-	BotCheckKeyContainerTask,
-	BotCheckKeyContainerData,
-}
-
-// ListCheckKeys returns all available check keys for a bot (builtin + registered checkers).
-func (s *Service) ListCheckKeys(ctx context.Context, botID string) ([]string, error) {
-	keys := make([]string, 0, len(builtinCheckKeys)+8)
-	keys = append(keys, builtinCheckKeys...)
+// appendDynamicChecks appends checks from registered runtime checkers.
+func (s *Service) appendDynamicChecks(ctx context.Context, botID string, checks []BotCheck) []BotCheck {
 	for _, checker := range s.checkers {
-		keys = append(keys, checker.CheckKeys(ctx, botID)...)
-	}
-	return keys, nil
-}
-
-// RunCheck evaluates a single check key for a bot.
-func (s *Service) RunCheck(ctx context.Context, botID, key string) (BotCheck, error) {
-	// Try registered checkers first (they own dynamic keys like mcp.*).
-	for _, checker := range s.checkers {
-		for _, k := range checker.CheckKeys(ctx, botID) {
-			if k == key {
-				return checker.RunCheck(ctx, botID, key), nil
+		items := checker.ListChecks(ctx, botID)
+		for _, item := range items {
+			item.ID = strings.TrimSpace(item.ID)
+			item.Type = strings.TrimSpace(item.Type)
+			item.Status = strings.TrimSpace(item.Status)
+			if item.ID == "" {
+				if item.Type != "" {
+					item.ID = item.Type
+				} else {
+					item.ID = "runtime.unknown"
+					if s.logger != nil {
+						s.logger.Warn("runtime checker returned check without id and type",
+							slog.String("bot_id", botID))
+					}
+				}
 			}
+			if item.Type == "" {
+				item.Type = item.ID
+			}
+			if item.Status == "" {
+				item.Status = BotCheckStatusUnknown
+			}
+			checks = append(checks, item)
 		}
 	}
-	// Fall back to builtin checks.
-	checks, err := s.ListChecks(ctx, botID)
-	if err != nil {
-		return BotCheck{}, err
-	}
-	for _, c := range checks {
-		if c.CheckKey == key {
-			return c, nil
-		}
-	}
-	return BotCheck{
-		CheckKey: key,
-		Status:   BotCheckStatusUnknown,
-		Summary:  "Check key not found.",
-	}, nil
+	return checks
 }
 
 func summarizeChecks(checks []BotCheck) (string, int32) {

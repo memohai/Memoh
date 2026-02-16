@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,16 @@ type ManagerStore interface {
 	ConfigResolver
 }
 
+// ConnectionStatus describes runtime status for one configured channel connection.
+type ConnectionStatus struct {
+	ConfigID    string      `json:"config_id"`
+	BotID       string      `json:"bot_id"`
+	ChannelType ChannelType `json:"channel_type"`
+	Running     bool        `json:"running"`
+	LastError   string      `json:"last_error,omitempty"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+}
+
 // Manager coordinates channel adapters, connection lifecycle, and message dispatch.
 // Connection lifecycle lives in connection.go, inbound dispatch in inbound.go,
 // and outbound pipeline in outbound.go.
@@ -63,6 +74,7 @@ type Manager struct {
 	mu             sync.Mutex
 	refreshMu      sync.Mutex
 	connections    map[string]*connectionEntry
+	connectionMeta map[string]ConnectionStatus
 }
 
 // NewManager creates a Manager with the given logger, registry, config store, and inbound processor.
@@ -79,6 +91,7 @@ func NewManager(log *slog.Logger, registry *Registry, service ManagerStore, proc
 		processor:       processor,
 		refreshInterval: 5 * time.Minute,
 		connections:     map[string]*connectionEntry{},
+		connectionMeta:  map[string]ConnectionStatus{},
 		logger:          log.With(slog.String("component", "channel")),
 		middlewares:     []Middleware{},
 		inboundQueue:    make(chan inboundTask, 256),
@@ -282,4 +295,27 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	}
 	m.stopAll(ctx)
 	return nil
+}
+
+// ConnectionStatusesByBot returns observed channel connection statuses for a bot.
+func (m *Manager) ConnectionStatusesByBot(botID string) []ConnectionStatus {
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return []ConnectionStatus{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	items := make([]ConnectionStatus, 0, len(m.connectionMeta))
+	for _, status := range m.connectionMeta {
+		if status.BotID == botID {
+			items = append(items, status)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].ChannelType == items[j].ChannelType {
+			return items[i].ConfigID < items[j].ConfigID
+		}
+		return items[i].ChannelType < items[j].ChannelType
+	})
+	return items
 }

@@ -186,37 +186,33 @@
             >
               <li
                 v-for="item in checks"
-                :key="item.check_key"
+                :key="item.id"
                 class="py-3 first:pt-0 last:pb-0"
               >
                 <div class="flex items-center justify-between gap-2">
-                  <p class="font-mono text-xs">{{ checkKeyLabel(item.check_key) }}</p>
-                  <div v-if="isCheckLoading(item)">
-                    <Spinner class="size-3.5" />
+                  <div class="min-w-0">
+                    <p class="font-mono text-xs">{{ checkTitleLabel(item) }}</p>
+                    <p
+                      v-if="item.subtitle"
+                      class="mt-0.5 text-xs text-muted-foreground"
+                    >
+                      {{ item.subtitle }}
+                    </p>
                   </div>
                   <Badge
-                    v-else
                     :variant="checkStatusVariant(item.status)"
                     class="text-[10px]"
                   >
                     {{ checkStatusLabel(item.status) }}
                   </Badge>
                 </div>
+                <p class="mt-2 text-sm">{{ item.summary }}</p>
                 <p
-                  v-if="isCheckLoading(item)"
-                  class="mt-2 text-sm text-muted-foreground"
+                  v-if="item.detail"
+                  class="mt-1 text-xs text-muted-foreground break-all"
                 >
-                  {{ $t('common.loading') }}
+                  {{ item.detail }}
                 </p>
-                <template v-else>
-                  <p class="mt-2 text-sm">{{ item.summary }}</p>
-                  <p
-                    v-if="item.detail"
-                    class="mt-1 text-xs text-muted-foreground break-all"
-                  >
-                    {{ item.detail }}
-                  </p>
-                </template>
               </li>
             </ul>
           </div>
@@ -553,11 +549,11 @@ import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
   getBotsById, putBotsById,
+  getBotsByIdChecks,
   getBotsByBotIdContainer, postBotsByBotIdContainer, deleteBotsByBotIdContainer,
   postBotsByBotIdContainerStart, postBotsByBotIdContainerStop,
   getBotsByBotIdContainerSnapshots, postBotsByBotIdContainerSnapshots,
 } from '@memoh/sdk'
-import { client } from '@memoh/sdk/client'
 import type {
   BotsBotCheck, HandlersGetContainerResponse,
   HandlersListSnapshotsResponse,
@@ -598,20 +594,9 @@ const { mutateAsync: updateBot, isLoading: updateBotLoading } = useMutation({
   },
 })
 
-async function fetchCheckKeys(id: string): Promise<string[]> {
-  const { data } = await client.get({
-    url: `/bots/${id}/checks/keys`,
-    throwOnError: true,
-  }) as { data: { keys: string[] } }
-  return data.keys ?? []
-}
-
-async function fetchSingleCheck(id: string, key: string): Promise<BotCheck> {
-  const { data } = await client.get({
-    url: `/bots/${id}/checks/run/${key}`,
-    throwOnError: true,
-  }) as { data: BotCheck }
-  return data
+async function fetchChecks(id: string): Promise<BotCheck[]> {
+  const { data } = await getBotsByIdChecks({ path: { id }, throwOnError: true })
+  return data?.items ?? []
 }
 
 const isEditingBotName = ref(false)
@@ -704,13 +689,6 @@ const botLifecyclePending = computed(() => (
 
 const checks = ref<BotCheck[]>([])
 const checksLoading = ref(false)
-const checkKeyI18nKeys: Record<string, string> = {
-  'container.init': 'bots.checks.keys.containerInit',
-  'container.record': 'bots.checks.keys.containerRecord',
-  'container.task': 'bots.checks.keys.containerTask',
-  'container.data_path': 'bots.checks.keys.containerDataPath',
-  'bot.delete': 'bots.checks.keys.botDelete',
-}
 const checksSummaryText = computed(() => {
   const issueCount = checks.value.filter((item) => item.status === 'warn' || item.status === 'error').length
   if (issueCount > 0) {
@@ -873,56 +851,22 @@ function checkStatusLabel(status: BotCheck['status']): string {
   return t('bots.checks.status.ok')
 }
 
-function isCheckLoading(item: BotCheck): boolean {
-  return item.status === 'unknown' && !item.summary
-}
-
-function checkKeyLabel(checkKey: string): string {
-  const key = checkKeyI18nKeys[checkKey]
-  if (!key) {
-    return checkKey
+function checkTitleLabel(item: BotCheck): string {
+  const titleKey = (item.title_key ?? '').trim()
+  if (titleKey) {
+    const translated = t(titleKey)
+    if (translated !== titleKey) {
+      return translated
+    }
   }
-  return t(key)
+  return (item.type ?? '').trim() || (item.id ?? '').trim() || '-'
 }
 
 async function loadChecks(showToast: boolean) {
   checksLoading.value = true
   checks.value = []
   try {
-    const keys = await fetchCheckKeys(botId.value)
-    if (keys.length === 0) return
-
-    // Maintain key order: pre-fill placeholders, replace as results arrive.
-    const keyOrder = new Map(keys.map((k, i) => [k, i]))
-    checks.value = keys.map((key) => ({
-      check_key: key,
-      status: 'unknown' as BotCheck['status'],
-      summary: '',
-    }))
-
-    const pending = keys.map(async (key) => {
-      try {
-        const result = await fetchSingleCheck(botId.value, key)
-        const idx = keyOrder.get(key)
-        if (idx !== undefined) {
-          const updated = [...checks.value]
-          updated[idx] = result
-          checks.value = updated
-        }
-      } catch {
-        const idx = keyOrder.get(key)
-        if (idx !== undefined) {
-          const updated = [...checks.value]
-          updated[idx] = {
-            check_key: key,
-            status: 'error' as BotCheck['status'],
-            summary: 'Check failed',
-          }
-          checks.value = updated
-        }
-      }
-    })
-    await Promise.all(pending)
+    checks.value = await fetchChecks(botId.value)
   } catch (error) {
     if (showToast) {
       toast.error(resolveErrorMessage(error, t('bots.checks.loadFailed')))

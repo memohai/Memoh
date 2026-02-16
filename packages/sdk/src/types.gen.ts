@@ -71,13 +71,16 @@ export type BotsBot = {
 };
 
 export type BotsBotCheck = {
-    check_key?: string;
     detail?: string;
+    id?: string;
     metadata?: {
         [key: string]: unknown;
     };
     status?: string;
+    subtitle?: string;
     summary?: string;
+    title_key?: string;
+    type?: string;
 };
 
 export type BotsBotMember = {
@@ -99,10 +102,6 @@ export type BotsCreateBotRequest = {
 
 export type BotsListBotsResponse = {
     items?: Array<BotsBot>;
-};
-
-export type BotsListCheckKeysResponse = {
-    keys?: Array<string>;
 };
 
 export type BotsListChecksResponse = {
@@ -140,6 +139,10 @@ export type ChannelAction = {
 
 export type ChannelAttachment = {
     asset_id?: string;
+    /**
+     * data URL for agent delivery
+     */
+    base64?: string;
     caption?: string;
     duration_ms?: number;
     height?: number;
@@ -3384,52 +3387,6 @@ export type GetBotsByIdChecksResponses = {
 };
 
 export type GetBotsByIdChecksResponse = GetBotsByIdChecksResponses[keyof GetBotsByIdChecksResponses];
-
-export type GetBotsByIdChecksKeysData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{id}/checks/keys';
-};
-
-export type GetBotsByIdChecksKeysResponses = {
-    /**
-     * OK
-     */
-    200: BotsListCheckKeysResponse;
-};
-
-export type GetBotsByIdChecksKeysResponse = GetBotsByIdChecksKeysResponses[keyof GetBotsByIdChecksKeysResponses];
-
-export type GetBotsByIdChecksRunByKeyData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        id: string;
-        /**
-         * Check key
-         */
-        key: string;
-    };
-    query?: never;
-    url: '/bots/{id}/checks/run/{key}';
-};
-
-export type GetBotsByIdChecksRunByKeyResponses = {
-    /**
-     * OK
-     */
-    200: BotsBotCheck;
-};
-
-export type GetBotsByIdChecksRunByKeyResponse = GetBotsByIdChecksRunByKeyResponses[keyof GetBotsByIdChecksRunByKeyResponses];
 
 export type GetBotsByIdMembersData = {
     body?: never;

@@ -36,6 +36,9 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/embeddings"
 	"github.com/memohai/memoh/internal/handlers"
+	"github.com/memohai/memoh/internal/healthcheck"
+	channelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/channel"
+	mcpchecker "github.com/memohai/memoh/internal/healthcheck/checkers/mcp"
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
 	mcpcontainer "github.com/memohai/memoh/internal/mcp/providers/container"
@@ -514,7 +517,7 @@ func startContainerReconciliation(lc fx.Lifecycle, containerdHandler *handlers.C
 	})
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
@@ -523,7 +526,12 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 				return err
 			}
 			botService.SetContainerLifecycle(containerdHandler)
-			botService.AddRuntimeChecker(mcp.NewConnectionChecker(logger, mcpConnService, toolGateway))
+			botService.AddRuntimeChecker(healthcheck.NewRuntimeCheckerAdapter(
+				mcpchecker.NewChecker(logger, mcpConnService, toolGateway),
+			))
+			botService.AddRuntimeChecker(healthcheck.NewRuntimeCheckerAdapter(
+				channelchecker.NewChecker(logger, channelManager),
+			))
 
 			go func() {
 				if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {

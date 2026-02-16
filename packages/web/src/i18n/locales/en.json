@@ -258,13 +258,22 @@
     },
     "checks": {
       "title": "Runtime Checks",
-      "subtitle": "Resource health is evaluated at request time.",
+      "subtitle": "View current health status and issue details.",
       "ok": "No issues",
       "hasIssue": "Has issues",
       "issueCount": "{count} issues",
       "empty": "No check items",
       "loadFailed": "Failed to load runtime checks",
       "actions": {},
+      "titles": {
+        "containerInit": "Container initialization",
+        "containerRecord": "Container record",
+        "containerTask": "Container task",
+        "containerDataPath": "Container data path",
+        "botDelete": "Bot deletion",
+        "mcpConnection": "MCP connection",
+        "channelConnection": "Channel connection"
+      },
       "keys": {
         "containerInit": "Container initialization",
         "containerRecord": "Container record",
