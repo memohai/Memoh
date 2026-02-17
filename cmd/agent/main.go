@@ -676,7 +676,8 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memory.LLM, error) {
 	if c.modelsService == nil || c.queries == nil {
 		return nil, fmt.Errorf("models service not configured")
 	}
-	memoryModel, memoryProvider, err := models.SelectMemoryModel(ctx, c.modelsService, c.queries)
+	botID := memory.BotIDFromContext(ctx)
+	memoryModel, memoryProvider, err := models.SelectMemoryModelForBot(ctx, c.modelsService, c.queries, botID)
 	if err != nil {
 		return nil, err
 	}
