@@ -8,6 +8,7 @@ export interface IdentityContext {
   containerId: string
 
   channelIdentityId: string
+  speakerAlias?: string
   displayName: string
 
   contactId?: string
