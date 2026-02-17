@@ -145,9 +145,6 @@ export const createAgent = (
     if (identity.currentPlatform) {
       headers['X-Memoh-Current-Platform'] = identity.currentPlatform
     }
-    if (identity.replyTarget) {
-      headers['X-Memoh-Reply-Target'] = identity.replyTarget
-    }
     const attachments = await Promise.all(
       input.attachments.map(async (attachment) => {
         if (attachment.type !== 'image') {
@@ -292,7 +289,7 @@ export const createAgent = (
 
     const turnContext = trustedTurnContext({
       speakerId: identity.speakerAlias || '',
-      displayName: identity.displayName || identity.contactName || 'User',
+      displayName: identity.displayName || 'User',
       channel: currentChannel,
       conversationType: identity.conversationType || 'direct',
       date: new Date(),

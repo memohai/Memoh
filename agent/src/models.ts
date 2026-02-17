@@ -23,19 +23,15 @@ export const ModelConfigModel = z.object({
 
 export const AllowedActionModel = z.enum(allActions)
 
+/** 与 Go gatewayIdentity 对齐 */
 export const IdentityContextModel = z.object({
   botId: z.string().min(1, 'Bot ID is required'),
   containerId: z.string().min(1, 'Container ID is required'),
   channelIdentityId: z.string().min(1, 'Channel identity ID is required'),
   speakerAlias: z.string().optional(),
   displayName: z.string().min(1, 'Display name is required'),
-  contactId: z.string().optional(),
-  contactName: z.string().optional(),
-  contactAlias: z.string().optional(),
-  userId: z.string().optional(),
   currentPlatform: z.string().optional(),
   conversationType: z.string().optional(),
-  replyTarget: z.string().optional(),
   sessionToken: z.string().optional(),
 })
 

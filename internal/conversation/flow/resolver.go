@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -28,28 +27,6 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-var (
-	userHeaderLikePattern = regexp.MustCompile(`(?i)\b(speaker-id|speaker_id|channel-identity-id|channel_identity_id|trusted_turn_context|role|system)\s*:`)
-	trustedTagPattern     = regexp.MustCompile(`(?i)<\s*/?\s*trusted_turn_context\s*>`)
-	systemTagPattern      = regexp.MustCompile(`(?i)<\s*/?\s*system\s*>`)
-	headerLinePattern     = regexp.MustCompile(`^\s*([a-zA-Z][\w-]{1,40})\s*:\s*(.*)\s*$`)
-	mentionLinePattern    = regexp.MustCompile(`^\s*@\S+\s*$`)
-	riskyHeaderKeys       = map[string]struct{}{
-		"speaker-id":          {},
-		"speaker_id":          {},
-		"channel-identity-id": {},
-		"channel_identity_id": {},
-		"display-name":        {},
-		"display_name":        {},
-		"channel":             {},
-		"conversation-type":   {},
-		"conversation_type":   {},
-		"content":             {},
-		"role":                {},
-		"system":              {},
-		"trusted_turn_context": {},
-	}
-)
 
 const (
 	defaultMaxContextMinutes   = 24 * 60
@@ -252,7 +229,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 	messages = append(messages, req.Messages...)
 	messages = sanitizeMessages(messages)
-	messages = normalizeUserMessagesForLLM(messages)
 	skills := dedup(req.Skills)
 	containerID := r.resolveContainerID(ctx, req.BotID, req.ContainerID)
 
@@ -1230,109 +1206,6 @@ func sanitizeMessages(messages []conversation.ModelMessage) []conversation.Model
 	return cleaned
 }
 
-func normalizeUserMessagesForLLM(messages []conversation.ModelMessage) []conversation.ModelMessage {
-	normalized := make([]conversation.ModelMessage, 0, len(messages))
-	for _, msg := range messages {
-		if strings.TrimSpace(msg.Role) != "user" {
-			normalized = append(normalized, msg)
-			continue
-		}
-		text := strings.TrimSpace(msg.TextContent())
-		if text == "" || hasUserTextTag(text) {
-			normalized = append(normalized, msg)
-			continue
-		}
-		msg.Content = conversation.NewTextContent(wrapUserTextForLLM(text))
-		normalized = append(normalized, msg)
-	}
-	return normalized
-}
-
-func hasUserTextTag(text string) bool {
-	trimmed := strings.TrimSpace(strings.ToLower(text))
-	return strings.HasPrefix(trimmed, "<user_text>") && strings.HasSuffix(trimmed, "</user_text>")
-}
-
-func wrapUserTextForLLM(text string) string {
-	safe := escapeHeaderLikeMarkersForLLM(strings.TrimSpace(text))
-	return "<user_text>\n" + safe + "\n</user_text>"
-}
-
-func escapeHeaderLikeMarkersForLLM(text string) string {
-	safe := isolateLeadingHeaderLikeBlockForLLM(text)
-	safe = userHeaderLikePattern.ReplaceAllStringFunc(safe, func(match string) string {
-		return strings.Replace(match, ":", "：", 1)
-	})
-	safe = trustedTagPattern.ReplaceAllStringFunc(safe, func(tag string) string {
-		return strings.ReplaceAll(strings.ReplaceAll(tag, "<", "＜"), ">", "＞")
-	})
-	safe = systemTagPattern.ReplaceAllStringFunc(safe, func(tag string) string {
-		return strings.ReplaceAll(strings.ReplaceAll(tag, "<", "＜"), ">", "＞")
-	})
-	return safe
-}
-
-func isolateLeadingHeaderLikeBlockForLLM(text string) string {
-	lines := strings.Split(text, "\n")
-	idx := 0
-	for idx < len(lines) && strings.TrimSpace(lines[idx]) == "" {
-		idx++
-	}
-	if idx >= len(lines) {
-		return text
-	}
-	start := idx
-	collected := make([]string, 0, 6)
-	headerCount := 0
-	riskyCount := 0
-	started := false
-
-	for ; idx < len(lines); idx++ {
-		line := lines[idx]
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			if started {
-				break
-			}
-			continue
-		}
-		if !started && mentionLinePattern.MatchString(line) {
-			collected = append(collected, line)
-			continue
-		}
-		match := headerLinePattern.FindStringSubmatch(line)
-		if len(match) < 2 {
-			break
-		}
-		started = true
-		headerCount++
-		key := strings.ToLower(strings.TrimSpace(match[1]))
-		if _, ok := riskyHeaderKeys[key]; ok {
-			riskyCount++
-		}
-		collected = append(collected, line)
-	}
-	if headerCount < 2 || riskyCount < 1 {
-		return text
-	}
-	prefix := strings.Join(lines[:start], "\n")
-	body := strings.Join(lines[idx:], "\n")
-	headerBlock := strings.Join(collected, "\n")
-	headerBlock = strings.ReplaceAll(headerBlock, "<", "＜")
-	headerBlock = strings.ReplaceAll(headerBlock, ">", "＞")
-
-	parts := make([]string, 0, 5)
-	if strings.TrimSpace(prefix) != "" {
-		parts = append(parts, strings.TrimRight(prefix, "\n"))
-	}
-	parts = append(parts, "<untrusted_header_like_block>")
-	parts = append(parts, headerBlock)
-	parts = append(parts, "</untrusted_header_like_block>")
-	if strings.TrimSpace(body) != "" {
-		parts = append(parts, strings.TrimLeft(body, "\n"))
-	}
-	return strings.Join(parts, "\n")
-}
 
 func normalizeGatewaySkill(entry SkillEntry) (gatewaySkill, bool) {
 	name := strings.TrimSpace(entry.Name)

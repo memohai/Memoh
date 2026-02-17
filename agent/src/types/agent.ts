@@ -3,22 +3,15 @@ import { ModelConfig } from './model'
 import { AgentAttachment } from './attachment'
 import { MCPConnection } from './mcp'
 
+/** 与 Go gatewayIdentity 对齐 */
 export interface IdentityContext {
   botId: string
   containerId: string
-
   channelIdentityId: string
   speakerAlias?: string
   displayName: string
-
-  contactId?: string
-  contactName?: string
-  contactAlias?: string
-  userId?: string
-
   currentPlatform?: string
   conversationType?: string
-  replyTarget?: string
   sessionToken?: string
 }
 
