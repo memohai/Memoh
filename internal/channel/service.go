@@ -30,24 +30,24 @@ func NewService(queries *sqlc.Queries, registry *Registry) *Service {
 }
 
 // UpsertConfig creates or updates a bot's channel configuration.
-func (s *Service) UpsertConfig(ctx context.Context, botID string, channelType ChannelType, req UpsertConfigRequest) (ChannelConfig, error) {
+func (s *Service) UpsertConfig(ctx context.Context, botID string, channelType Type, req UpsertConfigRequest) (Config, error) {
 	if s.queries == nil {
-		return ChannelConfig{}, fmt.Errorf("channel queries not configured")
+		return Config{}, errors.New("channel queries not configured")
 	}
 	if channelType == "" {
-		return ChannelConfig{}, fmt.Errorf("channel type is required")
+		return Config{}, errors.New("channel type is required")
 	}
 	normalized, err := s.registry.NormalizeConfig(channelType, req.Credentials)
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
 	credentialsPayload, err := json.Marshal(normalized)
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
 	selfIdentity := req.SelfIdentity
 	if selfIdentity == nil {
@@ -66,7 +66,7 @@ func (s *Service) UpsertConfig(ctx context.Context, botID string, channelType Ch
 	}
 	selfPayload, err := json.Marshal(selfIdentity)
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
 	routing := req.Routing
 	if routing == nil {
@@ -74,11 +74,11 @@ func (s *Service) UpsertConfig(ctx context.Context, botID string, channelType Ch
 	}
 	routingPayload, err := json.Marshal(routing)
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
-	status, err := normalizeChannelConfigStatus(req.Status)
+	status, err := normalizeConfigStatus(req.Status)
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
 	verifiedAt := pgtype.Timestamptz{Valid: false}
 	if req.VerifiedAt != nil {
@@ -99,12 +99,12 @@ func (s *Service) UpsertConfig(ctx context.Context, botID string, channelType Ch
 		VerifiedAt:   verifiedAt,
 	})
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
-	return normalizeChannelConfig(row)
+	return normalizeConfig(row)
 }
 
-func normalizeChannelConfigStatus(raw string) (string, error) {
+func normalizeConfigStatus(raw string) (string, error) {
 	status := strings.ToLower(strings.TrimSpace(raw))
 	if status == "" {
 		return "pending", nil
@@ -122,24 +122,24 @@ func normalizeChannelConfigStatus(raw string) (string, error) {
 }
 
 // UpsertChannelIdentityConfig creates or updates a channel identity's channel binding.
-func (s *Service) UpsertChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType, req UpsertChannelIdentityConfigRequest) (ChannelIdentityBinding, error) {
+func (s *Service) UpsertChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType Type, req UpsertChannelIdentityConfigRequest) (IdentityBinding, error) {
 	if s.queries == nil {
-		return ChannelIdentityBinding{}, fmt.Errorf("channel queries not configured")
+		return IdentityBinding{}, errors.New("channel queries not configured")
 	}
 	if channelType == "" {
-		return ChannelIdentityBinding{}, fmt.Errorf("channel type is required")
+		return IdentityBinding{}, errors.New("channel type is required")
 	}
 	normalized, err := s.registry.NormalizeUserConfig(channelType, req.Config)
 	if err != nil {
-		return ChannelIdentityBinding{}, err
+		return IdentityBinding{}, err
 	}
 	payload, err := json.Marshal(normalized)
 	if err != nil {
-		return ChannelIdentityBinding{}, err
+		return IdentityBinding{}, err
 	}
 	pgChannelIdentityID, err := db.ParseUUID(channelIdentityID)
 	if err != nil {
-		return ChannelIdentityBinding{}, err
+		return IdentityBinding{}, err
 	}
 	row, err := s.queries.UpsertUserChannelBinding(ctx, sqlc.UpsertUserChannelBindingParams{
 		UserID:      pgChannelIdentityID,
@@ -147,59 +147,59 @@ func (s *Service) UpsertChannelIdentityConfig(ctx context.Context, channelIdenti
 		Config:      payload,
 	})
 	if err != nil {
-		return ChannelIdentityBinding{}, err
+		return IdentityBinding{}, err
 	}
-	return normalizeChannelIdentityBinding(row)
+	return normalizeIdentityBinding(row)
 }
 
 // ResolveEffectiveConfig returns the active channel configuration for a bot.
 // For configless channel types, a synthetic config is returned.
-func (s *Service) ResolveEffectiveConfig(ctx context.Context, botID string, channelType ChannelType) (ChannelConfig, error) {
+func (s *Service) ResolveEffectiveConfig(ctx context.Context, botID string, channelType Type) (Config, error) {
 	if s.queries == nil {
-		return ChannelConfig{}, fmt.Errorf("channel queries not configured")
+		return Config{}, errors.New("channel queries not configured")
 	}
 	if channelType == "" {
-		return ChannelConfig{}, fmt.Errorf("channel type is required")
+		return Config{}, errors.New("channel type is required")
 	}
 	if s.registry.IsConfigless(channelType) {
-		return ChannelConfig{
-			ID:          channelType.String() + ":" + strings.TrimSpace(botID),
-			BotID:       strings.TrimSpace(botID),
-			ChannelType: channelType,
+		return Config{
+			ID:    channelType.String() + ":" + strings.TrimSpace(botID),
+			BotID: strings.TrimSpace(botID),
+			Type:  channelType,
 		}, nil
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
 	row, err := s.queries.GetBotChannelConfig(ctx, sqlc.GetBotChannelConfigParams{
 		BotID:       botUUID,
 		ChannelType: channelType.String(),
 	})
 	if err == nil {
-		return normalizeChannelConfig(row)
+		return normalizeConfig(row)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
-	return ChannelConfig{}, fmt.Errorf("channel config not found")
+	return Config{}, errors.New("channel config not found")
 }
 
 // ListConfigsByType returns all channel configurations of the given type.
-func (s *Service) ListConfigsByType(ctx context.Context, channelType ChannelType) ([]ChannelConfig, error) {
+func (s *Service) ListConfigsByType(ctx context.Context, channelType Type) ([]Config, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("channel queries not configured")
+		return nil, errors.New("channel queries not configured")
 	}
 	if s.registry.IsConfigless(channelType) {
-		return []ChannelConfig{}, nil
+		return []Config{}, nil
 	}
 	rows, err := s.queries.ListBotChannelConfigsByType(ctx, channelType.String())
 	if err != nil {
 		return nil, err
 	}
-	items := make([]ChannelConfig, 0, len(rows))
+	items := make([]Config, 0, len(rows))
 	for _, row := range rows {
-		item, err := normalizeChannelConfig(row)
+		item, err := normalizeConfig(row)
 		if err != nil {
 			return nil, err
 		}
@@ -209,16 +209,16 @@ func (s *Service) ListConfigsByType(ctx context.Context, channelType ChannelType
 }
 
 // GetChannelIdentityConfig returns the channel identity's channel binding for the given channel type.
-func (s *Service) GetChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType) (ChannelIdentityBinding, error) {
+func (s *Service) GetChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType Type) (IdentityBinding, error) {
 	if s.queries == nil {
-		return ChannelIdentityBinding{}, fmt.Errorf("channel queries not configured")
+		return IdentityBinding{}, errors.New("channel queries not configured")
 	}
 	if channelType == "" {
-		return ChannelIdentityBinding{}, fmt.Errorf("channel type is required")
+		return IdentityBinding{}, errors.New("channel type is required")
 	}
 	pgChannelIdentityID, err := db.ParseUUID(channelIdentityID)
 	if err != nil {
-		return ChannelIdentityBinding{}, err
+		return IdentityBinding{}, err
 	}
 	row, err := s.queries.GetUserChannelBinding(ctx, sqlc.GetUserChannelBindingParams{
 		UserID:      pgChannelIdentityID,
@@ -226,17 +226,17 @@ func (s *Service) GetChannelIdentityConfig(ctx context.Context, channelIdentityI
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ChannelIdentityBinding{}, fmt.Errorf("channel user config not found")
+			return IdentityBinding{}, errors.New("channel user config not found")
 		}
-		return ChannelIdentityBinding{}, err
+		return IdentityBinding{}, err
 	}
 	config, err := DecodeConfigMap(row.Config)
 	if err != nil {
-		return ChannelIdentityBinding{}, err
+		return IdentityBinding{}, err
 	}
-	return ChannelIdentityBinding{
+	return IdentityBinding{
 		ID:                row.ID.String(),
-		ChannelType:       ChannelType(row.ChannelType),
+		Type:              Type(row.ChannelType),
 		ChannelIdentityID: row.UserID.String(),
 		Config:            config,
 		CreatedAt:         db.TimeFromPg(row.CreatedAt),
@@ -245,17 +245,17 @@ func (s *Service) GetChannelIdentityConfig(ctx context.Context, channelIdentityI
 }
 
 // ListChannelIdentityConfigsByType returns all channel identity bindings for the given channel type.
-func (s *Service) ListChannelIdentityConfigsByType(ctx context.Context, channelType ChannelType) ([]ChannelIdentityBinding, error) {
+func (s *Service) ListChannelIdentityConfigsByType(ctx context.Context, channelType Type) ([]IdentityBinding, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("channel queries not configured")
+		return nil, errors.New("channel queries not configured")
 	}
 	rows, err := s.queries.ListUserChannelBindingsByPlatform(ctx, channelType.String())
 	if err != nil {
 		return nil, err
 	}
-	items := make([]ChannelIdentityBinding, 0, len(rows))
+	items := make([]IdentityBinding, 0, len(rows))
 	for _, row := range rows {
-		item, err := normalizeChannelIdentityBinding(row)
+		item, err := normalizeIdentityBinding(row)
 		if err != nil {
 			return nil, err
 		}
@@ -264,8 +264,8 @@ func (s *Service) ListChannelIdentityConfigsByType(ctx context.Context, channelT
 	return items, nil
 }
 
-// ResolveChannelIdentityBinding finds the channel identity ID whose channel binding matches the given criteria.
-func (s *Service) ResolveChannelIdentityBinding(ctx context.Context, channelType ChannelType, criteria BindingCriteria) (string, error) {
+// ResolveIdentityBinding finds the channel identity ID whose channel binding matches the given criteria.
+func (s *Service) ResolveIdentityBinding(ctx context.Context, channelType Type, criteria BindingCriteria) (string, error) {
 	rows, err := s.ListChannelIdentityConfigsByType(ctx, channelType)
 	if err != nil {
 		return "", err
@@ -278,21 +278,21 @@ func (s *Service) ResolveChannelIdentityBinding(ctx context.Context, channelType
 			return row.ChannelIdentityID, nil
 		}
 	}
-	return "", fmt.Errorf("channel user binding not found")
+	return "", errors.New("channel user binding not found")
 }
 
-func normalizeChannelConfig(row sqlc.BotChannelConfig) (ChannelConfig, error) {
+func normalizeConfig(row sqlc.BotChannelConfig) (Config, error) {
 	credentials, err := DecodeConfigMap(row.Credentials)
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
 	selfIdentity, err := DecodeConfigMap(row.SelfIdentity)
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
 	routing, err := DecodeConfigMap(row.Routing)
 	if err != nil {
-		return ChannelConfig{}, err
+		return Config{}, err
 	}
 	verifiedAt := time.Time{}
 	if row.VerifiedAt.Valid {
@@ -302,10 +302,10 @@ func normalizeChannelConfig(row sqlc.BotChannelConfig) (ChannelConfig, error) {
 	if row.ExternalIdentity.Valid {
 		externalIdentity = strings.TrimSpace(row.ExternalIdentity.String)
 	}
-	return ChannelConfig{
+	return Config{
 		ID:               row.ID.String(),
 		BotID:            row.BotID.String(),
-		ChannelType:      ChannelType(row.ChannelType),
+		Type:             Type(row.ChannelType),
 		Credentials:      credentials,
 		ExternalIdentity: externalIdentity,
 		SelfIdentity:     selfIdentity,
@@ -317,14 +317,14 @@ func normalizeChannelConfig(row sqlc.BotChannelConfig) (ChannelConfig, error) {
 	}, nil
 }
 
-func normalizeChannelIdentityBinding(row sqlc.UserChannelBinding) (ChannelIdentityBinding, error) {
+func normalizeIdentityBinding(row sqlc.UserChannelBinding) (IdentityBinding, error) {
 	config, err := DecodeConfigMap(row.Config)
 	if err != nil {
-		return ChannelIdentityBinding{}, err
+		return IdentityBinding{}, err
 	}
-	return ChannelIdentityBinding{
+	return IdentityBinding{
 		ID:                row.ID.String(),
-		ChannelType:       ChannelType(row.ChannelType),
+		Type:              Type(row.ChannelType),
 		ChannelIdentityID: row.UserID.String(),
 		Config:            config,
 		CreatedAt:         db.TimeFromPg(row.CreatedAt),

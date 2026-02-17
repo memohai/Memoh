@@ -1,3 +1,4 @@
+// Package boot provides runtime configuration and dependency wiring for the agent.
 package boot
 
 import (
@@ -10,6 +11,8 @@ import (
 	"github.com/memohai/memoh/internal/config"
 )
 
+// RuntimeConfig holds parsed runtime settings (JWT, server address, containerd socket).
+// Values may be overridden by environment variables (e.g. HTTP_ADDR, CONTAINERD_SOCKET).
 type RuntimeConfig struct {
 	JwtSecret            string
 	JwtExpiresIn         time.Duration
@@ -17,6 +20,7 @@ type RuntimeConfig struct {
 	ContainerdSocketPath string
 }
 
+// ProvideRuntimeConfig builds RuntimeConfig from the given config and applies env overrides.
 func ProvideRuntimeConfig(cfg config.Config) (*RuntimeConfig, error) {
 	if strings.TrimSpace(cfg.Auth.JWTSecret) == "" {
 		return nil, errors.New("jwt secret is required")

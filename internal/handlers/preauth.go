@@ -13,12 +13,14 @@ import (
 	"github.com/memohai/memoh/internal/preauth"
 )
 
+// PreauthHandler serves POST /bots/:bot_id/preauth_keys for issuing preauth keys.
 type PreauthHandler struct {
 	service        *preauth.Service
 	botService     *bots.Service
 	accountService *accounts.Service
 }
 
+// NewPreauthHandler creates a preauth handler.
 func NewPreauthHandler(service *preauth.Service, botService *bots.Service, accountService *accounts.Service) *PreauthHandler {
 	return &PreauthHandler{
 		service:        service,
@@ -27,6 +29,7 @@ func NewPreauthHandler(service *preauth.Service, botService *bots.Service, accou
 	}
 }
 
+// Register mounts POST /bots/:bot_id/preauth_keys on the Echo instance.
 func (h *PreauthHandler) Register(e *echo.Echo) {
 	group := e.Group("/bots/:bot_id/preauth_keys")
 	group.POST("", h.Issue)
@@ -36,6 +39,7 @@ type preauthIssueRequest struct {
 	TTLSeconds int `json:"ttl_seconds"`
 }
 
+// Issue creates a preauth key for the bot and returns it (requires bot access).
 func (h *PreauthHandler) Issue(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {

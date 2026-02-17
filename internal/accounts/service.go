@@ -1,3 +1,4 @@
+// Package accounts provides user account and credential management.
 package accounts
 
 import (
@@ -22,6 +23,7 @@ type Service struct {
 	logger  *slog.Logger
 }
 
+// Errors returned by account operations.
 var (
 	ErrInvalidPassword    = errors.New("invalid password")
 	ErrInvalidCredentials = errors.New("invalid credentials")
@@ -42,7 +44,7 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 // Get returns an account by user id.
 func (s *Service) Get(ctx context.Context, userID string) (Account, error) {
 	if s.queries == nil {
-		return Account{}, fmt.Errorf("account queries not configured")
+		return Account{}, errors.New("account queries not configured")
 	}
 	pgID, err := db.ParseUUID(userID)
 	if err != nil {
@@ -58,7 +60,7 @@ func (s *Service) Get(ctx context.Context, userID string) (Account, error) {
 // Login authenticates by identity (username or email) and password.
 func (s *Service) Login(ctx context.Context, identity, password string) (Account, error) {
 	if s.queries == nil {
-		return Account{}, fmt.Errorf("account queries not configured")
+		return Account{}, errors.New("account queries not configured")
 	}
 	identity = strings.TrimSpace(identity)
 	if identity == "" || strings.TrimSpace(password) == "" {
@@ -91,7 +93,7 @@ func (s *Service) Login(ctx context.Context, identity, password string) (Account
 // ListAccounts returns all accounts.
 func (s *Service) ListAccounts(ctx context.Context) ([]Account, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("account queries not configured")
+		return nil, errors.New("account queries not configured")
 	}
 	rows, err := s.queries.ListAccounts(ctx)
 	if err != nil {
@@ -107,7 +109,7 @@ func (s *Service) ListAccounts(ctx context.Context) ([]Account, error) {
 // IsAdmin checks if the user has admin role.
 func (s *Service) IsAdmin(ctx context.Context, userID string) (bool, error) {
 	if s.queries == nil {
-		return false, fmt.Errorf("account queries not configured")
+		return false, errors.New("account queries not configured")
 	}
 	pgID, err := db.ParseUUID(userID)
 	if err != nil {
@@ -126,15 +128,15 @@ func (s *Service) IsAdmin(ctx context.Context, userID string) (bool, error) {
 // Create creates a new account for an existing user.
 func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRequest) (Account, error) {
 	if s.queries == nil {
-		return Account{}, fmt.Errorf("account queries not configured")
+		return Account{}, errors.New("account queries not configured")
 	}
 	username := strings.TrimSpace(req.Username)
 	if username == "" {
-		return Account{}, fmt.Errorf("username is required")
+		return Account{}, errors.New("username is required")
 	}
 	password := strings.TrimSpace(req.Password)
 	if password == "" {
-		return Account{}, fmt.Errorf("password is required")
+		return Account{}, errors.New("password is required")
 	}
 	role, err := normalizeRole(req.Role)
 	if err != nil {
@@ -195,7 +197,7 @@ func (s *Service) CreateHuman(ctx context.Context, userID string, req CreateAcco
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		if s.queries == nil {
-			return Account{}, fmt.Errorf("account queries not configured")
+			return Account{}, errors.New("account queries not configured")
 		}
 		userRow, err := s.queries.CreateUser(ctx, sqlc.CreateUserParams{
 			IsActive: true,
@@ -205,7 +207,7 @@ func (s *Service) CreateHuman(ctx context.Context, userID string, req CreateAcco
 			return Account{}, err
 		}
 		if !userRow.ID.Valid {
-			return Account{}, fmt.Errorf("create user: invalid id")
+			return Account{}, errors.New("create user: invalid id")
 		}
 		userID = userRow.ID.String()
 	}
@@ -215,7 +217,7 @@ func (s *Service) CreateHuman(ctx context.Context, userID string, req CreateAcco
 // UpdateAdmin updates account fields as admin.
 func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAccountRequest) (Account, error) {
 	if s.queries == nil {
-		return Account{}, fmt.Errorf("account queries not configured")
+		return Account{}, errors.New("account queries not configured")
 	}
 	pgID, err := db.ParseUUID(userID)
 	if err != nil {
@@ -264,7 +266,7 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 // UpdateProfile updates the user's profile.
 func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdateProfileRequest) (Account, error) {
 	if s.queries == nil {
-		return Account{}, fmt.Errorf("account queries not configured")
+		return Account{}, errors.New("account queries not configured")
 	}
 	pgID, err := db.ParseUUID(userID)
 	if err != nil {
@@ -300,10 +302,10 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdatePr
 // UpdatePassword changes the password after verifying the current one.
 func (s *Service) UpdatePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
 	if s.queries == nil {
-		return fmt.Errorf("account queries not configured")
+		return errors.New("account queries not configured")
 	}
 	if strings.TrimSpace(newPassword) == "" {
-		return fmt.Errorf("new password is required")
+		return errors.New("new password is required")
 	}
 	pgID, err := db.ParseUUID(userID)
 	if err != nil {
@@ -336,10 +338,10 @@ func (s *Service) UpdatePassword(ctx context.Context, userID, currentPassword, n
 // ResetPassword sets a new password without requiring the current one.
 func (s *Service) ResetPassword(ctx context.Context, userID, newPassword string) error {
 	if s.queries == nil {
-		return fmt.Errorf("account queries not configured")
+		return errors.New("account queries not configured")
 	}
 	if strings.TrimSpace(newPassword) == "" {
-		return fmt.Errorf("new password is required")
+		return errors.New("new password is required")
 	}
 	pgID, err := db.ParseUUID(userID)
 	if err != nil {
@@ -423,4 +425,3 @@ func toAccount(row sqlc.User) Account {
 		LastLoginAt: lastLogin,
 	}
 }
-

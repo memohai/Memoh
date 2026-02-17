@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/containerd/containerd/v2/pkg/oci"
@@ -12,12 +14,12 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/memohai/memoh/internal/config"
-
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 )
 
+// VersionInfo holds version record (id, version number, snapshot id, created_at).
 type VersionInfo struct {
 	ID         string
 	Version    int
@@ -25,9 +27,10 @@ type VersionInfo struct {
 	CreatedAt  time.Time
 }
 
+// CreateVersion commits the current container snapshot, creates a new container from it, and records the version.
 func (m *Manager) CreateVersion(ctx context.Context, userID string) (*VersionInfo, error) {
 	if m.db == nil || m.queries == nil {
-		return nil, fmt.Errorf("db is not configured")
+		return nil, errors.New("db is not configured")
 	}
 	if err := validateBotID(userID); err != nil {
 		return nil, err
@@ -128,9 +131,10 @@ func (m *Manager) CreateVersion(ctx context.Context, userID string) (*VersionInf
 	}, nil
 }
 
+// ListVersions returns version records for the bot (userID) from DB, newest first.
 func (m *Manager) ListVersions(ctx context.Context, userID string) ([]VersionInfo, error) {
 	if m.db == nil || m.queries == nil {
-		return nil, fmt.Errorf("db is not configured")
+		return nil, errors.New("db is not configured")
 	}
 	if err := validateBotID(userID); err != nil {
 		return nil, err
@@ -158,9 +162,10 @@ func (m *Manager) ListVersions(ctx context.Context, userID string) ([]VersionInf
 	return out, nil
 }
 
+// RollbackVersion restores the container from the given version snapshot (delete current, create from snapshot).
 func (m *Manager) RollbackVersion(ctx context.Context, userID string, version int) error {
 	if m.db == nil || m.queries == nil {
-		return fmt.Errorf("db is not configured")
+		return errors.New("db is not configured")
 	}
 	if err := validateBotID(userID); err != nil {
 		return err
@@ -244,9 +249,10 @@ func (m *Manager) RollbackVersion(ctx context.Context, userID string, version in
 	})
 }
 
+// VersionSnapshotID returns the snapshot ID for the given version number from DB.
 func (m *Manager) VersionSnapshotID(ctx context.Context, userID string, version int) (string, error) {
 	if m.db == nil || m.queries == nil {
-		return "", fmt.Errorf("db is not configured")
+		return "", errors.New("db is not configured")
 	}
 	if err := validateBotID(userID); err != nil {
 		return "", err
@@ -273,7 +279,7 @@ func (m *Manager) safeStopTask(ctx context.Context, containerID string) error {
 	return err
 }
 
-func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, runtime, imageRef string) (pgtype.UUID, error) {
+func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, _ string, imageRef string) (pgtype.UUID, error) {
 	hostPath, err := m.DataDir(botID)
 	if err != nil {
 		return pgtype.UUID{}, err
@@ -315,7 +321,11 @@ func (m *Manager) insertVersion(ctx context.Context, containerID, snapshotID, sn
 	if err != nil {
 		return "", 0, time.Time{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		if err := tx.Rollback(ctx); err != nil {
+			m.logger.Warn("insert version: tx rollback failed", slog.Any("error", err))
+		}
+	}()
 
 	qtx := m.queries.WithTx(tx)
 
@@ -369,4 +379,3 @@ func (m *Manager) insertEvent(ctx context.Context, containerID, eventType string
 		Payload:     b,
 	})
 }
-

@@ -1,3 +1,4 @@
+// Package message provides message persistence and history service.
 package message
 
 import (
@@ -367,7 +368,7 @@ func (s *DBService) publishMessageCreated(message Message) {
 		return
 	}
 	s.publisher.Publish(event.Event{
-		Type:  event.EventTypeMessageCreated,
+		Type:  event.TypeMessageCreated,
 		BotID: strings.TrimSpace(message.BotID),
 		Data:  payload,
 	})

@@ -155,7 +155,7 @@ func TestConnectionToExportEntry_SSE(t *testing.T) {
 }
 
 func TestEntryToUpsertRequest(t *testing.T) {
-	entry := MCPServerEntry{
+	entry := ServerEntry{
 		Command: "npx",
 		Args:    []string{"-y", "server"},
 		Env:     map[string]string{"KEY": "val"},

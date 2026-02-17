@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -19,12 +20,12 @@ import (
 const (
 	feishuStreamThinkingText  = "Thinking..."
 	feishuStreamPatchInterval = 700 * time.Millisecond
-	feishuStreamMaxRunes       = 8000
+	feishuStreamMaxRunes      = 8000
 )
 
 type feishuOutboundStream struct {
-	adapter       *FeishuAdapter
-	cfg           channel.ChannelConfig
+	adapter       *Adapter
+	cfg           channel.Config
 	target        string
 	reply         *channel.ReplyRef
 	client        *lark.Client
@@ -40,10 +41,10 @@ type feishuOutboundStream struct {
 
 func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
 	if s == nil || s.adapter == nil {
-		return fmt.Errorf("feishu stream not configured")
+		return errors.New("feishu stream not configured")
 	}
 	if s.closed.Load() {
-		return fmt.Errorf("feishu stream is closed")
+		return errors.New("feishu stream is closed")
 	}
 	select {
 	case <-ctx.Done():
@@ -130,7 +131,7 @@ func (s *feishuOutboundStream) ensureCard(ctx context.Context, text string) erro
 		return nil
 	}
 	if s.client == nil {
-		return fmt.Errorf("feishu client not configured")
+		return errors.New("feishu client not configured")
 	}
 	content, err := buildFeishuStreamCardContent(text)
 	if err != nil {
@@ -145,7 +146,7 @@ func (s *feishuOutboundStream) ensureCard(ctx context.Context, text string) erro
 				Uuid(uuid.NewString()).
 				Build()).
 			Build()
-		replyResp, err := s.client.Im.V1.Message.Reply(ctx, replyReq)
+		replyResp, err := s.client.Im.Message.Reply(ctx, replyReq)
 		if err != nil {
 			return err
 		}
@@ -157,7 +158,7 @@ func (s *feishuOutboundStream) ensureCard(ctx context.Context, text string) erro
 			return fmt.Errorf("feishu stream reply failed: %s (code: %d)", msg, code)
 		}
 		if replyResp.Data == nil || replyResp.Data.MessageId == nil || strings.TrimSpace(*replyResp.Data.MessageId) == "" {
-			return fmt.Errorf("feishu stream reply failed: empty message id")
+			return errors.New("feishu stream reply failed: empty message id")
 		}
 		s.cardMessageID = strings.TrimSpace(*replyResp.Data.MessageId)
 		s.lastPatched = normalizeFeishuStreamText(text)
@@ -173,7 +174,7 @@ func (s *feishuOutboundStream) ensureCard(ctx context.Context, text string) erro
 			Uuid(uuid.NewString()).
 			Build()).
 		Build()
-	createResp, err := s.client.Im.V1.Message.Create(ctx, createReq)
+	createResp, err := s.client.Im.Message.Create(ctx, createReq)
 	if err != nil {
 		return err
 	}
@@ -185,7 +186,7 @@ func (s *feishuOutboundStream) ensureCard(ctx context.Context, text string) erro
 		return fmt.Errorf("feishu stream create failed: %s (code: %d)", msg, code)
 	}
 	if createResp.Data == nil || createResp.Data.MessageId == nil || strings.TrimSpace(*createResp.Data.MessageId) == "" {
-		return fmt.Errorf("feishu stream create failed: empty message id")
+		return errors.New("feishu stream create failed: empty message id")
 	}
 	s.cardMessageID = strings.TrimSpace(*createResp.Data.MessageId)
 	s.lastPatched = normalizeFeishuStreamText(text)
@@ -195,7 +196,7 @@ func (s *feishuOutboundStream) ensureCard(ctx context.Context, text string) erro
 
 func (s *feishuOutboundStream) patchCard(ctx context.Context, text string) error {
 	if strings.TrimSpace(s.cardMessageID) == "" {
-		return fmt.Errorf("feishu stream card message not initialized")
+		return errors.New("feishu stream card message not initialized")
 	}
 	contentText := normalizeFeishuStreamText(text)
 	if contentText == s.lastPatched {
@@ -211,7 +212,7 @@ func (s *feishuOutboundStream) patchCard(ctx context.Context, text string) error
 			Content(content).
 			Build()).
 		Build()
-	patchResp, err := s.client.Im.V1.Message.Patch(ctx, patchReq)
+	patchResp, err := s.client.Im.Message.Patch(ctx, patchReq)
 	if err != nil {
 		return err
 	}

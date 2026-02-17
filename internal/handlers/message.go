@@ -105,6 +105,7 @@ func (h *MessageHandler) SendMessage(c echo.Context) error {
 		req.Channels = []string{req.CurrentChannel}
 	}
 	channelIdentityID = h.resolveWebChannelIdentity(c.Request().Context(), channelIdentityID, &req)
+	req.UserID = channelIdentityID
 
 	if h.runner == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "conversation runner not configured")
@@ -155,6 +156,7 @@ func (h *MessageHandler) StreamMessage(c echo.Context) error {
 		req.Channels = []string{req.CurrentChannel}
 	}
 	channelIdentityID = h.resolveWebChannelIdentity(c.Request().Context(), channelIdentityID, &req)
+	req.UserID = channelIdentityID
 
 	if h.runner == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "conversation runner not configured")
@@ -180,7 +182,6 @@ func (h *MessageHandler) StreamMessage(c echo.Context) error {
 		case chunk, ok := <-chunkChan:
 			if !ok {
 				if processingState == "started" {
-					processingState = "completed"
 					if err := writeSSEJSON(writer, flusher, map[string]string{"type": "processing_completed"}); err != nil {
 						return nil
 					}
@@ -203,7 +204,6 @@ func (h *MessageHandler) StreamMessage(c echo.Context) error {
 			if err != nil {
 				h.logger.Error("conversation stream failed", slog.Any("error", err))
 				if processingState == "started" {
-					processingState = "failed"
 					if writeErr := writeSSEJSON(writer, flusher, map[string]string{
 						"type":  "processing_failed",
 						"error": err.Error(),
@@ -226,7 +226,7 @@ func (h *MessageHandler) StreamMessage(c echo.Context) error {
 }
 
 func writeSSEData(writer *bufio.Writer, flusher http.Flusher, payload string) error {
-	if _, err := writer.WriteString(fmt.Sprintf("data: %s\n\n", payload)); err != nil {
+	if _, err := fmt.Fprintf(writer, "data: %s\n\n", payload); err != nil {
 		return err
 	}
 	if err := writer.Flush(); err != nil {
@@ -259,7 +259,7 @@ func parseSinceParam(raw string) (time.Time, bool, error) {
 	if epochMillis, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
 		return time.UnixMilli(epochMillis).UTC(), true, nil
 	}
-	return time.Time{}, false, fmt.Errorf("invalid since parameter")
+	return time.Time{}, false, errors.New("invalid since parameter")
 }
 
 // ListMessages godoc
@@ -274,7 +274,7 @@ func parseSinceParam(raw string) (time.Time, bool, error) {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/messages [get]
+// @Router /bots/{bot_id}/messages [get].
 func (h *MessageHandler) ListMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -391,7 +391,7 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 			sentMessageIDs[msgID] = struct{}{}
 		}
 		return writeSSEJSON(writer, flusher, map[string]any{
-			"type":    string(messageevent.EventTypeMessageCreated),
+			"type":    string(messageevent.TypeMessageCreated),
 			"bot_id":  botID,
 			"message": message,
 		})
@@ -430,7 +430,7 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 			if strings.TrimSpace(event.BotID) != botID {
 				continue
 			}
-			if event.Type != messageevent.EventTypeMessageCreated {
+			if event.Type != messageevent.TypeMessageCreated {
 				continue
 			}
 			if len(event.Data) == 0 {

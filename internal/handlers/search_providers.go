@@ -10,11 +10,13 @@ import (
 	"github.com/memohai/memoh/internal/searchproviders"
 )
 
+// SearchProvidersHandler serves /search-providers CRUD and /meta APIs.
 type SearchProvidersHandler struct {
 	service *searchproviders.Service
 	logger  *slog.Logger
 }
 
+// NewSearchProvidersHandler creates a search providers handler.
 func NewSearchProvidersHandler(log *slog.Logger, service *searchproviders.Service) *SearchProvidersHandler {
 	return &SearchProvidersHandler{
 		service: service,
@@ -22,6 +24,7 @@ func NewSearchProvidersHandler(log *slog.Logger, service *searchproviders.Servic
 	}
 }
 
+// Register mounts /search-providers routes on the Echo instance.
 func (h *SearchProvidersHandler) Register(e *echo.Echo) {
 	group := e.Group("/search-providers")
 	group.GET("/meta", h.ListMeta)
@@ -37,7 +40,7 @@ func (h *SearchProvidersHandler) Register(e *echo.Echo) {
 // @Description List available search provider types and config schemas
 // @Tags search-providers
 // @Success 200 {array} searchproviders.ProviderMeta
-// @Router /search-providers/meta [get]
+// @Router /search-providers/meta [get].
 func (h *SearchProvidersHandler) ListMeta(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.service.ListMeta(c.Request().Context()))
 }
@@ -52,7 +55,7 @@ func (h *SearchProvidersHandler) ListMeta(c echo.Context) error {
 // @Success 201 {object} searchproviders.GetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /search-providers [post]
+// @Router /search-providers [post].
 func (h *SearchProvidersHandler) Create(c echo.Context) error {
 	var req searchproviders.CreateRequest
 	if err := c.Bind(&req); err != nil {
@@ -80,7 +83,7 @@ func (h *SearchProvidersHandler) Create(c echo.Context) error {
 // @Param provider query string false "Provider filter (brave)"
 // @Success 200 {array} searchproviders.GetResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /search-providers [get]
+// @Router /search-providers [get].
 func (h *SearchProvidersHandler) List(c echo.Context) error {
 	items, err := h.service.List(c.Request().Context(), c.QueryParam("provider"))
 	if err != nil {
@@ -99,7 +102,7 @@ func (h *SearchProvidersHandler) List(c echo.Context) error {
 // @Success 200 {object} searchproviders.GetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /search-providers/{id} [get]
+// @Router /search-providers/{id} [get].
 func (h *SearchProvidersHandler) Get(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -123,7 +126,7 @@ func (h *SearchProvidersHandler) Get(c echo.Context) error {
 // @Success 200 {object} searchproviders.GetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /search-providers/{id} [put]
+// @Router /search-providers/{id} [put].
 func (h *SearchProvidersHandler) Update(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -150,7 +153,7 @@ func (h *SearchProvidersHandler) Update(c echo.Context) error {
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /search-providers/{id} [delete]
+// @Router /search-providers/{id} [delete].
 func (h *SearchProvidersHandler) Delete(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {

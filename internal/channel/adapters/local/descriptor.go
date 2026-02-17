@@ -5,7 +5,7 @@ import "github.com/memohai/memoh/internal/channel"
 
 const (
 	// CLIType is the registered ChannelType for the CLI adapter.
-	CLIType channel.ChannelType = "cli"
+	CLIType channel.Type = "cli"
 	// WebType is the registered ChannelType for the Web adapter.
-	WebType channel.ChannelType = "web"
+	WebType channel.Type = "web"
 )

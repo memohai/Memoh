@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -21,6 +21,7 @@ const (
 	headerReplyTarget       = "X-Memoh-Reply-Target"
 )
 
+// SetToolGatewayService sets the MCP tool gateway used by HandleMCPTools (inject after construction).
 func (h *ContainerdHandler) SetToolGatewayService(service *mcpgw.ToolGatewayService) {
 	h.toolGateway = service
 }
@@ -35,7 +36,7 @@ func (h *ContainerdHandler) SetToolGatewayService(service *mcpgw.ToolGatewayServ
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/tools [post]
+// @Router /bots/{bot_id}/tools [post].
 func (h *ContainerdHandler) HandleMCPTools(c echo.Context) error {
 	if h.toolGateway == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "tool gateway not configured")
@@ -141,7 +142,7 @@ func (h *ContainerdHandler) toolGatewayMiddleware(session mcpgw.ToolSessionConte
 			case "tools/call":
 				callReq, ok := req.(*sdkmcp.ServerRequest[*sdkmcp.CallToolParamsRaw])
 				if !ok || callReq == nil || callReq.Params == nil {
-					return nil, fmt.Errorf("tools/call params is required")
+					return nil, errors.New("tools/call params is required")
 				}
 				payload, err := buildToolCallPayloadFromRaw(callReq.Params)
 				if err != nil {
@@ -161,11 +162,11 @@ func (h *ContainerdHandler) toolGatewayMiddleware(session mcpgw.ToolSessionConte
 
 func buildToolCallPayloadFromRaw(params *sdkmcp.CallToolParamsRaw) (mcpgw.ToolCallPayload, error) {
 	if params == nil {
-		return mcpgw.ToolCallPayload{}, fmt.Errorf("tools/call params is required")
+		return mcpgw.ToolCallPayload{}, errors.New("tools/call params is required")
 	}
 	name := strings.TrimSpace(params.Name)
 	if name == "" {
-		return mcpgw.ToolCallPayload{}, fmt.Errorf("tools/call name is required")
+		return mcpgw.ToolCallPayload{}, errors.New("tools/call name is required")
 	}
 	arguments := map[string]any{}
 	if len(params.Arguments) > 0 {

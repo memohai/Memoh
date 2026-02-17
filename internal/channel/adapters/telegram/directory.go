@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -27,17 +28,17 @@ func directoryLimit(n int) int {
 }
 
 // ListPeers returns users the bot can reach. Telegram Bot API does not provide a list of users; returns empty.
-func (a *TelegramAdapter) ListPeers(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (a *Adapter) ListPeers(_ context.Context, _ channel.Config, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
 // ListGroups returns chats the bot is in. Telegram Bot API does not provide a list of chats; returns empty.
-func (a *TelegramAdapter) ListGroups(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (a *Adapter) ListGroups(_ context.Context, _ channel.Config, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
 // ListGroupMembers returns administrators of the given group (Telegram only exposes admin list, not full members).
-func (a *TelegramAdapter) ListGroupMembers(ctx context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (a *Adapter) ListGroupMembers(_ context.Context, cfg channel.Config, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return nil, err
@@ -76,7 +77,7 @@ func (a *TelegramAdapter) ListGroupMembers(ctx context.Context, cfg channel.Chan
 }
 
 // ResolveEntry resolves an input string to a user or group DirectoryEntry using getChat / getChatMember.
-func (a *TelegramAdapter) ResolveEntry(ctx context.Context, cfg channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
+func (a *Adapter) ResolveEntry(ctx context.Context, cfg channel.Config, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return channel.DirectoryEntry{}, err
@@ -96,7 +97,7 @@ func (a *TelegramAdapter) ResolveEntry(ctx context.Context, cfg channel.ChannelC
 	}
 }
 
-func (a *TelegramAdapter) resolveTelegramUser(ctx context.Context, bot *tgbotapi.BotAPI, input string) (channel.DirectoryEntry, error) {
+func (a *Adapter) resolveTelegramUser(_ context.Context, bot *tgbotapi.BotAPI, input string) (channel.DirectoryEntry, error) {
 	chatID, userID := parseTelegramUserInput(input)
 	if chatID == 0 && userID == 0 {
 		return channel.DirectoryEntry{}, fmt.Errorf("telegram resolve entry user: invalid input %q", input)
@@ -114,7 +115,7 @@ func (a *TelegramAdapter) resolveTelegramUser(ctx context.Context, bot *tgbotapi
 			return channel.DirectoryEntry{}, fmt.Errorf("telegram get chat member: %w", err)
 		}
 		if member.User == nil {
-			return channel.DirectoryEntry{}, fmt.Errorf("telegram get chat member: empty user")
+			return channel.DirectoryEntry{}, errors.New("telegram get chat member: empty user")
 		}
 		return telegramUserToEntry(member.User), nil
 	}
@@ -147,7 +148,7 @@ func (a *TelegramAdapter) resolveTelegramUser(ctx context.Context, bot *tgbotapi
 	}, nil
 }
 
-func (a *TelegramAdapter) resolveTelegramGroup(ctx context.Context, bot *tgbotapi.BotAPI, input string) (channel.DirectoryEntry, error) {
+func (a *Adapter) resolveTelegramGroup(_ context.Context, bot *tgbotapi.BotAPI, input string) (channel.DirectoryEntry, error) {
 	chatID, superGroupUsername := parseTelegramChatInput(input)
 	if chatID == 0 && superGroupUsername == "" {
 		return channel.DirectoryEntry{}, fmt.Errorf("telegram resolve entry group: invalid input %q", input)
@@ -169,11 +170,11 @@ func (a *TelegramAdapter) resolveTelegramGroup(ctx context.Context, bot *tgbotap
 		handle = "@" + handle
 	}
 	return channel.DirectoryEntry{
-		Kind:      channel.DirectoryEntryGroup,
-		ID:        idStr,
-		Name:      name,
-		Handle:    handle,
-		Metadata:  map[string]any{"chat_id": idStr, "type": chat.Type},
+		Kind:     channel.DirectoryEntryGroup,
+		ID:       idStr,
+		Name:     name,
+		Handle:   handle,
+		Metadata: map[string]any{"chat_id": idStr, "type": chat.Type},
 	}, nil
 }
 
@@ -199,9 +200,9 @@ func parseTelegramUserInput(input string) (chatID, userID int64) {
 	if input == "" {
 		return 0, 0
 	}
-	if idx := strings.Index(input, ":"); idx >= 0 {
-		left := strings.TrimSpace(input[:idx])
-		right := strings.TrimSpace(input[idx+1:])
+	if before, after, ok := strings.Cut(input, ":"); ok {
+		left := strings.TrimSpace(before)
+		right := strings.TrimSpace(after)
 		cid, err1 := strconv.ParseInt(left, 10, 64)
 		uid, err2 := strconv.ParseInt(right, 10, 64)
 		if err1 == nil && err2 == nil && cid != 0 && uid != 0 {

@@ -1,3 +1,4 @@
+// Package directory provides the MCP directory provider (channel user lookup).
 package directory
 
 import (
@@ -13,12 +14,12 @@ const toolLookupChannelUser = "lookup_channel_user"
 
 // ConfigResolver resolves effective channel config for a bot (used to call directory APIs).
 type ConfigResolver interface {
-	ResolveEffectiveConfig(ctx context.Context, botID string, channelType channel.ChannelType) (channel.ChannelConfig, error)
+	ResolveEffectiveConfig(ctx context.Context, botID string, channelType channel.Type) (channel.Config, error)
 }
 
 // ChannelTypeResolver parses platform name to channel type.
 type ChannelTypeResolver interface {
-	ParseChannelType(raw string) (channel.ChannelType, error)
+	ParseChannelType(raw string) (channel.Type, error)
 }
 
 // Executor exposes channel directory lookup as an MCP tool for the LLM.
@@ -43,7 +44,7 @@ func NewExecutor(log *slog.Logger, registry *channel.Registry, configResolver Co
 }
 
 // ListTools returns the lookup_channel_user tool descriptor.
-func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	if p.registry == nil || p.configResolver == nil || p.typeResolver == nil {
 		return []mcpgw.ToolDescriptor{}, nil
 	}

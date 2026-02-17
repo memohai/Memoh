@@ -1,8 +1,10 @@
+// Package route provides conversation routing and channel-route management.
 package route
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -180,7 +182,7 @@ func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput)
 	}
 
 	if s.conversation == nil {
-		return ResolveConversationResult{}, fmt.Errorf("conversation service not configured")
+		return ResolveConversationResult{}, errors.New("conversation service not configured")
 	}
 
 	kind := determineConversationKind(input.ThreadID, input.ConversationType)

@@ -1,8 +1,10 @@
+// Package inbound handles incoming channel events and message routing.
 package inbound
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -24,9 +26,7 @@ const (
 	processingStatusTimeout = 60 * time.Second
 )
 
-var (
-	whitespacePattern = regexp.MustCompile(`\s+`)
-)
+var whitespacePattern = regexp.MustCompile(`\s+`)
 
 // RouteResolver resolves and manages channel routes.
 type RouteResolver interface {
@@ -88,12 +88,12 @@ func (p *ChannelInboundProcessor) IdentityMiddleware() channel.Middleware {
 }
 
 // HandleInbound processes an inbound channel message through identity resolution and chat gateway.
-func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, sender channel.StreamReplySender) error {
+func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel.Config, msg channel.InboundMessage, sender channel.StreamReplySender) error {
 	if p.runner == nil {
-		return fmt.Errorf("channel inbound processor not configured")
+		return errors.New("channel inbound processor not configured")
 	}
 	if sender == nil {
-		return fmt.Errorf("reply sender not configured")
+		return errors.New("reply sender not configured")
 	}
 	text := buildInboundQuery(msg.Message)
 	if strings.TrimSpace(text) == "" {
@@ -126,7 +126,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	// Resolve or create the route via channel_routes.
 	if p.routeResolver == nil {
-		return fmt.Errorf("route resolver not configured")
+		return errors.New("route resolver not configured")
 	}
 	resolved, err := p.routeResolver.ResolveConversation(ctx, route.ResolveInput{
 		BotID:             identity.BotID,
@@ -225,7 +225,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
-		err := fmt.Errorf("reply target missing")
+		err := errors.New("reply target missing")
 		if statusNotifier != nil {
 			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, err); notifyErr != nil {
 				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
@@ -507,7 +507,7 @@ func metadataBool(metadata map[string]any, key string) bool {
 	}
 }
 
-func (p *ChannelInboundProcessor) persistInboundUser(ctx context.Context, routeID string, identity InboundIdentity, msg channel.InboundMessage, query string, triggerMode string) bool {
+func (p *ChannelInboundProcessor) persistInboundUser(ctx context.Context, routeID string, identity Identity, msg channel.InboundMessage, query, triggerMode string) bool {
 	if p.message == nil {
 		return false
 	}
@@ -547,7 +547,7 @@ func (p *ChannelInboundProcessor) persistInboundUser(ctx context.Context, routeI
 	return true
 }
 
-func buildChannelMessage(output conversation.AssistantOutput, capabilities channel.ChannelCapabilities) channel.Message {
+func buildChannelMessage(output conversation.AssistantOutput, capabilities channel.Capabilities) channel.Message {
 	msg := channel.Message{}
 	if strings.TrimSpace(output.Content) != "" {
 		msg.Text = strings.TrimSpace(output.Content)
@@ -789,7 +789,7 @@ type sendMessageToolArgs struct {
 	Message           *channel.Message `json:"message"`
 }
 
-func collectMessageToolContext(registry *channel.Registry, messages []conversation.ModelMessage, channelType channel.ChannelType, replyTarget string) ([]string, bool) {
+func collectMessageToolContext(registry *channel.Registry, messages []conversation.ModelMessage, channelType channel.Type, replyTarget string) ([]string, bool) {
 	if len(messages) == 0 {
 		return nil, false
 	}
@@ -842,7 +842,7 @@ func extractSendMessageText(args sendMessageToolArgs) string {
 	return strings.TrimSpace(args.Message.PlainText())
 }
 
-func shouldSuppressForToolCall(registry *channel.Registry, args sendMessageToolArgs, channelType channel.ChannelType, replyTarget string) bool {
+func shouldSuppressForToolCall(registry *channel.Registry, args sendMessageToolArgs, channelType channel.Type, replyTarget string) bool {
 	platform := strings.TrimSpace(args.Platform)
 	if platform == "" {
 		platform = string(channelType)
@@ -865,7 +865,7 @@ func shouldSuppressForToolCall(registry *channel.Registry, args sendMessageToolA
 	return normalizedTarget == normalizedReply
 }
 
-func normalizeReplyTarget(registry *channel.Registry, channelType channel.ChannelType, target string) string {
+func normalizeReplyTarget(registry *channel.Registry, channelType channel.Type, target string) string {
 	if registry == nil {
 		return strings.TrimSpace(target)
 	}
@@ -895,7 +895,7 @@ func isSilentReplyText(text string) bool {
 	return false
 }
 
-func hasTokenPrefix(value []rune, token []rune) bool {
+func hasTokenPrefix(value, token []rune) bool {
 	if len(value) < len(token) {
 		return false
 	}
@@ -910,7 +910,7 @@ func hasTokenPrefix(value []rune, token []rune) bool {
 	return !isWordChar(value[len(token)])
 }
 
-func hasTokenSuffix(value []rune, token []rune) bool {
+func hasTokenSuffix(value, token []rune) bool {
 	if len(value) < len(token) {
 		return false
 	}
@@ -959,14 +959,14 @@ func isMessagingToolDuplicate(text string, sentTexts []string) bool {
 }
 
 // requireIdentity resolves identity for the current message. Always resolves from msg so each sender is identified correctly (no reuse of context state across messages).
-func (p *ChannelInboundProcessor) requireIdentity(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) (IdentityState, error) {
+func (p *ChannelInboundProcessor) requireIdentity(ctx context.Context, cfg channel.Config, msg channel.InboundMessage) (IdentityState, error) {
 	if p.identity == nil {
-		return IdentityState{}, fmt.Errorf("identity resolver not configured")
+		return IdentityState{}, errors.New("identity resolver not configured")
 	}
 	return p.identity.Resolve(ctx, cfg, msg)
 }
 
-func (p *ChannelInboundProcessor) resolveProcessingStatusNotifier(channelType channel.ChannelType) channel.ProcessingStatusNotifier {
+func (p *ChannelInboundProcessor) resolveProcessingStatusNotifier(channelType channel.Type) channel.ProcessingStatusNotifier {
 	if p == nil || p.registry == nil {
 		return nil
 	}
@@ -980,7 +980,7 @@ func (p *ChannelInboundProcessor) resolveProcessingStatusNotifier(channelType ch
 func (p *ChannelInboundProcessor) notifyProcessingStarted(
 	ctx context.Context,
 	notifier channel.ProcessingStatusNotifier,
-	cfg channel.ChannelConfig,
+	cfg channel.Config,
 	msg channel.InboundMessage,
 	info channel.ProcessingStatusInfo,
 ) (channel.ProcessingStatusHandle, error) {
@@ -995,7 +995,7 @@ func (p *ChannelInboundProcessor) notifyProcessingStarted(
 func (p *ChannelInboundProcessor) notifyProcessingCompleted(
 	ctx context.Context,
 	notifier channel.ProcessingStatusNotifier,
-	cfg channel.ChannelConfig,
+	cfg channel.Config,
 	msg channel.InboundMessage,
 	info channel.ProcessingStatusInfo,
 	handle channel.ProcessingStatusHandle,
@@ -1011,7 +1011,7 @@ func (p *ChannelInboundProcessor) notifyProcessingCompleted(
 func (p *ChannelInboundProcessor) notifyProcessingFailed(
 	ctx context.Context,
 	notifier channel.ProcessingStatusNotifier,
-	cfg channel.ChannelConfig,
+	cfg channel.Config,
 	msg channel.InboundMessage,
 	info channel.ProcessingStatusInfo,
 	handle channel.ProcessingStatusHandle,
@@ -1028,7 +1028,7 @@ func (p *ChannelInboundProcessor) notifyProcessingFailed(
 func (p *ChannelInboundProcessor) logProcessingStatusError(
 	stage string,
 	msg channel.InboundMessage,
-	identity InboundIdentity,
+	identity Identity,
 	err error,
 ) {
 	if p == nil || p.logger == nil || err == nil {

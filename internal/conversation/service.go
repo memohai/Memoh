@@ -16,6 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
+// Errors returned by conversation operations.
 var (
 	ErrChatNotFound     = errors.New("chat not found")
 	ErrNotParticipant   = errors.New("not a participant")
@@ -127,14 +128,14 @@ func (s *Service) Get(ctx context.Context, conversationID string) (Conversation,
 }
 
 // GetReadAccess resolves whether a user can read a conversation.
-func (s *Service) GetReadAccess(ctx context.Context, conversationID, channelIdentityID string) (ConversationReadAccess, error) {
+func (s *Service) GetReadAccess(ctx context.Context, conversationID, channelIdentityID string) (ReadAccess, error) {
 	pgConversationID, err := parseUUID(conversationID)
 	if err != nil {
-		return ConversationReadAccess{}, ErrPermissionDenied
+		return ReadAccess{}, ErrPermissionDenied
 	}
 	pgChannelIdentityID, err := parseUUID(channelIdentityID)
 	if err != nil {
-		return ConversationReadAccess{}, ErrPermissionDenied
+		return ReadAccess{}, ErrPermissionDenied
 	}
 	row, err := s.queries.GetChatReadAccessByUser(ctx, sqlc.GetChatReadAccessByUserParams{
 		ChatID: pgConversationID,
@@ -142,11 +143,11 @@ func (s *Service) GetReadAccess(ctx context.Context, conversationID, channelIden
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ConversationReadAccess{}, ErrPermissionDenied
+			return ReadAccess{}, ErrPermissionDenied
 		}
-		return ConversationReadAccess{}, err
+		return ReadAccess{}, err
 	}
-	return ConversationReadAccess{
+	return ReadAccess{
 		AccessMode:      row.AccessMode,
 		ParticipantRole: strings.TrimSpace(row.ParticipantRole),
 		LastObservedAt:  pgTimePtr(row.LastObservedAt),
@@ -154,7 +155,7 @@ func (s *Service) GetReadAccess(ctx context.Context, conversationID, channelIden
 }
 
 // ListByBotAndChannelIdentity returns all visible conversations for a bot and channel identity.
-func (s *Service) ListByBotAndChannelIdentity(ctx context.Context, botID, channelIdentityID string) ([]ConversationListItem, error) {
+func (s *Service) ListByBotAndChannelIdentity(ctx context.Context, botID, channelIdentityID string) ([]ListItem, error) {
 	pgBotID, err := parseUUID(botID)
 	if err != nil {
 		return nil, err
@@ -170,7 +171,7 @@ func (s *Service) ListByBotAndChannelIdentity(ctx context.Context, botID, channe
 	if err != nil {
 		return nil, err
 	}
-	conversations := make([]ConversationListItem, 0, len(rows))
+	conversations := make([]ListItem, 0, len(rows))
 	for _, row := range rows {
 		conversations = append(conversations, toChatListItem(row))
 	}
@@ -388,8 +389,8 @@ func toChatFields(id, botID pgtype.UUID, kind string, parentChatID pgtype.UUID, 
 	}
 }
 
-func toChatListItem(row sqlc.ListVisibleChatsByBotAndUserRow) ConversationListItem {
-	return ConversationListItem{
+func toChatListItem(row sqlc.ListVisibleChatsByBotAndUserRow) ListItem {
+	return ListItem{
 		ID:              row.ID.String(),
 		BotID:           row.BotID.String(),
 		Kind:            row.Kind,

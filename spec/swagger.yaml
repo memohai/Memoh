@@ -254,7 +254,7 @@ definitions:
     - AttachmentVoice
     - AttachmentFile
     - AttachmentGIF
-  channel.ChannelCapabilities:
+  channel.Capabilities:
     properties:
       attachments:
         type: boolean
@@ -291,7 +291,7 @@ definitions:
       unsend:
         type: boolean
     type: object
-  channel.ChannelConfig:
+  channel.Config:
     properties:
       bot_id:
         type: string
@@ -317,22 +317,6 @@ definitions:
       updated_at:
         type: string
       verified_at:
-        type: string
-    type: object
-  channel.ChannelIdentityBinding:
-    properties:
-      channel_identity_id:
-        type: string
-      channel_type:
-        type: string
-      config:
-        additionalProperties: {}
-        type: object
-      created_at:
-        type: string
-      id:
-        type: string
-      updated_at:
         type: string
     type: object
   channel.ConfigSchema:
@@ -374,6 +358,22 @@ definitions:
     - FieldBool
     - FieldNumber
     - FieldEnum
+  channel.IdentityBinding:
+    properties:
+      channel_identity_id:
+        type: string
+      channel_type:
+        type: string
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      updated_at:
+        type: string
+    type: object
   channel.Message:
     properties:
       actions:
@@ -551,7 +551,7 @@ definitions:
   handlers.ChannelMeta:
     properties:
       capabilities:
-        $ref: '#/definitions/channel.ChannelCapabilities'
+        $ref: '#/definitions/channel.Capabilities'
       config_schema:
         $ref: '#/definitions/channel.ConfigSchema'
       configless:
@@ -881,14 +881,14 @@ definitions:
     properties:
       mcpServers:
         additionalProperties:
-          $ref: '#/definitions/mcp.MCPServerEntry'
+          $ref: '#/definitions/mcp.ServerEntry'
         type: object
     type: object
   mcp.ImportRequest:
     properties:
       mcpServers:
         additionalProperties:
-          $ref: '#/definitions/mcp.MCPServerEntry'
+          $ref: '#/definitions/mcp.ServerEntry'
         type: object
     type: object
   mcp.ListResponse:
@@ -898,7 +898,7 @@ definitions:
           $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
         type: array
     type: object
-  mcp.MCPServerEntry:
+  mcp.ServerEntry:
     properties:
       args:
         items:
@@ -967,7 +967,7 @@ definitions:
         type: number
       results:
         items:
-          $ref: '#/definitions/memory.MemoryItem'
+          $ref: '#/definitions/memory.Item'
         type: array
     type: object
   memory.DeleteResponse:
@@ -975,7 +975,7 @@ definitions:
       message:
         type: string
     type: object
-  memory.MemoryItem:
+  memory.Item:
     properties:
       agent_id:
         type: string
@@ -1032,7 +1032,7 @@ definitions:
         type: array
       results:
         items:
-          $ref: '#/definitions/memory.MemoryItem'
+          $ref: '#/definitions/memory.Item'
         type: array
     type: object
   memory.TopKBucket:
@@ -3244,7 +3244,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/channel.ChannelConfig'
+            $ref: '#/definitions/channel.Config'
         "400":
           description: Bad Request
           schema:
@@ -3287,7 +3287,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/channel.ChannelConfig'
+            $ref: '#/definitions/channel.Config'
         "400":
           description: Bad Request
           schema:
@@ -4582,7 +4582,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/channel.ChannelIdentityBinding'
+            $ref: '#/definitions/channel.IdentityBinding'
         "400":
           description: Bad Request
           schema:
@@ -4616,7 +4616,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/channel.ChannelIdentityBinding'
+            $ref: '#/definitions/channel.IdentityBinding'
         "400":
           description: Bad Request
           schema:

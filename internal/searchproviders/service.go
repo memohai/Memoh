@@ -1,3 +1,4 @@
+// Package searchproviders provides search provider configuration and management.
 package searchproviders
 
 import (
@@ -11,11 +12,13 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
+// Service manages search provider configs (create, list, get, update, delete).
 type Service struct {
 	queries *sqlc.Queries
 	logger  *slog.Logger
 }
 
+// NewService creates a search providers service.
 func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	return &Service{
 		queries: queries,
@@ -23,6 +26,7 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	}
 }
 
+// ListMeta returns metadata for all supported providers (display name, config schema).
 func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
 	return []ProviderMeta{
 		{
@@ -56,6 +60,7 @@ func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
 	}
 }
 
+// Create creates a new search provider config.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
 	if !isValidProviderName(req.Provider) {
 		return GetResponse{}, fmt.Errorf("invalid provider: %s", req.Provider)
@@ -75,6 +80,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 	return s.toGetResponse(row), nil
 }
 
+// Get returns the search provider config by ID.
 func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
@@ -87,6 +93,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 	return s.toGetResponse(row), nil
 }
 
+// GetRawByID returns the raw sqlc row for the search provider by ID.
 func (s *Service) GetRawByID(ctx context.Context, id string) (sqlc.SearchProvider, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
@@ -95,6 +102,7 @@ func (s *Service) GetRawByID(ctx context.Context, id string) (sqlc.SearchProvide
 	return s.queries.GetSearchProviderByID(ctx, pgID)
 }
 
+// List returns all provider configs, optionally filtered by provider name.
 func (s *Service) List(ctx context.Context, provider string) ([]GetResponse, error) {
 	provider = strings.TrimSpace(provider)
 	var (
@@ -116,6 +124,7 @@ func (s *Service) List(ctx context.Context, provider string) ([]GetResponse, err
 	return items, nil
 }
 
+// Update updates the search provider config by ID.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (GetResponse, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
@@ -156,6 +165,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	return s.toGetResponse(updated), nil
 }
 
+// Delete removes the search provider config by ID.
 func (s *Service) Delete(ctx context.Context, id string) error {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {

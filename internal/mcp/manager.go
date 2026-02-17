@@ -24,11 +24,13 @@ import (
 	"github.com/memohai/memoh/internal/identity"
 )
 
+// Label and ID prefix for MCP bot containers.
 const (
 	BotLabelKey     = "mcp.bot_id"
 	ContainerPrefix = "mcp-"
 )
 
+// ExecRequest specifies command, env, work dir, and stdio options for container exec.
 type ExecRequest struct {
 	BotID    string
 	Command  []string
@@ -38,6 +40,7 @@ type ExecRequest struct {
 	UseStdio bool
 }
 
+// ExecResult holds the exit code from container exec.
 type ExecResult struct {
 	ExitCode uint32
 }
@@ -49,6 +52,7 @@ type ExecWithCaptureResult struct {
 	ExitCode uint32
 }
 
+// Manager manages MCP containers (ensure, exec, versioning) and bot data dirs.
 type Manager struct {
 	service     ctr.Service
 	cfg         config.MCPConfig
@@ -59,6 +63,7 @@ type Manager struct {
 	logger      *slog.Logger
 }
 
+// NewManager creates an MCP manager with containerd service, config, namespace, and DB pool.
 func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string, conn *pgxpool.Pool) *Manager {
 	if namespace == "" {
 		namespace = config.DefaultNamespace
@@ -76,6 +81,7 @@ func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, nam
 	}
 }
 
+// Init pulls the MCP image and unpacks with the configured snapshotter.
 func (m *Manager) Init(ctx context.Context) error {
 	image := m.imageRef()
 
@@ -163,6 +169,7 @@ func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 	return botIDs, nil
 }
 
+// Start ensures the MCP container exists, starts the task, and sets up CNI network.
 func (m *Manager) Start(ctx context.Context, botID string) error {
 	if err := m.EnsureBot(ctx, botID); err != nil {
 		return err
@@ -183,6 +190,7 @@ func (m *Manager) Start(ctx context.Context, botID string) error {
 	return nil
 }
 
+// Stop stops the MCP container task with the given timeout (force kill).
 func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration) error {
 	if err := validateBotID(botID); err != nil {
 		return err
@@ -193,6 +201,7 @@ func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration)
 	})
 }
 
+// Delete removes the task, network, and container (with snapshot cleanup) for the bot.
 func (m *Manager) Delete(ctx context.Context, botID string) error {
 	if err := validateBotID(botID); err != nil {
 		return err
@@ -211,6 +220,7 @@ func (m *Manager) Delete(ctx context.Context, botID string) error {
 	})
 }
 
+// Exec runs a command in the MCP container and returns exit code (optional stdio/terminal).
 func (m *Manager) Exec(ctx context.Context, req ExecRequest) (*ExecResult, error) {
 	if err := validateBotID(req.BotID); err != nil {
 		return nil, err
@@ -219,7 +229,7 @@ func (m *Manager) Exec(ctx context.Context, req ExecRequest) (*ExecResult, error
 		return nil, fmt.Errorf("%w: empty command", ctr.ErrInvalidArgument)
 	}
 	if m.queries == nil {
-		return nil, fmt.Errorf("db is not configured")
+		return nil, errors.New("db is not configured")
 	}
 
 	startedAt := time.Now()
@@ -263,7 +273,7 @@ func (m *Manager) ExecWithCapture(ctx context.Context, req ExecRequest) (*ExecWi
 		return nil, fmt.Errorf("%w: empty command", ctr.ErrInvalidArgument)
 	}
 	if m.queries == nil {
-		return nil, fmt.Errorf("db is not configured")
+		return nil, errors.New("db is not configured")
 	}
 
 	if runtime.GOOS == "darwin" {
@@ -281,7 +291,8 @@ func (m *Manager) execWithCaptureLima(ctx context.Context, req ExecRequest) (*Ex
 	// Each element becomes a separate OS arg to limactl.  Lima/SSH joins
 	// them with spaces and passes the result to the remote shell, so only
 	// values that may contain shell-special characters need quoting.
-	args := []string{"shell", "default", "--",
+	args := []string{
+		"shell", "default", "--",
 		"sudo", "ctr", "-n", m.namespace,
 		"tasks", "exec", "--exec-id", execID,
 	}
@@ -332,7 +343,11 @@ func (m *Manager) execWithCaptureContainerd(ctx context.Context, req ExecRequest
 	if err != nil {
 		return nil, fmt.Errorf("create fifo dir: %w", err)
 	}
-	defer os.RemoveAll(fifoDir)
+	defer func() {
+		if err := os.RemoveAll(fifoDir); err != nil {
+			m.logger.Warn("exec cleanup: remove fifo dir failed", slog.String("dir", fifoDir), slog.Any("error", err))
+		}
+	}()
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	result, err := m.service.ExecTask(ctx, m.containerID(req.BotID), ctr.ExecTaskRequest{

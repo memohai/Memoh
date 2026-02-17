@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -178,13 +179,13 @@ type resolvedContext struct {
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
 	if strings.TrimSpace(req.Query) == "" {
-		return resolvedContext{}, fmt.Errorf("query is required")
+		return resolvedContext{}, errors.New("query is required")
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return resolvedContext{}, fmt.Errorf("bot id is required")
+		return resolvedContext{}, errors.New("bot id is required")
 	}
 	if strings.TrimSpace(req.ChatID) == "" {
-		return resolvedContext{}, fmt.Errorf("chat id is required")
+		return resolvedContext{}, errors.New("chat id is required")
 	}
 
 	skipHistory := req.MaxContextLoadTime < 0
@@ -236,12 +237,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		} else {
 			usableSkills = make([]gatewaySkill, 0, len(entries))
 			for _, e := range entries {
-				usableSkills = append(usableSkills, gatewaySkill{
-					Name:        e.Name,
-					Description: e.Description,
-					Content:     e.Content,
-					Metadata:    e.Metadata,
-				})
+				usableSkills = append(usableSkills, gatewaySkill(e))
 			}
 		}
 	}
@@ -308,10 +304,10 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 // TriggerSchedule executes a scheduled command through the agent gateway trigger-schedule endpoint.
 func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) error {
 	if strings.TrimSpace(botID) == "" {
-		return fmt.Errorf("bot id is required")
+		return errors.New("bot id is required")
 	}
 	if strings.TrimSpace(payload.Command) == "" {
-		return fmt.Errorf("schedule command is required")
+		return errors.New("schedule command is required")
 	}
 
 	req := conversation.ChatRequest{
@@ -422,7 +418,11 @@ func (r *Resolver) postChat(ctx context.Context, payload gatewayRequest, token s
 	if err != nil {
 		return gatewayResponse{}, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			r.logger.Warn("gateway request: close response body failed", slog.Any("error", err))
+		}
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -463,7 +463,11 @@ func (r *Resolver) postTriggerSchedule(ctx context.Context, payload triggerSched
 	if err != nil {
 		return gatewayResponse{}, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			r.logger.Warn("trigger-schedule: close response body failed", slog.Any("error", err))
+		}
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -504,7 +508,11 @@ func (r *Resolver) streamChat(ctx context.Context, payload gatewayRequest, req c
 		r.logger.Error("gateway stream connect failed", slog.String("url", url), slog.Any("error", err))
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			r.logger.Warn("gateway stream: close response body failed", slog.Any("error", err))
+		}
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(resp.Body)
@@ -522,8 +530,8 @@ func (r *Resolver) streamChat(ctx context.Context, payload gatewayRequest, req c
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "event:") {
-			currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		if after, ok := strings.CutPrefix(line, "event:"); ok {
+			currentEvent = strings.TrimSpace(after)
 			continue
 		}
 		if !strings.HasPrefix(line, "data:") {
@@ -631,7 +639,7 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMi
 
 type memoryContextItem struct {
 	Namespace string
-	Item      memory.MemoryItem
+	Item      memory.Item
 }
 
 func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversation.ChatRequest) *conversation.ModelMessage {
@@ -718,7 +726,7 @@ func (r *Resolver) persistUserMessage(ctx context.Context, req conversation.Chat
 		return nil
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return fmt.Errorf("bot id is required for persistence")
+		return errors.New("bot id is required for persistence")
 	}
 	text := strings.TrimSpace(req.Query)
 	if text == "" {
@@ -990,7 +998,7 @@ func (r *Resolver) addMemory(ctx context.Context, botID string, msgs []memory.Me
 
 func (r *Resolver) selectChatModel(ctx context.Context, req conversation.ChatRequest, botSettings settings.Settings, cs conversation.Settings) (models.GetResponse, sqlc.LlmProvider, error) {
 	if r.modelsService == nil {
-		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("models service not configured")
+		return models.GetResponse{}, sqlc.LlmProvider{}, errors.New("models service not configured")
 	}
 	modelID := strings.TrimSpace(req.Model)
 	providerFilter := strings.TrimSpace(req.Provider)
@@ -1005,7 +1013,7 @@ func (r *Resolver) selectChatModel(ctx context.Context, req conversation.ChatReq
 	}
 
 	if modelID == "" {
-		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("chat model not configured: specify model in request or bot settings")
+		return models.GetResponse{}, sqlc.LlmProvider{}, errors.New("chat model not configured: specify model in request or bot settings")
 	}
 
 	if providerFilter == "" {
@@ -1034,7 +1042,7 @@ func (r *Resolver) fetchChatModel(ctx context.Context, modelID string) (models.G
 		return models.GetResponse{}, sqlc.LlmProvider{}, err
 	}
 	if model.Type != models.ModelTypeChat {
-		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("model is not a chat model")
+		return models.GetResponse{}, sqlc.LlmProvider{}, errors.New("model is not a chat model")
 	}
 	prov, err := models.FetchProviderByID(ctx, r.queries, model.LlmProviderID)
 	if err != nil {
@@ -1067,7 +1075,7 @@ func (r *Resolver) listCandidates(ctx context.Context, providerFilter string) ([
 
 func (r *Resolver) loadBotSettings(ctx context.Context, botID string) (settings.Settings, error) {
 	if r.settingsService == nil {
-		return settings.Settings{}, fmt.Errorf("settings service not configured")
+		return settings.Settings{}, errors.New("settings service not configured")
 	}
 	return r.settingsService.GetBot(ctx, botID)
 }
@@ -1116,15 +1124,6 @@ func dedup(items []string) []string {
 	return result
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 func coalescePositiveInt(values ...int) int {
 	for _, v := range values {
 		if v > 0 {
@@ -1165,7 +1164,7 @@ func truncateMemorySnippet(s string, n int) string {
 
 func parseResolverUUID(id string) (pgtype.UUID, error) {
 	if strings.TrimSpace(id) == "" {
-		return pgtype.UUID{}, fmt.Errorf("empty id")
+		return pgtype.UUID{}, errors.New("empty id")
 	}
 	return db.ParseUUID(id)
 }

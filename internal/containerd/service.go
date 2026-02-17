@@ -26,26 +26,31 @@ import (
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
-	"github.com/memohai/memoh/internal/config"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
 	"github.com/opencontainers/runtime-spec/specs-go"
+
+	"github.com/memohai/memoh/internal/config"
 )
 
+// Errors returned by containerd operations.
 var (
 	ErrInvalidArgument = errors.New("invalid argument")
 	ErrTaskStopTimeout = errors.New("timeout waiting for task to stop")
 )
 
+// PullImageOptions configures image pull (unpack and snapshotter).
 type PullImageOptions struct {
 	Unpack      bool
 	Snapshotter string
 }
 
+// DeleteImageOptions configures image deletion (synchronous wait).
 type DeleteImageOptions struct {
 	Synchronous bool
 }
 
+// CreateContainerRequest specifies container ID, image, snapshot, labels, and OCI spec options.
 type CreateContainerRequest struct {
 	ID          string
 	ImageRef    string
@@ -55,26 +60,31 @@ type CreateContainerRequest struct {
 	SpecOpts    []oci.SpecOpts
 }
 
+// DeleteContainerOptions configures whether to remove the container snapshot.
 type DeleteContainerOptions struct {
 	CleanupSnapshot bool
 }
 
+// StartTaskOptions configures stdio, terminal, and FIFO directory for the task.
 type StartTaskOptions struct {
 	UseStdio bool
 	Terminal bool
 	FIFODir  string
 }
 
+// StopTaskOptions configures signal, timeout, and force kill for stopping a task.
 type StopTaskOptions struct {
 	Signal  syscall.Signal
 	Timeout time.Duration
 	Force   bool
 }
 
+// DeleteTaskOptions configures force deletion of a task.
 type DeleteTaskOptions struct {
 	Force bool
 }
 
+// ExecTaskRequest specifies command args, env, work dir, stdio, and terminal for exec.
 type ExecTaskRequest struct {
 	Args     []string
 	Env      []string
@@ -87,6 +97,7 @@ type ExecTaskRequest struct {
 	Stderr   io.Writer
 }
 
+// ExecTaskSession holds stdio streams and Wait/Close for a streaming exec session.
 type ExecTaskSession struct {
 	Stdin  io.WriteCloser
 	Stdout io.ReadCloser
@@ -95,19 +106,23 @@ type ExecTaskSession struct {
 	Close  func() error
 }
 
+// ExecTaskResult holds the exit code of an exec call.
 type ExecTaskResult struct {
 	ExitCode uint32
 }
 
+// SnapshotCommitResult holds version and active snapshot IDs after a commit.
 type SnapshotCommitResult struct {
 	VersionSnapshotID string
 	ActiveSnapshotID  string
 }
 
+// ListTasksOptions optionally filters listed tasks.
 type ListTasksOptions struct {
 	Filter string
 }
 
+// TaskInfo holds container ID, task ID, PID, status, and exit status for a task.
 type TaskInfo struct {
 	ContainerID string
 	ID          string
@@ -116,6 +131,7 @@ type TaskInfo struct {
 	ExitStatus  uint32
 }
 
+// Service is the containerd abstraction for images, containers, tasks, snapshots, and exec.
 type Service interface {
 	PullImage(ctx context.Context, ref string, opts *PullImageOptions) (containerd.Image, error)
 	GetImage(ctx context.Context, ref string) (containerd.Image, error)
@@ -142,12 +158,14 @@ type Service interface {
 	SnapshotMounts(ctx context.Context, snapshotter, key string) ([]mount.Mount, error)
 }
 
+// DefaultService is the default implementation of Service using a containerd client and namespace.
 type DefaultService struct {
 	client    *containerd.Client
 	namespace string
 	logger    *slog.Logger
 }
 
+// NewDefaultService builds a DefaultService from logger, client, and config (namespace from config).
 func NewDefaultService(log *slog.Logger, client *containerd.Client, cfg config.Config) *DefaultService {
 	namespace := cfg.Containerd.Namespace
 	if namespace == "" {
@@ -160,6 +178,7 @@ func NewDefaultService(log *slog.Logger, client *containerd.Client, cfg config.C
 	}
 }
 
+// PullImage pulls an image by reference; optional unpack and snapshotter.
 func (s *DefaultService) PullImage(ctx context.Context, ref string, opts *PullImageOptions) (containerd.Image, error) {
 	if ref == "" {
 		return nil, ErrInvalidArgument
@@ -177,6 +196,7 @@ func (s *DefaultService) PullImage(ctx context.Context, ref string, opts *PullIm
 	return s.client.Pull(ctx, ref, pullOpts...)
 }
 
+// GetImage returns the image for the given reference.
 func (s *DefaultService) GetImage(ctx context.Context, ref string) (containerd.Image, error) {
 	if ref == "" {
 		return nil, ErrInvalidArgument
@@ -185,11 +205,13 @@ func (s *DefaultService) GetImage(ctx context.Context, ref string) (containerd.I
 	return s.client.GetImage(ctx, ref)
 }
 
+// ListImages lists all images in the namespace.
 func (s *DefaultService) ListImages(ctx context.Context) ([]containerd.Image, error) {
 	ctx = s.withNamespace(ctx)
 	return s.client.ListImages(ctx)
 }
 
+// DeleteImage deletes the image by reference, optionally waiting synchronously.
 func (s *DefaultService) DeleteImage(ctx context.Context, ref string, opts *DeleteImageOptions) error {
 	if ref == "" {
 		return ErrInvalidArgument
@@ -202,6 +224,7 @@ func (s *DefaultService) DeleteImage(ctx context.Context, ref string, opts *Dele
 	return s.client.ImageService().Delete(ctx, ref, deleteOpts...)
 }
 
+// CreateContainer creates a container from an image or existing snapshot (with lease and spec).
 func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContainerRequest) (containerd.Container, error) {
 	if req.ID == "" || req.ImageRef == "" {
 		return nil, ErrInvalidArgument
@@ -212,7 +235,11 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 	if err != nil {
 		return nil, err
 	}
-	defer done(ctx)
+	defer func() {
+		if err := done(ctx); err != nil {
+			s.logger.Warn("release lease failed", slog.Any("error", err))
+		}
+	}()
 	image, err := s.getImageWithFallback(ctx, req.ImageRef)
 	if err != nil {
 		pullOpts := &PullImageOptions{
@@ -278,7 +305,7 @@ func (s *DefaultService) snapshotParentFromLayers(ctx context.Context, image con
 		return "", err
 	}
 	if len(manifest.Layers) == 0 {
-		return "", fmt.Errorf("image has no layer descriptors")
+		return "", errors.New("image has no layer descriptors")
 	}
 	diffIDs := make([]digest.Digest, 0, len(manifest.Layers))
 	for _, layer := range manifest.Layers {
@@ -344,8 +371,8 @@ func (s *DefaultService) getImageWithFallback(ctx context.Context, ref string) (
 	if err == nil {
 		return image, nil
 	}
-	if strings.HasPrefix(ref, "docker.io/library/") {
-		alt := strings.TrimPrefix(ref, "docker.io/library/")
+	if after, ok := strings.CutPrefix(ref, "docker.io/library/"); ok {
+		alt := after
 		image, altErr := s.GetImage(ctx, alt)
 		if altErr == nil {
 			return image, nil
@@ -358,8 +385,8 @@ func (s *DefaultService) getImageWithFallback(ctx context.Context, ref string) (
 			if name == ref || strings.HasSuffix(ref, "/"+name) || strings.HasSuffix(name, "/"+ref) {
 				return img, nil
 			}
-			if strings.HasPrefix(ref, "docker.io/library/") {
-				alt := strings.TrimPrefix(ref, "docker.io/library/")
+			if after, ok := strings.CutPrefix(ref, "docker.io/library/"); ok {
+				alt := after
 				if name == alt || strings.HasSuffix(name, "/"+alt) {
 					return img, nil
 				}
@@ -369,6 +396,7 @@ func (s *DefaultService) getImageWithFallback(ctx context.Context, ref string) (
 	return nil, err
 }
 
+// GetContainer returns the container by ID.
 func (s *DefaultService) GetContainer(ctx context.Context, id string) (containerd.Container, error) {
 	if id == "" {
 		return nil, ErrInvalidArgument
@@ -377,11 +405,13 @@ func (s *DefaultService) GetContainer(ctx context.Context, id string) (container
 	return s.client.LoadContainer(ctx, id)
 }
 
+// ListContainers returns all containers in the namespace.
 func (s *DefaultService) ListContainers(ctx context.Context) ([]containerd.Container, error) {
 	ctx = s.withNamespace(ctx)
 	return s.client.Containers(ctx)
 }
 
+// DeleteContainer deletes the container and optionally its snapshot.
 func (s *DefaultService) DeleteContainer(ctx context.Context, id string, opts *DeleteContainerOptions) error {
 	if id == "" {
 		return ErrInvalidArgument
@@ -405,6 +435,7 @@ func (s *DefaultService) DeleteContainer(ctx context.Context, id string, opts *D
 	return container.Delete(ctx, deleteOpts...)
 }
 
+// StartTask creates and starts the container task (optional stdio/terminal/FIFO).
 func (s *DefaultService) StartTask(ctx context.Context, containerID string, opts *StartTaskOptions) (containerd.Task, error) {
 	if containerID == "" {
 		return nil, ErrInvalidArgument
@@ -440,6 +471,7 @@ func (s *DefaultService) StartTask(ctx context.Context, containerID string, opts
 	return task, nil
 }
 
+// GetTask returns the running task for the container.
 func (s *DefaultService) GetTask(ctx context.Context, containerID string) (containerd.Task, error) {
 	if containerID == "" {
 		return nil, ErrInvalidArgument
@@ -453,6 +485,7 @@ func (s *DefaultService) GetTask(ctx context.Context, containerID string) (conta
 	return container.Task(ctx, nil)
 }
 
+// ListTasks returns task info for all tasks, optionally filtered.
 func (s *DefaultService) ListTasks(ctx context.Context, opts *ListTasksOptions) ([]TaskInfo, error) {
 	ctx = s.withNamespace(ctx)
 	request := &tasksv1.ListTasksRequest{}
@@ -479,6 +512,7 @@ func (s *DefaultService) ListTasks(ctx context.Context, opts *ListTasksOptions) 
 	return tasks, nil
 }
 
+// StopTask stops the task with signal and timeout; optional force kill.
 func (s *DefaultService) StopTask(ctx context.Context, containerID string, opts *StopTaskOptions) error {
 	if containerID == "" {
 		return ErrInvalidArgument
@@ -530,6 +564,7 @@ func (s *DefaultService) StopTask(ctx context.Context, containerID string, opts 
 	}
 }
 
+// DeleteTask deletes the task; optional force kill before delete.
 func (s *DefaultService) DeleteTask(ctx context.Context, containerID string, opts *DeleteTaskOptions) error {
 	if containerID == "" {
 		return ErrInvalidArgument
@@ -549,6 +584,7 @@ func (s *DefaultService) DeleteTask(ctx context.Context, containerID string, opt
 	return err
 }
 
+// ExecTask runs a command in the container and returns the exit code (non-streaming).
 func (s *DefaultService) ExecTask(ctx context.Context, containerID string, req ExecTaskRequest) (ExecTaskResult, error) {
 	if containerID == "" || len(req.Args) == 0 {
 		return ExecTaskResult{}, ErrInvalidArgument
@@ -609,7 +645,11 @@ func (s *DefaultService) ExecTask(ctx context.Context, containerID string, req E
 	if err != nil {
 		return ExecTaskResult{}, err
 	}
-	defer process.Delete(ctx)
+	defer func() {
+		if _, err := process.Delete(ctx); err != nil {
+			s.logger.Warn("exec process delete failed", slog.Any("error", err))
+		}
+	}()
 
 	statusC, err := process.Wait(ctx)
 	if err != nil {
@@ -628,6 +668,7 @@ func (s *DefaultService) ExecTask(ctx context.Context, containerID string, req E
 	return ExecTaskResult{ExitCode: code}, nil
 }
 
+// ExecTaskStreaming runs a command and returns stdio streams plus Wait/Close for the session.
 func (s *DefaultService) ExecTaskStreaming(ctx context.Context, containerID string, req ExecTaskRequest) (*ExecTaskSession, error) {
 	if containerID == "" || len(req.Args) == 0 {
 		return nil, ErrInvalidArgument
@@ -755,18 +796,19 @@ func resolveExecFIFODir(preferred string) (string, error) {
 
 	var lastErr error
 	for _, dir := range candidates {
-		if err := os.MkdirAll(dir, 0o755); err == nil {
+		err := os.MkdirAll(dir, 0o755)
+		if err == nil {
 			return dir, nil
-		} else {
-			lastErr = err
 		}
+		lastErr = err
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no fifo directory candidate available")
+		lastErr = errors.New("no fifo directory candidate available")
 	}
 	return "", lastErr
 }
 
+// ListContainersByLabel returns containers whose label key matches (value optional).
 func (s *DefaultService) ListContainersByLabel(ctx context.Context, key, value string) ([]containerd.Container, error) {
 	if key == "" {
 		return nil, ErrInvalidArgument
@@ -791,6 +833,7 @@ func (s *DefaultService) ListContainersByLabel(ctx context.Context, key, value s
 	return filtered, nil
 }
 
+// CommitSnapshot commits the active snapshot key as a new snapshot name.
 func (s *DefaultService) CommitSnapshot(ctx context.Context, snapshotter, name, key string) error {
 	if snapshotter == "" || name == "" || key == "" {
 		return ErrInvalidArgument
@@ -799,13 +842,14 @@ func (s *DefaultService) CommitSnapshot(ctx context.Context, snapshotter, name, 
 	return s.client.SnapshotService(snapshotter).Commit(ctx, name, key)
 }
 
+// ListSnapshots walks the snapshotter and returns all snapshot infos.
 func (s *DefaultService) ListSnapshots(ctx context.Context, snapshotter string) ([]snapshots.Info, error) {
 	if snapshotter == "" {
 		return nil, ErrInvalidArgument
 	}
 	ctx = s.withNamespace(ctx)
 	infos := []snapshots.Info{}
-	if err := s.client.SnapshotService(snapshotter).Walk(ctx, func(ctx context.Context, info snapshots.Info) error {
+	if err := s.client.SnapshotService(snapshotter).Walk(ctx, func(_ context.Context, info snapshots.Info) error {
 		infos = append(infos, info)
 		return nil
 	}); err != nil {
@@ -814,6 +858,7 @@ func (s *DefaultService) ListSnapshots(ctx context.Context, snapshotter string) 
 	return infos, nil
 }
 
+// PrepareSnapshot prepares a new active snapshot key from parent.
 func (s *DefaultService) PrepareSnapshot(ctx context.Context, snapshotter, key, parent string) error {
 	if snapshotter == "" || key == "" || parent == "" {
 		return ErrInvalidArgument
@@ -823,6 +868,7 @@ func (s *DefaultService) PrepareSnapshot(ctx context.Context, snapshotter, key, 
 	return err
 }
 
+// CreateContainerFromSnapshot creates a container from an existing snapshot (no new snapshot).
 func (s *DefaultService) CreateContainerFromSnapshot(ctx context.Context, req CreateContainerRequest) (containerd.Container, error) {
 	if req.ID == "" || req.SnapshotID == "" {
 		return nil, ErrInvalidArgument
@@ -874,6 +920,7 @@ func (s *DefaultService) CreateContainerFromSnapshot(ctx context.Context, req Cr
 	return s.client.NewContainer(ctx, req.ID, containerOpts...)
 }
 
+// SnapshotMounts returns the mount points for the snapshot key.
 func (s *DefaultService) SnapshotMounts(ctx context.Context, snapshotter, key string) ([]mount.Mount, error) {
 	if snapshotter == "" || key == "" {
 		return nil, ErrInvalidArgument

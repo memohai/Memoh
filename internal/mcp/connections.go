@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -40,11 +41,11 @@ type UpsertRequest struct {
 
 // ImportRequest accepts a standard mcpServers dict for batch import.
 type ImportRequest struct {
-	MCPServers map[string]MCPServerEntry `json:"mcpServers"`
+	MCPServers map[string]ServerEntry `json:"mcpServers"`
 }
 
-// MCPServerEntry is one entry in the standard mcpServers dict.
-type MCPServerEntry struct {
+// ServerEntry is one entry in the standard mcpServers dict.
+type ServerEntry struct {
 	Command   string            `json:"command,omitempty"`
 	Args      []string          `json:"args,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
@@ -61,7 +62,7 @@ type ListResponse struct {
 
 // ExportResponse returns connections in standard mcpServers format.
 type ExportResponse struct {
-	MCPServers map[string]MCPServerEntry `json:"mcpServers"`
+	MCPServers map[string]ServerEntry `json:"mcpServers"`
 }
 
 // ConnectionService handles CRUD operations for MCP connections.
@@ -84,7 +85,7 @@ func NewConnectionService(log *slog.Logger, queries *sqlc.Queries) *ConnectionSe
 // ListByBot returns all MCP connections for a bot.
 func (s *ConnectionService) ListByBot(ctx context.Context, botID string) ([]Connection, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("mcp queries not configured")
+		return nil, errors.New("mcp queries not configured")
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -123,7 +124,7 @@ func (s *ConnectionService) ListActiveByBot(ctx context.Context, botID string) (
 // Get returns a specific MCP connection for a bot.
 func (s *ConnectionService) Get(ctx context.Context, botID, id string) (Connection, error) {
 	if s.queries == nil {
-		return Connection{}, fmt.Errorf("mcp queries not configured")
+		return Connection{}, errors.New("mcp queries not configured")
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -146,7 +147,7 @@ func (s *ConnectionService) Get(ctx context.Context, botID, id string) (Connecti
 // Create inserts a new MCP connection for a bot.
 func (s *ConnectionService) Create(ctx context.Context, botID string, req UpsertRequest) (Connection, error) {
 	if s.queries == nil {
-		return Connection{}, fmt.Errorf("mcp queries not configured")
+		return Connection{}, errors.New("mcp queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -154,7 +155,7 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Connection{}, fmt.Errorf("name is required")
+		return Connection{}, errors.New("name is required")
 	}
 	mcpType, config, err := inferTypeAndConfig(req)
 	if err != nil {
@@ -184,7 +185,7 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 // Update modifies an existing MCP connection.
 func (s *ConnectionService) Update(ctx context.Context, botID, id string, req UpsertRequest) (Connection, error) {
 	if s.queries == nil {
-		return Connection{}, fmt.Errorf("mcp queries not configured")
+		return Connection{}, errors.New("mcp queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -196,7 +197,7 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Connection{}, fmt.Errorf("name is required")
+		return Connection{}, errors.New("name is required")
 	}
 	mcpType, config, err := inferTypeAndConfig(req)
 	if err != nil {
@@ -230,7 +231,7 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 // Connections not in the input are left untouched.
 func (s *ConnectionService) Import(ctx context.Context, botID string, req ImportRequest) ([]Connection, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("mcp queries not configured")
+		return nil, errors.New("mcp queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -278,7 +279,7 @@ func (s *ConnectionService) ExportByBot(ctx context.Context, botID string) (Expo
 	if err != nil {
 		return ExportResponse{}, err
 	}
-	servers := make(map[string]MCPServerEntry, len(items))
+	servers := make(map[string]ServerEntry, len(items))
 	for _, conn := range items {
 		servers[conn.Name] = connectionToExportEntry(conn)
 	}
@@ -288,7 +289,7 @@ func (s *ConnectionService) ExportByBot(ctx context.Context, botID string) (Expo
 // Delete removes an MCP connection.
 func (s *ConnectionService) Delete(ctx context.Context, botID, id string) error {
 	if s.queries == nil {
-		return fmt.Errorf("mcp queries not configured")
+		return errors.New("mcp queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -307,7 +308,7 @@ func (s *ConnectionService) Delete(ctx context.Context, botID, id string) error 
 // BatchDelete removes multiple MCP connections by IDs. Invalid IDs are skipped; at least one must succeed for no error.
 func (s *ConnectionService) BatchDelete(ctx context.Context, botID string, ids []string) error {
 	if s.queries == nil {
-		return fmt.Errorf("mcp queries not configured")
+		return errors.New("mcp queries not configured")
 	}
 	if len(ids) == 0 {
 		return nil
@@ -362,10 +363,10 @@ func inferTypeAndConfig(req UpsertRequest) (string, map[string]any, error) {
 	hasURL := strings.TrimSpace(req.URL) != ""
 
 	if !hasCommand && !hasURL {
-		return "", nil, fmt.Errorf("command or url is required")
+		return "", nil, errors.New("command or url is required")
 	}
 	if hasCommand && hasURL {
-		return "", nil, fmt.Errorf("command and url are mutually exclusive")
+		return "", nil, errors.New("command and url are mutually exclusive")
 	}
 
 	config := map[string]any{}
@@ -395,8 +396,8 @@ func inferTypeAndConfig(req UpsertRequest) (string, map[string]any, error) {
 	return "http", config, nil
 }
 
-// entryToUpsertRequest converts a named MCPServerEntry to an UpsertRequest.
-func entryToUpsertRequest(name string, entry MCPServerEntry) UpsertRequest {
+// entryToUpsertRequest converts a named ServerEntry to an UpsertRequest.
+func entryToUpsertRequest(name string, entry ServerEntry) UpsertRequest {
 	return UpsertRequest{
 		Name:      name,
 		Command:   entry.Command,
@@ -410,8 +411,8 @@ func entryToUpsertRequest(name string, entry MCPServerEntry) UpsertRequest {
 }
 
 // connectionToExportEntry converts a stored connection to standard mcpServers entry.
-func connectionToExportEntry(conn Connection) MCPServerEntry {
-	entry := MCPServerEntry{}
+func connectionToExportEntry(conn Connection) ServerEntry {
+	entry := ServerEntry{}
 	switch conn.Type {
 	case "stdio":
 		entry.Command, _ = conn.Config["command"].(string)

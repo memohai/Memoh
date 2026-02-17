@@ -1,9 +1,9 @@
+// Package preauth provides pre-authentication token issuance and validation.
 package preauth
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -15,12 +15,15 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
+// ErrKeyNotFound is returned when a preauth key lookup by token finds no row.
 var ErrKeyNotFound = errors.New("preauth key not found")
 
+// Service issues and validates preauth keys for bot access.
 type Service struct {
 	queries *sqlc.Queries
 }
 
+// NewService creates a preauth service using the given queries.
 func NewService(queries *sqlc.Queries) *Service {
 	return &Service{queries: queries}
 }
@@ -28,7 +31,7 @@ func NewService(queries *sqlc.Queries) *Service {
 // Issue creates a new preauth key for the given bot.
 func (s *Service) Issue(ctx context.Context, botID, issuedByUserID string, ttl time.Duration) (Key, error) {
 	if s.queries == nil {
-		return Key{}, fmt.Errorf("preauth queries not configured")
+		return Key{}, errors.New("preauth queries not configured")
 	}
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
@@ -59,9 +62,10 @@ func (s *Service) Issue(ctx context.Context, botID, issuedByUserID string, ttl t
 	return normalizeKey(row), nil
 }
 
+// Get returns the preauth key for the given token, or ErrKeyNotFound if not found.
 func (s *Service) Get(ctx context.Context, token string) (Key, error) {
 	if s.queries == nil {
-		return Key{}, fmt.Errorf("preauth queries not configured")
+		return Key{}, errors.New("preauth queries not configured")
 	}
 	row, err := s.queries.GetBotPreauthKey(ctx, strings.TrimSpace(token))
 	if err != nil {
@@ -73,9 +77,10 @@ func (s *Service) Get(ctx context.Context, token string) (Key, error) {
 	return normalizeKey(row), nil
 }
 
+// MarkUsed marks the preauth key by ID as used and returns the updated key.
 func (s *Service) MarkUsed(ctx context.Context, id string) (Key, error) {
 	if s.queries == nil {
-		return Key{}, fmt.Errorf("preauth queries not configured")
+		return Key{}, errors.New("preauth queries not configured")
 	}
 	pgID, err := db.ParseUUID(id)
 	if err != nil {

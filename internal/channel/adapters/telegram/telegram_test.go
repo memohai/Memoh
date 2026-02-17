@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
 	"github.com/memohai/memoh/internal/channel"
 )
 
@@ -73,7 +75,7 @@ func TestIsTelegramBotMentioned(t *testing.T) {
 func TestTelegramDescriptorIncludesStreaming(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	caps := adapter.Descriptor().Capabilities
 	if !caps.Streaming {
 		t.Fatal("expected streaming capability")
@@ -86,7 +88,7 @@ func TestTelegramDescriptorIncludesStreaming(t *testing.T) {
 func TestBuildTelegramAttachmentIncludesPlatformReference(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	att := adapter.buildTelegramAttachment(nil, channel.AttachmentFile, "file_1", "doc.txt", "text/plain", 10)
 	if att.PlatformKey != "file_1" {
 		t.Fatalf("unexpected platform key: %s", att.PlatformKey)
@@ -169,21 +171,21 @@ func TestPickTelegramPhoto(t *testing.T) {
 	}
 }
 
-func TestTelegramAdapter_Type(t *testing.T) {
+func TestAdapter_Type(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	if adapter.Type() != Type {
 		t.Fatalf("Type should return telegram: %s", adapter.Type())
 	}
 }
 
-func TestTelegramAdapter_OpenStreamEmptyTarget(t *testing.T) {
+func TestAdapter_OpenStreamEmptyTarget(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	ctx := context.Background()
-	cfg := channel.ChannelConfig{}
+	cfg := channel.Config{}
 	_, err := adapter.OpenStream(ctx, cfg, "", channel.StreamOptions{})
 	if err == nil {
 		t.Fatal("empty target should return error")
@@ -278,10 +280,10 @@ func TestBuildTelegramAnimation(t *testing.T) {
 	}
 }
 
-func TestTelegramAdapter_NormalizeAndResolve(t *testing.T) {
+func TestAdapter_NormalizeAndResolve(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	norm, err := adapter.NormalizeConfig(map[string]any{"botToken": "t1"})
 	if err != nil {
 		t.Fatalf("NormalizeConfig: %v", err)
@@ -320,7 +322,7 @@ func TestIsTelegramMessageNotModified(t *testing.T) {
 		want bool
 	}{
 		{"nil", nil, false},
-		{"plain error", fmt.Errorf("network error"), false},
+		{"plain error", errors.New("network error"), false},
 		{"other api error", tgbotapi.Error{Code: 400, Message: "Bad Request: chat not found"}, false},
 		{"message is not modified", tgbotapi.Error{Code: 400, Message: productionMessageNotModified}, true},
 		{"production exact", tgbotapi.Error{Code: 400, Message: productionMessageNotModified}, true},
@@ -472,19 +474,19 @@ func TestEditTelegramMessageText_429ReturnsError(t *testing.T) {
 	}
 }
 
-func TestTelegramAdapter_ImplementsProcessingStatusNotifier(t *testing.T) {
+func TestAdapter_ImplementsProcessingStatusNotifier(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	var _ channel.ProcessingStatusNotifier = adapter
 }
 
 func TestProcessingStarted_EmptyParams(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	ctx := context.Background()
-	cfg := channel.ChannelConfig{}
+	cfg := channel.Config{}
 	msg := channel.InboundMessage{}
 
 	handle, err := adapter.ProcessingStarted(ctx, cfg, msg, channel.ProcessingStatusInfo{})
@@ -499,10 +501,10 @@ func TestProcessingStarted_EmptyParams(t *testing.T) {
 func TestProcessingCompleted_EmptyHandle(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	ctx := context.Background()
 
-	err := adapter.ProcessingCompleted(ctx, channel.ChannelConfig{}, channel.InboundMessage{}, channel.ProcessingStatusInfo{}, channel.ProcessingStatusHandle{})
+	err := adapter.ProcessingCompleted(ctx, channel.Config{}, channel.InboundMessage{}, channel.ProcessingStatusInfo{}, channel.ProcessingStatusHandle{})
 	if err != nil {
 		t.Fatalf("empty handle should be no-op: %v", err)
 	}
@@ -511,10 +513,10 @@ func TestProcessingCompleted_EmptyHandle(t *testing.T) {
 func TestProcessingFailed_DelegatesToCompleted(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	ctx := context.Background()
 
-	err := adapter.ProcessingFailed(ctx, channel.ChannelConfig{}, channel.InboundMessage{}, channel.ProcessingStatusInfo{}, channel.ProcessingStatusHandle{}, fmt.Errorf("test"))
+	err := adapter.ProcessingFailed(ctx, channel.Config{}, channel.InboundMessage{}, channel.ProcessingStatusInfo{}, channel.ProcessingStatusHandle{}, errors.New("test"))
 	if err != nil {
 		t.Fatalf("empty handle should be no-op: %v", err)
 	}

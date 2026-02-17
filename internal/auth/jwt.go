@@ -1,6 +1,8 @@
+// Package auth provides JWT-based authentication and middleware.
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -30,7 +32,7 @@ func JWTMiddleware(secret string, skipper middleware.Skipper) echo.MiddlewareFun
 		SigningMethod: "HS256",
 		TokenLookup:   "header:Authorization:Bearer ",
 		Skipper:       skipper,
-		NewClaimsFunc: func(c echo.Context) jwt.Claims {
+		NewClaimsFunc: func(_ echo.Context) jwt.Claims {
 			return jwt.MapClaims{}
 		},
 	})
@@ -58,13 +60,13 @@ func UserIDFromContext(c echo.Context) (string, error) {
 // GenerateToken creates a signed JWT for the user.
 func GenerateToken(userID, secret string, expiresIn time.Duration) (string, time.Time, error) {
 	if strings.TrimSpace(userID) == "" {
-		return "", time.Time{}, fmt.Errorf("user id is required")
+		return "", time.Time{}, errors.New("user id is required")
 	}
 	if strings.TrimSpace(secret) == "" {
-		return "", time.Time{}, fmt.Errorf("jwt secret is required")
+		return "", time.Time{}, errors.New("jwt secret is required")
 	}
 	if expiresIn <= 0 {
-		return "", time.Time{}, fmt.Errorf("jwt expires in must be positive")
+		return "", time.Time{}, errors.New("jwt expires in must be positive")
 	}
 
 	now := time.Now().UTC()
@@ -95,22 +97,22 @@ type ChatToken struct {
 // GenerateChatToken creates a signed JWT for chat route reply.
 func GenerateChatToken(info ChatToken, secret string, expiresIn time.Duration) (string, time.Time, error) {
 	if strings.TrimSpace(info.BotID) == "" {
-		return "", time.Time{}, fmt.Errorf("bot id is required")
+		return "", time.Time{}, errors.New("bot id is required")
 	}
 	if strings.TrimSpace(info.ChatID) == "" {
-		return "", time.Time{}, fmt.Errorf("chat id is required")
+		return "", time.Time{}, errors.New("chat id is required")
 	}
 	if strings.TrimSpace(info.UserID) == "" {
 		info.UserID = strings.TrimSpace(info.ChannelIdentityID)
 	}
 	if strings.TrimSpace(info.UserID) == "" {
-		return "", time.Time{}, fmt.Errorf("user id is required")
+		return "", time.Time{}, errors.New("user id is required")
 	}
 	if strings.TrimSpace(secret) == "" {
-		return "", time.Time{}, fmt.Errorf("jwt secret is required")
+		return "", time.Time{}, errors.New("jwt secret is required")
 	}
 	if expiresIn <= 0 {
-		return "", time.Time{}, fmt.Errorf("jwt expires in must be positive")
+		return "", time.Time{}, errors.New("jwt expires in must be positive")
 	}
 
 	now := time.Now().UTC()

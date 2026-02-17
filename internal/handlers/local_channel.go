@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -20,7 +21,7 @@ import (
 
 // LocalChannelHandler handles local channel (CLI/Web) routes backed by bot history.
 type LocalChannelHandler struct {
-	channelType    channel.ChannelType
+	channelType    channel.Type
 	channelManager *channel.Manager
 	channelService *channel.Service
 	chatService    *conversation.Service
@@ -30,7 +31,7 @@ type LocalChannelHandler struct {
 }
 
 // NewLocalChannelHandler creates a local channel handler.
-func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *channel.Manager, channelService *channel.Service, chatService *conversation.Service, routeHub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *LocalChannelHandler {
+func NewLocalChannelHandler(channelType channel.Type, channelManager *channel.Manager, channelService *channel.Service, chatService *conversation.Service, routeHub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *LocalChannelHandler {
 	return &LocalChannelHandler{
 		channelType:    channelType,
 		channelManager: channelManager,
@@ -44,7 +45,7 @@ func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *cha
 
 // Register registers the local channel routes.
 func (h *LocalChannelHandler) Register(e *echo.Echo) {
-	prefix := fmt.Sprintf("/bots/:bot_id/%s", h.channelType.String())
+	prefix := "/bots/:bot_id/" + h.channelType.String()
 	group := e.Group(prefix)
 	group.GET("/stream", h.StreamMessages)
 	group.POST("/messages", h.PostMessage)
@@ -100,10 +101,12 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 			if err != nil {
 				continue
 			}
-			if _, err := writer.WriteString(fmt.Sprintf("data: %s\n\n", string(data))); err != nil {
+			if _, err := fmt.Fprintf(writer, "data: %s\n\n", string(data)); err != nil {
 				return nil // client disconnected
 			}
-			writer.Flush()
+			if err := writer.Flush(); err != nil {
+				slog.Default().Warn("local channel: flush failed", slog.Any("error", err))
+			}
 			flusher.Flush()
 		}
 	}

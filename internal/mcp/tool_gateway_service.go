@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -30,6 +29,7 @@ type ToolGatewayService struct {
 	cache map[string]cachedToolRegistry
 }
 
+// NewToolGatewayService creates a gateway that aggregates tools from executors and sources (with cache).
 func NewToolGatewayService(log *slog.Logger, executors []ToolExecutor, sources []ToolSource) *ToolGatewayService {
 	if log == nil {
 		log = slog.Default()
@@ -55,6 +55,7 @@ func NewToolGatewayService(log *slog.Logger, executors []ToolExecutor, sources [
 	}
 }
 
+// InitializeResult returns the MCP initialize response (protocol version, capabilities, server info).
 func (s *ToolGatewayService) InitializeResult() map[string]any {
 	return map[string]any{
 		"protocolVersion": "2025-06-18",
@@ -70,6 +71,7 @@ func (s *ToolGatewayService) InitializeResult() map[string]any {
 	}
 }
 
+// ListTools returns all tools from executors and sources for the session (cached by cacheTTL).
 func (s *ToolGatewayService) ListTools(ctx context.Context, session ToolSessionContext) ([]ToolDescriptor, error) {
 	registry, err := s.getRegistry(ctx, session, false)
 	if err != nil {
@@ -78,10 +80,11 @@ func (s *ToolGatewayService) ListTools(ctx context.Context, session ToolSessionC
 	return registry.List(), nil
 }
 
+// CallTool looks up the tool by name, delegates to the executor/source, and returns the MCP result map.
 func (s *ToolGatewayService) CallTool(ctx context.Context, session ToolSessionContext, payload ToolCallPayload) (map[string]any, error) {
 	toolName := strings.TrimSpace(payload.Name)
 	if toolName == "" {
-		return nil, fmt.Errorf("tool name is required")
+		return nil, errors.New("tool name is required")
 	}
 
 	registry, err := s.getRegistry(ctx, session, false)
@@ -121,7 +124,7 @@ func (s *ToolGatewayService) CallTool(ctx context.Context, session ToolSessionCo
 func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessionContext, force bool) (*ToolRegistry, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot id is required")
+		return nil, errors.New("bot id is required")
 	}
 	if !force {
 		s.mu.Lock()

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -19,8 +20,8 @@ const (
 	manifestVer   = 1
 )
 
-// MemoryFS persists memory entries as files inside the bot container via ExecRunner.
-type MemoryFS struct {
+// FS persists memory entries as files inside the bot container via ExecRunner.
+type FS struct {
 	execRunner container.ExecRunner
 	workDir    string // e.g. "/data"
 	logger     *slog.Logger
@@ -42,15 +43,15 @@ type ManifestEntry struct {
 	Filters   map[string]any `json:"filters,omitempty"`
 }
 
-// NewMemoryFS creates a MemoryFS that writes through the given ExecRunner.
-func NewMemoryFS(log *slog.Logger, runner container.ExecRunner, workDir string) *MemoryFS {
+// NewFS creates a FS that writes through the given ExecRunner.
+func NewFS(log *slog.Logger, runner container.ExecRunner, workDir string) *FS {
 	if log == nil {
 		log = slog.Default()
 	}
 	if strings.TrimSpace(workDir) == "" {
 		workDir = "/data"
 	}
-	return &MemoryFS{
+	return &FS{
 		execRunner: runner,
 		workDir:    workDir,
 		logger:     log.With(slog.String("component", "memoryfs")),
@@ -61,7 +62,7 @@ func NewMemoryFS(log *slog.Logger, runner container.ExecRunner, workDir string) 
 
 // PersistMemories writes .md files for new items and incrementally updates the manifest.
 // Used after Add — does NOT delete existing files.
-func (fs *MemoryFS) PersistMemories(ctx context.Context, botID string, items []MemoryItem, filters map[string]any) error {
+func (fs *FS) PersistMemories(ctx context.Context, botID string, items []Item, filters map[string]any) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -100,7 +101,7 @@ func (fs *MemoryFS) PersistMemories(ctx context.Context, botID string, items []M
 
 // RebuildFiles does a full replace: deletes all old memory/*.md files, writes new ones,
 // and rewrites manifest from scratch. Used after Compact.
-func (fs *MemoryFS) RebuildFiles(ctx context.Context, botID string, items []MemoryItem, filters map[string]any) error {
+func (fs *FS) RebuildFiles(ctx context.Context, botID string, items []Item, filters map[string]any) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -132,7 +133,7 @@ func (fs *MemoryFS) RebuildFiles(ctx context.Context, botID string, items []Memo
 }
 
 // RemoveMemories removes specific memory files from the FS and updates the manifest.
-func (fs *MemoryFS) RemoveMemories(ctx context.Context, botID string, ids []string) error {
+func (fs *FS) RemoveMemories(ctx context.Context, botID string, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -158,7 +159,7 @@ func (fs *MemoryFS) RemoveMemories(ctx context.Context, botID string, ids []stri
 }
 
 // RemoveAllMemories deletes all memory files and the manifest.
-func (fs *MemoryFS) RemoveAllMemories(ctx context.Context, botID string) error {
+func (fs *FS) RemoveAllMemories(ctx context.Context, botID string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -174,13 +175,13 @@ func (fs *MemoryFS) RemoveAllMemories(ctx context.Context, botID string) error {
 // ----- read operations -----
 
 // ReadManifest reads and parses the manifest.json file.
-func (fs *MemoryFS) ReadManifest(ctx context.Context, botID string) (*Manifest, error) {
+func (fs *FS) ReadManifest(ctx context.Context, botID string) (*Manifest, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	return fs.readManifestLocked(ctx, botID)
 }
 
-func (fs *MemoryFS) readManifestLocked(ctx context.Context, botID string) (*Manifest, error) {
+func (fs *FS) readManifestLocked(ctx context.Context, botID string) (*Manifest, error) {
 	content, err := container.ExecRead(ctx, fs.execRunner, botID, fs.workDir, manifestPath)
 	if err != nil {
 		return nil, err
@@ -193,13 +194,13 @@ func (fs *MemoryFS) readManifestLocked(ctx context.Context, botID string) (*Mani
 }
 
 // ReadAllMemoryFiles lists and reads all .md files under memory/ and parses their frontmatter.
-func (fs *MemoryFS) ReadAllMemoryFiles(ctx context.Context, botID string) ([]MemoryItem, error) {
+func (fs *FS) ReadAllMemoryFiles(ctx context.Context, botID string) ([]Item, error) {
 	entries, err := container.ExecList(ctx, fs.execRunner, botID, fs.workDir, memoryDirPath, false)
 	if err != nil {
 		return nil, fmt.Errorf("list memory dir: %w", err)
 	}
 
-	var items []MemoryItem
+	var items []Item
 	for _, entry := range entries {
 		if entry.IsDir || !strings.HasSuffix(entry.Path, ".md") {
 			continue
@@ -222,13 +223,13 @@ func (fs *MemoryFS) ReadAllMemoryFiles(ctx context.Context, botID string) ([]Mem
 
 // ----- internal helpers -----
 
-func (fs *MemoryFS) writeMemoryFile(ctx context.Context, botID string, item MemoryItem) error {
+func (fs *FS) writeMemoryFile(ctx context.Context, botID string, item Item) error {
 	content := formatMemoryMD(item)
 	filePath := fmt.Sprintf("%s/%s.md", memoryDirPath, item.ID)
 	return container.ExecWrite(ctx, fs.execRunner, botID, fs.workDir, filePath, content)
 }
 
-func (fs *MemoryFS) writeManifest(ctx context.Context, botID string, manifest *Manifest) error {
+func (fs *FS) writeManifest(ctx context.Context, botID string, manifest *Manifest) error {
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
@@ -237,7 +238,7 @@ func (fs *MemoryFS) writeManifest(ctx context.Context, botID string, manifest *M
 }
 
 // execDeleteDir removes all files inside a directory (but keeps the directory itself).
-func (fs *MemoryFS) execDeleteDir(ctx context.Context, botID, dirPath string) {
+func (fs *FS) execDeleteDir(ctx context.Context, botID, dirPath string) {
 	// Use find + rm to avoid shell quoting issues with glob wildcards.
 	script := fmt.Sprintf("find %s -type f -delete 2>/dev/null; true", container.ShellQuote(dirPath))
 	_, err := fs.execRunner.ExecWithCapture(ctx, mcpgw.ExecRequest{
@@ -251,8 +252,8 @@ func (fs *MemoryFS) execDeleteDir(ctx context.Context, botID, dirPath string) {
 }
 
 // execDeleteFile removes a single file.
-func (fs *MemoryFS) execDeleteFile(ctx context.Context, botID, filePath string) {
-	script := fmt.Sprintf("rm -f %s", container.ShellQuote(filePath))
+func (fs *FS) execDeleteFile(ctx context.Context, botID, filePath string) {
+	script := "rm -f " + container.ShellQuote(filePath)
 	_, err := fs.execRunner.ExecWithCapture(ctx, mcpgw.ExecRequest{
 		BotID:   botID,
 		Command: []string{"/bin/sh", "-c", script},
@@ -265,7 +266,7 @@ func (fs *MemoryFS) execDeleteFile(ctx context.Context, botID, filePath string) 
 
 // ----- .md formatting / parsing -----
 
-func formatMemoryMD(item MemoryItem) string {
+func formatMemoryMD(item Item) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString(fmt.Sprintf("id: %s\n", item.ID))
@@ -284,21 +285,21 @@ func formatMemoryMD(item MemoryItem) string {
 	return b.String()
 }
 
-func parseMemoryMD(content string) (MemoryItem, error) {
+func parseMemoryMD(content string) (Item, error) {
 	content = strings.TrimSpace(content)
 	if !strings.HasPrefix(content, "---") {
-		return MemoryItem{}, fmt.Errorf("missing frontmatter")
+		return Item{}, errors.New("missing frontmatter")
 	}
 	// Split on "---" delimiters.
 	parts := strings.SplitN(content[3:], "---", 2)
 	if len(parts) < 2 {
-		return MemoryItem{}, fmt.Errorf("incomplete frontmatter")
+		return Item{}, errors.New("incomplete frontmatter")
 	}
 	frontmatter := strings.TrimSpace(parts[0])
 	body := strings.TrimSpace(parts[1])
 
-	item := MemoryItem{Memory: body}
-	for _, line := range strings.Split(frontmatter, "\n") {
+	item := Item{Memory: body}
+	for line := range strings.SplitSeq(frontmatter, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -321,7 +322,7 @@ func parseMemoryMD(content string) (MemoryItem, error) {
 		}
 	}
 	if item.ID == "" {
-		return MemoryItem{}, fmt.Errorf("missing id in frontmatter")
+		return Item{}, errors.New("missing id in frontmatter")
 	}
 	return item, nil
 }

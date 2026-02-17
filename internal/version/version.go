@@ -1,3 +1,6 @@
+// Package version provides application version and build info.
+//
+//nolint:revive
 package version
 
 import (

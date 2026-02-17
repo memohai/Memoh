@@ -1,3 +1,4 @@
+// Package federation provides the MCP federation SSE source.
 package federation
 
 import (
@@ -15,10 +16,12 @@ import (
 
 const cacheTTL = 5 * time.Second
 
+// ConnectionLister lists active MCP connections by bot (for federation source).
 type ConnectionLister interface {
 	ListActiveByBot(ctx context.Context, botID string) ([]mcpgw.Connection, error)
 }
 
+// Gateway lists and calls tools on HTTP/SSE/Stdio MCP connections.
 type Gateway interface {
 	ListHTTPConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error)
 	CallHTTPConnectionTool(ctx context.Context, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error)
@@ -42,6 +45,7 @@ type cacheEntry struct {
 	tools     []mcpgw.ToolDescriptor
 }
 
+// Source is a ToolSource that federates tools from remote MCP connections (HTTP/SSE/Stdio) with cache.
 type Source struct {
 	logger      *slog.Logger
 	gateway     Gateway
@@ -51,6 +55,7 @@ type Source struct {
 	cache map[string]cacheEntry
 }
 
+// NewSource creates a federation source with gateway and connection lister.
 func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister) *Source {
 	if log == nil {
 		log = slog.Default()
@@ -63,6 +68,7 @@ func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister) 
 	}
 }
 
+// ListTools returns tools from all active connections for the bot (cached by cacheTTL).
 func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" || s.gateway == nil {
@@ -80,6 +86,7 @@ func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext
 	return cloneTools(tools), nil
 }
 
+// CallTool routes the tool call to the appropriate connection (HTTP/SSE/Stdio) via gateway.
 func (s *Source) CallTool(ctx context.Context, session mcpgw.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
 	if s.gateway == nil {
 		return mcpgw.BuildToolErrorResult("federation gateway not available"), nil
@@ -274,6 +281,7 @@ func (s *Source) getRoute(botID, toolName string) (toolRoute, bool) {
 	return route, exists
 }
 
+// String returns a short description of the source for logging.
 func (s *Source) String() string {
 	return fmt.Sprintf("FederationSource(%p)", s)
 }

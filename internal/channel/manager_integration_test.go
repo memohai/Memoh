@@ -2,8 +2,7 @@ package channel
 
 import (
 	"context"
-	"fmt"
-	"io"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -12,37 +11,37 @@ import (
 )
 
 type fakeConfigStore struct {
-	effectiveConfig        ChannelConfig
-	channelIdentityConfig  ChannelIdentityBinding
-	configsByType          map[ChannelType][]ChannelConfig
+	effectiveConfig        Config
+	channelIdentityConfig  IdentityBinding
+	configsByType          map[Type][]Config
 	boundChannelIdentityID string
 }
 
-func (f *fakeConfigStore) ResolveEffectiveConfig(ctx context.Context, botID string, channelType ChannelType) (ChannelConfig, error) {
+func (f *fakeConfigStore) ResolveEffectiveConfig(_ context.Context, _ string, _ Type) (Config, error) {
 	return f.effectiveConfig, nil
 }
 
-func (f *fakeConfigStore) GetChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType) (ChannelIdentityBinding, error) {
+func (f *fakeConfigStore) GetChannelIdentityConfig(_ context.Context, _ string, _ Type) (IdentityBinding, error) {
 	if f.channelIdentityConfig.ID == "" && len(f.channelIdentityConfig.Config) == 0 {
-		return ChannelIdentityBinding{}, fmt.Errorf("channel user config not found")
+		return IdentityBinding{}, errors.New("channel user config not found")
 	}
 	return f.channelIdentityConfig, nil
 }
 
-func (f *fakeConfigStore) UpsertChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType, req UpsertChannelIdentityConfigRequest) (ChannelIdentityBinding, error) {
+func (f *fakeConfigStore) UpsertChannelIdentityConfig(_ context.Context, _ string, _ Type, _ UpsertChannelIdentityConfigRequest) (IdentityBinding, error) {
 	return f.channelIdentityConfig, nil
 }
 
-func (f *fakeConfigStore) ListConfigsByType(ctx context.Context, channelType ChannelType) ([]ChannelConfig, error) {
+func (f *fakeConfigStore) ListConfigsByType(_ context.Context, channelType Type) ([]Config, error) {
 	if f.configsByType == nil {
 		return nil, nil
 	}
 	return f.configsByType[channelType], nil
 }
 
-func (f *fakeConfigStore) ResolveChannelIdentityBinding(ctx context.Context, channelType ChannelType, criteria BindingCriteria) (string, error) {
+func (f *fakeConfigStore) ResolveIdentityBinding(_ context.Context, _ Type, _ BindingCriteria) (string, error) {
 	if f.boundChannelIdentityID == "" {
-		return "", fmt.Errorf("channel user binding not found")
+		return "", errors.New("channel user binding not found")
 	}
 	return f.boundChannelIdentityID, nil
 }
@@ -50,11 +49,11 @@ func (f *fakeConfigStore) ResolveChannelIdentityBinding(ctx context.Context, cha
 type fakeInboundProcessorIntegration struct {
 	resp   *OutboundMessage
 	err    error
-	gotCfg ChannelConfig
+	gotCfg Config
 	gotMsg InboundMessage
 }
 
-func (f *fakeInboundProcessorIntegration) HandleInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage, sender StreamReplySender) error {
+func (f *fakeInboundProcessorIntegration) HandleInbound(ctx context.Context, cfg Config, msg InboundMessage, sender StreamReplySender) error {
 	f.gotCfg = cfg
 	f.gotMsg = msg
 	if f.err != nil {
@@ -64,38 +63,38 @@ func (f *fakeInboundProcessorIntegration) HandleInbound(ctx context.Context, cfg
 		return nil
 	}
 	if sender == nil {
-		return fmt.Errorf("sender missing")
+		return errors.New("sender missing")
 	}
 	return sender.Send(ctx, *f.resp)
 }
 
 type fakeAdapter struct {
-	channelType ChannelType
+	channelType Type
 	mu          sync.Mutex
-	started     []ChannelConfig
+	started     []Config
 	sent        []OutboundMessage
 	stops       int
 }
 
-func (f *fakeAdapter) Type() ChannelType {
+func (f *fakeAdapter) Type() Type {
 	return f.channelType
 }
 
 func (f *fakeAdapter) Descriptor() Descriptor {
-	return Descriptor{Type: f.channelType, DisplayName: "Fake", Capabilities: ChannelCapabilities{Text: true}}
+	return Descriptor{Type: f.channelType, DisplayName: "Fake", Capabilities: Capabilities{Text: true}}
 }
 
 func (f *fakeAdapter) ResolveTarget(channelIdentityConfig map[string]any) (string, error) {
 	value := strings.TrimSpace(ReadString(channelIdentityConfig, "target"))
 	if value == "" {
-		return "", fmt.Errorf("missing target")
+		return "", errors.New("missing target")
 	}
 	return "resolved:" + value, nil
 }
 
 func (f *fakeAdapter) NormalizeTarget(raw string) string { return strings.TrimSpace(raw) }
 
-func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (Connection, error) {
+func (f *fakeAdapter) Connect(_ context.Context, cfg Config, _ InboundHandler) (Connection, error) {
 	f.mu.Lock()
 	f.started = append(f.started, cfg)
 	f.mu.Unlock()
@@ -108,7 +107,7 @@ func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, handler In
 	return NewConnection(cfg, stop), nil
 }
 
-func (f *fakeAdapter) Send(ctx context.Context, cfg ChannelConfig, msg OutboundMessage) error {
+func (f *fakeAdapter) Send(_ context.Context, _ Config, msg OutboundMessage) error {
 	f.mu.Lock()
 	f.sent = append(f.sent, msg)
 	f.mu.Unlock()
@@ -118,7 +117,7 @@ func (f *fakeAdapter) Send(ctx context.Context, cfg ChannelConfig, msg OutboundM
 func TestManagerHandleInboundIntegratesAdapter(t *testing.T) {
 	t.Parallel()
 
-	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+	log := slog.New(slog.DiscardHandler)
 	store := &fakeConfigStore{}
 	processor := &fakeInboundProcessorIntegration{
 		resp: &OutboundMessage{
@@ -129,19 +128,19 @@ func TestManagerHandleInboundIntegratesAdapter(t *testing.T) {
 		},
 	}
 	reg := NewRegistry()
-	adapter := &fakeAdapter{channelType: ChannelType("test")}
+	adapter := &fakeAdapter{channelType: Type("test")}
 	manager := NewManager(log, reg, store, processor)
 	manager.RegisterAdapter(adapter)
 
-	cfg := ChannelConfig{
+	cfg := Config{
 		ID:          "cfg-1",
 		BotID:       "bot-1",
-		ChannelType: ChannelType("test"),
+		Type:        Type("test"),
 		Credentials: map[string]any{"botToken": "token"},
 		UpdatedAt:   time.Now(),
 	}
 	err := manager.handleInbound(context.Background(), cfg, InboundMessage{
-		Channel:     ChannelType("test"),
+		Channel:     Type("test"),
 		Message:     Message{Text: "hi"},
 		BotID:       "bot-1",
 		ReplyTarget: "123",
@@ -171,26 +170,26 @@ func TestManagerHandleInboundIntegratesAdapter(t *testing.T) {
 func TestManagerSendUsesBinding(t *testing.T) {
 	t.Parallel()
 
-	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+	log := slog.New(slog.DiscardHandler)
 	store := &fakeConfigStore{
-		effectiveConfig: ChannelConfig{
+		effectiveConfig: Config{
 			ID:          "cfg-1",
 			BotID:       "bot-1",
-			ChannelType: ChannelType("test"),
+			Type:        Type("test"),
 			Credentials: map[string]any{"botToken": "token"},
 			UpdatedAt:   time.Now(),
 		},
-		channelIdentityConfig: ChannelIdentityBinding{
+		channelIdentityConfig: IdentityBinding{
 			ID:     "binding-1",
 			Config: map[string]any{"target": "alice"},
 		},
 	}
 	reg := NewRegistry()
-	adapter := &fakeAdapter{channelType: ChannelType("test")}
+	adapter := &fakeAdapter{channelType: Type("test")}
 	manager := NewManager(log, reg, store, &fakeInboundProcessorIntegration{})
 	manager.RegisterAdapter(adapter)
 
-	err := manager.Send(context.Background(), "bot-1", ChannelType("test"), SendRequest{
+	err := manager.Send(context.Background(), "bot-1", Type("test"), SendRequest{
 		ChannelIdentityID: "user-1",
 		Message: Message{
 			Text: "hello",
@@ -213,21 +212,21 @@ func TestManagerSendUsesBinding(t *testing.T) {
 func TestManagerReconcileStartsAndStops(t *testing.T) {
 	t.Parallel()
 
-	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+	log := slog.New(slog.DiscardHandler)
 	store := &fakeConfigStore{}
 	reg := NewRegistry()
-	adapter := &fakeAdapter{channelType: ChannelType("test")}
+	adapter := &fakeAdapter{channelType: Type("test")}
 	manager := NewManager(log, reg, store, &fakeInboundProcessorIntegration{})
 	manager.RegisterAdapter(adapter)
 
-	cfg := ChannelConfig{
+	cfg := Config{
 		ID:          "cfg-1",
 		BotID:       "bot-1",
-		ChannelType: ChannelType("test"),
+		Type:        Type("test"),
 		Credentials: map[string]any{"botToken": "token"},
 		UpdatedAt:   time.Now(),
 	}
-	manager.reconcile(context.Background(), []ChannelConfig{cfg})
+	manager.reconcile(context.Background(), []Config{cfg})
 	manager.reconcile(context.Background(), nil)
 
 	adapter.mu.Lock()

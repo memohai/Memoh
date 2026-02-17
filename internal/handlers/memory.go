@@ -20,7 +20,7 @@ type MemoryHandler struct {
 	service        *memory.Service
 	chatService    *conversation.Service
 	accountService *accounts.Service
-	memoryFS       *memory.MemoryFS
+	memoryFS       *memory.FS
 	logger         *slog.Logger
 }
 
@@ -73,7 +73,7 @@ func NewMemoryHandler(log *slog.Logger, service *memory.Service, chatService *co
 }
 
 // SetMemoryFS sets the optional filesystem persistence layer.
-func (h *MemoryHandler) SetMemoryFS(fs *memory.MemoryFS) {
+func (h *MemoryHandler) SetMemoryFS(fs *memory.FS) {
 	h.memoryFS = fs
 }
 
@@ -112,7 +112,7 @@ func (h *MemoryHandler) checkService() error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory [post]
+// @Router /bots/{bot_id}/memory [post].
 func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
@@ -190,7 +190,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory/search [post]
+// @Router /bots/{bot_id}/memory/search [post].
 func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
@@ -223,7 +223,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 	botID := strings.TrimSpace(chatObj.BotID)
 
 	// Search shared namespace and merge results.
-	var allResults []memory.MemoryItem
+	var allResults []memory.Item
 	for _, scope := range scopes {
 		filters := buildNamespaceFilters(scope.Namespace, scope.ScopeID, payload.Filters)
 		if botID != "" {
@@ -271,7 +271,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory [get]
+// @Router /bots/{bot_id}/memory [get].
 func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
@@ -294,7 +294,7 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 		return err
 	}
 
-	var allResults []memory.MemoryItem
+	var allResults []memory.Item
 	for _, scope := range scopes {
 		req := memory.GetAllRequest{
 			Filters: buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil),
@@ -325,7 +325,7 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory [delete]
+// @Router /bots/{bot_id}/memory [delete].
 func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
@@ -395,7 +395,7 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory/{id} [delete]
+// @Router /bots/{bot_id}/memory/{id} [delete].
 func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
@@ -449,7 +449,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory/compact [post]
+// @Router /bots/{bot_id}/memory/compact [post].
 func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
@@ -516,7 +516,7 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory/usage [get]
+// @Router /bots/{bot_id}/memory/usage [get].
 func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
@@ -567,7 +567,7 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory/rebuild [post]
+// @Router /bots/{bot_id}/memory/rebuild [post].
 func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 	if err := h.checkService(); err != nil {
 		return err
@@ -716,12 +716,12 @@ func buildNamespaceFilters(namespace, scopeID string, extra map[string]any) map[
 	return filters
 }
 
-func deduplicateMemoryItems(items []memory.MemoryItem) []memory.MemoryItem {
+func deduplicateMemoryItems(items []memory.Item) []memory.Item {
 	if len(items) == 0 {
 		return items
 	}
 	seen := make(map[string]struct{}, len(items))
-	result := make([]memory.MemoryItem, 0, len(items))
+	result := make([]memory.Item, 0, len(items))
 	for _, item := range items {
 		if _, ok := seen[item.ID]; ok {
 			continue

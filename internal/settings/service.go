@@ -1,9 +1,9 @@
+// Package settings provides user and system settings persistence.
 package settings
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -14,13 +14,16 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
+// Service reads and updates bot-level and system settings.
 type Service struct {
 	queries *sqlc.Queries
 	logger  *slog.Logger
 }
 
+// ErrPersonalBotGuestAccessUnsupported is returned when enabling guest access on a personal bot.
 var ErrPersonalBotGuestAccessUnsupported = errors.New("personal bots do not support guest access")
 
+// NewService creates a settings service.
 func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	return &Service{
 		queries: queries,
@@ -28,6 +31,7 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	}
 }
 
+// GetBot returns the settings for the given bot.
 func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
 	pgID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -40,9 +44,10 @@ func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
 	return normalizeBotSettingsReadRow(row), nil
 }
 
+// UpsertBot updates bot settings (model IDs, max context time, language, allow guest); returns ErrPersonalBotGuestAccessUnsupported for personal bots if AllowGuest is set.
 func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest) (Settings, error) {
 	if s.queries == nil {
-		return Settings{}, fmt.Errorf("settings queries not configured")
+		return Settings{}, errors.New("settings queries not configured")
 	}
 	pgID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -119,9 +124,10 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	return normalizeBotSettingsWriteRow(updated), nil
 }
 
+// Delete removes bot-level settings for the given bot.
 func (s *Service) Delete(ctx context.Context, botID string) error {
 	if s.queries == nil {
-		return fmt.Errorf("settings queries not configured")
+		return errors.New("settings queries not configured")
 	}
 	pgID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -190,7 +196,7 @@ func normalizeBotSettingsFields(
 
 func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.UUID, error) {
 	if strings.TrimSpace(modelID) == "" {
-		return pgtype.UUID{}, fmt.Errorf("model_id is required")
+		return pgtype.UUID{}, errors.New("model_id is required")
 	}
 	row, err := s.queries.GetModelByModelID(ctx, modelID)
 	if err != nil {

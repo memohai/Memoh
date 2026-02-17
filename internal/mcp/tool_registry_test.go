@@ -7,11 +7,11 @@ import (
 
 type registryTestProvider struct{}
 
-func (p *registryTestProvider) ListTools(ctx context.Context, session ToolSessionContext) ([]ToolDescriptor, error) {
+func (p *registryTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]ToolDescriptor, error) {
 	return nil, nil
 }
 
-func (p *registryTestProvider) CallTool(ctx context.Context, session ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
+func (p *registryTestProvider) CallTool(_ context.Context, _ ToolSessionContext, _ string, _ map[string]any) (map[string]any, error) {
 	return nil, nil
 }
 

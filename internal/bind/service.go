@@ -1,3 +1,4 @@
+// Package bind provides bind-code issuance and consumption for channel linking.
 package bind
 
 import (
@@ -46,7 +47,7 @@ func NewService(log *slog.Logger, pool *pgxpool.Pool, queries *sqlc.Queries) *Se
 // Platform is optional; when provided, bind consume must happen on the same channel platform.
 func (s *Service) Issue(ctx context.Context, issuedByUserID, platform string, ttl time.Duration) (Code, error) {
 	if s.queries == nil {
-		return Code{}, fmt.Errorf("bind queries not configured")
+		return Code{}, errors.New("bind queries not configured")
 	}
 	if ttl <= 0 {
 		ttl = defaultTTL
@@ -59,7 +60,7 @@ func (s *Service) Issue(ctx context.Context, issuedByUserID, platform string, tt
 	normalizedPlatform := normalizePlatform(platform)
 
 	expiresAt := time.Now().UTC().Add(ttl)
-	for i := 0; i < maxTokenRetries; i++ {
+	for range maxTokenRetries {
 		token := strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")[:8])
 		row, err := s.queries.CreateBindCode(ctx, sqlc.CreateBindCodeParams{
 			Token:          token,
@@ -78,13 +79,13 @@ func (s *Service) Issue(ctx context.Context, issuedByUserID, platform string, tt
 		}
 		return Code{}, fmt.Errorf("create bind code: %w", err)
 	}
-	return Code{}, fmt.Errorf("create bind code: token collision after retries")
+	return Code{}, errors.New("create bind code: token collision after retries")
 }
 
 // Get looks up a bind code by token.
 func (s *Service) Get(ctx context.Context, token string) (Code, error) {
 	if s.queries == nil {
-		return Code{}, fmt.Errorf("bind queries not configured")
+		return Code{}, errors.New("bind queries not configured")
 	}
 	row, err := s.queries.GetBindCode(ctx, strings.TrimSpace(token))
 	if err != nil {
@@ -99,7 +100,7 @@ func (s *Service) Get(ctx context.Context, token string) (Code, error) {
 // Consume validates and consumes a bind code and links the channel identity to issuer user.
 func (s *Service) Consume(ctx context.Context, code Code, channelIdentityID string) error {
 	if s.queries == nil || s.pool == nil {
-		return fmt.Errorf("bind service not configured")
+		return errors.New("bind service not configured")
 	}
 
 	// Fast-fail based on caller snapshot before opening a transaction.
@@ -115,7 +116,7 @@ func (s *Service) Consume(ctx context.Context, code Code, channelIdentityID stri
 	}
 	sourceIdentityID := strings.TrimSpace(channelIdentityID)
 	if sourceIdentityID == "" {
-		return fmt.Errorf("channel identity id is required")
+		return errors.New("channel identity id is required")
 	}
 	pgSourceIdentityID, err := db.ParseUUID(sourceIdentityID)
 	if err != nil {
@@ -149,7 +150,7 @@ func (s *Service) Consume(ctx context.Context, code Code, channelIdentityID stri
 
 	targetUserID := strings.TrimSpace(lockedCode.IssuedByUserID)
 	if targetUserID == "" {
-		return fmt.Errorf("bind code issuer user is missing")
+		return errors.New("bind code issuer user is missing")
 	}
 	pgTargetUserID, err := db.ParseUUID(targetUserID)
 	if err != nil {
@@ -158,14 +159,14 @@ func (s *Service) Consume(ctx context.Context, code Code, channelIdentityID stri
 
 	if _, err := qtx.GetChannelIdentityByIDForUpdate(ctx, pgSourceIdentityID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("channel identity not found")
+			return errors.New("channel identity not found")
 		}
 		return fmt.Errorf("lock source identity: %w", err)
 	}
 	sourceIdentity, err := qtx.GetChannelIdentityByIDForUpdate(ctx, pgSourceIdentityID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("channel identity not found")
+			return errors.New("channel identity not found")
 		}
 		return fmt.Errorf("reload source identity: %w", err)
 	}

@@ -12,18 +12,18 @@ import (
 
 // ConfigLister lists channel configs for periodic refresh. Used by connection lifecycle.
 type ConfigLister interface {
-	ListConfigsByType(ctx context.Context, channelType ChannelType) ([]ChannelConfig, error)
+	ListConfigsByType(ctx context.Context, channelType Type) ([]Config, error)
 }
 
 // ConfigResolver resolves effective configs and user bindings. Used for outbound sending.
 type ConfigResolver interface {
-	ResolveEffectiveConfig(ctx context.Context, botID string, channelType ChannelType) (ChannelConfig, error)
-	GetChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType) (ChannelIdentityBinding, error)
+	ResolveEffectiveConfig(ctx context.Context, botID string, channelType Type) (Config, error)
+	GetChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType Type) (IdentityBinding, error)
 }
 
 // BindingStore resolves channel-identity bindings. Used by identity resolution.
 type BindingStore interface {
-	ResolveChannelIdentityBinding(ctx context.Context, channelType ChannelType, criteria BindingCriteria) (string, error)
+	ResolveIdentityBinding(ctx context.Context, channelType Type, criteria BindingCriteria) (string, error)
 }
 
 // ConfigStore is the full persistence interface. Components should depend on smaller
@@ -32,7 +32,7 @@ type ConfigStore interface {
 	ConfigLister
 	ConfigResolver
 	BindingStore
-	UpsertChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType, req UpsertChannelIdentityConfigRequest) (ChannelIdentityBinding, error)
+	UpsertChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType Type, req UpsertChannelIdentityConfigRequest) (IdentityBinding, error)
 }
 
 // Middleware wraps an InboundHandler to add cross-cutting behavior.
@@ -121,13 +121,13 @@ func (m *Manager) AddAdapter(ctx context.Context, adapter Adapter) {
 }
 
 // RemoveAdapter unregisters an adapter and stops all its active connections.
-func (m *Manager) RemoveAdapter(ctx context.Context, channelType ChannelType) {
+func (m *Manager) RemoveAdapter(ctx context.Context, channelType Type) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	m.mu.Lock()
 	for id, entry := range m.connections {
-		if entry != nil && entry.config.ChannelType == channelType {
+		if entry != nil && entry.config.Type == channelType {
 			if entry.connection != nil {
 				if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) && m.logger != nil {
 					m.logger.Warn("adapter stop failed", slog.String("config_id", id), slog.Any("error", err))
@@ -166,9 +166,9 @@ func (m *Manager) Start(ctx context.Context) {
 }
 
 // Send delivers an outbound message to the specified channel, resolving target and config automatically.
-func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelType, req SendRequest) error {
+func (m *Manager) Send(ctx context.Context, botID string, channelType Type, req SendRequest) error {
 	if m.service == nil {
-		return fmt.Errorf("channel manager not configured")
+		return errors.New("channel manager not configured")
 	}
 	sender, ok := m.registry.GetSender(channelType)
 	if !ok {
@@ -182,14 +182,14 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 	if target == "" {
 		targetChannelIdentityID := strings.TrimSpace(req.ChannelIdentityID)
 		if targetChannelIdentityID == "" {
-			return fmt.Errorf("target or user_id is required")
+			return errors.New("target or user_id is required")
 		}
 		userCfg, err := m.service.GetChannelIdentityConfig(ctx, targetChannelIdentityID, channelType)
 		if err != nil {
 			if m.logger != nil {
 				m.logger.Warn("channel binding missing", slog.String("channel", channelType.String()), slog.String("channel_identity_id", targetChannelIdentityID))
 			}
-			return fmt.Errorf("channel binding required")
+			return errors.New("channel binding required")
 		}
 		target, err = m.registry.ResolveTargetFromUserConfig(channelType, userCfg.Config)
 		if err != nil {
@@ -200,7 +200,7 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 		target = normalized
 	}
 	if req.Message.IsEmpty() {
-		return fmt.Errorf("message is required")
+		return errors.New("message is required")
 	}
 	if m.logger != nil {
 		m.logger.Info("send outbound", slog.String("channel", channelType.String()), slog.String("bot_id", botID))
@@ -225,9 +225,9 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 }
 
 // React adds or removes an emoji reaction on a channel message.
-func (m *Manager) React(ctx context.Context, botID string, channelType ChannelType, req ReactRequest) error {
+func (m *Manager) React(ctx context.Context, botID string, channelType Type, req ReactRequest) error {
 	if m.service == nil {
-		return fmt.Errorf("channel manager not configured")
+		return errors.New("channel manager not configured")
 	}
 	reactor, ok := m.registry.GetReactor(channelType)
 	if !ok {
@@ -239,18 +239,18 @@ func (m *Manager) React(ctx context.Context, botID string, channelType ChannelTy
 	}
 	target := strings.TrimSpace(req.Target)
 	if target == "" {
-		return fmt.Errorf("target is required for reactions")
+		return errors.New("target is required for reactions")
 	}
 	if normalized, ok := m.registry.NormalizeTarget(channelType, target); ok {
 		target = normalized
 	}
 	messageID := strings.TrimSpace(req.MessageID)
 	if messageID == "" {
-		return fmt.Errorf("message_id is required for reactions")
+		return errors.New("message_id is required for reactions")
 	}
 	emoji := strings.TrimSpace(req.Emoji)
 	if !req.Remove && emoji == "" {
-		return fmt.Errorf("emoji is required when adding a reaction")
+		return errors.New("emoji is required when adding a reaction")
 	}
 	if m.logger != nil {
 		m.logger.Info("react outbound",

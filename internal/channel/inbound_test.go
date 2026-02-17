@@ -2,7 +2,7 @@ package channel
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"testing"
 )
@@ -13,24 +13,25 @@ type mockAdapter struct {
 	streamEvents []StreamEvent
 }
 
-func (m *mockAdapter) Type() ChannelType { return ChannelType("test") }
+func (m *mockAdapter) Type() Type { return Type("test") }
 func (m *mockAdapter) Descriptor() Descriptor {
 	return Descriptor{
-		Type:        ChannelType("test"),
+		Type:        Type("test"),
 		DisplayName: "Test",
-		Capabilities: ChannelCapabilities{
+		Capabilities: Capabilities{
 			Text:      true,
 			Reply:     true,
 			Streaming: true,
 		},
 	}
 }
-func (m *mockAdapter) Send(ctx context.Context, cfg ChannelConfig, msg OutboundMessage) error {
+
+func (m *mockAdapter) Send(_ context.Context, _ Config, msg OutboundMessage) error {
 	m.sentMessages = append(m.sentMessages, msg)
 	return nil
 }
 
-func (m *mockAdapter) OpenStream(ctx context.Context, cfg ChannelConfig, target string, opts StreamOptions) (OutboundStream, error) {
+func (m *mockAdapter) OpenStream(_ context.Context, _ Config, _ string, _ StreamOptions) (OutboundStream, error) {
 	return &mockAdapterStream{adapter: m}, nil
 }
 
@@ -38,7 +39,7 @@ type mockAdapterStream struct {
 	adapter *mockAdapter
 }
 
-func (s *mockAdapterStream) Push(ctx context.Context, event StreamEvent) error {
+func (s *mockAdapterStream) Push(_ context.Context, event StreamEvent) error {
 	if s == nil || s.adapter == nil {
 		return nil
 	}
@@ -52,18 +53,18 @@ func (s *mockAdapterStream) Push(ctx context.Context, event StreamEvent) error {
 	return nil
 }
 
-func (s *mockAdapterStream) Close(ctx context.Context) error {
+func (s *mockAdapterStream) Close(_ context.Context) error {
 	return nil
 }
 
 type fakeInboundProcessor struct {
 	resp   *OutboundMessage
 	err    error
-	gotCfg ChannelConfig
+	gotCfg Config
 	gotMsg InboundMessage
 }
 
-func (f *fakeInboundProcessor) HandleInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage, sender StreamReplySender) error {
+func (f *fakeInboundProcessor) HandleInbound(ctx context.Context, cfg Config, msg InboundMessage, sender StreamReplySender) error {
 	f.gotCfg = cfg
 	f.gotMsg = msg
 	if f.err != nil {
@@ -73,14 +74,14 @@ func (f *fakeInboundProcessor) HandleInbound(ctx context.Context, cfg ChannelCon
 		return nil
 	}
 	if sender == nil {
-		return fmt.Errorf("sender missing")
+		return errors.New("sender missing")
 	}
 	return sender.Send(ctx, *f.resp)
 }
 
 type fakeInboundStreamProcessor struct{}
 
-func (f *fakeInboundStreamProcessor) HandleInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage, sender StreamReplySender) error {
+func (f *fakeInboundStreamProcessor) HandleInbound(ctx context.Context, _ Config, _ InboundMessage, sender StreamReplySender) error {
 	stream, err := sender.OpenStream(ctx, "stream-target", StreamOptions{})
 	if err != nil {
 		return err
@@ -120,9 +121,9 @@ func TestManager_handleInbound(t *testing.T) {
 		adapter := &mockAdapter{}
 		m.RegisterAdapter(adapter)
 
-		cfg := ChannelConfig{ID: "bot-1", BotID: "bot-1", ChannelType: ChannelType("test")}
+		cfg := Config{ID: "bot-1", BotID: "bot-1", Type: Type("test")}
 		msg := InboundMessage{
-			Channel:     ChannelType("test"),
+			Channel:     Type("test"),
 			Message:     Message{Text: "hello"},
 			ReplyTarget: "target-id",
 			Conversation: Conversation{
@@ -154,9 +155,9 @@ func TestManager_handleInbound(t *testing.T) {
 		adapter := &mockAdapter{}
 		m.RegisterAdapter(adapter)
 
-		cfg := ChannelConfig{ID: "bot-1", BotID: "bot-1", ChannelType: ChannelType("test")}
+		cfg := Config{ID: "bot-1", BotID: "bot-1", Type: Type("test")}
 		msg := InboundMessage{
-			Channel:     ChannelType("test"),
+			Channel:     Type("test"),
 			Message:     Message{Text: "hello"},
 			ReplyTarget: "target-id",
 		}
@@ -175,7 +176,7 @@ func TestManager_handleInbound(t *testing.T) {
 		processor := &fakeInboundProcessor{err: context.Canceled}
 		reg := NewRegistry()
 		m := NewManager(logger, reg, &fakeConfigStore{}, processor)
-		cfg := ChannelConfig{ID: "bot-1"}
+		cfg := Config{ID: "bot-1"}
 		msg := InboundMessage{Message: Message{Text: "  "}} // whitespace-only message
 
 		err := m.handleInbound(context.Background(), cfg, msg)
@@ -191,9 +192,9 @@ func TestManager_handleInbound(t *testing.T) {
 		adapter := &mockAdapter{}
 		m.RegisterAdapter(adapter)
 
-		cfg := ChannelConfig{ID: "bot-1", BotID: "bot-1", ChannelType: ChannelType("test")}
+		cfg := Config{ID: "bot-1", BotID: "bot-1", Type: Type("test")}
 		msg := InboundMessage{
-			Channel:     ChannelType("test"),
+			Channel:     Type("test"),
 			Message:     Message{Text: "hello"},
 			ReplyTarget: "stream-target",
 			Conversation: Conversation{

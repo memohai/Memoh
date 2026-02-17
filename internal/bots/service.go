@@ -1,3 +1,4 @@
+// Package bots provides bot lifecycle, membership, and container management.
 package bots
 
 import (
@@ -7,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +32,7 @@ const (
 	botLifecycleOperationTimeout = 5 * time.Minute
 )
 
+// Errors returned by bot operations.
 var (
 	ErrBotNotFound       = errors.New("bot not found")
 	ErrBotAccessDenied   = errors.New("bot access denied")
@@ -68,7 +71,7 @@ func (s *Service) AddRuntimeChecker(c RuntimeChecker) {
 // AuthorizeAccess checks whether userID may access the given bot.
 func (s *Service) AuthorizeAccess(ctx context.Context, userID, botID string, isAdmin bool, policy AccessPolicy) (Bot, error) {
 	if s.queries == nil {
-		return Bot{}, fmt.Errorf("bot queries not configured")
+		return Bot{}, errors.New("bot queries not configured")
 	}
 	bot, err := s.Get(ctx, botID)
 	if err != nil {
@@ -96,11 +99,11 @@ func (s *Service) AuthorizeAccess(ctx context.Context, userID, botID string, isA
 // Create creates a new bot owned by owner user.
 func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotRequest) (Bot, error) {
 	if s.queries == nil {
-		return Bot{}, fmt.Errorf("bot queries not configured")
+		return Bot{}, errors.New("bot queries not configured")
 	}
 	ownerID := strings.TrimSpace(ownerUserID)
 	if ownerID == "" {
-		return Bot{}, fmt.Errorf("owner user id is required")
+		return Bot{}, errors.New("owner user id is required")
 	}
 	ownerUUID, err := db.ParseUUID(ownerID)
 	if err != nil {
@@ -156,7 +159,7 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 // Get returns a bot by its ID.
 func (s *Service) Get(ctx context.Context, botID string) (Bot, error) {
 	if s.queries == nil {
-		return Bot{}, fmt.Errorf("bot queries not configured")
+		return Bot{}, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -179,7 +182,7 @@ func (s *Service) Get(ctx context.Context, botID string) (Bot, error) {
 // ListByOwner returns bots owned by the given user.
 func (s *Service) ListByOwner(ctx context.Context, ownerUserID string) ([]Bot, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("bot queries not configured")
+		return nil, errors.New("bot queries not configured")
 	}
 	ownerUUID, err := db.ParseUUID(ownerUserID)
 	if err != nil {
@@ -206,7 +209,7 @@ func (s *Service) ListByOwner(ctx context.Context, ownerUserID string) ([]Bot, e
 // ListByMember returns bots where the user is a member.
 func (s *Service) ListByMember(ctx context.Context, channelIdentityID string) ([]Bot, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("bot queries not configured")
+		return nil, errors.New("bot queries not configured")
 	}
 	memberUUID, err := db.ParseUUID(channelIdentityID)
 	if err != nil {
@@ -259,7 +262,7 @@ func (s *Service) ListAccessible(ctx context.Context, channelIdentityID string) 
 // Update updates bot profile fields.
 func (s *Service) Update(ctx context.Context, botID string, req UpdateBotRequest) (Bot, error) {
 	if s.queries == nil {
-		return Bot{}, fmt.Errorf("bot queries not configured")
+		return Bot{}, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -316,9 +319,9 @@ func (s *Service) Update(ctx context.Context, botID string, req UpdateBotRequest
 }
 
 // TransferOwner transfers bot ownership to another user.
-func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID string) (Bot, error) {
+func (s *Service) TransferOwner(ctx context.Context, botID, ownerUserID string) (Bot, error) {
 	if s.queries == nil {
-		return Bot{}, fmt.Errorf("bot queries not configured")
+		return Bot{}, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -351,7 +354,7 @@ func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID s
 // Delete removes a bot and its associated resources.
 func (s *Service) Delete(ctx context.Context, botID string) error {
 	if s.queries == nil {
-		return fmt.Errorf("bot queries not configured")
+		return errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -377,7 +380,7 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 // ListChecks evaluates runtime resource checks for a bot.
 func (s *Service) ListChecks(ctx context.Context, botID string) ([]BotCheck, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("bot queries not configured")
+		return nil, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -453,7 +456,7 @@ func (s *Service) enqueueDeleteLifecycle(botID string) {
 
 func (s *Service) updateStatus(ctx context.Context, botID, status string) error {
 	if s.queries == nil {
-		return fmt.Errorf("bot queries not configured")
+		return errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -467,7 +470,7 @@ func (s *Service) updateStatus(ctx context.Context, botID, status string) error 
 
 func (s *Service) ensureUserExists(ctx context.Context, userID pgtype.UUID) error {
 	if s.queries == nil {
-		return fmt.Errorf("bot queries not configured")
+		return errors.New("bot queries not configured")
 	}
 	_, err := s.queries.GetUserByID(ctx, userID)
 	if err != nil {
@@ -482,7 +485,7 @@ func (s *Service) ensureUserExists(ctx context.Context, userID pgtype.UUID) erro
 // UpsertMember creates or updates a bot membership.
 func (s *Service) UpsertMember(ctx context.Context, botID string, req UpsertMemberRequest) (BotMember, error) {
 	if s.queries == nil {
-		return BotMember{}, fmt.Errorf("bot queries not configured")
+		return BotMember{}, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -510,7 +513,7 @@ func (s *Service) UpsertMember(ctx context.Context, botID string, req UpsertMemb
 // ListMembers returns all members of a bot.
 func (s *Service) ListMembers(ctx context.Context, botID string) ([]BotMember, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("bot queries not configured")
+		return nil, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -530,7 +533,7 @@ func (s *Service) ListMembers(ctx context.Context, botID string) ([]BotMember, e
 // GetMember returns a specific bot member.
 func (s *Service) GetMember(ctx context.Context, botID, channelIdentityID string) (BotMember, error) {
 	if s.queries == nil {
-		return BotMember{}, fmt.Errorf("bot queries not configured")
+		return BotMember{}, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -553,7 +556,7 @@ func (s *Service) GetMember(ctx context.Context, botID, channelIdentityID string
 // DeleteMember removes a member from a bot.
 func (s *Service) DeleteMember(ctx context.Context, botID, channelIdentityID string) error {
 	if s.queries == nil {
-		return fmt.Errorf("bot queries not configured")
+		return errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -788,7 +791,7 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot) ([]BotCh
 		CheckKey: BotCheckKeyContainerRecord,
 		Status:   BotCheckStatusOK,
 		Summary:  "Container record exists.",
-		Detail:   fmt.Sprintf("container_id=%s", strings.TrimSpace(containerRow.ContainerID)),
+		Detail:   "container_id=" + strings.TrimSpace(containerRow.ContainerID),
 		Metadata: map[string]any{
 			"container_id": strings.TrimSpace(containerRow.ContainerID),
 			"namespace":    strings.TrimSpace(containerRow.Namespace),
@@ -806,11 +809,11 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot) ([]BotCh
 	case "running", "created", "stopped", "paused":
 		taskCheck.Status = BotCheckStatusOK
 		taskCheck.Summary = "Container task state is reported."
-		taskCheck.Detail = fmt.Sprintf("status=%s", taskStatus)
+		taskCheck.Detail = "status=" + taskStatus
 	case "":
 		taskCheck.Detail = "status is empty"
 	default:
-		taskCheck.Detail = fmt.Sprintf("unexpected status=%s", taskStatus)
+		taskCheck.Detail = "unexpected status=" + taskStatus
 	}
 	taskCheck.Metadata = map[string]any{"status": taskStatus}
 	checks = append(checks, taskCheck)
@@ -876,10 +879,8 @@ func (s *Service) ListCheckKeys(ctx context.Context, botID string) ([]string, er
 func (s *Service) RunCheck(ctx context.Context, botID, key string) (BotCheck, error) {
 	// Try registered checkers first (they own dynamic keys like mcp.*).
 	for _, checker := range s.checkers {
-		for _, k := range checker.CheckKeys(ctx, botID) {
-			if k == key {
-				return checker.RunCheck(ctx, botID, key), nil
-			}
+		if slices.Contains(checker.CheckKeys(ctx, botID), key) {
+			return checker.RunCheck(ctx, botID, key), nil
 		}
 	}
 	// Fall back to builtin checks.

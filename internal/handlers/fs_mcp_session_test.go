@@ -228,7 +228,7 @@ func TestMCPSessionExplicitInitializeDoesNotDuplicateInitialize(t *testing.T) {
 }
 
 func TestMCPSessionRemovesPendingOnContextCancel(t *testing.T) {
-	conn := newFakeMCPConnection(func(req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
+	conn := newFakeMCPConnection(func(_ *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
 		// Intentionally do not reply; caller should timeout.
 		return nil, nil
 	})

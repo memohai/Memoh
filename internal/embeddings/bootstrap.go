@@ -1,3 +1,4 @@
+// Package embeddings provides embedder interfaces and resolver-based text embedding.
 package embeddings
 
 import (
@@ -13,6 +14,7 @@ type ResolverTextEmbedder struct {
 	Dims     int
 }
 
+// Embed delegates to Resolver.Embed with TypeText and the configured ModelID.
 func (e *ResolverTextEmbedder) Embed(ctx context.Context, input string) ([]float32, error) {
 	result, err := e.Resolver.Embed(ctx, Request{
 		Type:  TypeText,
@@ -25,6 +27,7 @@ func (e *ResolverTextEmbedder) Embed(ctx context.Context, input string) ([]float
 	return result.Embedding, nil
 }
 
+// Dimensions returns the configured embedding dimension (Dims).
 func (e *ResolverTextEmbedder) Dimensions() int {
 	return e.Dims
 }

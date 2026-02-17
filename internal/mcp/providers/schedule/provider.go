@@ -1,3 +1,4 @@
+// Package schedule provides the MCP schedule provider (list, get, create, trigger).
 package schedule
 
 import (
@@ -17,6 +18,7 @@ const (
 	toolScheduleDelete = "delete_schedule"
 )
 
+// Scheduler provides schedule list, get, create, update, delete (used by schedule tool executor).
 type Scheduler interface {
 	List(ctx context.Context, botID string) ([]sched.Schedule, error)
 	Get(ctx context.Context, id string) (sched.Schedule, error)
@@ -25,11 +27,13 @@ type Scheduler interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// Executor is the MCP tool executor for list_schedule, get_schedule, create_schedule, update_schedule, delete_schedule.
 type Executor struct {
 	service Scheduler
 	logger  *slog.Logger
 }
 
+// NewExecutor creates a schedule tool executor.
 func NewExecutor(log *slog.Logger, service Scheduler) *Executor {
 	if log == nil {
 		log = slog.Default()
@@ -40,7 +44,8 @@ func NewExecutor(log *slog.Logger, service Scheduler) *Executor {
 	}
 }
 
-func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+// ListTools returns list_schedule, get_schedule, create_schedule, update_schedule, delete_schedule descriptors.
+func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	if p.service == nil {
 		return []mcpgw.ToolDescriptor{}, nil
 	}
@@ -111,6 +116,7 @@ func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 	}, nil
 }
 
+// CallTool runs list_schedule, get_schedule, create_schedule, update_schedule, or delete_schedule.
 func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
 	if p.service == nil {
 		return mcpgw.BuildToolErrorResult("schedule service not available"), nil

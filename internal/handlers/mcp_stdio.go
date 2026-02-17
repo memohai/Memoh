@@ -21,6 +21,7 @@ import (
 	mcptools "github.com/memohai/memoh/internal/mcp"
 )
 
+// MCPStdioRequest is the body for creating a stdio MCP proxy (name, command, args, env, cwd).
 type MCPStdioRequest struct {
 	Name    string            `json:"name"`
 	Command string            `json:"command"`
@@ -29,6 +30,7 @@ type MCPStdioRequest struct {
 	Cwd     string            `json:"cwd"`
 }
 
+// MCPStdioResponse returns connection_id, url, and optional tools list after creating the proxy.
 type MCPStdioResponse struct {
 	ConnectionID string   `json:"connection_id"`
 	URL          string   `json:"url"`
@@ -55,7 +57,7 @@ type mcpStdioSession struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp-stdio [post]
+// @Router /bots/{bot_id}/mcp-stdio [post].
 func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -124,7 +126,7 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp-stdio/{connection_id} [post]
+// @Router /bots/{bot_id}/mcp-stdio/{connection_id} [post].
 func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {

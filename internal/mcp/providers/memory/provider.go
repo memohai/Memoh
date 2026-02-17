@@ -1,3 +1,4 @@
+// Package memory provides the MCP memory provider (search and recall tools).
 package memory
 
 import (
@@ -18,22 +19,26 @@ const (
 	sharedMemoryNamespace  = "bot"
 )
 
-type MemorySearcher interface {
+// Searcher performs memory search (used by memory tool executor).
+type Searcher interface {
 	Search(ctx context.Context, req mem.SearchRequest) (mem.SearchResponse, error)
 }
 
+// AdminChecker checks if a channel identity is admin (for memory tool access).
 type AdminChecker interface {
 	IsAdmin(ctx context.Context, channelIdentityID string) (bool, error)
 }
 
+// Executor is the MCP tool executor for search_memory (delegates to Searcher, checks chat access).
 type Executor struct {
-	searcher     MemorySearcher
+	searcher     Searcher
 	chatAccessor conversation.Accessor
 	adminChecker AdminChecker
 	logger       *slog.Logger
 }
 
-func NewExecutor(log *slog.Logger, searcher MemorySearcher, chatAccessor conversation.Accessor, adminChecker AdminChecker) *Executor {
+// NewExecutor creates a memory tool executor.
+func NewExecutor(log *slog.Logger, searcher Searcher, chatAccessor conversation.Accessor, adminChecker AdminChecker) *Executor {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -45,7 +50,8 @@ func NewExecutor(log *slog.Logger, searcher MemorySearcher, chatAccessor convers
 	}
 }
 
-func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+// ListTools returns the search_memory tool descriptor.
+func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	if p.searcher == nil || p.chatAccessor == nil {
 		return []mcpgw.ToolDescriptor{}, nil
 	}
@@ -71,6 +77,7 @@ func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 	}, nil
 }
 
+// CallTool runs search_memory (query, limit) and returns MCP result; validates chat access.
 func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
 	if toolName != toolSearchMemory {
 		return nil, mcpgw.ErrToolNotFound
@@ -142,7 +149,7 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 		p.logger.Warn("memory search namespace failed", slog.String("namespace", sharedMemoryNamespace), slog.Any("error", err))
 		return mcpgw.BuildToolErrorResult("memory search failed"), nil
 	}
-	allResults := make([]mem.MemoryItem, 0, len(resp.Results))
+	allResults := make([]mem.Item, 0, len(resp.Results))
 	allResults = append(allResults, resp.Results...)
 
 	allResults = deduplicateMemoryItems(allResults)
@@ -182,12 +189,12 @@ func (p *Executor) canAccessChat(ctx context.Context, chatID, channelIdentityID 
 	return p.chatAccessor.IsParticipant(ctx, chatID, channelIdentityID)
 }
 
-func deduplicateMemoryItems(items []mem.MemoryItem) []mem.MemoryItem {
+func deduplicateMemoryItems(items []mem.Item) []mem.Item {
 	if len(items) == 0 {
 		return items
 	}
 	seen := make(map[string]struct{}, len(items))
-	result := make([]mem.MemoryItem, 0, len(items))
+	result := make([]mem.Item, 0, len(items))
 	for _, item := range items {
 		id := strings.TrimSpace(item.ID)
 		if id == "" {

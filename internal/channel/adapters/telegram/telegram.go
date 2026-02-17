@@ -14,24 +14,24 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/common"
+	"github.com/memohai/memoh/internal/channel/adapters/adapterutil"
 )
 
 const telegramMaxMessageLength = 4096
 
-// TelegramAdapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Telegram.
-type TelegramAdapter struct {
+// Adapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Telegram.
+type Adapter struct {
 	logger *slog.Logger
 	mu     sync.RWMutex
 	bots   map[string]*tgbotapi.BotAPI // keyed by bot token
 }
 
-// NewTelegramAdapter creates a TelegramAdapter with the given logger.
-func NewTelegramAdapter(log *slog.Logger) *TelegramAdapter {
+// NewAdapter creates a Adapter with the given logger.
+func NewAdapter(log *slog.Logger) *Adapter {
 	if log == nil {
 		log = slog.Default()
 	}
-	adapter := &TelegramAdapter{
+	adapter := &Adapter{
 		logger: log.With(slog.String("adapter", "telegram")),
 		bots:   make(map[string]*tgbotapi.BotAPI),
 	}
@@ -39,9 +39,9 @@ func NewTelegramAdapter(log *slog.Logger) *TelegramAdapter {
 	return adapter
 }
 
-var getOrCreateBotForTest func(a *TelegramAdapter, token, configID string) (*tgbotapi.BotAPI, error)
+var getOrCreateBotForTest func(a *Adapter, token, configID string) (*tgbotapi.BotAPI, error)
 
-func (a *TelegramAdapter) getOrCreateBot(token, configID string) (*tgbotapi.BotAPI, error) {
+func (a *Adapter) getOrCreateBot(token, configID string) (*tgbotapi.BotAPI, error) {
 	if getOrCreateBotForTest != nil {
 		return getOrCreateBotForTest(a, token, configID)
 	}
@@ -68,16 +68,16 @@ func (a *TelegramAdapter) getOrCreateBot(token, configID string) (*tgbotapi.BotA
 }
 
 // Type returns the Telegram channel type.
-func (a *TelegramAdapter) Type() channel.ChannelType {
+func (a *Adapter) Type() channel.Type {
 	return Type
 }
 
 // Descriptor returns the Telegram channel metadata.
-func (a *TelegramAdapter) Descriptor() channel.Descriptor {
+func (a *Adapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        Type,
 		DisplayName: "Telegram",
-		Capabilities: channel.ChannelCapabilities{
+		Capabilities: channel.Capabilities{
 			Text:           true,
 			Markdown:       true,
 			Reply:          true,
@@ -115,37 +115,37 @@ func (a *TelegramAdapter) Descriptor() channel.Descriptor {
 }
 
 // NormalizeConfig validates and normalizes a Telegram channel configuration map.
-func (a *TelegramAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
+func (a *Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeConfig(raw)
 }
 
 // NormalizeUserConfig validates and normalizes a Telegram user-binding configuration map.
-func (a *TelegramAdapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
+func (a *Adapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeUserConfig(raw)
 }
 
 // NormalizeTarget normalizes a Telegram delivery target string.
-func (a *TelegramAdapter) NormalizeTarget(raw string) string {
+func (a *Adapter) NormalizeTarget(raw string) string {
 	return normalizeTarget(raw)
 }
 
 // ResolveTarget derives a delivery target from a Telegram user-binding configuration.
-func (a *TelegramAdapter) ResolveTarget(userConfig map[string]any) (string, error) {
+func (a *Adapter) ResolveTarget(userConfig map[string]any) (string, error) {
 	return resolveTarget(userConfig)
 }
 
 // MatchBinding reports whether a Telegram user binding matches the given criteria.
-func (a *TelegramAdapter) MatchBinding(config map[string]any, criteria channel.BindingCriteria) bool {
+func (a *Adapter) MatchBinding(config map[string]any, criteria channel.BindingCriteria) bool {
 	return matchBinding(config, criteria)
 }
 
 // BuildUserConfig constructs a Telegram user-binding config from an Identity.
-func (a *TelegramAdapter) BuildUserConfig(identity channel.Identity) map[string]any {
+func (a *Adapter) BuildUserConfig(identity channel.Identity) map[string]any {
 	return buildUserConfig(identity)
 }
 
 // Connect starts long-polling for Telegram updates and forwards messages to the handler.
-func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler) (channel.Connection, error) {
+func (a *Adapter) Connect(ctx context.Context, cfg channel.Config, handler channel.InboundHandler) (channel.Connection, error) {
 	if a.logger != nil {
 		a.logger.Info("start", slog.String("config_id", cfg.ID))
 	}
@@ -242,7 +242,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 						slog.String("chat_id", msg.Conversation.ID),
 						slog.String("user_id", attrs["user_id"]),
 						slog.String("username", attrs["username"]),
-						slog.String("text", common.SummarizeText(text)),
+						slog.String("text", adapterutil.SummarizeText(text)),
 					)
 				}
 				go func() {
@@ -266,6 +266,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 		// "Conflict: terminated by other getUpdates request" when a new
 		// connection starts with the same bot token.
 		for range updates {
+			continue // drain channel
 		}
 		return nil
 	}
@@ -273,7 +274,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 }
 
 // Send delivers an outbound message to Telegram, handling text, attachments, and replies.
-func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *Adapter) Send(_ context.Context, cfg channel.Config, msg channel.OutboundMessage) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		if a.logger != nil {
@@ -283,14 +284,14 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	}
 	to := strings.TrimSpace(msg.Target)
 	if to == "" {
-		return fmt.Errorf("telegram target is required")
+		return errors.New("telegram target is required")
 	}
 	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
 	if err != nil {
 		return err
 	}
 	if msg.Message.IsEmpty() {
-		return fmt.Errorf("message is required")
+		return errors.New("message is required")
 	}
 	text := strings.TrimSpace(msg.Message.PlainText())
 	text, parseMode := formatTelegramOutput(text, msg.Message.Format)
@@ -325,10 +326,10 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 // OpenStream opens a Telegram streaming session.
 // The adapter sends one message then edits it in place as deltas arrive (editMessageText),
 // avoiding one message per delta and rate limits.
-func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *Adapter) OpenStream(ctx context.Context, cfg channel.Config, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return nil, fmt.Errorf("telegram target is required")
+		return nil, errors.New("telegram target is required")
 	}
 	select {
 	case <-ctx.Done():
@@ -413,13 +414,13 @@ func parseReplyToMessageID(reply *channel.ReplyRef) int {
 	return value
 }
 
-func sendTelegramText(bot *tgbotapi.BotAPI, target string, text string, replyTo int, parseMode string) error {
+func sendTelegramText(bot *tgbotapi.BotAPI, target, text string, replyTo int, parseMode string) error {
 	_, _, err := sendTelegramTextReturnMessage(bot, target, text, replyTo, parseMode)
 	return err
 }
 
 // sendTelegramTextReturnMessage sends a text message and returns the chat ID and message ID for later editing.
-func sendTelegramTextReturnMessage(bot *tgbotapi.BotAPI, target string, text string, replyTo int, parseMode string) (chatID int64, messageID int, err error) {
+func sendTelegramTextReturnMessage(bot *tgbotapi.BotAPI, target, text string, replyTo int, parseMode string) (chatID int64, messageID int, err error) {
 	text = truncateTelegramText(sanitizeTelegramText(text))
 	var sent tgbotapi.Message
 	if strings.HasPrefix(target, "@") {
@@ -435,7 +436,7 @@ func sendTelegramTextReturnMessage(bot *tgbotapi.BotAPI, target string, text str
 	} else {
 		chatID, err = strconv.ParseInt(target, 10, 64)
 		if err != nil {
-			return 0, 0, fmt.Errorf("telegram target must be @username or chat_id")
+			return 0, 0, errors.New("telegram target must be @username or chat_id")
 		}
 		message := tgbotapi.NewMessage(chatID, text)
 		message.ParseMode = parseMode
@@ -458,7 +459,7 @@ var sendEditForTest func(bot *tgbotapi.BotAPI, edit tgbotapi.EditMessageTextConf
 
 // editTelegramMessageText sends an edit request. It handles "message is not modified"
 // silently but returns 429 and other errors to the caller for higher-level retry decisions.
-func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, parseMode string) error {
+func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, text, parseMode string) error {
 	text = truncateTelegramText(sanitizeTelegramText(text))
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	edit.ParseMode = parseMode
@@ -511,7 +512,7 @@ func sendTelegramAttachment(bot *tgbotapi.BotAPI, target string, att channel.Att
 	keyRef := strings.TrimSpace(att.PlatformKey)
 	sourcePlatform := strings.TrimSpace(att.SourcePlatform)
 	if urlRef == "" && keyRef == "" {
-		return fmt.Errorf("attachment reference is required")
+		return errors.New("attachment reference is required")
 	}
 	if strings.TrimSpace(caption) == "" && strings.TrimSpace(att.Caption) != "" {
 		caption = strings.TrimSpace(att.Caption)
@@ -529,7 +530,7 @@ func sendTelegramAttachment(bot *tgbotapi.BotAPI, target string, att channel.Att
 		} else {
 			chatID, err := strconv.ParseInt(target, 10, 64)
 			if err != nil {
-				return fmt.Errorf("telegram target must be @username or chat_id")
+				return errors.New("telegram target must be @username or chat_id")
 			}
 			photo = tgbotapi.NewPhoto(chatID, file)
 		}
@@ -552,7 +553,7 @@ func sendTelegramAttachment(bot *tgbotapi.BotAPI, target string, att channel.Att
 		} else {
 			chatID, err := strconv.ParseInt(target, 10, 64)
 			if err != nil {
-				return fmt.Errorf("telegram target must be @username or chat_id")
+				return errors.New("telegram target must be @username or chat_id")
 			}
 			document = tgbotapi.NewDocument(chatID, file)
 		}
@@ -634,7 +635,7 @@ func buildTelegramAudio(target string, file tgbotapi.RequestFileData) (tgbotapi.
 	}
 	chatID, err := strconv.ParseInt(target, 10, 64)
 	if err != nil {
-		return tgbotapi.AudioConfig{}, fmt.Errorf("telegram target must be @username or chat_id")
+		return tgbotapi.AudioConfig{}, errors.New("telegram target must be @username or chat_id")
 	}
 	return tgbotapi.NewAudio(chatID, file), nil
 }
@@ -647,7 +648,7 @@ func buildTelegramVoice(target string, file tgbotapi.RequestFileData) (tgbotapi.
 	}
 	chatID, err := strconv.ParseInt(target, 10, 64)
 	if err != nil {
-		return tgbotapi.VoiceConfig{}, fmt.Errorf("telegram target must be @username or chat_id")
+		return tgbotapi.VoiceConfig{}, errors.New("telegram target must be @username or chat_id")
 	}
 	return tgbotapi.NewVoice(chatID, file), nil
 }
@@ -660,7 +661,7 @@ func buildTelegramVideo(target string, file tgbotapi.RequestFileData) (tgbotapi.
 	}
 	chatID, err := strconv.ParseInt(target, 10, 64)
 	if err != nil {
-		return tgbotapi.VideoConfig{}, fmt.Errorf("telegram target must be @username or chat_id")
+		return tgbotapi.VideoConfig{}, errors.New("telegram target must be @username or chat_id")
 	}
 	return tgbotapi.NewVideo(chatID, file), nil
 }
@@ -673,7 +674,7 @@ func buildTelegramAnimation(target string, file tgbotapi.RequestFileData) (tgbot
 	}
 	chatID, err := strconv.ParseInt(target, 10, 64)
 	if err != nil {
-		return tgbotapi.AnimationConfig{}, fmt.Errorf("telegram target must be @username or chat_id")
+		return tgbotapi.AnimationConfig{}, errors.New("telegram target must be @username or chat_id")
 	}
 	return tgbotapi.NewAnimation(chatID, file), nil
 }
@@ -714,7 +715,7 @@ func isTelegramBotMentioned(msg *tgbotapi.Message, botUsername string) bool {
 	return false
 }
 
-func (a *TelegramAdapter) collectTelegramAttachments(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) []channel.Attachment {
+func (a *Adapter) collectTelegramAttachments(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) []channel.Attachment {
 	if msg == nil {
 		return nil
 	}
@@ -769,7 +770,7 @@ func (a *TelegramAdapter) collectTelegramAttachments(bot *tgbotapi.BotAPI, msg *
 	return attachments
 }
 
-func (a *TelegramAdapter) buildTelegramAttachment(bot *tgbotapi.BotAPI, attType channel.AttachmentType, fileID, name, mime string, size int64) channel.Attachment {
+func (a *Adapter) buildTelegramAttachment(bot *tgbotapi.BotAPI, attType channel.AttachmentType, fileID, name, mime string, size int64) channel.Attachment {
 	url := ""
 	if bot != nil && strings.TrimSpace(fileID) != "" {
 		value, err := bot.GetFileDirectURL(fileID)
@@ -840,7 +841,7 @@ func truncateTelegramText(text string) string {
 }
 
 // ProcessingStarted sends a "typing" chat action to indicate processing.
-func (a *TelegramAdapter) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+func (a *Adapter) ProcessingStarted(_ context.Context, cfg channel.Config, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
 	chatID := strings.TrimSpace(info.ReplyTarget)
 	if chatID == "" {
 		return channel.ProcessingStatusHandle{}, nil
@@ -860,12 +861,12 @@ func (a *TelegramAdapter) ProcessingStarted(ctx context.Context, cfg channel.Cha
 }
 
 // ProcessingCompleted is a no-op for Telegram (typing indicator clears automatically).
-func (a *TelegramAdapter) ProcessingCompleted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
+func (a *Adapter) ProcessingCompleted(_ context.Context, _ channel.Config, _ channel.InboundMessage, _ channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle) error {
 	return nil
 }
 
 // ProcessingFailed is a no-op for Telegram (typing indicator clears automatically).
-func (a *TelegramAdapter) ProcessingFailed(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
+func (a *Adapter) ProcessingFailed(_ context.Context, _ channel.Config, _ channel.InboundMessage, _ channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle, _ error) error {
 	return nil
 }
 
@@ -898,7 +899,7 @@ func clearTelegramReaction(bot *tgbotapi.BotAPI, chatID, messageID string) error
 }
 
 // React adds an emoji reaction to a message (implements channel.Reactor).
-func (a *TelegramAdapter) React(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, emoji string) error {
+func (a *Adapter) React(_ context.Context, cfg channel.Config, target, messageID, emoji string) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
@@ -912,7 +913,7 @@ func (a *TelegramAdapter) React(ctx context.Context, cfg channel.ChannelConfig, 
 
 // Unreact removes the bot's reaction from a message (implements channel.Reactor).
 // The emoji parameter is ignored; Telegram clears all bot reactions at once.
-func (a *TelegramAdapter) Unreact(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, _ string) error {
+func (a *Adapter) Unreact(_ context.Context, cfg channel.Config, target, messageID, _ string) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err

@@ -1,3 +1,4 @@
+// Package flow provides conversation flow types and assistant output extraction.
 package flow
 
 import (

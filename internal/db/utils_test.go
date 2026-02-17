@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -107,7 +108,7 @@ func TestIsUniqueViolation(t *testing.T) {
 		want bool
 	}{
 		{"nil", nil, false},
-		{"plain error", fmt.Errorf("some error"), false},
+		{"plain error", errors.New("some error"), false},
 		{"unique violation", &pgconn.PgError{Code: "23505"}, true},
 		{"other pg error", &pgconn.PgError{Code: "23503"}, false},
 		{"wrapped unique violation", fmt.Errorf("wrapped: %w", &pgconn.PgError{Code: "23505"}), true},

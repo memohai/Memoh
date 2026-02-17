@@ -5,6 +5,7 @@ import "context"
 // DirectoryEntryKind classifies a directory entry as a user or a group.
 type DirectoryEntryKind string
 
+// DirectoryEntryKind values for listing and resolving directory entries.
 const (
 	DirectoryEntryUser  DirectoryEntryKind = "user"
 	DirectoryEntryGroup DirectoryEntryKind = "group"
@@ -27,10 +28,10 @@ type DirectoryQuery struct {
 	Kind  DirectoryEntryKind `json:"kind,omitempty"`
 }
 
-// ChannelDirectoryAdapter provides contact and group lookup for a channel platform.
-type ChannelDirectoryAdapter interface {
-	ListPeers(ctx context.Context, cfg ChannelConfig, query DirectoryQuery) ([]DirectoryEntry, error)
-	ListGroups(ctx context.Context, cfg ChannelConfig, query DirectoryQuery) ([]DirectoryEntry, error)
-	ListGroupMembers(ctx context.Context, cfg ChannelConfig, groupID string, query DirectoryQuery) ([]DirectoryEntry, error)
-	ResolveEntry(ctx context.Context, cfg ChannelConfig, input string, kind DirectoryEntryKind) (DirectoryEntry, error)
+// DirectoryAdapter provides contact and group lookup for a channel platform.
+type DirectoryAdapter interface {
+	ListPeers(ctx context.Context, cfg Config, query DirectoryQuery) ([]DirectoryEntry, error)
+	ListGroups(ctx context.Context, cfg Config, query DirectoryQuery) ([]DirectoryEntry, error)
+	ListGroupMembers(ctx context.Context, cfg Config, groupID string, query DirectoryQuery) ([]DirectoryEntry, error)
+	ResolveEntry(ctx context.Context, cfg Config, input string, kind DirectoryEntryKind) (DirectoryEntry, error)
 }

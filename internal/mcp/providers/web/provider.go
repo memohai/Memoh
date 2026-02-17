@@ -1,13 +1,14 @@
+// Package web provides the MCP web provider (Brave Search and fetch tools).
 package web
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,12 +21,14 @@ const (
 	toolWebSearch = "web_search"
 )
 
+// Executor is the MCP tool executor for web_search (and optional fetch) using configured search provider.
 type Executor struct {
 	logger          *slog.Logger
 	settings        *settings.Service
 	searchProviders *searchproviders.Service
 }
 
+// NewExecutor creates a web tool executor.
 func NewExecutor(log *slog.Logger, settingsSvc *settings.Service, searchSvc *searchproviders.Service) *Executor {
 	if log == nil {
 		log = slog.Default()
@@ -37,7 +40,8 @@ func NewExecutor(log *slog.Logger, settingsSvc *settings.Service, searchSvc *sea
 	}
 }
 
-func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+// ListTools returns web_search (and optionally fetch) tool descriptors.
+func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	if p.settings == nil || p.searchProviders == nil {
 		return []mcpgw.ToolDescriptor{}, nil
 	}
@@ -57,6 +61,7 @@ func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 	}, nil
 }
 
+// CallTool runs web_search (or fetch) using the bot's configured search provider.
 func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
 	if p.settings == nil || p.searchProviders == nil {
 		return mcpgw.BuildToolErrorResult("web tools are not available"), nil
@@ -112,7 +117,7 @@ func (p *Executor) callWebSearch(ctx context.Context, providerName string, confi
 	}
 	params := reqURL.Query()
 	params.Set("q", query)
-	params.Set("count", fmt.Sprintf("%d", count))
+	params.Set("count", strconv.Itoa(count))
 	reqURL.RawQuery = params.Encode()
 
 	timeout := parseTimeout(configJSON, 15*time.Second)
@@ -130,7 +135,11 @@ func (p *Executor) callWebSearch(ctx context.Context, providerName string, confi
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			p.logger.Warn("web search: close response body failed", slog.Any("error", err))
+		}
+	}()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil

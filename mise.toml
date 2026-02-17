@@ -2,7 +2,7 @@ experimental_monorepo_root = true
 
 [tools]
 # Go version from go.mod
-go = "1.25.6"
+go = "latest"
 # Node.js for frontend packages
 node = "25"
 # Bun for agent gateway
@@ -13,6 +13,8 @@ pnpm = "10"
 sqlc = "latest"
 # typos for spell check
 typos = "latest"
+# golangci-lint for Go linting
+golangci-lint = "latest"
 # Lima for macOS
 lima = { version = "system", platform = "darwin" }
 

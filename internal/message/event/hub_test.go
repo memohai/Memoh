@@ -12,7 +12,7 @@ func TestHubPublishScopedByBotID(t *testing.T) {
 	_, botBStream, cancelB := hub.Subscribe("bot-b", 8)
 	defer cancelB()
 
-	hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
+	hub.Publish(Event{Type: TypeMessageCreated, BotID: "bot-a"})
 
 	select {
 	case <-botAStream:
@@ -47,9 +47,9 @@ func TestHubSlowSubscriberDoesNotBlockPublish(t *testing.T) {
 	_, stream, cancel := hub.Subscribe("bot-a", 1)
 	defer cancel()
 
-	hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
-	hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
-	hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
+	hub.Publish(Event{Type: TypeMessageCreated, BotID: "bot-a"})
+	hub.Publish(Event{Type: TypeMessageCreated, BotID: "bot-a"})
+	hub.Publish(Event{Type: TypeMessageCreated, BotID: "bot-a"})
 
 	select {
 	case <-stream:

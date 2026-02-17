@@ -1,3 +1,4 @@
+// Package mcp provides MCP connection management, tool gateway, and federation.
 package mcp
 
 import (

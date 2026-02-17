@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SkillItem is one skill entry (name, description, content, metadata) for list/upsert APIs.
 type SkillItem struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
@@ -19,14 +20,17 @@ type SkillItem struct {
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
+// SkillsResponse holds the list of skills for list API.
 type SkillsResponse struct {
 	Skills []SkillItem `json:"skills"`
 }
 
+// SkillsUpsertRequest is the body for upserting skills (replace list).
 type SkillsUpsertRequest struct {
 	Skills []SkillItem `json:"skills"`
 }
 
+// SkillsDeleteRequest is the body for deleting skills by name.
 type SkillsDeleteRequest struct {
 	Names []string `json:"names"`
 }
@@ -43,7 +47,7 @@ type skillsOpResponse struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/skills [get]
+// @Router /bots/{bot_id}/container/skills [get].
 func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -69,12 +73,7 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 			continue
 		}
 		parsed := parseSkillFile(raw, name)
-		skills = append(skills, SkillItem{
-			Name:        parsed.Name,
-			Description: parsed.Description,
-			Content:     parsed.Content,
-			Metadata:    parsed.Metadata,
-		})
+		skills = append(skills, SkillItem(parsed))
 	}
 
 	return c.JSON(http.StatusOK, SkillsResponse{Skills: skills})
@@ -89,7 +88,7 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/skills [post]
+// @Router /bots/{bot_id}/container/skills [post].
 func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -138,7 +137,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/skills [delete]
+// @Router /bots/{bot_id}/container/skills [delete].
 func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -173,7 +172,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 
 // LoadSkills loads all skills from the container for the given bot.
 // This implements chat.SkillLoader.
-func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]SkillItem, error) {
+func (h *ContainerdHandler) LoadSkills(_ context.Context, botID string) ([]SkillItem, error) {
 	skillsDir, err := h.ensureSkillsDirHost(botID)
 	if err != nil {
 		return nil, err
@@ -195,12 +194,7 @@ func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]Ski
 			continue
 		}
 		parsed := parseSkillFile(raw, name)
-		skills = append(skills, SkillItem{
-			Name:        parsed.Name,
-			Description: parsed.Description,
-			Content:     parsed.Content,
-			Metadata:    parsed.Metadata,
-		})
+		skills = append(skills, SkillItem(parsed))
 	}
 	return skills, nil
 }
@@ -310,7 +304,7 @@ type parsedSkill struct {
 //	  key: value
 //	---
 //	# Body content ...
-func parseSkillFile(raw string, fallbackName string) parsedSkill {
+func parseSkillFile(raw, fallbackName string) parsedSkill {
 	result := parsedSkill{Name: fallbackName}
 
 	trimmed := strings.TrimSpace(raw)
@@ -326,13 +320,13 @@ func parseSkillFile(raw string, fallbackName string) parsedSkill {
 	} else if len(rest) > 1 && rest[0] == '\r' && rest[1] == '\n' {
 		rest = rest[2:]
 	}
-	closingIdx := strings.Index(rest, "\n---")
-	if closingIdx < 0 {
+	before, after, ok := strings.Cut(rest, "\n---")
+	if !ok {
 		return result
 	}
 
-	frontmatterRaw := rest[:closingIdx]
-	body := rest[closingIdx+4:]
+	frontmatterRaw := before
+	body := after
 	body = strings.TrimLeft(body, "\r\n")
 	result.Content = body
 

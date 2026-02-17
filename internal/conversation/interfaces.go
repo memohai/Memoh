@@ -16,5 +16,5 @@ type ParticipantChecker interface {
 type Accessor interface {
 	Reader
 	ParticipantChecker
-	GetReadAccess(ctx context.Context, conversationID, channelIdentityID string) (ConversationReadAccess, error)
+	GetReadAccess(ctx context.Context, conversationID, channelIdentityID string) (ReadAccess, error)
 }

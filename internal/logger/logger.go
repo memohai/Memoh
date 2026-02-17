@@ -1,3 +1,4 @@
+// Package logger provides structured logging and context-aware logger injection.
 package logger
 
 import (
@@ -9,9 +10,10 @@ import (
 
 type ctxKey struct{}
 
+// L is the global default logger; initialize with Init or use FromContext for request-scoped loggers.
 var (
-	L      *slog.Logger = slog.Default()
-	logKey              = ctxKey{}
+	L      = slog.Default()
+	logKey = ctxKey{}
 )
 
 // Init initializes the global logger with the given level and format (e.g. "debug", "json").
@@ -59,8 +61,14 @@ func parseLevel(level string) slog.Level {
 	}
 }
 
-// Debug, Info, Warn, Error log with the global logger (slog.Attr or key-value pairs).
+// Debug logs at debug level with the global logger (slog.Attr or key-value pairs).
 func Debug(msg string, args ...any) { L.Debug(msg, args...) }
-func Info(msg string, args ...any)  { L.Info(msg, args...) }
-func Warn(msg string, args ...any)  { L.Warn(msg, args...) }
+
+// Info logs at info level with the global logger.
+func Info(msg string, args ...any) { L.Info(msg, args...) }
+
+// Warn logs at warn level with the global logger.
+func Warn(msg string, args ...any) { L.Warn(msg, args...) }
+
+// Error logs at error level with the global logger.
 func Error(msg string, args ...any) { L.Error(msg, args...) }

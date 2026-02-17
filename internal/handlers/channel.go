@@ -10,15 +10,18 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 )
 
+// ChannelHandler serves channel identity config and channel metadata APIs.
 type ChannelHandler struct {
 	service  *channel.Service
 	registry *channel.Registry
 }
 
+// NewChannelHandler creates a channel handler.
 func NewChannelHandler(service *channel.Service, registry *channel.Registry) *ChannelHandler {
 	return &ChannelHandler{service: service, registry: registry}
 }
 
+// Register mounts /users/me/channels and /channels routes on the Echo instance.
 func (h *ChannelHandler) Register(e *echo.Echo) {
 	group := e.Group("/users/me/channels")
 	group.GET("/:platform", h.GetChannelIdentityConfig)
@@ -34,11 +37,11 @@ func (h *ChannelHandler) Register(e *echo.Echo) {
 // @Description Get channel binding configuration for current user
 // @Tags channel
 // @Param platform path string true "Channel platform"
-// @Success 200 {object} channel.ChannelIdentityBinding
+// @Success 200 {object} channel.IdentityBinding
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/me/channels/{platform} [get]
+// @Router /users/me/channels/{platform} [get].
 func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -64,10 +67,10 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 // @Tags channel
 // @Param platform path string true "Channel platform"
 // @Param payload body channel.UpsertChannelIdentityConfigRequest true "Channel user config payload"
-// @Success 200 {object} channel.ChannelIdentityBinding
+// @Success 200 {object} channel.IdentityBinding
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/me/channels/{platform} [put]
+// @Router /users/me/channels/{platform} [put].
 func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -91,14 +94,15 @@ func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
+// ChannelMeta is the API response for channel metadata (type, display name, capabilities, schemas).
 type ChannelMeta struct {
-	Type             string                      `json:"type"`
-	DisplayName      string                      `json:"display_name"`
-	Configless       bool                        `json:"configless"`
-	Capabilities     channel.ChannelCapabilities `json:"capabilities"`
-	ConfigSchema     channel.ConfigSchema        `json:"config_schema"`
-	UserConfigSchema channel.ConfigSchema        `json:"user_config_schema"`
-	TargetSpec       channel.TargetSpec          `json:"target_spec"`
+	Type             string               `json:"type"`
+	DisplayName      string               `json:"display_name"`
+	Configless       bool                 `json:"configless"`
+	Capabilities     channel.Capabilities `json:"capabilities"`
+	ConfigSchema     channel.ConfigSchema `json:"config_schema"`
+	UserConfigSchema channel.ConfigSchema `json:"user_config_schema"`
+	TargetSpec       channel.TargetSpec   `json:"target_spec"`
 }
 
 // ListChannels godoc
@@ -107,7 +111,7 @@ type ChannelMeta struct {
 // @Tags channel
 // @Success 200 {array} ChannelMeta
 // @Failure 500 {object} ErrorResponse
-// @Router /channels [get]
+// @Router /channels [get].
 func (h *ChannelHandler) ListChannels(c echo.Context) error {
 	descs := h.registry.ListDescriptors()
 	items := make([]ChannelMeta, 0, len(descs))
@@ -136,7 +140,7 @@ func (h *ChannelHandler) ListChannels(c echo.Context) error {
 // @Success 200 {object} ChannelMeta
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /channels/{platform} [get]
+// @Router /channels/{platform} [get].
 func (h *ChannelHandler) GetChannel(c echo.Context) error {
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {

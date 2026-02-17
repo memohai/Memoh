@@ -1,12 +1,14 @@
+// Package config loads and exposes application configuration (TOML).
 package config
 
 import (
-	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 )
 
+// Default configuration values used when a field is missing in TOML.
 const (
 	DefaultConfigPath       = "config.toml"
 	DefaultHTTPAddr         = ":8080"
@@ -25,6 +27,7 @@ const (
 	DefaultQdrantCollection = "memory"
 )
 
+// Config is the root application configuration loaded from TOML.
 type Config struct {
 	Log          LogConfig          `toml:"log"`
 	Server       ServerConfig       `toml:"server"`
@@ -37,31 +40,37 @@ type Config struct {
 	AgentGateway AgentGatewayConfig `toml:"agent_gateway"`
 }
 
+// LogConfig holds logging level and format (e.g. level=info, format=text).
 type LogConfig struct {
 	Level  string `toml:"level"`
 	Format string `toml:"format"`
 }
 
+// ServerConfig holds the HTTP server listen address.
 type ServerConfig struct {
 	Addr string `toml:"addr"`
 }
 
+// AdminConfig holds the initial admin account (username, password, email).
 type AdminConfig struct {
 	Username string `toml:"username"`
 	Password string `toml:"password"`
 	Email    string `toml:"email"`
 }
 
+// AuthConfig holds JWT secret and token expiry (e.g. 24h).
 type AuthConfig struct {
 	JWTSecret    string `toml:"jwt_secret"`
 	JWTExpiresIn string `toml:"jwt_expires_in"`
 }
 
+// ContainerdConfig holds the containerd socket path and namespace.
 type ContainerdConfig struct {
 	SocketPath string `toml:"socket_path"`
 	Namespace  string `toml:"namespace"`
 }
 
+// MCPConfig holds MCP container image, snapshotter, and data paths.
 type MCPConfig struct {
 	Image       string `toml:"image"`
 	Snapshotter string `toml:"snapshotter"`
@@ -69,6 +78,7 @@ type MCPConfig struct {
 	DataMount   string `toml:"data_mount"`
 }
 
+// PostgresConfig holds PostgreSQL connection parameters.
 type PostgresConfig struct {
 	Host     string `toml:"host"`
 	Port     int    `toml:"port"`
@@ -78,6 +88,7 @@ type PostgresConfig struct {
 	SSLMode  string `toml:"sslmode"`
 }
 
+// QdrantConfig holds Qdrant base URL, API key, collection name, and timeout.
 type QdrantConfig struct {
 	BaseURL        string `toml:"base_url"`
 	APIKey         string `toml:"api_key"`
@@ -85,11 +96,13 @@ type QdrantConfig struct {
 	TimeoutSeconds int    `toml:"timeout_seconds"`
 }
 
+// AgentGatewayConfig holds the agent gateway host and port.
 type AgentGatewayConfig struct {
 	Host string `toml:"host"`
 	Port int    `toml:"port"`
 }
 
+// BaseURL returns the agent gateway base URL (e.g. http://127.0.0.1:8081) from host and port.
 func (c AgentGatewayConfig) BaseURL() string {
 	host := c.Host
 	if host == "" {
@@ -99,9 +112,10 @@ func (c AgentGatewayConfig) BaseURL() string {
 	if port == 0 {
 		port = 8081
 	}
-	return "http://" + host + ":" + fmt.Sprint(port)
+	return "http://" + host + ":" + strconv.Itoa(port)
 }
 
+// Load reads and parses the TOML config file at path and applies default values for missing fields.
 func Load(path string) (Config, error) {
 	cfg := Config{
 		Log: LogConfig{

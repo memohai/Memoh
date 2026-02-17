@@ -2,11 +2,13 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
 	"github.com/memohai/memoh/internal/channel"
 )
 
@@ -23,7 +25,7 @@ func TestTelegramOutboundStream_CloseNil(t *testing.T) {
 func TestTelegramOutboundStream_PushClosed(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{adapter: adapter}
 	s.closed.Store(true)
 
@@ -40,7 +42,7 @@ func TestTelegramOutboundStream_PushClosed(t *testing.T) {
 func TestTelegramOutboundStream_PushStatusNoOp(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{adapter: adapter}
 
 	ctx := context.Background()
@@ -67,7 +69,7 @@ func TestTelegramOutboundStream_PushNilAdapter(t *testing.T) {
 func TestTelegramOutboundStream_PushUnsupportedEventType(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{adapter: adapter}
 	ctx := context.Background()
 
@@ -83,7 +85,7 @@ func TestTelegramOutboundStream_PushUnsupportedEventType(t *testing.T) {
 func TestTelegramOutboundStream_PushEmptyDeltaNoOp(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{adapter: adapter}
 	ctx := context.Background()
 
@@ -96,7 +98,7 @@ func TestTelegramOutboundStream_PushEmptyDeltaNoOp(t *testing.T) {
 func TestTelegramOutboundStream_PushErrorEventEmptyNoOp(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{adapter: adapter}
 	ctx := context.Background()
 
@@ -109,13 +111,13 @@ func TestTelegramOutboundStream_PushErrorEventEmptyNoOp(t *testing.T) {
 func TestTelegramOutboundStream_CloseContextCanceled(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{adapter: adapter}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	err := s.Close(ctx)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Close with canceled context should return context.Canceled: %v", err)
 	}
 }
@@ -124,7 +126,7 @@ func TestTelegramOutboundStream_CloseContextCanceled(t *testing.T) {
 func TestEditStreamMessage_NoEditWhenSameContent(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{
 		adapter:      adapter,
 		streamChatID: 1,
@@ -156,7 +158,7 @@ func TestEditStreamMessage_NoEditWhenSameContent(t *testing.T) {
 func TestEditStreamMessage_NoEditWhenMessageNotSent(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{adapter: adapter, streamMsgID: 0}
 	ctx := context.Background()
 
@@ -169,7 +171,7 @@ func TestEditStreamMessage_NoEditWhenMessageNotSent(t *testing.T) {
 func TestEditStreamMessage_NoEditWhenThrottled(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{
 		adapter:      adapter,
 		streamChatID: 1,
@@ -188,11 +190,11 @@ func TestEditStreamMessage_NoEditWhenThrottled(t *testing.T) {
 func TestEditStreamMessage_429SetsBackoffAndReturnsNil(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	before := time.Now().Add(-time.Minute)
 	s := &telegramOutboundStream{
 		adapter:      adapter,
-		cfg:          channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		cfg:          channel.Config{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
 		streamChatID: 1,
 		streamMsgID:  1,
 		lastEdited:   "a",
@@ -202,7 +204,7 @@ func TestEditStreamMessage_429SetsBackoffAndReturnsNil(t *testing.T) {
 
 	origGetBot := getOrCreateBotForTest
 	origEdit := testEditFunc
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+	getOrCreateBotForTest = func(_ *Adapter, _, _ string) (*tgbotapi.BotAPI, error) {
 		return &tgbotapi.BotAPI{Token: "fake"}, nil
 	}
 	testEditFunc = func(*tgbotapi.BotAPI, int64, int, string, string) error {
@@ -236,10 +238,10 @@ func TestEditStreamMessage_429SetsBackoffAndReturnsNil(t *testing.T) {
 func TestEditStreamMessageFinal_Success(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{
 		adapter:      adapter,
-		cfg:          channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		cfg:          channel.Config{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
 		streamChatID: 1,
 		streamMsgID:  1,
 		lastEdited:   "a",
@@ -249,7 +251,7 @@ func TestEditStreamMessageFinal_Success(t *testing.T) {
 
 	origGetBot := getOrCreateBotForTest
 	origEdit := testEditFunc
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+	getOrCreateBotForTest = func(_ *Adapter, _, _ string) (*tgbotapi.BotAPI, error) {
 		return &tgbotapi.BotAPI{Token: "fake"}, nil
 	}
 	testEditFunc = func(*tgbotapi.BotAPI, int64, int, string, string) error {
@@ -275,7 +277,7 @@ func TestEditStreamMessageFinal_Success(t *testing.T) {
 func TestEditStreamMessageFinal_SameContentNoOp(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{
 		adapter:      adapter,
 		streamChatID: 1,
@@ -294,7 +296,7 @@ func TestEditStreamMessageFinal_SameContentNoOp(t *testing.T) {
 func TestEditStreamMessageFinal_NoMessageNoOp(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewTelegramAdapter(nil)
+	adapter := NewAdapter(nil)
 	s := &telegramOutboundStream{adapter: adapter, streamMsgID: 0}
 	ctx := context.Background()
 
