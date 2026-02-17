@@ -24,7 +24,7 @@ type fakeChannelIdentityService struct {
 	lastMeta        map[string]any
 }
 
-func (f *fakeChannelIdentityService) ResolveByChannelIdentity(ctx context.Context, platform, externalID, displayName string, meta map[string]any) (identities.ChannelIdentity, error) {
+func (f *fakeChannelIdentityService) ResolveByChannelIdentity(_ context.Context, _ string, externalID, displayName string, meta map[string]any) (identities.ChannelIdentity, error) {
 	f.calls++
 	f.lastDisplayName = displayName
 	f.lastMeta = meta
@@ -40,7 +40,7 @@ func (f *fakeChannelIdentityService) ResolveByChannelIdentity(ctx context.Contex
 	return f.channelIdentity, nil
 }
 
-func (f *fakeChannelIdentityService) Canonicalize(ctx context.Context, channelIdentityID string) (string, error) {
+func (f *fakeChannelIdentityService) Canonicalize(_ context.Context, channelIdentityID string) (string, error) {
 	if f.canonical != nil {
 		if value, ok := f.canonical[channelIdentityID]; ok {
 			return value, nil
@@ -49,7 +49,7 @@ func (f *fakeChannelIdentityService) Canonicalize(ctx context.Context, channelId
 	return channelIdentityID, nil
 }
 
-func (f *fakeChannelIdentityService) GetLinkedUserID(ctx context.Context, channelIdentityID string) (string, error) {
+func (f *fakeChannelIdentityService) GetLinkedUserID(_ context.Context, channelIdentityID string) (string, error) {
 	if f.linked != nil {
 		if value, ok := f.linked[channelIdentityID]; ok {
 			return value, nil
@@ -60,7 +60,7 @@ func (f *fakeChannelIdentityService) GetLinkedUserID(ctx context.Context, channe
 	return channelIdentityID, nil
 }
 
-func (f *fakeChannelIdentityService) LinkChannelIdentityToUser(ctx context.Context, channelIdentityID, userID string) error {
+func (f *fakeChannelIdentityService) LinkChannelIdentityToUser(_ context.Context, channelIdentityID, userID string) error {
 	if f.linked == nil {
 		f.linked = map[string]string{}
 	}
@@ -73,11 +73,11 @@ type fakeMemberService struct {
 	upsertCalled bool
 }
 
-func (f *fakeMemberService) IsMember(ctx context.Context, botID, channelIdentityID string) (bool, error) {
+func (f *fakeMemberService) IsMember(_ context.Context, _ string, _ string) (bool, error) {
 	return f.isMember, nil
 }
 
-func (f *fakeMemberService) UpsertMemberSimple(ctx context.Context, botID, channelIdentityID, role string) error {
+func (f *fakeMemberService) UpsertMemberSimple(_ context.Context, _ string, _ string, _ string) error {
 	f.upsertCalled = true
 	return nil
 }
@@ -89,21 +89,21 @@ type fakePolicyService struct {
 	err         error
 }
 
-func (f *fakePolicyService) AllowGuest(ctx context.Context, botID string) (bool, error) {
+func (f *fakePolicyService) AllowGuest(_ context.Context, _ string) (bool, error) {
 	if f.err != nil {
 		return false, f.err
 	}
 	return f.allow, nil
 }
 
-func (f *fakePolicyService) BotType(ctx context.Context, botID string) (string, error) {
+func (f *fakePolicyService) BotType(_ context.Context, _ string) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
 	return f.botType, nil
 }
 
-func (f *fakePolicyService) BotOwnerUserID(ctx context.Context, botID string) (string, error) {
+func (f *fakePolicyService) BotOwnerUserID(_ context.Context, _ string) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
@@ -116,7 +116,7 @@ type fakePreauthServiceIdentity struct {
 	markUsed bool
 }
 
-func (f *fakePreauthServiceIdentity) Get(ctx context.Context, token string) (preauth.Key, error) {
+func (f *fakePreauthServiceIdentity) Get(_ context.Context, token string) (preauth.Key, error) {
 	if f.err != nil {
 		return preauth.Key{}, f.err
 	}
@@ -126,7 +126,7 @@ func (f *fakePreauthServiceIdentity) Get(ctx context.Context, token string) (pre
 	return f.key, nil
 }
 
-func (f *fakePreauthServiceIdentity) MarkUsed(ctx context.Context, id string) (preauth.Key, error) {
+func (f *fakePreauthServiceIdentity) MarkUsed(_ context.Context, _ string) (preauth.Key, error) {
 	f.markUsed = true
 	return f.key, nil
 }
@@ -139,7 +139,7 @@ type fakeBindService struct {
 	onConsume     func(channelChannelIdentityID string)
 }
 
-func (f *fakeBindService) Get(ctx context.Context, token string) (bind.Code, error) {
+func (f *fakeBindService) Get(_ context.Context, token string) (bind.Code, error) {
 	if f.getErr != nil {
 		return bind.Code{}, f.getErr
 	}
@@ -149,7 +149,7 @@ func (f *fakeBindService) Get(ctx context.Context, token string) (bind.Code, err
 	return f.code, nil
 }
 
-func (f *fakeBindService) Consume(ctx context.Context, code bind.Code, channelChannelIdentityID string) error {
+func (f *fakeBindService) Consume(_ context.Context, _ bind.Code, channelChannelIdentityID string) error {
 	f.consumeCalled = true
 	if f.onConsume != nil {
 		f.onConsume(channelChannelIdentityID)
@@ -158,35 +158,35 @@ func (f *fakeBindService) Consume(ctx context.Context, code bind.Code, channelCh
 }
 
 type fakeDirectoryAdapter struct {
-	channelType channel.ChannelType
-	resolveFn   func(ctx context.Context, cfg channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error)
+	channelType channel.Type
+	resolveFn   func(ctx context.Context, cfg channel.Config, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error)
 }
 
-func (f *fakeDirectoryAdapter) Type() channel.ChannelType {
+func (f *fakeDirectoryAdapter) Type() channel.Type {
 	return f.channelType
 }
 
 func (f *fakeDirectoryAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
-		Type:        f.channelType,
-		DisplayName: "FakeDirectory",
-		Capabilities: channel.ChannelCapabilities{},
+		Type:         f.channelType,
+		DisplayName:  "FakeDirectory",
+		Capabilities: channel.Capabilities{},
 	}
 }
 
-func (f *fakeDirectoryAdapter) ListPeers(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (f *fakeDirectoryAdapter) ListPeers(_ context.Context, _ channel.Config, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
-func (f *fakeDirectoryAdapter) ListGroups(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (f *fakeDirectoryAdapter) ListGroups(_ context.Context, _ channel.Config, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
-func (f *fakeDirectoryAdapter) ListGroupMembers(ctx context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (f *fakeDirectoryAdapter) ListGroupMembers(_ context.Context, _ channel.Config, _ string, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
-func (f *fakeDirectoryAdapter) ResolveEntry(ctx context.Context, cfg channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
+func (f *fakeDirectoryAdapter) ResolveEntry(ctx context.Context, cfg channel.Config, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
 	if f.resolveFn != nil {
 		return f.resolveFn(ctx, cfg, input, kind)
 	}
@@ -201,12 +201,12 @@ func TestIdentityResolverAllowGuestWithoutMembershipSideEffect(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "Guest"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -224,8 +224,8 @@ func TestIdentityResolverAllowGuestWithoutMembershipSideEffect(t *testing.T) {
 func TestIdentityResolverResolveDisplayNameFromDirectory(t *testing.T) {
 	registry := channel.NewRegistry()
 	directoryAdapter := &fakeDirectoryAdapter{
-		channelType: channel.ChannelType("feishu"),
-		resolveFn: func(ctx context.Context, cfg channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
+		channelType: channel.Type("feishu"),
+		resolveFn: func(_ context.Context, _ channel.Config, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
 			if kind != channel.DirectoryEntryUser {
 				t.Fatalf("expected kind user, got %s", kind)
 			}
@@ -249,7 +249,7 @@ func TestIdentityResolverResolveDisplayNameFromDirectory(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "target-id",
 		Sender: channel.Identity{
@@ -259,7 +259,7 @@ func TestIdentityResolverResolveDisplayNameFromDirectory(t *testing.T) {
 			},
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1", Type: channel.Type("feishu")}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -274,8 +274,8 @@ func TestIdentityResolverResolveDisplayNameFromDirectory(t *testing.T) {
 func TestIdentityResolverDirectoryLookupFailureDoesNotFallbackToOpenID(t *testing.T) {
 	registry := channel.NewRegistry()
 	directoryAdapter := &fakeDirectoryAdapter{
-		channelType: channel.ChannelType("feishu"),
-		resolveFn: func(ctx context.Context, cfg channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
+		channelType: channel.Type("feishu"),
+		resolveFn: func(_ context.Context, _ channel.Config, _ string, _ channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
 			return channel.DirectoryEntry{}, errors.New("lookup failed")
 		},
 	}
@@ -290,7 +290,7 @@ func TestIdentityResolverDirectoryLookupFailureDoesNotFallbackToOpenID(t *testin
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "target-id",
 		Sender: channel.Identity{
@@ -301,7 +301,7 @@ func TestIdentityResolverDirectoryLookupFailureDoesNotFallbackToOpenID(t *testin
 			},
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1", Type: channel.Type("feishu")}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -316,8 +316,8 @@ func TestIdentityResolverDirectoryLookupFailureDoesNotFallbackToOpenID(t *testin
 func TestIdentityResolverDirectoryAvatarURLPropagated(t *testing.T) {
 	registry := channel.NewRegistry()
 	directoryAdapter := &fakeDirectoryAdapter{
-		channelType: channel.ChannelType("feishu"),
-		resolveFn: func(ctx context.Context, cfg channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
+		channelType: channel.Type("feishu"),
+		resolveFn: func(_ context.Context, _ channel.Config, _ string, _ channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
 			return channel.DirectoryEntry{
 				Kind:      channel.DirectoryEntryUser,
 				Name:      "Avatar User",
@@ -336,7 +336,7 @@ func TestIdentityResolverDirectoryAvatarURLPropagated(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "target-id",
 		Sender: channel.Identity{
@@ -344,7 +344,7 @@ func TestIdentityResolverDirectoryAvatarURLPropagated(t *testing.T) {
 			Attributes: map[string]string{"open_id": "ou-avatar"},
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1", Type: channel.Type("feishu")}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -370,12 +370,12 @@ func TestIdentityResolverExistingMemberPasses(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("telegram"),
+		Channel:     channel.Type("telegram"),
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "chat-123",
 		Sender:      channel.Identity{SubjectID: "tg-user-1"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -400,12 +400,12 @@ func TestIdentityResolverPreauthKey(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "PREAUTH123"},
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "ext-1"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -436,12 +436,12 @@ func TestIdentityResolverPreauthKeyExpired(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "PREAUTH123"},
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "ext-1"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -461,12 +461,12 @@ func TestIdentityResolverDenied(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("telegram"),
+		Channel:     channel.Type("telegram"),
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "chat-123",
 		Sender:      channel.Identity{SubjectID: "stranger-1"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestIdentityResolverPersonalBotRejectsGroupMessages(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
-		Channel: channel.ChannelType("feishu"),
+		Channel: channel.Type("feishu"),
 		Message: channel.Message{Text: "hello"},
 		Sender:  channel.Identity{SubjectID: "ext-group-1"},
 		Conversation: channel.Conversation{
@@ -492,7 +492,7 @@ func TestIdentityResolverPersonalBotRejectsGroupMessages(t *testing.T) {
 		},
 	}
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestIdentityResolverPersonalBotAllowsOwnerInGroup(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
-		Channel: channel.ChannelType("feishu"),
+		Channel: channel.Type("feishu"),
 		Message: channel.Message{Text: "hello from owner"},
 		Sender:  channel.Identity{SubjectID: "ext-owner-1"},
 		Conversation: channel.Conversation{
@@ -524,7 +524,7 @@ func TestIdentityResolverPersonalBotAllowsOwnerInGroup(t *testing.T) {
 		},
 	}
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -544,7 +544,7 @@ func TestIdentityResolverPersonalBotAllowsOwnerDirectWithoutMembership(t *testin
 
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
-		Channel: channel.ChannelType("feishu"),
+		Channel: channel.Type("feishu"),
 		Message: channel.Message{Text: "hello from owner"},
 		Sender:  channel.Identity{SubjectID: "ext-owner-direct"},
 		Conversation: channel.Conversation{
@@ -553,7 +553,7 @@ func TestIdentityResolverPersonalBotAllowsOwnerDirectWithoutMembership(t *testin
 		},
 	}
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestIdentityResolverPersonalBotOwnerFallbackByAlternateSubject(t *testing.T
 
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
-		Channel: channel.ChannelType("feishu"),
+		Channel: channel.Type("feishu"),
 		Message: channel.Message{Text: "hello from owner"},
 		Sender: channel.Identity{
 			SubjectID: "ou-open-owner",
@@ -596,7 +596,7 @@ func TestIdentityResolverPersonalBotOwnerFallbackByAlternateSubject(t *testing.T
 		},
 	}
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -622,7 +622,7 @@ func TestIdentityResolverPersonalBotRejectsNonOwnerDirectEvenIfMember(t *testing
 
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
-		Channel: channel.ChannelType("feishu"),
+		Channel: channel.Type("feishu"),
 		Message: channel.Message{Text: "hello from non-owner"},
 		Sender:  channel.Identity{SubjectID: "ext-non-owner"},
 		Conversation: channel.Conversation{
@@ -631,7 +631,7 @@ func TestIdentityResolverPersonalBotRejectsNonOwnerDirectEvenIfMember(t *testing
 		},
 	}
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -669,12 +669,12 @@ func TestIdentityResolverBindRunsBeforeMembershipCheck(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "BIND123"},
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "ext-bind-1"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -708,12 +708,12 @@ func TestIdentityResolverBindConsumeErrorHandledAsDecision(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("telegram"),
+		Channel:     channel.Type("telegram"),
 		Message:     channel.Message{Text: "BINDUSED"},
 		ReplyTarget: "chat-123",
 		Sender:      channel.Identity{SubjectID: "ext-bind-2"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -747,12 +747,12 @@ func TestIdentityResolverBindCodeNotScopedToCurrentBot(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-2",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "BINDANYBOT"},
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "ext-bind-any-bot"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -775,7 +775,7 @@ func TestIdentityResolverPublicBotGroupDeniedSilently(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "group-target",
 		Sender:      channel.Identity{SubjectID: "stranger-group"},
@@ -784,7 +784,7 @@ func TestIdentityResolverPublicBotGroupDeniedSilently(t *testing.T) {
 			Type: "group",
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -804,7 +804,7 @@ func TestIdentityResolverPublicBotDirectDeniedWithReply(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "direct-target",
 		Sender:      channel.Identity{SubjectID: "stranger-direct"},
@@ -813,7 +813,7 @@ func TestIdentityResolverPublicBotDirectDeniedWithReply(t *testing.T) {
 			Type: "p2p",
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -840,12 +840,12 @@ func TestIdentityResolverBindCodePlatformMismatch(t *testing.T) {
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "BINDPLATFORM"},
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "ext-bind-platform"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.Config{BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

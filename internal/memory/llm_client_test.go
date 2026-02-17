@@ -16,7 +16,7 @@ func TestLLMClientExtract(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"choices":[{"message":{"content":"{\"facts\":[\"hello\"]}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"facts\":[\"hello\"]}"}}]}`))
 	}))
 	defer server.Close()
 

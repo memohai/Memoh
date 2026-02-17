@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,11 +18,11 @@ import (
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/common"
+	"github.com/memohai/memoh/internal/channel/adapters/adapterutil"
 )
 
-// FeishuAdapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Feishu.
-type FeishuAdapter struct {
+// Adapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Feishu.
+type Adapter struct {
 	logger *slog.Logger
 }
 
@@ -43,7 +44,7 @@ type larkProcessingReactionGateway struct {
 
 func (g *larkProcessingReactionGateway) Add(ctx context.Context, messageID, reactionType string) (string, error) {
 	if g == nil || g.api == nil {
-		return "", fmt.Errorf("feishu reaction api not configured")
+		return "", errors.New("feishu reaction api not configured")
 	}
 	req := larkim.NewCreateMessageReactionReqBuilder().
 		MessageId(messageID).
@@ -65,14 +66,14 @@ func (g *larkProcessingReactionGateway) Add(ctx context.Context, messageID, reac
 		return "", fmt.Errorf("feishu add reaction failed: %s (code: %d)", msg, code)
 	}
 	if resp.Data == nil || resp.Data.ReactionId == nil || strings.TrimSpace(*resp.Data.ReactionId) == "" {
-		return "", fmt.Errorf("feishu add reaction failed: empty reaction id")
+		return "", errors.New("feishu add reaction failed: empty reaction id")
 	}
 	return strings.TrimSpace(*resp.Data.ReactionId), nil
 }
 
 func (g *larkProcessingReactionGateway) Remove(ctx context.Context, messageID, reactionID string) error {
 	if g == nil || g.api == nil {
-		return fmt.Errorf("feishu reaction api not configured")
+		return errors.New("feishu reaction api not configured")
 	}
 	req := larkim.NewDeleteMessageReactionReqBuilder().
 		MessageId(messageID).
@@ -94,27 +95,27 @@ func (g *larkProcessingReactionGateway) Remove(ctx context.Context, messageID, r
 	return nil
 }
 
-// NewFeishuAdapter creates a FeishuAdapter with the given logger.
-func NewFeishuAdapter(log *slog.Logger) *FeishuAdapter {
+// NewAdapter creates a Adapter with the given logger.
+func NewAdapter(log *slog.Logger) *Adapter {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &FeishuAdapter{
+	return &Adapter{
 		logger: log.With(slog.String("adapter", "feishu")),
 	}
 }
 
 // Type returns the Feishu channel type.
-func (a *FeishuAdapter) Type() channel.ChannelType {
+func (a *Adapter) Type() channel.Type {
 	return Type
 }
 
 // Descriptor returns the Feishu channel metadata.
-func (a *FeishuAdapter) Descriptor() channel.Descriptor {
+func (a *Adapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        Type,
 		DisplayName: "Feishu",
-		Capabilities: channel.ChannelCapabilities{
+		Capabilities: channel.Capabilities{
 			Text:           true,
 			RichText:       true,
 			Attachments:    true,
@@ -158,7 +159,7 @@ func (a *FeishuAdapter) Descriptor() channel.Descriptor {
 }
 
 // ProcessingStarted adds a transient reaction to indicate the inbound message is being processed.
-func (a *FeishuAdapter) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+func (a *Adapter) ProcessingStarted(ctx context.Context, cfg channel.Config, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
 	messageID := strings.TrimSpace(info.SourceMessageID)
 	if messageID == "" {
 		return channel.ProcessingStatusHandle{}, nil
@@ -175,7 +176,7 @@ func (a *FeishuAdapter) ProcessingStarted(ctx context.Context, cfg channel.Chann
 }
 
 // ProcessingCompleted removes the transient processing reaction before output is sent.
-func (a *FeishuAdapter) ProcessingCompleted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
+func (a *Adapter) ProcessingCompleted(ctx context.Context, cfg channel.Config, _ channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
 	messageID := strings.TrimSpace(info.SourceMessageID)
 	reactionID := strings.TrimSpace(handle.Token)
 	if messageID == "" || reactionID == "" {
@@ -189,23 +190,23 @@ func (a *FeishuAdapter) ProcessingCompleted(ctx context.Context, cfg channel.Cha
 }
 
 // ProcessingFailed removes the transient processing reaction when chat processing fails.
-func (a *FeishuAdapter) ProcessingFailed(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
+func (a *Adapter) ProcessingFailed(ctx context.Context, cfg channel.Config, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, _ error) error {
 	return a.ProcessingCompleted(ctx, cfg, msg, info, handle)
 }
 
-func (a *FeishuAdapter) processingReactionGateway(cfg channel.ChannelConfig) (processingReactionGateway, error) {
+func (a *Adapter) processingReactionGateway(cfg channel.Config) (processingReactionGateway, error) {
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return nil, err
 	}
 	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret)
-	gateway := &larkProcessingReactionGateway{api: client.Im.V1.MessageReaction}
+	gateway := &larkProcessingReactionGateway{api: client.Im.MessageReaction}
 	return gateway, nil
 }
 
 // React adds an emoji reaction to a message (implements channel.Reactor).
 // The target parameter is unused for Feishu; reactions are keyed by message_id.
-func (a *FeishuAdapter) React(ctx context.Context, cfg channel.ChannelConfig, _ string, messageID string, emoji string) error {
+func (a *Adapter) React(ctx context.Context, cfg channel.Config, _, messageID, emoji string) error {
 	gateway, err := a.processingReactionGateway(cfg)
 	if err != nil {
 		return err
@@ -218,7 +219,7 @@ func (a *FeishuAdapter) React(ctx context.Context, cfg channel.ChannelConfig, _ 
 // For Feishu, this requires the reaction_id which we don't have here, so we pass
 // the emoji as reaction_id. If the caller stored the reaction_id from React, they
 // should pass it as emoji. This is a best-effort operation.
-func (a *FeishuAdapter) Unreact(ctx context.Context, cfg channel.ChannelConfig, _ string, messageID string, reactionID string) error {
+func (a *Adapter) Unreact(ctx context.Context, cfg channel.Config, _, messageID, reactionID string) error {
 	if strings.TrimSpace(reactionID) == "" {
 		return nil
 	}
@@ -231,7 +232,7 @@ func (a *FeishuAdapter) Unreact(ctx context.Context, cfg channel.ChannelConfig, 
 
 func addProcessingReaction(ctx context.Context, gateway processingReactionGateway, messageID, reactionType string) (string, error) {
 	if gateway == nil {
-		return "", fmt.Errorf("processing reaction gateway is nil")
+		return "", errors.New("processing reaction gateway is nil")
 	}
 	msgID := strings.TrimSpace(messageID)
 	if msgID == "" {
@@ -239,14 +240,14 @@ func addProcessingReaction(ctx context.Context, gateway processingReactionGatewa
 	}
 	rxType := strings.TrimSpace(reactionType)
 	if rxType == "" {
-		return "", fmt.Errorf("processing reaction type is empty")
+		return "", errors.New("processing reaction type is empty")
 	}
 	return gateway.Add(ctx, msgID, rxType)
 }
 
 func removeProcessingReaction(ctx context.Context, gateway processingReactionGateway, messageID, reactionID string) error {
 	if gateway == nil {
-		return fmt.Errorf("processing reaction gateway is nil")
+		return errors.New("processing reaction gateway is nil")
 	}
 	msgID := strings.TrimSpace(messageID)
 	rxID := strings.TrimSpace(reactionID)
@@ -257,7 +258,7 @@ func removeProcessingReaction(ctx context.Context, gateway processingReactionGat
 }
 
 // DiscoverSelf retrieves the bot's own identity from the Feishu platform.
-func (a *FeishuAdapter) DiscoverSelf(ctx context.Context, credentials map[string]any) (map[string]any, string, error) {
+func (a *Adapter) DiscoverSelf(ctx context.Context, credentials map[string]any) (map[string]any, string, error) {
 	cfg, err := parseConfig(credentials)
 	if err != nil {
 		return nil, "", err
@@ -284,7 +285,7 @@ func (a *FeishuAdapter) DiscoverSelf(ctx context.Context, credentials map[string
 	}
 	openID := strings.TrimSpace(body.Bot.OpenID)
 	if openID == "" {
-		return nil, "", fmt.Errorf("feishu discover self: empty open_id")
+		return nil, "", errors.New("feishu discover self: empty open_id")
 	}
 	identity := map[string]any{
 		"open_id": openID,
@@ -299,37 +300,37 @@ func (a *FeishuAdapter) DiscoverSelf(ctx context.Context, credentials map[string
 }
 
 // NormalizeConfig validates and normalizes a Feishu channel configuration map.
-func (a *FeishuAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
+func (a *Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeConfig(raw)
 }
 
 // NormalizeUserConfig validates and normalizes a Feishu user-binding configuration map.
-func (a *FeishuAdapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
+func (a *Adapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeUserConfig(raw)
 }
 
 // NormalizeTarget normalizes a Feishu delivery target string.
-func (a *FeishuAdapter) NormalizeTarget(raw string) string {
+func (a *Adapter) NormalizeTarget(raw string) string {
 	return normalizeTarget(raw)
 }
 
 // ResolveTarget derives a delivery target from a Feishu user-binding configuration.
-func (a *FeishuAdapter) ResolveTarget(userConfig map[string]any) (string, error) {
+func (a *Adapter) ResolveTarget(userConfig map[string]any) (string, error) {
 	return resolveTarget(userConfig)
 }
 
 // MatchBinding reports whether a Feishu user binding matches the given criteria.
-func (a *FeishuAdapter) MatchBinding(config map[string]any, criteria channel.BindingCriteria) bool {
+func (a *Adapter) MatchBinding(config map[string]any, criteria channel.BindingCriteria) bool {
 	return matchBinding(config, criteria)
 }
 
 // BuildUserConfig constructs a Feishu user-binding config from an Identity.
-func (a *FeishuAdapter) BuildUserConfig(identity channel.Identity) map[string]any {
+func (a *Adapter) BuildUserConfig(identity channel.Identity) map[string]any {
 	return buildUserConfig(identity)
 }
 
 // Connect establishes a WebSocket connection to Feishu and forwards inbound messages to the handler.
-func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler) (channel.Connection, error) {
+func (a *Adapter) Connect(ctx context.Context, cfg channel.Config, handler channel.InboundHandler) (channel.Connection, error) {
 	if a.logger != nil {
 		a.logger.Info("start", slog.String("config_id", cfg.ID))
 	}
@@ -372,7 +373,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 					rawMessageID = strings.TrimSpace(*event.Event.Message.MessageId)
 				}
 				if event.Event.Message.MessageType != nil {
-					rawMessageType = strings.TrimSpace(string(*event.Event.Message.MessageType))
+					rawMessageType = strings.TrimSpace(*event.Event.Message.MessageType)
 				}
 			}
 			if text == "" && len(msg.Message.Attachments) == 0 {
@@ -403,7 +404,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 					slog.String("route_key", msg.RoutingKey()),
 					slog.String("chat_type", msg.Conversation.Type),
 					slog.Bool("is_mentioned", isMentioned),
-					slog.String("text", common.SummarizeText(text)),
+					slog.String("text", adapterutil.SummarizeText(text)),
 				)
 			}
 			go func() {
@@ -469,7 +470,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 }
 
 // Send delivers an outbound message to Feishu, handling attachments, rich text, and replies.
-func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *Adapter) Send(ctx context.Context, cfg channel.Config, msg channel.OutboundMessage) error {
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		if a.logger != nil {
@@ -508,7 +509,7 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 		msgType = larkim.MsgTypeText
 		text := strings.TrimSpace(msg.Message.PlainText())
 		if text == "" {
-			return fmt.Errorf("message is required")
+			return errors.New("message is required")
 		}
 		payload, marshalErr := json.Marshal(map[string]string{"text": text})
 		if marshalErr != nil {
@@ -537,20 +538,20 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 				Uuid(uuid.NewString()).
 				Build()).
 			Build()
-		resp, err := client.Im.V1.Message.Reply(ctx, replyReq)
+		resp, err := client.Im.Message.Reply(ctx, replyReq)
 		return a.handleReplyResponse(cfg.ID, resp, err)
 	}
 
-	resp, err := client.Im.V1.Message.Create(ctx, req)
+	resp, err := client.Im.Message.Create(ctx, req)
 	return a.handleResponse(cfg.ID, resp, err)
 }
 
 // OpenStream opens a Feishu streaming session.
 // The adapter strategy uses one interactive card and patches it incrementally.
-func (a *FeishuAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *Adapter) OpenStream(ctx context.Context, cfg channel.Config, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return nil, fmt.Errorf("feishu target is required")
+		return nil, errors.New("feishu target is required")
 	}
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
@@ -578,7 +579,7 @@ func (a *FeishuAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfi
 	}, nil
 }
 
-func (a *FeishuAdapter) handleReplyResponse(configID string, resp *larkim.ReplyMessageResp, err error) error {
+func (a *Adapter) handleReplyResponse(configID string, resp *larkim.ReplyMessageResp, err error) error {
 	if err != nil {
 		if a.logger != nil {
 			a.logger.Error("reply failed", slog.String("config_id", configID), slog.Any("error", err))
@@ -603,7 +604,7 @@ func (a *FeishuAdapter) handleReplyResponse(configID string, resp *larkim.ReplyM
 	return nil
 }
 
-func (a *FeishuAdapter) handleResponse(configID string, resp *larkim.CreateMessageResp, err error) error {
+func (a *Adapter) handleResponse(configID string, resp *larkim.CreateMessageResp, err error) error {
 	if err != nil {
 		if a.logger != nil {
 			a.logger.Error("send failed", slog.String("config_id", configID), slog.Any("error", err))
@@ -628,7 +629,7 @@ func (a *FeishuAdapter) handleResponse(configID string, resp *larkim.CreateMessa
 	return nil
 }
 
-func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client, receiveID, receiveType string, att channel.Attachment, text string) error {
+func (a *Adapter) sendAttachment(ctx context.Context, client *lark.Client, receiveID, receiveType string, att channel.Attachment, _ string) error {
 	var msgType string
 	var contentMap map[string]string
 	sourcePlatform := strings.TrimSpace(att.SourcePlatform)
@@ -644,7 +645,7 @@ func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client,
 	} else {
 		downloadURL := strings.TrimSpace(att.URL)
 		if downloadURL == "" {
-			return fmt.Errorf("failed to download attachment: url is required when platform key is unavailable")
+			return errors.New("failed to download attachment: url is required when platform key is unavailable")
 		}
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 		if err != nil {
@@ -655,7 +656,11 @@ func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client,
 		if err != nil {
 			return fmt.Errorf("failed to download attachment: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				a.logger.Warn("download attachment: close response body failed", slog.Any("error", err))
+			}
+		}()
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("failed to download attachment, status: %d", resp.StatusCode)
 		}
@@ -666,7 +671,7 @@ func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client,
 					Image(resp.Body).
 					Build()).
 				Build()
-			uploadResp, err := client.Im.V1.Image.Create(ctx, uploadReq)
+			uploadResp, err := client.Im.Image.Create(ctx, uploadReq)
 			if err != nil {
 				return fmt.Errorf("failed to upload image: %w", err)
 			}
@@ -692,7 +697,7 @@ func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client,
 					File(resp.Body).
 					Build()).
 				Build()
-			uploadResp, err := client.Im.V1.File.Create(ctx, uploadReq)
+			uploadResp, err := client.Im.File.Create(ctx, uploadReq)
 			if err != nil {
 				return fmt.Errorf("failed to upload file: %w", err)
 			}
@@ -722,7 +727,7 @@ func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client,
 			Build()).
 		Build()
 
-	sendResp, err := client.Im.V1.Message.Create(ctx, req)
+	sendResp, err := client.Im.Message.Create(ctx, req)
 	return a.handleResponse("", sendResp, err)
 }
 
@@ -747,7 +752,7 @@ func resolveFeishuFileType(name, mime string) string {
 	}
 }
 
-func (a *FeishuAdapter) buildPostContent(msg channel.Message) (string, error) {
+func (a *Adapter) buildPostContent(msg channel.Message) (string, error) {
 	type postContent struct {
 		ZhCn struct {
 			Title   string  `json:"title"`

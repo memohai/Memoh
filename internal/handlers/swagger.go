@@ -14,26 +14,31 @@ import (
 
 //go:generate go run github.com/swaggo/swag/cmd/swag@latest init -g swagger.go -o ../../spec --parseDependency --parseInternal
 
+// Cached swagger spec and load error (loaded once on first Spec call).
 var (
 	swaggerSpec []byte
 	swaggerOnce sync.Once
 	swaggerErr  error
 )
 
+// SwaggerHandler serves OpenAPI spec and docs UI.
 type SwaggerHandler struct {
 	logger *slog.Logger
 }
 
+// NewSwaggerHandler creates a swagger handler.
 func NewSwaggerHandler(log *slog.Logger) *SwaggerHandler {
 	return &SwaggerHandler{logger: log.With(slog.String("handler", "swagger"))}
 }
 
+// Register mounts GET api/swagger.json and api/docs on the Echo instance.
 func (h *SwaggerHandler) Register(e *echo.Echo) {
 	e.GET("api/swagger.json", h.Spec)
 	e.GET("api/docs", h.UI)
 	e.GET("api/docs/", h.UI)
 }
 
+// Spec returns the swagger.json blob (from spec/swagger.json, loaded once).
 func (h *SwaggerHandler) Spec(c echo.Context) error {
 	swaggerOnce.Do(func() {
 		swaggerSpec, swaggerErr = os.ReadFile("spec/swagger.json")
@@ -44,6 +49,7 @@ func (h *SwaggerHandler) Spec(c echo.Context) error {
 	return c.Blob(http.StatusOK, "application/json", swaggerSpec)
 }
 
+// UI returns the Swagger UI HTML page.
 func (h *SwaggerHandler) UI(c echo.Context) error {
 	return c.HTML(http.StatusOK, swaggerUIHTML)
 }

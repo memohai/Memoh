@@ -8,12 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/containerd/containerd/v2/client"
 	gocni "github.com/containerd/go-cni"
 )
 
+// Default CNI config and binary directories on Linux.
 const (
 	defaultCNIConfDir = "/etc/cni/net.d"
 	defaultCNIBinDir  = "/opt/cni/bin"
@@ -45,7 +47,7 @@ func SetupNetwork(ctx context.Context, task client.Task, containerID string) err
 	if _, err := os.Stat(defaultCNIBinDir); err != nil {
 		return fmt.Errorf("cni bin dir missing: %s: %w", defaultCNIBinDir, err)
 	}
-	netnsPath := filepath.Join("/proc", fmt.Sprint(pid), "ns", "net")
+	netnsPath := filepath.Join("/proc", strconv.FormatUint(uint64(pid), 10), "ns", "net")
 	if _, err := os.Stat(netnsPath); err != nil {
 		return fmt.Errorf("netns not found: %s: %w", netnsPath, err)
 	}
@@ -85,7 +87,7 @@ func setupNetworkWithCLI(ctx context.Context, containerID string, pid uint32) er
 		"memoh-cli",
 		"cni-setup",
 		"--id", containerID,
-		"--pid", fmt.Sprint(pid),
+		"--pid", strconv.FormatUint(uint64(pid), 10),
 		"--conf-dir", defaultCNIConfDir,
 		"--bin-dir", defaultCNIBinDir,
 	}
@@ -144,7 +146,7 @@ func RemoveNetwork(ctx context.Context, task client.Task, containerID string) er
 		return fmt.Errorf("cni bin dir missing: %s: %w", defaultCNIBinDir, err)
 	}
 
-	netnsPath := filepath.Join("/proc", fmt.Sprint(pid), "ns", "net")
+	netnsPath := filepath.Join("/proc", strconv.FormatUint(uint64(pid), 10), "ns", "net")
 	if _, err := os.Stat(netnsPath); err != nil {
 		return fmt.Errorf("netns not found: %s: %w", netnsPath, err)
 	}
@@ -173,7 +175,7 @@ func removeNetworkWithCLI(ctx context.Context, containerID string, pid uint32) e
 		"memoh-cli",
 		"cni-remove",
 		"--id", containerID,
-		"--pid", fmt.Sprint(pid),
+		"--pid", strconv.FormatUint(uint64(pid), 10),
 		"--conf-dir", defaultCNIConfDir,
 		"--bin-dir", defaultCNIBinDir,
 	}

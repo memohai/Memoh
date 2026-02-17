@@ -1,0 +1,111 @@
+version: "2"
+
+run:
+  timeout: 15m
+  go: "1.25"
+  tests: true
+
+output:
+  show-stats: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - errorlint
+    - exptostd
+    - fatcontext
+    - gocritic
+    - godot
+    - govet
+    - ineffassign
+    - misspell
+    - modernize
+    - nilnesserr
+    - perfsprint
+    - predeclared
+    - revive
+    - sloglint
+    - staticcheck
+    - testifylint
+    - unconvert
+    - unused
+    - usestdlibvars
+    - whitespace
+  exclusions:
+    paths:
+      - internal/db/sqlc
+      - ^.*\.(pb|l|y)\.go$
+
+formatters:
+  enable:
+    - gci
+    - gofumpt
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/memohai/memoh)
+    gofumpt:
+      extra-rules: false
+    goimports:
+      local-prefixes:
+        - github.com/memohai/memoh
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - shadow
+      - fieldalignment
+  gocyclo:
+    min-complexity: 10
+  funlen:
+    lines: 60
+    statements: 30
+  modernize:
+    disable:
+      - omitzero
+  perfsprint:
+    int-conversion: true
+    err-error: true
+    errorf: true
+    sprintf1: true
+    strconcat: false
+    concat-loop: false
+  revive:
+    rules:
+      - name: blank-imports
+      - name: comment-spacings
+      - name: context-as-argument
+        arguments:
+          - allowTypesBefore: "*testing.T,testing.TB"
+      - name: dot-imports
+      - name: error-naming
+      - name: error-return
+      - name: error-strings
+      - name: exported
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: unreachable-code
+      - name: unused-parameter
+      - name: unused-receiver
+  sloglint:
+    attr-only: true
+    no-global: default          
+    context-only: scope         
+    static-msg: true            
+    key-naming-case: snake     
+    forbidden-keys: [time, level, msg, source]
+  testifylint:
+    enable-all: true
+    disable:
+      - float-compare
+      - go-require

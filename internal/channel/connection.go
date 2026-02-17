@@ -3,13 +3,12 @@ package channel
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 )
 
 type connectionEntry struct {
-	config     ChannelConfig
+	config     Config
 	connection Connection
 }
 
@@ -24,7 +23,7 @@ func (m *Manager) refresh(ctx context.Context) {
 	if m.service == nil {
 		return
 	}
-	configs := make([]ChannelConfig, 0)
+	configs := make([]Config, 0)
 	for _, channelType := range m.registry.Types() {
 		items, err := m.service.ListConfigsByType(ctx, channelType)
 		if err != nil {
@@ -38,8 +37,8 @@ func (m *Manager) refresh(ctx context.Context) {
 	m.reconcile(ctx, configs)
 }
 
-func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
-	active := map[string]ChannelConfig{}
+func (m *Manager) reconcile(ctx context.Context, configs []Config) {
+	active := map[string]Config{}
 	for _, cfg := range configs {
 		if cfg.ID == "" {
 			continue
@@ -51,7 +50,7 @@ func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
 		active[cfg.ID] = cfg
 		if err := m.ensureConnection(ctx, cfg); err != nil {
 			if m.logger != nil {
-				m.logger.Error("adapter start failed", slog.String("channel", cfg.ChannelType.String()), slog.String("config_id", cfg.ID), slog.Any("error", err))
+				m.logger.Error("adapter start failed", slog.String("channel", cfg.Type.String()), slog.String("config_id", cfg.ID), slog.Any("error", err))
 			}
 		}
 	}
@@ -64,7 +63,7 @@ func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
 		}
 		if entry != nil && entry.connection != nil {
 			if m.logger != nil {
-				m.logger.Info("adapter stop", slog.String("channel", entry.config.ChannelType.String()), slog.String("config_id", id))
+				m.logger.Info("adapter stop", slog.String("channel", entry.config.Type.String()), slog.String("config_id", id))
 			}
 			if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) && m.logger != nil {
 				m.logger.Warn("adapter stop failed", slog.String("config_id", id), slog.Any("error", err))
@@ -74,8 +73,8 @@ func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
 	}
 }
 
-func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error {
-	_, ok := m.registry.GetReceiver(cfg.ChannelType)
+func (m *Manager) ensureConnection(ctx context.Context, cfg Config) error {
+	_, ok := m.registry.GetReceiver(cfg.Type)
 	if !ok {
 		return nil
 	}
@@ -100,12 +99,12 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 
 	if oldConn != nil {
 		if m.logger != nil {
-			m.logger.Info("adapter restart", slog.String("channel", cfg.ChannelType.String()), slog.String("config_id", cfg.ID))
+			m.logger.Info("adapter restart", slog.String("channel", cfg.Type.String()), slog.String("config_id", cfg.ID))
 		}
 		if err := oldConn.Stop(ctx); err != nil {
 			if errors.Is(err, ErrStopNotSupported) {
 				if m.logger != nil {
-					m.logger.Warn("adapter restart skipped", slog.String("channel", cfg.ChannelType.String()), slog.String("config_id", cfg.ID))
+					m.logger.Warn("adapter restart skipped", slog.String("channel", cfg.Type.String()), slog.String("config_id", cfg.ID))
 				}
 				// Re-insert the entry since we can't restart it.
 				m.mu.Lock()
@@ -119,7 +118,7 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 		}
 	}
 
-	receiver, ok := m.registry.GetReceiver(cfg.ChannelType)
+	receiver, ok := m.registry.GetReceiver(cfg.Type)
 	if !ok {
 		return nil
 	}
@@ -134,7 +133,7 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 	m.mu.Unlock()
 
 	if m.logger != nil {
-		m.logger.Info("adapter start", slog.String("channel", cfg.ChannelType.String()), slog.String("config_id", cfg.ID))
+		m.logger.Info("adapter start", slog.String("channel", cfg.Type.String()), slog.String("config_id", cfg.ID))
 	}
 	handler := m.handleInbound
 	for i := len(m.middlewares) - 1; i >= 0; i-- {
@@ -167,7 +166,7 @@ func (m *Manager) stopAll(ctx context.Context) {
 	for id, entry := range m.connections {
 		if entry != nil && entry.connection != nil {
 			if m.logger != nil {
-				m.logger.Info("adapter stop", slog.String("channel", entry.config.ChannelType.String()), slog.String("config_id", id))
+				m.logger.Info("adapter stop", slog.String("channel", entry.config.Type.String()), slog.String("config_id", id))
 			}
 			if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) && m.logger != nil {
 				m.logger.Warn("adapter stop failed", slog.String("config_id", id), slog.Any("error", err))
@@ -181,7 +180,7 @@ func (m *Manager) stopAll(ctx context.Context) {
 func (m *Manager) Stop(ctx context.Context, configID string) error {
 	configID = strings.TrimSpace(configID)
 	if configID == "" {
-		return fmt.Errorf("config id is required")
+		return errors.New("config id is required")
 	}
 	m.mu.Lock()
 	entry := m.connections[configID]
@@ -196,7 +195,7 @@ func (m *Manager) Stop(ctx context.Context, configID string) error {
 func (m *Manager) StopByBot(ctx context.Context, botID string) error {
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
-		return fmt.Errorf("bot id is required")
+		return errors.New("bot id is required")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

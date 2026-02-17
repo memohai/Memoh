@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,8 +21,8 @@ type IdentityDecision struct {
 	Reply channel.Message
 }
 
-// InboundIdentity carries the resolved channel identity for an inbound message.
-type InboundIdentity struct {
+// Identity carries the resolved channel identity for an inbound message.
+type Identity struct {
 	BotID             string
 	ChannelConfigID   string
 	SubjectID         string
@@ -34,7 +35,7 @@ type InboundIdentity struct {
 
 // IdentityState bundles resolved identity with an optional early-exit decision.
 type IdentityState struct {
-	Identity InboundIdentity
+	Identity Identity
 	Decision *IdentityDecision
 }
 
@@ -142,7 +143,7 @@ func NewIdentityResolver(
 // Middleware returns a channel middleware that resolves identity before processing.
 func (r *IdentityResolver) Middleware() channel.Middleware {
 	return func(next channel.InboundHandler) channel.InboundHandler {
-		return func(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) error {
+		return func(ctx context.Context, cfg channel.Config, msg channel.InboundMessage) error {
 			state, err := r.Resolve(ctx, cfg, msg)
 			if err != nil {
 				return err
@@ -155,9 +156,9 @@ func (r *IdentityResolver) Middleware() channel.Middleware {
 // Resolve performs two-phase identity resolution:
 //  1. Global identity: (channel, channel_subject_id) -> channel_identity_id (unconditional)
 //  2. Authorization: bot membership check with guest/preauth fallback
-func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) (IdentityState, error) {
+func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.Config, msg channel.InboundMessage) (IdentityState, error) {
 	if r.channelIdentities == nil {
-		return IdentityState{}, fmt.Errorf("identity resolver not configured")
+		return IdentityState{}, errors.New("identity resolver not configured")
 	}
 
 	botID := strings.TrimSpace(msg.BotID)
@@ -173,7 +174,7 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 	displayName, avatarURL := r.resolveProfile(ctx, cfg, msg, subjectID)
 
 	state := IdentityState{
-		Identity: InboundIdentity{
+		Identity: Identity{
 			BotID:           botID,
 			ChannelConfigID: channelConfigID,
 			SubjectID:       subjectID,
@@ -182,7 +183,7 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 
 	// Phase 1: Global identity resolution (unconditional).
 	if subjectID == "" {
-		return state, fmt.Errorf("cannot resolve identity: no channel_subject_id")
+		return state, errors.New("cannot resolve identity: no channel_subject_id")
 	}
 
 	channelIdentityID, linkedUserID, err := r.resolveIdentityWithLinkedUser(ctx, msg, subjectID, displayName, avatarURL)
@@ -287,7 +288,7 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 func (r *IdentityResolver) resolveIdentityWithLinkedUser(ctx context.Context, msg channel.InboundMessage, primarySubjectID, displayName, avatarURL string) (string, string, error) {
 	candidates := identitySubjectCandidates(msg, primarySubjectID)
 	if len(candidates) == 0 {
-		return "", "", fmt.Errorf("cannot resolve identity: no channel_subject_id")
+		return "", "", errors.New("cannot resolve identity: no channel_subject_id")
 	}
 
 	var meta map[string]any
@@ -448,10 +449,8 @@ func identitySubjectCandidates(msg channel.InboundMessage, primary string) []str
 		if value == "" {
 			return
 		}
-		for _, existing := range candidates {
-			if existing == value {
-				return
-			}
+		if slices.Contains(candidates, value) {
+			return
 		}
 		candidates = append(candidates, value)
 	}
@@ -480,7 +479,7 @@ func extractDisplayName(msg channel.InboundMessage) string {
 
 // resolveProfile resolves display name and avatar URL for the sender.
 // Always queries directory for avatar; prefers message-level display name over directory name.
-func (r *IdentityResolver) resolveProfile(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, subjectID string) (string, string) {
+func (r *IdentityResolver) resolveProfile(ctx context.Context, cfg channel.Config, msg channel.InboundMessage, subjectID string) (string, string) {
 	displayName := extractDisplayName(msg)
 	dirName, avatarURL := r.resolveProfileFromDirectory(ctx, cfg, msg, subjectID)
 	if displayName == "" {
@@ -490,7 +489,7 @@ func (r *IdentityResolver) resolveProfile(ctx context.Context, cfg channel.Chann
 }
 
 // resolveProfileFromDirectory looks up the directory for sender display name and avatar URL.
-func (r *IdentityResolver) resolveProfileFromDirectory(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, subjectID string) (string, string) {
+func (r *IdentityResolver) resolveProfileFromDirectory(ctx context.Context, cfg channel.Config, msg channel.InboundMessage, subjectID string) (string, string) {
 	if r.registry == nil {
 		return "", ""
 	}

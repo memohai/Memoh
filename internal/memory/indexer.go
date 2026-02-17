@@ -1,3 +1,4 @@
+// Package memory provides in-memory and Qdrant-backed memory stores and indexing.
 package memory
 
 import (
@@ -5,12 +6,11 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
-	"github.com/blevesearch/bleve/v2/registry"
-
+	// Register bleve analysis and language analyzers for full-text indexing.
 	_ "github.com/blevesearch/bleve/v2/analysis/analyzer/standard"
 	_ "github.com/blevesearch/bleve/v2/analysis/lang/ar"
 	_ "github.com/blevesearch/bleve/v2/analysis/lang/bg"
@@ -42,6 +42,7 @@ import (
 	_ "github.com/blevesearch/bleve/v2/analysis/lang/ru"
 	_ "github.com/blevesearch/bleve/v2/analysis/lang/sv"
 	_ "github.com/blevesearch/bleve/v2/analysis/lang/tr"
+	"github.com/blevesearch/bleve/v2/registry"
 )
 
 const (
@@ -52,6 +53,7 @@ const (
 	sparseDimMask = sparseDimSize - 1
 )
 
+// BM25Indexer provides BM25 sparse indexing for full-text memory search (term weights, stats).
 type BM25Indexer struct {
 	cache  *registry.Cache
 	logger *slog.Logger
@@ -68,6 +70,7 @@ type bm25Stats struct {
 	DocFreq   map[string]int
 }
 
+// NewBM25Indexer creates a BM25 indexer with default k1/b and a language-aware analyzer cache.
 func NewBM25Indexer(log *slog.Logger) *BM25Indexer {
 	if log == nil {
 		log = slog.Default()
@@ -81,6 +84,7 @@ func NewBM25Indexer(log *slog.Logger) *BM25Indexer {
 	}
 }
 
+// TermFrequencies tokenizes text for the given language and returns term frequencies and document length.
 func (b *BM25Indexer) TermFrequencies(lang, text string) (map[string]int, int, error) {
 	analyzerName, err := b.normalizeAnalyzer(lang)
 	if err != nil {
@@ -104,6 +108,7 @@ func (b *BM25Indexer) TermFrequencies(lang, text string) (map[string]int, int, e
 	return freq, docLen, nil
 }
 
+// AddDocument indexes a document and returns the sparse vector (indices, values) for storage.
 func (b *BM25Indexer) AddDocument(lang string, termFreq map[string]int, docLen int) (indices []uint32, values []float32) {
 	b.mu.Lock()
 	stats := b.ensureStatsLocked(lang)
@@ -113,6 +118,7 @@ func (b *BM25Indexer) AddDocument(lang string, termFreq map[string]int, docLen i
 	return indices, values
 }
 
+// RemoveDocument updates BM25 stats by removing the document (e.g. before update).
 func (b *BM25Indexer) RemoveDocument(lang string, termFreq map[string]int, docLen int) {
 	b.mu.Lock()
 	stats := b.ensureStatsLocked(lang)
@@ -120,6 +126,7 @@ func (b *BM25Indexer) RemoveDocument(lang string, termFreq map[string]int, docLe
 	b.mu.Unlock()
 }
 
+// BuildQueryVector builds the sparse query vector for the given term frequencies (for SearchSparse).
 func (b *BM25Indexer) BuildQueryVector(lang string, termFreq map[string]int) (indices []uint32, values []float32) {
 	b.mu.RLock()
 	stats := b.ensureStatsLocked(lang)
@@ -237,7 +244,7 @@ func sparseWeightsToVector(weights map[uint32]float32) ([]uint32, []float32) {
 	for idx := range weights {
 		indices = append(indices, idx)
 	}
-	sort.Slice(indices, func(i, j int) bool { return indices[i] < indices[j] })
+	slices.Sort(indices)
 	values := make([]float32, 0, len(indices))
 	for _, idx := range indices {
 		values = append(values, weights[idx])

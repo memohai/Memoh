@@ -1,8 +1,10 @@
+// Package main is the entry point for the Memoh CLI.
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -42,7 +44,8 @@ func main() {
 
 	cmd := buildMCPCommand(*containerID)
 	if err := runWithStdio(cmd); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			os.Exit(exitErr.ExitCode())
 		}
 		os.Exit(1)
@@ -214,10 +217,10 @@ func parseCNIArgs(args []string) (string, string, error) {
 		return "", "", err
 	}
 	if *id == "" {
-		return "", "", fmt.Errorf("missing --id")
+		return "", "", errors.New("missing --id")
 	}
 	if *netns == "" && *pid == 0 {
-		return "", "", fmt.Errorf("missing --netns or --pid")
+		return "", "", errors.New("missing --netns or --pid")
 	}
 	if *netns == "" {
 		*netns = filepath.Join("/proc", strconv.Itoa(*pid), "ns", "net")

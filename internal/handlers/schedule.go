@@ -13,6 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 )
 
+// ScheduleHandler serves /bots/:bot_id/schedule CRUD APIs.
 type ScheduleHandler struct {
 	service        *schedule.Service
 	botService     *bots.Service
@@ -20,6 +21,7 @@ type ScheduleHandler struct {
 	logger         *slog.Logger
 }
 
+// NewScheduleHandler creates a schedule handler.
 func NewScheduleHandler(log *slog.Logger, service *schedule.Service, botService *bots.Service, accountService *accounts.Service) *ScheduleHandler {
 	return &ScheduleHandler{
 		service:        service,
@@ -29,6 +31,7 @@ func NewScheduleHandler(log *slog.Logger, service *schedule.Service, botService 
 	}
 }
 
+// Register mounts /bots/:bot_id/schedule routes on the Echo instance.
 func (h *ScheduleHandler) Register(e *echo.Echo) {
 	group := e.Group("/bots/:bot_id/schedule")
 	group.POST("", h.Create)
@@ -46,7 +49,7 @@ func (h *ScheduleHandler) Register(e *echo.Echo) {
 // @Success 201 {object} schedule.Schedule
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/schedule [post]
+// @Router /bots/{bot_id}/schedule [post].
 func (h *ScheduleHandler) Create(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
@@ -77,7 +80,7 @@ func (h *ScheduleHandler) Create(c echo.Context) error {
 // @Success 200 {object} schedule.ListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/schedule [get]
+// @Router /bots/{bot_id}/schedule [get].
 func (h *ScheduleHandler) List(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
@@ -106,7 +109,7 @@ func (h *ScheduleHandler) List(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/schedule/{id} [get]
+// @Router /bots/{bot_id}/schedule/{id} [get].
 func (h *ScheduleHandler) Get(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
@@ -142,7 +145,7 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 // @Success 200 {object} schedule.Schedule
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/schedule/{id} [put]
+// @Router /bots/{bot_id}/schedule/{id} [put].
 func (h *ScheduleHandler) Update(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
@@ -185,7 +188,7 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/schedule/{id} [delete]
+// @Router /bots/{bot_id}/schedule/{id} [delete].
 func (h *ScheduleHandler) Delete(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {

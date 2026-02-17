@@ -1,7 +1,9 @@
+// Package identity provides identity type constants and helpers.
 package identity
 
 import "strings"
 
+// Identity type constants: human (user) or bot.
 const (
 	IdentityTypeHuman = "human"
 	IdentityTypeBot   = "bot"

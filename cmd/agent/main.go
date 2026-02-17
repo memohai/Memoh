@@ -1,3 +1,4 @@
+// Package main is the entry point for the Memoh agent server (HTTP API, channels, containers).
 package main
 
 import (
@@ -192,7 +193,7 @@ func provideContainerdClient(lc fx.Lifecycle, rc *boot.RuntimeConfig) (*containe
 		return nil, fmt.Errorf("connect containerd: %w", err)
 	}
 	lc.Append(fx.Hook{
-		OnStop: func(ctx context.Context) error {
+		OnStop: func(_ context.Context) error {
 			return client.Close()
 		},
 	})
@@ -205,7 +206,7 @@ func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("db connect: %w", err)
 	}
 	lc.Append(fx.Hook{
-		OnStop: func(ctx context.Context) error {
+		OnStop: func(_ context.Context) error {
 			conn.Close()
 			return nil
 		},
@@ -321,8 +322,8 @@ func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *mod
 
 func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub) *channel.Registry {
 	registry := channel.NewRegistry()
-	registry.MustRegister(telegram.NewTelegramAdapter(log))
-	registry.MustRegister(feishu.NewFeishuAdapter(log))
+	registry.MustRegister(telegram.NewAdapter(log))
+	registry.MustRegister(feishu.NewAdapter(log))
 	registry.MustRegister(local.NewCLIAdapter(hub))
 	registry.MustRegister(local.NewWebAdapter(hub))
 	return registry
@@ -383,7 +384,7 @@ func provideMemoryHandler(log *slog.Logger, service *memory.Service, chatService
 		if strings.TrimSpace(execWorkDir) == "" {
 			execWorkDir = config.DefaultDataMount
 		}
-		h.SetMemoryFS(memory.NewMemoryFS(log, manager, execWorkDir))
+		h.SetMemoryFS(memory.NewFS(log, manager, execWorkDir))
 	}
 	return h
 }
@@ -435,7 +436,7 @@ func provideServer(params serverParams) *server.Server {
 
 func startMemoryWarmup(lc fx.Lifecycle, memoryService *memory.Service, logger *slog.Logger) {
 	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
+		OnStart: func(_ context.Context) error {
 			go func() {
 				if err := memoryService.WarmupBM25(context.Background(), 200); err != nil {
 					logger.Warn("bm25 warmup failed", slog.Any("error", err))
@@ -526,7 +527,7 @@ func buildTextEmbedder(resolver *embeddings.Resolver, textModel models.GetRespon
 
 func ensureAdminUser(ctx context.Context, log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) error {
 	if queries == nil {
-		return fmt.Errorf("db queries not configured")
+		return errors.New("db queries not configured")
 	}
 	count, err := queries.CountAccounts(ctx)
 	if err != nil {
@@ -540,7 +541,7 @@ func ensureAdminUser(ctx context.Context, log *slog.Logger, queries *dbsqlc.Quer
 	password := strings.TrimSpace(cfg.Admin.Password)
 	email := strings.TrimSpace(cfg.Admin.Email)
 	if username == "" || password == "" {
-		return fmt.Errorf("admin username/password required in config.toml")
+		return errors.New("admin username/password required in config.toml")
 	}
 	if password == "change-your-password-here" {
 		log.Warn("admin password uses default placeholder; please update config.toml")
@@ -629,7 +630,7 @@ func (c *lazyLLMClient) DetectLanguage(ctx context.Context, text string) (string
 
 func (c *lazyLLMClient) resolve(ctx context.Context) (memory.LLM, error) {
 	if c.modelsService == nil || c.queries == nil {
-		return nil, fmt.Errorf("models service not configured")
+		return nil, errors.New("models service not configured")
 	}
 	memoryModel, memoryProvider, err := models.SelectMemoryModel(ctx, c.modelsService, c.queries)
 	if err != nil {

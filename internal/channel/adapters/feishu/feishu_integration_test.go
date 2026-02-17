@@ -28,9 +28,9 @@ func TestFeishuGateway_Integration(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
-	adapter := NewFeishuAdapter(logger)
+	adapter := NewAdapter(logger)
 
-	cfg := channel.ChannelConfig{
+	cfg := channel.Config{
 		ID: "integration-test-bot",
 		Credentials: map[string]any{
 			"app_id":             appID,
@@ -45,7 +45,7 @@ func TestFeishuGateway_Integration(t *testing.T) {
 
 	receivedChan := make(chan channel.InboundMessage, 1)
 
-	handler := func(ctx context.Context, c channel.ChannelConfig, msg channel.InboundMessage) error {
+	handler := func(ctx context.Context, c channel.Config, msg channel.InboundMessage) error {
 		plainText := msg.Message.PlainText()
 		logger.Info("received message in test",
 			slog.String("text", plainText),
@@ -115,7 +115,7 @@ func TestFeishuDiscoverSelf_Integration(t *testing.T) {
 	if appID == "" || appSecret == "" {
 		t.Skip("skipping integration test: FEISHU_APP_ID or FEISHU_APP_SECRET not set")
 	}
-	adapter := NewFeishuAdapter(nil)
+	adapter := NewAdapter(nil)
 	credentials := map[string]any{
 		"app_id":     appID,
 		"app_secret": appSecret,

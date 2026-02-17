@@ -1,5 +1,5 @@
-// Package common provides shared utilities for channel adapters.
-package common
+// Package adapterutil provides shared utilities for channel adapters.
+package adapterutil
 
 import "strings"
 

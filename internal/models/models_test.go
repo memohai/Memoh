@@ -3,8 +3,9 @@ package models_test
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/models"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/memohai/memoh/internal/models"
 )
 
 // This is an example test file demonstrating how to use the models service
@@ -185,20 +186,20 @@ func TestModel_Validate(t *testing.T) {
 
 func TestModelTypes(t *testing.T) {
 	t.Run("ModelType constants", func(t *testing.T) {
-		assert.Equal(t, models.ModelType("chat"), models.ModelTypeChat)
-		assert.Equal(t, models.ModelType("embedding"), models.ModelTypeEmbedding)
+		assert.Equal(t, models.ModelTypeChat, models.ModelType("chat"))
+		assert.Equal(t, models.ModelTypeEmbedding, models.ModelType("embedding"))
 	})
 
 	t.Run("ClientType constants", func(t *testing.T) {
-		assert.Equal(t, models.ClientType("openai"), models.ClientTypeOpenAI)
-		assert.Equal(t, models.ClientType("openai-compat"), models.ClientTypeOpenAICompat)
-		assert.Equal(t, models.ClientType("anthropic"), models.ClientTypeAnthropic)
-		assert.Equal(t, models.ClientType("google"), models.ClientTypeGoogle)
-		assert.Equal(t, models.ClientType("azure"), models.ClientTypeAzure)
-		assert.Equal(t, models.ClientType("bedrock"), models.ClientTypeBedrock)
-		assert.Equal(t, models.ClientType("mistral"), models.ClientTypeMistral)
-		assert.Equal(t, models.ClientType("xai"), models.ClientTypeXAI)
-		assert.Equal(t, models.ClientType("ollama"), models.ClientTypeOllama)
-		assert.Equal(t, models.ClientType("dashscope"), models.ClientTypeDashscope)
+		assert.Equal(t, models.ClientTypeOpenAI, models.ClientType("openai"))
+		assert.Equal(t, models.ClientTypeOpenAICompat, models.ClientType("openai-compat"))
+		assert.Equal(t, models.ClientTypeAnthropic, models.ClientType("anthropic"))
+		assert.Equal(t, models.ClientTypeGoogle, models.ClientType("google"))
+		assert.Equal(t, models.ClientTypeAzure, models.ClientType("azure"))
+		assert.Equal(t, models.ClientTypeBedrock, models.ClientType("bedrock"))
+		assert.Equal(t, models.ClientTypeMistral, models.ClientType("mistral"))
+		assert.Equal(t, models.ClientTypeXAI, models.ClientType("xai"))
+		assert.Equal(t, models.ClientTypeOllama, models.ClientType("ollama"))
+		assert.Equal(t, models.ClientTypeDashscope, models.ClientType("dashscope"))
 	})
 }

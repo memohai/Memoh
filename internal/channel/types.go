@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-// ChannelType identifies a messaging platform (e.g., "telegram", "feishu").
-type ChannelType string
+// Type identifies a messaging platform (e.g., "telegram", "feishu").
+type Type string
 
 // String returns the channel type as a plain string.
-func (c ChannelType) String() string {
+func (c Type) String() string {
 	return string(c)
 }
 
@@ -41,7 +41,7 @@ type Conversation struct {
 
 // InboundMessage is a message received from an external channel.
 type InboundMessage struct {
-	Channel      ChannelType
+	Channel      Type
 	Message      Message
 	BotID        string
 	ReplyTarget  string
@@ -89,6 +89,7 @@ type OutboundMessage struct {
 // StreamEventType defines the kind of outbound stream event.
 type StreamEventType string
 
+// StreamEventType values for outbound stream events (status, delta, final, error).
 const (
 	StreamEventStatus StreamEventType = "status"
 	StreamEventDelta  StreamEventType = "delta"
@@ -99,6 +100,7 @@ const (
 // StreamStatus indicates the lifecycle state of a streaming reply.
 type StreamStatus string
 
+// StreamStatus values for stream lifecycle (started, completed, failed).
 const (
 	StreamStatusStarted   StreamStatus = "started"
 	StreamStatusCompleted StreamStatus = "completed"
@@ -130,6 +132,7 @@ type StreamOptions struct {
 // MessageFormat indicates how the message text should be rendered.
 type MessageFormat string
 
+// MessageFormat values for how message text is rendered (plain, markdown, rich).
 const (
 	MessageFormatPlain    MessageFormat = "plain"
 	MessageFormatMarkdown MessageFormat = "markdown"
@@ -139,6 +142,7 @@ const (
 // MessagePartType identifies the kind of a rich-text message part.
 type MessagePartType string
 
+// MessagePartType values for rich message parts (text, link, code_block, mention, emoji).
 const (
 	MessagePartText      MessagePartType = "text"
 	MessagePartLink      MessagePartType = "link"
@@ -150,6 +154,7 @@ const (
 // MessageTextStyle describes inline formatting for a text part.
 type MessageTextStyle string
 
+// MessageTextStyle values for inline styles (bold, italic, strikethrough, code).
 const (
 	MessageStyleBold          MessageTextStyle = "bold"
 	MessageStyleItalic        MessageTextStyle = "italic"
@@ -172,6 +177,7 @@ type MessagePart struct {
 // AttachmentType classifies the kind of binary attachment.
 type AttachmentType string
 
+// AttachmentType values for message attachments (image, audio, video, voice, file, gif).
 const (
 	AttachmentImage AttachmentType = "image"
 	AttachmentAudio AttachmentType = "audio"
@@ -304,11 +310,11 @@ func BindingCriteriaFromIdentity(identity Identity) BindingCriteria {
 	}
 }
 
-// ChannelConfig holds the configuration for a bot's channel integration.
-type ChannelConfig struct {
+// Config holds the configuration for a bot's channel integration.
+type Config struct {
 	ID               string         `json:"id"`
 	BotID            string         `json:"bot_id"`
-	ChannelType      ChannelType    `json:"channel_type"`
+	Type             Type           `json:"channel_type"`
 	Credentials      map[string]any `json:"credentials"`
 	ExternalIdentity string         `json:"external_identity"`
 	SelfIdentity     map[string]any `json:"self_identity"`
@@ -319,10 +325,10 @@ type ChannelConfig struct {
 	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
-// ChannelIdentityBinding represents a channel identity's binding to a specific channel type.
-type ChannelIdentityBinding struct {
+// IdentityBinding represents a channel identity's binding to a specific channel type.
+type IdentityBinding struct {
 	ID                string         `json:"id"`
-	ChannelType       ChannelType    `json:"channel_type"`
+	Type              Type           `json:"channel_type"`
 	ChannelIdentityID string         `json:"channel_identity_id"`
 	Config            map[string]any `json:"config"`
 	CreatedAt         time.Time      `json:"created_at"`

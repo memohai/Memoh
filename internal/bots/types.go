@@ -101,23 +101,27 @@ type RuntimeChecker interface {
 	RunCheck(ctx context.Context, botID, key string) BotCheck
 }
 
+// Bot type identifiers for registry and policy.
 const (
 	BotTypePersonal = "personal"
 	BotTypePublic   = "public"
 )
 
+// Bot lifecycle status values stored in the database.
 const (
 	BotStatusCreating = "creating"
 	BotStatusReady    = "ready"
 	BotStatusDeleting = "deleting"
 )
 
+// BotCheckState is the overall state of a single check (ok, issue, or unknown).
 const (
 	BotCheckStateOK      = "ok"
 	BotCheckStateIssue   = "issue"
 	BotCheckStateUnknown = "unknown"
 )
 
+// BotCheckStatus is the status level of a check result (ok, warn, error, unknown).
 const (
 	BotCheckStatusOK      = "ok"
 	BotCheckStatusWarn    = "warn"
@@ -125,6 +129,7 @@ const (
 	BotCheckStatusUnknown = "unknown"
 )
 
+// BotCheckKey identifies which check is run (container init, task, data path, etc.).
 const (
 	BotCheckKeyContainerInit   = "container.init"
 	BotCheckKeyContainerRecord = "container.record"
@@ -133,6 +138,7 @@ const (
 	BotCheckKeyDelete          = "bot.delete"
 )
 
+// MemberRole is the role of a user in a bot (owner, admin, or member).
 const (
 	MemberRoleOwner  = "owner"
 	MemberRoleAdmin  = "admin"

@@ -2,8 +2,10 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/url"
 	"strconv"
 	"strings"
@@ -19,6 +21,7 @@ const (
 	sparseVocabVectorName = "sparse_vocab"
 )
 
+// QdrantStore is the Qdrant-backed vector store for dense and optional sparse (BM25) vectors.
 type QdrantStore struct {
 	client            *qdrant.Client
 	collection        string
@@ -33,7 +36,8 @@ type QdrantStore struct {
 	usesSparseVectors bool
 }
 
-type qdrantPoint struct {
+// QdrantPoint is a single point (id, vector, sparse, payload) for Qdrant store operations.
+type QdrantPoint struct {
 	ID               string         `json:"id"`
 	Vector           []float32      `json:"vector"`
 	VectorName       string         `json:"vector_name,omitempty"`
@@ -43,6 +47,7 @@ type qdrantPoint struct {
 	Payload          map[string]any `json:"payload,omitempty"`
 }
 
+// NewQdrantStore creates a Qdrant store; collection defaults to "memory"; dimension or sparseVectorName required.
 func NewQdrantStore(log *slog.Logger, baseURL, apiKey, collection string, dimension int, sparseVectorName string, timeout time.Duration) (*QdrantStore, error) {
 	host, port, useTLS, err := parseQdrantEndpoint(baseURL)
 	if err != nil {
@@ -55,7 +60,7 @@ func NewQdrantStore(log *slog.Logger, baseURL, apiKey, collection string, dimens
 		collection = "memory"
 	}
 	if dimension <= 0 && strings.TrimSpace(sparseVectorName) == "" {
-		return nil, fmt.Errorf("embedding dimension is required")
+		return nil, errors.New("embedding dimension is required")
 	}
 
 	cfg := &qdrant.Config{
@@ -89,10 +94,12 @@ func NewQdrantStore(log *slog.Logger, baseURL, apiKey, collection string, dimens
 	return store, nil
 }
 
+// NewSibling creates a new QdrantStore for a different collection/dimension using the same connection config.
 func (s *QdrantStore) NewSibling(collection string, dimension int) (*QdrantStore, error) {
 	return NewQdrantStore(s.logger, s.baseURL, s.apiKey, collection, dimension, s.sparseVectorName, s.timeout)
 }
 
+// NewQdrantStoreWithVectors creates a store with named vectors (map[name]dimension); used for multi-model collections.
 func NewQdrantStoreWithVectors(log *slog.Logger, baseURL, apiKey, collection string, vectors map[string]int, sparseVectorName string, timeout time.Duration) (*QdrantStore, error) {
 	host, port, useTLS, err := parseQdrantEndpoint(baseURL)
 	if err != nil {
@@ -105,7 +112,7 @@ func NewQdrantStoreWithVectors(log *slog.Logger, baseURL, apiKey, collection str
 		collection = "memory"
 	}
 	if len(vectors) == 0 {
-		return nil, fmt.Errorf("vectors map is required")
+		return nil, errors.New("vectors map is required")
 	}
 
 	cfg := &qdrant.Config{
@@ -140,7 +147,8 @@ func NewQdrantStoreWithVectors(log *slog.Logger, baseURL, apiKey, collection str
 	return store, nil
 }
 
-func (s *QdrantStore) Upsert(ctx context.Context, points []qdrantPoint) error {
+// Upsert inserts or overwrites points (dense and/or sparse vectors, payload) in the collection.
+func (s *QdrantStore) Upsert(ctx context.Context, points []QdrantPoint) error {
 	if len(points) == 0 {
 		return nil
 	}
@@ -153,11 +161,12 @@ func (s *QdrantStore) Upsert(ctx context.Context, points []qdrantPoint) error {
 		var vectors *qdrant.Vectors
 		vectorMap := map[string]*qdrant.Vector{}
 		if len(point.Vector) > 0 {
-			if point.VectorName != "" && s.usesNamedVectors {
+			switch {
+			case point.VectorName != "" && s.usesNamedVectors:
 				vectorMap[point.VectorName] = qdrant.NewVectorDense(point.Vector)
-			} else if !s.usesNamedVectors && len(point.SparseIndices) == 0 {
+			case !s.usesNamedVectors && len(point.SparseIndices) == 0:
 				vectors = qdrant.NewVectorsDense(point.Vector)
-			} else if point.VectorName != "" {
+			case point.VectorName != "":
 				vectorMap[point.VectorName] = qdrant.NewVectorDense(point.Vector)
 			}
 		}
@@ -167,7 +176,7 @@ func (s *QdrantStore) Upsert(ctx context.Context, points []qdrantPoint) error {
 				sparseName = s.sparseVectorName
 			}
 			if sparseName == "" {
-				return fmt.Errorf("sparse vector name is required")
+				return errors.New("sparse vector name is required")
 			}
 			vectorMap[sparseName] = qdrant.NewVectorSparse(point.SparseIndices, point.SparseValues)
 		}
@@ -191,7 +200,8 @@ func (s *QdrantStore) Upsert(ctx context.Context, points []qdrantPoint) error {
 	return err
 }
 
-func (s *QdrantStore) Search(ctx context.Context, vector []float32, limit int, filters map[string]any, vectorName string) ([]qdrantPoint, []float64, error) {
+// Search performs dense vector search; returns points and scores.
+func (s *QdrantStore) Search(ctx context.Context, vector []float32, limit int, filters map[string]any, vectorName string) ([]QdrantPoint, []float64, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -212,10 +222,10 @@ func (s *QdrantStore) Search(ctx context.Context, vector []float32, limit int, f
 		return nil, nil, err
 	}
 
-	points := make([]qdrantPoint, 0, len(results))
+	points := make([]QdrantPoint, 0, len(results))
 	scores := make([]float64, 0, len(results))
 	for _, scored := range results {
-		points = append(points, qdrantPoint{
+		points = append(points, QdrantPoint{
 			ID:      pointIDToString(scored.GetId()),
 			Payload: valueMapToInterface(scored.GetPayload()),
 		})
@@ -224,7 +234,8 @@ func (s *QdrantStore) Search(ctx context.Context, vector []float32, limit int, f
 	return points, scores, nil
 }
 
-func (s *QdrantStore) SearchSparse(ctx context.Context, indices []uint32, values []float32, limit int, filters map[string]any, withSparseVectors bool) ([]qdrantPoint, []float64, error) {
+// SearchSparse performs sparse (BM25) vector search; returns points and scores.
+func (s *QdrantStore) SearchSparse(ctx context.Context, indices []uint32, values []float32, limit int, filters map[string]any, withSparseVectors bool) ([]QdrantPoint, []float64, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -232,7 +243,7 @@ func (s *QdrantStore) SearchSparse(ctx context.Context, indices []uint32, values
 		return nil, nil, nil
 	}
 	if s.sparseVectorName == "" {
-		return nil, nil, fmt.Errorf("sparse vector name not configured")
+		return nil, nil, errors.New("sparse vector name not configured")
 	}
 	filter := buildQdrantFilter(filters)
 	using := qdrant.PtrOf(s.sparseVectorName)
@@ -251,10 +262,10 @@ func (s *QdrantStore) SearchSparse(ctx context.Context, indices []uint32, values
 	if err != nil {
 		return nil, nil, err
 	}
-	points := make([]qdrantPoint, 0, len(results))
+	points := make([]QdrantPoint, 0, len(results))
 	scores := make([]float64, 0, len(results))
 	for _, scored := range results {
-		p := qdrantPoint{
+		p := QdrantPoint{
 			ID:      pointIDToString(scored.GetId()),
 			Payload: valueMapToInterface(scored.GetPayload()),
 		}
@@ -267,8 +278,9 @@ func (s *QdrantStore) SearchSparse(ctx context.Context, indices []uint32, values
 	return points, scores, nil
 }
 
-func (s *QdrantStore) SearchBySources(ctx context.Context, vector []float32, limit int, filters map[string]any, sources []string, vectorName string) (map[string][]qdrantPoint, map[string][]float64, error) {
-	pointsBySource := make(map[string][]qdrantPoint, len(sources))
+// SearchBySources runs dense search and groups results by source (e.g. for multi-source ranking).
+func (s *QdrantStore) SearchBySources(ctx context.Context, vector []float32, limit int, filters map[string]any, sources []string, vectorName string) (map[string][]QdrantPoint, map[string][]float64, error) {
+	pointsBySource := make(map[string][]QdrantPoint, len(sources))
 	scoresBySource := make(map[string][]float64, len(sources))
 	if len(sources) == 0 {
 		return pointsBySource, scoresBySource, nil
@@ -288,8 +300,9 @@ func (s *QdrantStore) SearchBySources(ctx context.Context, vector []float32, lim
 	return pointsBySource, scoresBySource, nil
 }
 
-func (s *QdrantStore) SearchSparseBySources(ctx context.Context, indices []uint32, values []float32, limit int, filters map[string]any, sources []string, withSparseVectors bool) (map[string][]qdrantPoint, map[string][]float64, error) {
-	pointsBySource := make(map[string][]qdrantPoint, len(sources))
+// SearchSparseBySources runs sparse search and groups results by source.
+func (s *QdrantStore) SearchSparseBySources(ctx context.Context, indices []uint32, values []float32, limit int, filters map[string]any, sources []string, withSparseVectors bool) (map[string][]QdrantPoint, map[string][]float64, error) {
+	pointsBySource := make(map[string][]QdrantPoint, len(sources))
 	scoresBySource := make(map[string][]float64, len(sources))
 	if len(sources) == 0 {
 		return pointsBySource, scoresBySource, nil
@@ -309,7 +322,8 @@ func (s *QdrantStore) SearchSparseBySources(ctx context.Context, indices []uint3
 	return pointsBySource, scoresBySource, nil
 }
 
-func (s *QdrantStore) Get(ctx context.Context, id string) (*qdrantPoint, error) {
+// Get returns a single point by ID (payload only; no vectors in response).
+func (s *QdrantStore) Get(ctx context.Context, id string) (*QdrantPoint, error) {
 	result, err := s.client.Get(ctx, &qdrant.GetPoints{
 		CollectionName: s.collection,
 		Ids:            []*qdrant.PointId{qdrant.NewIDUUID(id)},
@@ -322,12 +336,13 @@ func (s *QdrantStore) Get(ctx context.Context, id string) (*qdrantPoint, error) 
 		return nil, nil
 	}
 	point := result[0]
-	return &qdrantPoint{
+	return &QdrantPoint{
 		ID:      pointIDToString(point.GetId()),
 		Payload: valueMapToInterface(point.GetPayload()),
 	}, nil
 }
 
+// Delete removes a single point by ID.
 func (s *QdrantStore) Delete(ctx context.Context, id string) error {
 	_, err := s.client.Delete(ctx, &qdrant.DeletePoints{
 		CollectionName: s.collection,
@@ -337,6 +352,7 @@ func (s *QdrantStore) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+// DeleteBatch removes multiple points by ID.
 func (s *QdrantStore) DeleteBatch(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -353,7 +369,8 @@ func (s *QdrantStore) DeleteBatch(ctx context.Context, ids []string) error {
 	return err
 }
 
-func (s *QdrantStore) List(ctx context.Context, limit int, filters map[string]any, withSparseVectors bool) ([]qdrantPoint, error) {
+// List scrolls points with optional limit and filters; optionally includes sparse vectors.
+func (s *QdrantStore) List(ctx context.Context, limit int, filters map[string]any, withSparseVectors bool) ([]QdrantPoint, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -372,9 +389,9 @@ func (s *QdrantStore) List(ctx context.Context, limit int, filters map[string]an
 		return nil, err
 	}
 
-	result := make([]qdrantPoint, 0, len(points))
+	result := make([]QdrantPoint, 0, len(points))
 	for _, point := range points {
-		p := qdrantPoint{
+		p := QdrantPoint{
 			ID:      pointIDToString(point.GetId()),
 			Payload: valueMapToInterface(point.GetPayload()),
 		}
@@ -386,7 +403,8 @@ func (s *QdrantStore) List(ctx context.Context, limit int, filters map[string]an
 	return result, nil
 }
 
-func (s *QdrantStore) Scroll(ctx context.Context, limit int, filters map[string]any, offset *qdrant.PointId) ([]qdrantPoint, *qdrant.PointId, error) {
+// Scroll scrolls points with limit, filters, and optional offset; returns next offset for pagination.
+func (s *QdrantStore) Scroll(ctx context.Context, limit int, filters map[string]any, offset *qdrant.PointId) ([]QdrantPoint, *qdrant.PointId, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -401,9 +419,9 @@ func (s *QdrantStore) Scroll(ctx context.Context, limit int, filters map[string]
 	if err != nil {
 		return nil, nil, err
 	}
-	result := make([]qdrantPoint, 0, len(points))
+	result := make([]QdrantPoint, 0, len(points))
 	for _, point := range points {
-		result = append(result, qdrantPoint{
+		result = append(result, QdrantPoint{
 			ID:      pointIDToString(point.GetId()),
 			Payload: valueMapToInterface(point.GetPayload()),
 		})
@@ -438,12 +456,14 @@ func extractSparseFromVectorOutput(vecOut *qdrant.VectorOutput) ([]uint32, []flo
 		return sparse.GetIndices(), sparse.GetValues()
 	}
 	// Deprecated flat fields fallback (older Qdrant server versions).
+	//nolint:staticcheck // SA1019: intentional fallback for older Qdrant API
 	if vecOut.GetIndices() != nil && len(vecOut.GetIndices().GetData()) > 0 {
 		return vecOut.GetIndices().GetData(), vecOut.GetData()
 	}
 	return nil, nil
 }
 
+// Count returns the number of points matching the given filters.
 func (s *QdrantStore) Count(ctx context.Context, filters map[string]any) (uint64, error) {
 	filter := buildQdrantFilter(filters)
 	result, err := s.client.Count(ctx, &qdrant.CountPoints{
@@ -457,10 +477,11 @@ func (s *QdrantStore) Count(ctx context.Context, filters map[string]any) (uint64
 	return result, nil
 }
 
+// DeleteAll removes all points matching the given filters (filter required).
 func (s *QdrantStore) DeleteAll(ctx context.Context, filters map[string]any) error {
 	filter := buildQdrantFilter(filters)
 	if filter == nil {
-		return fmt.Errorf("delete all requires filters")
+		return errors.New("delete all requires filters")
 	}
 	_, err := s.client.Delete(ctx, &qdrant.DeletePoints{
 		CollectionName: s.collection,
@@ -676,9 +697,7 @@ func cloneFilters(filters map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	clone := make(map[string]any, len(filters))
-	for key, value := range filters {
-		clone[key] = value
-	}
+	maps.Copy(clone, filters)
 	return clone
 }
 
@@ -747,7 +766,7 @@ func pointIDToString(id *qdrant.PointId) string {
 		return uuid
 	}
 	if num := id.GetNum(); num != 0 {
-		return fmt.Sprintf("%d", num)
+		return strconv.FormatUint(num, 10)
 	}
 	return ""
 }

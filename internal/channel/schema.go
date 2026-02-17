@@ -3,6 +3,7 @@ package channel
 // FieldType enumerates the supported configuration field types.
 type FieldType string
 
+// FieldType values for configuration schema fields.
 const (
 	FieldString FieldType = "string"
 	FieldSecret FieldType = "secret"

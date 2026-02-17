@@ -9,13 +9,14 @@ import (
 	"github.com/containerd/containerd/v2/core/mount"
 )
 
+// MountedSnapshot holds the mount directory, container info, and an Unmount function to release it.
 type MountedSnapshot struct {
 	Dir     string
 	Info    containers.Container
 	Unmount func() error
 }
 
-// MountContainerSnapshot mounts the active snapshot for a container.
+// MountContainerSnapshot mounts the active snapshot for a container into a temp dir; call Unmount when done.
 func MountContainerSnapshot(ctx context.Context, service Service, containerID string) (*MountedSnapshot, error) {
 	if containerID == "" {
 		return nil, ErrInvalidArgument

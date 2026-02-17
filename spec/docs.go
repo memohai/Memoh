@@ -2582,7 +2582,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/channel.ChannelConfig"
+                            "$ref": "#/definitions/channel.Config"
                         }
                     },
                     "400": {
@@ -2646,7 +2646,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/channel.ChannelConfig"
+                            "$ref": "#/definitions/channel.Config"
                         }
                     },
                     "400": {
@@ -4434,7 +4434,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/channel.ChannelIdentityBinding"
+                            "$ref": "#/definitions/channel.IdentityBinding"
                         }
                     },
                     "400": {
@@ -4485,7 +4485,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/channel.ChannelIdentityBinding"
+                            "$ref": "#/definitions/channel.IdentityBinding"
                         }
                     },
                     "400": {
@@ -5125,7 +5125,7 @@ const docTemplate = `{
                 "AttachmentGIF"
             ]
         },
-        "channel.ChannelCapabilities": {
+        "channel.Capabilities": {
             "type": "object",
             "properties": {
                 "attachments": {
@@ -5181,7 +5181,7 @@ const docTemplate = `{
                 }
             }
         },
-        "channel.ChannelConfig": {
+        "channel.Config": {
             "type": "object",
             "properties": {
                 "bot_id": {
@@ -5218,30 +5218,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "verified_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "channel.ChannelIdentityBinding": {
-            "type": "object",
-            "properties": {
-                "channel_identity_id": {
-                    "type": "string"
-                },
-                "channel_type": {
-                    "type": "string"
-                },
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "updated_at": {
                     "type": "string"
                 }
             }
@@ -5300,6 +5276,30 @@ const docTemplate = `{
                 "FieldNumber",
                 "FieldEnum"
             ]
+        },
+        "channel.IdentityBinding": {
+            "type": "object",
+            "properties": {
+                "channel_identity_id": {
+                    "type": "string"
+                },
+                "channel_type": {
+                    "type": "string"
+                },
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
         },
         "channel.Message": {
             "type": "object",
@@ -5559,7 +5559,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "capabilities": {
-                    "$ref": "#/definitions/channel.ChannelCapabilities"
+                    "$ref": "#/definitions/channel.Capabilities"
                 },
                 "config_schema": {
                     "$ref": "#/definitions/channel.ConfigSchema"
@@ -6066,7 +6066,7 @@ const docTemplate = `{
                 "mcpServers": {
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/mcp.MCPServerEntry"
+                        "$ref": "#/definitions/mcp.ServerEntry"
                     }
                 }
             }
@@ -6077,7 +6077,7 @@ const docTemplate = `{
                 "mcpServers": {
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/mcp.MCPServerEntry"
+                        "$ref": "#/definitions/mcp.ServerEntry"
                     }
                 }
             }
@@ -6093,7 +6093,7 @@ const docTemplate = `{
                 }
             }
         },
-        "mcp.MCPServerEntry": {
+        "mcp.ServerEntry": {
             "type": "object",
             "properties": {
                 "args": {
@@ -6197,7 +6197,7 @@ const docTemplate = `{
                 "results": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/memory.MemoryItem"
+                        "$ref": "#/definitions/memory.Item"
                     }
                 }
             }
@@ -6210,7 +6210,7 @@ const docTemplate = `{
                 }
             }
         },
-        "memory.MemoryItem": {
+        "memory.Item": {
             "type": "object",
             "properties": {
                 "agent_id": {
@@ -6296,7 +6296,7 @@ const docTemplate = `{
                 "results": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/memory.MemoryItem"
+                        "$ref": "#/definitions/memory.Item"
                     }
                 }
             }
@@ -7042,7 +7042,7 @@ const docTemplate = `{
     }
 }`
 
-// SwaggerInfo holds exported Swagger Info so clients can modify it
+// SwaggerInfo holds exported Swagger Info so clients can modify it.
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0.0",
 	Host:             "",

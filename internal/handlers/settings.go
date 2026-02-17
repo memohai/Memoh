@@ -14,6 +14,7 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
+// SettingsHandler serves /bots/:bot_id/settings get, upsert, delete.
 type SettingsHandler struct {
 	service        *settings.Service
 	botService     *bots.Service
@@ -21,6 +22,7 @@ type SettingsHandler struct {
 	logger         *slog.Logger
 }
 
+// NewSettingsHandler creates a settings handler.
 func NewSettingsHandler(log *slog.Logger, service *settings.Service, botService *bots.Service, accountService *accounts.Service) *SettingsHandler {
 	return &SettingsHandler{
 		service:        service,
@@ -30,6 +32,7 @@ func NewSettingsHandler(log *slog.Logger, service *settings.Service, botService 
 	}
 }
 
+// Register mounts /bots/:bot_id/settings on the Echo instance.
 func (h *SettingsHandler) Register(e *echo.Echo) {
 	group := e.Group("/bots/:bot_id/settings")
 	group.GET("", h.Get)
@@ -45,7 +48,7 @@ func (h *SettingsHandler) Register(e *echo.Echo) {
 // @Success 200 {object} settings.Settings
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/settings [get]
+// @Router /bots/{bot_id}/settings [get].
 func (h *SettingsHandler) Get(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -74,7 +77,7 @@ func (h *SettingsHandler) Get(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/settings [put]
-// @Router /bots/{bot_id}/settings [post]
+// @Router /bots/{bot_id}/settings [post].
 func (h *SettingsHandler) Upsert(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -108,7 +111,7 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/settings [delete]
+// @Router /bots/{bot_id}/settings [delete].
 func (h *SettingsHandler) Delete(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {

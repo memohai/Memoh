@@ -1,7 +1,7 @@
 package telegram
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/memohai/memoh/internal/channel"
@@ -65,7 +65,7 @@ func resolveTarget(raw map[string]any) (string, error) {
 		}
 		return name, nil
 	}
-	return "", fmt.Errorf("telegram binding is incomplete")
+	return "", errors.New("telegram binding is incomplete")
 }
 
 func matchBinding(raw map[string]any, criteria channel.BindingCriteria) bool {
@@ -107,7 +107,7 @@ func buildUserConfig(identity channel.Identity) map[string]any {
 func parseConfig(raw map[string]any) (Config, error) {
 	token := strings.TrimSpace(channel.ReadString(raw, "botToken", "bot_token"))
 	if token == "" {
-		return Config{}, fmt.Errorf("telegram botToken is required")
+		return Config{}, errors.New("telegram botToken is required")
 	}
 	return Config{BotToken: token}, nil
 }
@@ -117,7 +117,7 @@ func parseUserConfig(raw map[string]any) (UserConfig, error) {
 	userID := strings.TrimSpace(channel.ReadString(raw, "userId", "user_id"))
 	chatID := strings.TrimSpace(channel.ReadString(raw, "chatId", "chat_id"))
 	if username == "" && userID == "" && chatID == "" {
-		return UserConfig{}, fmt.Errorf("telegram user config requires username, user_id, or chat_id")
+		return UserConfig{}, errors.New("telegram user config requires username, user_id, or chat_id")
 	}
 	return UserConfig{
 		Username: username,

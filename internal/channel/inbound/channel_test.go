@@ -23,7 +23,7 @@ type fakeChatGateway struct {
 	onChat func(conversation.ChatRequest)
 }
 
-func (f *fakeChatGateway) Chat(ctx context.Context, req conversation.ChatRequest) (conversation.ChatResponse, error) {
+func (f *fakeChatGateway) Chat(_ context.Context, req conversation.ChatRequest) (conversation.ChatResponse, error) {
 	f.gotReq = req
 	if f.onChat != nil {
 		f.onChat(req)
@@ -31,7 +31,7 @@ func (f *fakeChatGateway) Chat(ctx context.Context, req conversation.ChatRequest
 	return f.resp, f.err
 }
 
-func (f *fakeChatGateway) StreamChat(ctx context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
+func (f *fakeChatGateway) StreamChat(_ context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
 	f.gotReq = req
 	if f.onChat != nil {
 		f.onChat(req)
@@ -57,7 +57,7 @@ func (f *fakeChatGateway) StreamChat(ctx context.Context, req conversation.ChatR
 	return chunks, errs
 }
 
-func (f *fakeChatGateway) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) error {
+func (f *fakeChatGateway) TriggerSchedule(_ context.Context, _ string, _ schedule.TriggerPayload, _ string) error {
 	return nil
 }
 
@@ -66,12 +66,12 @@ type fakeReplySender struct {
 	events []channel.StreamEvent
 }
 
-func (s *fakeReplySender) Send(ctx context.Context, msg channel.OutboundMessage) error {
+func (s *fakeReplySender) Send(_ context.Context, msg channel.OutboundMessage) error {
 	s.sent = append(s.sent, msg)
 	return nil
 }
 
-func (s *fakeReplySender) OpenStream(ctx context.Context, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (s *fakeReplySender) OpenStream(_ context.Context, target string, _ channel.StreamOptions) (channel.OutboundStream, error) {
 	return &fakeOutboundStream{
 		sender: s,
 		target: strings.TrimSpace(target),
@@ -83,7 +83,7 @@ type fakeOutboundStream struct {
 	target string
 }
 
-func (s *fakeOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
+func (s *fakeOutboundStream) Push(_ context.Context, event channel.StreamEvent) error {
 	if s == nil || s.sender == nil {
 		return nil
 	}
@@ -97,7 +97,7 @@ func (s *fakeOutboundStream) Push(ctx context.Context, event channel.StreamEvent
 	return nil
 }
 
-func (s *fakeOutboundStream) Close(ctx context.Context) error {
+func (s *fakeOutboundStream) Close(_ context.Context) error {
 	return nil
 }
 
@@ -113,20 +113,20 @@ type fakeProcessingStatusNotifier struct {
 	failedCause   error
 }
 
-func (n *fakeProcessingStatusNotifier) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+func (n *fakeProcessingStatusNotifier) ProcessingStarted(_ context.Context, _ channel.Config, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
 	n.events = append(n.events, "started")
 	n.info = append(n.info, info)
 	return n.startedHandle, n.startedErr
 }
 
-func (n *fakeProcessingStatusNotifier) ProcessingCompleted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
+func (n *fakeProcessingStatusNotifier) ProcessingCompleted(_ context.Context, _ channel.Config, _ channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
 	n.events = append(n.events, "completed")
 	n.info = append(n.info, info)
 	n.completedSeen = handle
 	return n.completedErr
 }
 
-func (n *fakeProcessingStatusNotifier) ProcessingFailed(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
+func (n *fakeProcessingStatusNotifier) ProcessingFailed(_ context.Context, _ channel.Config, _ channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
 	n.events = append(n.events, "failed")
 	n.info = append(n.info, info)
 	n.failedSeen = handle
@@ -138,29 +138,29 @@ type fakeProcessingStatusAdapter struct {
 	notifier *fakeProcessingStatusNotifier
 }
 
-func (a *fakeProcessingStatusAdapter) Type() channel.ChannelType {
-	return channel.ChannelType("feishu")
+func (a *fakeProcessingStatusAdapter) Type() channel.Type {
+	return channel.Type("feishu")
 }
 
 func (a *fakeProcessingStatusAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
-		Type: channel.ChannelType("feishu"),
-		Capabilities: channel.ChannelCapabilities{
+		Type: channel.Type("feishu"),
+		Capabilities: channel.Capabilities{
 			Text:  true,
 			Reply: true,
 		},
 	}
 }
 
-func (a *fakeProcessingStatusAdapter) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+func (a *fakeProcessingStatusAdapter) ProcessingStarted(ctx context.Context, cfg channel.Config, msg channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
 	return a.notifier.ProcessingStarted(ctx, cfg, msg, info)
 }
 
-func (a *fakeProcessingStatusAdapter) ProcessingCompleted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
+func (a *fakeProcessingStatusAdapter) ProcessingCompleted(ctx context.Context, cfg channel.Config, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
 	return a.notifier.ProcessingCompleted(ctx, cfg, msg, info, handle)
 }
 
-func (a *fakeProcessingStatusAdapter) ProcessingFailed(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
+func (a *fakeProcessingStatusAdapter) ProcessingFailed(ctx context.Context, cfg channel.Config, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
 	return a.notifier.ProcessingFailed(ctx, cfg, msg, info, handle, cause)
 }
 
@@ -170,14 +170,14 @@ type fakeChatService struct {
 	persisted     []messagepkg.Message
 }
 
-func (f *fakeChatService) ResolveConversation(ctx context.Context, input route.ResolveInput) (route.ResolveConversationResult, error) {
+func (f *fakeChatService) ResolveConversation(_ context.Context, _ route.ResolveInput) (route.ResolveConversationResult, error) {
 	if f.resolveErr != nil {
 		return route.ResolveConversationResult{}, f.resolveErr
 	}
 	return f.resolveResult, nil
 }
 
-func (f *fakeChatService) Persist(ctx context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+func (f *fakeChatService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
 	msg := messagepkg.Message{
 		BotID:                   input.BotID,
 		RouteID:                 input.RouteID,
@@ -209,10 +209,10 @@ func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, policySvc, nil, nil, "", 0)
 	sender := &fakeReplySender{}
 
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1", Type: channel.Type("feishu")}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
@@ -252,10 +252,10 @@ func TestChannelInboundProcessorDenied(t *testing.T) {
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, policySvc, nil, nil, "", 0)
 	sender := &fakeReplySender{}
 
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1", Type: channel.Type("feishu")}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "stranger-1"},
@@ -282,7 +282,7 @@ func TestChannelInboundProcessorIgnoreEmpty(t *testing.T) {
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, policySvc, nil, nil, "", 0)
 	sender := &fakeReplySender{}
 
-	cfg := channel.ChannelConfig{ID: "cfg-1"}
+	cfg := channel.Config{ID: "cfg-1"}
 	msg := channel.InboundMessage{Message: channel.Message{Text: "  "}}
 
 	err := processor.HandleInbound(context.Background(), cfg, msg, sender)
@@ -311,10 +311,10 @@ func TestChannelInboundProcessorSilentReply(t *testing.T) {
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
 	sender := &fakeReplySender{}
 
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1"}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("telegram"),
+		Channel:     channel.Type("telegram"),
 		Message:     channel.Message{Text: "test"},
 		ReplyTarget: "chat-123",
 		Sender:      channel.Identity{SubjectID: "user-1"},
@@ -347,10 +347,10 @@ func TestChannelInboundProcessorGroupPassiveSync(t *testing.T) {
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
 	sender := &fakeReplySender{}
 
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1"}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{ID: "msg-1", Text: "hello everyone"},
 		ReplyTarget: "chat_id:oc_123",
 		Sender:      channel.Identity{SubjectID: "user-1"},
@@ -395,10 +395,10 @@ func TestChannelInboundProcessorGroupMentionTriggersReply(t *testing.T) {
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
 	sender := &fakeReplySender{}
 
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1"}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{ID: "msg-2", Text: "@bot ping"},
 		ReplyTarget: "chat_id:oc_123",
 		Sender:      channel.Identity{SubjectID: "user-1"},
@@ -447,10 +447,10 @@ func TestChannelInboundProcessorPersonalGroupNonOwnerIgnored(t *testing.T) {
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, policySvc, nil, nil, "", 0)
 	sender := &fakeReplySender{}
 
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1"}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{ID: "msg-personal-1", Text: "hello"},
 		ReplyTarget: "chat_id:oc_personal",
 		Sender:      channel.Identity{SubjectID: "ext-member-1"},
@@ -490,10 +490,10 @@ func TestChannelInboundProcessorPersonalGroupOwnerWithoutMentionUsesPassivePersi
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, policySvc, nil, nil, "", 0)
 	sender := &fakeReplySender{}
 
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1"}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{ID: "msg-personal-2", Text: "owner says hi"},
 		ReplyTarget: "chat_id:oc_personal",
 		Sender:      channel.Identity{SubjectID: "ext-owner-1"},
@@ -536,7 +536,7 @@ func TestChannelInboundProcessorProcessingStatusSuccessLifecycle(t *testing.T) {
 				{Role: "assistant", Content: conversation.NewTextContent("AI reply")},
 			},
 		},
-		onChat: func(req conversation.ChatRequest) {
+		onChat: func(_ conversation.ChatRequest) {
 			if len(notifier.events) != 1 || notifier.events[0] != "started" {
 				t.Fatalf("expected started before chat call, got events: %+v", notifier.events)
 			}
@@ -544,10 +544,10 @@ func TestChannelInboundProcessorProcessingStatusSuccessLifecycle(t *testing.T) {
 	}
 	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
 	sender := &fakeReplySender{}
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1", Type: channel.Type("feishu")}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{ID: "om_123", Text: "hello"},
 		ReplyTarget: "chat_id:oc_123",
 		Sender:      channel.Identity{SubjectID: "ext-1"},
@@ -591,10 +591,10 @@ func TestChannelInboundProcessorProcessingStatusFailureLifecycle(t *testing.T) {
 	gateway := &fakeChatGateway{err: chatErr}
 	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
 	sender := &fakeReplySender{}
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1", Type: channel.Type("feishu")}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{ID: "om_456", Text: "hello"},
 		ReplyTarget: "chat_id:oc_456",
 		Sender:      channel.Identity{SubjectID: "ext-2"},
@@ -641,10 +641,10 @@ func TestChannelInboundProcessorProcessingStatusErrorsAreBestEffort(t *testing.T
 	}
 	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
 	sender := &fakeReplySender{}
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1", Type: channel.Type("feishu")}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{ID: "om_789", Text: "hello"},
 		ReplyTarget: "chat_id:oc_789",
 		Sender:      channel.Identity{SubjectID: "ext-3"},
@@ -683,10 +683,10 @@ func TestChannelInboundProcessorProcessingFailedNotifyErrorDoesNotOverrideChatEr
 	gateway := &fakeChatGateway{err: chatErr}
 	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
 	sender := &fakeReplySender{}
-	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+	cfg := channel.Config{ID: "cfg-1", BotID: "bot-1", Type: channel.Type("feishu")}
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
+		Channel:     channel.Type("feishu"),
 		Message:     channel.Message{ID: "om_999", Text: "hello"},
 		ReplyTarget: "chat_id:oc_999",
 		Sender:      channel.Identity{SubjectID: "ext-4"},

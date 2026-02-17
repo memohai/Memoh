@@ -1,3 +1,4 @@
+// Package main is the entry point for the Memoh MCP stdio server.
 package main
 
 import (
@@ -9,12 +10,17 @@ import (
 	"os/signal"
 	"syscall"
 
+	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/version"
-	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -25,18 +31,18 @@ func main() {
 	)
 	err := server.Run(ctx, &gomcp.StdioTransport{})
 	if ctx.Err() != nil {
-		return
+		return 0
 	}
 	if err == nil {
 		logger.Warn("mcp server exited without error; waiting for shutdown signal")
 		<-ctx.Done()
-		return
+		return 0
 	}
 	if errors.Is(err, io.EOF) {
 		logger.Warn("mcp stdio closed; waiting for shutdown signal")
 		<-ctx.Done()
-		return
+		return 0
 	}
 	logger.Error("mcp server failed", slog.Any("error", err))
-	os.Exit(1)
+	return 1
 }

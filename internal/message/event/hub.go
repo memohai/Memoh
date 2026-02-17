@@ -1,3 +1,4 @@
+// Package event provides in-memory event hubs for message delivery.
 package event
 
 import (
@@ -13,17 +14,17 @@ const (
 	DefaultBufferSize = 64
 )
 
-// EventType identifies the event category published by the message event hub.
-type EventType string
+// Type identifies the event category published by the message event hub.
+type Type string
 
 const (
-	// EventTypeMessageCreated is emitted after a message is persisted successfully.
-	EventTypeMessageCreated EventType = "message_created"
+	// TypeMessageCreated is emitted after a message is persisted successfully.
+	TypeMessageCreated Type = "message_created"
 )
 
 // Event is the normalized payload emitted by the in-process message event hub.
 type Event struct {
-	Type  EventType       `json:"type"`
+	Type  Type            `json:"type"`
 	BotID string          `json:"bot_id"`
 	Data  json.RawMessage `json:"data,omitempty"`
 }

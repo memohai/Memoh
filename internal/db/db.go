@@ -1,3 +1,4 @@
+// Package db provides PostgreSQL connection and pool helpers.
 package db
 
 import (
@@ -9,6 +10,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 )
 
+// Open creates a pgx connection pool from the given Postgres config (DSN built from host, port, user, etc.).
 func Open(ctx context.Context, cfg config.PostgresConfig) (*pgxpool.Pool, error) {
 	dsn := fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/%s?sslmode=%s",

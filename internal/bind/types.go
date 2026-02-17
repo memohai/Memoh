@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// Errors returned by bind operations.
 var (
 	ErrCodeNotFound = errors.New("bind code not found")
 	ErrCodeUsed     = errors.New("bind code already used")
@@ -19,8 +20,8 @@ type Code struct {
 	Platform                string    `json:"platform,omitempty"`
 	Token                   string    `json:"token"`
 	IssuedByUserID          string    `json:"issued_by_user_id"`
-	ExpiresAt               time.Time `json:"expires_at,omitempty"`
-	UsedAt                  time.Time `json:"used_at,omitempty"`
+	ExpiresAt               time.Time `json:"expires_at,omitzero"`
+	UsedAt                  time.Time `json:"used_at,omitzero"`
 	UsedByChannelIdentityID string    `json:"used_by_channel_identity_id,omitempty"`
 	CreatedAt               time.Time `json:"created_at"`
 }

@@ -2,6 +2,7 @@ package directory
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel"
@@ -39,34 +40,38 @@ func TestExecutor_ListTools_NilDeps(t *testing.T) {
 func TestExecutor_CallTool_NotFound(t *testing.T) {
 	exec := NewExecutor(nil, channel.NewRegistry(), &fakeConfigResolver{}, channel.NewRegistry())
 	_, err := exec.CallTool(context.Background(), mcpgw.ToolSessionContext{}, "other_tool", nil)
-	if err != mcpgw.ErrToolNotFound {
+	if !errors.Is(err, mcpgw.ErrToolNotFound) {
 		t.Errorf("expected ErrToolNotFound, got %v", err)
 	}
 }
 
 type dirMockAdapter struct {
-	channelType channel.ChannelType
+	channelType channel.Type
 }
 
-func (d *dirMockAdapter) Type() channel.ChannelType { return d.channelType }
+func (d *dirMockAdapter) Type() channel.Type { return d.channelType }
 func (d *dirMockAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{Type: d.channelType, DisplayName: "DirTest"}
 }
-func (d *dirMockAdapter) ListPeers(context.Context, channel.ChannelConfig, channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+
+func (d *dirMockAdapter) ListPeers(context.Context, channel.Config, channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
-func (d *dirMockAdapter) ListGroups(context.Context, channel.ChannelConfig, channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+
+func (d *dirMockAdapter) ListGroups(context.Context, channel.Config, channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
-func (d *dirMockAdapter) ListGroupMembers(context.Context, channel.ChannelConfig, string, channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+
+func (d *dirMockAdapter) ListGroupMembers(context.Context, channel.Config, string, channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
-func (d *dirMockAdapter) ResolveEntry(context.Context, channel.ChannelConfig, string, channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
+
+func (d *dirMockAdapter) ResolveEntry(context.Context, channel.Config, string, channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
 	return channel.DirectoryEntry{Kind: channel.DirectoryEntryUser, ID: "id1", Name: "Test User"}, nil
 }
 
 type fakeConfigResolver struct{}
 
-func (f *fakeConfigResolver) ResolveEffectiveConfig(context.Context, string, channel.ChannelType) (channel.ChannelConfig, error) {
-	return channel.ChannelConfig{}, nil
+func (f *fakeConfigResolver) ResolveEffectiveConfig(context.Context, string, channel.Type) (channel.Config, error) {
+	return channel.Config{}, nil
 }

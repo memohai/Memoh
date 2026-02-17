@@ -5,16 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
@@ -22,7 +19,6 @@ import (
 	sdkjsonrpc "github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
 	mcptools "github.com/memohai/memoh/internal/mcp"
 )
 
@@ -78,167 +74,6 @@ const (
 	mcpSessionInitStateInitialized
 	mcpSessionInitStateReady
 )
-
-func (h *ContainerdHandler) getMCPSession(ctx context.Context, containerID string) (*mcpSession, error) {
-	h.mcpMu.Lock()
-	if sess, ok := h.mcpSess[containerID]; ok {
-		h.mcpMu.Unlock()
-		return sess, nil
-	}
-	h.mcpMu.Unlock()
-
-	var sess *mcpSession
-	var err error
-	if runtime.GOOS == "darwin" {
-		sess, err = h.startLimaMCPSession(containerID)
-	}
-	if err != nil || sess == nil {
-		sess, err = h.startContainerdMCPSession(ctx, containerID)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	h.mcpMu.Lock()
-	h.mcpSess[containerID] = sess
-	h.mcpMu.Unlock()
-
-	sess.onClose = func() {
-		h.mcpMu.Lock()
-		if current, ok := h.mcpSess[containerID]; ok && current == sess {
-			delete(h.mcpSess, containerID)
-		}
-		h.mcpMu.Unlock()
-	}
-
-	return sess, nil
-}
-
-func (h *ContainerdHandler) startContainerdMCPSession(ctx context.Context, containerID string) (*mcpSession, error) {
-	execSession, err := h.service.ExecTaskStreaming(ctx, containerID, ctr.ExecTaskRequest{
-		Args:    []string{"/app/mcp"},
-		FIFODir: h.mcpFIFODir(),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	sess := &mcpSession{
-		stdin:   execSession.Stdin,
-		stdout:  execSession.Stdout,
-		stderr:  execSession.Stderr,
-		pending: make(map[string]chan *sdkjsonrpc.Response),
-		closed:  make(chan struct{}),
-	}
-	transport := &sdkmcp.IOTransport{
-		Reader: sess.stdout,
-		Writer: sess.stdin,
-	}
-	conn, err := transport.Connect(ctx)
-	if err != nil {
-		sess.closeWithError(err)
-		return nil, err
-	}
-	sess.conn = conn
-
-	h.startMCPStderrLogger(execSession.Stderr, containerID)
-	go sess.readLoop()
-	go func() {
-		_, err := execSession.Wait()
-		if err != nil {
-			if isBenignMCPSessionExit(err) {
-				sess.closeWithError(io.EOF)
-				return
-			}
-			h.logger.Error("mcp session exited", slog.Any("error", err), slog.String("container_id", containerID))
-			sess.closeWithError(err)
-			return
-		}
-		sess.closeWithError(io.EOF)
-	}()
-
-	return sess, nil
-}
-
-func (h *ContainerdHandler) startLimaMCPSession(containerID string) (*mcpSession, error) {
-	execID := fmt.Sprintf("mcp-%d", time.Now().UnixNano())
-	cmd := exec.Command(
-		"limactl",
-		"shell",
-		"--tty=false",
-		"default",
-		"--",
-		"sudo",
-		"-n",
-		"ctr",
-		"-n",
-		"default",
-		"tasks",
-		"exec",
-		"--exec-id",
-		execID,
-		containerID,
-		"/app/mcp",
-	)
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		_ = stderr.Close()
-		return nil, err
-	}
-
-	sess := &mcpSession{
-		stdin:   stdin,
-		stdout:  stdout,
-		stderr:  stderr,
-		cmd:     cmd,
-		pending: make(map[string]chan *sdkjsonrpc.Response),
-		closed:  make(chan struct{}),
-	}
-	transport := &sdkmcp.IOTransport{
-		Reader: sess.stdout,
-		Writer: sess.stdin,
-	}
-	conn, err := transport.Connect(context.Background())
-	if err != nil {
-		sess.closeWithError(err)
-		return nil, err
-	}
-	sess.conn = conn
-
-	h.startMCPStderrLogger(stderr, containerID)
-	go sess.readLoop()
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			if isBenignMCPSessionExit(err) {
-				sess.closeWithError(io.EOF)
-				return
-			}
-			h.logger.Error("mcp session exited", slog.Any("error", err), slog.String("container_id", containerID))
-			sess.closeWithError(err)
-			return
-		}
-		sess.closeWithError(io.EOF)
-	}()
-
-	return sess, nil
-}
 
 func (s *mcpSession) closeWithError(err error) {
 	s.closeOnce.Do(func() {
@@ -365,7 +200,7 @@ func (s *mcpSession) call(ctx context.Context, req mcptools.JSONRPCRequest) (map
 	}
 	target := sdkIDKey(targetID)
 	if target == "" {
-		return nil, fmt.Errorf("missing request id")
+		return nil, errors.New("missing request id")
 	}
 	if s.conn == nil {
 		return nil, io.EOF
@@ -429,7 +264,7 @@ func (s *mcpSession) callRaw(ctx context.Context, req mcptools.JSONRPCRequest) (
 	}
 	target := sdkIDKey(targetID)
 	if target == "" {
-		return nil, fmt.Errorf("missing request id")
+		return nil, errors.New("missing request id")
 	}
 	if s.conn == nil {
 		return nil, io.EOF
@@ -609,11 +444,11 @@ func (s *mcpSession) invokeCall(ctx context.Context, req *sdkjsonrpc.Request) (*
 		return nil, io.EOF
 	}
 	if req == nil || !req.ID.IsValid() {
-		return nil, fmt.Errorf("missing request id")
+		return nil, errors.New("missing request id")
 	}
 	key := sdkIDKey(req.ID)
 	if key == "" {
-		return nil, fmt.Errorf("invalid request id")
+		return nil, errors.New("invalid request id")
 	}
 
 	respCh := make(chan *sdkjsonrpc.Response, 1)
@@ -665,7 +500,7 @@ func (s *mcpSession) setInitStateAtLeast(next mcpSessionInitState) {
 
 func parseRawJSONRPCID(raw json.RawMessage) (sdkjsonrpc.ID, error) {
 	if len(raw) == 0 {
-		return sdkjsonrpc.ID{}, fmt.Errorf("missing request id")
+		return sdkjsonrpc.ID{}, errors.New("missing request id")
 	}
 	var idValue any
 	if err := json.Unmarshal(raw, &idValue); err != nil {
@@ -676,7 +511,7 @@ func parseRawJSONRPCID(raw json.RawMessage) (sdkjsonrpc.ID, error) {
 		return sdkjsonrpc.ID{}, err
 	}
 	if !id.IsValid() {
-		return sdkjsonrpc.ID{}, fmt.Errorf("missing request id")
+		return sdkjsonrpc.ID{}, errors.New("missing request id")
 	}
 	return id, nil
 }
@@ -710,7 +545,8 @@ func sdkResponsePayload(resp *sdkjsonrpc.Response) (map[string]any, error) {
 	if resp.Error != nil {
 		code := int64(-32603)
 		message := strings.TrimSpace(resp.Error.Error())
-		if wireErr, ok := resp.Error.(*sdkjsonrpc.Error); ok {
+		wireErr := &sdkjsonrpc.Error{}
+		if errors.As(resp.Error, &wireErr) {
 			code = wireErr.Code
 			message = strings.TrimSpace(wireErr.Message)
 		}

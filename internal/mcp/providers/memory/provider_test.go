@@ -15,7 +15,7 @@ type fakeSearcher struct {
 	err  error
 }
 
-func (f *fakeSearcher) Search(ctx context.Context, req memory.SearchRequest) (memory.SearchResponse, error) {
+func (f *fakeSearcher) Search(_ context.Context, _ memory.SearchRequest) (memory.SearchResponse, error) {
 	if f.err != nil {
 		return memory.SearchResponse{}, f.err
 	}
@@ -29,22 +29,22 @@ type fakeChatAccessor struct {
 	participantErr error
 }
 
-func (f *fakeChatAccessor) Get(ctx context.Context, conversationID string) (conversation.Conversation, error) {
+func (f *fakeChatAccessor) Get(_ context.Context, _ string) (conversation.Conversation, error) {
 	if f.getErr != nil {
 		return conversation.Conversation{}, f.getErr
 	}
 	return f.chat, nil
 }
 
-func (f *fakeChatAccessor) IsParticipant(ctx context.Context, conversationID, channelIdentityID string) (bool, error) {
+func (f *fakeChatAccessor) IsParticipant(_ context.Context, _, _ string) (bool, error) {
 	if f.participantErr != nil {
 		return false, f.participantErr
 	}
 	return f.participant, nil
 }
 
-func (f *fakeChatAccessor) GetReadAccess(ctx context.Context, conversationID, channelIdentityID string) (conversation.ConversationReadAccess, error) {
-	return conversation.ConversationReadAccess{}, nil
+func (f *fakeChatAccessor) GetReadAccess(_ context.Context, _, _ string) (conversation.ReadAccess, error) {
+	return conversation.ReadAccess{}, nil
 }
 
 type fakeAdminChecker struct {
@@ -52,7 +52,7 @@ type fakeAdminChecker struct {
 	err   error
 }
 
-func (f *fakeAdminChecker) IsAdmin(ctx context.Context, channelIdentityID string) (bool, error) {
+func (f *fakeAdminChecker) IsAdmin(_ context.Context, _ string) (bool, error) {
 	if f.err != nil {
 		return false, f.err
 	}
@@ -91,7 +91,7 @@ func TestExecutor_CallTool_NotFound(t *testing.T) {
 	accessor := &fakeChatAccessor{}
 	exec := NewExecutor(nil, searcher, accessor, nil)
 	_, err := exec.CallTool(context.Background(), mcpgw.ToolSessionContext{BotID: "bot1"}, "other_tool", nil)
-	if err != mcpgw.ErrToolNotFound {
+	if !errors.Is(err, mcpgw.ErrToolNotFound) {
 		t.Errorf("expected ErrToolNotFound, got %v", err)
 	}
 }
@@ -136,7 +136,7 @@ func TestExecutor_CallTool_NoBotID(t *testing.T) {
 func TestExecutor_CallTool_Success_BotScope(t *testing.T) {
 	searcher := &fakeSearcher{
 		resp: memory.SearchResponse{
-			Results: []memory.MemoryItem{
+			Results: []memory.Item{
 				{ID: "id1", Memory: "mem1", Score: 0.9},
 			},
 		},
@@ -213,7 +213,7 @@ func TestExecutor_CallTool_NotParticipant(t *testing.T) {
 
 func TestExecutor_CallTool_AdminBypass(t *testing.T) {
 	searcher := &fakeSearcher{
-		resp: memory.SearchResponse{Results: []memory.MemoryItem{{ID: "id1", Memory: "m1", Score: 0.8}}},
+		resp: memory.SearchResponse{Results: []memory.Item{{ID: "id1", Memory: "m1", Score: 0.8}}},
 	}
 	accessor := &fakeChatAccessor{
 		chat:        conversation.Conversation{BotID: "bot1", ID: "c1"},
@@ -255,20 +255,20 @@ func TestExecutor_CallTool_SearchError(t *testing.T) {
 func TestDeduplicateMemoryItems(t *testing.T) {
 	tests := []struct {
 		name    string
-		items   []memory.MemoryItem
+		items   []memory.Item
 		wantLen int
 	}{
 		{"empty", nil, 0},
-		{"single", []memory.MemoryItem{{ID: "a", Memory: "m", Score: 1}}, 1},
-		{"dedup by id", []memory.MemoryItem{
+		{"single", []memory.Item{{ID: "a", Memory: "m", Score: 1}}, 1},
+		{"dedup by id", []memory.Item{
 			{ID: "a", Memory: "m1", Score: 1},
 			{ID: "a", Memory: "m2", Score: 0.9},
 		}, 1},
-		{"dedup by memory when id empty", []memory.MemoryItem{
+		{"dedup by memory when id empty", []memory.Item{
 			{ID: "", Memory: "same", Score: 1},
 			{ID: "", Memory: "same", Score: 0.9},
 		}, 1},
-		{"no dedup", []memory.MemoryItem{
+		{"no dedup", []memory.Item{
 			{ID: "a", Memory: "m1", Score: 1},
 			{ID: "b", Memory: "m2", Score: 0.9},
 		}, 2},

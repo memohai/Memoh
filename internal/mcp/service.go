@@ -6,6 +6,7 @@ import (
 	"strconv"
 )
 
+// JSONRPCRequest is the JSON-RPC 2.0 request shape (jsonrpc, id, method, params).
 type JSONRPCRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
@@ -13,6 +14,7 @@ type JSONRPCRequest struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
+// JSONRPCResponse is the JSON-RPC 2.0 response shape (result or error).
 type JSONRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -20,12 +22,14 @@ type JSONRPCResponse struct {
 	Error   *JSONRPCError   `json:"error,omitempty"`
 }
 
+// JSONRPCError is the JSON-RPC 2.0 error object (code, message).
 type JSONRPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
-func NewToolCallRequest(id string, toolName string, args map[string]any) (JSONRPCRequest, error) {
+// NewToolCallRequest builds a tools/call JSON-RPC request with the given id, tool name, and arguments.
+func NewToolCallRequest(id, toolName string, args map[string]any) (JSONRPCRequest, error) {
 	params := map[string]any{
 		"name":      toolName,
 		"arguments": args,
@@ -42,10 +46,12 @@ func NewToolCallRequest(id string, toolName string, args map[string]any) (JSONRP
 	}, nil
 }
 
+// RawStringID returns a JSON-RPC id as quoted string raw message.
 func RawStringID(id string) json.RawMessage {
 	return json.RawMessage([]byte(strconv.Quote(id)))
 }
 
+// PayloadError returns an error if the payload contains a top-level error object.
 func PayloadError(payload map[string]any) error {
 	if payload == nil {
 		return errors.New("empty payload")
@@ -59,6 +65,7 @@ func PayloadError(payload map[string]any) error {
 	return nil
 }
 
+// ResultError returns an error if result.isError is true (tool call failure).
 func ResultError(payload map[string]any) error {
 	result, ok := payload["result"].(map[string]any)
 	if !ok {
@@ -74,6 +81,7 @@ func ResultError(payload map[string]any) error {
 	return nil
 }
 
+// StructuredContent extracts result.structuredContent from the payload, or parses result.content text as JSON.
 func StructuredContent(payload map[string]any) (map[string]any, error) {
 	result, ok := payload["result"].(map[string]any)
 	if !ok {
@@ -91,6 +99,7 @@ func StructuredContent(payload map[string]any) (map[string]any, error) {
 	return nil, errors.New("missing structured content")
 }
 
+// ContentText returns the first content item's text from the MCP result content array.
 func ContentText(result map[string]any) string {
 	rawContent, ok := result["content"].([]any)
 	if !ok || len(rawContent) == 0 {

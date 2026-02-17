@@ -4,4 +4,4 @@ package telegram
 import "github.com/memohai/memoh/internal/channel"
 
 // Type is the registered ChannelType identifier for Telegram.
-const Type channel.ChannelType = "telegram"
+const Type channel.Type = "telegram"

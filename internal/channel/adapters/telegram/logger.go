@@ -10,10 +10,10 @@ type slogBotLogger struct {
 	log *slog.Logger
 }
 
-func (s *slogBotLogger) Println(v ...interface{}) {
+func (s *slogBotLogger) Println(v ...any) {
 	s.log.Warn(fmt.Sprint(v...))
 }
 
-func (s *slogBotLogger) Printf(format string, v ...interface{}) {
+func (s *slogBotLogger) Printf(format string, v ...any) {
 	s.log.Warn(fmt.Sprintf(format, v...))
 }

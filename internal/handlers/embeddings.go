@@ -13,13 +13,16 @@ import (
 	"github.com/memohai/memoh/internal/models"
 )
 
+// DefaultEmbeddingTimeout is the default HTTP timeout for embedding requests.
 const DefaultEmbeddingTimeout = 10 * time.Second
 
+// EmbeddingsHandler serves POST /embeddings for text or multimodal embedding.
 type EmbeddingsHandler struct {
 	resolver *embeddings.Resolver
 	logger   *slog.Logger
 }
 
+// EmbeddingsRequest is the body for POST /embeddings (type, provider, model, dimensions, input).
 type EmbeddingsRequest struct {
 	Type       string          `json:"type"`
 	Provider   string          `json:"provider,omitempty"`
@@ -28,28 +31,32 @@ type EmbeddingsRequest struct {
 	Input      EmbeddingsInput `json:"input"`
 }
 
+// EmbeddingsInput holds text and optional image/video URL.
 type EmbeddingsInput struct {
 	Text     string `json:"text,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
 	VideoURL string `json:"video_url,omitempty"`
 }
 
+// EmbeddingsResponse is the success body (type, provider, model, dimensions, embedding, usage).
 type EmbeddingsResponse struct {
 	Type       string          `json:"type"`
 	Provider   string          `json:"provider"`
 	Model      string          `json:"model"`
 	Dimensions int             `json:"dimensions"`
 	Embedding  []float32       `json:"embedding"`
-	Usage      EmbeddingsUsage `json:"usage,omitempty"`
+	Usage      EmbeddingsUsage `json:"usage,omitzero"`
 	Message    string          `json:"message,omitempty"`
 }
 
+// EmbeddingsUsage holds token and duration usage from the embedding API.
 type EmbeddingsUsage struct {
 	InputTokens int `json:"input_tokens,omitempty"`
 	ImageTokens int `json:"image_tokens,omitempty"`
-	Duration int `json:"duration,omitempty"`
+	Duration    int `json:"duration,omitempty"`
 }
 
+// NewEmbeddingsHandler creates an embeddings handler with a resolver built from models service and queries.
 func NewEmbeddingsHandler(log *slog.Logger, modelsService *models.Service, queries *sqlc.Queries) *EmbeddingsHandler {
 	return &EmbeddingsHandler{
 		resolver: embeddings.NewResolver(log, modelsService, queries, DefaultEmbeddingTimeout),
@@ -57,6 +64,7 @@ func NewEmbeddingsHandler(log *slog.Logger, modelsService *models.Service, queri
 	}
 }
 
+// Register mounts POST /embeddings on the Echo instance.
 func (h *EmbeddingsHandler) Register(e *echo.Echo) {
 	e.POST("/embeddings", h.Embed)
 }
@@ -70,7 +78,7 @@ func (h *EmbeddingsHandler) Register(e *echo.Echo) {
 // @Failure 400 {object} ErrorResponse
 // @Failure 501 {object} EmbeddingsResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /embeddings [post]
+// @Router /embeddings [post].
 func (h *EmbeddingsHandler) Embed(c echo.Context) error {
 	var req EmbeddingsRequest
 	if err := c.Bind(&req); err != nil {
@@ -129,7 +137,7 @@ func (h *EmbeddingsHandler) Embed(c echo.Context) error {
 		Usage: EmbeddingsUsage{
 			InputTokens: result.Usage.InputTokens,
 			ImageTokens: result.Usage.ImageTokens,
-			Duration: result.Usage.Duration,
+			Duration:    result.Usage.Duration,
 		},
 	})
 }

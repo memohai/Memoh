@@ -1,3 +1,4 @@
+// Package handlers provides HTTP API handlers for the Memoh agent server.
 package handlers
 
 import (
@@ -13,6 +14,7 @@ import (
 	"github.com/memohai/memoh/internal/auth"
 )
 
+// AuthHandler serves /auth/login and issues JWTs.
 type AuthHandler struct {
 	accountService *accounts.Service
 	jwtSecret      string
@@ -20,11 +22,13 @@ type AuthHandler struct {
 	logger         *slog.Logger
 }
 
+// LoginRequest is the body for POST /auth/login.
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
+// LoginResponse is the success body (access_token, user info, expires_at).
 type LoginResponse struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
@@ -35,6 +39,7 @@ type LoginResponse struct {
 	Username    string `json:"username"`
 }
 
+// NewAuthHandler creates an auth handler with account service and JWT config.
 func NewAuthHandler(log *slog.Logger, accountService *accounts.Service, jwtSecret string, expiresIn time.Duration) *AuthHandler {
 	return &AuthHandler{
 		accountService: accountService,
@@ -44,6 +49,7 @@ func NewAuthHandler(log *slog.Logger, accountService *accounts.Service, jwtSecre
 	}
 }
 
+// Register mounts POST /auth/login on the Echo instance.
 func (h *AuthHandler) Register(e *echo.Echo) {
 	e.POST("/auth/login", h.Login)
 }
@@ -57,7 +63,7 @@ func (h *AuthHandler) Register(e *echo.Echo) {
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /auth/login [post]
+// @Router /auth/login [post].
 func (h *AuthHandler) Login(c echo.Context) error {
 	if h.accountService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "user service not configured")

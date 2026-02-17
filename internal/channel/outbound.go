@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,7 @@ import (
 // ChunkerMode selects the text chunking strategy.
 type ChunkerMode string
 
+// ChunkerMode values select how outbound text is split (plain text or markdown-aware).
 const (
 	ChunkerModeText     ChunkerMode = "text"
 	ChunkerModeMarkdown ChunkerMode = "markdown"
@@ -19,6 +21,7 @@ const (
 // OutboundOrder controls the delivery order of text and media messages.
 type OutboundOrder string
 
+// OutboundOrder values: send media before text or text before media.
 const (
 	OutboundOrderMediaFirst OutboundOrder = "media_first"
 	OutboundOrderTextFirst  OutboundOrder = "text_first"
@@ -165,10 +168,7 @@ func splitLongLine(line string, limit int) []string {
 	runes := []rune(line)
 	chunks := make([]string, 0)
 	for start := 0; start < len(runes); start += limit {
-		end := start + limit
-		if end > len(runes) {
-			end = len(runes)
-		}
+		end := min(start+limit, len(runes))
 		segment := strings.TrimSpace(string(runes[start:end]))
 		if segment == "" {
 			continue
@@ -180,7 +180,7 @@ func splitLongLine(line string, limit int) []string {
 
 // --- Outbound pipeline methods (used by Manager) ---
 
-func (m *Manager) resolveOutboundPolicy(channelType ChannelType) OutboundPolicy {
+func (m *Manager) resolveOutboundPolicy(channelType Type) OutboundPolicy {
 	policy, ok := m.registry.GetOutboundPolicy(channelType)
 	if !ok {
 		policy = OutboundPolicy{}
@@ -191,7 +191,7 @@ func (m *Manager) resolveOutboundPolicy(channelType ChannelType) OutboundPolicy 
 // buildOutboundMessages splits an outbound message into multiple messages based on the policy.
 func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]OutboundMessage, error) {
 	if msg.Message.IsEmpty() {
-		return nil, fmt.Errorf("message is required")
+		return nil, errors.New("message is required")
 	}
 	normalized := normalizeOutboundMessage(msg.Message)
 	chunker := policy.Chunker
@@ -246,7 +246,7 @@ func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]Outbou
 	}
 
 	if len(textMessages) == 0 && len(attachmentMessages) == 0 {
-		return nil, fmt.Errorf("message is required")
+		return nil, errors.New("message is required")
 	}
 	if policy.MediaOrder == OutboundOrderTextFirst {
 		return append(textMessages, attachmentMessages...), nil
@@ -265,7 +265,7 @@ func normalizeOutboundMessage(msg Message) Message {
 	return msg
 }
 
-func validateMessageCapabilities(registry *Registry, channelType ChannelType, msg Message) error {
+func validateMessageCapabilities(registry *Registry, channelType Type, msg Message) error {
 	caps, ok := registry.GetCapabilities(channelType)
 	if !ok {
 		return nil
@@ -273,65 +273,65 @@ func validateMessageCapabilities(registry *Registry, channelType ChannelType, ms
 	switch msg.Format {
 	case MessageFormatPlain:
 		if !caps.Text {
-			return fmt.Errorf("channel does not support plain text")
+			return errors.New("channel does not support plain text")
 		}
 	case MessageFormatMarkdown:
 		if !caps.Markdown && !caps.RichText {
-			return fmt.Errorf("channel does not support markdown")
+			return errors.New("channel does not support markdown")
 		}
 	case MessageFormatRich:
 		if !caps.RichText {
-			return fmt.Errorf("channel does not support rich text")
+			return errors.New("channel does not support rich text")
 		}
 	}
 	if len(msg.Parts) > 0 && !caps.RichText {
-		return fmt.Errorf("channel does not support rich text")
+		return errors.New("channel does not support rich text")
 	}
 	if len(msg.Attachments) > 0 && !caps.Attachments {
-		return fmt.Errorf("channel does not support attachments")
+		return errors.New("channel does not support attachments")
 	}
 	if len(msg.Attachments) > 0 && requiresMedia(msg.Attachments) && !caps.Media {
-		return fmt.Errorf("channel does not support media")
+		return errors.New("channel does not support media")
 	}
 	if len(msg.Actions) > 0 && !caps.Buttons {
-		return fmt.Errorf("channel does not support actions")
+		return errors.New("channel does not support actions")
 	}
 	if msg.Thread != nil && !caps.Threads {
-		return fmt.Errorf("channel does not support threads")
+		return errors.New("channel does not support threads")
 	}
 	if msg.Reply != nil && !caps.Reply {
-		return fmt.Errorf("channel does not support reply")
+		return errors.New("channel does not support reply")
 	}
 	if strings.TrimSpace(msg.ID) != "" && !caps.Edit {
-		return fmt.Errorf("channel does not support edit")
+		return errors.New("channel does not support edit")
 	}
 	return nil
 }
 
-func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg ChannelConfig, msg OutboundMessage, policy OutboundPolicy) error {
+func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Config, msg OutboundMessage, policy OutboundPolicy) error {
 	if sender == nil {
-		return fmt.Errorf("unsupported channel type: %s", cfg.ChannelType)
+		return fmt.Errorf("unsupported channel type: %s", cfg.Type)
 	}
 	target := strings.TrimSpace(msg.Target)
 	if target == "" {
-		return fmt.Errorf("target is required")
+		return errors.New("target is required")
 	}
 	if msg.Message.IsEmpty() {
-		return fmt.Errorf("message is required")
+		return errors.New("message is required")
 	}
 	normalized := msg
-	attachments, err := normalizeAttachmentRefs(msg.Message.Attachments, cfg.ChannelType)
+	attachments, err := normalizeAttachmentRefs(msg.Message.Attachments, cfg.Type)
 	if err != nil {
 		return err
 	}
 	normalized.Message.Attachments = attachments
-	if err := validateMessageCapabilities(m.registry, cfg.ChannelType, normalized.Message); err != nil {
+	if err := validateMessageCapabilities(m.registry, cfg.Type, normalized.Message); err != nil {
 		return err
 	}
-	editor, _ := m.registry.GetMessageEditor(cfg.ChannelType)
+	editor, _ := m.registry.GetMessageEditor(cfg.Type)
 	if strings.TrimSpace(normalized.Message.ID) != "" {
 		if editor == nil {
-			return fmt.Errorf("channel does not support edit")
+			return errors.New("channel does not support edit")
 		}
 		var lastErr error
 		for i := 0; i < policy.RetryMax; i++ {
@@ -342,7 +342,7 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 			lastErr = err
 			if m.logger != nil {
 				m.logger.Warn("edit outbound retry",
-					slog.String("channel", cfg.ChannelType.String()),
+					slog.String("channel", cfg.Type.String()),
 					slog.Int("attempt", i+1),
 					slog.Any("error", err))
 			}
@@ -359,7 +359,7 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 		lastErr = err
 		if m.logger != nil {
 			m.logger.Warn("send outbound retry",
-				slog.String("channel", cfg.ChannelType.String()),
+				slog.String("channel", cfg.Type.String()),
 				slog.Int("attempt", i+1),
 				slog.Any("error", err))
 		}
@@ -368,7 +368,7 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 	return fmt.Errorf("send outbound failed after retries: %w", lastErr)
 }
 
-func normalizeAttachmentRefs(attachments []Attachment, defaultPlatform ChannelType) ([]Attachment, error) {
+func normalizeAttachmentRefs(attachments []Attachment, defaultPlatform Type) ([]Attachment, error) {
 	if len(attachments) == 0 {
 		return nil, nil
 	}
@@ -382,7 +382,7 @@ func normalizeAttachmentRefs(attachments []Attachment, defaultPlatform ChannelTy
 			item.SourcePlatform = defaultPlatform.String()
 		}
 		if item.URL == "" && item.PlatformKey == "" {
-			return nil, fmt.Errorf("attachment reference is required")
+			return nil, errors.New("attachment reference is required")
 		}
 		normalized = append(normalized, item)
 	}
@@ -401,20 +401,20 @@ func requiresMedia(attachments []Attachment) bool {
 	return false
 }
 
-func validateStreamEvent(registry *Registry, channelType ChannelType, event StreamEvent) error {
+func validateStreamEvent(registry *Registry, channelType Type, event StreamEvent) error {
 	caps, _ := registry.GetCapabilities(channelType)
 	switch event.Type {
 	case StreamEventStatus:
 		if event.Status == "" {
-			return fmt.Errorf("stream status is required")
+			return errors.New("stream status is required")
 		}
 	case StreamEventDelta:
 		if !caps.Streaming && !caps.BlockStreaming {
-			return fmt.Errorf("channel does not support streaming")
+			return errors.New("channel does not support streaming")
 		}
 	case StreamEventFinal:
 		if event.Final == nil {
-			return fmt.Errorf("stream final payload is required")
+			return errors.New("stream final payload is required")
 		}
 		if err := validateMessageCapabilities(registry, channelType, event.Final.Message); err != nil {
 			return err
@@ -424,7 +424,7 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 		}
 	case StreamEventError:
 		if strings.TrimSpace(event.Error) == "" {
-			return fmt.Errorf("stream error is required")
+			return errors.New("stream error is required")
 		}
 	default:
 		return fmt.Errorf("unsupported stream event type: %s", event.Type)
@@ -432,7 +432,7 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 	return nil
 }
 
-func (m *Manager) newReplySender(cfg ChannelConfig, channelType ChannelType) StreamReplySender {
+func (m *Manager) newReplySender(cfg Config, channelType Type) StreamReplySender {
 	sender, _ := m.registry.GetSender(channelType)
 	streamSender, _ := m.registry.GetStreamSender(channelType)
 	return &managerReplySender{
@@ -448,13 +448,13 @@ type managerReplySender struct {
 	manager      *Manager
 	sender       Sender
 	streamSender StreamSender
-	channelType  ChannelType
-	config       ChannelConfig
+	channelType  Type
+	config       Config
 }
 
 func (s *managerReplySender) Send(ctx context.Context, msg OutboundMessage) error {
 	if s.manager == nil {
-		return fmt.Errorf("channel manager not configured")
+		return errors.New("channel manager not configured")
 	}
 	policy := s.manager.resolveOutboundPolicy(s.channelType)
 	outbound, err := buildOutboundMessages(msg, policy)
@@ -471,18 +471,18 @@ func (s *managerReplySender) Send(ctx context.Context, msg OutboundMessage) erro
 
 func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts StreamOptions) (OutboundStream, error) {
 	if s.manager == nil {
-		return nil, fmt.Errorf("channel manager not configured")
+		return nil, errors.New("channel manager not configured")
 	}
 	if s.streamSender == nil {
-		return nil, fmt.Errorf("channel stream sender not configured")
+		return nil, errors.New("channel stream sender not configured")
 	}
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return nil, fmt.Errorf("target is required")
+		return nil, errors.New("target is required")
 	}
 	caps, _ := s.manager.registry.GetCapabilities(s.channelType)
 	if !caps.Streaming && !caps.BlockStreaming {
-		return nil, fmt.Errorf("channel does not support streaming")
+		return nil, errors.New("channel does not support streaming")
 	}
 	stream, err := s.streamSender.OpenStream(ctx, s.config, target, opts)
 	if err != nil {
@@ -498,12 +498,12 @@ func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts
 type managerOutboundStream struct {
 	manager     *Manager
 	stream      OutboundStream
-	channelType ChannelType
+	channelType Type
 }
 
 func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) error {
 	if s.manager == nil || s.stream == nil {
-		return fmt.Errorf("stream is not configured")
+		return errors.New("stream is not configured")
 	}
 	if err := validateStreamEvent(s.manager.registry, s.channelType, event); err != nil {
 		return err
@@ -513,7 +513,7 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 
 func (s *managerOutboundStream) Close(ctx context.Context) error {
 	if s.stream == nil {
-		return fmt.Errorf("stream is not configured")
+		return errors.New("stream is not configured")
 	}
 	return s.stream.Close(ctx)
 }

@@ -1,3 +1,4 @@
+// Package schedule provides cron schedule and trigger management.
 package schedule
 
 import (
@@ -19,6 +20,7 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
+// Service manages cron schedules and triggers execution via Triggerer.
 type Service struct {
 	queries   *sqlc.Queries
 	cron      *cron.Cron
@@ -30,6 +32,7 @@ type Service struct {
 	jobs      map[string]cron.EntryID
 }
 
+// NewService creates a schedule service and starts the cron scheduler.
 func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, runtimeConfig *boot.RuntimeConfig) *Service {
 	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	c := cron.New(cron.WithParser(parser))
@@ -46,9 +49,10 @@ func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, ru
 	return service
 }
 
+// Bootstrap loads all enabled schedules from DB and registers them with the cron scheduler.
 func (s *Service) Bootstrap(ctx context.Context) error {
 	if s.queries == nil {
-		return fmt.Errorf("schedule queries not configured")
+		return errors.New("schedule queries not configured")
 	}
 	items, err := s.queries.ListEnabledSchedules(ctx)
 	if err != nil {
@@ -62,12 +66,13 @@ func (s *Service) Bootstrap(ctx context.Context) error {
 	return nil
 }
 
+// Create creates a new schedule for the bot and starts the cron job if enabled.
 func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (Schedule, error) {
 	if s.queries == nil {
-		return Schedule{}, fmt.Errorf("schedule queries not configured")
+		return Schedule{}, errors.New("schedule queries not configured")
 	}
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Description) == "" || strings.TrimSpace(req.Pattern) == "" || strings.TrimSpace(req.Command) == "" {
-		return Schedule{}, fmt.Errorf("name, description, pattern, command are required")
+		return Schedule{}, errors.New("name, description, pattern, command are required")
 	}
 	if _, err := s.parser.Parse(req.Pattern); err != nil {
 		return Schedule{}, fmt.Errorf("invalid cron pattern: %w", err)
@@ -104,6 +109,7 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	return toSchedule(row), nil
 }
 
+// Get returns the schedule by ID.
 func (s *Service) Get(ctx context.Context, id string) (Schedule, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
@@ -112,13 +118,14 @@ func (s *Service) Get(ctx context.Context, id string) (Schedule, error) {
 	row, err := s.queries.GetScheduleByID(ctx, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Schedule{}, fmt.Errorf("schedule not found")
+			return Schedule{}, errors.New("schedule not found")
 		}
 		return Schedule{}, err
 	}
 	return toSchedule(row), nil
 }
 
+// List returns all schedules for the given bot.
 func (s *Service) List(ctx context.Context, botID string) ([]Schedule, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -135,6 +142,7 @@ func (s *Service) List(ctx context.Context, botID string) ([]Schedule, error) {
 	return items, nil
 }
 
+// Update updates the schedule by ID and reschedules the cron job if pattern/enabled changed.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Schedule, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
@@ -193,6 +201,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	return toSchedule(updated), nil
 }
 
+// Delete removes the schedule and its cron job.
 func (s *Service) Delete(ctx context.Context, id string) error {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
@@ -205,16 +214,17 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// Trigger runs the schedule once by ID (calls Triggerer with payload and JWT).
 func (s *Service) Trigger(ctx context.Context, scheduleID string) error {
 	if s.triggerer == nil {
-		return fmt.Errorf("schedule triggerer not configured")
+		return errors.New("schedule triggerer not configured")
 	}
 	schedule, err := s.Get(ctx, scheduleID)
 	if err != nil {
 		return err
 	}
 	if !schedule.Enabled {
-		return fmt.Errorf("schedule is disabled")
+		return errors.New("schedule is disabled")
 	}
 	return s.runSchedule(ctx, schedule)
 }
@@ -223,7 +233,7 @@ const scheduleTokenTTL = 10 * time.Minute
 
 func (s *Service) runSchedule(ctx context.Context, schedule Schedule) error {
 	if s.triggerer == nil {
-		return fmt.Errorf("schedule triggerer not configured")
+		return errors.New("schedule triggerer not configured")
 	}
 	updated, err := s.queries.IncrementScheduleCalls(ctx, toUUID(schedule.ID))
 	if err != nil {
@@ -266,7 +276,7 @@ func (s *Service) resolveBotOwner(ctx context.Context, botID string) (string, er
 	}
 	ownerID := bot.OwnerUserID.String()
 	if ownerID == "" {
-		return "", fmt.Errorf("bot owner not found")
+		return "", errors.New("bot owner not found")
 	}
 	return ownerID, nil
 }
@@ -274,7 +284,7 @@ func (s *Service) resolveBotOwner(ctx context.Context, botID string) (string, er
 // generateTriggerToken creates a short-lived JWT for schedule trigger callbacks.
 func (s *Service) generateTriggerToken(userID string) (string, error) {
 	if strings.TrimSpace(s.jwtSecret) == "" {
-		return "", fmt.Errorf("jwt secret not configured")
+		return "", errors.New("jwt secret not configured")
 	}
 	signed, _, err := auth.GenerateToken(userID, s.jwtSecret, scheduleTokenTTL)
 	if err != nil {
@@ -286,7 +296,7 @@ func (s *Service) generateTriggerToken(userID string) (string, error) {
 func (s *Service) scheduleJob(schedule sqlc.Schedule) error {
 	id := schedule.ID.String()
 	if id == "" {
-		return fmt.Errorf("schedule id missing")
+		return errors.New("schedule id missing")
 	}
 	job := func() {
 		if err := s.runSchedule(context.Background(), toSchedule(schedule)); err != nil {
@@ -337,8 +347,8 @@ func toSchedule(row sqlc.Schedule) Schedule {
 		BotID:        row.BotID.String(),
 	}
 	if row.MaxCalls.Valid {
-		max := int(row.MaxCalls.Int32)
-		item.MaxCalls = &max
+		maxCalls := int(row.MaxCalls.Int32)
+		item.MaxCalls = &maxCalls
 	}
 	if row.CreatedAt.Valid {
 		item.CreatedAt = row.CreatedAt.Time

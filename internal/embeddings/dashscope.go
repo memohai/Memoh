@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,11 +13,13 @@ import (
 	"time"
 )
 
+// Default DashScope API base URL and embedding path.
 const (
 	DefaultDashScopeBaseURL = "https://dashscope.aliyuncs.com"
 	DashScopeEmbeddingPath  = "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
 )
 
+// DashScopeEmbedder calls Aliyun DashScope multimodal embedding API.
 type DashScopeEmbedder struct {
 	apiKey  string
 	baseURL string
@@ -25,6 +28,8 @@ type DashScopeEmbedder struct {
 	http    *http.Client
 }
 
+// DashScopeUsage holds token/duration usage from DashScope API response.
+// DashScopeUsage holds token/duration usage from DashScope API response.
 type DashScopeUsage struct {
 	InputTokens int `json:"input_tokens"`
 	ImageTokens int `json:"image_tokens"`
@@ -55,6 +60,7 @@ type dashScopeResponse struct {
 	Message   string         `json:"message"`
 }
 
+// NewDashScopeEmbedder builds a DashScope embedder; baseURL defaults to DefaultDashScopeBaseURL if empty.
 func NewDashScopeEmbedder(log *slog.Logger, apiKey, baseURL, model string, timeout time.Duration) *DashScopeEmbedder {
 	if baseURL == "" {
 		baseURL = DefaultDashScopeBaseURL
@@ -73,7 +79,8 @@ func NewDashScopeEmbedder(log *slog.Logger, apiKey, baseURL, model string, timeo
 	}
 }
 
-func (e *DashScopeEmbedder) Embed(ctx context.Context, text string, imageURL string, videoURL string) ([]float32, DashScopeUsage, error) {
+// Embed returns the embedding vector and usage for text and/or image/video URLs via DashScope API.
+func (e *DashScopeEmbedder) Embed(ctx context.Context, text, imageURL, videoURL string) ([]float32, DashScopeUsage, error) {
 	contents := make([]map[string]string, 0, 3)
 	if strings.TrimSpace(text) != "" {
 		contents = append(contents, map[string]string{"text": text})
@@ -85,7 +92,7 @@ func (e *DashScopeEmbedder) Embed(ctx context.Context, text string, imageURL str
 		contents = append(contents, map[string]string{"video": videoURL})
 	}
 	if len(contents) == 0 {
-		return nil, DashScopeUsage{}, fmt.Errorf("dashscope input is required")
+		return nil, DashScopeUsage{}, errors.New("dashscope input is required")
 	}
 
 	payload, err := json.Marshal(dashScopeRequest{
@@ -107,7 +114,11 @@ func (e *DashScopeEmbedder) Embed(ctx context.Context, text string, imageURL str
 	if err != nil {
 		return nil, DashScopeUsage{}, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			e.logger.Warn("dashscope embeddings: close response body failed", slog.Any("error", err))
+		}
+	}()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, DashScopeUsage{}, fmt.Errorf("dashscope embeddings error: %s", strings.TrimSpace(string(body)))
@@ -121,15 +132,16 @@ func (e *DashScopeEmbedder) Embed(ctx context.Context, text string, imageURL str
 		return nil, parsed.Usage, fmt.Errorf("dashscope embeddings error: %s", parsed.Message)
 	}
 	if len(parsed.Output.Embeddings) == 0 {
-		return nil, parsed.Usage, fmt.Errorf("dashscope embeddings empty response")
+		return nil, parsed.Usage, errors.New("dashscope embeddings empty response")
 	}
 
-	preferredType := ""
-	if strings.TrimSpace(text) != "" {
+	var preferredType string
+	switch {
+	case strings.TrimSpace(text) != "":
 		preferredType = "text"
-	} else if strings.TrimSpace(imageURL) != "" {
+	case strings.TrimSpace(imageURL) != "":
 		preferredType = "image"
-	} else if strings.TrimSpace(videoURL) != "" {
+	case strings.TrimSpace(videoURL) != "":
 		preferredType = "video"
 	}
 

@@ -22,7 +22,7 @@ type fakeProcessingReactionGateway struct {
 	removeErr error
 }
 
-func (g *fakeProcessingReactionGateway) Add(ctx context.Context, messageID, reactionType string) (string, error) {
+func (g *fakeProcessingReactionGateway) Add(_ context.Context, messageID, reactionType string) (string, error) {
 	g.addCalls = append(g.addCalls, struct{ messageID, reactionType string }{
 		messageID:    messageID,
 		reactionType: reactionType,
@@ -35,7 +35,7 @@ func (g *fakeProcessingReactionGateway) Add(ctx context.Context, messageID, reac
 	return resp.reactionID, resp.err
 }
 
-func (g *fakeProcessingReactionGateway) Remove(ctx context.Context, messageID, reactionID string) error {
+func (g *fakeProcessingReactionGateway) Remove(_ context.Context, messageID, reactionID string) error {
 	g.removeCalls = append(g.removeCalls, struct{ messageID, reactionID string }{
 		messageID:  messageID,
 		reactionID: reactionID,
@@ -207,7 +207,7 @@ func TestExtractFeishuInboundImageAttachmentReference(t *testing.T) {
 func TestFeishuDescriptorIncludesStreamingAndMedia(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewFeishuAdapter(nil)
+	adapter := NewAdapter(nil)
 	caps := adapter.Descriptor().Capabilities
 	if !caps.Streaming {
 		t.Fatal("expected streaming capability")
@@ -534,10 +534,10 @@ func TestRemoveProcessingReactionNoopForEmptyToken(t *testing.T) {
 func TestFeishuProcessingStartedNoSourceMessageID(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewFeishuAdapter(nil)
+	adapter := NewAdapter(nil)
 	handle, err := adapter.ProcessingStarted(
 		context.Background(),
-		channel.ChannelConfig{},
+		channel.Config{},
 		channel.InboundMessage{},
 		channel.ProcessingStatusInfo{},
 	)
@@ -552,10 +552,10 @@ func TestFeishuProcessingStartedNoSourceMessageID(t *testing.T) {
 func TestFeishuProcessingStartedRequiresConfigWhenSourceMessageExists(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewFeishuAdapter(nil)
+	adapter := NewAdapter(nil)
 	_, err := adapter.ProcessingStarted(
 		context.Background(),
-		channel.ChannelConfig{},
+		channel.Config{},
 		channel.InboundMessage{},
 		channel.ProcessingStatusInfo{SourceMessageID: "om_5"},
 	)
@@ -567,10 +567,10 @@ func TestFeishuProcessingStartedRequiresConfigWhenSourceMessageExists(t *testing
 func TestFeishuProcessingCompletedNoopWithoutToken(t *testing.T) {
 	t.Parallel()
 
-	adapter := NewFeishuAdapter(nil)
+	adapter := NewAdapter(nil)
 	err := adapter.ProcessingCompleted(
 		context.Background(),
-		channel.ChannelConfig{},
+		channel.Config{},
 		channel.InboundMessage{},
 		channel.ProcessingStatusInfo{SourceMessageID: "om_6"},
 		channel.ProcessingStatusHandle{},

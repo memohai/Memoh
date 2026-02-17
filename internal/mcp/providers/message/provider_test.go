@@ -14,7 +14,7 @@ type fakeSender struct {
 	lastReq channel.SendRequest
 }
 
-func (f *fakeSender) Send(ctx context.Context, botID string, channelType channel.ChannelType, req channel.SendRequest) error {
+func (f *fakeSender) Send(_ context.Context, _ string, _ channel.Type, req channel.SendRequest) error {
 	f.lastReq = req
 	return f.err
 }
@@ -24,17 +24,17 @@ type fakeReactor struct {
 	lastReq channel.ReactRequest
 }
 
-func (f *fakeReactor) React(ctx context.Context, botID string, channelType channel.ChannelType, req channel.ReactRequest) error {
+func (f *fakeReactor) React(_ context.Context, _ string, _ channel.Type, req channel.ReactRequest) error {
 	f.lastReq = req
 	return f.err
 }
 
 type fakeResolver struct {
-	ct  channel.ChannelType
+	ct  channel.Type
 	err error
 }
 
-func (f *fakeResolver) ParseChannelType(raw string) (channel.ChannelType, error) {
+func (f *fakeResolver) ParseChannelType(_ string) (channel.Type, error) {
 	if f.err != nil {
 		return "", f.err
 	}
@@ -57,7 +57,7 @@ func TestExecutor_ListTools_NilDeps(t *testing.T) {
 func TestExecutor_ListTools(t *testing.T) {
 	sender := &fakeSender{}
 	reactor := &fakeReactor{}
-	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	resolver := &fakeResolver{ct: channel.Type("feishu")}
 	exec := NewExecutor(nil, sender, reactor, resolver)
 	tools, err := exec.ListTools(context.Background(), mcpgw.ToolSessionContext{})
 	if err != nil {
@@ -76,7 +76,7 @@ func TestExecutor_ListTools(t *testing.T) {
 
 func TestExecutor_ListTools_OnlySender(t *testing.T) {
 	sender := &fakeSender{}
-	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	resolver := &fakeResolver{ct: channel.Type("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	tools, err := exec.ListTools(context.Background(), mcpgw.ToolSessionContext{})
 	if err != nil {
@@ -92,10 +92,10 @@ func TestExecutor_ListTools_OnlySender(t *testing.T) {
 
 func TestExecutor_CallTool_NotFound(t *testing.T) {
 	sender := &fakeSender{}
-	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	resolver := &fakeResolver{ct: channel.Type("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	_, err := exec.CallTool(context.Background(), mcpgw.ToolSessionContext{BotID: "bot1"}, "other_tool", nil)
-	if err != mcpgw.ErrToolNotFound {
+	if !errors.Is(err, mcpgw.ErrToolNotFound) {
 		t.Errorf("expected ErrToolNotFound, got %v", err)
 	}
 }
@@ -115,7 +115,7 @@ func TestExecutor_CallTool_NilDeps(t *testing.T) {
 
 func TestExecutor_CallTool_NoBotID(t *testing.T) {
 	sender := &fakeSender{}
-	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	resolver := &fakeResolver{ct: channel.Type("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	result, err := exec.CallTool(context.Background(), mcpgw.ToolSessionContext{}, toolSend, map[string]any{
 		"platform": "feishu", "target": "t1", "text": "hi",
@@ -130,7 +130,7 @@ func TestExecutor_CallTool_NoBotID(t *testing.T) {
 
 func TestExecutor_CallTool_BotIDMismatch(t *testing.T) {
 	sender := &fakeSender{}
-	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	resolver := &fakeResolver{ct: channel.Type("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
@@ -146,7 +146,7 @@ func TestExecutor_CallTool_BotIDMismatch(t *testing.T) {
 
 func TestExecutor_CallTool_NoPlatform(t *testing.T) {
 	sender := &fakeSender{}
-	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	resolver := &fakeResolver{ct: channel.Type("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
@@ -178,7 +178,7 @@ func TestExecutor_CallTool_PlatformParseError(t *testing.T) {
 
 func TestExecutor_CallTool_NoMessage(t *testing.T) {
 	sender := &fakeSender{}
-	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	resolver := &fakeResolver{ct: channel.Type("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
@@ -194,7 +194,7 @@ func TestExecutor_CallTool_NoMessage(t *testing.T) {
 
 func TestExecutor_CallTool_NoTarget(t *testing.T) {
 	sender := &fakeSender{}
-	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	resolver := &fakeResolver{ct: channel.Type("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
@@ -210,7 +210,7 @@ func TestExecutor_CallTool_NoTarget(t *testing.T) {
 
 func TestExecutor_CallTool_SendError(t *testing.T) {
 	sender := &fakeSender{err: errors.New("send failed")}
-	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	resolver := &fakeResolver{ct: channel.Type("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", ReplyTarget: "t1"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
@@ -226,7 +226,7 @@ func TestExecutor_CallTool_SendError(t *testing.T) {
 
 func TestExecutor_CallTool_Success(t *testing.T) {
 	sender := &fakeSender{}
-	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	resolver := &fakeResolver{ct: channel.Type("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "feishu", ReplyTarget: "chat1"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
@@ -252,7 +252,7 @@ func TestExecutor_CallTool_Success(t *testing.T) {
 
 func TestExecutor_CallTool_ReplyTo(t *testing.T) {
 	sender := &fakeSender{}
-	resolver := &fakeResolver{ct: channel.ChannelType("telegram")}
+	resolver := &fakeResolver{ct: channel.Type("telegram")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "telegram", ReplyTarget: "123"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
@@ -275,7 +275,7 @@ func TestExecutor_CallTool_ReplyTo(t *testing.T) {
 
 func TestExecutor_CallTool_NoReplyTo(t *testing.T) {
 	sender := &fakeSender{}
-	resolver := &fakeResolver{ct: channel.ChannelType("telegram")}
+	resolver := &fakeResolver{ct: channel.Type("telegram")}
 	exec := NewExecutor(nil, sender, nil, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "telegram", ReplyTarget: "123"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
@@ -309,7 +309,7 @@ func TestExecutor_React_NilReactor(t *testing.T) {
 
 func TestExecutor_React_NoMessageID(t *testing.T) {
 	reactor := &fakeReactor{}
-	resolver := &fakeResolver{ct: channel.ChannelType("telegram")}
+	resolver := &fakeResolver{ct: channel.Type("telegram")}
 	exec := NewExecutor(nil, nil, reactor, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "telegram", ReplyTarget: "123"}
 	result, err := exec.CallTool(context.Background(), session, toolReact, map[string]any{
@@ -325,7 +325,7 @@ func TestExecutor_React_NoMessageID(t *testing.T) {
 
 func TestExecutor_React_NoTarget(t *testing.T) {
 	reactor := &fakeReactor{}
-	resolver := &fakeResolver{ct: channel.ChannelType("telegram")}
+	resolver := &fakeResolver{ct: channel.Type("telegram")}
 	exec := NewExecutor(nil, nil, reactor, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "telegram"}
 	result, err := exec.CallTool(context.Background(), session, toolReact, map[string]any{
@@ -341,7 +341,7 @@ func TestExecutor_React_NoTarget(t *testing.T) {
 
 func TestExecutor_React_Success(t *testing.T) {
 	reactor := &fakeReactor{}
-	resolver := &fakeResolver{ct: channel.ChannelType("telegram")}
+	resolver := &fakeResolver{ct: channel.Type("telegram")}
 	exec := NewExecutor(nil, nil, reactor, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "telegram", ReplyTarget: "123"}
 	result, err := exec.CallTool(context.Background(), session, toolReact, map[string]any{
@@ -370,7 +370,7 @@ func TestExecutor_React_Success(t *testing.T) {
 
 func TestExecutor_React_Remove(t *testing.T) {
 	reactor := &fakeReactor{}
-	resolver := &fakeResolver{ct: channel.ChannelType("telegram")}
+	resolver := &fakeResolver{ct: channel.Type("telegram")}
 	exec := NewExecutor(nil, nil, reactor, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "telegram", ReplyTarget: "123"}
 	result, err := exec.CallTool(context.Background(), session, toolReact, map[string]any{
@@ -393,7 +393,7 @@ func TestExecutor_React_Remove(t *testing.T) {
 
 func TestExecutor_React_Error(t *testing.T) {
 	reactor := &fakeReactor{err: errors.New("reaction failed")}
-	resolver := &fakeResolver{ct: channel.ChannelType("telegram")}
+	resolver := &fakeResolver{ct: channel.Type("telegram")}
 	exec := NewExecutor(nil, nil, reactor, resolver)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "telegram", ReplyTarget: "123"}
 	result, err := exec.CallTool(context.Background(), session, toolReact, map[string]any{

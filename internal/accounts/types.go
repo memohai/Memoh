@@ -13,7 +13,7 @@ type Account struct {
 	IsActive    bool      `json:"is_active"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
-	LastLoginAt time.Time `json:"last_login_at,omitempty"`
+	LastLoginAt time.Time `json:"last_login_at,omitzero"`
 }
 
 // CreateAccountRequest is the input for creating an account.

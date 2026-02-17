@@ -12,7 +12,7 @@ func ValidateChannelIdentityID(channelIdentityID string) error {
 		return fmt.Errorf("%w: channel identity id required", ctr.ErrInvalidArgument)
 	}
 	for _, r := range channelIdentityID {
-		if !(r == '-' || r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+		if r != '-' && r != '_' && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
 			return fmt.Errorf("%w: invalid channel identity id", ctr.ErrInvalidArgument)
 		}
 	}

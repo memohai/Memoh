@@ -11,19 +11,17 @@ import (
 )
 
 const (
-	codeBlockPlaceholder  = "\x00CB"
 	inlineCodePlaceholder = "\x00IC"
 )
 
 var (
-	reCodeBlockFence = regexp.MustCompile("(?s)```(\\w*)\\n?(.*?)```")
-	reInlineCode     = regexp.MustCompile("`([^`\\n]+?)`")
-	reBold           = regexp.MustCompile(`\*\*(.+?)\*\*`)
-	reStrike         = regexp.MustCompile(`~~(.+?)~~`)
-	reLink           = regexp.MustCompile(`\[([^\]]+?)\]\(([^)]+?)\)`)
-	reHeading        = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)
-	reListBullet     = regexp.MustCompile(`(?m)^(\s*)[-+]\s`)
-	reItalic         = regexp.MustCompile(`\*([^*\n]+?)\*`)
+	reInlineCode = regexp.MustCompile("`([^`\\n]+?)`")
+	reBold       = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	reStrike     = regexp.MustCompile(`~~(.+?)~~`)
+	reLink       = regexp.MustCompile(`\[([^\]]+?)\]\(([^)]+?)\)`)
+	reHeading    = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)
+	reListBullet = regexp.MustCompile(`(?m)^(\s*)[-+]\s`)
+	reItalic     = regexp.MustCompile(`\*([^*\n]+?)\*`)
 )
 
 // formatTelegramOutput converts standard markdown to Telegram-compatible HTML
@@ -86,8 +84,8 @@ func splitCodeBlocks(text string) []string {
 		}
 		segments = append(segments, text[:start])
 		rest := text[start+len(fence):]
-		end := strings.Index(rest, fence)
-		if end < 0 {
+		before, after, ok := strings.Cut(rest, fence)
+		if !ok {
 			// Unclosed code block: treat remainder as normal text.
 			segments = append(segments, text[start:])
 			// Remove the last normal segment and replace with full remainder.
@@ -95,16 +93,16 @@ func splitCodeBlocks(text string) []string {
 			segments = segments[:len(segments)-1]
 			break
 		}
-		segments = append(segments, rest[:end])
-		text = rest[end+len(fence):]
+		segments = append(segments, before)
+		text = after
 	}
 	return segments
 }
 
 // extractCodeBlockLang separates the optional language tag from code content.
 func extractCodeBlockLang(block string) (string, string) {
-	idx := strings.IndexByte(block, '\n')
-	if idx < 0 {
+	before, after, ok := strings.Cut(block, "\n")
+	if !ok {
 		// Single line: check if it looks like a language tag.
 		trimmed := strings.TrimSpace(block)
 		if trimmed != "" && !strings.Contains(trimmed, " ") && len(trimmed) <= 20 {
@@ -112,8 +110,8 @@ func extractCodeBlockLang(block string) (string, string) {
 		}
 		return "", block
 	}
-	firstLine := strings.TrimSpace(block[:idx])
-	rest := block[idx+1:]
+	firstLine := strings.TrimSpace(before)
+	rest := after
 	if firstLine != "" && !strings.Contains(firstLine, " ") && len(firstLine) <= 20 {
 		return firstLine, rest
 	}

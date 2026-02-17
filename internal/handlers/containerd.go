@@ -33,14 +33,13 @@ import (
 	"github.com/memohai/memoh/internal/policy"
 )
 
+// ContainerdHandler serves bot container and snapshot APIs (create, get, list, delete, snapshot, MCP stdio).
 type ContainerdHandler struct {
 	service        ctr.Service
 	cfg            config.MCPConfig
 	namespace      string
 	logger         *slog.Logger
 	toolGateway    *mcp.ToolGatewayService
-	mcpMu          sync.Mutex
-	mcpSess        map[string]*mcpSession
 	mcpStdioMu     sync.Mutex
 	mcpStdioSess   map[string]*mcpStdioSession
 	botService     *bots.Service
@@ -49,10 +48,12 @@ type ContainerdHandler struct {
 	queries        *dbsqlc.Queries
 }
 
+// CreateContainerRequest is the body for creating a bot container (optional snapshotter).
 type CreateContainerRequest struct {
 	Snapshotter string `json:"snapshotter,omitempty"`
 }
 
+// CreateContainerResponse returns container_id, image, snapshotter, started.
 type CreateContainerResponse struct {
 	ContainerID string `json:"container_id"`
 	Image       string `json:"image"`
@@ -60,6 +61,7 @@ type CreateContainerResponse struct {
 	Started     bool   `json:"started"`
 }
 
+// GetContainerResponse is the container detail for get API (status, paths, task_running, timestamps).
 type GetContainerResponse struct {
 	ContainerID   string    `json:"container_id"`
 	Image         string    `json:"image"`
@@ -72,38 +74,42 @@ type GetContainerResponse struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+// CreateSnapshotRequest is the body for creating a snapshot (snapshot_name).
 type CreateSnapshotRequest struct {
 	SnapshotName string `json:"snapshot_name"`
 }
 
+// CreateSnapshotResponse returns container_id, snapshot_name, snapshotter.
 type CreateSnapshotResponse struct {
 	ContainerID  string `json:"container_id"`
 	SnapshotName string `json:"snapshot_name"`
 	Snapshotter  string `json:"snapshotter"`
 }
 
+// SnapshotInfo is one snapshot entry (snapshotter, name, parent, kind, timestamps, labels).
 type SnapshotInfo struct {
 	Snapshotter string            `json:"snapshotter"`
 	Name        string            `json:"name"`
 	Parent      string            `json:"parent,omitempty"`
 	Kind        string            `json:"kind"`
-	CreatedAt   time.Time         `json:"created_at,omitempty"`
-	UpdatedAt   time.Time         `json:"updated_at,omitempty"`
+	CreatedAt   time.Time         `json:"created_at,omitzero"`
+	UpdatedAt   time.Time         `json:"updated_at,omitzero"`
 	Labels      map[string]string `json:"labels,omitempty"`
 }
 
+// ListSnapshotsResponse holds snapshotter and list of SnapshotInfo.
 type ListSnapshotsResponse struct {
 	Snapshotter string         `json:"snapshotter"`
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
+// NewContainerdHandler creates a containerd handler (optionally set toolGateway after construction).
 func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *ContainerdHandler {
 	return &ContainerdHandler{
 		service:        service,
 		cfg:            cfg,
 		namespace:      namespace,
 		logger:         log.With(slog.String("handler", "containerd")),
-		mcpSess:        make(map[string]*mcpSession),
 		mcpStdioSess:   make(map[string]*mcpStdioSession),
 		botService:     botService,
 		accountService: accountService,
@@ -112,6 +118,7 @@ func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPC
 	}
 }
 
+// Register mounts /bots/:bot_id/container, /bots/:bot_id/mcp-stdio, /bots/:bot_id/tools on the Echo instance.
 func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group := e.Group("/bots/:bot_id/container")
 	group.POST("", h.CreateContainer)
@@ -138,7 +145,7 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 // @Success 200 {object} CreateContainerResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container [post]
+// @Router /bots/{bot_id}/container [post].
 func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -378,7 +385,7 @@ func (h *ContainerdHandler) botContainerID(ctx context.Context, botID string) (s
 // @Success 200 {object} GetContainerResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container [get]
+// @Router /bots/{bot_id}/container [get].
 func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -456,7 +463,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 // @Success 204
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container [delete]
+// @Router /bots/{bot_id}/container [delete].
 func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -475,7 +482,7 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 // @Success 200 {object} object
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/start [post]
+// @Router /bots/{bot_id}/container/start [post].
 func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -507,7 +514,7 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 // @Success 200 {object} object
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/stop [post]
+// @Router /bots/{bot_id}/container/stop [post].
 func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -546,7 +553,7 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 // @Success 200 {object} CreateSnapshotResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/snapshots [post]
+// @Router /bots/{bot_id}/container/snapshots [post].
 func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -596,7 +603,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param snapshotter query string false "Snapshotter name"
 // @Success 200 {object} ListSnapshotsResponse
-// @Router /bots/{bot_id}/container/snapshots [get]
+// @Router /bots/{bot_id}/container/snapshots [get].
 func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	if _, err := h.requireBotAccess(c); err != nil {
 		return err

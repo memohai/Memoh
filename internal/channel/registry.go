@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,24 +14,24 @@ import (
 // and passed explicitly to components that need it.
 type Registry struct {
 	mu       sync.RWMutex
-	adapters map[ChannelType]Adapter
+	adapters map[Type]Adapter
 }
 
 // NewRegistry creates an empty Registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		adapters: map[ChannelType]Adapter{},
+		adapters: map[Type]Adapter{},
 	}
 }
 
 // Register adds an adapter to the registry.
 func (r *Registry) Register(adapter Adapter) error {
 	if adapter == nil {
-		return fmt.Errorf("adapter is nil")
+		return errors.New("adapter is nil")
 	}
-	ct := normalizeChannelType(adapter.Type().String())
+	ct := normalizeType(adapter.Type().String())
 	if ct == "" {
-		return fmt.Errorf("channel type is required")
+		return errors.New("channel type is required")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -49,8 +50,8 @@ func (r *Registry) MustRegister(adapter Adapter) {
 }
 
 // Unregister removes a channel type from the registry.
-func (r *Registry) Unregister(channelType ChannelType) bool {
-	ct := normalizeChannelType(channelType.String())
+func (r *Registry) Unregister(channelType Type) bool {
+	ct := normalizeType(channelType.String())
 	if ct == "" {
 		return false
 	}
@@ -64,21 +65,21 @@ func (r *Registry) Unregister(channelType ChannelType) bool {
 }
 
 // Get returns the adapter for the given channel type.
-func (r *Registry) Get(channelType ChannelType) (Adapter, bool) {
-	ct := normalizeChannelType(channelType.String())
+func (r *Registry) Get(channelType Type) (Adapter, bool) {
+	ct := normalizeType(channelType.String())
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	adapter, ok := r.adapters[ct]
 	return adapter, ok
 }
 
-// DirectoryAdapter returns the directory adapter for the given channel type if it implements ChannelDirectoryAdapter.
-func (r *Registry) DirectoryAdapter(channelType ChannelType) (ChannelDirectoryAdapter, bool) {
+// DirectoryAdapter returns the directory adapter for the given channel type if it implements DirectoryAdapter.
+func (r *Registry) DirectoryAdapter(channelType Type) (DirectoryAdapter, bool) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return nil, false
 	}
-	dir, ok := adapter.(ChannelDirectoryAdapter)
+	dir, ok := adapter.(DirectoryAdapter)
 	return dir, ok
 }
 
@@ -94,10 +95,10 @@ func (r *Registry) List() []Adapter {
 }
 
 // Types returns all registered channel types.
-func (r *Registry) Types() []ChannelType {
+func (r *Registry) Types() []Type {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	items := make([]ChannelType, 0, len(r.adapters))
+	items := make([]Type, 0, len(r.adapters))
 	for ct := range r.adapters {
 		items = append(items, ct)
 	}
@@ -107,7 +108,7 @@ func (r *Registry) Types() []ChannelType {
 // --- Descriptor accessors ---
 
 // GetDescriptor returns the descriptor for the given channel type.
-func (r *Registry) GetDescriptor(channelType ChannelType) (Descriptor, bool) {
+func (r *Registry) GetDescriptor(channelType Type) (Descriptor, bool) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return Descriptor{}, false
@@ -125,9 +126,9 @@ func (r *Registry) ListDescriptors() []Descriptor {
 	return items
 }
 
-// ParseChannelType validates and normalizes a raw string into a registered ChannelType.
-func (r *Registry) ParseChannelType(raw string) (ChannelType, error) {
-	ct := normalizeChannelType(raw)
+// ParseChannelType validates and normalizes a raw string into a registered Type.
+func (r *Registry) ParseChannelType(raw string) (Type, error) {
+	ct := normalizeType(raw)
 	if ct == "" {
 		return "", fmt.Errorf("unsupported channel type: %s", raw)
 	}
@@ -140,16 +141,16 @@ func (r *Registry) ParseChannelType(raw string) (ChannelType, error) {
 // --- Capability accessors ---
 
 // GetCapabilities returns the capability matrix for the given channel type.
-func (r *Registry) GetCapabilities(channelType ChannelType) (ChannelCapabilities, bool) {
+func (r *Registry) GetCapabilities(channelType Type) (Capabilities, bool) {
 	desc, ok := r.GetDescriptor(channelType)
 	if !ok {
-		return ChannelCapabilities{}, false
+		return Capabilities{}, false
 	}
 	return desc.Capabilities, true
 }
 
 // GetOutboundPolicy returns the outbound policy for the given channel type.
-func (r *Registry) GetOutboundPolicy(channelType ChannelType) (OutboundPolicy, bool) {
+func (r *Registry) GetOutboundPolicy(channelType Type) (OutboundPolicy, bool) {
 	desc, ok := r.GetDescriptor(channelType)
 	if !ok {
 		return OutboundPolicy{}, false
@@ -158,7 +159,7 @@ func (r *Registry) GetOutboundPolicy(channelType ChannelType) (OutboundPolicy, b
 }
 
 // GetConfigSchema returns the configuration schema for the given channel type.
-func (r *Registry) GetConfigSchema(channelType ChannelType) (ConfigSchema, bool) {
+func (r *Registry) GetConfigSchema(channelType Type) (ConfigSchema, bool) {
 	desc, ok := r.GetDescriptor(channelType)
 	if !ok {
 		return ConfigSchema{}, false
@@ -167,7 +168,7 @@ func (r *Registry) GetConfigSchema(channelType ChannelType) (ConfigSchema, bool)
 }
 
 // GetUserConfigSchema returns the user-binding configuration schema.
-func (r *Registry) GetUserConfigSchema(channelType ChannelType) (ConfigSchema, bool) {
+func (r *Registry) GetUserConfigSchema(channelType Type) (ConfigSchema, bool) {
 	desc, ok := r.GetDescriptor(channelType)
 	if !ok {
 		return ConfigSchema{}, false
@@ -176,7 +177,7 @@ func (r *Registry) GetUserConfigSchema(channelType ChannelType) (ConfigSchema, b
 }
 
 // IsConfigless reports whether the channel type operates without per-bot configuration.
-func (r *Registry) IsConfigless(channelType ChannelType) bool {
+func (r *Registry) IsConfigless(channelType Type) bool {
 	desc, ok := r.GetDescriptor(channelType)
 	if !ok {
 		return false
@@ -187,7 +188,7 @@ func (r *Registry) IsConfigless(channelType ChannelType) bool {
 // --- Sender / Receiver accessors ---
 
 // GetSender returns the Sender for the given channel type, or nil if unsupported.
-func (r *Registry) GetSender(channelType ChannelType) (Sender, bool) {
+func (r *Registry) GetSender(channelType Type) (Sender, bool) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return nil, false
@@ -197,7 +198,7 @@ func (r *Registry) GetSender(channelType ChannelType) (Sender, bool) {
 }
 
 // GetStreamSender returns the StreamSender for the given channel type, or nil if unsupported.
-func (r *Registry) GetStreamSender(channelType ChannelType) (StreamSender, bool) {
+func (r *Registry) GetStreamSender(channelType Type) (StreamSender, bool) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return nil, false
@@ -207,7 +208,7 @@ func (r *Registry) GetStreamSender(channelType ChannelType) (StreamSender, bool)
 }
 
 // GetMessageEditor returns the MessageEditor for the given channel type, or nil if unsupported.
-func (r *Registry) GetMessageEditor(channelType ChannelType) (MessageEditor, bool) {
+func (r *Registry) GetMessageEditor(channelType Type) (MessageEditor, bool) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return nil, false
@@ -217,7 +218,7 @@ func (r *Registry) GetMessageEditor(channelType ChannelType) (MessageEditor, boo
 }
 
 // GetReactor returns the Reactor for the given channel type, or nil if unsupported.
-func (r *Registry) GetReactor(channelType ChannelType) (Reactor, bool) {
+func (r *Registry) GetReactor(channelType Type) (Reactor, bool) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return nil, false
@@ -227,7 +228,7 @@ func (r *Registry) GetReactor(channelType ChannelType) (Reactor, bool) {
 }
 
 // GetReceiver returns the Receiver for the given channel type, or nil if unsupported.
-func (r *Registry) GetReceiver(channelType ChannelType) (Receiver, bool) {
+func (r *Registry) GetReceiver(channelType Type) (Receiver, bool) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return nil, false
@@ -237,7 +238,7 @@ func (r *Registry) GetReceiver(channelType ChannelType) (Receiver, bool) {
 }
 
 // GetProcessingStatusNotifier returns the ProcessingStatusNotifier for the given channel type, or nil if unsupported.
-func (r *Registry) GetProcessingStatusNotifier(channelType ChannelType) (ProcessingStatusNotifier, bool) {
+func (r *Registry) GetProcessingStatusNotifier(channelType Type) (ProcessingStatusNotifier, bool) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return nil, false
@@ -247,7 +248,7 @@ func (r *Registry) GetProcessingStatusNotifier(channelType ChannelType) (Process
 }
 
 // DiscoverSelf calls the SelfDiscoverer for the given channel type if supported.
-func (r *Registry) DiscoverSelf(ctx context.Context, channelType ChannelType, credentials map[string]any) (map[string]any, string, error) {
+func (r *Registry) DiscoverSelf(ctx context.Context, channelType Type, credentials map[string]any) (map[string]any, string, error) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return nil, "", fmt.Errorf("unsupported channel type: %s", channelType)
@@ -262,7 +263,7 @@ func (r *Registry) DiscoverSelf(ctx context.Context, channelType ChannelType, cr
 // --- Dispatch methods (replace former global functions in config.go / target.go) ---
 
 // NormalizeConfig validates and normalizes a channel configuration map.
-func (r *Registry) NormalizeConfig(channelType ChannelType, raw map[string]any) (map[string]any, error) {
+func (r *Registry) NormalizeConfig(channelType Type, raw map[string]any) (map[string]any, error) {
 	if raw == nil {
 		raw = map[string]any{}
 	}
@@ -277,7 +278,7 @@ func (r *Registry) NormalizeConfig(channelType ChannelType, raw map[string]any) 
 }
 
 // NormalizeUserConfig validates and normalizes a user-channel binding configuration.
-func (r *Registry) NormalizeUserConfig(channelType ChannelType, raw map[string]any) (map[string]any, error) {
+func (r *Registry) NormalizeUserConfig(channelType Type, raw map[string]any) (map[string]any, error) {
 	if raw == nil {
 		raw = map[string]any{}
 	}
@@ -292,7 +293,7 @@ func (r *Registry) NormalizeUserConfig(channelType ChannelType, raw map[string]a
 }
 
 // ResolveTargetFromUserConfig derives a delivery target from a user-channel binding.
-func (r *Registry) ResolveTargetFromUserConfig(channelType ChannelType, config map[string]any) (string, error) {
+func (r *Registry) ResolveTargetFromUserConfig(channelType Type, config map[string]any) (string, error) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return "", fmt.Errorf("unsupported channel type: %s", channelType)
@@ -304,7 +305,7 @@ func (r *Registry) ResolveTargetFromUserConfig(channelType ChannelType, config m
 }
 
 // NormalizeTarget applies the channel-specific target normalization.
-func (r *Registry) NormalizeTarget(channelType ChannelType, raw string) (string, bool) {
+func (r *Registry) NormalizeTarget(channelType Type, raw string) (string, bool) {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return strings.TrimSpace(raw), false
@@ -320,7 +321,7 @@ func (r *Registry) NormalizeTarget(channelType ChannelType, raw string) (string,
 }
 
 // MatchUserBinding reports whether the given binding config matches the criteria.
-func (r *Registry) MatchUserBinding(channelType ChannelType, config map[string]any, criteria BindingCriteria) bool {
+func (r *Registry) MatchUserBinding(channelType Type, config map[string]any, criteria BindingCriteria) bool {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return false
@@ -332,7 +333,7 @@ func (r *Registry) MatchUserBinding(channelType ChannelType, config map[string]a
 }
 
 // BuildUserBindingConfig constructs a user-channel binding config from an Identity.
-func (r *Registry) BuildUserBindingConfig(channelType ChannelType, identity Identity) map[string]any {
+func (r *Registry) BuildUserBindingConfig(channelType Type, identity Identity) map[string]any {
 	adapter, ok := r.Get(channelType)
 	if !ok {
 		return map[string]any{}
@@ -343,10 +344,10 @@ func (r *Registry) BuildUserBindingConfig(channelType ChannelType, identity Iden
 	return map[string]any{}
 }
 
-func normalizeChannelType(raw string) ChannelType {
+func normalizeType(raw string) Type {
 	normalized := strings.TrimSpace(strings.ToLower(raw))
 	if normalized == "" {
 		return ""
 	}
-	return ChannelType(normalized)
+	return Type(normalized)
 }

@@ -53,6 +53,7 @@ func NewUsersHandler(log *slog.Logger, service *accounts.Service, channelIdentit
 	}
 }
 
+// Register mounts /users and /bots routes on the Echo instance.
 func (h *UsersHandler) Register(e *echo.Echo) {
 	userGroup := e.Group("/users")
 	userGroup.GET("/me", h.GetMe)
@@ -91,7 +92,7 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 // @Success 200 {object} accounts.Account
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/me [get]
+// @Router /users/me [get].
 func (h *UsersHandler) GetMe(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -112,7 +113,7 @@ func (h *UsersHandler) GetMe(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/me/identities [get]
+// @Router /users/me/identities [get].
 func (h *UsersHandler) ListMyIdentities(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -139,7 +140,7 @@ func (h *UsersHandler) ListMyIdentities(c echo.Context) error {
 // @Success 200 {object} accounts.Account
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/me [put]
+// @Router /users/me [put].
 func (h *UsersHandler) UpdateMe(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -164,7 +165,7 @@ func (h *UsersHandler) UpdateMe(c echo.Context) error {
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/me/password [put]
+// @Router /users/me/password [put].
 func (h *UsersHandler) UpdateMyPassword(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -191,7 +192,7 @@ func (h *UsersHandler) UpdateMyPassword(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users [get]
+// @Router /users [get].
 func (h *UsersHandler) ListUsers(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -224,7 +225,7 @@ func (h *UsersHandler) ListUsers(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/{id} [get]
+// @Router /users/{id} [get].
 func (h *UsersHandler) GetUser(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -264,7 +265,7 @@ func (h *UsersHandler) GetUser(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/{id} [put]
+// @Router /users/{id} [put].
 func (h *UsersHandler) UpdateUser(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -310,7 +311,7 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/{id}/password [put]
+// @Router /users/{id}/password [put].
 func (h *UsersHandler) ResetUserPassword(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -352,7 +353,7 @@ func (h *UsersHandler) ResetUserPassword(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users [post]
+// @Router /users [post].
 func (h *UsersHandler) CreateUser(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -369,7 +370,7 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	resp, err := h.service.CreateHuman(c.Request().Context(), "", req)
+	resp, err := h.service.Create(c.Request().Context(), "", req)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -385,7 +386,7 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots [post]
+// @Router /bots [post].
 func (h *UsersHandler) CreateBot(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -456,7 +457,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots [get]
+// @Router /bots [get].
 func (h *UsersHandler) ListBots(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -494,7 +495,7 @@ func (h *UsersHandler) ListBots(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id} [get]
+// @Router /bots/{id} [get].
 func (h *UsersHandler) GetBot(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -521,7 +522,7 @@ func (h *UsersHandler) GetBot(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/checks [get]
+// @Router /bots/{id}/checks [get].
 func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -550,7 +551,7 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 // @Tags bots
 // @Param id path string true "Bot ID"
 // @Success 200 {object} bots.ListCheckKeysResponse
-// @Router /bots/{id}/checks/keys [get]
+// @Router /bots/{id}/checks/keys [get].
 func (h *UsersHandler) ListBotCheckKeys(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -577,7 +578,7 @@ func (h *UsersHandler) ListBotCheckKeys(c echo.Context) error {
 // @Param id path string true "Bot ID"
 // @Param key path string true "Check key"
 // @Success 200 {object} bots.BotCheck
-// @Router /bots/{id}/checks/run/{key} [get]
+// @Router /bots/{id}/checks/run/{key} [get].
 func (h *UsersHandler) RunBotCheck(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -612,7 +613,7 @@ func (h *UsersHandler) RunBotCheck(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id} [put]
+// @Router /bots/{id} [put].
 func (h *UsersHandler) UpdateBot(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -647,7 +648,7 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/owner [put]
+// @Router /bots/{id}/owner [put].
 func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -691,7 +692,7 @@ func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id} [delete]
+// @Router /bots/{id} [delete].
 func (h *UsersHandler) DeleteBot(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -726,7 +727,7 @@ func (h *UsersHandler) DeleteBot(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/members [get]
+// @Router /bots/{id}/members [get].
 func (h *UsersHandler) ListBotMembers(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -757,7 +758,7 @@ func (h *UsersHandler) ListBotMembers(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/members [put]
+// @Router /bots/{id}/members [put].
 func (h *UsersHandler) UpsertBotMember(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -796,7 +797,7 @@ func (h *UsersHandler) UpsertBotMember(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/members/{user_id} [delete]
+// @Router /bots/{id}/members/{user_id} [delete].
 func (h *UsersHandler) DeleteBotMember(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -825,12 +826,12 @@ func (h *UsersHandler) DeleteBotMember(c echo.Context) error {
 // @Tags bots
 // @Param id path string true "Bot ID"
 // @Param platform path string true "Channel platform"
-// @Success 200 {object} channel.ChannelConfig
+// @Success 200 {object} channel.Config
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/channel/{platform} [get]
+// @Router /bots/{id}/channel/{platform} [get].
 func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -864,12 +865,12 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 // @Param id path string true "Bot ID"
 // @Param platform path string true "Channel platform"
 // @Param payload body channel.UpsertConfigRequest true "Channel config payload"
-// @Success 200 {object} channel.ChannelConfig
+// @Success 200 {object} channel.Config
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/channel/{platform} [put]
+// @Router /bots/{id}/channel/{platform} [put].
 func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -912,7 +913,7 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/channel/{platform}/send [post]
+// @Router /bots/{id}/channel/{platform}/send [post].
 func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -957,7 +958,7 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 // @Failure 401 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/channel/{platform}/send_chat [post]
+// @Router /bots/{id}/channel/{platform}/send_chat [post].
 func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 	chatToken, err := auth.ChatTokenFromContext(c)
 	if err != nil {

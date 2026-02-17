@@ -122,13 +122,13 @@ func TestToCode_OptionalFields(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	row := sqlc.ChannelIdentityBindCode{
-		ID:                pgID,
-		Token:             "TOKEN",
-		IssuedByUserID:    pgID,
-		ChannelType:       pgtype.Text{Valid: false},
-		ExpiresAt:         pgtype.Timestamptz{Valid: false},
-		UsedAt:            pgtype.Timestamptz{Valid: false},
-		CreatedAt:         pgtype.Timestamptz{Time: now, Valid: true},
+		ID:             pgID,
+		Token:          "TOKEN",
+		IssuedByUserID: pgID,
+		ChannelType:    pgtype.Text{Valid: false},
+		ExpiresAt:      pgtype.Timestamptz{Valid: false},
+		UsedAt:         pgtype.Timestamptz{Valid: false},
+		CreatedAt:      pgtype.Timestamptz{Time: now, Valid: true},
 	}
 	c := toCode(row)
 	if c.Platform != "" {
@@ -204,4 +204,3 @@ func TestService_Consume_InvalidChannelIdentityID(t *testing.T) {
 		t.Fatal("expected error for invalid channel identity id")
 	}
 }
-

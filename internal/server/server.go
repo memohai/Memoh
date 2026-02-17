@@ -1,3 +1,4 @@
+// Package server provides the HTTP server and Echo setup for the agent API.
 package server
 
 import (
@@ -11,17 +12,20 @@ import (
 	"github.com/memohai/memoh/internal/auth"
 )
 
+// Server is the HTTP server (Echo) with JWT middleware and registered handlers.
 type Server struct {
 	echo   *echo.Echo
 	addr   string
 	logger *slog.Logger
 }
 
+// Handler registers routes on the Echo instance.
 type Handler interface {
 	Register(e *echo.Echo)
 }
 
-func NewServer(log *slog.Logger, addr string, jwtSecret string,
+// NewServer builds the Echo server with recovery, request logging, JWT auth, and the given handlers.
+func NewServer(log *slog.Logger, addr, jwtSecret string,
 	handlers ...Handler,
 ) *Server {
 	if addr == "" {
@@ -70,10 +74,12 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 	}
 }
 
+// Start starts the HTTP server (blocks until shutdown).
 func (s *Server) Start() error {
 	return s.echo.Start(s.addr)
 }
 
+// Stop gracefully shuts down the server using the given context.
 func (s *Server) Stop(ctx context.Context) error {
 	return s.echo.Shutdown(ctx)
 }

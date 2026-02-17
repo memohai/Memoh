@@ -1,6 +1,7 @@
 package containerd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"strings"
 )
 
+// Paths used when resolving /etc/resolv.conf source.
 const (
 	systemdResolvConf = "/run/systemd/resolve/resolv.conf"
 	fallbackResolv    = "nameserver 1.1.1.1\nnameserver 8.8.8.8\n"
@@ -60,14 +62,15 @@ func limaFileExists(path string) (bool, error) {
 		"-f",
 		path,
 	)
-	if err := cmd.Run(); err == nil {
+	err := cmd.Run()
+	if err == nil {
 		return true, nil
-	} else if exitErr, ok := err.(*exec.ExitError); ok {
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		if exitErr.ExitCode() == 1 {
 			return false, nil
 		}
-		return false, fmt.Errorf("lima test failed for %s: %w", path, err)
-	} else {
-		return false, fmt.Errorf("lima test failed for %s: %w", path, err)
 	}
+	return false, fmt.Errorf("lima test failed for %s: %w", path, err)
 }

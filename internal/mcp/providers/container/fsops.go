@@ -1,3 +1,4 @@
+// Package container provides MCP container provider (filesystem and exec tools).
 package container
 
 import (
@@ -60,7 +61,7 @@ func ExecWrite(ctx context.Context, runner ExecRunner, botID, workDir, filePath,
 }
 
 // ExecList lists directory entries inside the container via find + stat.
-// Output format per line: <name>|<type>|<size>|<mode>|<mtime_epoch>
+// Output format per line: <name>|<type>|<size>|<mode>|<mtime_epoch>.
 func ExecList(ctx context.Context, runner ExecRunner, botID, workDir, dirPath string, recursive bool) ([]FileEntry, error) {
 	depthFlag := "-maxdepth 1"
 	if recursive {

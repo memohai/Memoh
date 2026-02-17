@@ -63,7 +63,7 @@ Following is a conversation between the user and the assistant. You have to extr
 You should detect the language of the user input and record the facts in the same language.
 `, time.Now().UTC().Format("2006-01-02"), "```json", "```")
 
-	userPrompt := fmt.Sprintf("Following is a conversation between the user and the assistant. You have to extract the relevant facts and preferences about the user, if any, from the conversation and return them in the JSON format as shown above.\n\nInput:\n%s", parsedMessages)
+	userPrompt := "Following is a conversation between the user and the assistant. You have to extract the relevant facts and preferences about the user, if any, from the conversation and return them in the JSON format as shown above.\n\nInput:\n" + parsedMessages
 	return systemPrompt, userPrompt
 }
 
@@ -106,7 +106,7 @@ Follow the instruction mentioned below:
 Do not return anything except the JSON format.`, toJSON(retrievedOldMemory), toJSON(newRetrievedFacts), "```json", "```")
 }
 
-func getCompactMemoryMessages(memories []map[string]string, targetCount int, decayDays int) (string, string) {
+func getCompactMemoryMessages(memories []map[string]string, targetCount, decayDays int) (string, string) {
 	decayInstruction := ""
 	if decayDays > 0 {
 		decayInstruction = fmt.Sprintf(`
@@ -152,7 +152,7 @@ Do not include any extra keys, comments, or formatting. Output must be valid JSO
 If the text is Chinese, Japanese, or Korean, output exactly {"language":"cjk"}.
 Never output "zh", "zh-cn", "zh-tw", "ja", "ko", or any code not in the allowed list.
 Before finalizing, verify the value is one of the allowed codes.`
-	userPrompt := fmt.Sprintf("Text:\n%s", text)
+	userPrompt := "Text:\n" + text
 	return systemPrompt, userPrompt
 }
 

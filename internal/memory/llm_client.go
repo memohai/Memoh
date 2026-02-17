@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
 
+// LLMClient calls an OpenAI-compatible chat API for Extract, Decide, Compact, DetectLanguage.
 type LLMClient struct {
 	baseURL string
 	apiKey  string
@@ -20,15 +23,16 @@ type LLMClient struct {
 	http    *http.Client
 }
 
+// NewLLMClient builds an LLM client; baseURL, apiKey, model required; timeout defaults to 10s.
 func NewLLMClient(log *slog.Logger, baseURL, apiKey, model string, timeout time.Duration) (*LLMClient, error) {
 	if strings.TrimSpace(baseURL) == "" {
-		return nil, fmt.Errorf("llm client: base url is required")
+		return nil, errors.New("llm client: base url is required")
 	}
 	if strings.TrimSpace(apiKey) == "" {
-		return nil, fmt.Errorf("llm client: api key is required")
+		return nil, errors.New("llm client: api key is required")
 	}
 	if strings.TrimSpace(model) == "" {
-		return nil, fmt.Errorf("llm client: model is required")
+		return nil, errors.New("llm client: model is required")
 	}
 	if log == nil {
 		log = slog.Default()
@@ -47,9 +51,10 @@ func NewLLMClient(log *slog.Logger, baseURL, apiKey, model string, timeout time.
 	}, nil
 }
 
+// Extract calls the LLM to extract facts from messages and returns structured facts.
 func (c *LLMClient) Extract(ctx context.Context, req ExtractRequest) (ExtractResponse, error) {
 	if len(req.Messages) == 0 {
-		return ExtractResponse{}, fmt.Errorf("messages is required")
+		return ExtractResponse{}, errors.New("messages is required")
 	}
 	parsedMessages := strings.Join(formatMessages(req.Messages), "\n")
 	systemPrompt, userPrompt := getFactRetrievalMessages(parsedMessages)
@@ -68,9 +73,10 @@ func (c *LLMClient) Extract(ctx context.Context, req ExtractRequest) (ExtractRes
 	return parsed, nil
 }
 
+// Decide calls the LLM to decide add/update/delete actions from facts and candidates.
 func (c *LLMClient) Decide(ctx context.Context, req DecideRequest) (DecideResponse, error) {
 	if len(req.Facts) == 0 {
-		return DecideResponse{}, fmt.Errorf("facts is required")
+		return DecideResponse{}, errors.New("facts is required")
 	}
 	retrieved := make([]map[string]string, 0, len(req.Candidates))
 	for _, candidate := range req.Candidates {
@@ -130,9 +136,10 @@ func (c *LLMClient) Decide(ctx context.Context, req DecideRequest) (DecideRespon
 	return DecideResponse{Actions: actions}, nil
 }
 
+// Compact calls the LLM to consolidate memories into fewer facts (target count, optional decay).
 func (c *LLMClient) Compact(ctx context.Context, req CompactRequest) (CompactResponse, error) {
 	if len(req.Memories) == 0 {
-		return CompactResponse{}, fmt.Errorf("memories is required")
+		return CompactResponse{}, errors.New("memories is required")
 	}
 	memories := make([]map[string]string, 0, len(req.Memories))
 	for _, m := range req.Memories {
@@ -160,9 +167,10 @@ func (c *LLMClient) Compact(ctx context.Context, req CompactRequest) (CompactRes
 	return parsed, nil
 }
 
+// DetectLanguage calls the LLM to detect the language code of the given text.
 func (c *LLMClient) DetectLanguage(ctx context.Context, text string) (string, error) {
 	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("text is required")
+		return "", errors.New("text is required")
 	}
 	systemPrompt, userPrompt := getLanguageDetectionMessages(text)
 	content, err := c.callChat(ctx, []chatMessage{
@@ -205,7 +213,7 @@ type chatResponse struct {
 
 func (c *LLMClient) callChat(ctx context.Context, messages []chatMessage) (string, error) {
 	if c.apiKey == "" {
-		return "", fmt.Errorf("llm api key is required")
+		return "", errors.New("llm api key is required")
 	}
 	body, err := json.Marshal(chatRequest{
 		Model:       c.model,
@@ -229,7 +237,11 @@ func (c *LLMClient) callChat(ctx context.Context, messages []chatMessage) (strin
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Warn("llm request: close response body failed", slog.Any("error", err))
+		}
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
@@ -241,7 +253,7 @@ func (c *LLMClient) callChat(ctx context.Context, messages []chatMessage) (strin
 		return "", err
 	}
 	if len(parsed.Choices) == 0 || parsed.Choices[0].Message.Content == "" {
-		return "", fmt.Errorf("llm response missing content")
+		return "", errors.New("llm response missing content")
 	}
 	return parsed.Choices[0].Message.Content, nil
 }
@@ -260,13 +272,13 @@ func asString(value any) string {
 		return typed
 	case float64:
 		if typed == float64(int64(typed)) {
-			return fmt.Sprintf("%d", int64(typed))
+			return strconv.FormatInt(int64(typed), 10)
 		}
 		return fmt.Sprintf("%f", typed)
 	case int:
-		return fmt.Sprintf("%d", typed)
+		return strconv.Itoa(typed)
 	case int64:
-		return fmt.Sprintf("%d", typed)
+		return strconv.FormatInt(typed, 10)
 	default:
 		return ""
 	}

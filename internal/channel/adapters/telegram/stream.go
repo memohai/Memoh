@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -16,11 +17,11 @@ import (
 
 const telegramStreamEditThrottle = 5000 * time.Millisecond
 
-var testEditFunc func(bot *tgbotapi.BotAPI, chatID int64, msgID int, text string, parseMode string) error
+var testEditFunc func(bot *tgbotapi.BotAPI, chatID int64, msgID int, text, parseMode string) error
 
 type telegramOutboundStream struct {
-	adapter      *TelegramAdapter
-	cfg          channel.ChannelConfig
+	adapter      *Adapter
+	cfg          channel.Config
 	target       string
 	reply        *channel.ReplyRef
 	parseMode    string
@@ -33,7 +34,7 @@ type telegramOutboundStream struct {
 	lastEditedAt time.Time
 }
 
-func (s *telegramOutboundStream) getBotAndReply(ctx context.Context) (bot *tgbotapi.BotAPI, replyTo int, err error) {
+func (s *telegramOutboundStream) getBotAndReply(_ context.Context) (bot *tgbotapi.BotAPI, replyTo int, err error) {
 	telegramCfg, err := parseConfig(s.cfg.Credentials)
 	if err != nil {
 		return nil, 0, err
@@ -171,10 +172,10 @@ func (s *telegramOutboundStream) editStreamMessageFinal(ctx context.Context, tex
 
 func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
 	if s == nil || s.adapter == nil {
-		return fmt.Errorf("telegram stream not configured")
+		return errors.New("telegram stream not configured")
 	}
 	if s.closed.Load() {
-		return fmt.Errorf("telegram stream is closed")
+		return errors.New("telegram stream is closed")
 	}
 	select {
 	case <-ctx.Done():

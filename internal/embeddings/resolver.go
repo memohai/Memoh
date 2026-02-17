@@ -14,6 +14,7 @@ import (
 	"github.com/memohai/memoh/internal/models"
 )
 
+// Embedding type and provider name constants.
 const (
 	TypeText       = "text"
 	TypeMultimodal = "multimodal"
@@ -23,6 +24,7 @@ const (
 	ProviderDashScope = "dashscope"
 )
 
+// Request specifies embedding type, provider, model, dimensions, and input (text/image/video URL).
 type Request struct {
 	Type       string
 	Provider   string
@@ -31,18 +33,21 @@ type Request struct {
 	Input      Input
 }
 
+// Input holds text and optional image/video URLs for multimodal embedding.
 type Input struct {
 	Text     string
 	ImageURL string
 	VideoURL string
 }
 
+// Usage holds token and duration usage returned by the embedding API.
 type Usage struct {
 	InputTokens int
 	ImageTokens int
 	Duration    int
 }
 
+// Result holds embedding vector, type, provider, model, dimensions, and usage.
 type Result struct {
 	Type       string
 	Provider   string
@@ -52,6 +57,7 @@ type Result struct {
 	Usage      Usage
 }
 
+// Resolver resolves embedding requests by provider/model and delegates to the appropriate embedder.
 type Resolver struct {
 	modelsService *models.Service
 	queries       *sqlc.Queries
@@ -59,6 +65,7 @@ type Resolver struct {
 	logger        *slog.Logger
 }
 
+// NewResolver creates a Resolver with the given models service, queries, and timeout.
 func NewResolver(log *slog.Logger, modelsService *models.Service, queries *sqlc.Queries, timeout time.Duration) *Resolver {
 	return &Resolver{
 		modelsService: modelsService,
@@ -68,6 +75,8 @@ func NewResolver(log *slog.Logger, modelsService *models.Service, queries *sqlc.
 	}
 }
 
+// Embed performs the embedding request using the resolved provider and model.
+// Embed performs the embedding request using the resolved provider and model.
 func (r *Resolver) Embed(ctx context.Context, req Request) (Result, error) {
 	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
 	req.Provider = strings.ToLower(strings.TrimSpace(req.Provider))

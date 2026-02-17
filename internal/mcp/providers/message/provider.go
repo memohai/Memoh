@@ -1,9 +1,10 @@
+// Package message provides the MCP message provider (send and list tools).
 package message
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -18,17 +19,17 @@ const (
 
 // Sender sends outbound messages through channel manager.
 type Sender interface {
-	Send(ctx context.Context, botID string, channelType channel.ChannelType, req channel.SendRequest) error
+	Send(ctx context.Context, botID string, channelType channel.Type, req channel.SendRequest) error
 }
 
 // Reactor adds or removes emoji reactions through channel manager.
 type Reactor interface {
-	React(ctx context.Context, botID string, channelType channel.ChannelType, req channel.ReactRequest) error
+	React(ctx context.Context, botID string, channelType channel.Type, req channel.ReactRequest) error
 }
 
 // ChannelTypeResolver parses platform name to channel type.
 type ChannelTypeResolver interface {
-	ParseChannelType(raw string) (channel.ChannelType, error)
+	ParseChannelType(raw string) (channel.Type, error)
 }
 
 // Executor exposes send and react as MCP tools.
@@ -53,7 +54,8 @@ func NewExecutor(log *slog.Logger, sender Sender, reactor Reactor, resolver Chan
 	}
 }
 
-func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+// ListTools returns send and optionally react tool descriptors.
+func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	var tools []mcpgw.ToolDescriptor
 	if p.sender != nil && p.resolver != nil {
 		tools = append(tools, mcpgw.ToolDescriptor{
@@ -138,6 +140,7 @@ func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 	return tools, nil
 }
 
+// CallTool runs send or react; validates args and delegates to Sender/Reactor.
 func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
 	switch toolName {
 	case toolSend:
@@ -273,21 +276,21 @@ func (p *Executor) resolveBotID(arguments map[string]any, session mcpgw.ToolSess
 		botID = strings.TrimSpace(session.BotID)
 	}
 	if botID == "" {
-		return "", fmt.Errorf("bot_id is required")
+		return "", errors.New("bot_id is required")
 	}
 	if strings.TrimSpace(session.BotID) != "" && botID != strings.TrimSpace(session.BotID) {
-		return "", fmt.Errorf("bot_id mismatch")
+		return "", errors.New("bot_id mismatch")
 	}
 	return botID, nil
 }
 
-func (p *Executor) resolvePlatform(arguments map[string]any, session mcpgw.ToolSessionContext) (channel.ChannelType, error) {
+func (p *Executor) resolvePlatform(arguments map[string]any, session mcpgw.ToolSessionContext) (channel.Type, error) {
 	platform := mcpgw.FirstStringArg(arguments, "platform")
 	if platform == "" {
 		platform = strings.TrimSpace(session.CurrentPlatform)
 	}
 	if platform == "" {
-		return "", fmt.Errorf("platform is required")
+		return "", errors.New("platform is required")
 	}
 	return p.resolver.ParseChannelType(platform)
 }
@@ -307,14 +310,14 @@ func parseOutboundMessage(arguments map[string]any, fallbackText string) (channe
 				return channel.Message{}, err
 			}
 		default:
-			return channel.Message{}, fmt.Errorf("message must be object or string")
+			return channel.Message{}, errors.New("message must be object or string")
 		}
 	}
 	if msg.IsEmpty() && strings.TrimSpace(fallbackText) != "" {
 		msg.Text = strings.TrimSpace(fallbackText)
 	}
 	if msg.IsEmpty() {
-		return channel.Message{}, fmt.Errorf("message is required")
+		return channel.Message{}, errors.New("message is required")
 	}
 	return msg, nil
 }

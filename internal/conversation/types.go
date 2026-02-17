@@ -41,8 +41,8 @@ type Conversation struct {
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
-// ConversationListItem is a conversation entry with access context for list rendering.
-type ConversationListItem struct {
+// ListItem is a conversation entry with access context for list rendering.
+type ListItem struct {
 	ID              string         `json:"id"`
 	BotID           string         `json:"bot_id"`
 	Kind            string         `json:"kind"`
@@ -57,8 +57,8 @@ type ConversationListItem struct {
 	LastObservedAt  *time.Time     `json:"last_observed_at,omitempty"`
 }
 
-// ConversationReadAccess is the resolved access context for reading conversation content.
-type ConversationReadAccess struct {
+// ReadAccess is the resolved access context for reading conversation content.
+type ReadAccess struct {
 	AccessMode      string
 	ParticipantRole string
 	LastObservedAt  *time.Time

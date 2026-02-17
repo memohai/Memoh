@@ -1,3 +1,4 @@
+// Package providers provides LLM provider configuration and management.
 package providers
 
 import (
@@ -11,13 +12,13 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
-// Service handles provider operations
+// Service handles provider operations.
 type Service struct {
 	queries *sqlc.Queries
 	logger  *slog.Logger
 }
 
-// NewService creates a new provider service
+// NewService creates a new provider service.
 func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	return &Service{
 		queries: queries,
@@ -25,7 +26,7 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	}
 }
 
-// Create creates a new LLM provider
+// Create creates a new LLM provider.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
 	// Validate client type
 	if !isValidClientType(req.ClientType) {
@@ -53,7 +54,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 	return s.toGetResponse(provider), nil
 }
 
-// Get retrieves a provider by ID
+// Get retrieves a provider by ID.
 func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -68,7 +69,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 	return s.toGetResponse(provider), nil
 }
 
-// GetByName retrieves a provider by name
+// GetByName retrieves a provider by name.
 func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, error) {
 	provider, err := s.queries.GetLlmProviderByName(ctx, name)
 	if err != nil {
@@ -78,7 +79,7 @@ func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, erro
 	return s.toGetResponse(provider), nil
 }
 
-// List retrieves all providers
+// List retrieves all providers.
 func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	providers, err := s.queries.ListLlmProviders(ctx)
 	if err != nil {
@@ -92,7 +93,7 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	return results, nil
 }
 
-// ListByClientType retrieves providers by client type
+// ListByClientType retrieves providers by client type.
 func (s *Service) ListByClientType(ctx context.Context, clientType ClientType) ([]GetResponse, error) {
 	if !isValidClientType(clientType) {
 		return nil, fmt.Errorf("invalid client_type: %s", clientType)
@@ -110,7 +111,7 @@ func (s *Service) ListByClientType(ctx context.Context, clientType ClientType) (
 	return results, nil
 }
 
-// Update updates an existing provider
+// Update updates an existing provider.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (GetResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -169,7 +170,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	return s.toGetResponse(updated), nil
 }
 
-// Delete deletes a provider by ID
+// Delete deletes a provider by ID.
 func (s *Service) Delete(ctx context.Context, id string) error {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -182,7 +183,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Count returns the total count of providers
+// Count returns the total count of providers.
 func (s *Service) Count(ctx context.Context) (int64, error) {
 	count, err := s.queries.CountLlmProviders(ctx)
 	if err != nil {
@@ -191,7 +192,7 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-// CountByClientType returns the count of providers by client type
+// CountByClientType returns the count of providers by client type.
 func (s *Service) CountByClientType(ctx context.Context, clientType ClientType) (int64, error) {
 	if !isValidClientType(clientType) {
 		return 0, fmt.Errorf("invalid client_type: %s", clientType)
@@ -204,7 +205,7 @@ func (s *Service) CountByClientType(ctx context.Context, clientType ClientType) 
 	return count, nil
 }
 
-// toGetResponse converts a database provider to a response
+// toGetResponse converts a database provider to a response.
 func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 	var metadata map[string]any
 	if len(provider.Metadata) > 0 {
@@ -228,7 +229,7 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 	}
 }
 
-// isValidClientType checks if a client type is valid
+// isValidClientType checks if a client type is valid.
 func isValidClientType(clientType ClientType) bool {
 	switch clientType {
 	case ClientTypeOpenAI, ClientTypeOpenAICompat, ClientTypeAnthropic, ClientTypeGoogle,
@@ -240,7 +241,7 @@ func isValidClientType(clientType ClientType) bool {
 	}
 }
 
-// maskAPIKey masks an API key for security
+// maskAPIKey masks an API key for security.
 func maskAPIKey(apiKey string) string {
 	if apiKey == "" {
 		return ""

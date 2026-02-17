@@ -53,7 +53,7 @@ func NewExecutor(log *slog.Logger, execRunner ExecRunner, execWorkDir string) *E
 }
 
 // ListTools returns read, write, list, edit, and exec tool descriptors.
-func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	return []mcpgw.ToolDescriptor{
 		{
 			Name:        toolRead,
@@ -135,8 +135,8 @@ func normalizePath(path string) string {
 	if path == prefix {
 		return "."
 	}
-	if strings.HasPrefix(path, prefix+"/") {
-		return strings.TrimLeft(strings.TrimPrefix(path, prefix+"/"), "/")
+	if after, ok := strings.CutPrefix(path, prefix+"/"); ok {
+		return strings.TrimLeft(after, "/")
 	}
 	return path
 }

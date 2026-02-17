@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"sort"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/embeddings"
 )
 
+// Service coordinates memory add/search/update/delete using LLM, embedder, QdrantStore, and BM25.
 type Service struct {
 	llm                      LLM
 	embedder                 embeddings.Embedder
@@ -28,6 +31,7 @@ type Service struct {
 	defaultMultimodalModelID string
 }
 
+// NewService creates a memory service with the given dependencies and default model IDs.
 func NewService(log *slog.Logger, llm LLM, embedder embeddings.Embedder, store *QdrantStore, resolver *embeddings.Resolver, bm25 *BM25Indexer, defaultTextModelID, defaultMultimodalModelID string) *Service {
 	return &Service{
 		llm:                      llm,
@@ -41,12 +45,13 @@ func NewService(log *slog.Logger, llm LLM, embedder embeddings.Embedder, store *
 	}
 }
 
+// Add adds memories from message(s), optionally running extract/decide and embedding; returns search-style results.
 func (s *Service) Add(ctx context.Context, req AddRequest) (SearchResponse, error) {
 	if req.Message == "" && len(req.Messages) == 0 {
-		return SearchResponse{}, fmt.Errorf("message or messages is required")
+		return SearchResponse{}, errors.New("message or messages is required")
 	}
 	if req.BotID == "" && req.AgentID == "" && req.RunID == "" {
-		return SearchResponse{}, fmt.Errorf("bot_id, agent_id or run_id is required")
+		return SearchResponse{}, errors.New("bot_id, agent_id or run_id is required")
 	}
 
 	messages := normalizeMessages(req)
@@ -66,7 +71,7 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (SearchResponse, erro
 		return SearchResponse{}, err
 	}
 	if len(extractResp.Facts) == 0 {
-		return SearchResponse{Results: []MemoryItem{}}, nil
+		return SearchResponse{Results: []Item{}}, nil
 	}
 
 	candidates, err := s.collectCandidates(ctx, extractResp.Facts, filters)
@@ -95,7 +100,7 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (SearchResponse, erro
 		}
 	}
 
-	results := make([]MemoryItem, 0, len(actions))
+	results := make([]Item, 0, len(actions))
 	for _, action := range actions {
 		switch strings.ToUpper(action.Event) {
 		case "ADD":
@@ -134,12 +139,13 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (SearchResponse, erro
 	return SearchResponse{Results: results}, nil
 }
 
+// Search runs hybrid (dense + BM25) or dense-only search by query and scope; returns ranked results.
 func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse, error) {
 	if strings.TrimSpace(req.Query) == "" {
-		return SearchResponse{}, fmt.Errorf("query is required")
+		return SearchResponse{}, errors.New("query is required")
 	}
 	if s.store == nil {
-		return SearchResponse{}, fmt.Errorf("qdrant store not configured")
+		return SearchResponse{}, errors.New("qdrant store not configured")
 	}
 	filters := buildSearchFilters(req)
 	modality := ""
@@ -149,10 +155,10 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 	embeddingEnabled := req.EmbeddingEnabled != nil && *req.EmbeddingEnabled
 	if modality == embeddings.TypeMultimodal {
 		if !embeddingEnabled {
-			return SearchResponse{}, fmt.Errorf("embedding is disabled")
+			return SearchResponse{}, errors.New("embedding is disabled")
 		}
 		if s.resolver == nil {
-			return SearchResponse{}, fmt.Errorf("embeddings resolver not configured")
+			return SearchResponse{}, errors.New("embeddings resolver not configured")
 		}
 		result, err := s.resolver.Embed(ctx, embeddings.Request{
 			Type: embeddings.TypeMultimodal,
@@ -169,9 +175,9 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 			if err != nil {
 				return SearchResponse{}, err
 			}
-			results := make([]MemoryItem, 0, len(points))
+			results := make([]Item, 0, len(points))
 			for idx, point := range points {
-				item := payloadToMemoryItem(point.ID, point.Payload)
+				item := payloadToItem(point.ID, point.Payload)
 				if idx < len(scores) {
 					item.Score = scores[idx]
 				}
@@ -189,7 +195,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 
 	if embeddingEnabled {
 		if s.embedder == nil {
-			return SearchResponse{}, fmt.Errorf("embedder not configured")
+			return SearchResponse{}, errors.New("embedder not configured")
 		}
 		vector, err := s.embedder.Embed(ctx, req.Query)
 		if err != nil {
@@ -201,9 +207,9 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 			if err != nil {
 				return SearchResponse{}, err
 			}
-			results := make([]MemoryItem, 0, len(points))
+			results := make([]Item, 0, len(points))
 			for idx, point := range points {
-				item := payloadToMemoryItem(point.ID, point.Payload)
+				item := payloadToItem(point.ID, point.Payload)
 				if idx < len(scores) {
 					item.Score = scores[idx]
 				}
@@ -220,7 +226,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 	}
 
 	if s.bm25 == nil {
-		return SearchResponse{}, fmt.Errorf("bm25 indexer not configured")
+		return SearchResponse{}, errors.New("bm25 indexer not configured")
 	}
 	lang, err := s.detectLanguage(ctx, req.Query)
 	if err != nil {
@@ -237,9 +243,9 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 		if err != nil {
 			return SearchResponse{}, err
 		}
-		results := make([]MemoryItem, 0, len(points))
+		results := make([]Item, 0, len(points))
 		for idx, point := range points {
-			item := payloadToMemoryItem(point.ID, point.Payload)
+			item := payloadToItem(point.ID, point.Payload)
 			if idx < len(scores) {
 				item.Score = scores[idx]
 			}
@@ -255,9 +261,9 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 		return SearchResponse{}, err
 	}
 	// Build sparse vector lookup before fusion (fusion discards raw points).
-	var sparseByID map[string]qdrantPoint
+	var sparseByID map[string]QdrantPoint
 	if wantStats {
-		sparseByID = make(map[string]qdrantPoint)
+		sparseByID = make(map[string]QdrantPoint)
 		for _, pts := range pointsBySource {
 			for _, p := range pts {
 				if len(p.SparseIndices) > 0 {
@@ -277,12 +283,13 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 	return SearchResponse{Results: results}, nil
 }
 
+// EmbedUpsert embeds the request input via resolver and upserts one point into the store; returns item and embedding info.
 func (s *Service) EmbedUpsert(ctx context.Context, req EmbedUpsertRequest) (EmbedUpsertResponse, error) {
 	if s.resolver == nil {
-		return EmbedUpsertResponse{}, fmt.Errorf("embeddings resolver not configured")
+		return EmbedUpsertResponse{}, errors.New("embeddings resolver not configured")
 	}
 	if req.BotID == "" && req.AgentID == "" && req.RunID == "" {
-		return EmbedUpsertResponse{}, fmt.Errorf("bot_id, agent_id or run_id is required")
+		return EmbedUpsertResponse{}, errors.New("bot_id, agent_id or run_id is required")
 	}
 	req.Type = strings.TrimSpace(req.Type)
 	req.Provider = strings.TrimSpace(req.Provider)
@@ -306,7 +313,7 @@ func (s *Service) EmbedUpsert(ctx context.Context, req EmbedUpsertRequest) (Embe
 	}
 
 	if s.store == nil {
-		return EmbedUpsertResponse{}, fmt.Errorf("qdrant store not configured")
+		return EmbedUpsertResponse{}, errors.New("qdrant store not configured")
 	}
 
 	vectorName := ""
@@ -320,7 +327,7 @@ func (s *Service) EmbedUpsert(ctx context.Context, req EmbedUpsertRequest) (Embe
 	if metadata, ok := payload["metadata"].(map[string]any); ok && result.Model != "" {
 		metadata["model_id"] = result.Model
 	}
-	if err := s.store.Upsert(ctx, []qdrantPoint{{
+	if err := s.store.Upsert(ctx, []QdrantPoint{{
 		ID:         id,
 		Vector:     result.Embedding,
 		VectorName: vectorName,
@@ -329,7 +336,7 @@ func (s *Service) EmbedUpsert(ctx context.Context, req EmbedUpsertRequest) (Embe
 		return EmbedUpsertResponse{}, err
 	}
 
-	item := payloadToMemoryItem(id, payload)
+	item := payloadToItem(id, payload)
 	return EmbedUpsertResponse{
 		Item:       item,
 		Provider:   result.Provider,
@@ -338,26 +345,27 @@ func (s *Service) EmbedUpsert(ctx context.Context, req EmbedUpsertRequest) (Embe
 	}, nil
 }
 
-func (s *Service) Update(ctx context.Context, req UpdateRequest) (MemoryItem, error) {
+// Update updates an existing memory by ID (text, optional re-embedding); updates BM25 and store.
+func (s *Service) Update(ctx context.Context, req UpdateRequest) (Item, error) {
 	if strings.TrimSpace(req.MemoryID) == "" {
-		return MemoryItem{}, fmt.Errorf("memory_id is required")
+		return Item{}, errors.New("memory_id is required")
 	}
 	if strings.TrimSpace(req.Memory) == "" {
-		return MemoryItem{}, fmt.Errorf("memory is required")
+		return Item{}, errors.New("memory is required")
 	}
 	if s.store == nil {
-		return MemoryItem{}, fmt.Errorf("qdrant store not configured")
+		return Item{}, errors.New("qdrant store not configured")
 	}
 	if s.bm25 == nil {
-		return MemoryItem{}, fmt.Errorf("bm25 indexer not configured")
+		return Item{}, errors.New("bm25 indexer not configured")
 	}
 
 	existing, err := s.store.Get(ctx, req.MemoryID)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	if existing == nil {
-		return MemoryItem{}, fmt.Errorf("memory not found")
+		return Item{}, errors.New("memory not found")
 	}
 
 	payload := existing.Payload
@@ -381,11 +389,11 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (MemoryItem, er
 
 	newLang, err := s.detectLanguage(ctx, req.Memory)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	newFreq, newLen, err := s.bm25.TermFrequencies(newLang, req.Memory)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	sparseIndices, sparseValues := s.bm25.AddDocument(newLang, newFreq, newLen)
 
@@ -395,7 +403,7 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (MemoryItem, er
 	payload["lang"] = newLang
 
 	embeddingEnabled := req.EmbeddingEnabled != nil && *req.EmbeddingEnabled
-	point := qdrantPoint{
+	point := QdrantPoint{
 		ID:               req.MemoryID,
 		SparseIndices:    sparseIndices,
 		SparseValues:     sparseValues,
@@ -404,40 +412,40 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (MemoryItem, er
 	}
 	if embeddingEnabled {
 		if s.embedder == nil {
-			return MemoryItem{}, fmt.Errorf("embedder not configured")
+			return Item{}, errors.New("embedder not configured")
 		}
 		vector, err := s.embedder.Embed(ctx, req.Memory)
 		if err != nil {
-			return MemoryItem{}, err
+			return Item{}, err
 		}
 		point.Vector = vector
 		point.VectorName = s.vectorNameForText()
 	}
-	if err := s.store.Upsert(ctx, []qdrantPoint{point}); err != nil {
-		return MemoryItem{}, err
+	if err := s.store.Upsert(ctx, []QdrantPoint{point}); err != nil {
+		return Item{}, err
 	}
-	return payloadToMemoryItem(req.MemoryID, payload), nil
+	return payloadToItem(req.MemoryID, payload), nil
 }
 
-func (s *Service) Get(ctx context.Context, memoryID string) (MemoryItem, error) {
+// Get returns a single memory by ID from the store.
+func (s *Service) Get(ctx context.Context, memoryID string) (Item, error) {
 	if strings.TrimSpace(memoryID) == "" {
-		return MemoryItem{}, fmt.Errorf("memory_id is required")
+		return Item{}, errors.New("memory_id is required")
 	}
 	point, err := s.store.Get(ctx, memoryID)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	if point == nil {
-		return MemoryItem{}, fmt.Errorf("memory not found")
+		return Item{}, errors.New("memory not found")
 	}
-	return payloadToMemoryItem(point.ID, point.Payload), nil
+	return payloadToItem(point.ID, point.Payload), nil
 }
 
+// GetAll lists memories by scope (bot/agent/run, limit, filters) without search ranking.
 func (s *Service) GetAll(ctx context.Context, req GetAllRequest) (SearchResponse, error) {
 	filters := map[string]any{}
-	for k, v := range req.Filters {
-		filters[k] = v
-	}
+	maps.Copy(filters, req.Filters)
 	if req.BotID != "" {
 		filters["bot_id"] = req.BotID
 	}
@@ -448,7 +456,7 @@ func (s *Service) GetAll(ctx context.Context, req GetAllRequest) (SearchResponse
 		filters["run_id"] = req.RunID
 	}
 	if len(filters) == 0 {
-		return SearchResponse{}, fmt.Errorf("bot_id, agent_id or run_id is required")
+		return SearchResponse{}, errors.New("bot_id, agent_id or run_id is required")
 	}
 
 	wantStats := !req.NoStats
@@ -456,9 +464,9 @@ func (s *Service) GetAll(ctx context.Context, req GetAllRequest) (SearchResponse
 	if err != nil {
 		return SearchResponse{}, err
 	}
-	results := make([]MemoryItem, 0, len(points))
+	results := make([]Item, 0, len(points))
 	for _, point := range points {
-		item := payloadToMemoryItem(point.ID, point.Payload)
+		item := payloadToItem(point.ID, point.Payload)
 		if wantStats {
 			item.TopKBuckets, item.CDFCurve = computeSparseVectorStats(point.SparseIndices, point.SparseValues)
 		}
@@ -467,9 +475,10 @@ func (s *Service) GetAll(ctx context.Context, req GetAllRequest) (SearchResponse
 	return SearchResponse{Results: results}, nil
 }
 
+// Delete removes a single memory by ID from the store (does not update BM25; use for non-indexed or rebuild).
 func (s *Service) Delete(ctx context.Context, memoryID string) (DeleteResponse, error) {
 	if strings.TrimSpace(memoryID) == "" {
-		return DeleteResponse{}, fmt.Errorf("memory_id is required")
+		return DeleteResponse{}, errors.New("memory_id is required")
 	}
 	if err := s.store.Delete(ctx, memoryID); err != nil {
 		return DeleteResponse{}, err
@@ -477,9 +486,10 @@ func (s *Service) Delete(ctx context.Context, memoryID string) (DeleteResponse, 
 	return DeleteResponse{Message: "Memory deleted successfully!"}, nil
 }
 
+// DeleteBatch removes multiple memories by ID from the store.
 func (s *Service) DeleteBatch(ctx context.Context, memoryIDs []string) (DeleteResponse, error) {
 	if len(memoryIDs) == 0 {
-		return DeleteResponse{}, fmt.Errorf("memory_ids is required")
+		return DeleteResponse{}, errors.New("memory_ids is required")
 	}
 	cleaned := make([]string, 0, len(memoryIDs))
 	for _, id := range memoryIDs {
@@ -489,7 +499,7 @@ func (s *Service) DeleteBatch(ctx context.Context, memoryIDs []string) (DeleteRe
 		}
 	}
 	if len(cleaned) == 0 {
-		return DeleteResponse{}, fmt.Errorf("memory_ids is required")
+		return DeleteResponse{}, errors.New("memory_ids is required")
 	}
 	if err := s.store.DeleteBatch(ctx, cleaned); err != nil {
 		return DeleteResponse{}, err
@@ -497,11 +507,10 @@ func (s *Service) DeleteBatch(ctx context.Context, memoryIDs []string) (DeleteRe
 	return DeleteResponse{Message: fmt.Sprintf("%d memories deleted successfully!", len(cleaned))}, nil
 }
 
+// DeleteAll removes all memories matching the scope (bot_id/agent_id/run_id) and optional filters.
 func (s *Service) DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteResponse, error) {
 	filters := map[string]any{}
-	for k, v := range req.Filters {
-		filters[k] = v
-	}
+	maps.Copy(filters, req.Filters)
 	if req.BotID != "" {
 		filters["bot_id"] = req.BotID
 	}
@@ -512,7 +521,7 @@ func (s *Service) DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteRe
 		filters["run_id"] = req.RunID
 	}
 	if len(filters) == 0 {
-		return DeleteResponse{}, fmt.Errorf("bot_id, agent_id or run_id is required")
+		return DeleteResponse{}, errors.New("bot_id, agent_id or run_id is required")
 	}
 	if err := s.store.DeleteAll(ctx, filters); err != nil {
 		return DeleteResponse{}, err
@@ -520,12 +529,13 @@ func (s *Service) DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteRe
 	return DeleteResponse{Message: "Memories deleted successfully!"}, nil
 }
 
+// Compact fetches memories by filters, asks LLM to consolidate to target count (ratio), then replaces in store; returns before/after counts and new items.
 func (s *Service) Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (CompactResult, error) {
 	if s.llm == nil {
-		return CompactResult{}, fmt.Errorf("llm not configured")
+		return CompactResult{}, errors.New("llm not configured")
 	}
 	if s.store == nil {
-		return CompactResult{}, fmt.Errorf("qdrant store not configured")
+		return CompactResult{}, errors.New("qdrant store not configured")
 	}
 	if ratio <= 0 || ratio > 1 {
 		ratio = 0.5
@@ -539,9 +549,9 @@ func (s *Service) Compact(ctx context.Context, filters map[string]any, ratio flo
 	beforeCount := len(points)
 	if beforeCount <= 1 {
 		// Nothing to compact.
-		items := make([]MemoryItem, 0, len(points))
+		items := make([]Item, 0, len(points))
 		for _, p := range points {
-			items = append(items, payloadToMemoryItem(p.ID, p.Payload))
+			items = append(items, payloadToItem(p.ID, p.Payload))
 		}
 		return CompactResult{
 			BeforeCount: beforeCount,
@@ -560,10 +570,7 @@ func (s *Service) Compact(ctx context.Context, filters map[string]any, ratio flo
 			CreatedAt: fmt.Sprint(p.Payload["created_at"]),
 		})
 	}
-	targetCount := int(math.Round(float64(beforeCount) * ratio))
-	if targetCount < 1 {
-		targetCount = 1
-	}
+	targetCount := max(int(math.Round(float64(beforeCount)*ratio)), 1)
 
 	// Ask LLM to consolidate.
 	compactResp, err := s.llm.Compact(ctx, CompactRequest{
@@ -575,7 +582,7 @@ func (s *Service) Compact(ctx context.Context, filters map[string]any, ratio flo
 		return CompactResult{}, fmt.Errorf("compact llm call failed: %w", err)
 	}
 	if len(compactResp.Facts) == 0 {
-		return CompactResult{}, fmt.Errorf("compact returned no facts")
+		return CompactResult{}, errors.New("compact returned no facts")
 	}
 
 	// Delete old memories.
@@ -600,7 +607,7 @@ func (s *Service) Compact(ctx context.Context, filters map[string]any, ratio flo
 	}
 
 	// Add compacted facts.
-	results := make([]MemoryItem, 0, len(compactResp.Facts))
+	results := make([]Item, 0, len(compactResp.Facts))
 	for _, fact := range compactResp.Facts {
 		if strings.TrimSpace(fact) == "" {
 			continue
@@ -629,9 +636,10 @@ const (
 	payloadMetadataOverheadBytes = 256
 )
 
+// Usage returns memory usage stats (count, total/avg text bytes, estimated storage) for the given filters.
 func (s *Service) Usage(ctx context.Context, filters map[string]any) (UsageResponse, error) {
 	if s.store == nil {
-		return UsageResponse{}, fmt.Errorf("qdrant store not configured")
+		return UsageResponse{}, errors.New("qdrant store not configured")
 	}
 	points, err := s.store.List(ctx, 0, filters, false)
 	if err != nil {
@@ -656,6 +664,7 @@ func (s *Service) Usage(ctx context.Context, filters map[string]any) (UsageRespo
 	}, nil
 }
 
+// WarmupBM25 scrolls all points from the store and indexes them into BM25 (for cold start).
 func (s *Service) WarmupBM25(ctx context.Context, batchSize int) error {
 	if s.bm25 == nil || s.store == nil {
 		return nil
@@ -693,8 +702,8 @@ func (s *Service) WarmupBM25(ctx context.Context, batchSize int) error {
 	return nil
 }
 
-func (s *Service) addRawMessages(ctx context.Context, messages []Message, filters map[string]any, metadata map[string]any, embeddingEnabled bool) (SearchResponse, error) {
-	results := make([]MemoryItem, 0, len(messages))
+func (s *Service) addRawMessages(ctx context.Context, messages []Message, filters, metadata map[string]any, embeddingEnabled bool) (SearchResponse, error) {
+	results := make([]Item, 0, len(messages))
 	for _, message := range messages {
 		item, err := s.applyAdd(ctx, message.Content, filters, metadata, embeddingEnabled)
 		if err != nil {
@@ -712,7 +721,7 @@ func (s *Service) collectCandidates(ctx context.Context, facts []string, filters
 	unique := map[string]CandidateMemory{}
 	for _, fact := range facts {
 		if s.bm25 == nil {
-			return nil, fmt.Errorf("bm25 indexer not configured")
+			return nil, errors.New("bm25 indexer not configured")
 		}
 		lang, err := s.detectLanguage(ctx, fact)
 		if err != nil {
@@ -728,7 +737,7 @@ func (s *Service) collectCandidates(ctx context.Context, facts []string, filters
 			return nil, err
 		}
 		for _, point := range points {
-			item := payloadToMemoryItem(point.ID, point.Payload)
+			item := payloadToItem(point.ID, point.Payload)
 			unique[item.ID] = CandidateMemory{
 				ID:       item.ID,
 				Memory:   item.Memory,
@@ -744,26 +753,26 @@ func (s *Service) collectCandidates(ctx context.Context, facts []string, filters
 	return candidates, nil
 }
 
-func (s *Service) applyAdd(ctx context.Context, text string, filters map[string]any, metadata map[string]any, embeddingEnabled bool) (MemoryItem, error) {
+func (s *Service) applyAdd(ctx context.Context, text string, filters, metadata map[string]any, embeddingEnabled bool) (Item, error) {
 	if s.store == nil {
-		return MemoryItem{}, fmt.Errorf("qdrant store not configured")
+		return Item{}, errors.New("qdrant store not configured")
 	}
 	if s.bm25 == nil {
-		return MemoryItem{}, fmt.Errorf("bm25 indexer not configured")
+		return Item{}, errors.New("bm25 indexer not configured")
 	}
 	lang, err := s.detectLanguage(ctx, text)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	termFreq, docLen, err := s.bm25.TermFrequencies(lang, text)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	sparseIndices, sparseValues := s.bm25.AddDocument(lang, termFreq, docLen)
 	id := uuid.NewString()
 	payload := buildPayload(text, filters, metadata, "")
 	payload["lang"] = lang
-	point := qdrantPoint{
+	point := QdrantPoint{
 		ID:               id,
 		SparseIndices:    sparseIndices,
 		SparseValues:     sparseValues,
@@ -772,67 +781,67 @@ func (s *Service) applyAdd(ctx context.Context, text string, filters map[string]
 	}
 	if embeddingEnabled {
 		if s.embedder == nil {
-			return MemoryItem{}, fmt.Errorf("embedder not configured")
+			return Item{}, errors.New("embedder not configured")
 		}
 		vector, err := s.embedder.Embed(ctx, text)
 		if err != nil {
-			return MemoryItem{}, err
+			return Item{}, err
 		}
 		point.Vector = vector
 		point.VectorName = s.vectorNameForText()
 	}
-	if err := s.store.Upsert(ctx, []qdrantPoint{point}); err != nil {
-		return MemoryItem{}, err
+	if err := s.store.Upsert(ctx, []QdrantPoint{point}); err != nil {
+		return Item{}, err
 	}
-	return payloadToMemoryItem(id, payload), nil
+	return payloadToItem(id, payload), nil
 }
 
 // RebuildAdd inserts a memory with a specific ID (from filesystem recovery).
 // Like applyAdd but preserves the given ID instead of generating a new UUID.
-func (s *Service) RebuildAdd(ctx context.Context, id, text string, filters map[string]any) (MemoryItem, error) {
+func (s *Service) RebuildAdd(ctx context.Context, id, text string, filters map[string]any) (Item, error) {
 	if s.store == nil {
-		return MemoryItem{}, fmt.Errorf("qdrant store not configured")
+		return Item{}, errors.New("qdrant store not configured")
 	}
 	if s.bm25 == nil {
-		return MemoryItem{}, fmt.Errorf("bm25 indexer not configured")
+		return Item{}, errors.New("bm25 indexer not configured")
 	}
 	if strings.TrimSpace(id) == "" {
-		return MemoryItem{}, fmt.Errorf("id is required for rebuild")
+		return Item{}, errors.New("id is required for rebuild")
 	}
 	lang, err := s.detectLanguage(ctx, text)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	termFreq, docLen, err := s.bm25.TermFrequencies(lang, text)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	sparseIndices, sparseValues := s.bm25.AddDocument(lang, termFreq, docLen)
 	payload := buildPayload(text, filters, nil, "")
 	payload["lang"] = lang
-	point := qdrantPoint{
+	point := QdrantPoint{
 		ID:               id,
 		SparseIndices:    sparseIndices,
 		SparseValues:     sparseValues,
 		SparseVectorName: s.store.sparseVectorName,
 		Payload:          payload,
 	}
-	if err := s.store.Upsert(ctx, []qdrantPoint{point}); err != nil {
-		return MemoryItem{}, err
+	if err := s.store.Upsert(ctx, []QdrantPoint{point}); err != nil {
+		return Item{}, err
 	}
-	return payloadToMemoryItem(id, payload), nil
+	return payloadToItem(id, payload), nil
 }
 
-func (s *Service) applyUpdate(ctx context.Context, id, text string, filters map[string]any, metadata map[string]any, embeddingEnabled bool) (MemoryItem, error) {
+func (s *Service) applyUpdate(ctx context.Context, id, text string, filters, metadata map[string]any, embeddingEnabled bool) (Item, error) {
 	if strings.TrimSpace(id) == "" {
-		return MemoryItem{}, fmt.Errorf("update action missing id")
+		return Item{}, errors.New("update action missing id")
 	}
 	existing, err := s.store.Get(ctx, id)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	if existing == nil {
-		return MemoryItem{}, fmt.Errorf("memory not found")
+		return Item{}, errors.New("memory not found")
 	}
 
 	payload := existing.Payload
@@ -855,11 +864,11 @@ func (s *Service) applyUpdate(ctx context.Context, id, text string, filters map[
 	}
 	newLang, err := s.detectLanguage(ctx, text)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	newFreq, newLen, err := s.bm25.TermFrequencies(newLang, text)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	sparseIndices, sparseValues := s.bm25.AddDocument(newLang, newFreq, newLen)
 	payload["data"] = text
@@ -872,7 +881,7 @@ func (s *Service) applyUpdate(ctx context.Context, id, text string, filters map[
 	if filters != nil {
 		applyFiltersToPayload(payload, filters)
 	}
-	point := qdrantPoint{
+	point := QdrantPoint{
 		ID:               id,
 		SparseIndices:    sparseIndices,
 		SparseValues:     sparseValues,
@@ -881,33 +890,33 @@ func (s *Service) applyUpdate(ctx context.Context, id, text string, filters map[
 	}
 	if embeddingEnabled {
 		if s.embedder == nil {
-			return MemoryItem{}, fmt.Errorf("embedder not configured")
+			return Item{}, errors.New("embedder not configured")
 		}
 		vector, err := s.embedder.Embed(ctx, text)
 		if err != nil {
-			return MemoryItem{}, err
+			return Item{}, err
 		}
 		point.Vector = vector
 		point.VectorName = s.vectorNameForText()
 	}
-	if err := s.store.Upsert(ctx, []qdrantPoint{point}); err != nil {
-		return MemoryItem{}, err
+	if err := s.store.Upsert(ctx, []QdrantPoint{point}); err != nil {
+		return Item{}, err
 	}
-	return payloadToMemoryItem(id, payload), nil
+	return payloadToItem(id, payload), nil
 }
 
-func (s *Service) applyDelete(ctx context.Context, id string) (MemoryItem, error) {
+func (s *Service) applyDelete(ctx context.Context, id string) (Item, error) {
 	if strings.TrimSpace(id) == "" {
-		return MemoryItem{}, fmt.Errorf("delete action missing id")
+		return Item{}, errors.New("delete action missing id")
 	}
 	existing, err := s.store.Get(ctx, id)
 	if err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	if existing == nil {
-		return MemoryItem{}, fmt.Errorf("memory not found")
+		return Item{}, errors.New("memory not found")
 	}
-	item := payloadToMemoryItem(id, existing.Payload)
+	item := payloadToItem(id, existing.Payload)
 	if s.bm25 != nil {
 		oldText := fmt.Sprint(existing.Payload["data"])
 		oldLang := fmt.Sprint(existing.Payload["lang"])
@@ -928,7 +937,7 @@ func (s *Service) applyDelete(ctx context.Context, id string) (MemoryItem, error
 		}
 	}
 	if err := s.store.Delete(ctx, id); err != nil {
-		return MemoryItem{}, err
+		return Item{}, err
 	}
 	return item, nil
 }
@@ -942,7 +951,7 @@ func normalizeMessages(req AddRequest) []Message {
 
 func (s *Service) detectLanguage(ctx context.Context, text string) (string, error) {
 	if s.llm == nil {
-		return "", fmt.Errorf("language detector not configured")
+		return "", errors.New("language detector not configured")
 	}
 	lang, err := s.llm.DetectLanguage(ctx, text)
 	if err == nil && lang != "" {
@@ -992,9 +1001,7 @@ func isCJKRune(r rune) bool {
 
 func buildFilters(req AddRequest) map[string]any {
 	filters := map[string]any{}
-	for key, value := range req.Filters {
-		filters[key] = value
-	}
+	maps.Copy(filters, req.Filters)
 	if req.BotID != "" {
 		filters["bot_id"] = req.BotID
 	}
@@ -1009,9 +1016,7 @@ func buildFilters(req AddRequest) map[string]any {
 
 func buildSearchFilters(req SearchRequest) map[string]any {
 	filters := map[string]any{}
-	for key, value := range req.Filters {
-		filters[key] = value
-	}
+	maps.Copy(filters, req.Filters)
 	if req.BotID != "" {
 		filters["bot_id"] = req.BotID
 	}
@@ -1026,9 +1031,7 @@ func buildSearchFilters(req SearchRequest) map[string]any {
 
 func buildEmbedFilters(req EmbedUpsertRequest) map[string]any {
 	filters := map[string]any{}
-	for key, value := range req.Filters {
-		filters[key] = value
-	}
+	maps.Copy(filters, req.Filters)
 	if req.BotID != "" {
 		filters["bot_id"] = req.BotID
 	}
@@ -1086,7 +1089,7 @@ func (s *Service) vectorNameForMultimodal() string {
 	return strings.TrimSpace(s.defaultMultimodalModelID)
 }
 
-func buildPayload(text string, filters map[string]any, metadata map[string]any, createdAt string) map[string]any {
+func buildPayload(text string, filters, metadata map[string]any, createdAt string) map[string]any {
 	if createdAt == "" {
 		createdAt = time.Now().UTC().Format(time.RFC3339)
 	}
@@ -1102,14 +1105,12 @@ func buildPayload(text string, filters map[string]any, metadata map[string]any, 
 	return payload
 }
 
-func applyFiltersToPayload(payload map[string]any, filters map[string]any) {
-	for key, value := range filters {
-		payload[key] = value
-	}
+func applyFiltersToPayload(payload, filters map[string]any) {
+	maps.Copy(payload, filters)
 }
 
-func payloadToMemoryItem(id string, payload map[string]any) MemoryItem {
-	item := MemoryItem{
+func payloadToItem(id string, payload map[string]any) Item {
+	item := Item{
 		ID:     id,
 		Memory: fmt.Sprint(payload["data"]),
 	}
@@ -1165,13 +1166,9 @@ func hashEmbeddingInput(text, imageURL, videoURL string) string {
 func mergeMetadata(base any, extra map[string]any) map[string]any {
 	merged := map[string]any{}
 	if baseMap, ok := base.(map[string]any); ok {
-		for k, v := range baseMap {
-			merged[k] = v
-		}
+		maps.Copy(merged, baseMap)
 	}
-	for k, v := range extra {
-		merged[k] = v
-	}
+	maps.Copy(merged, extra)
 	return merged
 }
 
@@ -1226,7 +1223,7 @@ const (
 	rrfK = 60.0
 )
 
-func fuseByRankFusion(pointsBySource map[string][]qdrantPoint, _ map[string][]float64) []MemoryItem {
+func fuseByRankFusion(pointsBySource map[string][]QdrantPoint, _ map[string][]float64) []Item {
 	candidates := map[string]*rerankCandidate{}
 	rrfScores := map[string]float64{}
 
@@ -1243,9 +1240,9 @@ func fuseByRankFusion(pointsBySource map[string][]qdrantPoint, _ map[string][]fl
 		}
 	}
 
-	items := make([]MemoryItem, 0, len(candidates))
+	items := make([]Item, 0, len(candidates))
 	for id, candidate := range candidates {
-		item := payloadToMemoryItem(candidate.ID, candidate.Payload)
+		item := payloadToItem(candidate.ID, candidate.Payload)
 		item.Score = rrfScores[id]
 		items = append(items, item)
 	}

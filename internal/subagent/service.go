@@ -1,10 +1,10 @@
+// Package subagent provides sub-agent definition and management.
 package subagent
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -14,11 +14,13 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
+// Service manages subagent CRUD and context/skills updates.
 type Service struct {
 	queries *sqlc.Queries
 	logger  *slog.Logger
 }
 
+// NewService creates a subagent service.
 func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	return &Service{
 		queries: queries,
@@ -26,17 +28,18 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	}
 }
 
+// Create creates a new subagent for the bot.
 func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (Subagent, error) {
 	if s.queries == nil {
-		return Subagent{}, fmt.Errorf("subagent queries not configured")
+		return Subagent{}, errors.New("subagent queries not configured")
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Subagent{}, fmt.Errorf("name is required")
+		return Subagent{}, errors.New("name is required")
 	}
 	description := strings.TrimSpace(req.Description)
 	if description == "" {
-		return Subagent{}, fmt.Errorf("description is required")
+		return Subagent{}, errors.New("description is required")
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -68,6 +71,7 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	return toSubagent(row)
 }
 
+// Get returns the subagent by ID.
 func (s *Service) Get(ctx context.Context, id string) (Subagent, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
@@ -76,13 +80,14 @@ func (s *Service) Get(ctx context.Context, id string) (Subagent, error) {
 	row, err := s.queries.GetSubagentByID(ctx, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Subagent{}, fmt.Errorf("subagent not found")
+			return Subagent{}, errors.New("subagent not found")
 		}
 		return Subagent{}, err
 	}
 	return toSubagent(row)
 }
 
+// List returns all subagents for the given bot.
 func (s *Service) List(ctx context.Context, botID string) ([]Subagent, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -103,6 +108,7 @@ func (s *Service) List(ctx context.Context, botID string) ([]Subagent, error) {
 	return items, nil
 }
 
+// Update updates subagent name, description, and metadata by ID.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Subagent, error) {
 	existing, err := s.Get(ctx, id)
 	if err != nil {
@@ -112,14 +118,14 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sub
 	if req.Name != nil {
 		name = strings.TrimSpace(*req.Name)
 		if name == "" {
-			return Subagent{}, fmt.Errorf("name is required")
+			return Subagent{}, errors.New("name is required")
 		}
 	}
 	description := existing.Description
 	if req.Description != nil {
 		description = strings.TrimSpace(*req.Description)
 		if description == "" {
-			return Subagent{}, fmt.Errorf("description is required")
+			return Subagent{}, errors.New("description is required")
 		}
 	}
 	metadata := existing.Metadata
@@ -146,6 +152,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sub
 	return toSubagent(row)
 }
 
+// UpdateContext replaces the subagent system messages/context by ID.
 func (s *Service) UpdateContext(ctx context.Context, id string, req UpdateContextRequest) (Subagent, error) {
 	messagesPayload, err := marshalMessages(req.Messages)
 	if err != nil {
@@ -165,6 +172,7 @@ func (s *Service) UpdateContext(ctx context.Context, id string, req UpdateContex
 	return toSubagent(row)
 }
 
+// UpdateSkills replaces the subagent skills list by ID.
 func (s *Service) UpdateSkills(ctx context.Context, id string, req UpdateSkillsRequest) (Subagent, error) {
 	skillsPayload, err := marshalSkills(req.Skills)
 	if err != nil {
@@ -184,6 +192,7 @@ func (s *Service) UpdateSkills(ctx context.Context, id string, req UpdateSkillsR
 	return toSubagent(row)
 }
 
+// AddSkills appends skills to the subagent by ID (no duplicates).
 func (s *Service) AddSkills(ctx context.Context, id string, req AddSkillsRequest) (Subagent, error) {
 	existing, err := s.Get(ctx, id)
 	if err != nil {
@@ -208,6 +217,7 @@ func (s *Service) AddSkills(ctx context.Context, id string, req AddSkillsRequest
 	return toSubagent(row)
 }
 
+// Delete soft-deletes the subagent by ID.
 func (s *Service) Delete(ctx context.Context, id string) error {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
@@ -329,9 +339,8 @@ func normalizeSkills(skills []string) []string {
 	return normalized
 }
 
-func mergeSkills(existing []string, incoming []string) []string {
+func mergeSkills(existing, incoming []string) []string {
 	merged := append([]string{}, existing...)
 	merged = append(merged, incoming...)
 	return normalizeSkills(merged)
 }
-

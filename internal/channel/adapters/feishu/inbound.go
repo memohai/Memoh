@@ -2,8 +2,10 @@ package feishu
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -149,10 +151,7 @@ func isFeishuBotMentioned(contentMap map[string]any, mentions []*larkim.MentionE
 			return true
 		}
 	}
-	if matchFeishuContentMention(contentMap, botOpenID) {
-		return true
-	}
-	return false
+	return matchFeishuContentMention(contentMap, botOpenID)
 }
 
 // hasAnyFeishuMention is the fallback when the bot's open_id is unknown.
@@ -223,10 +222,8 @@ func hasFeishuAtTag(raw any) bool {
 			}
 		}
 	case []any:
-		for _, child := range value {
-			if hasFeishuAtTag(child) {
-				return true
-			}
+		if slices.ContainsFunc(value, hasFeishuAtTag) {
+			return true
 		}
 	}
 	return false
@@ -303,16 +300,16 @@ func stringValue(raw any) string {
 // resolveFeishuReceiveID parses target (open_id:/user_id:/chat_id: prefix) and returns receiveID and receiveType.
 func resolveFeishuReceiveID(raw string) (string, string, error) {
 	if raw == "" {
-		return "", "", fmt.Errorf("feishu target is required")
+		return "", "", errors.New("feishu target is required")
 	}
-	if strings.HasPrefix(raw, "open_id:") {
-		return strings.TrimPrefix(raw, "open_id:"), larkim.ReceiveIdTypeOpenId, nil
+	if after, ok := strings.CutPrefix(raw, "open_id:"); ok {
+		return after, larkim.ReceiveIdTypeOpenId, nil
 	}
-	if strings.HasPrefix(raw, "user_id:") {
-		return strings.TrimPrefix(raw, "user_id:"), larkim.ReceiveIdTypeUserId, nil
+	if after, ok := strings.CutPrefix(raw, "user_id:"); ok {
+		return after, larkim.ReceiveIdTypeUserId, nil
 	}
-	if strings.HasPrefix(raw, "chat_id:") {
-		return strings.TrimPrefix(raw, "chat_id:"), larkim.ReceiveIdTypeChatId, nil
+	if after, ok := strings.CutPrefix(raw, "chat_id:"); ok {
+		return after, larkim.ReceiveIdTypeChatId, nil
 	}
 	return raw, larkim.ReceiveIdTypeOpenId, nil
 }

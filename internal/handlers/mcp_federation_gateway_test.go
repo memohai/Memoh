@@ -4,10 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
-	mcpgw "github.com/memohai/memoh/internal/mcp"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	mcpgw "github.com/memohai/memoh/internal/mcp"
 )
 
 type testToolInput struct {
@@ -26,7 +28,7 @@ func newTestMCPServer() *sdkmcp.Server {
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name:        "echo",
 		Description: "Echo query",
-	}, func(ctx context.Context, request *sdkmcp.CallToolRequest, input testToolInput) (*sdkmcp.CallToolResult, testToolOutput, error) {
+	}, func(_ context.Context, _ *sdkmcp.CallToolRequest, input testToolInput) (*sdkmcp.CallToolResult, testToolOutput, error) {
 		return nil, testToolOutput{Echo: input.Query}, nil
 	})
 	return server
@@ -158,13 +160,7 @@ func TestResolveSSEEndpointCandidatesCompatibility(t *testing.T) {
 			if got[0] != tt.firstWant {
 				t.Fatalf("unexpected first endpoint: got=%s want=%s", got[0], tt.firstWant)
 			}
-			found := false
-			for _, item := range got {
-				if item == tt.contains {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(got, tt.contains)
 			if !found {
 				t.Fatalf("endpoint candidates missing expected value: %s in %#v", tt.contains, got)
 			}

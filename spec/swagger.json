@@ -2573,7 +2573,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/channel.ChannelConfig"
+                            "$ref": "#/definitions/channel.Config"
                         }
                     },
                     "400": {
@@ -2637,7 +2637,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/channel.ChannelConfig"
+                            "$ref": "#/definitions/channel.Config"
                         }
                     },
                     "400": {
@@ -4425,7 +4425,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/channel.ChannelIdentityBinding"
+                            "$ref": "#/definitions/channel.IdentityBinding"
                         }
                     },
                     "400": {
@@ -4476,7 +4476,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/channel.ChannelIdentityBinding"
+                            "$ref": "#/definitions/channel.IdentityBinding"
                         }
                     },
                     "400": {
@@ -5116,7 +5116,7 @@
                 "AttachmentGIF"
             ]
         },
-        "channel.ChannelCapabilities": {
+        "channel.Capabilities": {
             "type": "object",
             "properties": {
                 "attachments": {
@@ -5172,7 +5172,7 @@
                 }
             }
         },
-        "channel.ChannelConfig": {
+        "channel.Config": {
             "type": "object",
             "properties": {
                 "bot_id": {
@@ -5209,30 +5209,6 @@
                     "type": "string"
                 },
                 "verified_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "channel.ChannelIdentityBinding": {
-            "type": "object",
-            "properties": {
-                "channel_identity_id": {
-                    "type": "string"
-                },
-                "channel_type": {
-                    "type": "string"
-                },
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "updated_at": {
                     "type": "string"
                 }
             }
@@ -5291,6 +5267,30 @@
                 "FieldNumber",
                 "FieldEnum"
             ]
+        },
+        "channel.IdentityBinding": {
+            "type": "object",
+            "properties": {
+                "channel_identity_id": {
+                    "type": "string"
+                },
+                "channel_type": {
+                    "type": "string"
+                },
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
         },
         "channel.Message": {
             "type": "object",
@@ -5550,7 +5550,7 @@
             "type": "object",
             "properties": {
                 "capabilities": {
-                    "$ref": "#/definitions/channel.ChannelCapabilities"
+                    "$ref": "#/definitions/channel.Capabilities"
                 },
                 "config_schema": {
                     "$ref": "#/definitions/channel.ConfigSchema"
@@ -6057,7 +6057,7 @@
                 "mcpServers": {
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/mcp.MCPServerEntry"
+                        "$ref": "#/definitions/mcp.ServerEntry"
                     }
                 }
             }
@@ -6068,7 +6068,7 @@
                 "mcpServers": {
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/mcp.MCPServerEntry"
+                        "$ref": "#/definitions/mcp.ServerEntry"
                     }
                 }
             }
@@ -6084,7 +6084,7 @@
                 }
             }
         },
-        "mcp.MCPServerEntry": {
+        "mcp.ServerEntry": {
             "type": "object",
             "properties": {
                 "args": {
@@ -6188,7 +6188,7 @@
                 "results": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/memory.MemoryItem"
+                        "$ref": "#/definitions/memory.Item"
                     }
                 }
             }
@@ -6201,7 +6201,7 @@
                 }
             }
         },
-        "memory.MemoryItem": {
+        "memory.Item": {
             "type": "object",
             "properties": {
                 "agent_id": {
@@ -6287,7 +6287,7 @@
                 "results": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/memory.MemoryItem"
+                        "$ref": "#/definitions/memory.Item"
                     }
                 }
             }

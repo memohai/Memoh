@@ -2,27 +2,27 @@ package channel
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 )
 
 type inboundTask struct {
 	ctx context.Context
-	cfg ChannelConfig
+	cfg Config
 	msg InboundMessage
 }
 
 // HandleInbound enqueues an inbound message for asynchronous processing by the worker pool.
-func (m *Manager) HandleInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage) error {
+func (m *Manager) HandleInbound(ctx context.Context, cfg Config, msg InboundMessage) error {
 	if m.processor == nil {
-		return fmt.Errorf("inbound processor not configured")
+		return errors.New("inbound processor not configured")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	m.startInboundWorkers(ctx)
 	if m.inboundCtx != nil && m.inboundCtx.Err() != nil {
-		return fmt.Errorf("inbound dispatcher stopped")
+		return errors.New("inbound dispatcher stopped")
 	}
 	task := inboundTask{
 		ctx: context.WithoutCancel(ctx),
@@ -33,13 +33,13 @@ func (m *Manager) HandleInbound(ctx context.Context, cfg ChannelConfig, msg Inbo
 	case m.inboundQueue <- task:
 		return nil
 	default:
-		return fmt.Errorf("inbound queue full")
+		return errors.New("inbound queue full")
 	}
 }
 
-func (m *Manager) handleInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage) error {
+func (m *Manager) handleInbound(ctx context.Context, cfg Config, msg InboundMessage) error {
 	if m.processor == nil {
-		return fmt.Errorf("inbound processor not configured")
+		return errors.New("inbound processor not configured")
 	}
 	sender := m.newReplySender(cfg, msg.Channel)
 	if err := m.processor.HandleInbound(ctx, cfg, msg, sender); err != nil {

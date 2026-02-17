@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -45,7 +46,7 @@ type ToolCallPayload struct {
 }
 
 // ErrToolNotFound indicates the provider does not own the requested tool.
-var ErrToolNotFound = fmt.Errorf("tool not found")
+var ErrToolNotFound = errors.New("tool not found")
 
 // BuildToolSuccessResult builds a standard MCP tool success result object.
 func BuildToolSuccessResult(structured any) map[string]any {
@@ -105,6 +106,7 @@ func stringifyStructuredContent(v any) string {
 	}
 }
 
+// StringArg returns the string value for key in arguments, or empty string if missing/invalid.
 func StringArg(arguments map[string]any, key string) string {
 	if arguments == nil {
 		return ""
@@ -121,6 +123,7 @@ func StringArg(arguments map[string]any, key string) string {
 	}
 }
 
+// FirstStringArg returns the first non-empty string value for the given keys in arguments.
 func FirstStringArg(arguments map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value := StringArg(arguments, key); value != "" {
@@ -130,6 +133,7 @@ func FirstStringArg(arguments map[string]any, keys ...string) string {
 	return ""
 }
 
+// IntArg parses the key in arguments as an integer; returns value, true if present, or error if wrong type.
 func IntArg(arguments map[string]any, key string) (int, bool, error) {
 	if arguments == nil {
 		return 0, false, nil
@@ -181,6 +185,7 @@ func IntArg(arguments map[string]any, key string) (int, bool, error) {
 	}
 }
 
+// BoolArg returns the boolean value for key in arguments; second return is true if key present, error if wrong type.
 func BoolArg(arguments map[string]any, key string) (bool, bool, error) {
 	if arguments == nil {
 		return false, false, nil

@@ -32,8 +32,8 @@ func Test_directoryLimit(t *testing.T) {
 
 func Test_parseTelegramChatInput(t *testing.T) {
 	tests := []struct {
-		input string
-		wantID int64
+		input        string
+		wantID       int64
 		wantUsername string
 	}{
 		{"123456789", 123456789, ""},

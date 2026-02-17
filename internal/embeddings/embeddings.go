@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,11 +13,13 @@ import (
 	"time"
 )
 
+// Embedder produces vector embeddings for text (or other input) and reports dimension.
 type Embedder interface {
 	Embed(ctx context.Context, input string) ([]float32, error)
 	Dimensions() int
 }
 
+// OpenAIEmbedder calls OpenAI-compatible embedding API (e.g. OpenAI or local) for text.
 type OpenAIEmbedder struct {
 	apiKey  string
 	baseURL string
@@ -37,18 +40,19 @@ type openAIEmbeddingResponse struct {
 	} `json:"data"`
 }
 
+// NewOpenAIEmbedder builds an OpenAIEmbedder; baseURL, apiKey, model required; dims must be positive.
 func NewOpenAIEmbedder(log *slog.Logger, apiKey, baseURL, model string, dims int, timeout time.Duration) (*OpenAIEmbedder, error) {
 	if strings.TrimSpace(baseURL) == "" {
-		return nil, fmt.Errorf("openai embedder: base url is required")
+		return nil, errors.New("openai embedder: base url is required")
 	}
 	if strings.TrimSpace(apiKey) == "" {
-		return nil, fmt.Errorf("openai embedder: api key is required")
+		return nil, errors.New("openai embedder: api key is required")
 	}
 	if strings.TrimSpace(model) == "" {
-		return nil, fmt.Errorf("openai embedder: model is required")
+		return nil, errors.New("openai embedder: model is required")
 	}
 	if dims <= 0 {
-		return nil, fmt.Errorf("openai embedder: dimensions must be positive")
+		return nil, errors.New("openai embedder: dimensions must be positive")
 	}
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -65,10 +69,12 @@ func NewOpenAIEmbedder(log *slog.Logger, apiKey, baseURL, model string, dims int
 	}, nil
 }
 
+// Dimensions returns the embedding dimension configured for this embedder.
 func (e *OpenAIEmbedder) Dimensions() int {
 	return e.dims
 }
 
+// Embed returns the embedding vector for the given text via the OpenAI-compatible API.
 func (e *OpenAIEmbedder) Embed(ctx context.Context, input string) ([]float32, error) {
 	payload, err := json.Marshal(openAIEmbeddingRequest{
 		Input: input,
@@ -91,7 +97,11 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, input string) ([]float32, er
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			e.logger.Warn("embeddings: close response body failed", slog.Any("error", err))
+		}
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("openai embeddings error: %s", strings.TrimSpace(string(body)))
@@ -102,7 +112,7 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, input string) ([]float32, er
 		return nil, err
 	}
 	if len(parsed.Data) == 0 {
-		return nil, fmt.Errorf("openai embeddings empty response")
+		return nil, errors.New("openai embeddings empty response")
 	}
 	return parsed.Data[0].Embedding, nil
 }

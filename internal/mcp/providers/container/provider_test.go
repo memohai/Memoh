@@ -18,7 +18,7 @@ type fakeExecRunner struct {
 	handler func(req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error)
 }
 
-func (f *fakeExecRunner) ExecWithCapture(ctx context.Context, req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error) {
+func (f *fakeExecRunner) ExecWithCapture(_ context.Context, req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error) {
 	f.lastReq = req
 	if f.handler != nil {
 		return f.handler(req)
@@ -141,8 +141,8 @@ func TestExecutor_CallTool_Edit(t *testing.T) {
 			if strings.Contains(cmd, "base64 -d") {
 				// Write step: verify the written content contains the replacement.
 				// Extract base64 from: echo '<b64>' | base64 -d > 'path'
-				parts := strings.Split(cmd, "'")
-				for _, p := range parts {
+				parts := strings.SplitSeq(cmd, "'")
+				for p := range parts {
 					decoded, err := base64.StdEncoding.DecodeString(p)
 					if err == nil && strings.Contains(string(decoded), "goodbye world") {
 						return &mcpgw.ExecWithCaptureResult{ExitCode: 0}, nil
