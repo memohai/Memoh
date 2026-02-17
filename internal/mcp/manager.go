@@ -174,7 +174,7 @@ func (m *Manager) Start(ctx context.Context, botID string) error {
 	if err != nil {
 		return err
 	}
-	if err := ctr.SetupNetwork(ctx, task, m.containerID(botID)); err != nil {
+	if err := ctr.SetupNetwork(ctx, task, m.containerID(botID), m.cfg.CNIBinaryDir, m.cfg.CNIConfigDir); err != nil {
 		if stopErr := m.service.StopTask(ctx, m.containerID(botID), &ctr.StopTaskOptions{Force: true}); stopErr != nil {
 			m.logger.Warn("cleanup: stop task failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", stopErr))
 		}
@@ -199,7 +199,7 @@ func (m *Manager) Delete(ctx context.Context, botID string) error {
 	}
 
 	if task, taskErr := m.service.GetTask(ctx, m.containerID(botID)); taskErr == nil {
-		if err := ctr.RemoveNetwork(ctx, task, m.containerID(botID)); err != nil {
+		if err := ctr.RemoveNetwork(ctx, task, m.containerID(botID), m.cfg.CNIBinaryDir, m.cfg.CNIConfigDir); err != nil {
 			m.logger.Warn("cleanup: remove network failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", err))
 		}
 	}

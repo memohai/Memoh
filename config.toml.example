@@ -28,6 +28,8 @@ image = "docker.io/library/memoh-mcp:dev"
 snapshotter = "overlayfs"
 data_root = "data"
 data_mount = "/data"
+cni_bin_dir = "/opt/cni/bin"
+cni_conf_dir = "/etc/cni/net.d"
 
 ## Postgres configuration
 [postgres]

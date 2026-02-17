@@ -15,6 +15,8 @@ const (
 	DefaultMCPImage         = "docker.io/library/memoh-mcp:latest"
 	DefaultDataRoot         = "data"
 	DefaultDataMount        = "/data"
+	DefaultCNIBinaryDir    = "/opt/cni/bin"
+	DefaultCNIConfigDir    = "/etc/cni/net.d"
 	DefaultJWTExpiresIn     = "24h"
 	DefaultPGHost           = "127.0.0.1"
 	DefaultPGPort           = 5432
@@ -63,10 +65,12 @@ type ContainerdConfig struct {
 }
 
 type MCPConfig struct {
-	Image       string `toml:"image"`
-	Snapshotter string `toml:"snapshotter"`
-	DataRoot    string `toml:"data_root"`
-	DataMount   string `toml:"data_mount"`
+	Image        string `toml:"image"`
+	Snapshotter  string `toml:"snapshotter"`
+	DataRoot     string `toml:"data_root"`
+	DataMount    string `toml:"data_mount"`
+	CNIBinaryDir string `toml:"cni_bin_dir"`
+	CNIConfigDir string `toml:"cni_conf_dir"`
 }
 
 type PostgresConfig struct {
@@ -124,9 +128,11 @@ func Load(path string) (Config, error) {
 			Namespace:  DefaultNamespace,
 		},
 		MCP: MCPConfig{
-			Image:     DefaultMCPImage,
-			DataRoot:  DefaultDataRoot,
-			DataMount: DefaultDataMount,
+			Image:        DefaultMCPImage,
+			DataRoot:     DefaultDataRoot,
+			DataMount:    DefaultDataMount,
+			CNIBinaryDir: DefaultCNIBinaryDir,
+			CNIConfigDir: DefaultCNIConfigDir,
 		},
 		Postgres: PostgresConfig{
 			Host:     DefaultPGHost,
