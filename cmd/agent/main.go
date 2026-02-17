@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -49,7 +50,7 @@ import (
 	mcpweb "github.com/memohai/memoh/internal/mcp/providers/web"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
 	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/media/providers/containerfs"
+	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/memory"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
@@ -316,9 +317,10 @@ func provideScheduleTriggerer(resolver *flow.Resolver) schedule.Triggerer {
 // conversation flow
 // ---------------------------------------------------------------------------
 
-func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, memoryService *memory.Service, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, containerdHandler *handlers.ContainerdHandler) *flow.Resolver {
+func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, memoryService *memory.Service, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, memoryService, chatService, msgService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
+	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
 	return resolver
 }
 
@@ -326,9 +328,11 @@ func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *mod
 // channel providers
 // ---------------------------------------------------------------------------
 
-func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub) *channel.Registry {
+func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService *media.Service) *channel.Registry {
 	registry := channel.NewRegistry()
-	registry.MustRegister(telegram.NewTelegramAdapter(log))
+	tgAdapter := telegram.NewTelegramAdapter(log)
+	tgAdapter.SetAssetOpener(mediaService)
+	registry.MustRegister(tgAdapter)
 	registry.MustRegister(feishu.NewFeishuAdapter(log))
 	registry.MustRegister(local.NewCLIAdapter(hub))
 	registry.MustRegister(local.NewWebAdapter(hub))
@@ -370,8 +374,8 @@ func provideChannelLifecycleService(channelStore *channel.Store, channelManager 
 // containerd handler & tool gateway
 // ---------------------------------------------------------------------------
 
-func provideContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.Config, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *handlers.ContainerdHandler {
-	return handlers.NewContainerdHandler(log, service, cfg.MCP, cfg.Containerd.Namespace, botService, accountService, policyService, queries)
+func provideContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.Config, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *handlers.ContainerdHandler {
+	return handlers.NewContainerdHandler(log, service, manager, cfg.MCP, cfg.Containerd.Namespace, botService, accountService, policyService, queries)
 }
 
 func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, channelStore *channel.Store, scheduleService *schedule.Service, memoryService *memory.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService) *mcp.ToolGatewayService {
@@ -418,8 +422,8 @@ func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *
 	return handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
 }
 
-func provideMessageHandler(log *slog.Logger, resolver *flow.Resolver, chatService *conversation.Service, msgService *message.DBService, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, identityService *identities.Service, hub *event.Hub) *handlers.MessageHandler {
-	h := handlers.NewMessageHandler(log, resolver, chatService, msgService, botService, accountService, identityService, hub)
+func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, msgService *message.DBService, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub) *handlers.MessageHandler {
+	h := handlers.NewMessageHandler(log, chatService, msgService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	return h
 }
@@ -710,4 +714,20 @@ func (a *skillLoaderAdapter) LoadSkills(ctx context.Context, botID string) ([]fl
 		}
 	}
 	return entries, nil
+}
+
+// gatewayAssetLoaderAdapter bridges media service to flow gateway asset loader.
+type gatewayAssetLoaderAdapter struct {
+	media *media.Service
+}
+
+func (a *gatewayAssetLoaderAdapter) OpenForGateway(ctx context.Context, assetID string) (io.ReadCloser, string, string, error) {
+	if a == nil || a.media == nil {
+		return nil, "", "", fmt.Errorf("media service not configured")
+	}
+	reader, asset, err := a.media.Open(ctx, assetID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return reader, strings.TrimSpace(asset.BotID), strings.TrimSpace(asset.Mime), nil
 }

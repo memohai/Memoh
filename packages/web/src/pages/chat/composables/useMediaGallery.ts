@@ -12,9 +12,15 @@ function isMediaType(att: Record<string, unknown>): boolean {
 function resolveUrl(att: Record<string, unknown>): string {
   const url = String(att.url ?? '').trim()
   if (url) return url
+  const base64 = String(att.base64 ?? '').trim()
+  if (base64 && base64.startsWith('data:')) return base64
   const assetId = String(att.asset_id ?? '').trim()
   if (!assetId) return ''
-  const botId = String(att.bot_id ?? '').trim()
+  let botId = String(att.bot_id ?? '').trim()
+  if (!botId) {
+    const meta = att.metadata as Record<string, unknown> | undefined
+    botId = String(meta?.bot_id ?? '').trim()
+  }
   if (!botId) return ''
   const token = localStorage.getItem('token') || ''
   return `/api/bots/${botId}/media/${assetId}?token=${encodeURIComponent(token)}`

@@ -1,6 +1,6 @@
 import { ModelMessage } from 'ai'
 import { ModelConfig } from './model'
-import { AgentAttachment } from './attachment'
+import { GatewayInputAttachment } from './attachment'
 import { MCPConnection } from './mcp'
 
 export interface IdentityContext {
@@ -45,7 +45,7 @@ export interface AgentParams {
 
 export interface AgentInput {
   messages: ModelMessage[]
-  attachments: AgentAttachment[]
+  attachments: GatewayInputAttachment[]
   skills: string[]
   query: string
 }

@@ -1,4 +1,4 @@
-// Package containerfs implements media.StorageProvider for bot containers
+// Package containerfs implements storage.Provider for bot containers
 // backed by host-side bind mounts. Writing to <dataRoot>/bots/<bot_id>/media/<subpath>
 // on the host makes the file available at /data/media/<subpath> inside the container.
 package containerfs

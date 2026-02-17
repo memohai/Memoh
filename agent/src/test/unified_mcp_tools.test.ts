@@ -72,9 +72,14 @@ describe('getMCPTools (unified endpoint)', () => {
 
     try {
       const endpoint = `http://127.0.0.1:${server.port}/bots/bot-1/tools`
-      const { tools, close } = await getMCPTools(endpoint, {
-        Authorization: 'Bearer test-token',
-      })
+      const { tools, close } = await getMCPTools([{
+        type: 'http',
+        name: 'builtin',
+        url: endpoint,
+        headers: {
+          Authorization: 'Bearer test-token',
+        },
+      }])
 
       expect(Object.keys(tools)).toContain('search_memory')
       expect(seenMethods).toContain('initialize')

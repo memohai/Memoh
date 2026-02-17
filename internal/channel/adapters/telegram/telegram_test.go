@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/media"
 )
 
 func TestResolveTelegramSender(t *testing.T) {
@@ -93,6 +95,19 @@ func TestBuildTelegramAttachmentIncludesPlatformReference(t *testing.T) {
 	}
 	if att.SourcePlatform != Type.String() {
 		t.Fatalf("unexpected source platform: %s", att.SourcePlatform)
+	}
+}
+
+func TestBuildTelegramAttachmentInfersTypeFromMime(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	att := adapter.buildTelegramAttachment(nil, channel.AttachmentFile, "file_2", "photo.jpg", "IMAGE/JPEG; charset=utf-8", 10)
+	if att.Type != channel.AttachmentImage {
+		t.Fatalf("expected image type, got: %s", att.Type)
+	}
+	if att.Mime != "image/jpeg" {
+		t.Fatalf("expected normalized mime image/jpeg, got: %s", att.Mime)
 	}
 }
 
@@ -530,5 +545,146 @@ func TestProcessingFailed_DelegatesToCompleted(t *testing.T) {
 	err := adapter.ProcessingFailed(ctx, channel.ChannelConfig{}, channel.InboundMessage{}, channel.ProcessingStatusInfo{}, channel.ProcessingStatusHandle{}, fmt.Errorf("test"))
 	if err != nil {
 		t.Fatalf("empty handle should be no-op: %v", err)
+	}
+}
+
+func TestResolveTelegramFile_PlatformKey(t *testing.T) {
+	t.Parallel()
+
+	att := channel.Attachment{Type: channel.AttachmentImage, PlatformKey: "file_id_123"}
+	file, err := resolveTelegramFile("", "file_id_123", "", "", att, "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := file.(tgbotapi.FileID); !ok {
+		t.Fatalf("expected FileID, got %T", file)
+	}
+}
+
+func TestResolveTelegramFile_PublicURL(t *testing.T) {
+	t.Parallel()
+
+	att := channel.Attachment{Type: channel.AttachmentImage}
+	file, err := resolveTelegramFile("https://example.com/img.png", "", "", "", att, "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := file.(tgbotapi.FileURL); !ok {
+		t.Fatalf("expected FileURL, got %T", file)
+	}
+}
+
+func TestResolveTelegramFile_DataURL(t *testing.T) {
+	t.Parallel()
+
+	dataURL := "data:image/png;base64,iVBORw0KGgo="
+	att := channel.Attachment{Type: channel.AttachmentImage, Mime: "image/png", Name: "test.png"}
+	file, err := resolveTelegramFile("", "", dataURL, "", att, "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	fb, ok := file.(tgbotapi.FileBytes)
+	if !ok {
+		t.Fatalf("expected FileBytes, got %T", file)
+	}
+	if fb.Name != "test.png" {
+		t.Fatalf("expected name test.png, got %q", fb.Name)
+	}
+	if len(fb.Bytes) == 0 {
+		t.Fatal("expected non-empty bytes")
+	}
+}
+
+func TestResolveTelegramFile_NoReference(t *testing.T) {
+	t.Parallel()
+
+	att := channel.Attachment{Type: channel.AttachmentImage}
+	_, err := resolveTelegramFile("", "", "", "", att, "", nil)
+	if err == nil {
+		t.Fatal("expected error when no reference available")
+	}
+}
+
+func TestResolveTelegramFile_ContainerPathFallsToBase64(t *testing.T) {
+	t.Parallel()
+
+	dataURL := "data:image/jpeg;base64,/9j/4AAQ"
+	att := channel.Attachment{Type: channel.AttachmentImage, Mime: "image/jpeg"}
+	file, err := resolveTelegramFile("/data/media/image/a.jpg", "", dataURL, "", att, "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := file.(tgbotapi.FileBytes); !ok {
+		t.Fatalf("expected FileBytes for container path + base64, got %T", file)
+	}
+}
+
+type mockAssetOpener struct {
+	data []byte
+	mime string
+}
+
+func (m *mockAssetOpener) Open(_ context.Context, _ string) (io.ReadCloser, media.Asset, error) {
+	return io.NopCloser(strings.NewReader(string(m.data))), media.Asset{Mime: m.mime}, nil
+}
+
+func TestResolveTelegramFile_AssetID(t *testing.T) {
+	t.Parallel()
+
+	opener := &mockAssetOpener{data: []byte("fake-png-bytes"), mime: "image/png"}
+	att := channel.Attachment{Type: channel.AttachmentImage, AssetID: "asset-123", Name: "output.png"}
+	file, err := resolveTelegramFile("", "", "", "", att, "asset-123", opener)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	fb, ok := file.(tgbotapi.FileBytes)
+	if !ok {
+		t.Fatalf("expected FileBytes from asset reader, got %T", file)
+	}
+	if fb.Name != "output.png" {
+		t.Fatalf("expected name output.png, got %q", fb.Name)
+	}
+	if string(fb.Bytes) != "fake-png-bytes" {
+		t.Fatalf("expected fake-png-bytes, got %q", string(fb.Bytes))
+	}
+}
+
+func TestResolveTelegramFile_AssetIDPriorityOverURL(t *testing.T) {
+	t.Parallel()
+
+	opener := &mockAssetOpener{data: []byte("from-storage"), mime: "image/jpeg"}
+	att := channel.Attachment{Type: channel.AttachmentImage, AssetID: "a1"}
+	file, err := resolveTelegramFile("https://example.com/fallback.jpg", "", "", "", att, "a1", opener)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	fb, ok := file.(tgbotapi.FileBytes)
+	if !ok {
+		t.Fatalf("expected FileBytes (asset priority over URL), got %T", file)
+	}
+	if string(fb.Bytes) != "from-storage" {
+		t.Fatalf("expected from-storage, got %q", string(fb.Bytes))
+	}
+}
+
+func TestFileNameFromMime(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		mime         string
+		fallbackType string
+		want         string
+	}{
+		{"image/png", "image", "image.png"},
+		{"image/jpeg", "image", "image.jpg"},
+		{"image/gif", "image", "image.gif"},
+		{"video/mp4", "video", "video.mp4"},
+		{"", "image", "image.png"},
+		{"application/octet-stream", "", "file.bin"},
+	}
+	for _, tt := range tests {
+		if got := fileNameFromMime(tt.mime, tt.fallbackType); got != tt.want {
+			t.Errorf("fileNameFromMime(%q, %q) = %q, want %q", tt.mime, tt.fallbackType, got, tt.want)
+		}
 	}
 }

@@ -41,22 +41,16 @@ export const ScheduleModel = z.object({
   command: z.string().min(1, 'Schedule command is required'),
 })
 
-export const ImageAttachmentModel = z.object({
-  type: z.literal('image'),
-  base64: z.string().optional(),
-  path: z.string().optional(),
+export const AttachmentModel = z.object({
+  assetId: z.string().optional(),
+  type: z.string().min(1, 'Attachment type is required'),
   mime: z.string().optional(),
+  size: z.number().int().nonnegative().optional(),
   name: z.string().optional(),
+  transport: z.enum(['inline_data_url', 'public_url', 'tool_file_ref']),
+  payload: z.string().min(1, 'Attachment payload is required'),
   metadata: z.record(z.string(), z.any()).optional(),
 })
-
-export const FileAttachmentModel = z.object({
-  type: z.literal('file'),
-  path: z.string().min(1, 'File path is required'),
-  metadata: z.record(z.string(), z.any()).optional(),
-})
-
-export const AttachmentModel = z.union([ImageAttachmentModel, FileAttachmentModel])
 
 export const HTTPMCPConnectionModel = z.object({
   name: z.string().min(1, 'Name is required'),

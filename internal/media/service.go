@@ -18,17 +18,18 @@ import (
 
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/storage"
 )
 
 // Service provides media asset persistence operations.
 type Service struct {
 	queries  *sqlc.Queries
-	provider StorageProvider
+	provider storage.Provider
 	logger   *slog.Logger
 }
 
 // NewService creates a media service with the given storage provider.
-func NewService(log *slog.Logger, queries *sqlc.Queries, provider StorageProvider) *Service {
+func NewService(log *slog.Logger, queries *sqlc.Queries, provider storage.Provider) *Service {
 	if log == nil {
 		log = slog.Default()
 	}

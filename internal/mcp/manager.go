@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/containerd/containerd/v2/pkg/oci"
@@ -50,13 +51,15 @@ type ExecWithCaptureResult struct {
 }
 
 type Manager struct {
-	service     ctr.Service
-	cfg         config.MCPConfig
-	namespace   string
-	containerID func(string) string
-	db          *pgxpool.Pool
-	queries     *dbsqlc.Queries
-	logger      *slog.Logger
+	service         ctr.Service
+	cfg             config.MCPConfig
+	namespace       string
+	containerID     func(string) string
+	db              *pgxpool.Pool
+	queries         *dbsqlc.Queries
+	logger          *slog.Logger
+	containerLockMu sync.Mutex
+	containerLocks  map[string]*sync.Mutex
 }
 
 func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string, conn *pgxpool.Pool) *Manager {
@@ -64,16 +67,30 @@ func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, nam
 		namespace = config.DefaultNamespace
 	}
 	return &Manager{
-		service:   service,
-		cfg:       cfg,
-		namespace: namespace,
-		db:        conn,
-		queries:   dbsqlc.New(conn),
-		logger:    log.With(slog.String("component", "mcp")),
+		service:        service,
+		cfg:            cfg,
+		namespace:      namespace,
+		db:             conn,
+		queries:        dbsqlc.New(conn),
+		logger:         log.With(slog.String("component", "mcp")),
+		containerLocks: make(map[string]*sync.Mutex),
 		containerID: func(botID string) string {
 			return ContainerPrefix + botID
 		},
 	}
+}
+
+func (m *Manager) lockContainer(containerID string) func() {
+	m.containerLockMu.Lock()
+	lock, ok := m.containerLocks[containerID]
+	if !ok {
+		lock = &sync.Mutex{}
+		m.containerLocks[containerID] = lock
+	}
+	m.containerLockMu.Unlock()
+
+	lock.Lock()
+	return lock.Unlock
 }
 
 func (m *Manager) Init(ctx context.Context) error {

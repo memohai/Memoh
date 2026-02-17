@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -181,13 +182,15 @@ type fakeMediaIngestor struct {
 	ingestErr error
 	calls     int
 	inputs    []media.IngestInput
+	payloads  [][]byte
 }
 
 func (f *fakeMediaIngestor) Ingest(ctx context.Context, input media.IngestInput) (media.Asset, error) {
 	f.calls++
 	f.inputs = append(f.inputs, input)
 	if input.Reader != nil {
-		_, _ = io.ReadAll(input.Reader)
+		payload, _ := io.ReadAll(input.Reader)
+		f.payloads = append(f.payloads, payload)
 	}
 	if f.ingestErr != nil {
 		return media.Asset{}, f.ingestErr
@@ -620,6 +623,81 @@ func TestChannelInboundProcessorIngestsPlatformKeyWithResolver(t *testing.T) {
 	}
 	if got := chatSvc.persistedIn[0].Assets[0].AssetID; got != "asset-resolved-1" {
 		t.Fatalf("expected persisted asset id asset-resolved-1, got %q", got)
+	}
+}
+
+func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-base64"}}
+	memberSvc := &fakeMemberService{isMember: true}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-base64", RouteID: "route-base64"}}
+	gateway := &fakeChatGateway{
+		resp: conversation.ChatResponse{
+			Messages: []conversation.ModelMessage{
+				{Role: "assistant", Content: conversation.NewTextContent("ok")},
+			},
+		},
+	}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	mediaSvc := &fakeMediaIngestor{nextID: "asset-base64-1", nextMime: "image/png"}
+	processor.SetMediaService(mediaSvc)
+	sender := &fakeReplySender{}
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("fake-image-bytes"))
+	cfg := channel.ChannelConfig{ID: "cfg-base64", BotID: "bot-1", ChannelType: channel.ChannelType("web")}
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("web"),
+		Message: channel.Message{
+			ID:   "msg-base64-1",
+			Text: "attachment base64 test",
+			Attachments: []channel.Attachment{
+				{
+					Type:   channel.AttachmentImage,
+					Base64: "data:image/png;base64," + encoded,
+					Name:   "cat.png",
+				},
+			},
+		},
+		ReplyTarget: "web-target",
+		Sender: channel.Identity{
+			SubjectID: "web-subject",
+			Attributes: map[string]string{
+				"user_id": "web-user-id",
+			},
+		},
+		Conversation: channel.Conversation{
+			ID:   "web-conv",
+			Type: "p2p",
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mediaSvc.calls != 1 {
+		t.Fatalf("expected media ingest to be called once, got %d", mediaSvc.calls)
+	}
+	if len(mediaSvc.payloads) != 1 || string(mediaSvc.payloads[0]) != "fake-image-bytes" {
+		t.Fatalf("unexpected ingested payload: %+v", mediaSvc.payloads)
+	}
+	if len(gateway.gotReq.Attachments) != 1 {
+		t.Fatalf("expected one gateway attachment, got %d", len(gateway.gotReq.Attachments))
+	}
+	gotAttachment := gateway.gotReq.Attachments[0]
+	if gotAttachment.AssetID != "asset-base64-1" {
+		t.Fatalf("expected resolved asset id, got %q", gotAttachment.AssetID)
+	}
+	if gotAttachment.Base64 != "" {
+		t.Fatalf("expected base64 to be cleared after ingest, got %q", gotAttachment.Base64)
+	}
+	if !strings.HasPrefix(gotAttachment.Path, "/data/media/") {
+		t.Fatalf("expected attachment path under /data/media/, got %q", gotAttachment.Path)
+	}
+	if len(chatSvc.persistedIn) != 1 || len(chatSvc.persistedIn[0].Assets) != 1 {
+		t.Fatalf("expected one persisted asset ref, got %+v", chatSvc.persistedIn)
+	}
+	if got := chatSvc.persistedIn[0].Assets[0].AssetID; got != "asset-base64-1" {
+		t.Fatalf("expected persisted asset id asset-base64-1, got %q", got)
 	}
 }
 
@@ -1132,5 +1210,115 @@ func TestMapStreamChunkToChannelEvents_FinalMessages(t *testing.T) {
 	}
 	if messages[0].Role != "assistant" {
 		t.Fatalf("expected role assistant, got %q", messages[0].Role)
+	}
+}
+
+func TestIngestOutboundAttachments_DataURL(t *testing.T) {
+	t.Parallel()
+
+	p := &ChannelInboundProcessor{}
+	attachments := []channel.Attachment{
+		{Type: channel.AttachmentImage, URL: "data:image/png;base64,iVBORw0KGgo=", Mime: "image/png"},
+	}
+	// Without media service, attachments pass through unchanged.
+	result := p.ingestOutboundAttachments(context.Background(), "bot-1", attachments)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(result))
+	}
+	if result[0].AssetID != "" {
+		t.Fatalf("expected empty asset_id without media service, got %q", result[0].AssetID)
+	}
+}
+
+func TestIngestOutboundAttachments_NonDataURL(t *testing.T) {
+	t.Parallel()
+
+	p := &ChannelInboundProcessor{}
+	attachments := []channel.Attachment{
+		{Type: channel.AttachmentImage, URL: "https://example.com/img.png"},
+		{Type: channel.AttachmentImage, AssetID: "existing-asset", URL: "/data/media/img.png"},
+	}
+	result := p.ingestOutboundAttachments(context.Background(), "bot-1", attachments)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 attachments, got %d", len(result))
+	}
+	if result[0].URL != "https://example.com/img.png" {
+		t.Fatalf("expected public URL preserved, got %q", result[0].URL)
+	}
+	if result[1].AssetID != "existing-asset" {
+		t.Fatalf("expected existing asset_id preserved, got %q", result[1].AssetID)
+	}
+}
+
+func TestChannelAttachmentsToAssetRefs(t *testing.T) {
+	t.Parallel()
+
+	attachments := []channel.Attachment{
+		{AssetID: "a1", Type: channel.AttachmentImage},
+		{Type: channel.AttachmentFile},
+		{AssetID: "a2", Type: channel.AttachmentAudio},
+	}
+	refs := channelAttachmentsToAssetRefs(attachments, "output")
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 refs, got %d", len(refs))
+	}
+	if refs[0].AssetID != "a1" || refs[0].Role != "output" {
+		t.Fatalf("unexpected ref[0]: %+v", refs[0])
+	}
+	if refs[1].AssetID != "a2" {
+		t.Fatalf("unexpected ref[1]: %+v", refs[1])
+	}
+}
+
+func TestIsDataURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"data:image/png;base64,abc", true},
+		{"DATA:text/plain;base64,abc", true},
+		{"https://example.com", false},
+		{"/data/media/img.png", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isDataURL(tt.input); got != tt.want {
+			t.Errorf("isDataURL(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestMapChannelToChatAttachments(t *testing.T) {
+	t.Parallel()
+
+	attachments := []channel.Attachment{
+		{
+			Type:    channel.AttachmentImage,
+			AssetID: "asset-1",
+			URL:     "/data/media/image/a.png",
+			Base64:  "AAAA",
+			Mime:    "image/png",
+		},
+		{
+			Type: channel.AttachmentFile,
+			URL:  "https://example.com/doc.pdf",
+			Name: "doc.pdf",
+		},
+	}
+
+	mapped := mapChannelToChatAttachments(attachments)
+	if len(mapped) != 2 {
+		t.Fatalf("expected 2 mapped attachments, got %d", len(mapped))
+	}
+	if mapped[0].Path != "/data/media/image/a.png" {
+		t.Fatalf("expected asset attachment path, got %q", mapped[0].Path)
+	}
+	if !strings.HasPrefix(mapped[0].Base64, "data:image/png;base64,") {
+		t.Fatalf("expected normalized base64 data url, got %q", mapped[0].Base64)
+	}
+	if mapped[1].URL != "https://example.com/doc.pdf" {
+		t.Fatalf("expected non-asset attachment URL, got %q", mapped[1].URL)
 	}
 }

@@ -27,13 +27,42 @@ import {
   dedupeAttachments,
   AttachmentsStreamExtractor,
 } from './utils/attachments'
-import type {
-  ContainerFileAttachment,
-  ImageAttachment,
-} from './types/attachment'
+import type { ContainerFileAttachment, GatewayInputAttachment } from './types/attachment'
 import { getMCPTools } from './tools/mcp'
 import { getTools } from './tools'
 import { buildIdentityHeaders } from './utils/headers'
+
+export const buildNativeImageParts = (attachments: GatewayInputAttachment[]): ImagePart[] => {
+  return attachments
+    .filter((attachment) =>
+      attachment.type === 'image' &&
+      (attachment.transport === 'inline_data_url' || attachment.transport === 'public_url') &&
+      Boolean(attachment.payload),
+    )
+    .map((attachment) => ({ type: 'image', image: attachment.payload } as ImagePart))
+}
+
+const buildFileRefs = (
+  attachments: GatewayInputAttachment[],
+  supportsImage: boolean,
+): ContainerFileAttachment[] => {
+  return attachments
+    .filter((attachment) => {
+      if (attachment.transport !== 'tool_file_ref' || !attachment.payload) {
+        return false
+      }
+      if (attachment.type === 'file') {
+        return true
+      }
+      // When image native modality is unavailable, keep image refs as tool files.
+      return !supportsImage && attachment.type === 'image'
+    })
+    .map((attachment) => ({
+      type: 'file' as const,
+      path: attachment.payload,
+      metadata: attachment.metadata,
+    }))
+}
 
 export const createAgent = (
   {
@@ -258,29 +287,8 @@ export const createAgent = (
   const generateUserPrompt = (input: AgentInput) => {
     const supportsImage = hasInputModality(modelConfig, ModelInput.Image)
 
-    // Separate attachments by model capability: native images vs fallback file paths.
-    const nativeImages = supportsImage
-      ? input.attachments.filter((a) => a.type === 'image')
-      : []
-    const fallbackFiles = input.attachments.filter(
-      (a): a is ContainerFileAttachment => a.type === 'file',
-    )
-    // Images the model cannot handle natively are mentioned as path references.
-    const unsupportedImages: ContainerFileAttachment[] = supportsImage
-      ? []
-      : input.attachments
-          .filter((a) => a.type === 'image')
-          .map((a) => ({
-            type: 'file' as const,
-            path: String(
-              (a as ImageAttachment).path || a.metadata?.path || '[image]',
-            ),
-            metadata: a.metadata,
-          }))
-    const allFiles: ContainerFileAttachment[] = [
-      ...fallbackFiles,
-      ...unsupportedImages,
-    ]
+    const allFiles = buildFileRefs(input.attachments, supportsImage)
+    const imageParts = supportsImage ? buildNativeImageParts(input.attachments) : []
 
     const text = user(input.query, {
       channelIdentityId: identity.channelIdentityId || '',
@@ -290,18 +298,6 @@ export const createAgent = (
       date: new Date(),
       attachments: allFiles,
     })
-    const imageParts: ImagePart[] = nativeImages
-      .map((image) => {
-        const img = image as ImageAttachment
-        if (img.base64) {
-          return { type: 'image', image: img.base64 } as ImagePart
-        }
-        if (img.url) {
-          return { type: 'image', image: img.url } as ImagePart
-        }
-        return { type: 'image', image: '' } as ImagePart
-      })
-      .filter((p) => p.image !== '')
     const userMessage: UserModelMessage = {
       role: 'user',
       content: [{ type: 'text', text }, ...imageParts],
@@ -310,10 +306,9 @@ export const createAgent = (
   }
 
   const ask = async (input: AgentInput) => {
-    const preparedInput = await prepareInputWithMCPImageBase64(input)
-    const userPrompt = generateUserPrompt(preparedInput)
-    const messages = [...preparedInput.messages, userPrompt]
-    preparedInput.skills.forEach((skill) => enableSkill(skill))
+    const userPrompt = generateUserPrompt(input)
+    const messages = [...input.messages, userPrompt]
+    input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
     const { tools, close } = await getAgentTools()
     const { response, reasoning, text, usage } = await generateText({
@@ -451,10 +446,9 @@ export const createAgent = (
   }
 
   async function* stream(input: AgentInput): AsyncGenerator<AgentAction> {
-    const preparedInput = await prepareInputWithMCPImageBase64(input)
-    const userPrompt = generateUserPrompt(preparedInput)
-    const messages = [...preparedInput.messages, userPrompt]
-    preparedInput.skills.forEach((skill) => enableSkill(skill))
+    const userPrompt = generateUserPrompt(input)
+    const messages = [...input.messages, userPrompt]
+    input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
     const attachmentsExtractor = new AttachmentsStreamExtractor()
     const result: {

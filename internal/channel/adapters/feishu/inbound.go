@@ -57,16 +57,17 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string) ch
 			}
 		case larkim.MsgTypeImage:
 			if key, ok := contentMap["image_key"].(string); ok {
-				msg.Attachments = append(msg.Attachments, channel.Attachment{
+				msg.Attachments = append(msg.Attachments, channel.NormalizeInboundChannelAttachment(channel.Attachment{
 					Type:           channel.AttachmentImage,
 					PlatformKey:    key,
 					SourcePlatform: Type.String(),
 					Metadata:       map[string]any{"message_id": msg.ID},
-				})
+				}))
 			}
 		case larkim.MsgTypeFile, larkim.MsgTypeAudio, larkim.MsgTypeMedia:
 			if key, ok := contentMap["file_key"].(string); ok {
 				name, _ := contentMap["file_name"].(string)
+				mime, _ := contentMap["mime_type"].(string)
 				attType := channel.AttachmentFile
 				switch *message.MessageType {
 				case larkim.MsgTypeAudio:
@@ -74,13 +75,14 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string) ch
 				case larkim.MsgTypeMedia:
 					attType = channel.AttachmentVideo
 				}
-				msg.Attachments = append(msg.Attachments, channel.Attachment{
+				msg.Attachments = append(msg.Attachments, channel.NormalizeInboundChannelAttachment(channel.Attachment{
 					Type:           attType,
 					PlatformKey:    key,
 					SourcePlatform: Type.String(),
 					Name:           name,
+					Mime:           mime,
 					Metadata:       map[string]any{"message_id": msg.ID},
-				})
+				}))
 			}
 		}
 	}
@@ -275,24 +277,28 @@ func extractFeishuPostAttachments(contentMap map[string]any, messageID string) [
 			tag := strings.ToLower(strings.TrimSpace(stringValue(part["tag"])))
 			if tag == "img" {
 				if key, ok := part["image_key"].(string); ok && strings.TrimSpace(key) != "" {
-					result = append(result, channel.Attachment{
+					mime := strings.TrimSpace(stringValue(part["mime_type"]))
+					result = append(result, channel.NormalizeInboundChannelAttachment(channel.Attachment{
 						Type:           channel.AttachmentImage,
 						PlatformKey:    strings.TrimSpace(key),
 						SourcePlatform: Type.String(),
+						Mime:           mime,
 						Metadata:       map[string]any{"message_id": messageID},
-					})
+					}))
 				}
 			}
 			if tag == "file" {
 				if key, ok := part["file_key"].(string); ok && strings.TrimSpace(key) != "" {
 					name := strings.TrimSpace(stringValue(part["file_name"]))
-					result = append(result, channel.Attachment{
+					mime := strings.TrimSpace(stringValue(part["mime_type"]))
+					result = append(result, channel.NormalizeInboundChannelAttachment(channel.Attachment{
 						Type:           channel.AttachmentFile,
 						PlatformKey:    strings.TrimSpace(key),
 						SourcePlatform: Type.String(),
 						Name:           name,
+						Mime:           mime,
 						Metadata:       map[string]any{"message_id": messageID},
-					})
+					}))
 				}
 			}
 		}

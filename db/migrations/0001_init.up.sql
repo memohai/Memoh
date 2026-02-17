@@ -277,27 +277,33 @@ CREATE TABLE IF NOT EXISTS containers (
 CREATE INDEX IF NOT EXISTS idx_containers_bot_id ON containers(bot_id);
 
 CREATE TABLE IF NOT EXISTS snapshots (
-  id TEXT PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   container_id TEXT NOT NULL REFERENCES containers(container_id) ON DELETE CASCADE,
-  parent_snapshot_id TEXT REFERENCES snapshots(id) ON DELETE SET NULL,
+  runtime_snapshot_name TEXT NOT NULL,
+  parent_runtime_snapshot_name TEXT,
   snapshotter TEXT NOT NULL,
-  digest TEXT,
+  source TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_snapshots_container_id ON snapshots(container_id);
-CREATE INDEX IF NOT EXISTS idx_snapshots_parent_id ON snapshots(parent_snapshot_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_container_runtime_name
+  ON snapshots(container_id, runtime_snapshot_name);
+CREATE INDEX IF NOT EXISTS idx_snapshots_container_created_at
+  ON snapshots(container_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_snapshots_runtime_name
+  ON snapshots(runtime_snapshot_name);
 
 CREATE TABLE IF NOT EXISTS container_versions (
-  id TEXT PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   container_id TEXT NOT NULL REFERENCES containers(container_id) ON DELETE CASCADE,
-  snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE RESTRICT,
+  snapshot_id UUID NOT NULL REFERENCES snapshots(id) ON DELETE RESTRICT,
   version INTEGER NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (container_id, version)
 );
 
 CREATE INDEX IF NOT EXISTS idx_container_versions_container_id ON container_versions(container_id);
+CREATE INDEX IF NOT EXISTS idx_container_versions_snapshot_id ON container_versions(snapshot_id);
 
 CREATE TABLE IF NOT EXISTS lifecycle_events (
   id TEXT PRIMARY KEY,

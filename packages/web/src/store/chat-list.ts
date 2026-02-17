@@ -15,7 +15,8 @@ import {
   extractMessageText,
   extractToolCalls,
   extractAllToolResults,
-  streamMessage,
+  sendLocalChannelMessage,
+  streamLocalChannel,
   streamMessageEvents,
   type ChatAttachment,
 } from '@/composables/api/useChat'
@@ -61,6 +62,15 @@ export interface ChatMessage {
   isSelf?: boolean
 }
 
+interface PendingAssistantStream {
+  assistantMsg: ChatMessage
+  textBlockIdx: number
+  thinkingBlockIdx: number
+  done: boolean
+  resolve: () => void
+  reject: (err: Error) => void
+}
+
 // ---- Store ----
 
 export const useChatStore = defineStore('chat', () => {
@@ -80,6 +90,9 @@ export const useChatStore = defineStore('chat', () => {
   let messageEventsController: AbortController | null = null
   let messageEventsLoopVersion = 0
   let messageEventsSince = ''
+  let localStreamController: AbortController | null = null
+  let localStreamLoopVersion = 0
+  let pendingAssistantStream: PendingAssistantStream | null = null
 
   const participantChats = computed(() =>
     chats.value.filter((c) => (c.access_mode ?? 'participant') === 'participant'),
@@ -99,6 +112,8 @@ export const useChatStore = defineStore('chat', () => {
       void initialize()
     } else {
       stopMessageEvents()
+      stopLocalStream()
+      rejectPendingAssistantStream(new Error('Bot stream stopped'))
       messageEventsSince = ''
       chats.value = []
       chatId.value = null
@@ -309,6 +324,203 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function stopLocalStream() {
+    localStreamLoopVersion += 1
+    if (localStreamController) {
+      localStreamController.abort()
+      localStreamController = null
+    }
+  }
+
+  function pushAssistantBlock(session: PendingAssistantStream, block: ContentBlock): number {
+    session.assistantMsg.blocks.push(block)
+    return session.assistantMsg.blocks.length - 1
+  }
+
+  function appendAssistantError(session: PendingAssistantStream, errorMessage: string) {
+    const message = errorMessage.trim()
+    if (!message) return
+    if (session.textBlockIdx < 0 || session.assistantMsg.blocks[session.textBlockIdx]?.type !== 'text') {
+      session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })
+    }
+    ;(session.assistantMsg.blocks[session.textBlockIdx] as TextBlock).content += `\n\n**Error:** ${message}`
+  }
+
+  function resolvePendingAssistantStream() {
+    if (!pendingAssistantStream || pendingAssistantStream.done) return
+    const session = pendingAssistantStream
+    session.done = true
+    pendingAssistantStream = null
+    session.resolve()
+  }
+
+  function rejectPendingAssistantStream(err: Error) {
+    if (!pendingAssistantStream || pendingAssistantStream.done) return
+    const session = pendingAssistantStream
+    session.done = true
+    pendingAssistantStream = null
+    session.reject(err)
+  }
+
+  function handleLocalStreamEvent(event: StreamEvent) {
+    const session = pendingAssistantStream
+    if (!session || session.done) return
+
+    const type = (event.type ?? '').toLowerCase()
+    switch (type) {
+      case 'text_start':
+        session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })
+        break
+      case 'text_delta':
+        if (typeof event.delta === 'string') {
+          if (session.textBlockIdx < 0 || session.assistantMsg.blocks[session.textBlockIdx]?.type !== 'text') {
+            session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })
+          }
+          ;(session.assistantMsg.blocks[session.textBlockIdx] as TextBlock).content += event.delta
+        }
+        break
+      case 'text_end':
+        session.textBlockIdx = -1
+        break
+      case 'reasoning_start':
+        session.thinkingBlockIdx = pushAssistantBlock(session, { type: 'thinking', content: '', done: false })
+        break
+      case 'reasoning_delta':
+        if (typeof event.delta === 'string') {
+          if (session.thinkingBlockIdx < 0 || session.assistantMsg.blocks[session.thinkingBlockIdx]?.type !== 'thinking') {
+            session.thinkingBlockIdx = pushAssistantBlock(session, { type: 'thinking', content: '', done: false })
+          }
+          ;(session.assistantMsg.blocks[session.thinkingBlockIdx] as ThinkingBlock).content += event.delta
+        }
+        break
+      case 'reasoning_end':
+        if (session.thinkingBlockIdx >= 0 && session.assistantMsg.blocks[session.thinkingBlockIdx]?.type === 'thinking') {
+          ;(session.assistantMsg.blocks[session.thinkingBlockIdx] as ThinkingBlock).done = true
+        }
+        session.thinkingBlockIdx = -1
+        break
+      case 'tool_call_start':
+        pushAssistantBlock(session, {
+          type: 'tool_call',
+          toolCallId: (event.toolCallId as string) ?? '',
+          toolName: (event.toolName as string) ?? 'unknown',
+          input: event.input ?? null,
+          result: null,
+          done: false,
+        })
+        session.textBlockIdx = -1
+        break
+      case 'tool_call_end': {
+        const callId = (event.toolCallId as string) ?? ''
+        let matched = false
+        if (callId) {
+          for (let i = 0; i < session.assistantMsg.blocks.length; i++) {
+            const block = session.assistantMsg.blocks[i]
+            if (block && block.type === 'tool_call' && block.toolCallId === callId && !block.done) {
+              block.result = event.result ?? null
+              block.input = event.input ?? block.input
+              block.done = true
+              matched = true
+              break
+            }
+          }
+        }
+        if (!matched) {
+          for (let i = 0; i < session.assistantMsg.blocks.length; i++) {
+            const block = session.assistantMsg.blocks[i]
+            if (block && block.type === 'tool_call' && block.toolName === event.toolName && !block.done) {
+              block.result = event.result ?? null
+              block.input = event.input ?? block.input
+              block.done = true
+              break
+            }
+          }
+        }
+        break
+      }
+      case 'attachment_delta': {
+        const items = event.attachments
+        if (Array.isArray(items) && items.length > 0) {
+          const lastBlock = session.assistantMsg.blocks[session.assistantMsg.blocks.length - 1]
+          if (lastBlock && lastBlock.type === 'attachment') {
+            lastBlock.attachments.push(...items)
+          } else {
+            pushAssistantBlock(session, { type: 'attachment', attachments: [...items] })
+          }
+        }
+        break
+      }
+      case 'processing_started':
+        if (session.assistantMsg.blocks.length === 0) {
+          session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })
+        }
+        break
+      case 'processing_completed':
+        resolvePendingAssistantStream()
+        break
+      case 'processing_failed': {
+        const message = typeof event.message === 'string'
+          ? event.message
+          : typeof event.error === 'string'
+            ? event.error
+            : 'processing failed'
+        appendAssistantError(session, message)
+        rejectPendingAssistantStream(new Error(message))
+        break
+      }
+      case 'error': {
+        const message = typeof event.message === 'string'
+          ? event.message
+          : typeof event.error === 'string'
+            ? event.error
+            : 'stream error'
+        appendAssistantError(session, message)
+        rejectPendingAssistantStream(new Error(message))
+        break
+      }
+      case 'agent_start':
+      case 'agent_end':
+      default: {
+        const fallback = extractFallbackText(event)
+        if (fallback) {
+          if (session.textBlockIdx < 0 || session.assistantMsg.blocks[session.textBlockIdx]?.type !== 'text') {
+            session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })
+          }
+          ;(session.assistantMsg.blocks[session.textBlockIdx] as TextBlock).content += fallback
+        }
+        break
+      }
+    }
+  }
+
+  function startLocalStream(targetBotId: string) {
+    const bid = targetBotId.trim()
+    stopLocalStream()
+    if (!bid) return
+
+    const controller = new AbortController()
+    localStreamController = controller
+    const version = localStreamLoopVersion
+
+    const run = async () => {
+      let delay = 1000
+      while (!controller.signal.aborted && localStreamLoopVersion === version) {
+        try {
+          await streamLocalChannel(bid, controller.signal, handleLocalStreamEvent)
+          delay = 1000
+          if (!controller.signal.aborted && localStreamLoopVersion === version) {
+            await sleep(300)
+          }
+        } catch {
+          if (controller.signal.aborted || localStreamLoopVersion !== version) return
+          await sleep(delay)
+          delay = Math.min(delay * 2, 5000)
+        }
+      }
+    }
+    void run()
+  }
+
   function updateSince(createdAt?: string) {
     const v = (createdAt ?? '').trim()
     if (!v) return
@@ -467,6 +679,7 @@ export const useChatStore = defineStore('chat', () => {
     initializing.value = true
     loadingChats.value = true
     stopMessageEvents()
+    stopLocalStream()
     try {
       const bid = await ensureBot()
       if (!bid) {
@@ -490,6 +703,7 @@ export const useChatStore = defineStore('chat', () => {
       chatId.value = activeChatId
       await loadMessages(bid, activeChatId)
       startMessageEvents(bid)
+      startLocalStream(bid)
     } finally {
       loadingChats.value = false
       initializing.value = false
@@ -602,192 +816,39 @@ export const useChatStore = defineStore('chat', () => {
         streaming: true,
       })
       const assistantMsg = messages[messages.length - 1]!
+      const completion = new Promise<void>((resolve, reject) => {
+        pendingAssistantStream = {
+          assistantMsg,
+          textBlockIdx: -1,
+          thinkingBlockIdx: -1,
+          done: false,
+          resolve,
+          reject,
+        }
+      })
 
-      let textBlockIdx = -1
-      let thinkingBlockIdx = -1
-
-      function pushBlock(block: ContentBlock): number {
-        assistantMsg.blocks.push(block)
-        return assistantMsg.blocks.length - 1
+      abortFn = () => {
+        const abortError = new Error('aborted')
+        abortError.name = 'AbortError'
+        rejectPendingAssistantStream(abortError)
       }
 
-      abortFn = streamMessage(
-        bid, cid, trimmed,
-        (event: StreamEvent) => {
-          const type = (event.type ?? '').toLowerCase()
+      await sendLocalChannelMessage(bid, trimmed, attachments)
+      await completion
 
-          switch (type) {
-            case 'text_start':
-              textBlockIdx = pushBlock({ type: 'text', content: '' })
-              break
-
-            case 'text_delta':
-              if (typeof event.delta === 'string') {
-                if (textBlockIdx < 0 || assistantMsg.blocks[textBlockIdx]?.type !== 'text') {
-                  textBlockIdx = pushBlock({ type: 'text', content: '' })
-                }
-                ;(assistantMsg.blocks[textBlockIdx] as TextBlock).content += event.delta
-              }
-              break
-
-            case 'text_end':
-              textBlockIdx = -1
-              break
-
-            case 'reasoning_start':
-              thinkingBlockIdx = pushBlock({ type: 'thinking', content: '', done: false })
-              break
-
-            case 'reasoning_delta':
-              if (typeof event.delta === 'string') {
-                if (thinkingBlockIdx < 0 || assistantMsg.blocks[thinkingBlockIdx]?.type !== 'thinking') {
-                  thinkingBlockIdx = pushBlock({ type: 'thinking', content: '', done: false })
-                }
-                ;(assistantMsg.blocks[thinkingBlockIdx] as ThinkingBlock).content += event.delta
-              }
-              break
-
-            case 'reasoning_end':
-              if (thinkingBlockIdx >= 0 && assistantMsg.blocks[thinkingBlockIdx]?.type === 'thinking') {
-                ;(assistantMsg.blocks[thinkingBlockIdx] as ThinkingBlock).done = true
-              }
-              thinkingBlockIdx = -1
-              break
-
-            case 'tool_call_start':
-              pushBlock({
-                type: 'tool_call',
-                toolCallId: (event.toolCallId as string) ?? '',
-                toolName: (event.toolName as string) ?? 'unknown',
-                input: event.input ?? null,
-                result: null,
-                done: false,
-              })
-              textBlockIdx = -1
-              break
-
-            case 'tool_call_end': {
-              const callId = (event.toolCallId as string) ?? ''
-              let matched = false
-              if (callId) {
-                for (let i = 0; i < assistantMsg.blocks.length; i++) {
-                  const b = assistantMsg.blocks[i]
-                  if (b && b.type === 'tool_call' && b.toolCallId === callId && !b.done) {
-                    b.result = event.result ?? null
-                    b.input = event.input ?? b.input
-                    b.done = true
-                    matched = true
-                    break
-                  }
-                }
-              }
-              if (!matched) {
-                for (let i = 0; i < assistantMsg.blocks.length; i++) {
-                  const b = assistantMsg.blocks[i]
-                  if (b && b.type === 'tool_call' && b.toolName === event.toolName && !b.done) {
-                    b.result = event.result ?? null
-                    b.input = event.input ?? b.input
-                    b.done = true
-                    break
-                  }
-                }
-              }
-              break
-            }
-
-            case 'attachment_delta': {
-              const items = event.attachments
-              if (Array.isArray(items) && items.length > 0) {
-                const lastBlock = assistantMsg.blocks[assistantMsg.blocks.length - 1]
-                if (lastBlock && lastBlock.type === 'attachment') {
-                  lastBlock.attachments.push(...items)
-                } else {
-                  pushBlock({ type: 'attachment', attachments: [...items] })
-                }
-              }
-              break
-            }
-
-            case 'processing_started':
-              if (assistantMsg.blocks.length === 0) {
-                pushBlock({ type: 'text', content: '' })
-                textBlockIdx = 0
-              }
-              break
-
-            case 'processing_completed':
-            case 'agent_start':
-            case 'agent_end':
-              break
-
-            case 'processing_failed': {
-              const failMsg = typeof event.message === 'string'
-                ? event.message
-                : typeof event.error === 'string'
-                  ? event.error
-                  : ''
-              if (failMsg) {
-                if (textBlockIdx < 0 || assistantMsg.blocks[textBlockIdx]?.type !== 'text') {
-                  textBlockIdx = pushBlock({ type: 'text', content: '' })
-                }
-                ;(assistantMsg.blocks[textBlockIdx] as TextBlock).content += `\n\n**Error:** ${failMsg}`
-              }
-              break
-            }
-
-            case 'error': {
-              const errMsg = typeof event.message === 'string'
-                ? event.message
-                : typeof event.error === 'string'
-                  ? event.error
-                  : 'Stream error'
-              if (textBlockIdx < 0 || assistantMsg.blocks[textBlockIdx]?.type !== 'text') {
-                textBlockIdx = pushBlock({ type: 'text', content: '' })
-              }
-              ;(assistantMsg.blocks[textBlockIdx] as TextBlock).content += `\n\n**Error:** ${errMsg}`
-              break
-            }
-
-            default: {
-              const fallback = extractFallbackText(event)
-              if (fallback) {
-                if (textBlockIdx < 0 || assistantMsg.blocks[textBlockIdx]?.type !== 'text') {
-                  textBlockIdx = pushBlock({ type: 'text', content: '' })
-                }
-                ;(assistantMsg.blocks[textBlockIdx] as TextBlock).content += fallback
-              }
-              break
-            }
-          }
-        },
-        () => {
-          assistantMsg.streaming = false
-          streaming.value = false
-          loading.value = false
-          abortFn = null
-          touchChat(cid)
-        },
-        (err) => {
-          if (assistantMsg.blocks.length === 0) {
-            assistantMsg.blocks.push({
-              type: 'text',
-              content: `Failed to send message: ${err.message}`,
-            })
-          }
-          assistantMsg.streaming = false
-          streaming.value = false
-          loading.value = false
-          abortFn = null
-        },
-        attachments,
-      )
+      assistantMsg.streaming = false
+      streaming.value = false
+      loading.value = false
+      abortFn = null
+      touchChat(cid)
     } catch (err) {
+      const isAbort = err instanceof Error && err.name === 'AbortError'
       const reason = err instanceof Error ? err.message : 'Unknown error'
       const last = messages[messages.length - 1]
-      if (last?.role === 'assistant' && last.streaming) {
+      if (!isAbort && last?.role === 'assistant' && last.streaming) {
         last.blocks = [{ type: 'text', content: `Failed to send message: ${reason}` }]
         last.streaming = false
-      } else {
+      } else if (!isAbort) {
         messages.push({
           id: nextId(),
           role: 'assistant',
@@ -796,8 +857,10 @@ export const useChatStore = defineStore('chat', () => {
           streaming: false,
         })
       }
+      pendingAssistantStream = null
       streaming.value = false
       loading.value = false
+      abortFn = null
     }
   }
 

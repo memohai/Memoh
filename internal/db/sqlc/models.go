@@ -150,9 +150,9 @@ type Container struct {
 }
 
 type ContainerVersion struct {
-	ID          string             `json:"id"`
+	ID          pgtype.UUID        `json:"id"`
 	ContainerID string             `json:"container_id"`
-	SnapshotID  string             `json:"snapshot_id"`
+	SnapshotID  pgtype.UUID        `json:"snapshot_id"`
 	Version     int32              `json:"version"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
@@ -250,12 +250,13 @@ type SearchProvider struct {
 }
 
 type Snapshot struct {
-	ID               string             `json:"id"`
-	ContainerID      string             `json:"container_id"`
-	ParentSnapshotID pgtype.Text        `json:"parent_snapshot_id"`
-	Snapshotter      string             `json:"snapshotter"`
-	Digest           pgtype.Text        `json:"digest"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ID                        pgtype.UUID        `json:"id"`
+	ContainerID               string             `json:"container_id"`
+	RuntimeSnapshotName       string             `json:"runtime_snapshot_name"`
+	ParentRuntimeSnapshotName pgtype.Text        `json:"parent_runtime_snapshot_name"`
+	Snapshotter               string             `json:"snapshotter"`
+	Source                    string             `json:"source"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
 }
 
 type StorageProvider struct {

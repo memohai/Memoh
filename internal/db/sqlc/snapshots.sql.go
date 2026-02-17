@@ -11,8 +11,147 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const insertSnapshot = `-- name: InsertSnapshot :exec
-INSERT INTO snapshots (id, container_id, parent_snapshot_id, snapshotter, digest)
+const getSnapshotByContainerAndRuntimeName = `-- name: GetSnapshotByContainerAndRuntimeName :one
+SELECT
+  id,
+  container_id,
+  runtime_snapshot_name,
+  parent_runtime_snapshot_name,
+  snapshotter,
+  source,
+  created_at
+FROM snapshots
+WHERE container_id = $1
+  AND runtime_snapshot_name = $2
+LIMIT 1
+`
+
+type GetSnapshotByContainerAndRuntimeNameParams struct {
+	ContainerID         string `json:"container_id"`
+	RuntimeSnapshotName string `json:"runtime_snapshot_name"`
+}
+
+func (q *Queries) GetSnapshotByContainerAndRuntimeName(ctx context.Context, arg GetSnapshotByContainerAndRuntimeNameParams) (Snapshot, error) {
+	row := q.db.QueryRow(ctx, getSnapshotByContainerAndRuntimeName, arg.ContainerID, arg.RuntimeSnapshotName)
+	var i Snapshot
+	err := row.Scan(
+		&i.ID,
+		&i.ContainerID,
+		&i.RuntimeSnapshotName,
+		&i.ParentRuntimeSnapshotName,
+		&i.Snapshotter,
+		&i.Source,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listSnapshotsByContainerID = `-- name: ListSnapshotsByContainerID :many
+SELECT
+  id,
+  container_id,
+  runtime_snapshot_name,
+  parent_runtime_snapshot_name,
+  snapshotter,
+  source,
+  created_at
+FROM snapshots
+WHERE container_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListSnapshotsByContainerID(ctx context.Context, containerID string) ([]Snapshot, error) {
+	rows, err := q.db.Query(ctx, listSnapshotsByContainerID, containerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Snapshot
+	for rows.Next() {
+		var i Snapshot
+		if err := rows.Scan(
+			&i.ID,
+			&i.ContainerID,
+			&i.RuntimeSnapshotName,
+			&i.ParentRuntimeSnapshotName,
+			&i.Snapshotter,
+			&i.Source,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSnapshotsWithVersionByContainerID = `-- name: ListSnapshotsWithVersionByContainerID :many
+SELECT
+  s.id,
+  s.container_id,
+  s.runtime_snapshot_name,
+  s.parent_runtime_snapshot_name,
+  s.snapshotter,
+  s.source,
+  s.created_at,
+  cv.version
+FROM snapshots s
+LEFT JOIN container_versions cv ON cv.snapshot_id = s.id
+WHERE s.container_id = $1
+ORDER BY s.created_at DESC
+`
+
+type ListSnapshotsWithVersionByContainerIDRow struct {
+	ID                        pgtype.UUID        `json:"id"`
+	ContainerID               string             `json:"container_id"`
+	RuntimeSnapshotName       string             `json:"runtime_snapshot_name"`
+	ParentRuntimeSnapshotName pgtype.Text        `json:"parent_runtime_snapshot_name"`
+	Snapshotter               string             `json:"snapshotter"`
+	Source                    string             `json:"source"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	Version                   pgtype.Int4        `json:"version"`
+}
+
+func (q *Queries) ListSnapshotsWithVersionByContainerID(ctx context.Context, containerID string) ([]ListSnapshotsWithVersionByContainerIDRow, error) {
+	rows, err := q.db.Query(ctx, listSnapshotsWithVersionByContainerID, containerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSnapshotsWithVersionByContainerIDRow
+	for rows.Next() {
+		var i ListSnapshotsWithVersionByContainerIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ContainerID,
+			&i.RuntimeSnapshotName,
+			&i.ParentRuntimeSnapshotName,
+			&i.Snapshotter,
+			&i.Source,
+			&i.CreatedAt,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const upsertSnapshot = `-- name: UpsertSnapshot :one
+INSERT INTO snapshots (
+  container_id,
+  runtime_snapshot_name,
+  parent_runtime_snapshot_name,
+  snapshotter,
+  source
+)
 VALUES (
   $1,
   $2,
@@ -20,24 +159,39 @@ VALUES (
   $4,
   $5
 )
-ON CONFLICT (id) DO NOTHING
+ON CONFLICT (container_id, runtime_snapshot_name) DO UPDATE
+SET
+  parent_runtime_snapshot_name = EXCLUDED.parent_runtime_snapshot_name,
+  snapshotter = EXCLUDED.snapshotter,
+  source = EXCLUDED.source
+RETURNING id, container_id, runtime_snapshot_name, parent_runtime_snapshot_name, snapshotter, source, created_at
 `
 
-type InsertSnapshotParams struct {
-	ID               string      `json:"id"`
-	ContainerID      string      `json:"container_id"`
-	ParentSnapshotID pgtype.Text `json:"parent_snapshot_id"`
-	Snapshotter      string      `json:"snapshotter"`
-	Digest           pgtype.Text `json:"digest"`
+type UpsertSnapshotParams struct {
+	ContainerID               string      `json:"container_id"`
+	RuntimeSnapshotName       string      `json:"runtime_snapshot_name"`
+	ParentRuntimeSnapshotName pgtype.Text `json:"parent_runtime_snapshot_name"`
+	Snapshotter               string      `json:"snapshotter"`
+	Source                    string      `json:"source"`
 }
 
-func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) error {
-	_, err := q.db.Exec(ctx, insertSnapshot,
-		arg.ID,
+func (q *Queries) UpsertSnapshot(ctx context.Context, arg UpsertSnapshotParams) (Snapshot, error) {
+	row := q.db.QueryRow(ctx, upsertSnapshot,
 		arg.ContainerID,
-		arg.ParentSnapshotID,
+		arg.RuntimeSnapshotName,
+		arg.ParentRuntimeSnapshotName,
 		arg.Snapshotter,
-		arg.Digest,
+		arg.Source,
 	)
-	return err
+	var i Snapshot
+	err := row.Scan(
+		&i.ID,
+		&i.ContainerID,
+		&i.RuntimeSnapshotName,
+		&i.ParentRuntimeSnapshotName,
+		&i.Snapshotter,
+		&i.Source,
+		&i.CreatedAt,
+	)
+	return i, err
 }
