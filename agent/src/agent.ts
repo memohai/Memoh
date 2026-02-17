@@ -124,7 +124,6 @@ export const createAgent = (
     }
   }
 
-<<<<<<< HEAD
   const prepareInputWithMCPImageBase64 = async (
     input: AgentInput,
   ): Promise<AgentInput> => {
@@ -203,7 +202,7 @@ export const createAgent = (
     )
     return { ...input, attachments }
   }
-  
+
   const generateSystemPrompt = async (turnContext?: string) => {
     const { identityContent, soulContent, toolsContent } =
       await loadSystemFiles()
@@ -299,27 +298,12 @@ export const createAgent = (
       date: new Date(),
       attachments: allFiles,
     })
-<<<<<<< HEAD
+    const text = user(input.query)
     const imageParts: ImagePart[] = nativeImages
       .map((image) => {
         const img = image as ImageAttachment
         if (img.base64) {
           return { type: 'image', image: img.base64 } as ImagePart
-=======
-    const text = user(input.query)
-    const imageParts: ImagePart[] = nativeImages.map((image) => {
-      const img = image as ImageAttachment
-      if (img.base64) {
-        return { type: 'image', image: img.base64 } as ImagePart
-      }
-      if (img.path) {
-        try {
-          const data = readFileSync(img.path)
-          const mime = img.mime || 'image/png'
-          return { type: 'image', image: `data:${mime};base64,${data.toString('base64')}` } as ImagePart
-        } catch {
-          return { type: 'image', image: '' } as ImagePart
->>>>>>> 756e93e (refactor(agent): move user identity headers to system prompt and sanitize input)
         }
         if (img.url) {
           return { type: 'image', image: img.url } as ImagePart
@@ -335,18 +319,11 @@ export const createAgent = (
   }
 
   const ask = async (input: AgentInput) => {
-<<<<<<< HEAD
     const preparedInput = await prepareInputWithMCPImageBase64(input)
-    const userPrompt = generateUserPrompt(preparedInput)
-    const messages = [...preparedInput.messages, userPrompt]
+    const { turnContext, userMessage } = generateUserTurn(preparedInput)
+    const messages = [...preparedInput.messages, userMessage]
     preparedInput.skills.forEach((skill) => enableSkill(skill))
-    const systemPrompt = await generateSystemPrompt()
-=======
-    const { turnContext, userMessage } = generateUserTurn(input)
-    const messages = [...input.messages, userMessage]
-    input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt(turnContext)
->>>>>>> 756e93e (refactor(agent): move user identity headers to system prompt and sanitize input)
     const { tools, close } = await getAgentTools()
     const { response, reasoning, text, usage } = await generateText({
       model,
@@ -483,18 +460,11 @@ export const createAgent = (
   }
 
   async function* stream(input: AgentInput): AsyncGenerator<AgentAction> {
-<<<<<<< HEAD
     const preparedInput = await prepareInputWithMCPImageBase64(input)
-    const userPrompt = generateUserPrompt(preparedInput)
-    const messages = [...preparedInput.messages, userPrompt]
+    const { turnContext, userMessage } = generateUserTurn(preparedInput)
+    const messages = [...preparedInput.messages, userMessage]
     preparedInput.skills.forEach((skill) => enableSkill(skill))
-    const systemPrompt = await generateSystemPrompt()
-=======
-    const { turnContext, userMessage } = generateUserTurn(input)
-    const messages = [...input.messages, userMessage]
-    input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt(turnContext)
->>>>>>> 756e93e (refactor(agent): move user identity headers to system prompt and sanitize input)
     const attachmentsExtractor = new AttachmentsStreamExtractor()
     const result: {
       messages: ModelMessage[];
