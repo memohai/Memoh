@@ -170,25 +170,25 @@ func TestPostTriggerSchedule_GatewayError(t *testing.T) {
 }
 
 type fakeGatewayAssetLoader struct {
-	openFn func(ctx context.Context, assetID string) (io.ReadCloser, string, string, error)
+	openFn func(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error)
 }
 
-func (f *fakeGatewayAssetLoader) OpenForGateway(ctx context.Context, assetID string) (io.ReadCloser, string, string, error) {
+func (f *fakeGatewayAssetLoader) OpenForGateway(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error) {
 	if f == nil || f.openFn == nil {
-		return nil, "", "", io.EOF
+		return nil, "", io.EOF
 	}
-	return f.openFn(ctx, assetID)
+	return f.openFn(ctx, botID, contentHash)
 }
 
 func TestPrepareGatewayAttachments_InlineAssetToBase64(t *testing.T) {
 	resolver := &Resolver{
 		logger: slog.Default(),
 		assetLoader: &fakeGatewayAssetLoader{
-			openFn: func(ctx context.Context, assetID string) (io.ReadCloser, string, string, error) {
-				if assetID != "asset-1" {
-					t.Fatalf("unexpected asset id: %s", assetID)
+			openFn: func(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error) {
+				if contentHash != "asset-1" {
+					t.Fatalf("unexpected content hash: %s", contentHash)
 				}
-				return io.NopCloser(strings.NewReader("image-binary")), "bot-1", "image/png", nil
+				return io.NopCloser(strings.NewReader("image-binary")), "image/png", nil
 			},
 		},
 	}
@@ -197,7 +197,7 @@ func TestPrepareGatewayAttachments_InlineAssetToBase64(t *testing.T) {
 		Attachments: []conversation.ChatAttachment{
 			{
 				Type:    "image",
-				AssetID: "asset-1",
+				ContentHash: "asset-1",
 			},
 		},
 	}
@@ -312,8 +312,8 @@ func TestPrepareGatewayAttachments_DetectsImageMimeWhenOctetStream(t *testing.T)
 	resolver := &Resolver{
 		logger: slog.Default(),
 		assetLoader: &fakeGatewayAssetLoader{
-			openFn: func(ctx context.Context, assetID string) (io.ReadCloser, string, string, error) {
-				return io.NopCloser(bytes.NewReader(jpegBytes)), "bot-1", "application/octet-stream", nil
+			openFn: func(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error) {
+				return io.NopCloser(bytes.NewReader(jpegBytes)), "application/octet-stream", nil
 			},
 		},
 	}
@@ -322,7 +322,7 @@ func TestPrepareGatewayAttachments_DetectsImageMimeWhenOctetStream(t *testing.T)
 		Attachments: []conversation.ChatAttachment{
 			{
 				Type:    "image",
-				AssetID: "asset-2",
+				ContentHash: "asset-2",
 			},
 		},
 	}
@@ -395,5 +395,32 @@ func TestEncodeReaderAsDataURL_RejectsOversizedPayload(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "asset too large to inline") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestOutboundAssetRefsToMessageRefs(t *testing.T) {
+	t.Parallel()
+	refs := []conversation.OutboundAssetRef{
+		{ContentHash: "a1", Role: "attachment", Ordinal: 0},
+		{ContentHash: "", Role: "attachment", Ordinal: 1},
+		{ContentHash: "a2", Ordinal: 2},
+	}
+	result := outboundAssetRefsToMessageRefs(refs)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 refs, got %d", len(result))
+	}
+	if result[0].ContentHash != "a1" || result[0].Role != "attachment" {
+		t.Fatalf("unexpected ref[0]: %+v", result[0])
+	}
+	if result[1].ContentHash != "a2" || result[1].Role != "attachment" {
+		t.Fatalf("unexpected ref[1]: %+v", result[1])
+	}
+}
+
+func TestOutboundAssetRefsToMessageRefs_Empty(t *testing.T) {
+	t.Parallel()
+	result := outboundAssetRefsToMessageRefs(nil)
+	if result != nil {
+		t.Fatalf("expected nil, got %v", result)
 	}
 }

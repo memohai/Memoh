@@ -5355,14 +5355,14 @@ const docTemplate = `{
         "channel.Attachment": {
             "type": "object",
             "properties": {
-                "asset_id": {
-                    "type": "string"
-                },
                 "base64": {
                     "description": "data URL for agent delivery",
                     "type": "string"
                 },
                 "caption": {
+                    "type": "string"
+                },
+                "content_hash": {
                     "type": "string"
                 },
                 "duration_ms": {
@@ -6726,16 +6726,7 @@ const docTemplate = `{
         "message.MessageAsset": {
             "type": "object",
             "properties": {
-                "asset_id": {
-                    "type": "string"
-                },
-                "duration_ms": {
-                    "type": "integer"
-                },
-                "height": {
-                    "type": "integer"
-                },
-                "media_type": {
+                "content_hash": {
                     "type": "string"
                 },
                 "mime": {
@@ -6743,9 +6734,6 @@ const docTemplate = `{
                 },
                 "ordinal": {
                     "type": "integer"
-                },
-                "original_name": {
-                    "type": "string"
                 },
                 "role": {
                     "type": "string"
@@ -6755,9 +6743,6 @@ const docTemplate = `{
                 },
                 "storage_key": {
                     "type": "string"
-                },
-                "width": {
-                    "type": "integer"
                 }
             }
         },

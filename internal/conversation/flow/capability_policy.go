@@ -21,16 +21,16 @@ var attachmentModality = map[string]string{
 }
 
 // gatewayAttachment is the strict server-to-gateway attachment contract.
-// It is provider-ready and does not rely on runtime path guessing in gateway.
+// ContentHash is the content reference (replaces legacy assetId).
 type gatewayAttachment struct {
-	AssetID   string         `json:"assetId,omitempty"`
-	Type      string         `json:"type"`
-	Mime      string         `json:"mime,omitempty"`
-	Size      int64          `json:"size,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	Transport string         `json:"transport"`
-	Payload   string         `json:"payload"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
+	ContentHash string         `json:"contentHash,omitempty"`
+	Type        string         `json:"type"`
+	Mime        string         `json:"mime,omitempty"`
+	Size        int64          `json:"size,omitempty"`
+	Name        string         `json:"name,omitempty"`
+	Transport   string         `json:"transport"`
+	Payload     string         `json:"payload"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 
 	// FallbackPath is an internal helper only used by server-side routing.
 	FallbackPath string `json:"-"`

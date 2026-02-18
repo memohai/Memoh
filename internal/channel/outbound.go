@@ -377,18 +377,18 @@ func normalizeAttachmentRefs(attachments []Attachment, defaultPlatform ChannelTy
 		item := att
 		item.URL = strings.TrimSpace(item.URL)
 		item.PlatformKey = strings.TrimSpace(item.PlatformKey)
-		item.AssetID = strings.TrimSpace(item.AssetID)
+		item.ContentHash = strings.TrimSpace(item.ContentHash)
 		item.SourcePlatform = strings.TrimSpace(item.SourcePlatform)
 		if item.SourcePlatform == "" && item.PlatformKey != "" {
 			item.SourcePlatform = defaultPlatform.String()
 		}
-		if item.URL == "" && item.PlatformKey == "" && item.AssetID == "" {
+		if item.URL == "" && item.PlatformKey == "" && item.ContentHash == "" {
 			return nil, fmt.Errorf("attachment reference is required")
 		}
-		// asset_id-only attachments require media resolution before dispatch.
+		// content_hash-only attachments require media resolution before dispatch.
 		// Adapters expect url or platform_key; fail loudly if neither is available.
-		if item.URL == "" && item.PlatformKey == "" && item.AssetID != "" {
-			return nil, fmt.Errorf("attachment %s has asset_id but no sendable url or platform_key; media resolution required before dispatch", item.AssetID)
+		if item.URL == "" && item.PlatformKey == "" && item.ContentHash != "" {
+			return nil, fmt.Errorf("attachment %s has content_hash but no sendable url or platform_key; media resolution required before dispatch", item.ContentHash)
 		}
 		normalized = append(normalized, item)
 	}

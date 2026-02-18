@@ -138,12 +138,12 @@ export type ChannelAction = {
 };
 
 export type ChannelAttachment = {
-    asset_id?: string;
     /**
      * data URL for agent delivery
      */
     base64?: string;
     caption?: string;
+    content_hash?: string;
     duration_ms?: number;
     height?: number;
     metadata?: {
@@ -686,17 +686,12 @@ export type MessageMessage = {
 };
 
 export type MessageMessageAsset = {
-    asset_id?: string;
-    duration_ms?: number;
-    height?: number;
-    media_type?: string;
+    content_hash?: string;
     mime?: string;
     ordinal?: number;
-    original_name?: string;
     role?: string;
     size_bytes?: number;
     storage_key?: string;
-    width?: number;
 };
 
 export type ModelsAddRequest = {

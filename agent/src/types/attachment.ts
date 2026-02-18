@@ -4,7 +4,7 @@ export type GatewayAttachmentTransport =
   | 'tool_file_ref'
 
 export interface GatewayInputAttachment {
-  assetId?: string
+  contentHash?: string
   type: string
   mime?: string
   size?: number
@@ -19,7 +19,7 @@ export interface BaseAgentAttachment {
   url?: string
   name?: string
   mime?: string
-  asset_id?: string
+  content_hash?: string
   metadata?: Record<string, unknown>
 }
 

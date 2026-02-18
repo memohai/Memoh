@@ -130,18 +130,23 @@ export const useChatStore = defineStore('chat', () => {
 
   // ---- Message adapter: convert server Message to ChatMessage ----
 
+  function mediaTypeFromMime(mime: string): string {
+    const m = (mime || '').toLowerCase().trim()
+    if (m.startsWith('image/')) return 'image'
+    if (m.startsWith('audio/')) return 'audio'
+    if (m.startsWith('video/')) return 'video'
+    return 'file'
+  }
+
   function buildAssetBlocks(raw: Message): AttachmentBlock[] {
     if (!raw.assets?.length) return []
     const items: Array<Record<string, unknown>> = raw.assets.map((a) => ({
-      type: a.media_type,
-      asset_id: a.asset_id,
+      type: mediaTypeFromMime(a.mime),
+      content_hash: a.content_hash,
       bot_id: raw.bot_id,
       mime: a.mime,
       size: a.size_bytes,
-      name: a.original_name ?? '',
       storage_key: a.storage_key,
-      width: a.width,
-      height: a.height,
     }))
     return [{ type: 'attachment', attachments: items }]
   }
@@ -297,6 +302,14 @@ export const useChatStore = defineStore('chat', () => {
     return senderUserId === currentUserId
   }
 
+  function resolveCrossChannelIsSelf(senderUserId: string): boolean {
+    if (!senderUserId) return false
+    const userStore = useUserStore()
+    const currentUserId = (userStore.userInfo.id ?? '').trim()
+    if (!currentUserId) return false
+    return senderUserId === currentUserId
+  }
+
   // ---- Abort ----
 
   function abort() {
@@ -363,6 +376,83 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function handleLocalStreamEvent(event: StreamEvent) {
+    // Cross-channel events arrive without a pending session. Detect them via
+    // source_channel metadata injected by the RouteHubBroadcaster.
+    const meta = (event as Record<string, unknown>).metadata as Record<string, unknown> | undefined
+    const sourceChannel = meta?.source_channel as string | undefined
+    const isCrossChannel = !!sourceChannel
+
+    // Cross-channel user message (the inbound message from Telegram/Feishu user).
+    if (isCrossChannel && (event.type ?? '').toLowerCase() === 'final' && meta?.role === 'user') {
+      const finalPayload = (event as Record<string, unknown>).final as Record<string, unknown> | undefined
+      const msg = finalPayload?.message as Record<string, unknown> | undefined
+      if (msg) {
+        const text = String(msg.text ?? '').trim()
+        const msgMeta = (msg.metadata as Record<string, unknown> | undefined)
+        const senderName = (msgMeta?.sender_display_name as string) ?? sourceChannel
+        const senderUserId = String(meta?.sender_user_id ?? '').trim()
+        const blocks: ContentBlock[] = []
+        if (text) blocks.push({ type: 'text', content: text })
+        const rawAtts = (msg.attachments ?? msg.Attachments) as Array<Record<string, unknown>> | undefined
+        if (Array.isArray(rawAtts) && rawAtts.length > 0) {
+          const items = rawAtts.map((a) => ({
+            type: mediaTypeFromMime(String(a.mime ?? '')),
+            content_hash: String(a.content_hash ?? ''),
+            bot_id: currentBotId.value ?? '',
+            mime: String(a.mime ?? ''),
+            size: Number(a.size ?? 0),
+            storage_key: String((a.metadata as Record<string, unknown> | undefined)?.storage_key ?? ''),
+          }))
+          blocks.push({ type: 'attachment', attachments: items })
+        }
+        if (blocks.length > 0) {
+          messages.push({
+            id: nextId(),
+            role: 'user',
+            blocks,
+            timestamp: new Date(),
+            streaming: false,
+            isSelf: resolveCrossChannelIsSelf(senderUserId),
+            platform: sourceChannel,
+            senderDisplayName: senderName,
+          })
+        }
+      }
+      return
+    }
+
+    // Cross-channel assistant events: auto-create a session when none exists.
+    if (isCrossChannel && !pendingAssistantStream) {
+      const type = (event.type ?? '').toLowerCase()
+      // Only start a session for events that carry actual content.
+      if (type === 'delta' || type === 'text_delta' || type === 'text_start'
+        || type === 'reasoning_start' || type === 'reasoning_delta'
+        || type === 'tool_call_start' || type === 'attachment_delta'
+        || type === 'status' || type === 'processing_started') {
+        messages.push({
+          id: nextId(),
+          role: 'assistant',
+          blocks: [],
+          timestamp: new Date(),
+          streaming: true,
+          platform: sourceChannel,
+        })
+        // IMPORTANT: get the reactive proxy from the array, not the plain object.
+        // Vue 3 wraps pushed objects in a Proxy; using the original ref bypasses reactivity.
+        const reactiveMsg = messages[messages.length - 1]!
+        pendingAssistantStream = {
+          assistantMsg: reactiveMsg,
+          textBlockIdx: -1,
+          thinkingBlockIdx: -1,
+          done: false,
+          resolve: () => { reactiveMsg.streaming = false },
+          reject: () => { reactiveMsg.streaming = false },
+        }
+      } else {
+        return
+      }
+    }
+
     const session = pendingAssistantStream
     if (!session || session.done) return
 
@@ -450,6 +540,10 @@ export const useChatStore = defineStore('chat', () => {
         }
         break
       }
+      case 'final':
+        // Text and attachments already accumulated via deltas/attachment_delta.
+        // For cross-channel, finalize via processing_completed instead.
+        break
       case 'processing_started':
         if (session.assistantMsg.blocks.length === 0) {
           session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })

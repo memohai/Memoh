@@ -209,12 +209,12 @@ definitions:
     type: object
   channel.Attachment:
     properties:
-      asset_id:
-        type: string
       base64:
         description: data URL for agent delivery
         type: string
       caption:
+        type: string
+      content_hash:
         type: string
       duration_ms:
         type: integer
@@ -1123,28 +1123,18 @@ definitions:
     type: object
   message.MessageAsset:
     properties:
-      asset_id:
-        type: string
-      duration_ms:
-        type: integer
-      height:
-        type: integer
-      media_type:
+      content_hash:
         type: string
       mime:
         type: string
       ordinal:
         type: integer
-      original_name:
-        type: string
       role:
         type: string
       size_bytes:
         type: integer
       storage_key:
         type: string
-      width:
-        type: integer
     type: object
   models.AddRequest:
     properties:

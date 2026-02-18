@@ -54,9 +54,9 @@ type ConversationSettingsReader interface {
 	GetSettings(ctx context.Context, conversationID string) (conversation.Settings, error)
 }
 
-// gatewayAssetLoader resolves asset_id references to binary payloads for gateway dispatch.
+// gatewayAssetLoader resolves content_hash references to binary payloads for gateway dispatch.
 type gatewayAssetLoader interface {
-	OpenForGateway(ctx context.Context, assetID string) (reader io.ReadCloser, botID string, mime string, err error)
+	OpenForGateway(ctx context.Context, botID, contentHash string) (reader io.ReadCloser, mime string, err error)
 }
 
 // Resolver orchestrates chat with the agent gateway.
@@ -157,7 +157,7 @@ type gatewayRequest struct {
 	Messages          []conversation.ModelMessage `json:"messages"`
 	Skills            []string                    `json:"skills"`
 	UsableSkills      []gatewaySkill              `json:"usableSkills"`
-	Query             string                      `json:"query,omitempty"`
+	Query             string                      `json:"query"`
 	Identity          gatewayIdentity             `json:"identity"`
 	Attachments       []any                       `json:"attachments"`
 }
@@ -184,9 +184,28 @@ type gatewaySchedule struct {
 }
 
 // triggerScheduleRequest is the payload for POST /chat/trigger-schedule.
+// It omits "query" from JSON so the trigger-schedule endpoint does not receive it.
 type triggerScheduleRequest struct {
 	gatewayRequest
 	Schedule gatewaySchedule `json:"schedule"`
+}
+
+// MarshalJSON marshals the request without the "query" field for trigger-schedule.
+func (t triggerScheduleRequest) MarshalJSON() ([]byte, error) {
+	type alias struct {
+		gatewayRequest
+		Schedule gatewaySchedule `json:"schedule"`
+	}
+	raw, err := json.Marshal(alias(t))
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	delete(m, "query")
+	return json.Marshal(m)
 }
 
 // --- resolved context (shared by Chat / StreamChat / TriggerSchedule) ---
@@ -635,7 +654,7 @@ func (r *Resolver) routeAndMergeAttachments(ctx context.Context, model models.Ge
 					"drop attachment without fallback path",
 					slog.String("type", strings.TrimSpace(routed.Fallback[i].Type)),
 					slog.String("transport", strings.TrimSpace(routed.Fallback[i].Transport)),
-					slog.String("asset_id", strings.TrimSpace(routed.Fallback[i].AssetID)),
+					slog.String("content_hash", strings.TrimSpace(routed.Fallback[i].ContentHash)),
 					slog.Bool("has_payload", strings.TrimSpace(routed.Fallback[i].Payload) != ""),
 				)
 			}
@@ -685,7 +704,7 @@ func (r *Resolver) prepareGatewayAttachments(ctx context.Context, req conversati
 			}
 		}
 		item := gatewayAttachment{
-			AssetID:      strings.TrimSpace(raw.AssetID),
+			ContentHash:  strings.TrimSpace(raw.ContentHash),
 			Type:         attachmentType,
 			Mime:         strings.TrimSpace(raw.Mime),
 			Size:         raw.Size,
@@ -751,18 +770,18 @@ func (r *Resolver) inlineImageAttachmentAssetIfNeeded(ctx context.Context, botID
 		(item.Transport == gatewayTransportInlineDataURL || item.Transport == gatewayTransportPublicURL) {
 		return item
 	}
-	assetID := strings.TrimSpace(item.AssetID)
-	if assetID == "" {
+	contentHash := strings.TrimSpace(item.ContentHash)
+	if contentHash == "" {
 		return item
 	}
-	dataURL, mime, err := r.inlineAssetAsDataURL(ctx, botID, assetID, item.Type, item.Mime)
+	dataURL, mime, err := r.inlineAssetAsDataURL(ctx, botID, contentHash, item.Type, item.Mime)
 	if err != nil {
 		if r != nil && r.logger != nil {
 			r.logger.Warn(
 				"inline gateway image attachment failed",
 				slog.Any("error", err),
 				slog.String("bot_id", botID),
-				slog.String("asset_id", assetID),
+				slog.String("content_hash", contentHash),
 			)
 		}
 		return item
@@ -775,22 +794,17 @@ func (r *Resolver) inlineImageAttachmentAssetIfNeeded(ctx context.Context, botID
 	return item
 }
 
-func (r *Resolver) inlineAssetAsDataURL(ctx context.Context, botID, assetID, attachmentType, fallbackMime string) (string, string, error) {
+func (r *Resolver) inlineAssetAsDataURL(ctx context.Context, botID, contentHash, attachmentType, fallbackMime string) (string, string, error) {
 	if r == nil || r.assetLoader == nil {
 		return "", "", fmt.Errorf("gateway asset loader not configured")
 	}
-	reader, assetBotID, assetMime, err := r.assetLoader.OpenForGateway(ctx, assetID)
+	reader, assetMime, err := r.assetLoader.OpenForGateway(ctx, botID, contentHash)
 	if err != nil {
 		return "", "", fmt.Errorf("open asset: %w", err)
 	}
 	defer func() {
 		_ = reader.Close()
 	}()
-	if strings.TrimSpace(botID) != "" &&
-		strings.TrimSpace(assetBotID) != "" &&
-		!strings.EqualFold(strings.TrimSpace(botID), strings.TrimSpace(assetBotID)) {
-		return "", "", fmt.Errorf("asset bot mismatch")
-	}
 	mime := strings.TrimSpace(fallbackMime)
 	if mime == "" {
 		mime = strings.TrimSpace(assetMime)
@@ -1146,6 +1160,22 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 	meta := buildRouteMetadata(req)
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
+
+	// Determine the last assistant message index for outbound asset attachment.
+	lastAssistantIdx := -1
+	if req.OutboundAssetCollector != nil {
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role == "assistant" {
+				lastAssistantIdx = i
+				break
+			}
+		}
+	}
+	var outboundAssets []messagepkg.AssetRef
+	if lastAssistantIdx >= 0 {
+		outboundAssets = outboundAssetRefsToMessageRefs(req.OutboundAssetCollector())
+	}
+
 	for i, msg := range messages {
 		content, err := json.Marshal(msg)
 		if err != nil {
@@ -1166,6 +1196,9 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			}
 		} else if strings.TrimSpace(req.ExternalMessageID) != "" {
 			sourceReplyToMessageID = req.ExternalMessageID
+		}
+		if i == lastAssistantIdx && len(outboundAssets) > 0 {
+			assets = append(assets, outboundAssets...)
 		}
 		var msgUsage json.RawMessage
 		if i == len(messages)-1 && len(usage) > 0 {
@@ -1190,23 +1223,59 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 }
 
+// outboundAssetRefsToMessageRefs converts outbound asset refs from the streaming
+// collector into message-level asset refs for persistence.
+func outboundAssetRefsToMessageRefs(refs []conversation.OutboundAssetRef) []messagepkg.AssetRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	result := make([]messagepkg.AssetRef, 0, len(refs))
+	for _, ref := range refs {
+		contentHash := strings.TrimSpace(ref.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		role := ref.Role
+		if strings.TrimSpace(role) == "" {
+			role = "attachment"
+		}
+		result = append(result, messagepkg.AssetRef{
+			ContentHash: contentHash,
+			Role:        role,
+			Ordinal:     ref.Ordinal,
+			Mime:        ref.Mime,
+			SizeBytes:   ref.SizeBytes,
+			StorageKey:  ref.StorageKey,
+		})
+	}
+	return result
+}
+
 // chatAttachmentsToAssetRefs converts ChatAttachment slice to message AssetRef slice.
-// Only attachments that carry an asset_id are included; others have not been ingested yet.
+// Only attachments that carry a content_hash are included.
 func chatAttachmentsToAssetRefs(attachments []conversation.ChatAttachment) []messagepkg.AssetRef {
 	if len(attachments) == 0 {
 		return nil
 	}
 	refs := make([]messagepkg.AssetRef, 0, len(attachments))
 	for i, att := range attachments {
-		id := strings.TrimSpace(att.AssetID)
-		if id == "" {
+		contentHash := strings.TrimSpace(att.ContentHash)
+		if contentHash == "" {
 			continue
 		}
-		refs = append(refs, messagepkg.AssetRef{
-			AssetID: id,
-			Role:    "attachment",
-			Ordinal: i,
-		})
+		ref := messagepkg.AssetRef{
+			ContentHash: contentHash,
+			Role:        "attachment",
+			Ordinal:     i,
+			Mime:        strings.TrimSpace(att.Mime),
+			SizeBytes:   att.Size,
+		}
+		if att.Metadata != nil {
+			if sk, ok := att.Metadata["storage_key"].(string); ok {
+				ref.StorageKey = sk
+			}
+		}
+		refs = append(refs, ref)
 	}
 	return refs
 }

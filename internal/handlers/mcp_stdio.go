@@ -6,8 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os/exec"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -171,9 +169,6 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 }
 
 func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context, containerID string, req MCPStdioRequest) (*mcpSession, error) {
-	if runtime.GOOS == "darwin" {
-		return h.startLimaMCPCommandSession(containerID, req)
-	}
 	args := append([]string{strings.TrimSpace(req.Command)}, req.Args...)
 	env := buildEnvPairs(req.Env)
 	execSession, err := h.service.ExecTaskStreaming(ctx, containerID, ctr.ExecTaskRequest{
@@ -298,89 +293,6 @@ func extractToolNames(payload map[string]any) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func (h *ContainerdHandler) startLimaMCPCommandSession(containerID string, req MCPStdioRequest) (*mcpSession, error) {
-	execID := fmt.Sprintf("mcp-stdio-%d", time.Now().UnixNano())
-	cmdline := buildShellCommand(req)
-	cmd := exec.Command(
-		"limactl",
-		"shell",
-		"--tty=false",
-		"default",
-		"--",
-		"sudo",
-		"-n",
-		"ctr",
-		"-n",
-		"default",
-		"tasks",
-		"exec",
-		"--exec-id",
-		execID,
-		containerID,
-		"/bin/sh",
-		"-lc",
-		cmdline,
-	)
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		_ = stderr.Close()
-		return nil, err
-	}
-
-	sess := &mcpSession{
-		stdin:   stdin,
-		stdout:  stdout,
-		stderr:  stderr,
-		cmd:     cmd,
-		pending: make(map[string]chan *sdkjsonrpc.Response),
-		closed:  make(chan struct{}),
-	}
-	transport := &sdkmcp.IOTransport{
-		Reader: sess.stdout,
-		Writer: sess.stdin,
-	}
-	conn, err := transport.Connect(context.Background())
-	if err != nil {
-		sess.closeWithError(err)
-		return nil, err
-	}
-	sess.conn = conn
-
-	h.startMCPStderrLogger(stderr, containerID)
-	go sess.readLoop()
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			if isBenignMCPSessionExit(err) {
-				sess.closeWithError(io.EOF)
-				return
-			}
-			h.logger.Error("mcp stdio session exited", slog.Any("error", err), slog.String("container_id", containerID))
-			sess.closeWithError(err)
-			return
-		}
-		sess.closeWithError(io.EOF)
-	}()
-
-	return sess, nil
 }
 
 func buildShellCommand(req MCPStdioRequest) string {

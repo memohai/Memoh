@@ -9,7 +9,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-memoh123}
     volumes:
       - postgres_data:/var/lib/postgresql
-      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+      - ./docker/initdb.d:/docker-entrypoint-initdb.d:ro
+      - ./db/migrations:/migrations:ro
     expose:
       - "5432"
     healthcheck:
@@ -38,21 +39,6 @@ services:
     networks:
       - memoh-network
 
-  containerd:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.containerd
-    container_name: memoh-containerd
-    privileged: true
-    pid: host
-    volumes:
-      - containerd_sock:/run/containerd
-      - containerd_data:/var/lib/containerd
-      - memoh_data:/opt/memoh/data
-    restart: unless-stopped
-    networks:
-      - memoh-network
-
   server:
     build:
       context: .
@@ -62,27 +48,19 @@ services:
         - COMMIT_HASH=${MEMOH_COMMIT:-unknown}
         - BUILD_TIME=${MEMOH_BUILD_TIME:-unknown}
     container_name: memoh-server
+    privileged: true
     pid: host
     volumes:
       - ${MEMOH_CONFIG:-./docker/config/config.docker.toml}:/app/config.toml:ro
-      - containerd_sock:/run/containerd
       - containerd_data:/var/lib/containerd
       - server_cni_state:/var/lib/cni
       - memoh_data:/opt/memoh/data
-    cap_add:
-      - SYS_ADMIN
-      - NET_ADMIN
-    security_opt:
-      - seccomp:unconfined
-      - apparmor:unconfined
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
-      containerd:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -124,8 +102,6 @@ volumes:
   postgres_data:
     driver: local
   qdrant_data:
-    driver: local
-  containerd_sock:
     driver: local
   containerd_data:
     driver: local

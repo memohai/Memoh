@@ -48,14 +48,15 @@ if ! $PSQL_CMD -c "SELECT 1;" > /dev/null 2>&1; then
     exit 1
 fi
 
-for migration_file in "$MIGRATIONS_DIR"/*.up.sql; do
-    if [ -f "$migration_file" ]; then
+# Run migrations in numeric order (0001, 0002, ... 0008).
+while IFS= read -r migration_file; do
+    if [ -n "$migration_file" ] && [ -f "$migration_file" ]; then
         if ! $PSQL_CMD -f "$migration_file" > /dev/null 2>&1; then
             echo -e "${RED}Error: Migration failed - $(basename "$migration_file")${NC}"
             exit 1
         fi
     fi
-done
+done < <(ls -1 "$MIGRATIONS_DIR"/*.up.sql 2>/dev/null | sort)
 
 echo -e "${GREEN}✓ Database migration completed${NC}"
 

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,26 +50,6 @@ func main() {
 
 func buildMCPCommand(containerID string) *exec.Cmd {
 	execID := "mcp-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	if runtime.GOOS == "darwin" {
-		return exec.Command(
-			"limactl",
-			"shell",
-			"--tty=false",
-			"default",
-			"--",
-			"sudo",
-			"-n",
-			"ctr",
-			"-n",
-			"default",
-			"tasks",
-			"exec",
-			"--exec-id",
-			execID,
-			containerID,
-			"/mcp",
-		)
-	}
 	return exec.Command(
 		"ctr",
 		"-n",

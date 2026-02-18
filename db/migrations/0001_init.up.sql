@@ -376,39 +376,17 @@ CREATE TABLE IF NOT EXISTS bot_storage_bindings (
 
 CREATE INDEX IF NOT EXISTS idx_bot_storage_bindings_bot_id ON bot_storage_bindings(bot_id);
 
--- media_assets: immutable media objects with dedup by content hash
-CREATE TABLE IF NOT EXISTS media_assets (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  storage_provider_id UUID REFERENCES storage_providers(id) ON DELETE SET NULL,
-  content_hash TEXT NOT NULL,
-  media_type TEXT NOT NULL,
-  mime TEXT NOT NULL DEFAULT 'application/octet-stream',
-  size_bytes BIGINT NOT NULL DEFAULT 0,
-  storage_key TEXT NOT NULL,
-  original_name TEXT,
-  width INTEGER,
-  height INTEGER,
-  duration_ms BIGINT,
-  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT media_assets_bot_hash_unique UNIQUE (bot_id, content_hash)
-);
-
-CREATE INDEX IF NOT EXISTS idx_media_assets_bot_id ON media_assets(bot_id);
-CREATE INDEX IF NOT EXISTS idx_media_assets_content_hash ON media_assets(content_hash);
-
--- bot_history_message_assets: join table linking messages to media assets
+-- bot_history_message_assets: soft link (message -> content_hash only).
+-- MIME, size, storage_key are derived from storage at read time.
 CREATE TABLE IF NOT EXISTS bot_history_message_assets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   message_id UUID NOT NULL REFERENCES bot_history_messages(id) ON DELETE CASCADE,
-  asset_id UUID NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
   role TEXT NOT NULL DEFAULT 'attachment',
   ordinal INTEGER NOT NULL DEFAULT 0,
+  content_hash TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT message_asset_unique UNIQUE (message_id, asset_id)
+  CONSTRAINT message_asset_content_unique UNIQUE (message_id, content_hash)
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_assets_message_id ON bot_history_message_assets(message_id);
-CREATE INDEX IF NOT EXISTS idx_message_assets_asset_id ON bot_history_message_assets(asset_id);
 

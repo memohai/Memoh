@@ -198,11 +198,21 @@ type ChatAttachment struct {
 	Path        string         `json:"path,omitempty"`
 	URL         string         `json:"url,omitempty"`
 	PlatformKey string         `json:"platform_key,omitempty"`
-	AssetID     string         `json:"asset_id,omitempty"`
+	ContentHash string         `json:"content_hash,omitempty"`
 	Name        string         `json:"name,omitempty"`
 	Mime        string         `json:"mime,omitempty"`
 	Size        int64          `json:"size,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// OutboundAssetRef carries an asset reference accumulated during outbound streaming.
+type OutboundAssetRef struct {
+	ContentHash string
+	Role        string
+	Ordinal     int
+	Mime        string
+	SizeBytes   int64
+	StorageKey  string
 }
 
 // ChatRequest is the input for Chat and StreamChat.
@@ -219,6 +229,10 @@ type ChatRequest struct {
 	ExternalMessageID       string `json:"-"`
 	ConversationType        string `json:"-"`
 	UserMessagePersisted    bool   `json:"-"`
+
+	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
+	// Set by the inbound channel processor; called by the resolver at persist time.
+	OutboundAssetCollector func() []OutboundAssetRef `json:"-"`
 
 	Query              string           `json:"query"`
 	Model              string           `json:"model,omitempty"`

@@ -75,12 +75,12 @@ type BotHistoryMessage struct {
 }
 
 type BotHistoryMessageAsset struct {
-	ID        pgtype.UUID        `json:"id"`
-	MessageID pgtype.UUID        `json:"message_id"`
-	AssetID   pgtype.UUID        `json:"asset_id"`
-	Role      string             `json:"role"`
-	Ordinal   int32              `json:"ordinal"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID          pgtype.UUID        `json:"id"`
+	MessageID   pgtype.UUID        `json:"message_id"`
+	Role        string             `json:"role"`
+	Ordinal     int32              `json:"ordinal"`
+	ContentHash string             `json:"content_hash"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type BotMember struct {
@@ -184,23 +184,6 @@ type McpConnection struct {
 	IsActive  bool               `json:"is_active"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-type MediaAsset struct {
-	ID                pgtype.UUID        `json:"id"`
-	BotID             pgtype.UUID        `json:"bot_id"`
-	StorageProviderID pgtype.UUID        `json:"storage_provider_id"`
-	ContentHash       string             `json:"content_hash"`
-	MediaType         string             `json:"media_type"`
-	Mime              string             `json:"mime"`
-	SizeBytes         int64              `json:"size_bytes"`
-	StorageKey        string             `json:"storage_key"`
-	OriginalName      pgtype.Text        `json:"original_name"`
-	Width             pgtype.Int4        `json:"width"`
-	Height            pgtype.Int4        `json:"height"`
-	DurationMs        pgtype.Int8        `json:"duration_ms"`
-	Metadata          []byte             `json:"metadata"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
 type Model struct {

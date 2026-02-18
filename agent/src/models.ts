@@ -42,7 +42,7 @@ export const ScheduleModel = z.object({
 })
 
 export const AttachmentModel = z.object({
-  assetId: z.string().optional(),
+  contentHash: z.string().optional(),
   type: z.string().min(1, 'Attachment type is required'),
   mime: z.string().optional(),
   size: z.number().int().nonnegative().optional(),

@@ -1,11 +1,8 @@
 package containerd
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -21,13 +18,7 @@ func ResolveConfSource(dataDir string) (string, error) {
 	if strings.TrimSpace(dataDir) == "" {
 		return "", ErrInvalidArgument
 	}
-	if runtime.GOOS == "darwin" {
-		if ok, err := limaFileExists(systemdResolvConf); err != nil {
-			return "", err
-		} else if ok {
-			return systemdResolvConf, nil
-		}
-	} else if _, err := os.Stat(systemdResolvConf); err == nil {
+	if _, err := os.Stat(systemdResolvConf); err == nil {
 		return systemdResolvConf, nil
 	}
 
@@ -44,30 +35,4 @@ func ResolveConfSource(dataDir string) (string, error) {
 		return "", err
 	}
 	return fallbackPath, nil
-}
-
-func limaFileExists(path string) (bool, error) {
-	if strings.TrimSpace(path) == "" {
-		return false, ErrInvalidArgument
-	}
-	cmd := exec.Command(
-		"limactl",
-		"shell",
-		"--tty=false",
-		"default",
-		"--",
-		"test",
-		"-f",
-		path,
-	)
-	if err := cmd.Run(); err == nil {
-		return true, nil
-	} else if exitErr, ok := err.(*exec.ExitError); ok {
-		if exitErr.ExitCode() == 1 {
-			return false, nil
-		}
-		return false, fmt.Errorf("lima test failed for %s: %w", path, err)
-	} else {
-		return false, fmt.Errorf("lima test failed for %s: %w", path, err)
-	}
 }

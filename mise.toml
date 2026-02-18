@@ -13,8 +13,6 @@ pnpm = "10"
 sqlc = "latest"
 # typos for spell check
 typos = "latest"
-# Lima for macOS
-lima = { version = "system", platform = "darwin" }
 
 [task_config]
 dir = "{{cwd}}"
@@ -29,16 +27,6 @@ run = "pnpm install"
 [tasks.go-install]
 description = "Install Go dependencies"
 run = "go mod download"
-
-[tasks.lima-up]
-run = "scripts/lima-up.sh"
-
-[tasks.lima-down]
-run = """
-if [ "$(uname -s)" = "Darwin" ]; then
-  limactl stop default
-fi
-"""
 
 [tasks.swagger-generate]
 description = "Generate Swagger documentation"

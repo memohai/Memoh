@@ -50,7 +50,6 @@ import (
 	mcpweb "github.com/memohai/memoh/internal/mcp/providers/web"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
 	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/memory"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
@@ -62,6 +61,7 @@ import (
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/server"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/subagent"
 	"github.com/memohai/memoh/internal/version"
 )
@@ -342,6 +342,7 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 func provideChannelRouter(
 	log *slog.Logger,
 	registry *channel.Registry,
+	hub *local.RouteHub,
 	routeService *route.DBService,
 	msgService *message.DBService,
 	resolver *flow.Resolver,
@@ -355,6 +356,7 @@ func provideChannelRouter(
 ) *inbound.ChannelInboundProcessor {
 	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, botService, policyService, preauthService, bindService, rc.JwtSecret, 5*time.Minute)
 	processor.SetMediaService(mediaService)
+	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
 	return processor
 }
 
@@ -428,7 +430,7 @@ func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, 
 	return h
 }
 
-func provideMediaService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) (*media.Service, error) {
+func provideMediaService(log *slog.Logger, cfg config.Config) (*media.Service, error) {
 	dataRoot := strings.TrimSpace(cfg.MCP.DataRoot)
 	if dataRoot == "" {
 		dataRoot = config.DefaultDataRoot
@@ -437,7 +439,7 @@ func provideMediaService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.C
 	if err != nil {
 		return nil, fmt.Errorf("init media provider: %w", err)
 	}
-	return media.NewService(log, queries, provider), nil
+	return media.NewService(log, provider), nil
 }
 
 func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, identityService *identities.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry) *handlers.UsersHandler {
@@ -721,13 +723,13 @@ type gatewayAssetLoaderAdapter struct {
 	media *media.Service
 }
 
-func (a *gatewayAssetLoaderAdapter) OpenForGateway(ctx context.Context, assetID string) (io.ReadCloser, string, string, error) {
+func (a *gatewayAssetLoaderAdapter) OpenForGateway(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error) {
 	if a == nil || a.media == nil {
-		return nil, "", "", fmt.Errorf("media service not configured")
+		return nil, "", fmt.Errorf("media service not configured")
 	}
-	reader, asset, err := a.media.Open(ctx, assetID)
+	reader, asset, err := a.media.Open(ctx, botID, contentHash)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", err
 	}
-	return reader, strings.TrimSpace(asset.BotID), strings.TrimSpace(asset.Mime), nil
+	return reader, strings.TrimSpace(asset.Mime), nil
 }

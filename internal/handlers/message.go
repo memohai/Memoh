@@ -62,7 +62,7 @@ func (h *MessageHandler) Register(e *echo.Echo) {
 	botGroup.GET("/messages", h.ListMessages)
 	botGroup.GET("/messages/events", h.StreamMessageEvents)
 	botGroup.DELETE("/messages", h.DeleteMessages)
-	botGroup.GET("/media/:asset_id", h.ServeMedia)
+	botGroup.GET("/media/:content_hash", h.ServeMedia)
 }
 
 // --- Messages ---
@@ -158,7 +158,30 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	return c.JSON(http.StatusOK, map[string]any{"items": messages})
+}
+
+// fillAssetMimeFromStorage fills mime, storage_key, size_bytes from storage (soft link: DB only has content_hash).
+func (h *MessageHandler) fillAssetMimeFromStorage(ctx context.Context, botID string, messages []messagepkg.Message) {
+	if h.mediaService == nil {
+		return
+	}
+	for i := range messages {
+		for j := range messages[i].Assets {
+			a := &messages[i].Assets[j]
+			if strings.TrimSpace(a.ContentHash) == "" {
+				continue
+			}
+			asset, err := h.mediaService.Resolve(ctx, botID, a.ContentHash)
+			if err != nil {
+				continue
+			}
+			a.Mime = asset.Mime
+			a.StorageKey = asset.StorageKey
+			a.SizeBytes = asset.SizeBytes
+		}
+	}
 }
 
 func parseBeforeParam(s string) (time.Time, bool) {
@@ -247,6 +270,7 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
+		h.fillAssetMimeFromStorage(c.Request().Context(), botID, backlog)
 		for _, message := range backlog {
 			if err := writeCreatedEvent(message); err != nil {
 				return nil
@@ -283,6 +307,7 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 				h.logger.Warn("decode message event failed", slog.Any("error", err))
 				continue
 			}
+			h.fillAssetMimeFromStorage(c.Request().Context(), botID, []messagepkg.Message{message})
 			if err := writeCreatedEvent(message); err != nil {
 				return nil
 			}
@@ -374,7 +399,7 @@ func (h *MessageHandler) requireReadable(ctx context.Context, conversationID, ch
 	return nil
 }
 
-// ServeMedia streams a media asset by bot_id + asset_id with read-access authorization.
+// ServeMedia streams a media asset by bot_id + content_hash with read-access authorization.
 func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -384,9 +409,9 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	assetID := strings.TrimSpace(c.Param("asset_id"))
-	if assetID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "asset id is required")
+	contentHash := strings.TrimSpace(c.Param("content_hash"))
+	if contentHash == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "content hash is required")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -397,7 +422,7 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	if h.mediaService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "media service not configured")
 	}
-	reader, asset, err := h.mediaService.Open(c.Request().Context(), assetID)
+	reader, asset, err := h.mediaService.Open(c.Request().Context(), botID, contentHash)
 	if err != nil {
 		if errors.Is(err, media.ErrAssetNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "asset not found")
@@ -405,19 +430,12 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	defer reader.Close()
-	// Verify asset belongs to the authorized bot.
-	if strings.TrimSpace(asset.BotID) != botID {
-		return echo.NewHTTPError(http.StatusForbidden, "asset does not belong to bot")
-	}
 	contentType := asset.Mime
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 	c.Response().Header().Set("Content-Type", contentType)
 	c.Response().Header().Set("Cache-Control", "private, max-age=86400")
-	if asset.OriginalName != "" {
-		c.Response().Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", asset.OriginalName))
-	}
 	c.Response().WriteHeader(http.StatusOK)
 	if _, err := io.Copy(c.Response().Writer, reader); err != nil {
 		h.logger.Warn("serve media stream failed", slog.Any("error", err))

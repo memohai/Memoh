@@ -552,7 +552,7 @@ func TestResolveTelegramFile_PlatformKey(t *testing.T) {
 	t.Parallel()
 
 	att := channel.Attachment{Type: channel.AttachmentImage, PlatformKey: "file_id_123"}
-	file, err := resolveTelegramFile("", "file_id_123", "", "", att, "", nil)
+	file, err := resolveTelegramFile("", "file_id_123", "", "", att, "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -565,7 +565,7 @@ func TestResolveTelegramFile_PublicURL(t *testing.T) {
 	t.Parallel()
 
 	att := channel.Attachment{Type: channel.AttachmentImage}
-	file, err := resolveTelegramFile("https://example.com/img.png", "", "", "", att, "", nil)
+	file, err := resolveTelegramFile("https://example.com/img.png", "", "", "", att, "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -579,7 +579,7 @@ func TestResolveTelegramFile_DataURL(t *testing.T) {
 
 	dataURL := "data:image/png;base64,iVBORw0KGgo="
 	att := channel.Attachment{Type: channel.AttachmentImage, Mime: "image/png", Name: "test.png"}
-	file, err := resolveTelegramFile("", "", dataURL, "", att, "", nil)
+	file, err := resolveTelegramFile("", "", dataURL, "", att, "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -599,7 +599,7 @@ func TestResolveTelegramFile_NoReference(t *testing.T) {
 	t.Parallel()
 
 	att := channel.Attachment{Type: channel.AttachmentImage}
-	_, err := resolveTelegramFile("", "", "", "", att, "", nil)
+	_, err := resolveTelegramFile("", "", "", "", att, "", "", nil)
 	if err == nil {
 		t.Fatal("expected error when no reference available")
 	}
@@ -610,7 +610,7 @@ func TestResolveTelegramFile_ContainerPathFallsToBase64(t *testing.T) {
 
 	dataURL := "data:image/jpeg;base64,/9j/4AAQ"
 	att := channel.Attachment{Type: channel.AttachmentImage, Mime: "image/jpeg"}
-	file, err := resolveTelegramFile("/data/media/image/a.jpg", "", dataURL, "", att, "", nil)
+	file, err := resolveTelegramFile("/data/media/image/a.jpg", "", dataURL, "", att, "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -624,16 +624,16 @@ type mockAssetOpener struct {
 	mime string
 }
 
-func (m *mockAssetOpener) Open(_ context.Context, _ string) (io.ReadCloser, media.Asset, error) {
+func (m *mockAssetOpener) Open(_ context.Context, _, _ string) (io.ReadCloser, media.Asset, error) {
 	return io.NopCloser(strings.NewReader(string(m.data))), media.Asset{Mime: m.mime}, nil
 }
 
-func TestResolveTelegramFile_AssetID(t *testing.T) {
+func TestResolveTelegramFile_ContentHash(t *testing.T) {
 	t.Parallel()
 
 	opener := &mockAssetOpener{data: []byte("fake-png-bytes"), mime: "image/png"}
-	att := channel.Attachment{Type: channel.AttachmentImage, AssetID: "asset-123", Name: "output.png"}
-	file, err := resolveTelegramFile("", "", "", "", att, "asset-123", opener)
+	att := channel.Attachment{Type: channel.AttachmentImage, ContentHash: "asset-123", Name: "output.png"}
+	file, err := resolveTelegramFile("", "", "", "", att, "asset-123", "bot-1", opener)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -649,12 +649,12 @@ func TestResolveTelegramFile_AssetID(t *testing.T) {
 	}
 }
 
-func TestResolveTelegramFile_AssetIDPriorityOverURL(t *testing.T) {
+func TestResolveTelegramFile_ContentHashPriorityOverURL(t *testing.T) {
 	t.Parallel()
 
 	opener := &mockAssetOpener{data: []byte("from-storage"), mime: "image/jpeg"}
-	att := channel.Attachment{Type: channel.AttachmentImage, AssetID: "a1"}
-	file, err := resolveTelegramFile("https://example.com/fallback.jpg", "", "", "", att, "a1", opener)
+	att := channel.Attachment{Type: channel.AttachmentImage, ContentHash: "a1"}
+	file, err := resolveTelegramFile("https://example.com/fallback.jpg", "", "", "", att, "a1", "bot-1", opener)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -76,17 +76,14 @@ func (p *Provider) Delete(_ context.Context, key string) error {
 }
 
 // AccessPath returns the container-internal path for a storage key.
-// Key format: "<bot_id>/<subpath>" → "/data/media/<subpath>".
+// Routing key format: "<bot_id>/<storage_key>" → "/data/media/<storage_key>".
 func (p *Provider) AccessPath(key string) string {
-	sub := key
-	if idx := strings.IndexByte(sub, '/'); idx >= 0 {
-		sub = sub[idx+1:]
-	}
+	_, sub := splitRoutingKey(key)
 	return containerMediaRoot + "/" + sub
 }
 
-// hostPath converts a storage key into the host-side file path.
-// Key format: "<bot_id>/<subpath>" → "<dataRoot>/bots/<bot_id>/media/<subpath>".
+// hostPath converts a routing key into the host-side file path.
+// Routing key format: "<bot_id>/<storage_key>" → "<dataRoot>/bots/<bot_id>/media/<storage_key>".
 func (p *Provider) hostPath(key string) (string, error) {
 	clean := filepath.Clean(key)
 	if filepath.IsAbs(clean) {
@@ -95,12 +92,7 @@ func (p *Provider) hostPath(key string) (string, error) {
 	if strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
 		return "", fmt.Errorf("path traversal is forbidden: %s", key)
 	}
-	idx := strings.IndexByte(clean, filepath.Separator)
-	if idx <= 0 {
-		return "", fmt.Errorf("storage key must contain bot_id prefix: %s", key)
-	}
-	botID := clean[:idx]
-	subPath := clean[idx+1:]
+	botID, subPath := splitRoutingKey(clean)
 	if strings.TrimSpace(botID) == "" || strings.TrimSpace(subPath) == "" {
 		return "", fmt.Errorf("invalid storage key: %s", key)
 	}
@@ -109,4 +101,13 @@ func (p *Provider) hostPath(key string) (string, error) {
 		return "", fmt.Errorf("path escapes data root: %s", key)
 	}
 	return joined, nil
+}
+
+// splitRoutingKey splits a routing key "<bot_id>/<storage_key>" into its parts.
+func splitRoutingKey(key string) (botID, storageKey string) {
+	idx := strings.IndexByte(key, filepath.Separator)
+	if idx <= 0 {
+		return "", key
+	}
+	return key[:idx], key[idx+1:]
 }

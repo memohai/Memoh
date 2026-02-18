@@ -157,8 +157,7 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 
 ### Container Management
 
-- macOS development requires running containerd via Lima (see `.github/CONTRIBUTING.md`).
-- In Docker deployment, containerd runs as a standalone service.
+- In Docker deployment, containerd runs inside the server container.
 - Each bot has its own isolated container instance.
 
 ## Database Tables

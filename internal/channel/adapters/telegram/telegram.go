@@ -23,9 +23,9 @@ import (
 
 const telegramMaxMessageLength = 4096
 
-// assetOpener reads stored asset bytes by ID.
+// assetOpener reads stored asset bytes by content hash.
 type assetOpener interface {
-	Open(ctx context.Context, assetID string) (io.ReadCloser, media.Asset, error)
+	Open(ctx context.Context, botID, contentHash string) (io.ReadCloser, media.Asset, error)
 }
 
 // TelegramAdapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Telegram.
@@ -534,14 +534,20 @@ func sendTelegramAttachmentImpl(_ context.Context, bot *tgbotapi.BotAPI, target 
 	keyRef := strings.TrimSpace(att.PlatformKey)
 	sourcePlatform := strings.TrimSpace(att.SourcePlatform)
 	base64Ref := strings.TrimSpace(att.Base64)
-	assetID := strings.TrimSpace(att.AssetID)
+	assetID := strings.TrimSpace(att.ContentHash)
 	if urlRef == "" && keyRef == "" && base64Ref == "" && assetID == "" {
 		return fmt.Errorf("attachment reference is required")
 	}
 	if strings.TrimSpace(caption) == "" && strings.TrimSpace(att.Caption) != "" {
 		caption = strings.TrimSpace(att.Caption)
 	}
-	file, err := resolveTelegramFile(urlRef, keyRef, base64Ref, sourcePlatform, att, assetID, opener)
+	var botID string
+	if att.Metadata != nil {
+		if bid, ok := att.Metadata["bot_id"].(string); ok {
+			botID = bid
+		}
+	}
+	file, err := resolveTelegramFile(urlRef, keyRef, base64Ref, sourcePlatform, att, assetID, botID, opener)
 	if err != nil {
 		return err
 	}
@@ -642,13 +648,13 @@ func sendTelegramAttachmentImpl(_ context.Context, bot *tgbotapi.BotAPI, target 
 }
 
 // resolveTelegramFile determines the best tgbotapi.RequestFileData for an attachment.
-// Priority: PlatformKey > AssetID (storage) > public URL > base64 data URL.
-func resolveTelegramFile(urlRef, keyRef, base64Ref, sourcePlatform string, att channel.Attachment, assetID string, opener assetOpener) (tgbotapi.RequestFileData, error) {
+// Priority: PlatformKey > ContentHash (storage) > public URL > base64 data URL.
+func resolveTelegramFile(urlRef, keyRef, base64Ref, sourcePlatform string, att channel.Attachment, assetID, botID string, opener assetOpener) (tgbotapi.RequestFileData, error) {
 	if keyRef != "" && (sourcePlatform == "" || strings.EqualFold(sourcePlatform, Type.String())) {
 		return tgbotapi.FileID(keyRef), nil
 	}
-	if assetID != "" && opener != nil {
-		reader, asset, err := opener.Open(context.Background(), assetID)
+	if assetID != "" && botID != "" && opener != nil {
+		reader, asset, err := opener.Open(context.Background(), botID, assetID)
 		if err == nil {
 			data, readErr := io.ReadAll(io.LimitReader(reader, media.MaxAssetBytes+1))
 			_ = reader.Close()

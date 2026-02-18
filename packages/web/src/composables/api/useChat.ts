@@ -19,17 +19,12 @@ export interface ChatSummary {
 }
 
 export interface MessageAsset {
-  asset_id: string
+  content_hash: string
   role: string
   ordinal: number
-  media_type: string
   mime: string
   size_bytes: number
   storage_key: string
-  original_name?: string
-  width?: number
-  height?: number
-  duration_ms?: number
 }
 
 export interface Message {
@@ -162,8 +157,6 @@ const LEGACY_STREAM_EVENT_TYPES = new Set<string>([
   'reasoning_start',
   'reasoning_delta',
   'reasoning_end',
-  'tool_call_start',
-  'tool_call_end',
   'attachment_delta',
   'agent_start',
   'agent_end',
@@ -176,17 +169,29 @@ const LEGACY_STREAM_EVENT_TYPES = new Set<string>([
 function normalizeStreamEvent(raw: Record<string, unknown>): StreamEvent | null {
   const eventType = String(raw.type ?? '').trim().toLowerCase()
   if (!eventType) return null
+
+  // Preserve metadata across all normalization paths so cross-channel
+  // source_channel / role tags survive to the store handler.
+  const metadata = (raw.metadata && typeof raw.metadata === 'object')
+    ? raw.metadata as Record<string, unknown>
+    : undefined
+
+  function withMeta(event: StreamEvent): StreamEvent {
+    if (metadata) (event as Record<string, unknown>).metadata = metadata
+    return event
+  }
+
   if (LEGACY_STREAM_EVENT_TYPES.has(eventType)) {
     return raw as StreamEvent
   }
   switch (eventType) {
     case 'status': {
       const status = String(raw.status ?? '').trim().toLowerCase()
-      if (status === 'started') return { type: 'processing_started' }
-      if (status === 'completed') return { type: 'processing_completed' }
+      if (status === 'started') return withMeta({ type: 'processing_started' })
+      if (status === 'completed') return withMeta({ type: 'processing_completed' })
       if (status === 'failed') {
         const err = String(raw.error ?? '').trim()
-        return { type: 'processing_failed', error: err, message: err }
+        return withMeta({ type: 'processing_failed', error: err, message: err })
       }
       return null
     }
@@ -194,20 +199,20 @@ function normalizeStreamEvent(raw: Record<string, unknown>): StreamEvent | null 
       const delta = String(raw.delta ?? '')
       const phase = String(raw.phase ?? '').trim().toLowerCase()
       if (phase === 'reasoning') {
-        return { type: 'reasoning_delta', delta }
+        return withMeta({ type: 'reasoning_delta', delta })
       }
-      return { type: 'text_delta', delta }
+      return withMeta({ type: 'text_delta', delta })
     }
     case 'phase_start': {
       const phase = String(raw.phase ?? '').trim().toLowerCase()
-      if (phase === 'reasoning') return { type: 'reasoning_start' }
-      if (phase === 'text') return { type: 'text_start' }
+      if (phase === 'reasoning') return withMeta({ type: 'reasoning_start' })
+      if (phase === 'text') return withMeta({ type: 'text_start' })
       return null
     }
     case 'phase_end': {
       const phase = String(raw.phase ?? '').trim().toLowerCase()
-      if (phase === 'reasoning') return { type: 'reasoning_end' }
-      if (phase === 'text') return { type: 'text_end' }
+      if (phase === 'reasoning') return withMeta({ type: 'reasoning_end' })
+      if (phase === 'text') return withMeta({ type: 'text_end' })
       return null
     }
     case 'tool_call_start':
@@ -215,33 +220,38 @@ function normalizeStreamEvent(raw: Record<string, unknown>): StreamEvent | null 
       const toolCall = (raw.tool_call && typeof raw.tool_call === 'object')
         ? raw.tool_call as Record<string, unknown>
         : {}
-      return {
+      return withMeta({
         type: eventType as StreamEvent['type'],
         toolCallId: String(toolCall.call_id ?? ''),
         toolName: String(toolCall.name ?? ''),
         input: toolCall.input,
         result: toolCall.result,
-      }
+      })
     }
     case 'attachment': {
       const attachments = Array.isArray(raw.attachments)
         ? raw.attachments as Array<Record<string, unknown>>
         : []
       if (!attachments.length) return null
-      return { type: 'attachment_delta', attachments }
+      return withMeta({ type: 'attachment_delta', attachments })
+    }
+    case 'final': {
+      // Cross-channel final messages (user inbound or assistant reply).
+      // Pass through the full raw event so the store can extract final.message.
+      return raw as StreamEvent
     }
     case 'processing_started':
     case 'processing_completed':
     case 'agent_start':
     case 'agent_end':
-      return { type: eventType as StreamEvent['type'] }
+      return withMeta({ type: eventType as StreamEvent['type'] })
     case 'processing_failed': {
       const err = String(raw.error ?? raw.message ?? '').trim()
-      return { type: 'processing_failed', error: err, message: err }
+      return withMeta({ type: 'processing_failed', error: err, message: err })
     }
     case 'error': {
       const err = String(raw.error ?? raw.message ?? 'Stream error').trim()
-      return { type: 'error', error: err, message: err }
+      return withMeta({ type: 'error', error: err, message: err })
     }
     default:
       return null
