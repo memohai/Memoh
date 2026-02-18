@@ -1,0 +1,53 @@
+# Memoh development configuration
+# Connects to devenv/docker-compose.yml infrastructure
+
+[log]
+level = "debug"
+format = "text"
+
+[server]
+addr = ":8080"
+
+[admin]
+username = "admin"
+password = "admin123"
+email = "dev@memoh.local"
+
+[auth]
+jwt_secret = "memoh-dev-secret-do-not-use-in-production"
+jwt_expires_in = "168h"
+
+# Containerd is typically not available in local development.
+# Uncomment and configure if you have containerd running locally.
+# [containerd]
+# socket_path = "/run/containerd/containerd.sock"
+# namespace = "default"
+
+# [mcp]
+# image = "docker.io/library/memoh-mcp:dev"
+# snapshotter = "overlayfs"
+# data_root = "data"
+# data_mount = "/data"
+
+[postgres]
+host = "127.0.0.1"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh"
+sslmode = "disable"
+
+[qdrant]
+base_url = "http://127.0.0.1:6334"
+api_key = ""
+collection = "memory"
+timeout_seconds = 10
+
+[agent_gateway]
+host = "127.0.0.1"
+port = 8081
+server_addr = ":8080"
+
+[web]
+host = "127.0.0.1"
+port = 8082

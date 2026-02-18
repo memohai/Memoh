@@ -33,18 +33,20 @@ Memoh is a AI agent system platform. Users can create their own AI bots and chat
 One-click install (**requires [Docker](https://www.docker.com/get-started/)**):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sudo sh
 ```
 
-*Silent install with all defaults: `curl -fsSL ... | sh -s -- -y`*
+*Silent install with all defaults: `curl -fsSL ... | sudo sh -s -- -y`*
 
 Or manually:
 
 ```bash
 git clone --depth 1 https://github.com/memohai/Memoh.git
 cd Memoh
-docker compose up -d
+sudo docker compose up -d
 ```
+
+> On macOS or if your user is in the `docker` group, `sudo` is not required.
 
 Visit <http://localhost:8082> after startup. Default login: `admin` / `admin123`
 

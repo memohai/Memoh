@@ -31,18 +31,20 @@ Memoh 是一个 AI Agent 系统平台。用户可通过 Telegram、Discord、飞
 一键安装（**需先安装 [Docker](https://www.docker.com/get-started/)**）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sudo sh
 ```
 
-*静默安装（全部默认）：`curl -fsSL ... | sh -s -- -y`*
+*静默安装（全部默认）：`curl -fsSL ... | sudo sh -s -- -y`*
 
 或手动部署：
 
 ```bash
 git clone --depth 1 https://github.com/memohai/Memoh.git
 cd Memoh
-docker compose up -d
+sudo docker compose up -d
 ```
+
+> macOS 或用户已在 `docker` 用户组中时，无需 `sudo`。
 
 启动后访问 <http://localhost:8082>。默认登录：`admin` / `admin123`
 

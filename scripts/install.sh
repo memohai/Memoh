@@ -28,13 +28,23 @@ echo "${GREEN}   Memoh One-Click Install${NC}"
 echo "${GREEN}========================================${NC}"
 echo ""
 
-# Check Docker
+# Check Docker and determine if sudo is needed
+DOCKER="docker"
 if ! command -v docker >/dev/null 2>&1; then
     echo "${RED}Error: Docker is not installed${NC}"
     echo "Install Docker first: https://docs.docker.com/get-docker/"
     exit 1
 fi
-if ! docker compose version >/dev/null 2>&1; then
+if ! docker info >/dev/null 2>&1; then
+    if sudo docker info >/dev/null 2>&1; then
+        DOCKER="sudo docker"
+    else
+        echo "${RED}Error: Cannot connect to Docker daemon${NC}"
+        echo "Try: sudo usermod -aG docker \$USER && newgrp docker"
+        exit 1
+    fi
+fi
+if ! $DOCKER compose version >/dev/null 2>&1; then
     echo "${RED}Error: Docker Compose v2 is required${NC}"
     echo "Install: https://docs.docker.com/compose/install/"
     exit 1
@@ -122,7 +132,7 @@ else
 fi
 
 # Generate config.toml from template
-cp docker/config/config.docker.toml config.toml
+cp conf/app.docker.toml config.toml
 sed -i.bak "s|username = \"admin\"|username = \"${ADMIN_USER}\"|" config.toml
 sed -i.bak "s|password = \"admin123\"|password = \"${ADMIN_PASS}\"|" config.toml
 sed -i.bak "s|jwt_secret = \".*\"|jwt_secret = \"${JWT_SECRET}\"|" config.toml
@@ -138,7 +148,7 @@ mkdir -p "$MEMOH_DATA_DIR"
 
 echo ""
 echo "${GREEN}Starting services (first build may take a few minutes)...${NC}"
-docker compose up -d --build
+$DOCKER compose up -d --build
 
 echo ""
 echo "${GREEN}========================================${NC}"
@@ -152,8 +162,8 @@ echo ""
 echo "  Admin login:     ${ADMIN_USER} / ${ADMIN_PASS}"
 echo ""
 echo "Commands:"
-echo "  cd ${INSTALL_DIR} && docker compose ps       # Status"
-echo "  cd ${INSTALL_DIR} && docker compose logs -f   # Logs"
-echo "  cd ${INSTALL_DIR} && docker compose down      # Stop"
+echo "  cd ${INSTALL_DIR} && $DOCKER compose ps       # Status"
+echo "  cd ${INSTALL_DIR} && $DOCKER compose logs -f   # Logs"
+echo "  cd ${INSTALL_DIR} && $DOCKER compose down      # Stop"
 echo ""
 echo "${YELLOW}First startup may take 1-2 minutes, please be patient.${NC}"

@@ -9,7 +9,21 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/memohai/memoh/internal/config"
 )
+
+// DSN builds a PostgreSQL connection string from config.
+func DSN(cfg config.PostgresConfig) string {
+	return fmt.Sprintf(
+		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		cfg.User,
+		cfg.Password,
+		cfg.Host,
+		cfg.Port,
+		cfg.Database,
+		cfg.SSLMode,
+	)
+}
 
 // ParseUUID converts a string UUID to pgtype.UUID.
 func ParseUUID(id string) (pgtype.UUID, error) {

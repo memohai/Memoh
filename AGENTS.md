@@ -74,11 +74,12 @@ Memoh/
 ├── db/                         # Database
 │   ├── migrations/             #   SQL migration files
 │   └── queries/                #   SQL query files (sqlc input)
-├── docker/                     # Docker configuration
+├── conf/                       # Configuration templates (app.example.toml, app.dev.toml, app.docker.toml)
+├── devenv/                     # Development environment (docker-compose for local infra)
+├── docker/                     # Docker build & runtime (Dockerfiles, entrypoints, nginx.conf)
 ├── docs/                       # Documentation site
 ├── scripts/                    # Utility scripts
-├── config.toml.example         # Configuration template
-├── docker-compose.yml          # Docker Compose orchestration
+├── docker-compose.yml          # Docker Compose orchestration (production)
 ├── mise.toml                   # mise tasks and tool version definitions
 └── sqlc.yaml                   # sqlc code generation config
 ```
@@ -90,8 +91,7 @@ Memoh/
 1. Install [mise](https://mise.jdx.dev/)
 2. Install toolchains and dependencies: `mise install`
 3. Initialize the project: `mise run setup`
-4. Copy the config file: `cp config.toml.example config.toml` and edit as needed
-5. Start the dev environment: `mise run dev`
+4. Start the dev environment: `mise run dev`
 
 ### Common Commands
 
@@ -182,7 +182,7 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 
 ## Configuration
 
-The main configuration file is `config.toml` (copied from `config.toml.example`), containing:
+The main configuration file is `config.toml` (copied from `conf/app.example.toml` or `conf/app.dev.toml` for development), containing:
 
 - `[server]` — HTTP listen address
 - `[admin]` — Admin account credentials

@@ -13,7 +13,7 @@ Docker is the recommended way to run Memoh. The stack includes PostgreSQL, Qdran
 Run the official install script (requires Docker and Docker Compose):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sudo sh
 ```
 
 The script will:
@@ -27,7 +27,7 @@ The script will:
 **Silent install** (use all defaults, no prompts):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sh -s -- -y
+curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sudo sh -s -- -y
 ```
 
 Defaults when running silently:
@@ -45,10 +45,12 @@ Clone the repository and start with Docker Compose:
 ```bash
 git clone https://github.com/memohai/Memoh.git
 cd Memoh
-docker compose up -d
+sudo docker compose up -d
 ```
 
-By default, Docker Compose uses `docker/config/config.docker.toml`. No config file in the project root is mounted — only this built-in config is used. See [config.toml reference](./config-toml) for all configuration fields.
+> On macOS or if your user is in the `docker` group, `sudo` is not required.
+
+By default, Docker Compose uses `conf/app.docker.toml`. No config file in the project root is mounted — only this built-in config is used. See [config.toml reference](./config-toml) for all configuration fields.
 
 ## Access Points
 
@@ -71,14 +73,14 @@ To use your own config file:
 1. Copy the Docker config template and edit it. See [config.toml reference](./config-toml) for field descriptions:
 
 ```bash
-cp docker/config/config.docker.toml config.toml
+cp conf/app.docker.toml config.toml
 nano config.toml
 ```
 
 2. Point `MEMOH_CONFIG` at your config when starting (path is on the host; run `docker compose` from the project root):
 
 ```bash
-MEMOH_CONFIG=./config.toml docker compose up -d
+sudo MEMOH_CONFIG=./config.toml docker compose up -d
 ```
 
 **Recommended changes for production** (see [config.toml reference](./config-toml) for details):
@@ -88,6 +90,8 @@ MEMOH_CONFIG=./config.toml docker compose up -d
 - `postgres.password` — Change the database password (and set `POSTGRES_PASSWORD` when running `docker compose`)
 
 ## Common Commands
+
+> Prefix with `sudo` on Linux if your user is not in the `docker` group.
 
 ```bash
 docker compose up -d           # Start

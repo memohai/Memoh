@@ -1,55 +1,48 @@
 # Contributing Guide
 
-## Mise
+## Prerequisites
 
-You need to install mise first.
+- [Docker](https://docs.docker.com/get-docker/) (for dev infrastructure)
+- [mise](https://mise.jdx.dev/) (task runner & toolchain manager)
 
-### Linux/macOS
+### Install mise
 
 ```bash
+# macOS / Linux
 curl https://mise.run | sh
-```
-
-Or use homebrew:
-
-```bash
+# or
 brew install mise
-```
 
-### Windows
-
-```bash
+# Windows
 winget install jdx.mise
 ```
 
-## Initialize
-
-Install toolchains and dependencies:
+## Quick Start
 
 ```bash
-mise install
+mise install       # Install toolchains (Go, Node, Bun, pnpm, sqlc)
+mise run setup     # Start infra + copy config + migrate DB + install deps
+mise run dev       # Start server + agent + web (all hot-reload)
 ```
 
-Setup project:
+That's it. `setup` handles everything automatically:
+1. Copies `conf/app.dev.toml` → `config.toml` (if not exists)
+2. Starts PostgreSQL + Qdrant via `devenv/docker-compose.yml`
+3. Runs database migrations
+4. Installs Go/Node/pnpm dependencies
+
+## Daily Development
 
 ```bash
-mise run setup
+mise run dev       # Start all services with hot-reload
 ```
 
-## Configure
-
-Copy config.toml.example to config.toml and configure:
+## Infrastructure
 
 ```bash
-cp config.toml.example config.toml
-```
-
-## Development
-
-Start development environment:
-
-```bash
-mise run dev
+mise run infra        # Start dev postgres + qdrant
+mise run infra-down   # Stop dev infrastructure
+mise run infra-logs   # View infrastructure logs
 ```
 
 ## More Commands
@@ -57,15 +50,28 @@ mise run dev
 | Command | Description |
 | ------- | ----------- |
 | `mise run dev` | Start development environment |
-| `mise run setup` | Setup development environment |
-| `mise run db-up` | Initialize and Migrate Database |
-| `mise run db-down` | Drop Database |
+| `mise run setup` | Full setup (infra + config + migrate + deps) |
+| `mise run infra` | Start dev infrastructure only |
+| `mise run infra-down` | Stop dev infrastructure |
+| `mise run db-up` | Run database migrations |
+| `mise run db-down` | Roll back database migrations |
 | `mise run swagger-generate` | Generate Swagger documentation |
+| `mise run sdk-generate` | Generate TypeScript SDK |
 | `mise run sqlc-generate` | Generate SQL code |
-| `mise run pnpm-install` | Install dependencies |
-| `mise run go-install` | Install Go dependencies |
-| `mise run //agent:dev` | Start agent gateway development server |
-| `mise run //cmd/agent:start` | Start main server |
-| `mise run //packages/web:dev` | Start web development server |
-| `mise run //packages/web:build` | Build web |
-| `mise run //packages/web:start` | Start web preview |
+| `mise run //agent:dev` | Start agent gateway only |
+| `mise run //cmd/agent:start` | Start main server only |
+| `mise run //packages/web:dev` | Start web dev server only |
+
+## Project Layout
+
+```
+conf/       — Configuration templates (app.example.toml, app.dev.toml, app.docker.toml)
+devenv/     — Development infrastructure (docker-compose for postgres + qdrant)
+docker/     — Production Docker build & runtime (Dockerfiles, entrypoints)
+cmd/        — Go application entry points
+internal/   — Go backend core code
+agent/      — Agent Gateway (Bun/Elysia)
+packages/   — Frontend monorepo (web, ui, sdk, cli, config)
+db/         — Database migrations and queries
+scripts/    — Utility scripts
+```

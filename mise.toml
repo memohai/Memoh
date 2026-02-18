@@ -41,6 +41,18 @@ depends = ["//:swagger-generate"]
 description = "Generate SQL code"
 run = "sqlc generate"
 
+[tasks.infra]
+description = "Start dev infrastructure (postgres + qdrant)"
+run = "docker compose -f devenv/docker-compose.yml up -d"
+
+[tasks.infra-down]
+description = "Stop dev infrastructure"
+run = "docker compose -f devenv/docker-compose.yml down"
+
+[tasks.infra-logs]
+description = "View dev infrastructure logs"
+run = "docker compose -f devenv/docker-compose.yml logs -f"
+
 [tasks.db-up]
 description = "Initialize and Migrate Database"
 run = "scripts/db-up.sh"
@@ -57,15 +69,6 @@ run = "pnpm release"
 description = "Install CLI"
 depends = ["//:pnpm-install"]
 run = "cd packages/cli && npm install -g"
-
-[tasks.build-cli]
-description = "Build Go CLI binary and install to local bin"
-run = """
-mkdir -p ~/.local/bin
-go build -trimpath -ldflags "-s -w" -o ~/.local/bin/memoh-cli ./cmd/cli
-chmod +x ~/.local/bin/memoh-cli
-echo "✓ CLI binary installed to ~/.local/bin/memoh-cli"
-"""
 
 [tasks.compile-mcp]
 description = "Build MCP binary into /app and signal container"
@@ -85,10 +88,33 @@ depends = [
 description = "Setup development environment"
 depends = [
   "//:sqlc-generate",
-  "//:db-up",
   "//:pnpm-install",
   "//:go-install",
   "//:install-cli",
 ]
-run = "echo '✓ Setup complete! Next: Copy config.toml.example to config.toml and configure, then run: mise run dev'"
+run = """
+#!/bin/bash
+set -e
+
+# Auto-copy dev config if config.toml doesn't exist
+if [ ! -f config.toml ]; then
+  cp conf/app.dev.toml config.toml
+  echo '✓ Copied conf/app.dev.toml → config.toml'
+fi
+
+# Start dev infrastructure
+docker compose -f devenv/docker-compose.yml up -d
+
+# Wait for postgres to be healthy
+echo 'Waiting for postgres...'
+until docker compose -f devenv/docker-compose.yml exec -T postgres pg_isready -U memoh >/dev/null 2>&1; do
+  sleep 1
+done
+echo '✓ Postgres ready'
+
+# Run migrations
+scripts/db-up.sh
+
+echo '✓ Setup complete! Run: mise run dev'
+"""
 

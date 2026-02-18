@@ -47,7 +47,7 @@ docker exec memoh-containerd ctr -n default containers rm mcp-<bot-id>
 docker compose restart server
 ```
 
-> **Note**: If you also run the server locally (outside Docker), keep the Docker config (`docker/config/config.docker.toml`) separate from your local `config.toml`, and update `docker-compose.yml` to mount the Docker-specific config instead.
+> **Note**: If you also run the server locally (outside Docker), keep the Docker config (`conf/app.docker.toml`) separate from your local `config.toml`, and update `docker-compose.yml` to mount the Docker-specific config instead.
 
 ## MCP Container: Image update not taking effect after rebuild
 

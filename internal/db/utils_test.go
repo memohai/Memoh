@@ -8,7 +8,23 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/memohai/memoh/internal/config"
 )
+
+func TestDSN(t *testing.T) {
+	cfg := config.PostgresConfig{
+		Host:     "localhost",
+		Port:     5432,
+		User:     "memoh",
+		Password: "secret",
+		Database: "memoh",
+		SSLMode:  "disable",
+	}
+	want := "postgres://memoh:secret@localhost:5432/memoh?sslmode=disable"
+	if got := DSN(cfg); got != want {
+		t.Errorf("DSN() = %q, want %q", got, want)
+	}
+}
 
 func TestParseUUID(t *testing.T) {
 	validUUID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")

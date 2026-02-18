@@ -57,7 +57,7 @@ echo "containerd is ready, starting memoh-server..."
 # ---- Start server (foreground, trap signals for graceful shutdown) ----
 trap 'echo "Shutting down..."; kill $SERVER_PID 2>/dev/null; kill $CONTAINERD_PID 2>/dev/null; wait' TERM INT
 
-/app/memoh-server &
+/app/memoh-server serve &
 SERVER_PID=$!
 
 wait $SERVER_PID
