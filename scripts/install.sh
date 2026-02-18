@@ -7,9 +7,10 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 REPO="https://github.com/memohai/Memoh.git"
-BRANCH="main"
+REPO_API="https://api.github.com/repos/memohai/Memoh"
 DIR="Memoh"
 SILENT=false
+MEMOH_VERSION="${MEMOH_VERSION:-latest}"
 
 # Parse flags
 for arg in "$@"; do
@@ -50,6 +51,26 @@ if ! $DOCKER compose version >/dev/null 2>&1; then
     exit 1
 fi
 echo "${GREEN}✓ Docker and Docker Compose detected${NC}"
+echo ""
+
+# Resolve MEMOH_VERSION: if empty or "latest", fetch the latest release tag from GitHub
+if [ -z "$MEMOH_VERSION" ] || [ "$MEMOH_VERSION" = "latest" ]; then
+  echo "Fetching latest release version from GitHub..."
+  if command -v curl >/dev/null 2>&1; then
+    MEMOH_VERSION=$(curl -fsSL "$REPO_API/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+  elif command -v wget >/dev/null 2>&1; then
+    MEMOH_VERSION=$(wget -qO- "$REPO_API/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+  else
+    echo "${RED}Error: curl or wget is required to fetch the latest version${NC}"
+    exit 1
+  fi
+  if [ -z "$MEMOH_VERSION" ]; then
+    echo "${RED}Error: Failed to fetch latest release version from GitHub${NC}"
+    echo "You can set MEMOH_VERSION manually, e.g.: MEMOH_VERSION=v1.0.0 sh install.sh"
+    exit 1
+  fi
+fi
+echo "${GREEN}✓ Version: ${MEMOH_VERSION}${NC}"
 echo ""
 
 # Generate random JWT secret
@@ -120,14 +141,15 @@ fi
 mkdir -p "$WORKSPACE"
 cd "$WORKSPACE"
 
-# Clone or update
+# Clone or update to the target version tag
 if [ -d "$DIR" ]; then
-    echo "Updating existing installation in $WORKSPACE..."
+    echo "Updating existing installation in $WORKSPACE to ${MEMOH_VERSION}..."
     cd "$DIR"
-    git pull --ff-only 2>/dev/null || true
+    git fetch --tags --depth 1 origin "refs/tags/${MEMOH_VERSION}:refs/tags/${MEMOH_VERSION}" 2>/dev/null || git fetch --tags --depth 1 origin
+    git checkout "${MEMOH_VERSION}" 2>/dev/null || { echo "${RED}Error: Tag ${MEMOH_VERSION} not found${NC}"; exit 1; }
 else
-    echo "Cloning Memoh into $WORKSPACE..."
-    git clone --depth 1 -b "$BRANCH" "$REPO" "$DIR"
+    echo "Cloning Memoh (${MEMOH_VERSION}) into $WORKSPACE..."
+    git clone --depth 1 -b "$MEMOH_VERSION" "$REPO" "$DIR"
     cd "$DIR"
 fi
 
