@@ -27,8 +27,10 @@ import {
   dedupeAttachments,
   AttachmentsStreamExtractor,
 } from './utils/attachments'
-import type { ContainerFileAttachment, ImageAttachment } from './types/attachment'
-import { readFileSync } from 'fs'
+import type {
+  ContainerFileAttachment,
+  ImageAttachment,
+} from './types/attachment'
 import { getMCPTools } from './tools/mcp'
 import { getTools } from './tools'
 import { buildIdentityHeaders } from './utils/headers'
@@ -121,6 +123,82 @@ export const createAgent = (
     }
   }
 
+  const prepareInputWithMCPImageBase64 = async (
+    input: AgentInput,
+  ): Promise<AgentInput> => {
+    if (!auth?.bearer || !identity.botId) {
+      return input
+    }
+    const url = `${auth.baseUrl.replace(/\/$/, '')}/bots/${identity.botId}/tools`
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      Authorization: `Bearer ${auth.bearer}`,
+    }
+    if (identity.channelIdentityId) {
+      headers['X-Memoh-Channel-Identity-Id'] = identity.channelIdentityId
+    }
+    if (identity.sessionToken) {
+      headers['X-Memoh-Session-Token'] = identity.sessionToken
+    }
+    if (identity.currentPlatform) {
+      headers['X-Memoh-Current-Platform'] = identity.currentPlatform
+    }
+    const attachments = await Promise.all(
+      input.attachments.map(async (attachment) => {
+        if (attachment.type !== 'image') {
+          return attachment
+        }
+        const image = attachment as ImageAttachment
+        if (typeof image.base64 === 'string' && image.base64.trim() !== '') {
+          return image
+        }
+        const path = String(image.path ?? '').trim()
+        if (!path) {
+          return image
+        }
+        const quotedPath = `'${path.replace(/'/g, '\'\\\'\'')}'`
+        const command = `base64 ${quotedPath} | tr -d '\\n'`
+        const body = JSON.stringify({
+          jsonrpc: '2.0',
+          id: `read-image-${quotedPath}`,
+          method: 'tools/call',
+          params: {
+            name: 'exec',
+            arguments: { command },
+          },
+        })
+        try {
+          const response = await fetch(url, { method: 'POST', headers, body })
+          if (!response.ok) {
+            return image
+          }
+          const payload = await response.json().catch(() => ({}))
+          const structured = payload?.result?.structuredContent
+          const execResult = (
+            structured && typeof structured === 'object' ? structured : null
+          ) as { stdout?: unknown; exit_code?: unknown } | null
+          const exitCode = Number(execResult?.exit_code ?? 1)
+          const stdout =
+            typeof execResult?.stdout === 'string'
+              ? execResult.stdout.trim()
+              : ''
+          if (exitCode !== 0 || stdout === '') {
+            return image
+          }
+          const mime = String(image.mime ?? '').trim() || 'image/png'
+          return {
+            ...image,
+            base64: `data:${mime};base64,${stdout}`,
+          }
+        } catch {
+          return image
+        }
+      }),
+    )
+    return { ...input, attachments }
+  }
+
   const generateSystemPrompt = async () => {
     const { identityContent, soulContent, toolsContent } =
       await loadSystemFiles()
@@ -154,14 +232,23 @@ export const createAgent = (
         name: 'builtin',
         url: `${baseUrl}/bots/${botId}/tools`,
         headers,
-      }
+      },
     ]
-    const { tools: mcpTools, close: closeMCP } = await getMCPTools([...builtins, ...mcpConnections], {
-      auth,
+    const { tools: mcpTools, close: closeMCP } = await getMCPTools(
+      [...builtins, ...mcpConnections],
+      {
+        auth,
+        fetch,
+        botId,
+      },
+    )
+    const tools = getTools(allowedActions, {
       fetch,
-      botId,
+      model: modelConfig,
+      identity,
+      auth,
+      enableSkill,
     })
-    const tools = getTools(allowedActions, { fetch, model: modelConfig, identity, auth, enableSkill })
     return {
       tools: { ...mcpTools, ...tools } as ToolSet,
       close: closeMCP,
@@ -185,52 +272,48 @@ export const createAgent = (
           .filter((a) => a.type === 'image')
           .map((a) => ({
             type: 'file' as const,
-            path: String((a as ImageAttachment).path || a.metadata?.path || '[image]'),
+            path: String(
+              (a as ImageAttachment).path || a.metadata?.path || '[image]',
+            ),
             metadata: a.metadata,
           }))
-    const allFiles: ContainerFileAttachment[] = [...fallbackFiles, ...unsupportedImages]
+    const allFiles: ContainerFileAttachment[] = [
+      ...fallbackFiles,
+      ...unsupportedImages,
+    ]
 
     const text = user(input.query, {
-      channelIdentityId: identity.channelIdentityId || identity.contactId || '',
-      displayName: identity.displayName || identity.contactName || 'User',
+      channelIdentityId: identity.channelIdentityId || '',
+      displayName: identity.displayName || 'User',
       channel: currentChannel,
       conversationType: identity.conversationType || 'direct',
       date: new Date(),
       attachments: allFiles,
     })
-    const imageParts: ImagePart[] = nativeImages.map((image) => {
-      const img = image as ImageAttachment
-      if (img.base64) {
-        return { type: 'image', image: img.base64 } as ImagePart
-      }
-      if (img.path) {
-        try {
-          const data = readFileSync(img.path)
-          const mime = img.mime || 'image/png'
-          return { type: 'image', image: `data:${mime};base64,${data.toString('base64')}` } as ImagePart
-        } catch {
-          return { type: 'image', image: '' } as ImagePart
+    const imageParts: ImagePart[] = nativeImages
+      .map((image) => {
+        const img = image as ImageAttachment
+        if (img.base64) {
+          return { type: 'image', image: img.base64 } as ImagePart
         }
-      }
-      if (img.url) {
-        return { type: 'image', image: img.url } as ImagePart
-      }
-      return { type: 'image', image: '' } as ImagePart
-    }).filter((p) => p.image !== '')
+        if (img.url) {
+          return { type: 'image', image: img.url } as ImagePart
+        }
+        return { type: 'image', image: '' } as ImagePart
+      })
+      .filter((p) => p.image !== '')
     const userMessage: UserModelMessage = {
       role: 'user',
-      content: [
-        { type: 'text', text },
-        ...imageParts,
-      ],
+      content: [{ type: 'text', text }, ...imageParts],
     }
     return userMessage
   }
 
   const ask = async (input: AgentInput) => {
-    const userPrompt = generateUserPrompt(input)
-    const messages = [...input.messages, userPrompt]
-    input.skills.forEach((skill) => enableSkill(skill))
+    const preparedInput = await prepareInputWithMCPImageBase64(input)
+    const userPrompt = generateUserPrompt(preparedInput)
+    const messages = [...preparedInput.messages, userPrompt]
+    preparedInput.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
     const { tools, close } = await getAgentTools()
     const { response, reasoning, text, usage } = await generateText({
@@ -368,9 +451,10 @@ export const createAgent = (
   }
 
   async function* stream(input: AgentInput): AsyncGenerator<AgentAction> {
-    const userPrompt = generateUserPrompt(input)
-    const messages = [...input.messages, userPrompt]
-    input.skills.forEach((skill) => enableSkill(skill))
+    const preparedInput = await prepareInputWithMCPImageBase64(input)
+    const userPrompt = generateUserPrompt(preparedInput)
+    const messages = [...preparedInput.messages, userPrompt]
+    preparedInput.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
     const attachmentsExtractor = new AttachmentsStreamExtractor()
     const result: {
@@ -496,11 +580,13 @@ export const createAgent = (
         case 'file':
           yield {
             type: 'attachment_delta',
-            attachments: [{
-              type: 'image',
-              url: `data:${chunk.file.mediaType ?? 'image/png'};base64,${chunk.file.base64}`,
-              mime: chunk.file.mediaType ?? 'image/png',
-            }],
+            attachments: [
+              {
+                type: 'image',
+                url: `data:${chunk.file.mediaType ?? 'image/png'};base64,${chunk.file.base64}`,
+                mime: chunk.file.mediaType ?? 'image/png',
+              },
+            ],
           }
       }
     }

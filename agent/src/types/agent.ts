@@ -6,18 +6,10 @@ import { MCPConnection } from './mcp'
 export interface IdentityContext {
   botId: string
   containerId: string
-
   channelIdentityId: string
   displayName: string
-
-  contactId?: string
-  contactName?: string
-  contactAlias?: string
-  userId?: string
-
   currentPlatform?: string
   conversationType?: string
-  replyTarget?: string
   sessionToken?: string
 }
 

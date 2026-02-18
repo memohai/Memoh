@@ -28,13 +28,8 @@ export const IdentityContextModel = z.object({
   containerId: z.string().min(1, 'Container ID is required'),
   channelIdentityId: z.string().min(1, 'Channel identity ID is required'),
   displayName: z.string().min(1, 'Display name is required'),
-  contactId: z.string().optional(),
-  contactName: z.string().optional(),
-  contactAlias: z.string().optional(),
-  userId: z.string().optional(),
   currentPlatform: z.string().optional(),
   conversationType: z.string().optional(),
-  replyTarget: z.string().optional(),
   sessionToken: z.string().optional(),
 })
 

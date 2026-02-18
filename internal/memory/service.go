@@ -51,6 +51,7 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (SearchResponse, erro
 
 	messages := normalizeMessages(req)
 	filters := buildFilters(req)
+	ctx = WithBotID(ctx, resolveBotID(req.BotID, filters))
 
 	embeddingEnabled := req.EmbeddingEnabled != nil && *req.EmbeddingEnabled
 	if req.Infer != nil && !*req.Infer {
@@ -142,6 +143,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 		return SearchResponse{}, fmt.Errorf("qdrant store not configured")
 	}
 	filters := buildSearchFilters(req)
+	ctx = WithBotID(ctx, resolveBotID(req.BotID, filters))
 	modality := ""
 	if raw, ok := filters["modality"].(string); ok {
 		modality = strings.ToLower(strings.TrimSpace(raw))
@@ -359,6 +361,7 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (MemoryItem, er
 	if existing == nil {
 		return MemoryItem{}, fmt.Errorf("memory not found")
 	}
+	ctx = WithBotID(ctx, resolveBotID("", existing.Payload))
 
 	payload := existing.Payload
 	oldText := fmt.Sprint(payload["data"])
@@ -530,6 +533,7 @@ func (s *Service) Compact(ctx context.Context, filters map[string]any, ratio flo
 	if ratio <= 0 || ratio > 1 {
 		ratio = 0.5
 	}
+	ctx = WithBotID(ctx, resolveBotID("", filters))
 
 	// Fetch all existing memories.
 	points, err := s.store.List(ctx, 0, filters, false)
@@ -1005,6 +1009,24 @@ func buildFilters(req AddRequest) map[string]any {
 		filters["run_id"] = req.RunID
 	}
 	return filters
+}
+
+func resolveBotID(explicitBotID string, filters map[string]any) string {
+	if botID := strings.TrimSpace(explicitBotID); botID != "" {
+		return botID
+	}
+	if len(filters) == 0 {
+		return ""
+	}
+	if raw, ok := filters["bot_id"].(string); ok {
+		if botID := strings.TrimSpace(raw); botID != "" {
+			return botID
+		}
+	}
+	if raw, ok := filters["scopeId"].(string); ok {
+		return strings.TrimSpace(raw)
+	}
+	return ""
 }
 
 func buildSearchFilters(req SearchRequest) map[string]any {

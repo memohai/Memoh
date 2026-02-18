@@ -13,8 +13,5 @@ export const buildIdentityHeaders = (identity: IdentityContext, auth: AgentAuthC
   if (identity.currentPlatform) {
     headers['X-Memoh-Current-Platform'] = identity.currentPlatform
   }
-  if (identity.replyTarget) {
-    headers['X-Memoh-Reply-Target'] = identity.replyTarget
-  }
   return headers
 }
