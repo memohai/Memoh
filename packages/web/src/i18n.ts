@@ -6,7 +6,7 @@ import { computed } from 'vue'
 export type Locale = 'en' | 'zh'
 
 const i18n = createI18n<typeof en | typeof zh, Locale>({
-  locale: 'zh',
+  locale: 'en',
   legacy: false,
   fallbackLocale: 'en',
   messages: {

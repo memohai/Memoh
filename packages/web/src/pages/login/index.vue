@@ -1,10 +1,33 @@
 <template>
-  <section class="w-screen h-screen flex *:m-auto bg-linear-to-t from-[#BFA4A0] to-[#7784AC] ">
+  <section class="w-screen h-screen flex *:m-auto bg-background relative">
+    <div class="absolute top-6 right-6 flex items-center gap-2">
+      <Select
+        :model-value="language"
+        @update:model-value="(v) => v && setLanguage(v as Locale)"
+      >
+        <SelectTrigger class="w-28 h-9">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value="en">English</SelectItem>
+            <SelectItem value="zh">中文</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <Button
+        variant="ghost"
+        size="icon"
+        @click="toggleTheme"
+      >
+        <Sun v-if="theme === 'dark'" class="size-5" />
+        <Moon v-else class="size-5" />
+      </Button>
+    </div>
     <section class="w-full max-w-sm flex flex-col gap-10 ">
       <section>
         <h3
-          class="scroll-m-20 text-3xl tracking-wide font-semibold  text-white text-center"
-          style="font-family: 'Source Han Serif CN', 'Noto Serif SC', 'STSong', 'SimSun', serif;"
+          class="scroll-m-20 text-3xl tracking-wide font-semibold text-foreground text-center"
         >
           {{ $t('auth.welcome') }}
         </h3>
@@ -96,19 +119,36 @@ import {
   FormItem,
   Label,
   Spinner,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@memoh/ui'
+import { Sun, Moon } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import * as z from 'zod'
 import { useUserStore } from '@/store/user'
+import { useSettingsStore } from '@/store/settings'
 import { ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { postAuthLogin } from '@memoh/sdk'
+import type { Locale } from '@/i18n'
 
 const router = useRouter()
 const { t } = useI18n()
+const settingsStore = useSettingsStore()
+const { theme, language } = storeToRefs(settingsStore)
+const { setLanguage, setTheme } = settingsStore
+
+const toggleTheme = () => {
+  setTheme(theme.value === 'light' ? 'dark' : 'light')
+}
 
 const formSchema = toTypedSchema(z.object({
   username: z.string().min(1),

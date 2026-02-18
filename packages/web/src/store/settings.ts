@@ -11,7 +11,7 @@ export interface Settings {
 export const useSettingsStore = defineStore('settings', () => {
   const colorMode = useColorMode()
   const i18n = useI18n()
-  const language = useStorage<Locale>('language', 'zh')
+  const language = useStorage<Locale>('language', 'en')
   const theme = useStorage<'light' | 'dark'>('theme', 'light')
 
   colorMode.value = theme.value

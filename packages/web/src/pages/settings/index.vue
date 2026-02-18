@@ -23,6 +23,78 @@
         </div>
       </div>
 
+      <!-- Display Settings -->
+      <section>
+        <h6 class="mb-2 flex items-center">
+          <FontAwesomeIcon
+            :icon="['fas', 'gear']"
+            class="mr-2"
+          />
+          {{ $t('settings.display') }}
+        </h6>
+        <Separator />
+        <div class="mt-4 space-y-4">
+          <div class="flex items-center justify-between">
+            <Label>{{ $t('settings.language') }}</Label>
+            <Select
+              :model-value="language"
+              @update:model-value="(v) => v && setLanguage(v as Locale)"
+            >
+              <SelectTrigger class="w-40">
+                <SelectValue :placeholder="$t('settings.languagePlaceholder')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="zh">
+                    {{ $t('settings.langZh') }}
+                  </SelectItem>
+                  <SelectItem value="en">
+                    {{ $t('settings.langEn') }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          <Separator />
+          <div class="flex items-center justify-between">
+            <Label>{{ $t('settings.theme') }}</Label>
+            <Select
+              :model-value="theme"
+              @update:model-value="(v) => v && setTheme(v as 'light' | 'dark')"
+            >
+              <SelectTrigger class="w-40">
+                <SelectValue :placeholder="$t('settings.themePlaceholder')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="light">
+                    {{ $t('settings.themeLight') }}
+                  </SelectItem>
+                  <SelectItem value="dark">
+                    {{ $t('settings.themeDark') }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Logout -->
+      <section>
+        <Separator class="mb-4" />
+        <ConfirmPopover
+          :message="$t('auth.logoutConfirm')"
+          @confirm="onLogout"
+        >
+          <template #trigger>
+            <Button>
+              {{ $t('auth.logout') }}
+            </Button>
+          </template>
+        </ConfirmPopover>
+      </section>
+
       <!-- User Profile -->
       <section>
         <h6 class="mb-2 flex items-center">
@@ -239,78 +311,6 @@
             </p>
           </div>
         </div>
-      </section>
-
-      <!-- Display Settings -->
-      <section>
-        <h6 class="mb-2 flex items-center">
-          <FontAwesomeIcon
-            :icon="['fas', 'gear']"
-            class="mr-2"
-          />
-          {{ $t('settings.display') }}
-        </h6>
-        <Separator />
-        <div class="mt-4 space-y-4">
-          <div class="flex items-center justify-between">
-            <Label>{{ $t('settings.language') }}</Label>
-            <Select
-              :model-value="language"
-              @update:model-value="(v) => v && setLanguage(v as Locale)"
-            >
-              <SelectTrigger class="w-40">
-                <SelectValue :placeholder="$t('settings.languagePlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="zh">
-                    {{ $t('settings.langZh') }}
-                  </SelectItem>
-                  <SelectItem value="en">
-                    {{ $t('settings.langEn') }}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-          <Separator />
-          <div class="flex items-center justify-between">
-            <Label>{{ $t('settings.theme') }}</Label>
-            <Select
-              :model-value="theme"
-              @update:model-value="(v) => v && setTheme(v as 'light' | 'dark')"
-            >
-              <SelectTrigger class="w-40">
-                <SelectValue :placeholder="$t('settings.themePlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="light">
-                    {{ $t('settings.themeLight') }}
-                  </SelectItem>
-                  <SelectItem value="dark">
-                    {{ $t('settings.themeDark') }}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </section>
-
-      <!-- Logout -->
-      <section>
-        <Separator class="mb-4" />
-        <ConfirmPopover
-          :message="$t('auth.logoutConfirm')"
-          @confirm="onLogout"
-        >
-          <template #trigger>
-            <Button variant="outline">
-              {{ $t('auth.logout') }}
-            </Button>
-          </template>
-        </ConfirmPopover>
       </section>
     </div>
   </section>
