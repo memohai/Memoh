@@ -10,8 +10,12 @@
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            <SelectItem value="en">English</SelectItem>
-            <SelectItem value="zh">中文</SelectItem>
+            <SelectItem value="en">
+              English
+            </SelectItem>
+            <SelectItem value="zh">
+              中文
+            </SelectItem>
           </SelectGroup>
         </SelectContent>
       </Select>
@@ -20,8 +24,14 @@
         size="icon"
         @click="toggleTheme"
       >
-        <Sun v-if="theme === 'dark'" class="size-5" />
-        <Moon v-else class="size-5" />
+        <Sun
+          v-if="theme === 'dark'"
+          class="size-5"
+        />
+        <Moon
+          v-else
+          class="size-5"
+        />
       </Button>
     </div>
     <section class="w-full max-w-sm flex flex-col gap-10 ">

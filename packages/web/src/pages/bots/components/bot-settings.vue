@@ -125,7 +125,10 @@
               variant="destructive"
               :disabled="deleteLoading"
             >
-              <Spinner v-if="deleteLoading" class="mr-1.5" />
+              <Spinner
+                v-if="deleteLoading"
+                class="mr-1.5"
+              />
               {{ $t('bots.settings.deleteBot') }}
             </Button>
           </template>

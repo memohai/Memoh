@@ -6,8 +6,12 @@
       class="flex-1 flex items-center justify-center text-muted-foreground"
     >
       <div class="text-center">
-        <p class="text-lg">{{ $t('chat.selectBot') }}</p>
-        <p class="text-sm mt-1">{{ $t('chat.selectBotHint') }}</p>
+        <p class="text-lg">
+          {{ $t('chat.selectBot') }}
+        </p>
+        <p class="text-sm mt-1">
+          {{ $t('chat.selectBotHint') }}
+        </p>
       </div>
     </div>
 
@@ -108,7 +112,10 @@
                 class="ml-1 text-muted-foreground hover:text-foreground"
                 @click="pendingFiles.splice(i, 1)"
               >
-                <FontAwesomeIcon :icon="['fas', 'xmark']" class="size-3" />
+                <FontAwesomeIcon
+                  :icon="['fas', 'xmark']"
+                  class="size-3"
+                />
               </button>
             </div>
           </div>
@@ -128,7 +135,7 @@
               multiple
               accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
               @change="handleFileSelect"
-            />
+            >
             <div class="absolute right-2 bottom-2 flex items-center gap-1">
               <Button
                 v-if="!streaming"
@@ -137,7 +144,10 @@
                 :disabled="!currentBotId || activeChatReadOnly"
                 @click="fileInput?.click()"
               >
-                <FontAwesomeIcon :icon="['fas', 'paperclip']" class="size-3.5" />
+                <FontAwesomeIcon
+                  :icon="['fas', 'paperclip']"
+                  class="size-3.5"
+                />
               </Button>
               <Button
                 v-if="!streaming"
@@ -145,7 +155,10 @@
                 :disabled="(!inputText.trim() && !pendingFiles.length) || !currentBotId || activeChatReadOnly"
                 @click="handleSend"
               >
-                <FontAwesomeIcon :icon="['fas', 'paper-plane']" class="size-3.5" />
+                <FontAwesomeIcon
+                  :icon="['fas', 'paper-plane']"
+                  class="size-3.5"
+                />
               </Button>
               <Button
                 v-else
@@ -153,7 +166,10 @@
                 variant="destructive"
                 @click="chatStore.abort()"
               >
-                <FontAwesomeIcon :icon="['fas', 'spinner']" class="size-3.5 animate-spin" />
+                <FontAwesomeIcon
+                  :icon="['fas', 'spinner']"
+                  class="size-3.5 animate-spin"
+                />
               </Button>
             </div>
           </div>

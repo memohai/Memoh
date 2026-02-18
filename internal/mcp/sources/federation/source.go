@@ -192,7 +192,7 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 					origin := strings.TrimSpace(tool.Name)
 					alias := origin
 					if prefix != "" {
-						alias = prefix + "." + origin
+						alias = prefix + "_" + origin
 					}
 					tool.Name = alias
 					if strings.TrimSpace(tool.Description) != "" {

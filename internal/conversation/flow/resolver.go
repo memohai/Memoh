@@ -992,6 +992,13 @@ func trimMessagesByTokens(messages []messageWithUsage, maxTokens int) []conversa
 		}
 	}
 
+	// Keep provider-valid message order: a "tool" message must follow a preceding
+	// assistant tool call. When history is head-trimmed, a leading tool message
+	// may become orphaned and cause provider 400 errors.
+	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Message.Role), "tool") {
+		cutoff++
+	}
+
 	result := make([]conversation.ModelMessage, 0, len(messages)-cutoff)
 	for _, m := range messages[cutoff:] {
 		result = append(result, m.Message)

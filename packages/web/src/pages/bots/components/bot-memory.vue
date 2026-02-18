@@ -4,7 +4,9 @@
     <div class="w-64 shrink-0 flex flex-col border rounded-lg overflow-hidden bg-card max-h-full">
       <div class="p-3 border-b space-y-3 shrink-0">
         <div class="flex items-center justify-between">
-          <h4 class="text-sm font-medium">{{ $t('bots.memory.files') }}</h4>
+          <h4 class="text-sm font-medium">
+            {{ $t('bots.memory.files') }}
+          </h4>
           <div class="flex items-center gap-1">
             <Button
               variant="ghost"
@@ -152,7 +154,10 @@
                 :disabled="actionLoading || !isDirty"
                 @click="handleSave"
               >
-                <Spinner v-if="actionLoading" class="mr-1.5 size-3" />
+                <Spinner
+                  v-if="actionLoading"
+                  class="mr-1.5 size-3"
+                />
                 {{ $t('common.save') }}
               </Button>
             </div>
@@ -169,12 +174,16 @@
         <!-- Charts Section -->
         <div class="h-[240px] border-t flex flex-col bg-muted/5 shrink-0">
           <div class="px-3 py-1.5 border-b bg-muted/10 flex items-center justify-between shrink-0">
-            <h5 class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Vector Manifold</h5>
+            <h5 class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
+              Vector Manifold
+            </h5>
           </div>
           <div class="flex-1 flex min-h-0 divide-x overflow-hidden">
             <!-- Top K Buckets (Bar Chart) -->
             <div class="flex-1 flex flex-col p-3 min-w-0">
-              <p class="text-[9px] font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">Top-K Bucket</p>
+              <p class="text-[9px] font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">
+                Top-K Bucket
+              </p>
               <div class="flex-1 flex items-end gap-0.5 relative group min-h-0 pt-2 pb-4">
                 <div
                   v-for="(bucket, idx) in selectedMemory.top_k_buckets"
@@ -187,7 +196,9 @@
                 >
                   <!-- Tooltip for Bar -->
                   <div class="absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1 bg-popover border text-popover-foreground px-2 py-1 rounded shadow-lg text-[10px] hidden group-hover/bar:block whitespace-nowrap pointer-events-none">
-                    <p class="font-bold text-primary">Index: {{ bucket.index }}</p>
+                    <p class="font-bold text-primary">
+                      Index: {{ bucket.index }}
+                    </p>
                     <p>Value: {{ bucket.value.toFixed(6) }}</p>
                   </div>
                 </div>
@@ -201,11 +212,25 @@
 
             <!-- CDF Curve (Line Chart) -->
             <div class="flex-1 flex flex-col p-3 min-w-0">
-              <p class="text-[9px] font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">Energy Gradient (CDF)</p>
+              <p class="text-[9px] font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">
+                Energy Gradient (CDF)
+              </p>
               <div class="flex-1 relative min-h-0 pt-2 pb-4 group/cdf">
-                <svg class="w-full h-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <svg
+                  class="w-full h-full overflow-visible"
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                >
                   <!-- Grid lines -->
-                  <line x1="0" y1="50" x2="100" y2="50" stroke="currentColor" class="text-muted-foreground/5" stroke-width="0.5" />
+                  <line
+                    x1="0"
+                    y1="50"
+                    x2="100"
+                    y2="50"
+                    stroke="currentColor"
+                    class="text-muted-foreground/5"
+                    stroke-width="0.5"
+                  />
                   
                   <!-- Area under curve -->
                   <path
@@ -273,8 +298,12 @@
                     transform: 'translate(-50%, -140%)'
                   }"
                 >
-                  <p class="font-bold text-primary">K: {{ hoveredCdfPoint.k }}</p>
-                  <p class="font-mono">P: {{ hoveredCdfPoint.cumulative.toFixed(6) }}</p>
+                  <p class="font-bold text-primary">
+                    K: {{ hoveredCdfPoint.k }}
+                  </p>
+                  <p class="font-mono">
+                    P: {{ hoveredCdfPoint.cumulative.toFixed(6) }}
+                  </p>
                 </div>
                 
                 <!-- Axis labels -->
@@ -301,7 +330,9 @@
             class="size-6 opacity-20"
           />
         </div>
-        <h3 class="text-sm font-medium text-foreground">{{ $t('bots.memory.title') }}</h3>
+        <h3 class="text-sm font-medium text-foreground">
+          {{ $t('bots.memory.title') }}
+        </h3>
         <p class="text-xs mt-1 max-w-[240px]">
           Select a file from the sidebar to view or edit, or create a new one to persist long-term information for your bot.
         </p>
@@ -403,7 +434,10 @@
             :disabled="actionLoading || !newMemoryContent.trim()"
             @click="handleCreateMemory"
           >
-            <Spinner v-if="actionLoading" class="mr-1.5 size-3" />
+            <Spinner
+              v-if="actionLoading"
+              class="mr-1.5 size-3"
+            />
             {{ $t('common.confirm') }}
           </Button>
         </DialogFooter>
@@ -432,7 +466,10 @@
                 class="flex items-start gap-3 p-3 rounded-md border cursor-pointer hover:bg-muted/50 transition-colors"
                 :class="{ 'bg-muted border-primary': compactRatio === '0.8' }"
               >
-                <RadioGroupItem value="0.8" class="mt-1" />
+                <RadioGroupItem
+                  value="0.8"
+                  class="mt-1"
+                />
                 <div class="min-w-0">
                   <p class="text-sm font-medium">{{ $t('bots.memory.compactRatioLight') }}</p>
                   <p class="text-xs text-muted-foreground">{{ $t('bots.memory.compactRatioLightDesc') }}</p>
@@ -442,7 +479,10 @@
                 class="flex items-start gap-3 p-3 rounded-md border cursor-pointer hover:bg-muted/50 transition-colors"
                 :class="{ 'bg-muted border-primary': compactRatio === '0.5' }"
               >
-                <RadioGroupItem value="0.5" class="mt-1" />
+                <RadioGroupItem
+                  value="0.5"
+                  class="mt-1"
+                />
                 <div class="min-w-0">
                   <p class="text-sm font-medium">{{ $t('bots.memory.compactRatioMedium') }}</p>
                   <p class="text-xs text-muted-foreground">{{ $t('bots.memory.compactRatioMediumDesc') }}</p>
@@ -452,7 +492,10 @@
                 class="flex items-start gap-3 p-3 rounded-md border cursor-pointer hover:bg-muted/50 transition-colors"
                 :class="{ 'bg-muted border-primary': compactRatio === '0.3' }"
               >
-                <RadioGroupItem value="0.3" class="mt-1" />
+                <RadioGroupItem
+                  value="0.3"
+                  class="mt-1"
+                />
                 <div class="min-w-0">
                   <p class="text-sm font-medium">{{ $t('bots.memory.compactRatioAggressive') }}</p>
                   <p class="text-xs text-muted-foreground">{{ $t('bots.memory.compactRatioAggressiveDesc') }}</p>
@@ -468,7 +511,10 @@
               type="date"
               class="w-full"
             />
-            <p v-if="compactDecayDays > 0" class="text-[10px] text-muted-foreground">
+            <p
+              v-if="compactDecayDays > 0"
+              class="text-[10px] text-muted-foreground"
+            >
               Calculated: {{ compactDecayDays }} days old
             </p>
           </div>
@@ -485,7 +531,10 @@
             :disabled="compactLoading"
             @click="handleCompact"
           >
-            <Spinner v-if="compactLoading" class="mr-1.5 size-3" />
+            <Spinner
+              v-if="compactLoading"
+              class="mr-1.5 size-3"
+            />
             {{ $t('common.confirm') }}
           </Button>
         </DialogFooter>
@@ -870,7 +919,7 @@ function generateSmoothPath(data: any[], closePath: boolean = false) {
   }
 
   if (closePath) {
-    d += ` L 100,100 L 0,100 Z`
+    d += ' L 100,100 L 0,100 Z'
   }
 
   return d

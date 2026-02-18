@@ -2,7 +2,10 @@
   <div class="space-y-4">
     <div class="space-y-2">
       <Label>API Key</Label>
-      <Input v-model="localConfig.api_key" type="password" />
+      <Input
+        v-model="localConfig.api_key"
+        type="password"
+      />
     </div>
     <div class="space-y-2">
       <Label>Base URL</Label>
@@ -10,7 +13,11 @@
     </div>
     <div class="space-y-2">
       <Label>Timeout (seconds)</Label>
-      <Input v-model.number="localConfig.timeout_seconds" type="number" :min="1" />
+      <Input
+        v-model.number="localConfig.timeout_seconds"
+        type="number"
+        :min="1"
+      />
     </div>
   </div>
 </template>
