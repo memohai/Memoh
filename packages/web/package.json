@@ -23,6 +23,7 @@
     "@vueuse/core": "^14.1.0",
     "dotenv": "^17.2.3",
     "katex": "^0.16.28",
+    "lucide-vue-next": "^0.562.0",
     "markstream-vue": "0.0.7-beta.2",
     "mermaid": "^11.12.2",
     "modern-css-reset": "^1.4.0",
@@ -41,10 +42,10 @@
     "zod": "^4.3.5"
   },
   "devDependencies": {
+    "@memoh/config": "workspace:*",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/tsconfig": "^0.8.1",
-    "@memoh/config": "workspace:*",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "vue-tsc": "^3.1.4"

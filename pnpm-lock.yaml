@@ -59,10 +59,10 @@ importers:
         version: 3.0.7(zod@4.3.5)
       '@elysiajs/bearer':
         specifier: ^1.4.2
-        version: 1.4.2(elysia@1.4.22(@sinclair/typebox@0.34.47)(@types/bun@1.3.8)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3))
+        version: 1.4.2(elysia@1.4.25(@sinclair/typebox@0.34.47)(@types/bun@1.3.9)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3))
       '@elysiajs/cors':
         specifier: ^1.4.1
-        version: 1.4.1(elysia@1.4.22(@sinclair/typebox@0.34.47)(@types/bun@1.3.8)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3))
+        version: 1.4.1(elysia@1.4.25(@sinclair/typebox@0.34.47)(@types/bun@1.3.9)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3))
       '@memoh/config':
         specifier: workspace:*
         version: link:../packages/config
@@ -83,7 +83,7 @@ importers:
         version: 6.0.25(zod@4.3.5)
       elysia:
         specifier: latest
-        version: 1.4.22(@sinclair/typebox@0.34.47)(@types/bun@1.3.8)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3)
+        version: 1.4.25(@sinclair/typebox@0.34.47)(@types/bun@1.3.9)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3)
       jsdom:
         specifier: ^27.4.0
         version: 27.4.0
@@ -99,7 +99,7 @@ importers:
     devDependencies:
       bun-types:
         specifier: latest
-        version: 1.3.8
+        version: 1.3.9
 
   docs:
     devDependencies:
@@ -136,13 +136,13 @@ importers:
     devDependencies:
       '@types/bun':
         specifier: latest
-        version: 1.3.8
+        version: 1.3.9
       '@types/node':
         specifier: ^22.10.5
         version: 22.19.5
       bun-types:
         specifier: latest
-        version: 1.3.8
+        version: 1.3.9
       tsup:
         specifier: ^8.4.0
         version: 8.5.1(@microsoft/api-extractor@7.55.2(@types/node@22.19.5))(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
@@ -294,6 +294,9 @@ importers:
       katex:
         specifier: ^0.16.28
         version: 0.16.28
+      lucide-vue-next:
+        specifier: ^0.562.0
+        version: 0.562.0(vue@3.5.26(typescript@5.9.3))
       markstream-vue:
         specifier: 0.0.7-beta.2
         version: 0.0.7-beta.2(katex@0.16.28)(mermaid@11.12.2)(shiki@3.21.0)(stream-markdown@0.0.13(shiki@3.21.0))(stream-monaco@0.0.18(monaco-editor@0.52.2))(vue-i18n@11.2.8(vue@3.5.26(typescript@5.9.3)))(vue@3.5.26(typescript@5.9.3))
@@ -1740,67 +1743,56 @@ packages:
     resolution: {integrity: sha512-EHMUcDwhtdRGlXZsGSIuXSYwD5kOT9NVnx9sqzYiwAc91wfYOE1g1djOEDseZJKKqtHAHGwnGPQu3kytmfaXLQ==}
     cpu: [arm]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-arm-musleabihf@4.54.0':
     resolution: {integrity: sha512-+pBrqEjaakN2ySv5RVrj/qLytYhPKEUwk+e3SFU5jTLHIcAtqh2rLrd/OkbNuHJpsBgxsD8ccJt5ga/SeG0JmA==}
     cpu: [arm]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-arm64-gnu@4.54.0':
     resolution: {integrity: sha512-NSqc7rE9wuUaRBsBp5ckQ5CVz5aIRKCwsoa6WMF7G01sX3/qHUw/z4pv+D+ahL1EIKy6Enpcnz1RY8pf7bjwng==}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-arm64-musl@4.54.0':
     resolution: {integrity: sha512-gr5vDbg3Bakga5kbdpqx81m2n9IX8M6gIMlQQIXiLTNeQW6CucvuInJ91EuCJ/JYvc+rcLLsDFcfAD1K7fMofg==}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-loong64-gnu@4.54.0':
     resolution: {integrity: sha512-gsrtB1NA3ZYj2vq0Rzkylo9ylCtW/PhpLEivlgWe0bpgtX5+9j9EZa0wtZiCjgu6zmSeZWyI/e2YRX1URozpIw==}
     cpu: [loong64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-ppc64-gnu@4.54.0':
     resolution: {integrity: sha512-y3qNOfTBStmFNq+t4s7Tmc9hW2ENtPg8FeUD/VShI7rKxNW7O4fFeaYbMsd3tpFlIg1Q8IapFgy7Q9i2BqeBvA==}
     cpu: [ppc64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-riscv64-gnu@4.54.0':
     resolution: {integrity: sha512-89sepv7h2lIVPsFma8iwmccN7Yjjtgz0Rj/Ou6fEqg3HDhpCa+Et+YSufy27i6b0Wav69Qv4WBNl3Rs6pwhebQ==}
     cpu: [riscv64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-riscv64-musl@4.54.0':
     resolution: {integrity: sha512-ZcU77ieh0M2Q8Ur7D5X7KvK+UxbXeDHwiOt/CPSBTI1fBmeDMivW0dPkdqkT4rOgDjrDDBUed9x4EgraIKoR2A==}
     cpu: [riscv64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-s390x-gnu@4.54.0':
     resolution: {integrity: sha512-2AdWy5RdDF5+4YfG/YesGDDtbyJlC9LHmL6rZw6FurBJ5n4vFGupsOBGfwMRjBYH7qRQowT8D/U4LoSvVwOhSQ==}
     cpu: [s390x]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-x64-gnu@4.54.0':
     resolution: {integrity: sha512-WGt5J8Ij/rvyqpFexxk3ffKqqbLf9AqrTBbWDk7ApGUzaIs6V+s2s84kAxklFwmMF/vBNGrVdYgbblCOFFezMQ==}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-x64-musl@4.54.0':
     resolution: {integrity: sha512-JzQmb38ATzHjxlPHuTH6tE7ojnMKM2kYNzt44LO/jJi8BpceEC8QuXYA908n8r3CNuG/B3BV8VR3Hi1rYtmPiw==}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-openharmony-arm64@4.54.0':
     resolution: {integrity: sha512-huT3fd0iC7jigGh7n3q/+lfPcXxBi+om/Rs3yiFxjvSxbSB6aohDFXbWvlspaqjeOh+hx7DDHS+5Es5qRkWkZg==}
@@ -1949,28 +1941,24 @@ packages:
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@tailwindcss/oxide-linux-arm64-musl@4.1.18':
     resolution: {integrity: sha512-1px92582HkPQlaaCkdRcio71p8bc8i/ap5807tPRDK/uw953cauQBT8c5tVGkOwrHMfc2Yh6UuxaH4vtTjGvHg==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   '@tailwindcss/oxide-linux-x64-gnu@4.1.18':
     resolution: {integrity: sha512-v3gyT0ivkfBLoZGF9LyHmts0Isc8jHZyVcbzio6Wpzifg/+5ZJpDiRiUhDLkcr7f/r38SWNe7ucxmGW3j3Kb/g==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@tailwindcss/oxide-linux-x64-musl@4.1.18':
     resolution: {integrity: sha512-bhJ2y2OQNlcRwwgOAGMY0xTFStt4/wyU6pvI6LSuZpRgKQwxTec0/3Scu91O8ir7qCR3AuepQKLU/kX99FouqQ==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   '@tailwindcss/oxide-wasm32-wasi@4.1.18':
     resolution: {integrity: sha512-LffYTvPjODiP6PT16oNeUQJzNVyJl1cjIebq/rWWBF+3eDst5JGEFSc5cWxyRCJ0Mxl+KyIkqRxk1XPEs9x8TA==}
@@ -2036,8 +2024,8 @@ packages:
   '@types/argparse@1.0.38':
     resolution: {integrity: sha512-ebDJ9b0e702Yr7pWgB0jzm+CX4Srzz8RcXtLJDJB+BSccqMa36uyH/zUsSYao5+BD1ytv3k3rPYCq4mAE1hsXA==}
 
-  '@types/bun@1.3.8':
-    resolution: {integrity: sha512-3LvWJ2q5GerAXYxO2mffLTqOzEu5qnhEAlh48Vnu8WQfnmSwbgagjGZV6BoHKJztENYEDn6QmVd949W4uESRJA==}
+  '@types/bun@1.3.9':
+    resolution: {integrity: sha512-KQ571yULOdWJiMH+RIWIOZ7B2RXQGpL1YQrBtLIV3FqDcCu6FsbFUBwhdKUlCKUpS3PJDsHlJ1QKlpxoVR+xtw==}
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -2612,8 +2600,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  bun-types@1.3.8:
-    resolution: {integrity: sha512-fL99nxdOWvV4LqjmC+8Q9kW3M4QTtTR1eePs94v5ctGqU8OeceWrSUaRw3JYb7tU3FkMIAjkueehrHPPPGKi5Q==}
+  bun-types@1.3.9:
+    resolution: {integrity: sha512-+UBWWOakIP4Tswh0Bt0QD0alpTY8cb5hvgiYeWCMet9YukHbzuruIEeXC2D7nMJPB12kbh8C7XJykSexEqGKJg==}
 
   bundle-name@4.1.0:
     resolution: {integrity: sha512-tjwM5exMg6BGRI+kNmTntNsvdZS1X8BFYS6tnJ2hdH0kVxM6/eVZ2xy+FqStSWvYmtfFMDLIxurorHwDKfDz5Q==}
@@ -3075,8 +3063,8 @@ packages:
   electron-to-chromium@1.5.267:
     resolution: {integrity: sha512-0Drusm6MVRXSOJpGbaSVgcQsuB4hEkMpHXaVstcPmhu5LIedxs1xNK/nIxmQIU/RPC0+1/o0AVZfBTkTNJOdUw==}
 
-  elysia@1.4.22:
-    resolution: {integrity: sha512-Q90VCb1RVFxnFaRV0FDoSylESQQLWgLHFmWciQJdX9h3b2cSasji9KWEUvaJuy/L9ciAGg4RAhUVfsXHg5K2RQ==}
+  elysia@1.4.25:
+    resolution: {integrity: sha512-liKjavH99Gpzrv9cDil6uYWmPuqESfPFV1FIaFSd3iNqo3y7e29sN43VxFIK8tWWnyi6eDAmi2SZk8hNAMQMyg==}
     peerDependencies:
       '@sinclair/typebox': '>= 0.34.0 < 1'
       '@types/bun': '>= 1.2.0'
@@ -3698,28 +3686,24 @@ packages:
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   lightningcss-linux-arm64-musl@1.30.2:
     resolution: {integrity: sha512-5Vh9dGeblpTxWHpOx8iauV02popZDsCYMPIgiuw97OJ5uaDsL86cnqSFs5LZkG3ghHoX5isLgWzMs+eD1YzrnA==}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   lightningcss-linux-x64-gnu@1.30.2:
     resolution: {integrity: sha512-Cfd46gdmj1vQ+lR6VRTTadNHu6ALuw2pKR9lYq4FnhvgBc4zWY1EtZcAc6EffShbb1MFrIPfLDXD6Xprbnni4w==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   lightningcss-linux-x64-musl@1.30.2:
     resolution: {integrity: sha512-XJaLUUFXb6/QG2lGIW6aIk6jKdtjtcffUT0NKvIqhSBY3hh9Ch+1LCeH80dR9q9LBjG3ewbDjnumefsLsP6aiA==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   lightningcss-win32-arm64-msvc@1.30.2:
     resolution: {integrity: sha512-FZn+vaj7zLv//D/192WFFVA0RgHawIcHqLX9xuWiQt7P0PtdFEVaxgF9rjM/IRYHQXNnk61/H/gb2Ei+kUQ4xQ==}
@@ -5575,13 +5559,13 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
-  '@elysiajs/bearer@1.4.2(elysia@1.4.22(@sinclair/typebox@0.34.47)(@types/bun@1.3.8)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3))':
+  '@elysiajs/bearer@1.4.2(elysia@1.4.25(@sinclair/typebox@0.34.47)(@types/bun@1.3.9)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3))':
     dependencies:
-      elysia: 1.4.22(@sinclair/typebox@0.34.47)(@types/bun@1.3.8)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3)
+      elysia: 1.4.25(@sinclair/typebox@0.34.47)(@types/bun@1.3.9)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3)
 
-  '@elysiajs/cors@1.4.1(elysia@1.4.22(@sinclair/typebox@0.34.47)(@types/bun@1.3.8)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3))':
+  '@elysiajs/cors@1.4.1(elysia@1.4.25(@sinclair/typebox@0.34.47)(@types/bun@1.3.9)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3))':
     dependencies:
-      elysia: 1.4.22(@sinclair/typebox@0.34.47)(@types/bun@1.3.8)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3)
+      elysia: 1.4.25(@sinclair/typebox@0.34.47)(@types/bun@1.3.9)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3)
 
   '@esbuild-kit/core-utils@3.3.2':
     dependencies:
@@ -6660,9 +6644,9 @@ snapshots:
 
   '@types/argparse@1.0.38': {}
 
-  '@types/bun@1.3.8':
+  '@types/bun@1.3.9':
     dependencies:
-      bun-types: 1.3.8
+      bun-types: 1.3.9
 
   '@types/chai@5.2.3':
     dependencies:
@@ -7385,7 +7369,7 @@ snapshots:
     transitivePeerDependencies:
       - magicast
 
-  bun-types@1.3.8:
+  bun-types@1.3.9:
     dependencies:
       '@types/node': 24.10.4
 
@@ -7832,7 +7816,7 @@ snapshots:
 
   electron-to-chromium@1.5.267: {}
 
-  elysia@1.4.22(@sinclair/typebox@0.34.47)(@types/bun@1.3.8)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3):
+  elysia@1.4.25(@sinclair/typebox@0.34.47)(@types/bun@1.3.9)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3):
     dependencies:
       '@sinclair/typebox': 0.34.47
       cookie: 1.1.1
@@ -7842,7 +7826,7 @@ snapshots:
       memoirist: 0.4.0
       openapi-types: 12.1.3
     optionalDependencies:
-      '@types/bun': 1.3.8
+      '@types/bun': 1.3.9
       typescript: 5.9.3
 
   emoji-regex-xs@1.0.0: {}
