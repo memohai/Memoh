@@ -216,7 +216,7 @@ type Attachment struct {
 	URL            string         `json:"url,omitempty"`
 	PlatformKey    string         `json:"platform_key,omitempty"`
 	SourcePlatform string         `json:"source_platform,omitempty"`
-	AssetID        string         `json:"asset_id,omitempty"`
+	ContentHash    string         `json:"content_hash,omitempty"`
 	Base64         string         `json:"base64,omitempty"` // data URL for agent delivery
 	Name           string         `json:"name,omitempty"`
 	Size           int64          `json:"size,omitempty"`

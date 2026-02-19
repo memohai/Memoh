@@ -49,6 +49,9 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 		InputModalities: inputMod,
 		Type:            string(model.Type),
 	}
+	if model.ClientType != "" {
+		params.ClientType = pgtype.Text{String: string(model.ClientType), Valid: true}
+	}
 
 	// Handle optional name field
 	if model.Name != "" {
@@ -140,7 +143,7 @@ func (s *Service) ListByClientType(ctx context.Context, clientType ClientType) (
 		return nil, fmt.Errorf("invalid client type: %s", clientType)
 	}
 
-	dbModels, err := s.queries.ListModelsByClientType(ctx, string(clientType))
+	dbModels, err := s.queries.ListModelsByClientType(ctx, pgtype.Text{String: string(clientType), Valid: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by client type: %w", err)
 	}
@@ -207,6 +210,9 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		InputModalities: inputMod,
 		Type:            string(model.Type),
 	}
+	if model.ClientType != "" {
+		params.ClientType = pgtype.Text{String: string(model.ClientType), Valid: true}
+	}
 
 	llmProviderID, err := db.ParseUUID(model.LlmProviderID)
 	if err != nil {
@@ -250,6 +256,9 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 		NewModelID:      model.ModelID,
 		InputModalities: inputMod,
 		Type:            string(model.Type),
+	}
+	if model.ClientType != "" {
+		params.ClientType = pgtype.Text{String: string(model.ClientType), Valid: true}
 	}
 
 	llmProviderID, err := db.ParseUUID(model.LlmProviderID)
@@ -333,6 +342,9 @@ func convertToGetResponse(dbModel sqlc.Model) GetResponse {
 			Type:    ModelType(dbModel.Type),
 		},
 	}
+	if dbModel.ClientType.Valid {
+		resp.Model.ClientType = ClientType(dbModel.ClientType.String)
+	}
 	if resp.Model.Type == ModelTypeChat {
 		resp.Model.InputModalities = normalizeModalities(dbModel.InputModalities, []string{ModelInputText})
 	}
@@ -370,16 +382,10 @@ func normalizeModalities(modalities []string, fallback []string) []string {
 
 func isValidClientType(clientType ClientType) bool {
 	switch clientType {
-	case ClientTypeOpenAI,
-		ClientTypeOpenAICompat,
-		ClientTypeAnthropic,
-		ClientTypeGoogle,
-		ClientTypeAzure,
-		ClientTypeBedrock,
-		ClientTypeMistral,
-		ClientTypeXAI,
-		ClientTypeOllama,
-		ClientTypeDashscope:
+	case ClientTypeOpenAIResponses,
+		ClientTypeOpenAICompletions,
+		ClientTypeAnthropicMessages,
+		ClientTypeGoogleGenerativeAI:
 		return true
 	default:
 		return false

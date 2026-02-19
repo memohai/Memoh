@@ -35,6 +35,7 @@ func (h *ProvidersHandler) Register(e *echo.Echo) {
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
 	group.GET("/count", h.Count)
+	group.POST("/:id/test", h.Test)
 }
 
 // Create godoc
@@ -58,9 +59,6 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 	if req.Name == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
-	if req.ClientType == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "client_type is required")
-	}
 	if req.BaseURL == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "base_url is required")
 	}
@@ -75,27 +73,15 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 
 // List godoc
 // @Summary List all LLM providers
-// @Description Get a list of all configured LLM providers, optionally filtered by client type
+// @Description Get a list of all configured LLM providers
 // @Tags providers
 // @Accept json
 // @Produce json
-// @Param client_type query string false "Client type filter (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)"
 // @Success 200 {array} providers.GetResponse
-// @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /providers [get]
 func (h *ProvidersHandler) List(c echo.Context) error {
-	clientType := c.QueryParam("client_type")
-
-	var resp []providers.GetResponse
-	var err error
-
-	if clientType != "" {
-		resp, err = h.service.ListByClientType(c.Request().Context(), providers.ClientType(clientType))
-	} else {
-		resp, err = h.service.List(c.Request().Context())
-	}
-
+	resp, err := h.service.List(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -252,30 +238,47 @@ func (h *ProvidersHandler) Delete(c echo.Context) error {
 
 // Count godoc
 // @Summary Count providers
-// @Description Get the total count of providers, optionally filtered by client type
+// @Description Get the total count of providers
 // @Tags providers
 // @Accept json
 // @Produce json
-// @Param client_type query string false "Client type filter (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)"
 // @Success 200 {object} providers.CountResponse
-// @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /providers/count [get]
 func (h *ProvidersHandler) Count(c echo.Context) error {
-	clientType := c.QueryParam("client_type")
-
-	var count int64
-	var err error
-
-	if clientType != "" {
-		count, err = h.service.CountByClientType(c.Request().Context(), providers.ClientType(clientType))
-	} else {
-		count, err = h.service.Count(c.Request().Context())
-	}
-
+	count, err := h.service.Count(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	return c.JSON(http.StatusOK, providers.CountResponse{Count: count})
+}
+
+// Test godoc
+// @Summary Test provider connectivity
+// @Description Probe a provider's base URL to check reachability, supported client types, and embedding support
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Param id path string true "Provider ID (UUID)"
+// @Success 200 {object} providers.TestResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /providers/{id}/test [post]
+func (h *ProvidersHandler) Test(c echo.Context) error {
+	id := c.Param("id")
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	}
+
+	resp, err := h.service.Test(c.Request().Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "invalid") {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+
+	return c.JSON(http.StatusOK, resp)
 }

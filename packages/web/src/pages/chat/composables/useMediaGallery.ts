@@ -1,4 +1,5 @@
 import { computed, ref, type Ref } from 'vue'
+import { useChatStore } from '@/store/chat-list'
 import type { ChatMessage } from '@/store/chat-list'
 import type { MediaGalleryItem } from '../components/media-gallery-lightbox.vue'
 
@@ -9,15 +10,48 @@ function isMediaType(att: Record<string, unknown>): boolean {
   return mime.startsWith('image/') || mime.startsWith('video/')
 }
 
-function resolveUrl(att: Record<string, unknown>): string {
-  const url = String(att.url ?? '').trim()
-  if (url) return url
-  const assetId = String(att.asset_id ?? '').trim()
-  if (!assetId) return ''
-  const botId = String(att.bot_id ?? '').trim()
+function isBrowserAccessibleUrl(url: string): boolean {
+  if (!url) return false
+  const lower = url.toLowerCase()
+  return lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('data:')
+}
+
+function resolveBotId(att: Record<string, unknown>): string {
+  let botId = String(att.bot_id ?? '').trim()
+  if (botId) return botId
+  const meta = att.metadata as Record<string, unknown> | undefined
+  botId = String(meta?.bot_id ?? '').trim()
+  if (botId) return botId
+  // Fall back to the currently active bot in the chat store.
+  try {
+    const store = useChatStore()
+    return (store.currentBotId ?? '').trim()
+  } catch {
+    return ''
+  }
+}
+
+function resolveAssetApiUrl(att: Record<string, unknown>): string {
+  const contentHash = String(att.content_hash ?? '').trim()
+  if (!contentHash) return ''
+  const botId = resolveBotId(att)
   if (!botId) return ''
   const token = localStorage.getItem('token') || ''
-  return `/api/bots/${botId}/media/${assetId}?token=${encodeURIComponent(token)}`
+  return `/api/bots/${botId}/media/${contentHash}?token=${encodeURIComponent(token)}`
+}
+
+function resolveUrl(att: Record<string, unknown>): string {
+  // Prefer asset API when content_hash is available (reliable, auth-aware).
+  const assetUrl = resolveAssetApiUrl(att)
+  if (assetUrl) return assetUrl
+  // Fall back to direct URL if browser-accessible (http/https/data).
+  const url = String(att.url ?? '').trim()
+  if (isBrowserAccessibleUrl(url)) return url
+  const base64 = String(att.base64 ?? '').trim()
+  if (isBrowserAccessibleUrl(base64)) return base64
+  // Container-internal paths or other non-HTTP URLs cannot be loaded directly.
+  // Return empty so the attachment-block shows the fallback (file name display).
+  return ''
 }
 
 function normalizeSrc(src: string): string {

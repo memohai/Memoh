@@ -17,6 +17,7 @@ type Bot struct {
 	IsActive           bool               `json:"is_active"`
 	Status             string             `json:"status"`
 	MaxContextLoadTime int32              `json:"max_context_load_time"`
+	MaxContextTokens   int32              `json:"max_context_tokens"`
 	Language           string             `json:"language"`
 	AllowGuest         bool               `json:"allow_guest"`
 	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
@@ -69,16 +70,17 @@ type BotHistoryMessage struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
 type BotHistoryMessageAsset struct {
-	ID        pgtype.UUID        `json:"id"`
-	MessageID pgtype.UUID        `json:"message_id"`
-	AssetID   pgtype.UUID        `json:"asset_id"`
-	Role      string             `json:"role"`
-	Ordinal   int32              `json:"ordinal"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID          pgtype.UUID        `json:"id"`
+	MessageID   pgtype.UUID        `json:"message_id"`
+	Role        string             `json:"role"`
+	Ordinal     int32              `json:"ordinal"`
+	ContentHash string             `json:"content_hash"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type BotMember struct {
@@ -148,9 +150,9 @@ type Container struct {
 }
 
 type ContainerVersion struct {
-	ID          string             `json:"id"`
+	ID          pgtype.UUID        `json:"id"`
 	ContainerID string             `json:"container_id"`
-	SnapshotID  string             `json:"snapshot_id"`
+	SnapshotID  pgtype.UUID        `json:"snapshot_id"`
 	Version     int32              `json:"version"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
@@ -164,14 +166,13 @@ type LifecycleEvent struct {
 }
 
 type LlmProvider struct {
-	ID         pgtype.UUID        `json:"id"`
-	Name       string             `json:"name"`
-	ClientType string             `json:"client_type"`
-	BaseUrl    string             `json:"base_url"`
-	ApiKey     string             `json:"api_key"`
-	Metadata   []byte             `json:"metadata"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ID        pgtype.UUID        `json:"id"`
+	Name      string             `json:"name"`
+	BaseUrl   string             `json:"base_url"`
+	ApiKey    string             `json:"api_key"`
+	Metadata  []byte             `json:"metadata"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type McpConnection struct {
@@ -185,28 +186,12 @@ type McpConnection struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
-type MediaAsset struct {
-	ID                pgtype.UUID        `json:"id"`
-	BotID             pgtype.UUID        `json:"bot_id"`
-	StorageProviderID pgtype.UUID        `json:"storage_provider_id"`
-	ContentHash       string             `json:"content_hash"`
-	MediaType         string             `json:"media_type"`
-	Mime              string             `json:"mime"`
-	SizeBytes         int64              `json:"size_bytes"`
-	StorageKey        string             `json:"storage_key"`
-	OriginalName      pgtype.Text        `json:"original_name"`
-	Width             pgtype.Int4        `json:"width"`
-	Height            pgtype.Int4        `json:"height"`
-	DurationMs        pgtype.Int8        `json:"duration_ms"`
-	Metadata          []byte             `json:"metadata"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-}
-
 type Model struct {
 	ID              pgtype.UUID        `json:"id"`
 	ModelID         string             `json:"model_id"`
 	Name            pgtype.Text        `json:"name"`
 	LlmProviderID   pgtype.UUID        `json:"llm_provider_id"`
+	ClientType      pgtype.Text        `json:"client_type"`
 	Dimensions      pgtype.Int4        `json:"dimensions"`
 	InputModalities []string           `json:"input_modalities"`
 	Type            string             `json:"type"`
@@ -248,12 +233,13 @@ type SearchProvider struct {
 }
 
 type Snapshot struct {
-	ID               string             `json:"id"`
-	ContainerID      string             `json:"container_id"`
-	ParentSnapshotID pgtype.Text        `json:"parent_snapshot_id"`
-	Snapshotter      string             `json:"snapshotter"`
-	Digest           pgtype.Text        `json:"digest"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ID                        pgtype.UUID        `json:"id"`
+	ContainerID               string             `json:"container_id"`
+	RuntimeSnapshotName       string             `json:"runtime_snapshot_name"`
+	ParentRuntimeSnapshotName pgtype.Text        `json:"parent_runtime_snapshot_name"`
+	Snapshotter               string             `json:"snapshotter"`
+	Source                    string             `json:"source"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
 }
 
 type StorageProvider struct {

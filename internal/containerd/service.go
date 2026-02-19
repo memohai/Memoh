@@ -100,8 +100,8 @@ type ExecTaskResult struct {
 }
 
 type SnapshotCommitResult struct {
-	VersionSnapshotID string
-	ActiveSnapshotID  string
+	VersionSnapshotName string
+	ActiveSnapshotName  string
 }
 
 type ListTasksOptions struct {

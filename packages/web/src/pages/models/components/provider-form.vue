@@ -62,26 +62,86 @@
       </section>
     </div>
 
-    <section class="flex justify-end mt-4 gap-4">
-      <ConfirmPopover
-        :message="$t('provider.deleteConfirm')"
-        :loading="deleteLoading"
-        @confirm="$emit('delete')"
-      >
-        <template #trigger>
-          <Button variant="outline">
-            <FontAwesomeIcon :icon="['far', 'trash-can']" />
-          </Button>
-        </template>
-      </ConfirmPopover>
-
+    <section class="flex justify-between items-center mt-4">
       <Button
-        type="submit"
-        :disabled="!hasChanges || !form.meta.value.valid"
+        type="button"
+        variant="outline"
+        :disabled="testLoading || !props.provider?.id"
+        @click="runTest"
       >
-        <Spinner v-if="editLoading" />
-        {{ $t('provider.saveChanges') }}
+        <Spinner v-if="testLoading" />
+        {{ $t('provider.testConnection') }}
       </Button>
+
+      <div class="flex gap-4">
+        <ConfirmPopover
+          :message="$t('provider.deleteConfirm')"
+          :loading="deleteLoading"
+          @confirm="$emit('delete')"
+        >
+          <template #trigger>
+            <Button variant="outline">
+              <FontAwesomeIcon :icon="['far', 'trash-can']" />
+            </Button>
+          </template>
+        </ConfirmPopover>
+
+        <Button
+          type="submit"
+          :disabled="!hasChanges || !form.meta.value.valid"
+        >
+          <Spinner v-if="editLoading" />
+          {{ $t('provider.saveChanges') }}
+        </Button>
+      </div>
+    </section>
+
+    <section
+      v-if="testResult"
+      class="mt-4 rounded-lg border p-4 space-y-3 text-sm"
+    >
+      <div class="flex items-center gap-2">
+        <span
+          class="inline-block size-2 rounded-full"
+          :class="testResult.reachable ? 'bg-green-500' : 'bg-red-500'"
+        />
+        <span class="font-medium">
+          {{ testResult.reachable ? $t('provider.reachable') : $t('provider.unreachable') }}
+        </span>
+        <span
+          v-if="testResult.latency_ms"
+          class="text-muted-foreground"
+        >
+          {{ testResult.latency_ms }}ms
+        </span>
+      </div>
+
+      <template v-if="testResult.reachable && testResult.checks">
+        <div
+          v-for="key in clientTypeKeys"
+          :key="key"
+          class="flex items-center justify-between"
+        >
+          <span>{{ clientTypeLabel(key) }}</span>
+          <Badge :variant="statusVariant(testResult.checks[key]?.status)">
+            {{ statusText(testResult.checks[key]?.status) }}
+          </Badge>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <span>{{ $t('provider.embedding') }}</span>
+          <Badge :variant="statusVariant(testResult.checks['embedding']?.status)">
+            {{ statusText(testResult.checks['embedding']?.status) }}
+          </Badge>
+        </div>
+      </template>
+
+      <div
+        v-if="testError"
+        class="text-destructive text-xs"
+      >
+        {{ testError }}
+      </div>
     </section>
   </form>
 </template>
@@ -90,17 +150,23 @@
 import {
   Input,
   Button,
+  Badge,
   FormControl,
   FormField,
   FormItem,
   Spinner,
 } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
-import type { ProvidersGetResponse } from '@memoh/sdk'
+import { postProvidersByIdTest } from '@memoh/sdk'
+import type { ProvidersGetResponse, ProvidersTestResponse, ProvidersCheckStatus } from '@memoh/sdk'
+import { useI18n } from 'vue-i18n'
+import { CLIENT_TYPE_META } from '@/constants/client-types'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   provider: Partial<ProvidersGetResponse> | undefined
@@ -113,10 +179,57 @@ const emit = defineEmits<{
   delete: []
 }>()
 
+const testLoading = ref(false)
+const testResult = ref<ProvidersTestResponse | null>(null)
+const testError = ref('')
+
+const clientTypeKeys = ['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai']
+
+function clientTypeLabel(key: string): string {
+  return CLIENT_TYPE_META[key]?.label ?? key
+}
+
+function statusVariant(status?: ProvidersCheckStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
+  switch (status) {
+    case 'supported': return 'default'
+    case 'auth_error': return 'secondary'
+    case 'unsupported': return 'outline'
+    case 'error': return 'destructive'
+    default: return 'outline'
+  }
+}
+
+function statusText(status?: ProvidersCheckStatus): string {
+  switch (status) {
+    case 'supported': return t('provider.supported')
+    case 'auth_error': return t('provider.authError')
+    case 'unsupported': return t('provider.unsupported')
+    case 'error': return t('provider.error')
+    default: return '-'
+  }
+}
+
+async function runTest() {
+  if (!props.provider?.id) return
+  testLoading.value = true
+  testResult.value = null
+  testError.value = ''
+  try {
+    const { data } = await postProvidersByIdTest({
+      path: { id: props.provider.id },
+      throwOnError: true,
+    })
+    testResult.value = data ?? null
+  } catch (err: unknown) {
+    testError.value = err instanceof Error ? err.message : t('provider.testFailed')
+  } finally {
+    testLoading.value = false
+  }
+}
+
 const providerSchema = toTypedSchema(z.object({
   name: z.string().min(1),
   base_url: z.string().min(1),
-  client_type: z.string().min(1),
   api_key: z.string().optional(),
   metadata: z.object({
     additionalProp1: z.object({}),
@@ -132,8 +245,6 @@ watch(() => props.provider, (newVal) => {
     form.setValues({
       name: newVal.name,
       base_url: newVal.base_url,
-      client_type: newVal.client_type,
-      // Keep key input empty by default so masked placeholders are never submitted back.
       api_key: '',
     })
   }
@@ -144,12 +255,10 @@ const hasChanges = computed(() => {
   const baseChanged = JSON.stringify({
     name: form.values.name,
     base_url: form.values.base_url,
-    client_type: form.values.client_type,
     metadata: form.values.metadata,
   }) !== JSON.stringify({
     name: raw?.name,
     base_url: raw?.base_url,
-    client_type: raw?.client_type,
     metadata: { additionalProp1: {} },
   })
 
@@ -161,7 +270,6 @@ const editProvider = form.handleSubmit(async (value) => {
   const payload: Record<string, unknown> = {
     name: value.name,
     base_url: value.base_url,
-    client_type: value.client_type,
     metadata: value.metadata,
   }
   if (value.api_key && value.api_key.trim() !== '') {

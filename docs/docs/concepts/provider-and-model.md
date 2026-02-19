@@ -2,8 +2,19 @@
 
 In Memoh, **provider** and **model** are separate but connected concepts:
 
-- A **provider** is the LLM service configuration (API endpoint, key, client type)
-- A **model** is the concrete chat or embedding model under that provider
+- A **provider** is the LLM service configuration (API endpoint and key)
+- A **model** is the concrete chat or embedding model under that provider, including its **client type** which determines which API protocol to use
+
+## Client Types
+
+Each model has a `client_type` that determines how Memoh communicates with the LLM service:
+
+| Client Type | Description |
+|-------------|-------------|
+| `openai-responses` | OpenAI Responses API |
+| `openai-completions` | OpenAI Chat Completions API (also works with compatible services like Ollama, Mistral, etc.) |
+| `anthropic-messages` | Anthropic Messages API |
+| `google-generative-ai` | Google Generative AI API |
 
 ## Typical Setup
 
@@ -26,4 +37,3 @@ This enables per-bot customization (for quality, latency, or cost).
 
 - `Models > Add Provider > Select Provider > Add Model`
 - `Bots > Select a bot > Settings > Choose chat/memory/embedding models`
-

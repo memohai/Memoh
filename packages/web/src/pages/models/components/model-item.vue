@@ -6,6 +6,12 @@
         <Badge variant="outline">
           {{ model.type }}
         </Badge>
+        <Badge
+          v-if="model.client_type"
+          variant="outline"
+        >
+          {{ model.client_type }}
+        </Badge>
       </ItemDescription>
     </ItemContent>
     <ItemActions>

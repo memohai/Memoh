@@ -12,7 +12,6 @@ export type {
   ChannelChannelIdentityBinding,
   ModelsGetResponse,
   ModelsModelType,
-  ProvidersClientType,
   ProvidersGetResponse,
   ScheduleListResponse,
   ScheduleSchedule,

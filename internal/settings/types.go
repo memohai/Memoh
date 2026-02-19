@@ -11,6 +11,7 @@ type Settings struct {
 	EmbeddingModelID   string `json:"embedding_model_id"`
 	SearchProviderID   string `json:"search_provider_id"`
 	MaxContextLoadTime int    `json:"max_context_load_time"`
+	MaxContextTokens   int    `json:"max_context_tokens"`
 	Language           string `json:"language"`
 	AllowGuest         bool   `json:"allow_guest"`
 }
@@ -21,6 +22,7 @@ type UpsertRequest struct {
 	EmbeddingModelID   string `json:"embedding_model_id,omitempty"`
 	SearchProviderID   string `json:"search_provider_id,omitempty"`
 	MaxContextLoadTime *int   `json:"max_context_load_time,omitempty"`
+	MaxContextTokens   *int   `json:"max_context_tokens,omitempty"`
 	Language           string `json:"language,omitempty"`
 	AllowGuest         *bool  `json:"allow_guest,omitempty"`
 }

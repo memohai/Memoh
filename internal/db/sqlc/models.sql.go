@@ -22,17 +22,6 @@ func (q *Queries) CountLlmProviders(ctx context.Context) (int64, error) {
 	return count, err
 }
 
-const countLlmProvidersByClientType = `-- name: CountLlmProvidersByClientType :one
-SELECT COUNT(*) FROM llm_providers WHERE client_type = $1
-`
-
-func (q *Queries) CountLlmProvidersByClientType(ctx context.Context, clientType string) (int64, error) {
-	row := q.db.QueryRow(ctx, countLlmProvidersByClientType, clientType)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countModels = `-- name: CountModels :one
 SELECT COUNT(*) FROM models
 `
@@ -56,29 +45,26 @@ func (q *Queries) CountModelsByType(ctx context.Context, type_ string) (int64, e
 }
 
 const createLlmProvider = `-- name: CreateLlmProvider :one
-INSERT INTO llm_providers (name, client_type, base_url, api_key, metadata)
+INSERT INTO llm_providers (name, base_url, api_key, metadata)
 VALUES (
   $1,
   $2,
   $3,
-  $4,
-  $5
+  $4
 )
-RETURNING id, name, client_type, base_url, api_key, metadata, created_at, updated_at
+RETURNING id, name, base_url, api_key, metadata, created_at, updated_at
 `
 
 type CreateLlmProviderParams struct {
-	Name       string `json:"name"`
-	ClientType string `json:"client_type"`
-	BaseUrl    string `json:"base_url"`
-	ApiKey     string `json:"api_key"`
-	Metadata   []byte `json:"metadata"`
+	Name     string `json:"name"`
+	BaseUrl  string `json:"base_url"`
+	ApiKey   string `json:"api_key"`
+	Metadata []byte `json:"metadata"`
 }
 
 func (q *Queries) CreateLlmProvider(ctx context.Context, arg CreateLlmProviderParams) (LlmProvider, error) {
 	row := q.db.QueryRow(ctx, createLlmProvider,
 		arg.Name,
-		arg.ClientType,
 		arg.BaseUrl,
 		arg.ApiKey,
 		arg.Metadata,
@@ -87,7 +73,6 @@ func (q *Queries) CreateLlmProvider(ctx context.Context, arg CreateLlmProviderPa
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.ClientType,
 		&i.BaseUrl,
 		&i.ApiKey,
 		&i.Metadata,
@@ -98,22 +83,24 @@ func (q *Queries) CreateLlmProvider(ctx context.Context, arg CreateLlmProviderPa
 }
 
 const createModel = `-- name: CreateModel :one
-INSERT INTO models (model_id, name, llm_provider_id, dimensions, input_modalities, type)
+INSERT INTO models (model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type)
 VALUES (
   $1,
   $2,
   $3,
   $4,
   $5,
-  $6
+  $6,
+  $7
 )
-RETURNING id, model_id, name, llm_provider_id, dimensions, input_modalities, type, created_at, updated_at
+RETURNING id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at
 `
 
 type CreateModelParams struct {
 	ModelID         string      `json:"model_id"`
 	Name            pgtype.Text `json:"name"`
 	LlmProviderID   pgtype.UUID `json:"llm_provider_id"`
+	ClientType      pgtype.Text `json:"client_type"`
 	Dimensions      pgtype.Int4 `json:"dimensions"`
 	InputModalities []string    `json:"input_modalities"`
 	Type            string      `json:"type"`
@@ -124,6 +111,7 @@ func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model
 		arg.ModelID,
 		arg.Name,
 		arg.LlmProviderID,
+		arg.ClientType,
 		arg.Dimensions,
 		arg.InputModalities,
 		arg.Type,
@@ -134,6 +122,7 @@ func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model
 		&i.ModelID,
 		&i.Name,
 		&i.LlmProviderID,
+		&i.ClientType,
 		&i.Dimensions,
 		&i.InputModalities,
 		&i.Type,
@@ -209,7 +198,7 @@ func (q *Queries) DeleteModelByModelID(ctx context.Context, modelID string) erro
 }
 
 const getLlmProviderByID = `-- name: GetLlmProviderByID :one
-SELECT id, name, client_type, base_url, api_key, metadata, created_at, updated_at FROM llm_providers WHERE id = $1
+SELECT id, name, base_url, api_key, metadata, created_at, updated_at FROM llm_providers WHERE id = $1
 `
 
 func (q *Queries) GetLlmProviderByID(ctx context.Context, id pgtype.UUID) (LlmProvider, error) {
@@ -218,7 +207,6 @@ func (q *Queries) GetLlmProviderByID(ctx context.Context, id pgtype.UUID) (LlmPr
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.ClientType,
 		&i.BaseUrl,
 		&i.ApiKey,
 		&i.Metadata,
@@ -229,7 +217,7 @@ func (q *Queries) GetLlmProviderByID(ctx context.Context, id pgtype.UUID) (LlmPr
 }
 
 const getLlmProviderByName = `-- name: GetLlmProviderByName :one
-SELECT id, name, client_type, base_url, api_key, metadata, created_at, updated_at FROM llm_providers WHERE name = $1
+SELECT id, name, base_url, api_key, metadata, created_at, updated_at FROM llm_providers WHERE name = $1
 `
 
 func (q *Queries) GetLlmProviderByName(ctx context.Context, name string) (LlmProvider, error) {
@@ -238,7 +226,6 @@ func (q *Queries) GetLlmProviderByName(ctx context.Context, name string) (LlmPro
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.ClientType,
 		&i.BaseUrl,
 		&i.ApiKey,
 		&i.Metadata,
@@ -249,7 +236,7 @@ func (q *Queries) GetLlmProviderByName(ctx context.Context, name string) (LlmPro
 }
 
 const getModelByID = `-- name: GetModelByID :one
-SELECT id, model_id, name, llm_provider_id, dimensions, input_modalities, type, created_at, updated_at FROM models WHERE id = $1
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models WHERE id = $1
 `
 
 func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, error) {
@@ -260,6 +247,7 @@ func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, erro
 		&i.ModelID,
 		&i.Name,
 		&i.LlmProviderID,
+		&i.ClientType,
 		&i.Dimensions,
 		&i.InputModalities,
 		&i.Type,
@@ -270,7 +258,7 @@ func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, erro
 }
 
 const getModelByModelID = `-- name: GetModelByModelID :one
-SELECT id, model_id, name, llm_provider_id, dimensions, input_modalities, type, created_at, updated_at FROM models WHERE model_id = $1
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models WHERE model_id = $1
 `
 
 func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model, error) {
@@ -281,6 +269,7 @@ func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model,
 		&i.ModelID,
 		&i.Name,
 		&i.LlmProviderID,
+		&i.ClientType,
 		&i.Dimensions,
 		&i.InputModalities,
 		&i.Type,
@@ -291,7 +280,7 @@ func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model,
 }
 
 const listLlmProviders = `-- name: ListLlmProviders :many
-SELECT id, name, client_type, base_url, api_key, metadata, created_at, updated_at FROM llm_providers
+SELECT id, name, base_url, api_key, metadata, created_at, updated_at FROM llm_providers
 ORDER BY created_at DESC
 `
 
@@ -307,42 +296,6 @@ func (q *Queries) ListLlmProviders(ctx context.Context) ([]LlmProvider, error) {
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
-			&i.ClientType,
-			&i.BaseUrl,
-			&i.ApiKey,
-			&i.Metadata,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listLlmProvidersByClientType = `-- name: ListLlmProvidersByClientType :many
-SELECT id, name, client_type, base_url, api_key, metadata, created_at, updated_at FROM llm_providers
-WHERE client_type = $1
-ORDER BY created_at DESC
-`
-
-func (q *Queries) ListLlmProvidersByClientType(ctx context.Context, clientType string) ([]LlmProvider, error) {
-	rows, err := q.db.Query(ctx, listLlmProvidersByClientType, clientType)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []LlmProvider
-	for rows.Next() {
-		var i LlmProvider
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.ClientType,
 			&i.BaseUrl,
 			&i.ApiKey,
 			&i.Metadata,
@@ -394,7 +347,7 @@ func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid pg
 }
 
 const listModels = `-- name: ListModels :many
-SELECT id, model_id, name, llm_provider_id, dimensions, input_modalities, type, created_at, updated_at FROM models
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
 ORDER BY created_at DESC
 `
 
@@ -412,6 +365,7 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 			&i.ModelID,
 			&i.Name,
 			&i.LlmProviderID,
+			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
 			&i.Type,
@@ -429,13 +383,12 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 }
 
 const listModelsByClientType = `-- name: ListModelsByClientType :many
-SELECT m.id, m.model_id, m.name, m.llm_provider_id, m.dimensions, m.input_modalities, m.type, m.created_at, m.updated_at FROM models AS m
-JOIN llm_providers AS p ON p.id = m.llm_provider_id
-WHERE p.client_type = $1
-ORDER BY m.created_at DESC
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
+WHERE client_type = $1
+ORDER BY created_at DESC
 `
 
-func (q *Queries) ListModelsByClientType(ctx context.Context, clientType string) ([]Model, error) {
+func (q *Queries) ListModelsByClientType(ctx context.Context, clientType pgtype.Text) ([]Model, error) {
 	rows, err := q.db.Query(ctx, listModelsByClientType, clientType)
 	if err != nil {
 		return nil, err
@@ -449,6 +402,7 @@ func (q *Queries) ListModelsByClientType(ctx context.Context, clientType string)
 			&i.ModelID,
 			&i.Name,
 			&i.LlmProviderID,
+			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
 			&i.Type,
@@ -466,7 +420,7 @@ func (q *Queries) ListModelsByClientType(ctx context.Context, clientType string)
 }
 
 const listModelsByProviderID = `-- name: ListModelsByProviderID :many
-SELECT id, model_id, name, llm_provider_id, dimensions, input_modalities, type, created_at, updated_at FROM models
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
 WHERE llm_provider_id = $1
 ORDER BY created_at DESC
 `
@@ -485,6 +439,7 @@ func (q *Queries) ListModelsByProviderID(ctx context.Context, llmProviderID pgty
 			&i.ModelID,
 			&i.Name,
 			&i.LlmProviderID,
+			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
 			&i.Type,
@@ -502,7 +457,7 @@ func (q *Queries) ListModelsByProviderID(ctx context.Context, llmProviderID pgty
 }
 
 const listModelsByProviderIDAndType = `-- name: ListModelsByProviderIDAndType :many
-SELECT id, model_id, name, llm_provider_id, dimensions, input_modalities, type, created_at, updated_at FROM models
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
 WHERE llm_provider_id = $1
   AND type = $2
 ORDER BY created_at DESC
@@ -527,6 +482,7 @@ func (q *Queries) ListModelsByProviderIDAndType(ctx context.Context, arg ListMod
 			&i.ModelID,
 			&i.Name,
 			&i.LlmProviderID,
+			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
 			&i.Type,
@@ -544,7 +500,7 @@ func (q *Queries) ListModelsByProviderIDAndType(ctx context.Context, arg ListMod
 }
 
 const listModelsByType = `-- name: ListModelsByType :many
-SELECT id, model_id, name, llm_provider_id, dimensions, input_modalities, type, created_at, updated_at FROM models
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
 WHERE type = $1
 ORDER BY created_at DESC
 `
@@ -563,6 +519,7 @@ func (q *Queries) ListModelsByType(ctx context.Context, type_ string) ([]Model, 
 			&i.ModelID,
 			&i.Name,
 			&i.LlmProviderID,
+			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
 			&i.Type,
@@ -583,28 +540,25 @@ const updateLlmProvider = `-- name: UpdateLlmProvider :one
 UPDATE llm_providers
 SET
   name = $1,
-  client_type = $2,
-  base_url = $3,
-  api_key = $4,
-  metadata = $5,
+  base_url = $2,
+  api_key = $3,
+  metadata = $4,
   updated_at = now()
-WHERE id = $6
-RETURNING id, name, client_type, base_url, api_key, metadata, created_at, updated_at
+WHERE id = $5
+RETURNING id, name, base_url, api_key, metadata, created_at, updated_at
 `
 
 type UpdateLlmProviderParams struct {
-	Name       string      `json:"name"`
-	ClientType string      `json:"client_type"`
-	BaseUrl    string      `json:"base_url"`
-	ApiKey     string      `json:"api_key"`
-	Metadata   []byte      `json:"metadata"`
-	ID         pgtype.UUID `json:"id"`
+	Name     string      `json:"name"`
+	BaseUrl  string      `json:"base_url"`
+	ApiKey   string      `json:"api_key"`
+	Metadata []byte      `json:"metadata"`
+	ID       pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateLlmProvider(ctx context.Context, arg UpdateLlmProviderParams) (LlmProvider, error) {
 	row := q.db.QueryRow(ctx, updateLlmProvider,
 		arg.Name,
-		arg.ClientType,
 		arg.BaseUrl,
 		arg.ApiKey,
 		arg.Metadata,
@@ -614,7 +568,6 @@ func (q *Queries) UpdateLlmProvider(ctx context.Context, arg UpdateLlmProviderPa
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.ClientType,
 		&i.BaseUrl,
 		&i.ApiKey,
 		&i.Metadata,
@@ -629,17 +582,19 @@ UPDATE models
 SET
   name = $1,
   llm_provider_id = $2,
-  dimensions = $3,
-  input_modalities = $4,
-  type = $5,
+  client_type = $3,
+  dimensions = $4,
+  input_modalities = $5,
+  type = $6,
   updated_at = now()
-WHERE id = $6
-RETURNING id, model_id, name, llm_provider_id, dimensions, input_modalities, type, created_at, updated_at
+WHERE id = $7
+RETURNING id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at
 `
 
 type UpdateModelParams struct {
 	Name            pgtype.Text `json:"name"`
 	LlmProviderID   pgtype.UUID `json:"llm_provider_id"`
+	ClientType      pgtype.Text `json:"client_type"`
 	Dimensions      pgtype.Int4 `json:"dimensions"`
 	InputModalities []string    `json:"input_modalities"`
 	Type            string      `json:"type"`
@@ -650,6 +605,7 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 	row := q.db.QueryRow(ctx, updateModel,
 		arg.Name,
 		arg.LlmProviderID,
+		arg.ClientType,
 		arg.Dimensions,
 		arg.InputModalities,
 		arg.Type,
@@ -661,6 +617,7 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 		&i.ModelID,
 		&i.Name,
 		&i.LlmProviderID,
+		&i.ClientType,
 		&i.Dimensions,
 		&i.InputModalities,
 		&i.Type,
@@ -676,18 +633,20 @@ SET
   model_id = $1,
   name = $2,
   llm_provider_id = $3,
-  dimensions = $4,
-  input_modalities = $5,
-  type = $6,
+  client_type = $4,
+  dimensions = $5,
+  input_modalities = $6,
+  type = $7,
   updated_at = now()
-WHERE model_id = $7
-RETURNING id, model_id, name, llm_provider_id, dimensions, input_modalities, type, created_at, updated_at
+WHERE model_id = $8
+RETURNING id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at
 `
 
 type UpdateModelByModelIDParams struct {
 	NewModelID      string      `json:"new_model_id"`
 	Name            pgtype.Text `json:"name"`
 	LlmProviderID   pgtype.UUID `json:"llm_provider_id"`
+	ClientType      pgtype.Text `json:"client_type"`
 	Dimensions      pgtype.Int4 `json:"dimensions"`
 	InputModalities []string    `json:"input_modalities"`
 	Type            string      `json:"type"`
@@ -699,6 +658,7 @@ func (q *Queries) UpdateModelByModelID(ctx context.Context, arg UpdateModelByMod
 		arg.NewModelID,
 		arg.Name,
 		arg.LlmProviderID,
+		arg.ClientType,
 		arg.Dimensions,
 		arg.InputModalities,
 		arg.Type,
@@ -710,6 +670,7 @@ func (q *Queries) UpdateModelByModelID(ctx context.Context, arg UpdateModelByMod
 		&i.ModelID,
 		&i.Name,
 		&i.LlmProviderID,
+		&i.ClientType,
 		&i.Dimensions,
 		&i.InputModalities,
 		&i.Type,

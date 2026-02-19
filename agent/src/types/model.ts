@@ -1,14 +1,8 @@
 export enum ClientType {
-  OpenAI = 'openai',
-  OpenAICompat = 'openai-compat',
-  Anthropic = 'anthropic',
-  Google = 'google',
-  Azure = 'azure',
-  Bedrock = 'bedrock',
-  Mistral = 'mistral',
-  XAI = 'xai',
-  Ollama = 'ollama',
-  Dashscope = 'dashscope',
+  OpenAIResponses = 'openai-responses',
+  OpenAICompletions = 'openai-completions',
+  AnthropicMessages = 'anthropic-messages',
+  GoogleGenerativeAI = 'google-generative-ai',
 }
 
 export enum ModelInput {

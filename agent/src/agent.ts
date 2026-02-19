@@ -27,13 +27,42 @@ import {
   dedupeAttachments,
   AttachmentsStreamExtractor,
 } from './utils/attachments'
-import type {
-  ContainerFileAttachment,
-  ImageAttachment,
-} from './types/attachment'
+import type { ContainerFileAttachment, GatewayInputAttachment } from './types/attachment'
 import { getMCPTools } from './tools/mcp'
 import { getTools } from './tools'
 import { buildIdentityHeaders } from './utils/headers'
+
+export const buildNativeImageParts = (attachments: GatewayInputAttachment[]): ImagePart[] => {
+  return attachments
+    .filter((attachment) =>
+      attachment.type === 'image' &&
+      (attachment.transport === 'inline_data_url' || attachment.transport === 'public_url') &&
+      Boolean(attachment.payload),
+    )
+    .map((attachment) => ({ type: 'image', image: attachment.payload } as ImagePart))
+}
+
+const buildFileRefs = (
+  attachments: GatewayInputAttachment[],
+  supportsImage: boolean,
+): ContainerFileAttachment[] => {
+  return attachments
+    .filter((attachment) => {
+      if (attachment.transport !== 'tool_file_ref' || !attachment.payload) {
+        return false
+      }
+      if (attachment.type === 'file') {
+        return true
+      }
+      // When image native modality is unavailable, keep image refs as tool files.
+      return !supportsImage && attachment.type === 'image'
+    })
+    .map((attachment) => ({
+      type: 'file' as const,
+      path: attachment.payload,
+      metadata: attachment.metadata,
+    }))
+}
 
 export const createAgent = (
   {
@@ -123,82 +152,6 @@ export const createAgent = (
     }
   }
 
-  const prepareInputWithMCPImageBase64 = async (
-    input: AgentInput,
-  ): Promise<AgentInput> => {
-    if (!auth?.bearer || !identity.botId) {
-      return input
-    }
-    const url = `${auth.baseUrl.replace(/\/$/, '')}/bots/${identity.botId}/tools`
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-      Authorization: `Bearer ${auth.bearer}`,
-    }
-    if (identity.channelIdentityId) {
-      headers['X-Memoh-Channel-Identity-Id'] = identity.channelIdentityId
-    }
-    if (identity.sessionToken) {
-      headers['X-Memoh-Session-Token'] = identity.sessionToken
-    }
-    if (identity.currentPlatform) {
-      headers['X-Memoh-Current-Platform'] = identity.currentPlatform
-    }
-    const attachments = await Promise.all(
-      input.attachments.map(async (attachment) => {
-        if (attachment.type !== 'image') {
-          return attachment
-        }
-        const image = attachment as ImageAttachment
-        if (typeof image.base64 === 'string' && image.base64.trim() !== '') {
-          return image
-        }
-        const path = String(image.path ?? '').trim()
-        if (!path) {
-          return image
-        }
-        const quotedPath = `'${path.replace(/'/g, '\'\\\'\'')}'`
-        const command = `base64 ${quotedPath} | tr -d '\\n'`
-        const body = JSON.stringify({
-          jsonrpc: '2.0',
-          id: `read-image-${quotedPath}`,
-          method: 'tools/call',
-          params: {
-            name: 'exec',
-            arguments: { command },
-          },
-        })
-        try {
-          const response = await fetch(url, { method: 'POST', headers, body })
-          if (!response.ok) {
-            return image
-          }
-          const payload = await response.json().catch(() => ({}))
-          const structured = payload?.result?.structuredContent
-          const execResult = (
-            structured && typeof structured === 'object' ? structured : null
-          ) as { stdout?: unknown; exit_code?: unknown } | null
-          const exitCode = Number(execResult?.exit_code ?? 1)
-          const stdout =
-            typeof execResult?.stdout === 'string'
-              ? execResult.stdout.trim()
-              : ''
-          if (exitCode !== 0 || stdout === '') {
-            return image
-          }
-          const mime = String(image.mime ?? '').trim() || 'image/png'
-          return {
-            ...image,
-            base64: `data:${mime};base64,${stdout}`,
-          }
-        } catch {
-          return image
-        }
-      }),
-    )
-    return { ...input, attachments }
-  }
-
   const generateSystemPrompt = async () => {
     const { identityContent, soulContent, toolsContent } =
       await loadSystemFiles()
@@ -258,29 +211,8 @@ export const createAgent = (
   const generateUserPrompt = (input: AgentInput) => {
     const supportsImage = hasInputModality(modelConfig, ModelInput.Image)
 
-    // Separate attachments by model capability: native images vs fallback file paths.
-    const nativeImages = supportsImage
-      ? input.attachments.filter((a) => a.type === 'image')
-      : []
-    const fallbackFiles = input.attachments.filter(
-      (a): a is ContainerFileAttachment => a.type === 'file',
-    )
-    // Images the model cannot handle natively are mentioned as path references.
-    const unsupportedImages: ContainerFileAttachment[] = supportsImage
-      ? []
-      : input.attachments
-          .filter((a) => a.type === 'image')
-          .map((a) => ({
-            type: 'file' as const,
-            path: String(
-              (a as ImageAttachment).path || a.metadata?.path || '[image]',
-            ),
-            metadata: a.metadata,
-          }))
-    const allFiles: ContainerFileAttachment[] = [
-      ...fallbackFiles,
-      ...unsupportedImages,
-    ]
+    const allFiles = buildFileRefs(input.attachments, supportsImage)
+    const imageParts = supportsImage ? buildNativeImageParts(input.attachments) : []
 
     const text = user(input.query, {
       channelIdentityId: identity.channelIdentityId || '',
@@ -290,18 +222,6 @@ export const createAgent = (
       date: new Date(),
       attachments: allFiles,
     })
-    const imageParts: ImagePart[] = nativeImages
-      .map((image) => {
-        const img = image as ImageAttachment
-        if (img.base64) {
-          return { type: 'image', image: img.base64 } as ImagePart
-        }
-        if (img.url) {
-          return { type: 'image', image: img.url } as ImagePart
-        }
-        return { type: 'image', image: '' } as ImagePart
-      })
-      .filter((p) => p.image !== '')
     const userMessage: UserModelMessage = {
       role: 'user',
       content: [{ type: 'text', text }, ...imageParts],
@@ -310,10 +230,9 @@ export const createAgent = (
   }
 
   const ask = async (input: AgentInput) => {
-    const preparedInput = await prepareInputWithMCPImageBase64(input)
-    const userPrompt = generateUserPrompt(preparedInput)
-    const messages = [...preparedInput.messages, userPrompt]
-    preparedInput.skills.forEach((skill) => enableSkill(skill))
+    const userPrompt = generateUserPrompt(input)
+    const messages = [...input.messages, userPrompt]
+    input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
     const { tools, close } = await getAgentTools()
     const { response, reasoning, text, usage } = await generateText({
@@ -340,7 +259,10 @@ export const createAgent = (
       ...messageAttachments,
     ])
     return {
-      messages: strippedMessages,
+      messages: [
+        userPrompt,
+        ...strippedMessages,
+      ],
       reasoning: reasoning.map((part) => part.text),
       usage,
       text: cleanedText,
@@ -451,10 +373,9 @@ export const createAgent = (
   }
 
   async function* stream(input: AgentInput): AsyncGenerator<AgentAction> {
-    const preparedInput = await prepareInputWithMCPImageBase64(input)
-    const userPrompt = generateUserPrompt(preparedInput)
-    const messages = [...preparedInput.messages, userPrompt]
-    preparedInput.skills.forEach((skill) => enableSkill(skill))
+    const userPrompt = generateUserPrompt(input)
+    const messages = [...input.messages, userPrompt]
+    input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
     const attachmentsExtractor = new AttachmentsStreamExtractor()
     const result: {
@@ -596,7 +517,10 @@ export const createAgent = (
     )
     yield {
       type: 'agent_end',
-      messages: strippedMessages,
+      messages: [
+        userPrompt,
+        ...strippedMessages,
+      ],
       reasoning: result.reasoning,
       usage: result.usage!,
       skills: getEnabledSkills(),

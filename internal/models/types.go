@@ -25,25 +25,20 @@ const (
 type ClientType string
 
 const (
-	ClientTypeOpenAI       ClientType = "openai"
-	ClientTypeOpenAICompat ClientType = "openai-compat"
-	ClientTypeAnthropic    ClientType = "anthropic"
-	ClientTypeGoogle       ClientType = "google"
-	ClientTypeAzure        ClientType = "azure"
-	ClientTypeBedrock      ClientType = "bedrock"
-	ClientTypeMistral      ClientType = "mistral"
-	ClientTypeXAI          ClientType = "xai"
-	ClientTypeOllama       ClientType = "ollama"
-	ClientTypeDashscope    ClientType = "dashscope"
+	ClientTypeOpenAIResponses    ClientType = "openai-responses"
+	ClientTypeOpenAICompletions  ClientType = "openai-completions"
+	ClientTypeAnthropicMessages  ClientType = "anthropic-messages"
+	ClientTypeGoogleGenerativeAI ClientType = "google-generative-ai"
 )
 
 type Model struct {
-	ModelID         string    `json:"model_id"`
-	Name            string    `json:"name"`
-	LlmProviderID   string    `json:"llm_provider_id"`
-	InputModalities []string  `json:"input_modalities,omitempty"`
-	Type            ModelType `json:"type"`
-	Dimensions      int       `json:"dimensions"`
+	ModelID         string     `json:"model_id"`
+	Name            string     `json:"name"`
+	LlmProviderID   string     `json:"llm_provider_id"`
+	ClientType      ClientType `json:"client_type,omitempty"`
+	InputModalities []string   `json:"input_modalities,omitempty"`
+	Type            ModelType  `json:"type"`
+	Dimensions      int        `json:"dimensions"`
 }
 
 // validInputModalities is the set of recognised input modality tokens.
@@ -65,10 +60,17 @@ func (m *Model) Validate() error {
 	if m.Type != ModelTypeChat && m.Type != ModelTypeEmbedding {
 		return errors.New("invalid model type")
 	}
+	if m.Type == ModelTypeChat {
+		if m.ClientType == "" {
+			return errors.New("client_type is required for chat models")
+		}
+		if !isValidClientType(m.ClientType) {
+			return fmt.Errorf("invalid client_type: %s", m.ClientType)
+		}
+	}
 	if m.Type == ModelTypeEmbedding && m.Dimensions <= 0 {
 		return errors.New("dimensions must be greater than 0")
 	}
-	// Input modalities only apply to chat models.
 	if m.Type == ModelTypeChat {
 		for _, mod := range m.InputModalities {
 			if _, ok := validInputModalities[mod]; !ok {

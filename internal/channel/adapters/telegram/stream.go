@@ -16,6 +16,7 @@ import (
 
 const telegramStreamEditThrottle = 5000 * time.Millisecond
 const telegramStreamToolHintText = "Calling tools..."
+const telegramStreamPendingSuffix = "\n……"
 
 var testEditFunc func(bot *tgbotapi.BotAPI, chatID int64, msgID int, text string, parseMode string) error
 
@@ -82,7 +83,7 @@ func (s *telegramOutboundStream) ensureStreamMessage(ctx context.Context, text s
 	if strings.TrimSpace(text) == "" {
 		text = "..."
 	} else {
-		text = text + "\n……"
+		text = strings.TrimSpace(text) + telegramStreamPendingSuffix
 	}
 	chatID, msgID, err := sendTelegramTextReturnMessage(bot, s.target, text, replyTo, s.parseMode)
 	if err != nil {
@@ -97,6 +98,12 @@ func (s *telegramOutboundStream) ensureStreamMessage(ctx context.Context, text s
 	return nil
 }
 
+func normalizeStreamComparableText(value string) string {
+	normalized := strings.TrimSpace(value)
+	normalized = strings.TrimSuffix(normalized, telegramStreamPendingSuffix)
+	return strings.TrimSpace(normalized)
+}
+
 func (s *telegramOutboundStream) editStreamMessage(ctx context.Context, text string) error {
 	s.mu.Lock()
 	chatID := s.streamChatID
@@ -107,10 +114,10 @@ func (s *telegramOutboundStream) editStreamMessage(ctx context.Context, text str
 	if msgID == 0 {
 		return nil
 	}
-	text = text + "\n……"
-	if strings.TrimSpace(text) == lastEdited {
+	if normalizeStreamComparableText(text) == normalizeStreamComparableText(lastEdited) {
 		return nil
 	}
+	text = strings.TrimSpace(text) + telegramStreamPendingSuffix
 	if time.Since(lastEditedAt) < telegramStreamEditThrottle {
 		return nil
 	}
@@ -216,7 +223,25 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 		return s.editStreamMessageFinal(ctx, telegramStreamToolHintText)
 	case channel.StreamEventToolCallEnd:
 		return nil
-	case channel.StreamEventAttachment, channel.StreamEventProcessingFailed, channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
+	case channel.StreamEventAttachment:
+		if len(event.Attachments) == 0 {
+			return nil
+		}
+		bot, replyTo, err := s.getBotAndReply(ctx)
+		if err != nil {
+			return err
+		}
+		for _, att := range event.Attachments {
+			if sendErr := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", replyTo, "", s.adapter.assets); sendErr != nil {
+				slog.Warn("telegram: stream attachment send failed",
+					slog.String("config_id", s.cfg.ID),
+					slog.String("type", string(att.Type)),
+					slog.Any("error", sendErr),
+				)
+			}
+		}
+		return nil
+	case channel.StreamEventProcessingFailed, channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventDelta:
 		if event.Delta == "" {
@@ -282,7 +307,7 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 				if i > 0 {
 					to = 0
 				}
-				if err := sendTelegramAttachment(bot, s.target, att, "", to, parseMode); err != nil && s.adapter.logger != nil {
+				if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode, s.adapter.assets); err != nil && s.adapter.logger != nil {
 					s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
 				}
 			}

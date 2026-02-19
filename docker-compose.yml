@@ -7,9 +7,9 @@ services:
       POSTGRES_DB: memoh
       POSTGRES_USER: memoh
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-memoh123}
+      TZ: ${TZ:-UTC}
     volumes:
-      - postgres_data:/var/lib/postgresql
-      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+      - postgres_data:/var/lib/postgresql/data
     expose:
       - "5432"
     healthcheck:
@@ -38,18 +38,24 @@ services:
     networks:
       - memoh-network
 
-  containerd:
+  migrate:
     build:
       context: .
-      dockerfile: docker/Dockerfile.containerd
-    container_name: memoh-containerd
-    privileged: true
-    pid: host
+      dockerfile: docker/Dockerfile.server
+      args:
+        - VERSION=${MEMOH_VERSION:-dev}
+        - COMMIT_HASH=${MEMOH_COMMIT:-unknown}
+        - BUILD_TIME=${MEMOH_BUILD_TIME:-unknown}
+    container_name: memoh-migrate
+    environment:
+      TZ: ${TZ:-UTC}
+    entrypoint: ["/app/memoh-server", "migrate", "up"]
     volumes:
-      - containerd_sock:/run/containerd
-      - containerd_data:/var/lib/containerd
-      - memoh_data:/opt/memoh/data
-    restart: unless-stopped
+      - ${MEMOH_CONFIG:-./conf/app.docker.toml}:/app/config.toml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
     networks:
       - memoh-network
 
@@ -62,27 +68,21 @@ services:
         - COMMIT_HASH=${MEMOH_COMMIT:-unknown}
         - BUILD_TIME=${MEMOH_BUILD_TIME:-unknown}
     container_name: memoh-server
+    privileged: true
     pid: host
+    environment:
+      TZ: ${TZ:-UTC}
     volumes:
-      - ${MEMOH_CONFIG:-./docker/config/config.docker.toml}:/app/config.toml:ro
-      - containerd_sock:/run/containerd
+      - ${MEMOH_CONFIG:-./conf/app.docker.toml}:/app/config.toml:ro
       - containerd_data:/var/lib/containerd
       - server_cni_state:/var/lib/cni
       - memoh_data:/opt/memoh/data
-    cap_add:
-      - SYS_ADMIN
-      - NET_ADMIN
-    security_opt:
-      - seccomp:unconfined
-      - apparmor:unconfined
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       qdrant:
-        condition: service_healthy
-      containerd:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -93,8 +93,10 @@ services:
       context: .
       dockerfile: docker/Dockerfile.agent
     container_name: memoh-agent
+    environment:
+      TZ: ${TZ:-UTC}
     volumes:
-      - ${MEMOH_CONFIG:-./docker/config/config.docker.toml}:/config.toml:ro
+      - ${MEMOH_CONFIG:-./conf/app.docker.toml}:/config.toml:ro
     ports:
       - "8081:8081"
     depends_on:
@@ -124,8 +126,6 @@ volumes:
   postgres_data:
     driver: local
   qdrant_data:
-    driver: local
-  containerd_sock:
     driver: local
   containerd_data:
     driver: local

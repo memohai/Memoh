@@ -1,0 +1,54 @@
+# Memoh configuration template
+# Copy to config.toml and adjust values for your environment.
+# For local development, use: cp conf/app.dev.toml config.toml
+
+[log]
+level = "info"
+format = "text"
+
+[server]
+addr = ":8080"
+
+[admin]
+username = "admin"
+password = "admin123"
+email = "admin@memoh.local"
+
+[auth]
+jwt_secret = "CHANGE-ME-TO-A-RANDOM-SECRET"
+jwt_expires_in = "168h"
+
+[containerd]
+socket_path = "/run/containerd/containerd.sock"
+namespace = "default"
+
+[mcp]
+image = "docker.io/library/memoh-mcp:dev"
+snapshotter = "overlayfs"
+data_root = "data"
+data_mount = "/data"
+cni_bin_dir = "/opt/cni/bin"
+cni_conf_dir = "/etc/cni/net.d"
+
+[postgres]
+host = "127.0.0.1"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh"
+sslmode = "disable"
+
+[qdrant]
+base_url = "http://127.0.0.1:6334"
+api_key = ""
+collection = "memory"
+timeout_seconds = 10
+
+[agent_gateway]
+host = "127.0.0.1"
+port = 8081
+server_addr = ":8080"
+
+[web]
+host = "127.0.0.1"
+port = 8082

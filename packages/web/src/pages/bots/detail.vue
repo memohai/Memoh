@@ -138,7 +138,9 @@
           <div class="rounded-md border p-4">
             <div class="flex items-center justify-between gap-2">
               <div>
-                <p class="text-sm font-medium">{{ $t('bots.checks.title') }}</p>
+                <p class="text-sm font-medium">
+                  {{ $t('bots.checks.title') }}
+                </p>
                 <p class="text-sm text-muted-foreground">
                   {{ $t('bots.checks.subtitle') }}
                 </p>
@@ -191,7 +193,9 @@
               >
                 <div class="flex items-center justify-between gap-2">
                   <div class="min-w-0">
-                    <p class="font-mono text-xs">{{ checkTitleLabel(item) }}</p>
+                    <p class="font-mono text-xs">
+                      {{ checkTitleLabel(item) }}
+                    </p>
                     <p
                       v-if="item.subtitle"
                       class="mt-0.5 text-xs text-muted-foreground"
@@ -206,7 +210,9 @@
                     {{ checkStatusLabel(item.status) }}
                   </Badge>
                 </div>
-                <p class="mt-2 text-sm">{{ item.summary }}</p>
+                <p class="mt-2 text-sm">
+                  {{ item.summary }}
+                </p>
                 <p
                   v-if="item.detail"
                   class="mt-1 text-xs text-muted-foreground break-all"
@@ -335,39 +341,65 @@
             <div class="rounded-md border p-4">
               <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                 <div class="space-y-1">
-                  <dt class="text-muted-foreground">{{ $t('bots.container.fields.id') }}</dt>
-                  <dd class="font-mono break-all">{{ containerInfo.container_id }}</dd>
+                  <dt class="text-muted-foreground">
+                    {{ $t('bots.container.fields.id') }}
+                  </dt>
+                  <dd class="font-mono break-all">
+                    {{ containerInfo.container_id }}
+                  </dd>
                 </div>
                 <div class="space-y-1">
-                  <dt class="text-muted-foreground">{{ $t('bots.container.fields.status') }}</dt>
+                  <dt class="text-muted-foreground">
+                    {{ $t('bots.container.fields.status') }}
+                  </dt>
                   <dd>{{ containerStatusText }}</dd>
                 </div>
                 <div class="space-y-1">
-                  <dt class="text-muted-foreground">{{ $t('bots.container.fields.task') }}</dt>
+                  <dt class="text-muted-foreground">
+                    {{ $t('bots.container.fields.task') }}
+                  </dt>
                   <dd>{{ containerTaskText }}</dd>
                 </div>
                 <div class="space-y-1">
-                  <dt class="text-muted-foreground">{{ $t('bots.container.fields.namespace') }}</dt>
+                  <dt class="text-muted-foreground">
+                    {{ $t('bots.container.fields.namespace') }}
+                  </dt>
                   <dd>{{ containerInfo.namespace }}</dd>
                 </div>
                 <div class="space-y-1 sm:col-span-2">
-                  <dt class="text-muted-foreground">{{ $t('bots.container.fields.image') }}</dt>
-                  <dd class="break-all">{{ containerInfo.image }}</dd>
+                  <dt class="text-muted-foreground">
+                    {{ $t('bots.container.fields.image') }}
+                  </dt>
+                  <dd class="break-all">
+                    {{ containerInfo.image }}
+                  </dd>
                 </div>
                 <div class="space-y-1 sm:col-span-2">
-                  <dt class="text-muted-foreground">{{ $t('bots.container.fields.hostPath') }}</dt>
-                  <dd class="break-all">{{ containerInfo.host_path || '-' }}</dd>
+                  <dt class="text-muted-foreground">
+                    {{ $t('bots.container.fields.hostPath') }}
+                  </dt>
+                  <dd class="break-all">
+                    {{ containerInfo.host_path || '-' }}
+                  </dd>
                 </div>
                 <div class="space-y-1 sm:col-span-2">
-                  <dt class="text-muted-foreground">{{ $t('bots.container.fields.containerPath') }}</dt>
-                  <dd class="break-all">{{ containerInfo.container_path }}</dd>
+                  <dt class="text-muted-foreground">
+                    {{ $t('bots.container.fields.containerPath') }}
+                  </dt>
+                  <dd class="break-all">
+                    {{ containerInfo.container_path }}
+                  </dd>
                 </div>
                 <div class="space-y-1">
-                  <dt class="text-muted-foreground">{{ $t('bots.container.fields.createdAt') }}</dt>
+                  <dt class="text-muted-foreground">
+                    {{ $t('bots.container.fields.createdAt') }}
+                  </dt>
                   <dd>{{ formatDate(containerInfo.created_at) }}</dd>
                 </div>
                 <div class="space-y-1">
-                  <dt class="text-muted-foreground">{{ $t('bots.container.fields.updatedAt') }}</dt>
+                  <dt class="text-muted-foreground">
+                    {{ $t('bots.container.fields.updatedAt') }}
+                  </dt>
                   <dd>{{ formatDate(containerInfo.updated_at) }}</dd>
                 </div>
               </dl>
@@ -414,10 +446,18 @@
                 <table class="w-full text-sm">
                   <thead class="bg-muted/50 text-left">
                     <tr>
-                      <th class="px-3 py-2 font-medium">{{ $t('bots.container.snapshotColumns.name') }}</th>
-                      <th class="px-3 py-2 font-medium">{{ $t('bots.container.snapshotColumns.kind') }}</th>
-                      <th class="px-3 py-2 font-medium">{{ $t('bots.container.snapshotColumns.parent') }}</th>
-                      <th class="px-3 py-2 font-medium">{{ $t('bots.container.snapshotColumns.createdAt') }}</th>
+                      <th class="px-3 py-2 font-medium">
+                        {{ $t('bots.container.snapshotColumns.name') }}
+                      </th>
+                      <th class="px-3 py-2 font-medium">
+                        {{ $t('bots.container.snapshotColumns.kind') }}
+                      </th>
+                      <th class="px-3 py-2 font-medium">
+                        {{ $t('bots.container.snapshotColumns.parent') }}
+                      </th>
+                      <th class="px-3 py-2 font-medium">
+                        {{ $t('bots.container.snapshotColumns.createdAt') }}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -426,10 +466,18 @@
                       :key="`${item.snapshotter}:${item.name}`"
                       class="border-t"
                     >
-                      <td class="px-3 py-2 font-mono text-xs break-all">{{ item.name }}</td>
-                      <td class="px-3 py-2">{{ item.kind }}</td>
-                      <td class="px-3 py-2 break-all">{{ item.parent || '-' }}</td>
-                      <td class="px-3 py-2">{{ formatDate(item.created_at) }}</td>
+                      <td class="px-3 py-2 font-mono text-xs break-all">
+                        {{ item.name }}
+                      </td>
+                      <td class="px-3 py-2">
+                        {{ item.kind }}
+                      </td>
+                      <td class="px-3 py-2 break-all">
+                        {{ item.parent || '-' }}
+                      </td>
+                      <td class="px-3 py-2">
+                        {{ formatDate(item.created_at) }}
+                      </td>
                     </tr>
                   </tbody>
                 </table>

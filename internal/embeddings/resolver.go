@@ -17,10 +17,6 @@ import (
 const (
 	TypeText       = "text"
 	TypeMultimodal = "multimodal"
-
-	ProviderOpenAI    = "openai"
-	ProviderBedrock   = "bedrock"
-	ProviderDashScope = "dashscope"
 )
 
 type Request struct {
@@ -81,16 +77,10 @@ func (r *Resolver) Embed(ctx context.Context, req Request) (Result, error) {
 	}
 	switch req.Type {
 	case TypeText:
-		if req.Provider != "" && req.Provider != ProviderOpenAI {
-			return Result{}, errors.New("invalid provider for text embeddings")
-		}
 		if req.Input.Text == "" {
 			return Result{}, errors.New("text input is required")
 		}
 	case TypeMultimodal:
-		if req.Provider != "" && req.Provider != ProviderBedrock && req.Provider != ProviderDashScope {
-			return Result{}, errors.New("invalid provider for multimodal embeddings")
-		}
 		if req.Input.Text == "" && req.Input.ImageURL == "" && req.Input.VideoURL == "" {
 			return Result{}, errors.New("multimodal input is required")
 		}
@@ -109,7 +99,9 @@ func (r *Resolver) Embed(ctx context.Context, req Request) (Result, error) {
 
 	req.Model = selected.ModelID
 	req.Dimensions = selected.Dimensions
-	req.Provider = strings.ToLower(strings.TrimSpace(provider.ClientType))
+	if selected.ClientType != "" {
+		req.Provider = string(selected.ClientType)
+	}
 	if req.Model == "" {
 		return Result{}, errors.New("embedding model id not configured")
 	}
@@ -122,11 +114,9 @@ func (r *Resolver) Embed(ctx context.Context, req Request) (Result, error) {
 		timeout = 10 * time.Second
 	}
 
+	// OpenAI-compatible embeddings work for both openai-responses and openai-completions
 	switch req.Type {
 	case TypeText:
-		if req.Provider != ProviderOpenAI {
-			return Result{}, errors.New("provider not implemented")
-		}
 		embedder, err := NewOpenAIEmbedder(r.logger, provider.ApiKey, provider.BaseUrl, req.Model, req.Dimensions, timeout)
 		if err != nil {
 			return Result{}, err
@@ -143,29 +133,7 @@ func (r *Resolver) Embed(ctx context.Context, req Request) (Result, error) {
 			Embedding:  vector,
 		}, nil
 	case TypeMultimodal:
-		if req.Provider == ProviderDashScope {
-			if strings.TrimSpace(provider.ApiKey) == "" {
-				return Result{}, errors.New("dashscope api key is required")
-			}
-			dashscope := NewDashScopeEmbedder(r.logger, provider.ApiKey, provider.BaseUrl, req.Model, timeout)
-			vector, usage, err := dashscope.Embed(ctx, req.Input.Text, req.Input.ImageURL, req.Input.VideoURL)
-			if err != nil {
-				return Result{}, err
-			}
-			return Result{
-				Type:       req.Type,
-				Provider:   req.Provider,
-				Model:      req.Model,
-				Dimensions: req.Dimensions,
-				Embedding:  vector,
-				Usage: Usage{
-					InputTokens: usage.InputTokens,
-					ImageTokens: usage.ImageTokens,
-					Duration:    usage.Duration,
-				},
-			}, nil
-		}
-		return Result{}, errors.New("provider not implemented")
+		return Result{}, errors.New("multimodal embeddings not supported for current provider types")
 	default:
 		return Result{}, errors.New("invalid embeddings type")
 	}

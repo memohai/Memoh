@@ -1,11 +1,16 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
@@ -27,11 +32,6 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 
 // Create creates a new LLM provider
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
-	// Validate client type
-	if !isValidClientType(req.ClientType) {
-		return GetResponse{}, fmt.Errorf("invalid client_type: %s", req.ClientType)
-	}
-
 	// Marshal metadata
 	metadataJSON, err := json.Marshal(req.Metadata)
 	if err != nil {
@@ -40,11 +40,10 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 
 	// Create provider
 	provider, err := s.queries.CreateLlmProvider(ctx, sqlc.CreateLlmProviderParams{
-		Name:       req.Name,
-		ClientType: string(req.ClientType),
-		BaseUrl:    req.BaseURL,
-		ApiKey:     req.APIKey,
-		Metadata:   metadataJSON,
+		Name:     req.Name,
+		BaseUrl:  req.BaseURL,
+		ApiKey:   req.APIKey,
+		Metadata: metadataJSON,
 	})
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("create provider: %w", err)
@@ -92,24 +91,6 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	return results, nil
 }
 
-// ListByClientType retrieves providers by client type
-func (s *Service) ListByClientType(ctx context.Context, clientType ClientType) ([]GetResponse, error) {
-	if !isValidClientType(clientType) {
-		return nil, fmt.Errorf("invalid client_type: %s", clientType)
-	}
-
-	providers, err := s.queries.ListLlmProvidersByClientType(ctx, string(clientType))
-	if err != nil {
-		return nil, fmt.Errorf("list providers by client type: %w", err)
-	}
-
-	results := make([]GetResponse, 0, len(providers))
-	for _, p := range providers {
-		results = append(results, s.toGetResponse(p))
-	}
-	return results, nil
-}
-
 // Update updates an existing provider
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (GetResponse, error) {
 	providerID, err := db.ParseUUID(id)
@@ -127,14 +108,6 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	name := existing.Name
 	if req.Name != nil {
 		name = *req.Name
-	}
-
-	clientType := existing.ClientType
-	if req.ClientType != nil {
-		if !isValidClientType(*req.ClientType) {
-			return GetResponse{}, fmt.Errorf("invalid client_type: %s", *req.ClientType)
-		}
-		clientType = string(*req.ClientType)
 	}
 
 	baseURL := existing.BaseUrl
@@ -155,12 +128,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 
 	// Update provider
 	updated, err := s.queries.UpdateLlmProvider(ctx, sqlc.UpdateLlmProviderParams{
-		ID:         providerID,
-		Name:       name,
-		ClientType: clientType,
-		BaseUrl:    baseURL,
-		ApiKey:     apiKey,
-		Metadata:   metadata,
+		ID:       providerID,
+		Name:     name,
+		BaseUrl:  baseURL,
+		ApiKey:   apiKey,
+		Metadata: metadata,
 	})
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("update provider: %w", err)
@@ -191,17 +163,184 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-// CountByClientType returns the count of providers by client type
-func (s *Service) CountByClientType(ctx context.Context, clientType ClientType) (int64, error) {
-	if !isValidClientType(clientType) {
-		return 0, fmt.Errorf("invalid client_type: %s", clientType)
+const probeTimeout = 5 * time.Second
+
+// Test probes the provider's base URL to check connectivity, supported
+// client types, and embedding support. All probes run concurrently.
+func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
+	providerID, err := db.ParseUUID(id)
+	if err != nil {
+		return TestResponse{}, err
 	}
 
-	count, err := s.queries.CountLlmProvidersByClientType(ctx, string(clientType))
+	provider, err := s.queries.GetLlmProviderByID(ctx, providerID)
 	if err != nil {
-		return 0, fmt.Errorf("count providers by client type: %w", err)
+		return TestResponse{}, fmt.Errorf("get provider: %w", err)
 	}
-	return count, nil
+
+	baseURL := strings.TrimRight(provider.BaseUrl, "/")
+	apiKey := provider.ApiKey
+
+	resp := TestResponse{Checks: make(map[string]CheckResult, 5)}
+
+	// Connectivity check
+	start := time.Now()
+	reachable, reachMsg := probeReachable(ctx, baseURL)
+	resp.Reachable = reachable
+	resp.LatencyMs = time.Since(start).Milliseconds()
+	if !reachable {
+		resp.Message = reachMsg
+		return resp, nil
+	}
+
+	type namedResult struct {
+		name   string
+		result CheckResult
+	}
+
+	probes := []struct {
+		name string
+		fn   func() CheckResult
+	}{
+		{"openai-completions", func() CheckResult {
+			return probeOpenAICompletions(ctx, baseURL, apiKey)
+		}},
+		{"openai-responses", func() CheckResult {
+			return probeOpenAIResponses(ctx, baseURL, apiKey)
+		}},
+		{"anthropic-messages", func() CheckResult {
+			return probeAnthropicMessages(ctx, baseURL, apiKey)
+		}},
+		{"google-generative-ai", func() CheckResult {
+			return probeGoogleGenerativeAI(ctx, baseURL, apiKey)
+		}},
+		{"embedding", func() CheckResult {
+			return probeEmbedding(ctx, baseURL, apiKey)
+		}},
+	}
+
+	results := make([]namedResult, len(probes))
+	var wg sync.WaitGroup
+	for i, p := range probes {
+		wg.Add(1)
+		go func(idx int, name string, fn func() CheckResult) {
+			defer wg.Done()
+			results[idx] = namedResult{name: name, result: fn()}
+		}(i, p.name, p.fn)
+	}
+	wg.Wait()
+
+	for _, nr := range results {
+		resp.Checks[nr.name] = nr.result
+	}
+	return resp, nil
+}
+
+func probeReachable(ctx context.Context, baseURL string) (bool, string) {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
+	if err != nil {
+		return false, err.Error()
+	}
+	httpResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, err.Error()
+	}
+	io.Copy(io.Discard, httpResp.Body)
+	httpResp.Body.Close()
+	return true, ""
+}
+
+func probeOpenAICompletions(ctx context.Context, baseURL, apiKey string) CheckResult {
+	body := `{"model":"probe-test","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`
+	return probeEndpoint(ctx, http.MethodPost, baseURL+"/chat/completions",
+		map[string]string{
+			"Authorization": "Bearer " + apiKey,
+			"Content-Type":  "application/json",
+		}, body)
+}
+
+func probeOpenAIResponses(ctx context.Context, baseURL, apiKey string) CheckResult {
+	body := `{"model":"probe-test","input":"hi","max_output_tokens":1}`
+	return probeEndpoint(ctx, http.MethodPost, baseURL+"/responses",
+		map[string]string{
+			"Authorization": "Bearer " + apiKey,
+			"Content-Type":  "application/json",
+		}, body)
+}
+
+func probeAnthropicMessages(ctx context.Context, baseURL, apiKey string) CheckResult {
+	body := `{"model":"probe-test","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`
+	return probeEndpoint(ctx, http.MethodPost, baseURL+"/messages",
+		map[string]string{
+			"x-api-key":         apiKey,
+			"anthropic-version": "2023-06-01",
+			"Content-Type":      "application/json",
+		}, body)
+}
+
+func probeGoogleGenerativeAI(ctx context.Context, baseURL, apiKey string) CheckResult {
+	return probeEndpoint(ctx, http.MethodGet, baseURL+"/models",
+		map[string]string{
+			"x-goog-api-key": apiKey,
+		}, "")
+}
+
+func probeEmbedding(ctx context.Context, baseURL, apiKey string) CheckResult {
+	body := `{"model":"probe-test","input":"hello"}`
+	return probeEndpoint(ctx, http.MethodPost, baseURL+"/embeddings",
+		map[string]string{
+			"Authorization": "Bearer " + apiKey,
+			"Content-Type":  "application/json",
+		}, body)
+}
+
+func probeEndpoint(ctx context.Context, method, url string, headers map[string]string, body string) CheckResult {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+
+	var bodyReader io.Reader
+	if body != "" {
+		bodyReader = bytes.NewBufferString(body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+	if err != nil {
+		return CheckResult{Status: CheckStatusError, Message: err.Error()}
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		return CheckResult{Status: CheckStatusError, LatencyMs: latency, Message: err.Error()}
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	return classifyResponse(resp.StatusCode, latency)
+}
+
+func classifyResponse(statusCode int, latencyMs int64) CheckResult {
+	r := CheckResult{StatusCode: statusCode, LatencyMs: latencyMs}
+	switch {
+	case statusCode >= 200 && statusCode <= 299,
+		statusCode == 400, statusCode == 422, statusCode == 429:
+		r.Status = CheckStatusSupported
+	case statusCode == 401 || statusCode == 403:
+		r.Status = CheckStatusAuthError
+	case statusCode == 404 || statusCode == 405:
+		r.Status = CheckStatusUnsupported
+	default:
+		r.Status = CheckStatusError
+		r.Message = fmt.Sprintf("unexpected status %d", statusCode)
+	}
+	return r
 }
 
 // toGetResponse converts a database provider to a response
@@ -217,26 +356,13 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 	maskedAPIKey := maskAPIKey(provider.ApiKey)
 
 	return GetResponse{
-		ID:         provider.ID.String(),
-		Name:       provider.Name,
-		ClientType: provider.ClientType,
-		BaseURL:    provider.BaseUrl,
-		APIKey:     maskedAPIKey,
-		Metadata:   metadata,
-		CreatedAt:  provider.CreatedAt.Time,
-		UpdatedAt:  provider.UpdatedAt.Time,
-	}
-}
-
-// isValidClientType checks if a client type is valid
-func isValidClientType(clientType ClientType) bool {
-	switch clientType {
-	case ClientTypeOpenAI, ClientTypeOpenAICompat, ClientTypeAnthropic, ClientTypeGoogle,
-		ClientTypeAzure, ClientTypeBedrock, ClientTypeMistral, ClientTypeXAI,
-		ClientTypeOllama, ClientTypeDashscope:
-		return true
-	default:
-		return false
+		ID:        provider.ID.String(),
+		Name:      provider.Name,
+		BaseURL:   provider.BaseUrl,
+		APIKey:    maskedAPIKey,
+		Metadata:  metadata,
+		CreatedAt: provider.CreatedAt.Time,
+		UpdatedAt: provider.UpdatedAt.Time,
 	}
 }
 

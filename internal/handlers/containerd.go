@@ -14,6 +14,7 @@ import (
 	"time"
 
 	tasktypes "github.com/containerd/containerd/api/types/task"
+	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
@@ -35,6 +36,7 @@ import (
 
 type ContainerdHandler struct {
 	service        ctr.Service
+	manager        *mcp.Manager
 	cfg            config.MCPConfig
 	namespace      string
 	logger         *slog.Logger
@@ -80,6 +82,8 @@ type CreateSnapshotResponse struct {
 	ContainerID  string `json:"container_id"`
 	SnapshotName string `json:"snapshot_name"`
 	Snapshotter  string `json:"snapshotter"`
+	Version      int    `json:"version"`
+	Source       string `json:"source"`
 }
 
 type SnapshotInfo struct {
@@ -90,6 +94,9 @@ type SnapshotInfo struct {
 	CreatedAt   time.Time         `json:"created_at,omitempty"`
 	UpdatedAt   time.Time         `json:"updated_at,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
+	Source      string            `json:"source"`
+	Managed     bool              `json:"managed"`
+	Version     *int              `json:"version,omitempty"`
 }
 
 type ListSnapshotsResponse struct {
@@ -97,9 +104,10 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.MCPConfig, namespace string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *ContainerdHandler {
 	return &ContainerdHandler{
 		service:        service,
+		manager:        manager,
 		cfg:            cfg,
 		namespace:      namespace,
 		logger:         log.With(slog.String("handler", "containerd")),
@@ -552,9 +560,40 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if h.manager == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "snapshot manager not configured")
+	}
 	var req CreateSnapshotRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	created, err := h.manager.CreateSnapshot(c.Request().Context(), botID, req.SnapshotName, mcp.SnapshotSourceManual)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return echo.NewHTTPError(http.StatusNotFound, "container not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, CreateSnapshotResponse{
+		ContainerID:  created.ContainerID,
+		SnapshotName: created.SnapshotName,
+		Snapshotter:  created.Snapshotter,
+		Version:      created.Version,
+		Source:       mcp.SnapshotSourceManual,
+	})
+}
+
+// ListSnapshots godoc
+// @Summary List snapshots
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Param snapshotter query string false "Snapshotter name"
+// @Success 200 {object} ListSnapshotsResponse
+// @Router /bots/{bot_id}/container/snapshots [get]
+func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
 	}
 	ctx := c.Request().Context()
 	containerID, err := h.botContainerID(ctx, botID)
@@ -572,57 +611,122 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	if strings.TrimSpace(h.namespace) != "" {
 		infoCtx = namespaces.WithNamespace(ctx, h.namespace)
 	}
-	info, err := container.Info(infoCtx)
+	containerInfo, err := container.Info(infoCtx)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	snapshotName := strings.TrimSpace(req.SnapshotName)
-	if snapshotName == "" {
-		snapshotName = containerID + "-" + time.Now().Format("20060102150405")
-	}
-	if err := h.service.CommitSnapshot(ctx, info.Snapshotter, snapshotName, info.SnapshotKey); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, CreateSnapshotResponse{
-		ContainerID:  containerID,
-		SnapshotName: snapshotName,
-		Snapshotter:  info.Snapshotter,
-	})
-}
 
-// ListSnapshots godoc
-// @Summary List snapshots
-// @Tags containerd
-// @Param bot_id path string true "Bot ID"
-// @Param snapshotter query string false "Snapshotter name"
-// @Success 200 {object} ListSnapshotsResponse
-// @Router /bots/{bot_id}/container/snapshots [get]
-func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
-	if _, err := h.requireBotAccess(c); err != nil {
-		return err
+	requestedSnapshotter := strings.TrimSpace(c.QueryParam("snapshotter"))
+	snapshotter := strings.TrimSpace(containerInfo.Snapshotter)
+	if requestedSnapshotter != "" {
+		if snapshotter != "" && requestedSnapshotter != snapshotter {
+			return echo.NewHTTPError(http.StatusBadRequest, "snapshotter does not match container snapshotter")
+		}
+		snapshotter = requestedSnapshotter
 	}
-	snapshotter := strings.TrimSpace(c.QueryParam("snapshotter"))
 	if snapshotter == "" {
 		snapshotter = strings.TrimSpace(h.cfg.Snapshotter)
 	}
 	if snapshotter == "" {
 		snapshotter = "overlayfs"
 	}
-	snapshots, err := h.service.ListSnapshots(c.Request().Context(), snapshotter)
+	snapshotKey := strings.TrimSpace(containerInfo.SnapshotKey)
+	if snapshotKey == "" {
+		return echo.NewHTTPError(http.StatusInternalServerError, "container snapshot key is empty")
+	}
+
+	allSnapshots, err := h.service.ListSnapshots(ctx, snapshotter)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	items := make([]SnapshotInfo, 0, len(snapshots))
-	for _, info := range snapshots {
+	runtimeByName := make(map[string]snapshots.Info, len(allSnapshots))
+	for _, info := range allSnapshots {
+		name := strings.TrimSpace(info.Name)
+		if name == "" {
+			continue
+		}
+		runtimeByName[name] = info
+	}
+	lineage, ok := snapshotLineage(snapshotKey, allSnapshots)
+	if !ok {
+		h.logger.Warn("container snapshot chain root not found",
+			slog.String("container_id", containerID),
+			slog.String("snapshotter", snapshotter),
+			slog.String("snapshot_key", snapshotKey),
+		)
+		return echo.NewHTTPError(http.StatusInternalServerError, "container snapshot chain not found")
+	}
+
+	metadataByName := map[string]dbsqlc.ListSnapshotsWithVersionByContainerIDRow{}
+	if h.queries != nil {
+		managedRows, dbErr := h.queries.ListSnapshotsWithVersionByContainerID(ctx, containerID)
+		if dbErr != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, dbErr.Error())
+		}
+		for _, row := range managedRows {
+			name := strings.TrimSpace(row.RuntimeSnapshotName)
+			if name == "" {
+				continue
+			}
+			metadataByName[name] = row
+		}
+	}
+
+	items := make([]SnapshotInfo, 0, len(lineage)+len(metadataByName))
+	seen := make(map[string]struct{}, len(lineage)+len(metadataByName))
+	appendRuntime := func(runtimeInfo snapshots.Info, fallbackSource string, meta *dbsqlc.ListSnapshotsWithVersionByContainerIDRow) {
+		source := fallbackSource
+		managed := false
+		var version *int
+		if meta != nil {
+			if strings.TrimSpace(meta.Source) != "" {
+				source = strings.TrimSpace(meta.Source)
+			}
+			managed = true
+			if meta.Version.Valid {
+				v := int(meta.Version.Int32)
+				version = &v
+			}
+		}
 		items = append(items, SnapshotInfo{
 			Snapshotter: snapshotter,
-			Name:        info.Name,
-			Parent:      info.Parent,
-			Kind:        info.Kind.String(),
-			CreatedAt:   info.Created,
-			UpdatedAt:   info.Updated,
-			Labels:      info.Labels,
+			Name:        runtimeInfo.Name,
+			Parent:      runtimeInfo.Parent,
+			Kind:        runtimeInfo.Kind.String(),
+			CreatedAt:   runtimeInfo.Created,
+			UpdatedAt:   runtimeInfo.Updated,
+			Labels:      runtimeInfo.Labels,
+			Source:      source,
+			Managed:     managed,
+			Version:     version,
 		})
+		seen[strings.TrimSpace(runtimeInfo.Name)] = struct{}{}
+	}
+
+	for _, runtimeInfo := range lineage {
+		name := strings.TrimSpace(runtimeInfo.Name)
+		row, hasMeta := metadataByName[name]
+		if hasMeta {
+			appendRuntime(runtimeInfo, "image_layer", &row)
+			continue
+		}
+		appendRuntime(runtimeInfo, "image_layer", nil)
+	}
+
+	for name, row := range metadataByName {
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		runtimeInfo, exists := runtimeByName[name]
+		if !exists {
+			h.logger.Warn("managed snapshot not found in runtime",
+				slog.String("container_id", containerID),
+				slog.String("snapshot_name", name),
+				slog.String("snapshotter", snapshotter),
+			)
+			continue
+		}
+		appendRuntime(runtimeInfo, "managed", &row)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
@@ -634,6 +738,40 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 		Snapshotter: snapshotter,
 		Snapshots:   items,
 	})
+}
+
+func snapshotLineage(root string, all []snapshots.Info) ([]snapshots.Info, bool) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return nil, false
+	}
+	index := make(map[string]snapshots.Info, len(all))
+	for _, info := range all {
+		name := strings.TrimSpace(info.Name)
+		if name == "" {
+			continue
+		}
+		index[name] = info
+	}
+	if _, ok := index[root]; !ok {
+		return nil, false
+	}
+	lineage := make([]snapshots.Info, 0, len(index))
+	visited := make(map[string]struct{}, len(index))
+	current := root
+	for current != "" {
+		if _, seen := visited[current]; seen {
+			break
+		}
+		info, ok := index[current]
+		if !ok {
+			break
+		}
+		lineage = append(lineage, info)
+		visited[current] = struct{}{}
+		current = strings.TrimSpace(info.Parent)
+	}
+	return lineage, true
 }
 
 // ---------- auth helpers ----------

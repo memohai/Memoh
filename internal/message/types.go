@@ -7,18 +7,14 @@ import (
 )
 
 // MessageAsset carries media asset metadata attached to a message.
+// ContentHash is the content-addressed identifier for the media file.
 type MessageAsset struct {
-	AssetID      string `json:"asset_id"`
-	Role         string `json:"role"`
-	Ordinal      int    `json:"ordinal"`
-	MediaType    string `json:"media_type"`
-	Mime         string `json:"mime"`
-	SizeBytes    int64  `json:"size_bytes"`
-	StorageKey   string `json:"storage_key"`
-	OriginalName string `json:"original_name,omitempty"`
-	Width        int    `json:"width,omitempty"`
-	Height       int    `json:"height,omitempty"`
-	DurationMs   int64  `json:"duration_ms,omitempty"`
+	ContentHash string `json:"content_hash"`
+	Role        string `json:"role"`
+	Ordinal     int    `json:"ordinal"`
+	Mime        string `json:"mime"`
+	SizeBytes   int64  `json:"size_bytes"`
+	StorageKey  string `json:"storage_key"`
 }
 
 // Message represents a single persisted bot message.
@@ -36,15 +32,20 @@ type Message struct {
 	Role                    string          `json:"role"`
 	Content                 json.RawMessage `json:"content"`
 	Metadata                map[string]any  `json:"metadata,omitempty"`
+	Usage                   json.RawMessage `json:"usage,omitempty"`
 	Assets                  []MessageAsset  `json:"assets,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
 }
 
 // AssetRef links a media asset to a persisted message.
+// ContentHash is the content-addressed identifier for the media file.
 type AssetRef struct {
-	AssetID string `json:"asset_id"`
-	Role    string `json:"role"`
-	Ordinal int    `json:"ordinal"`
+	ContentHash string `json:"content_hash"`
+	Role        string `json:"role"`
+	Ordinal     int    `json:"ordinal"`
+	Mime        string `json:"mime,omitempty"`
+	SizeBytes   int64  `json:"size_bytes,omitempty"`
+	StorageKey  string `json:"storage_key,omitempty"`
 }
 
 // PersistInput is the input for persisting a message.
@@ -59,6 +60,7 @@ type PersistInput struct {
 	Role                    string
 	Content                 json.RawMessage
 	Metadata                map[string]any
+	Usage                   json.RawMessage
 	Assets                  []AssetRef
 }
 

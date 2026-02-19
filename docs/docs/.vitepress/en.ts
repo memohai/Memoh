@@ -1,3 +1,5 @@
+import { text } from "node:stream/consumers";
+
 export const en = [
   {
     text: 'Overview',
@@ -26,6 +28,14 @@ export const en = [
       {
         text: 'Provider and Model',
         link: '/getting-started/provider-and-model.md'
+      },
+      {
+        text: 'Create Bot',
+        link: '/getting-started/create-bot.md'
+      },
+      {
+        text: 'telegram platform',
+        link: '/getting-started/platform-telegram.md'
       }
     ]
   },

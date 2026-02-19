@@ -46,6 +46,55 @@
               </FormItem>
             </FormField>
 
+            <!-- Client Type (chat only) -->
+            <div v-if="selectedType === 'chat'">
+              <Label class="mb-2">
+                {{ $t('models.clientType') }}
+              </Label>
+              <Popover v-model:open="clientTypeOpen">
+                <PopoverTrigger as-child>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    :aria-expanded="clientTypeOpen"
+                    class="w-full justify-between font-normal mt-2"
+                  >
+                    <span class="truncate">
+                      {{ selectedClientTypeLabel || $t('models.clientTypePlaceholder') }}
+                    </span>
+                    <FontAwesomeIcon
+                      :icon="['fas', 'chevron-down']"
+                      class="ml-2 size-3 shrink-0 text-muted-foreground"
+                    />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  class="w-[--reka-popover-trigger-width] p-1"
+                  align="start"
+                >
+                  <button
+                    v-for="ct in CLIENT_TYPE_LIST"
+                    :key="ct.value"
+                    class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                    :class="{ 'bg-accent': form.values.client_type === ct.value }"
+                    @click="selectClientType(ct.value)"
+                  >
+                    <FontAwesomeIcon
+                      v-if="form.values.client_type === ct.value"
+                      :icon="['fas', 'check']"
+                      class="size-3.5"
+                    />
+                    <span
+                      v-else
+                      class="size-3.5"
+                    />
+                    <span class="truncate">{{ ct.label }}</span>
+                    <span class="ml-auto text-xs text-muted-foreground">{{ ct.hint }}</span>
+                  </button>
+                </PopoverContent>
+              </Popover>
+            </div>
+
             <!-- Model -->
             <FormField
               v-slot="{ componentField }"
@@ -167,6 +216,9 @@ import {
   SelectTrigger,
   SelectValue,
   FormItem,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
   Checkbox,
   Separator,
   Label,
@@ -179,12 +231,14 @@ import z from 'zod'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postModels, putModelsModelByModelId } from '@memoh/sdk'
 import type { ModelsGetResponse } from '@memoh/sdk'
+import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
 
 const availableInputModalities = ['text', 'image', 'audio', 'video', 'file'] as const
 const selectedModalities = ref<string[]>(['text'])
 
 const formSchema = toTypedSchema(z.object({
   type: z.string().min(1),
+  client_type: z.string().optional(),
   model_id: z.string().min(1),
   name: z.string().optional(),
   dimensions: z.coerce.number().min(1).optional(),
@@ -192,20 +246,36 @@ const formSchema = toTypedSchema(z.object({
 
 const form = useForm({
   validationSchema: formSchema,
+  initialValues: {
+    type: 'chat',
+  },
 })
 
-const selectedType = computed(() => form.values.type || editInfo?.value?.type)
+const selectedType = computed(() => form.values.type || 'chat')
+
+const clientTypeOpen = ref(false)
+
+const selectedClientTypeLabel = computed(() => {
+  const ct = form.values.client_type
+  if (!ct) return ''
+  return CLIENT_TYPE_META[ct]?.label ?? ct
+})
+
+function selectClientType(value: string) {
+  form.setFieldValue('client_type', value)
+  clientTypeOpen.value = false
+}
 
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))
 const editInfo = inject<Ref<ModelsGetResponse | null>>('openModelState', ref(null))
 
-// 保存按钮：编辑模式直接可提交（表单已预填充，handleSubmit 内部会校验）
-// 新建模式需要必填字段有值
 const canSubmit = computed(() => {
   if (title.value === 'edit') return true
-  const { type, model_id } = form.values
-  return !!type && !!model_id
+  const { type, model_id, client_type } = form.values
+  if (!type || !model_id) return false
+  if (type === 'chat' && !client_type) return false
+  return true
 })
 
 function toggleModality(mod: string, checked: boolean) {
@@ -216,14 +286,6 @@ function toggleModality(mod: string, checked: boolean) {
   }
 }
 
-const emptyValues = {
-  type: '' as string,
-  model_id: '' as string,
-  name: '' as string,
-  dimensions: undefined as number | undefined,
-}
-
-// Display Name 自动跟随 Model ID，除非用户主动修改过
 const userEditedName = ref(false)
 
 watch(
@@ -269,20 +331,26 @@ async function addModel(e: Event) {
   const isEdit = title.value === 'edit' && !!editInfo?.value
   const fallback = editInfo?.value
 
-  // 从 form.values 读取，编辑模式用 editInfo 兜底
-  // （Dialog 异步渲染可能导致 vee-validate 内部状态未同步）
-  const type = form.values.type || (isEdit ? fallback!.type : '')
+  const type = form.values.type || (isEdit ? fallback!.type : 'chat')
+  const client_type = type === 'chat'
+    ? (form.values.client_type || (isEdit ? fallback!.client_type : ''))
+    : undefined
   const model_id = form.values.model_id || (isEdit ? fallback!.model_id : '')
   const name = form.values.name ?? (isEdit ? fallback!.name : '')
   const dimensions = form.values.dimensions ?? (isEdit ? fallback!.dimensions : undefined)
 
   if (!type || !model_id) return
+  if (type === 'chat' && !client_type) return
 
   try {
     const payload: Record<string, unknown> = {
       type,
       model_id,
       llm_provider_id: id,
+    }
+
+    if (type === 'chat' && client_type) {
+      payload.client_type = client_type
     }
 
     if (name) {
@@ -315,20 +383,26 @@ watch(open, async () => {
     return
   }
 
-  // 等待 Dialog 内容和 FormField 组件挂载完成
   await nextTick()
 
   if (editInfo?.value) {
-    const { type, model_id, name, dimensions, input_modalities } = editInfo.value
-    form.resetForm({ values: { type, model_id, name, dimensions } })
+    const { client_type, type, model_id, name, dimensions, input_modalities } = editInfo.value
+    form.resetForm({ values: { type: type || 'chat', client_type: client_type || '', model_id, name, dimensions } })
     selectedModalities.value = input_modalities ?? ['text']
     userEditedName.value = !!(name && name !== model_id)
   } else {
-    form.resetForm({ values: { ...emptyValues } })
+    form.resetForm({ values: { type: 'chat', client_type: '', model_id: '', name: '', dimensions: undefined } })
     selectedModalities.value = ['text']
     userEditedName.value = false
   }
 }, {
   immediate: true,
+})
+
+// Clear client_type when switching to embedding
+watch(selectedType, (newType) => {
+  if (newType === 'embedding') {
+    form.setFieldValue('client_type', '')
+  }
 })
 </script>

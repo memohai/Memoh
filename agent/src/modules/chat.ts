@@ -48,7 +48,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
     })
   }, {
     body: AgentModel.extend({
-      query: z.string(),
+      query: z.string().optional().default(''),
     }),
   })
   .post('/stream', async function* ({ body, bearer }) {
@@ -89,7 +89,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
     }
   }, {
     body: AgentModel.extend({
-      query: z.string(),
+      query: z.string().optional().default(''),
     }),
   })
   .post('/trigger-schedule', async ({ body, bearer }) => {

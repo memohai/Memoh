@@ -4,7 +4,7 @@ Manage chat and embedding models.
 
 ## model list
 
-List all models with their provider, type, and multimodal flag.
+List all models with their provider, type, client type, and multimodal flag.
 
 ```bash
 memoh model list
@@ -12,7 +12,7 @@ memoh model list
 
 ## model create
 
-Create a new model. Prompts for provider, model ID, type, and (for embedding models) dimensions.
+Create a new model. Prompts for provider, model ID, type, client type, and (for embedding models) dimensions.
 
 ```bash
 memoh model create [options]
@@ -23,6 +23,7 @@ memoh model create [options]
 | `--model_id <id>` | Model ID (e.g. `gpt-4`, `text-embedding-3-small`) |
 | `--name <name>` | Display name |
 | `--provider <provider>` | Provider name |
+| `--client_type <type>` | Client type: `openai-responses`, `openai-completions`, `anthropic-messages`, `google-generative-ai` |
 | `--type <type>` | `chat` or `embedding` |
 | `--dimensions <n>` | Embedding dimensions (required for embedding models) |
 | `--multimodal` | Mark as multimodal |
@@ -30,8 +31,8 @@ memoh model create [options]
 Examples:
 
 ```bash
-memoh model create --model_id gpt-4 --provider my-openai --type chat
-memoh model create --model_id text-embedding-3-small --provider my-openai --type embedding --dimensions 1536
+memoh model create --model_id gpt-4 --provider my-openai --client_type openai-responses --type chat
+memoh model create --model_id text-embedding-3-small --provider my-openai --client_type openai-completions --type embedding --dimensions 1536
 memoh model create
 # Interactive prompts
 ```

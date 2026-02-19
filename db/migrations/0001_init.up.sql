@@ -59,14 +59,12 @@ CREATE INDEX IF NOT EXISTS idx_user_channel_bindings_user_id ON user_channel_bin
 CREATE TABLE IF NOT EXISTS llm_providers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
-  client_type TEXT NOT NULL,
   base_url TEXT NOT NULL,
   api_key TEXT NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT llm_providers_name_unique UNIQUE (name),
-  CONSTRAINT llm_providers_client_type_check CHECK (client_type IN ('openai', 'openai-compat', 'anthropic', 'google', 'azure', 'bedrock', 'mistral', 'xai', 'ollama', 'dashscope'))
+  CONSTRAINT llm_providers_name_unique UNIQUE (name)
 );
 
 CREATE TABLE IF NOT EXISTS search_providers (
@@ -85,6 +83,7 @@ CREATE TABLE IF NOT EXISTS models (
   model_id TEXT NOT NULL,
   name TEXT,
   llm_provider_id UUID NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
+  client_type TEXT,
   dimensions INTEGER,
   input_modalities TEXT[] NOT NULL DEFAULT ARRAY['text']::TEXT[],
   type TEXT NOT NULL DEFAULT 'chat',
@@ -92,7 +91,9 @@ CREATE TABLE IF NOT EXISTS models (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT models_model_id_unique UNIQUE (model_id),
   CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding')),
-  CONSTRAINT models_dimensions_check CHECK (type != 'embedding' OR dimensions IS NOT NULL)
+  CONSTRAINT models_dimensions_check CHECK (type != 'embedding' OR dimensions IS NOT NULL),
+  CONSTRAINT models_client_type_check CHECK (client_type IS NULL OR client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai')),
+  CONSTRAINT models_chat_client_type_check CHECK (type != 'chat' OR client_type IS NOT NULL)
 );
 
 CREATE TABLE IF NOT EXISTS model_variants (
@@ -117,6 +118,7 @@ CREATE TABLE IF NOT EXISTS bots (
   is_active BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'ready',
   max_context_load_time INTEGER NOT NULL DEFAULT 1440,
+  max_context_tokens INTEGER NOT NULL DEFAULT 0,
   language TEXT NOT NULL DEFAULT 'auto',
   allow_guest BOOLEAN NOT NULL DEFAULT false,
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
@@ -242,6 +244,7 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
   content JSONB NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  usage JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -274,27 +277,33 @@ CREATE TABLE IF NOT EXISTS containers (
 CREATE INDEX IF NOT EXISTS idx_containers_bot_id ON containers(bot_id);
 
 CREATE TABLE IF NOT EXISTS snapshots (
-  id TEXT PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   container_id TEXT NOT NULL REFERENCES containers(container_id) ON DELETE CASCADE,
-  parent_snapshot_id TEXT REFERENCES snapshots(id) ON DELETE SET NULL,
+  runtime_snapshot_name TEXT NOT NULL,
+  parent_runtime_snapshot_name TEXT,
   snapshotter TEXT NOT NULL,
-  digest TEXT,
+  source TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_snapshots_container_id ON snapshots(container_id);
-CREATE INDEX IF NOT EXISTS idx_snapshots_parent_id ON snapshots(parent_snapshot_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_container_runtime_name
+  ON snapshots(container_id, runtime_snapshot_name);
+CREATE INDEX IF NOT EXISTS idx_snapshots_container_created_at
+  ON snapshots(container_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_snapshots_runtime_name
+  ON snapshots(runtime_snapshot_name);
 
 CREATE TABLE IF NOT EXISTS container_versions (
-  id TEXT PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   container_id TEXT NOT NULL REFERENCES containers(container_id) ON DELETE CASCADE,
-  snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE RESTRICT,
+  snapshot_id UUID NOT NULL REFERENCES snapshots(id) ON DELETE RESTRICT,
   version INTEGER NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (container_id, version)
 );
 
 CREATE INDEX IF NOT EXISTS idx_container_versions_container_id ON container_versions(container_id);
+CREATE INDEX IF NOT EXISTS idx_container_versions_snapshot_id ON container_versions(snapshot_id);
 
 CREATE TABLE IF NOT EXISTS lifecycle_events (
   id TEXT PRIMARY KEY,
@@ -367,39 +376,17 @@ CREATE TABLE IF NOT EXISTS bot_storage_bindings (
 
 CREATE INDEX IF NOT EXISTS idx_bot_storage_bindings_bot_id ON bot_storage_bindings(bot_id);
 
--- media_assets: immutable media objects with dedup by content hash
-CREATE TABLE IF NOT EXISTS media_assets (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  storage_provider_id UUID REFERENCES storage_providers(id) ON DELETE SET NULL,
-  content_hash TEXT NOT NULL,
-  media_type TEXT NOT NULL,
-  mime TEXT NOT NULL DEFAULT 'application/octet-stream',
-  size_bytes BIGINT NOT NULL DEFAULT 0,
-  storage_key TEXT NOT NULL,
-  original_name TEXT,
-  width INTEGER,
-  height INTEGER,
-  duration_ms BIGINT,
-  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT media_assets_bot_hash_unique UNIQUE (bot_id, content_hash)
-);
-
-CREATE INDEX IF NOT EXISTS idx_media_assets_bot_id ON media_assets(bot_id);
-CREATE INDEX IF NOT EXISTS idx_media_assets_content_hash ON media_assets(content_hash);
-
--- bot_history_message_assets: join table linking messages to media assets
+-- bot_history_message_assets: soft link (message -> content_hash only).
+-- MIME, size, storage_key are derived from storage at read time.
 CREATE TABLE IF NOT EXISTS bot_history_message_assets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   message_id UUID NOT NULL REFERENCES bot_history_messages(id) ON DELETE CASCADE,
-  asset_id UUID NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
   role TEXT NOT NULL DEFAULT 'attachment',
   ordinal INTEGER NOT NULL DEFAULT 0,
+  content_hash TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT message_asset_unique UNIQUE (message_id, asset_id)
+  CONSTRAINT message_asset_content_unique UNIQUE (message_id, content_hash)
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_assets_message_id ON bot_history_message_assets(message_id);
-CREATE INDEX IF NOT EXISTS idx_message_assets_asset_id ON bot_history_message_assets(asset_id);
 

@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+
+export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+pnpm lint:fix || true
+
+pnpm web:build

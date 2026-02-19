@@ -3,7 +3,7 @@
 ## One-Click Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/memohai/Memoh/main/scripts/install.sh | sudo sh
 ```
 
 Or manually:
@@ -11,8 +11,10 @@ Or manually:
 ```bash
 git clone https://github.com/memohai/Memoh.git
 cd Memoh
-docker compose up -d
+sudo docker compose up -d
 ```
+
+> On macOS or if your user is in the `docker` group, `sudo` is not required.
 
 Access:
 - Web UI: http://localhost:8082
@@ -30,14 +32,14 @@ That's it. No containerd, nerdctl, or buildkit required on the host.
 
 ## Custom Configuration
 
-By default, Docker Compose uses `docker/config/config.docker.toml` (no file in project root is mounted; only this config file is mounted into the containers).
+By default, Docker Compose uses `conf/app.docker.toml` (no file in project root is mounted; only this config file is mounted into the containers).
 
 To use your own config, create and edit it in the project root, then point `MEMOH_CONFIG` at it (path is on the host; run `docker compose` from the project root):
 
 ```bash
-cp docker/config/config.docker.toml config.toml
+cp conf/app.docker.toml config.toml
 nano config.toml
-MEMOH_CONFIG=./config.toml docker compose up -d
+sudo MEMOH_CONFIG=./config.toml docker compose up -d
 ```
 
 Recommended changes for production:
@@ -46,6 +48,8 @@ Recommended changes for production:
 - `postgres.password` - Database password
 
 ## Common Commands
+
+> Prefix with `sudo` on Linux if your user is not in the `docker` group.
 
 ```bash
 docker compose up -d          # Start

@@ -45,7 +45,9 @@ CREATE TABLE IF NOT EXISTS media_assets (
 CREATE INDEX IF NOT EXISTS idx_media_assets_bot_id ON media_assets(bot_id);
 CREATE INDEX IF NOT EXISTS idx_media_assets_content_hash ON media_assets(content_hash);
 
--- bot_history_message_assets: join table linking messages to media assets
+-- bot_history_message_assets: join table linking messages to media assets.
+-- On fresh databases (0001 already defines this table with content_hash schema),
+-- the CREATE is a no-op; the asset_id index only applies to old-schema upgrades.
 CREATE TABLE IF NOT EXISTS bot_history_message_assets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   message_id UUID NOT NULL REFERENCES bot_history_messages(id) ON DELETE CASCADE,
@@ -57,4 +59,13 @@ CREATE TABLE IF NOT EXISTS bot_history_message_assets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_assets_message_id ON bot_history_message_assets(message_id);
-CREATE INDEX IF NOT EXISTS idx_message_assets_asset_id ON bot_history_message_assets(asset_id);
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'bot_history_message_assets' AND column_name = 'asset_id'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_message_assets_asset_id ON bot_history_message_assets(asset_id);
+  END IF;
+END $$;

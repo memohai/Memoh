@@ -22,7 +22,8 @@ INSERT INTO bot_history_messages (
   source_reply_to_message_id,
   role,
   content,
-  metadata
+  metadata,
+  usage
 )
 VALUES (
   $1,
@@ -34,7 +35,8 @@ VALUES (
   $7::text,
   $8,
   $9,
-  $10
+  $10,
+  $11
 )
 RETURNING
   id,
@@ -48,6 +50,7 @@ RETURNING
   role,
   content,
   metadata,
+  usage,
   created_at
 `
 
@@ -62,6 +65,7 @@ type CreateMessageParams struct {
 	Role                    string      `json:"role"`
 	Content                 []byte      `json:"content"`
 	Metadata                []byte      `json:"metadata"`
+	Usage                   []byte      `json:"usage"`
 }
 
 type CreateMessageRow struct {
@@ -76,6 +80,7 @@ type CreateMessageRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -91,6 +96,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		arg.Role,
 		arg.Content,
 		arg.Metadata,
+		arg.Usage,
 	)
 	var i CreateMessageRow
 	err := row.Scan(
@@ -105,6 +111,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		&i.Role,
 		&i.Content,
 		&i.Metadata,
+		&i.Usage,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -126,13 +133,14 @@ SELECT
   m.bot_id,
   m.route_id,
   m.sender_channel_identity_id,
-  m.sender_account_user_id AS sender_user_id,
+  COALESCE(ci.user_id, m.sender_account_user_id) AS sender_user_id,
   m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
   m.content,
   m.metadata,
+  m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url
@@ -155,6 +163,7 @@ type ListMessagesRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -181,6 +190,7 @@ func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]ListMe
 			&i.Role,
 			&i.Content,
 			&i.Metadata,
+			&i.Usage,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -201,13 +211,14 @@ SELECT
   m.bot_id,
   m.route_id,
   m.sender_channel_identity_id,
-  m.sender_account_user_id AS sender_user_id,
+  COALESCE(ci.user_id, m.sender_account_user_id) AS sender_user_id,
   m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
   m.content,
   m.metadata,
+  m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url
@@ -237,6 +248,7 @@ type ListMessagesBeforeRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -263,6 +275,7 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 			&i.Role,
 			&i.Content,
 			&i.Metadata,
+			&i.Usage,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -283,13 +296,14 @@ SELECT
   m.bot_id,
   m.route_id,
   m.sender_channel_identity_id,
-  m.sender_account_user_id AS sender_user_id,
+  COALESCE(ci.user_id, m.sender_account_user_id) AS sender_user_id,
   m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
   m.content,
   m.metadata,
+  m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url
@@ -317,6 +331,7 @@ type ListMessagesLatestRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -343,6 +358,7 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 			&i.Role,
 			&i.Content,
 			&i.Metadata,
+			&i.Usage,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -363,13 +379,14 @@ SELECT
   m.bot_id,
   m.route_id,
   m.sender_channel_identity_id,
-  m.sender_account_user_id AS sender_user_id,
+  COALESCE(ci.user_id, m.sender_account_user_id) AS sender_user_id,
   m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
   m.content,
   m.metadata,
+  m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url
@@ -397,6 +414,7 @@ type ListMessagesSinceRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -423,6 +441,7 @@ func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSincePa
 			&i.Role,
 			&i.Content,
 			&i.Metadata,
+			&i.Usage,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,

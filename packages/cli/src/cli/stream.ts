@@ -1,5 +1,6 @@
 import chalk from 'chalk'
 import { client } from '@memoh/sdk/client'
+import { postBotsByBotIdCliMessages } from '@memoh/sdk'
 
 // ---------------------------------------------------------------------------
 // SSE stream types (aligned with frontend useChat.ts)
@@ -86,9 +87,102 @@ function parseStreamPayload(payload: string): StreamEvent | null {
     return { type: 'text_delta', delta: current.trim() } as StreamEvent
   }
   if (current && typeof current === 'object') {
-    return current as StreamEvent
+    return normalizeStreamEvent(current as Record<string, unknown>)
   }
   return null
+}
+
+const LEGACY_STREAM_EVENT_TYPES = new Set<string>([
+  'text_start',
+  'text_delta',
+  'text_end',
+  'reasoning_start',
+  'reasoning_delta',
+  'reasoning_end',
+  'tool_call_start',
+  'tool_call_end',
+  'attachment_delta',
+  'agent_start',
+  'agent_end',
+  'processing_started',
+  'processing_completed',
+  'processing_failed',
+  'error',
+])
+
+function normalizeStreamEvent(raw: Record<string, unknown>): StreamEvent | null {
+  const eventType = String(raw.type ?? '').trim().toLowerCase()
+  if (!eventType) return null
+  if (LEGACY_STREAM_EVENT_TYPES.has(eventType)) {
+    return raw as StreamEvent
+  }
+  switch (eventType) {
+    case 'status': {
+      const status = String(raw.status ?? '').trim().toLowerCase()
+      if (status === 'started') return { type: 'processing_started' }
+      if (status === 'completed') return { type: 'processing_completed' }
+      if (status === 'failed') {
+        const err = String(raw.error ?? '').trim()
+        return { type: 'processing_failed', error: err, message: err }
+      }
+      return null
+    }
+    case 'delta': {
+      const delta = String(raw.delta ?? '')
+      const phase = String(raw.phase ?? '').trim().toLowerCase()
+      if (phase === 'reasoning') {
+        return { type: 'reasoning_delta', delta }
+      }
+      return { type: 'text_delta', delta }
+    }
+    case 'phase_start': {
+      const phase = String(raw.phase ?? '').trim().toLowerCase()
+      if (phase === 'reasoning') return { type: 'reasoning_start' }
+      if (phase === 'text') return { type: 'text_start' }
+      return null
+    }
+    case 'phase_end': {
+      const phase = String(raw.phase ?? '').trim().toLowerCase()
+      if (phase === 'reasoning') return { type: 'reasoning_end' }
+      if (phase === 'text') return { type: 'text_end' }
+      return null
+    }
+    case 'tool_call_start':
+    case 'tool_call_end': {
+      const toolCall = (raw.tool_call && typeof raw.tool_call === 'object')
+        ? raw.tool_call as Record<string, unknown>
+        : {}
+      return {
+        type: eventType,
+        toolName: String(toolCall.name ?? ''),
+        toolCallId: String(toolCall.call_id ?? ''),
+        input: toolCall.input,
+        result: toolCall.result,
+      } as StreamEvent
+    }
+    case 'attachment': {
+      const attachments = Array.isArray(raw.attachments)
+        ? raw.attachments as Array<Record<string, unknown>>
+        : []
+      if (!attachments.length) return null
+      return { type: 'attachment_delta', attachments } as StreamEvent
+    }
+    case 'processing_started':
+    case 'processing_completed':
+    case 'agent_start':
+    case 'agent_end':
+      return { type: eventType } as StreamEvent
+    case 'processing_failed': {
+      const err = String(raw.error ?? raw.message ?? '').trim()
+      return { type: 'processing_failed', error: err, message: err } as StreamEvent
+    }
+    case 'error': {
+      const err = String(raw.error ?? raw.message ?? 'Stream error').trim()
+      return { type: 'error', error: err, message: err } as StreamEvent
+    }
+    default:
+      return null
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -440,20 +534,21 @@ function handleStreamEventInner(type: string, event: StreamEvent): boolean {
 
 // ---------------------------------------------------------------------------
 // Stream chat
-// Strictly follows frontend streamMessage() in useChat.ts:
-//   client.post({ url: '/bots/{bot_id}/messages/stream', path: { bot_id }, ... })
+// CLI channel flow:
+//   1) open SSE subscription at /bots/{bot_id}/cli/stream
+//   2) post message to /bots/{bot_id}/cli/messages
 // ---------------------------------------------------------------------------
 
 export const streamChat = async (query: string, botId: string) => {
   _printedText = false
 
   try {
-    // Exactly matches frontend: client.post() with parseAs: 'stream'
-    const { data: body } = await client.post({
-      url: '/bots/{bot_id}/messages/stream',
+    const controller = new AbortController()
+    const { data: body } = await client.get({
+      url: '/bots/{bot_id}/cli/stream',
       path: { bot_id: botId },
-      body: { query, current_channel: 'cli', channels: ['cli'] },
       parseAs: 'stream',
+      signal: controller.signal,
       throwOnError: true,
     }) as { data: ReadableStream<Uint8Array> }
 
@@ -462,14 +557,52 @@ export const streamChat = async (query: string, botId: string) => {
       return false
     }
 
-    // Use the same readSSEStream + parseStreamPayload as frontend
-    await readSSEStream(body, (payload) => {
+    let completed = false
+    let failedMessage = ''
+    const streamTask = readSSEStream(body, (payload) => {
       const event = parseStreamPayload(payload)
-      if (event) handleStreamEvent(event)
+      if (!event) return
+      handleStreamEvent(event)
+      const type = (event.type ?? '').toLowerCase()
+      if (type === 'processing_completed') {
+        completed = true
+        controller.abort()
+        return
+      }
+      if (type === 'processing_failed' || type === 'error') {
+        const msg = typeof event.message === 'string'
+          ? event.message
+          : typeof event.error === 'string'
+            ? event.error
+            : 'Stream error'
+        failedMessage = msg
+        controller.abort()
+      }
     })
+      .catch((err) => {
+        if ((err as Error).name !== 'AbortError') {
+          throw err
+        }
+      })
+
+    await postBotsByBotIdCliMessages({
+      path: { bot_id: botId },
+      body: { message: { text: query } },
+      throwOnError: true,
+    })
+
+    await streamTask
 
     if (_printedText) {
       process.stdout.write('\n')
+    }
+    if (failedMessage) {
+      console.log(chalk.red(`Stream error: ${failedMessage}`))
+      return false
+    }
+    if (!completed) {
+      console.log(chalk.red('Stream ended before completion'))
+      return false
     }
     return true
   } catch (err) {

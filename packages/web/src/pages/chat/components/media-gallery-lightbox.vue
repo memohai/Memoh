@@ -12,7 +12,10 @@
           aria-label="Close"
           @click="close"
         >
-          <FontAwesomeIcon :icon="['fas', 'xmark']" class="size-6" />
+          <FontAwesomeIcon
+            :icon="['fas', 'xmark']"
+            class="size-6"
+          />
         </button>
 
         <!-- Prev -->
@@ -22,7 +25,10 @@
           aria-label="Previous"
           @click.stop="prev"
         >
-          <FontAwesomeIcon :icon="['fas', 'chevron-left']" class="size-6" />
+          <FontAwesomeIcon
+            :icon="['fas', 'chevron-left']"
+            class="size-6"
+          />
         </button>
 
         <!-- Next -->
@@ -32,7 +38,10 @@
           aria-label="Next"
           @click.stop="next"
         >
-          <FontAwesomeIcon :icon="['fas', 'chevron-right']" class="size-6" />
+          <FontAwesomeIcon
+            :icon="['fas', 'chevron-right']"
+            class="size-6"
+          />
         </button>
 
         <!-- Media content -->
@@ -44,7 +53,7 @@
             class="max-w-full max-h-[90vh] object-contain select-none"
             draggable="false"
             @click.stop
-          />
+          >
           <video
             v-else-if="currentItem?.type === 'video'"
             :src="currentItem.src"

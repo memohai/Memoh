@@ -79,6 +79,7 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		Role:                    input.Role,
 		Content:                 content,
 		Metadata:                metaBytes,
+		Usage:                   input.Usage,
 	})
 	if err != nil {
 		return Message{}, err
@@ -89,30 +90,44 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	// Persist asset links if provided.
 	for _, ref := range input.Assets {
 		pgMsgID := row.ID
-		pgAssetID, assetErr := dbpkg.ParseUUID(ref.AssetID)
-		if assetErr != nil {
-			s.logger.Warn("skip invalid asset ref", slog.String("asset_id", ref.AssetID), slog.Any("error", assetErr))
-			continue
-		}
 		role := ref.Role
 		if strings.TrimSpace(role) == "" {
 			role = "attachment"
 		}
+		contentHash := strings.TrimSpace(ref.ContentHash)
+		if contentHash == "" {
+			s.logger.Warn("skip asset ref without content_hash")
+			continue
+		}
 		if _, assetErr := s.queries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
-			MessageID: pgMsgID,
-			AssetID:   pgAssetID,
-			Role:      role,
-			Ordinal:   int32(ref.Ordinal),
+			MessageID:   pgMsgID,
+			Role:        role,
+			Ordinal:     int32(ref.Ordinal),
+			ContentHash: contentHash,
 		}); assetErr != nil {
 			s.logger.Warn("create message asset link failed", slog.String("message_id", result.ID), slog.Any("error", assetErr))
 		}
 	}
 
-	// Enrich assets before publishing so SSE consumers see them immediately.
+	// Populate assets from input refs for SSE so consumers see them immediately.
+	// DB only stores the link (content_hash); mime/size/storage_key come from the caller.
 	if len(input.Assets) > 0 {
-		enriched := []Message{result}
-		s.enrichAssets(ctx, enriched)
-		result = enriched[0]
+		assets := make([]MessageAsset, 0, len(input.Assets))
+		for _, ref := range input.Assets {
+			ch := strings.TrimSpace(ref.ContentHash)
+			if ch == "" {
+				continue
+			}
+			assets = append(assets, MessageAsset{
+				ContentHash: ch,
+				Role:        coalesce(ref.Role, "attachment"),
+				Ordinal:     ref.Ordinal,
+				Mime:        ref.Mime,
+				SizeBytes:   ref.SizeBytes,
+				StorageKey:  ref.StorageKey,
+			})
+		}
+		result.Assets = assets
 	}
 
 	s.publishMessageCreated(result)
@@ -213,6 +228,7 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.Role,
 		row.Content,
 		row.Metadata,
+		row.Usage,
 		row.CreatedAt,
 	)
 }
@@ -232,6 +248,7 @@ func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
 		row.Role,
 		row.Content,
 		row.Metadata,
+		row.Usage,
 		row.CreatedAt,
 	)
 }
@@ -251,6 +268,7 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 		row.Role,
 		row.Content,
 		row.Metadata,
+		row.Usage,
 		row.CreatedAt,
 	)
 }
@@ -270,6 +288,7 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 		row.Role,
 		row.Content,
 		row.Metadata,
+		row.Usage,
 		row.CreatedAt,
 	)
 }
@@ -288,6 +307,7 @@ func toMessageFields(
 	role string,
 	content []byte,
 	metadata []byte,
+	usage []byte,
 	createdAt pgtype.Timestamptz,
 ) Message {
 	return Message{
@@ -304,6 +324,7 @@ func toMessageFields(
 		Role:                    role,
 		Content:                 json.RawMessage(content),
 		Metadata:                parseJSONMap(metadata),
+		Usage:                   json.RawMessage(usage),
 		CreatedAt:               createdAt.Time,
 	}
 }
@@ -347,6 +368,7 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 		row.Role,
 		row.Content,
 		row.Metadata,
+		row.Usage,
 		row.CreatedAt,
 	)
 }
@@ -382,6 +404,22 @@ func nonNilMap(m map[string]any) map[string]any {
 	return m
 }
 
+func coalesce(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func toPgInt8(v int64) pgtype.Int8 {
+	if v == 0 {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: v, Valid: true}
+}
+
 func parseJSONMap(data []byte) map[string]any {
 	if len(data) == 0 {
 		return nil
@@ -411,7 +449,9 @@ func (s *DBService) publishMessageCreated(message Message) {
 	})
 }
 
-// enrichAssets batch-loads asset links for a list of messages.
+// enrichAssets batch-loads asset links for a list of messages (single-table query).
+// On DB error (e.g. missing content_hash column), we skip enrichment and leave Assets empty
+// so the list request still returns all messages and does not fail.
 func (s *DBService) enrichAssets(ctx context.Context, messages []Message) {
 	if len(messages) == 0 {
 		return
@@ -429,29 +469,41 @@ func (s *DBService) enrichAssets(ctx context.Context, messages []Message) {
 	}
 	rows, err := s.queries.ListMessageAssetsBatch(ctx, ids)
 	if err != nil {
-		s.logger.Warn("enrich assets failed", slog.Any("error", err))
+		s.logger.Warn("enrich assets failed, returning messages without assets", slog.Any("error", err))
+		ensureAssetsSlice(messages)
 		return
 	}
 	assetMap := map[string][]MessageAsset{}
 	for _, row := range rows {
 		msgID := row.MessageID.String()
+		contentHash := strings.TrimSpace(row.ContentHash)
+		if contentHash == "" {
+			continue
+		}
 		assetMap[msgID] = append(assetMap[msgID], MessageAsset{
-			AssetID:      row.AssetID.String(),
-			Role:         row.Role,
-			Ordinal:      int(row.Ordinal),
-			MediaType:    row.MediaType,
-			Mime:         row.Mime,
-			SizeBytes:    row.SizeBytes,
-			StorageKey:   row.StorageKey,
-			OriginalName: dbpkg.TextToString(row.OriginalName),
-			Width:        int(row.Width.Int32),
-			Height:       int(row.Height.Int32),
-			DurationMs:   row.DurationMs.Int64,
+			ContentHash: contentHash,
+			Role:        row.Role,
+			Ordinal:     int(row.Ordinal),
+			Mime:        "",
+			SizeBytes:   0,
+			StorageKey:  "",
 		})
 	}
 	for i := range messages {
 		if assets, ok := assetMap[messages[i].ID]; ok {
 			messages[i].Assets = assets
+		} else {
+			messages[i].Assets = []MessageAsset{}
+		}
+	}
+}
+
+// ensureAssetsSlice sets Assets to a non-nil empty slice for each message so JSON is "assets": [].
+// Used when enrich fails so frontend gets a consistent shape and does not treat missing assets as broken.
+func ensureAssetsSlice(messages []Message) {
+	for i := range messages {
+		if messages[i].Assets == nil {
+			messages[i].Assets = []MessageAsset{}
 		}
 	}
 }

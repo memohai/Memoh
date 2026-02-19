@@ -3,7 +3,6 @@ package handlers
 import (
 	"bufio"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,9 +17,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
@@ -28,31 +25,27 @@ import (
 
 // MessageHandler handles bot-scoped messaging endpoints.
 type MessageHandler struct {
-	runner              flow.Runner
 	conversationService conversation.Accessor
 	messageService      messagepkg.Service
 	messageEvents       messageevent.Subscriber
 	mediaService        *media.Service
 	botService          *bots.Service
 	accountService      *accounts.Service
-	channelIdentitySvc  *identities.Service
 	logger              *slog.Logger
 }
 
 // NewMessageHandler creates a MessageHandler.
-func NewMessageHandler(log *slog.Logger, runner flow.Runner, conversationService conversation.Accessor, messageService messagepkg.Service, botService *bots.Service, accountService *accounts.Service, channelIdentitySvc *identities.Service, eventSubscribers ...messageevent.Subscriber) *MessageHandler {
+func NewMessageHandler(log *slog.Logger, conversationService conversation.Accessor, messageService messagepkg.Service, botService *bots.Service, accountService *accounts.Service, eventSubscribers ...messageevent.Subscriber) *MessageHandler {
 	var messageEvents messageevent.Subscriber
 	if len(eventSubscribers) > 0 {
 		messageEvents = eventSubscribers[0]
 	}
 	return &MessageHandler{
-		runner:              runner,
 		conversationService: conversationService,
 		messageService:      messageService,
 		messageEvents:       messageEvents,
 		botService:          botService,
 		accountService:      accountService,
-		channelIdentitySvc:  channelIdentitySvc,
 		logger:              log.With(slog.String("handler", "conversation")),
 	}
 }
@@ -66,180 +59,13 @@ func (h *MessageHandler) SetMediaService(svc *media.Service) {
 func (h *MessageHandler) Register(e *echo.Echo) {
 	// Bot-scoped message container (single shared history per bot).
 	botGroup := e.Group("/bots/:bot_id")
-	botGroup.POST("/messages", h.SendMessage)
-	botGroup.POST("/messages/stream", h.StreamMessage)
 	botGroup.GET("/messages", h.ListMessages)
 	botGroup.GET("/messages/events", h.StreamMessageEvents)
 	botGroup.DELETE("/messages", h.DeleteMessages)
-	botGroup.GET("/media/:asset_id", h.ServeMedia)
+	botGroup.GET("/media/:content_hash", h.ServeMedia)
 }
 
 // --- Messages ---
-
-// SendMessage sends a synchronous conversation message.
-func (h *MessageHandler) SendMessage(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
-		return err
-	}
-	if err := h.requireParticipant(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return err
-	}
-
-	var req conversation.ChatRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	if strings.TrimSpace(req.Query) == "" && len(req.Attachments) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "query or attachments is required")
-	}
-	req.BotID = botID
-	req.ChatID = botID
-	req.Token = c.Request().Header.Get("Authorization")
-	req.UserID = channelIdentityID
-	req.SourceChannelIdentityID = channelIdentityID
-	if strings.TrimSpace(req.CurrentChannel) == "" {
-		req.CurrentChannel = "web"
-	}
-	if strings.TrimSpace(req.ConversationType) == "" {
-		req.ConversationType = "direct"
-	}
-	if len(req.Channels) == 0 {
-		req.Channels = []string{req.CurrentChannel}
-	}
-	channelIdentityID = h.resolveWebChannelIdentity(c.Request().Context(), channelIdentityID, &req)
-	if req.Attachments, err = h.ingestInlineAttachments(c.Request().Context(), botID, req.Attachments); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
-	if h.runner == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "conversation runner not configured")
-	}
-	resp, err := h.runner.Chat(c.Request().Context(), req)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, resp)
-}
-
-// StreamMessage sends a streaming conversation message.
-func (h *MessageHandler) StreamMessage(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
-		return err
-	}
-	if err := h.requireParticipant(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return err
-	}
-
-	var req conversation.ChatRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	if strings.TrimSpace(req.Query) == "" && len(req.Attachments) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "query or attachments is required")
-	}
-	req.BotID = botID
-	req.ChatID = botID
-	req.Token = c.Request().Header.Get("Authorization")
-	req.UserID = channelIdentityID
-	req.SourceChannelIdentityID = channelIdentityID
-	if strings.TrimSpace(req.CurrentChannel) == "" {
-		req.CurrentChannel = "web"
-	}
-	if strings.TrimSpace(req.ConversationType) == "" {
-		req.ConversationType = "direct"
-	}
-	if len(req.Channels) == 0 {
-		req.Channels = []string{req.CurrentChannel}
-	}
-	channelIdentityID = h.resolveWebChannelIdentity(c.Request().Context(), channelIdentityID, &req)
-	if req.Attachments, err = h.ingestInlineAttachments(c.Request().Context(), botID, req.Attachments); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
-	if h.runner == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "conversation runner not configured")
-	}
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
-	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
-	c.Response().WriteHeader(http.StatusOK)
-
-	chunkChan, errChan := h.runner.StreamChat(c.Request().Context(), req)
-	flusher, ok := c.Response().Writer.(http.Flusher)
-	if !ok {
-		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
-	}
-	writer := bufio.NewWriter(c.Response().Writer)
-	processingState := "started"
-	if err := writeSSEJSON(writer, flusher, map[string]string{"type": "processing_started"}); err != nil {
-		return nil
-	}
-
-	for {
-		select {
-		case chunk, ok := <-chunkChan:
-			if !ok {
-				if processingState == "started" {
-					processingState = "completed"
-					if err := writeSSEJSON(writer, flusher, map[string]string{"type": "processing_completed"}); err != nil {
-						return nil
-					}
-				}
-				if err := writeSSEData(writer, flusher, "[DONE]"); err != nil {
-					return nil
-				}
-				return nil
-			}
-			if processingState == "started" {
-				processingState = "completed"
-				if err := writeSSEJSON(writer, flusher, map[string]string{"type": "processing_completed"}); err != nil {
-					return nil
-				}
-			}
-			if err := writeSSEData(writer, flusher, string(chunk)); err != nil {
-				return nil
-			}
-		case err := <-errChan:
-			if err != nil {
-				h.logger.Error("conversation stream failed", slog.Any("error", err))
-				if processingState == "started" {
-					processingState = "failed"
-					if writeErr := writeSSEJSON(writer, flusher, map[string]string{
-						"type":  "processing_failed",
-						"error": err.Error(),
-					}); writeErr != nil {
-						h.logger.Warn("write SSE processing_failed event failed", slog.Any("error", writeErr))
-					}
-				}
-				errData := map[string]string{
-					"type":    "error",
-					"error":   err.Error(),
-					"message": err.Error(),
-				}
-				if writeErr := writeSSEJSON(writer, flusher, errData); writeErr != nil {
-					return nil
-				}
-				return nil
-			}
-		}
-	}
-}
 
 func writeSSEData(writer *bufio.Writer, flusher http.Flusher, payload string) error {
 	if _, err := writer.WriteString(fmt.Sprintf("data: %s\n\n", payload)); err != nil {
@@ -258,92 +84,6 @@ func writeSSEJSON(writer *bufio.Writer, flusher http.Flusher, payload any) error
 		return err
 	}
 	return writeSSEData(writer, flusher, string(data))
-}
-
-func (h *MessageHandler) ingestInlineAttachments(ctx context.Context, botID string, attachments []conversation.ChatAttachment) ([]conversation.ChatAttachment, error) {
-	if len(attachments) == 0 || h.mediaService == nil {
-		return attachments, nil
-	}
-	result := make([]conversation.ChatAttachment, 0, len(attachments))
-	for _, att := range attachments {
-		item := att
-		if strings.TrimSpace(item.AssetID) != "" || strings.TrimSpace(item.Base64) == "" {
-			result = append(result, item)
-			continue
-		}
-		mediaType := mapAttachmentMediaType(item.Type)
-		maxBytes := media.MaxAssetBytes
-		raw, err := decodeAttachmentBase64(item.Base64, maxBytes)
-		if err != nil {
-			return nil, fmt.Errorf("invalid attachment base64: %w", err)
-		}
-		asset, err := h.mediaService.Ingest(ctx, media.IngestInput{
-			BotID:        botID,
-			MediaType:    mediaType,
-			Mime:         strings.TrimSpace(item.Mime),
-			OriginalName: strings.TrimSpace(item.Name),
-			Metadata:     item.Metadata,
-			Reader:       raw,
-			MaxBytes:     maxBytes,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("ingest attachment failed: %w", err)
-		}
-		item.AssetID = asset.ID
-		item.Path = h.mediaService.AccessPath(asset)
-		mime := strings.TrimSpace(item.Mime)
-		if mime == "" {
-			mime = strings.TrimSpace(asset.Mime)
-		}
-		item.Base64 = normalizeBase64DataURL(item.Base64, mime)
-		if strings.TrimSpace(item.Mime) == "" {
-			item.Mime = asset.Mime
-		}
-		result = append(result, item)
-	}
-	return result, nil
-}
-
-func decodeAttachmentBase64(input string, maxBytes int64) (io.Reader, error) {
-	value := strings.TrimSpace(input)
-	if value == "" {
-		return nil, fmt.Errorf("base64 payload is empty")
-	}
-	if strings.HasPrefix(strings.ToLower(value), "data:") {
-		if idx := strings.Index(value, ","); idx >= 0 {
-			value = value[idx+1:]
-		}
-	}
-	decoder := base64.NewDecoder(base64.StdEncoding, strings.NewReader(value))
-	return io.LimitReader(decoder, maxBytes+1), nil
-}
-
-func normalizeBase64DataURL(input, mime string) string {
-	value := strings.TrimSpace(input)
-	if value == "" {
-		return ""
-	}
-	if strings.HasPrefix(strings.ToLower(value), "data:") {
-		return value
-	}
-	mime = strings.TrimSpace(mime)
-	if mime == "" {
-		mime = "application/octet-stream"
-	}
-	return "data:" + mime + ";base64," + value
-}
-
-func mapAttachmentMediaType(t string) media.MediaType {
-	switch strings.ToLower(strings.TrimSpace(t)) {
-	case "image", "gif":
-		return media.MediaTypeImage
-	case "audio", "voice":
-		return media.MediaTypeAudio
-	case "video":
-		return media.MediaTypeVideo
-	default:
-		return media.MediaTypeFile
-	}
 }
 
 func parseSinceParam(raw string) (time.Time, bool, error) {
@@ -418,7 +158,30 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	return c.JSON(http.StatusOK, map[string]any{"items": messages})
+}
+
+// fillAssetMimeFromStorage fills mime, storage_key, size_bytes from storage (soft link: DB only has content_hash).
+func (h *MessageHandler) fillAssetMimeFromStorage(ctx context.Context, botID string, messages []messagepkg.Message) {
+	if h.mediaService == nil {
+		return
+	}
+	for i := range messages {
+		for j := range messages[i].Assets {
+			a := &messages[i].Assets[j]
+			if strings.TrimSpace(a.ContentHash) == "" {
+				continue
+			}
+			asset, err := h.mediaService.Resolve(ctx, botID, a.ContentHash)
+			if err != nil {
+				continue
+			}
+			a.Mime = asset.Mime
+			a.StorageKey = asset.StorageKey
+			a.SizeBytes = asset.SizeBytes
+		}
+	}
 }
 
 func parseBeforeParam(s string) (time.Time, bool) {
@@ -507,6 +270,7 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
+		h.fillAssetMimeFromStorage(c.Request().Context(), botID, backlog)
 		for _, message := range backlog {
 			if err := writeCreatedEvent(message); err != nil {
 				return nil
@@ -543,6 +307,7 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 				h.logger.Warn("decode message event failed", slog.Any("error", err))
 				continue
 			}
+			h.fillAssetMimeFromStorage(c.Request().Context(), botID, []messagepkg.Message{message})
 			if err := writeCreatedEvent(message); err != nil {
 				return nil
 			}
@@ -573,33 +338,6 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 }
 
 // --- helpers ---
-
-// resolveWebChannelIdentity resolves (web, user_id) to a channel identity and sets req.SourceChannelIdentityID.
-// Web uses user_id as the channel subject id (like Feishu open_id); the resolved ci has display_name and is linked to the user.
-// Returns the channel_identity_id to use for the rest of the flow, or the original userID if resolution is skipped/fails.
-func (h *MessageHandler) resolveWebChannelIdentity(ctx context.Context, userID string, req *conversation.ChatRequest) string {
-	if strings.TrimSpace(req.CurrentChannel) != "web" || h.channelIdentitySvc == nil || strings.TrimSpace(userID) == "" {
-		return userID
-	}
-	displayName := ""
-	if h.accountService != nil {
-		if account, err := h.accountService.Get(ctx, userID); err == nil {
-			displayName = strings.TrimSpace(account.DisplayName)
-			if displayName == "" {
-				displayName = strings.TrimSpace(account.Username)
-			}
-		}
-	}
-	ci, err := h.channelIdentitySvc.ResolveByChannelIdentity(ctx, "web", userID, displayName, nil)
-	if err != nil {
-		return userID
-	}
-	if err := h.channelIdentitySvc.LinkChannelIdentityToUser(ctx, ci.ID, userID); err != nil {
-		h.logger.Warn("link channel identity to user failed", slog.Any("error", err))
-	}
-	req.SourceChannelIdentityID = ci.ID
-	return ci.ID
-}
 
 func (h *MessageHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
@@ -661,7 +399,7 @@ func (h *MessageHandler) requireReadable(ctx context.Context, conversationID, ch
 	return nil
 }
 
-// ServeMedia streams a media asset by bot_id + asset_id with read-access authorization.
+// ServeMedia streams a media asset by bot_id + content_hash with read-access authorization.
 func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -671,9 +409,9 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	assetID := strings.TrimSpace(c.Param("asset_id"))
-	if assetID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "asset id is required")
+	contentHash := strings.TrimSpace(c.Param("content_hash"))
+	if contentHash == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "content hash is required")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -684,7 +422,7 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	if h.mediaService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "media service not configured")
 	}
-	reader, asset, err := h.mediaService.Open(c.Request().Context(), assetID)
+	reader, asset, err := h.mediaService.Open(c.Request().Context(), botID, contentHash)
 	if err != nil {
 		if errors.Is(err, media.ErrAssetNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "asset not found")
@@ -692,19 +430,12 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	defer reader.Close()
-	// Verify asset belongs to the authorized bot.
-	if strings.TrimSpace(asset.BotID) != botID {
-		return echo.NewHTTPError(http.StatusForbidden, "asset does not belong to bot")
-	}
 	contentType := asset.Mime
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 	c.Response().Header().Set("Content-Type", contentType)
 	c.Response().Header().Set("Cache-Control", "private, max-age=86400")
-	if asset.OriginalName != "" {
-		c.Response().Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", asset.OriginalName))
-	}
 	c.Response().WriteHeader(http.StatusOK)
 	if _, err := io.Copy(c.Response().Writer, reader); err != nil {
 		h.logger.Warn("serve media stream failed", slog.Any("error", err))

@@ -27,7 +27,7 @@ export default defineConfig(({ command }) => {
       try {
         config = loadConfig('../../config.toml')
       } catch {
-        config = loadConfig('../../docker/config/config.docker.toml')
+        config = loadConfig('../../conf/app.docker.toml')
       }
       port = config.web?.port ?? defaultPort
       host = config.web?.host ?? defaultHost

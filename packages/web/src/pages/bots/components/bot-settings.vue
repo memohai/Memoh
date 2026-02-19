@@ -58,6 +58,17 @@
       />
     </div>
 
+    <!-- Max Context Tokens -->
+    <div class="space-y-2">
+      <Label>{{ $t('bots.settings.maxContextTokens') }}</Label>
+      <Input
+        v-model.number="form.max_context_tokens"
+        type="number"
+        :min="0"
+        placeholder="0"
+      />
+    </div>
+
     <!-- Language -->
     <div class="space-y-2">
       <Label>{{ $t('bots.settings.language') }}</Label>
@@ -114,7 +125,10 @@
               variant="destructive"
               :disabled="deleteLoading"
             >
-              <Spinner v-if="deleteLoading" class="mr-1.5" />
+              <Spinner
+                v-if="deleteLoading"
+                class="mr-1.5"
+              />
               {{ $t('bots.settings.deleteBot') }}
             </Button>
           </template>
@@ -226,6 +240,7 @@ const form = reactive<SettingsSettings>({
   embedding_model_id: '',
   search_provider_id: '',
   max_context_load_time: 0,
+  max_context_tokens: 0,
   language: '',
   allow_guest: false,
 })
@@ -238,6 +253,7 @@ watch(settings, (val) => {
     form.embedding_model_id = val.embedding_model_id ?? ''
     form.search_provider_id = val.search_provider_id ?? ''
     form.max_context_load_time = val.max_context_load_time ?? 0
+    form.max_context_tokens = val.max_context_tokens ?? 0
     form.language = val.language ?? ''
     form.allow_guest = val.allow_guest ?? false
   }
@@ -252,6 +268,7 @@ const hasChanges = computed(() => {
     || form.embedding_model_id !== (s.embedding_model_id ?? '')
     || form.search_provider_id !== (s.search_provider_id ?? '')
     || form.max_context_load_time !== (s.max_context_load_time ?? 0)
+    || form.max_context_tokens !== (s.max_context_tokens ?? 0)
     || form.language !== (s.language ?? '')
   if (isPublicBot.value) {
     changed = changed || form.allow_guest !== (s.allow_guest ?? false)

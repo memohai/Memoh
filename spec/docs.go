@@ -148,6 +148,115 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/cli/messages": {
+            "post": {
+                "description": "Post a user message (with optional attachments) through the local channel pipeline.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "Send a message to a local channel",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Message payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.LocalChannelMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/cli/stream": {
+            "get": {
+                "description": "Open a persistent SSE connection to receive real-time stream events for the given bot.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "Subscribe to local channel events via SSE",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/container": {
             "get": {
                 "tags": [
@@ -2397,6 +2506,115 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/web/messages": {
+            "post": {
+                "description": "Post a user message (with optional attachments) through the local channel pipeline.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "Send a message to a local channel",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Message payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.LocalChannelMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/web/stream": {
+            "get": {
+                "description": "Open a persistent SSE connection to receive real-time stream events for the given bot.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "Subscribe to local channel events via SSE",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{id}": {
             "get": {
                 "description": "Get a bot by ID (owner/admin only)",
@@ -3322,7 +3540,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Client type (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)",
+                        "description": "Client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)",
                         "name": "client_type",
                         "in": "query"
                     }
@@ -3697,7 +3915,7 @@ const docTemplate = `{
         },
         "/providers": {
             "get": {
-                "description": "Get a list of all configured LLM providers, optionally filtered by client type",
+                "description": "Get a list of all configured LLM providers",
                 "consumes": [
                     "application/json"
                 ],
@@ -3708,14 +3926,6 @@ const docTemplate = `{
                     "providers"
                 ],
                 "summary": "List all LLM providers",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Client type filter (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)",
-                        "name": "client_type",
-                        "in": "query"
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -3724,12 +3934,6 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/providers.GetResponse"
                             }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "500": {
@@ -3787,7 +3991,7 @@ const docTemplate = `{
         },
         "/providers/count": {
             "get": {
-                "description": "Get the total count of providers, optionally filtered by client type",
+                "description": "Get the total count of providers",
                 "consumes": [
                     "application/json"
                 ],
@@ -3798,25 +4002,11 @@ const docTemplate = `{
                     "providers"
                 ],
                 "summary": "Count providers",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Client type filter (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)",
-                        "name": "client_type",
-                        "in": "query"
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/providers.CountResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "500": {
@@ -4060,6 +4250,56 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/models.GetResponse"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/providers/{id}/test": {
+            "post": {
+                "description": "Probe a provider's base URL to check reachability, supported client types, and embedding support",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "providers"
+                ],
+                "summary": "Test provider connectivity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/providers.TestResponse"
                         }
                     },
                     "400": {
@@ -5115,14 +5355,14 @@ const docTemplate = `{
         "channel.Attachment": {
             "type": "object",
             "properties": {
-                "asset_id": {
-                    "type": "string"
-                },
                 "base64": {
                     "description": "data URL for agent delivery",
                     "type": "string"
                 },
                 "caption": {
+                    "type": "string"
+                },
+                "content_hash": {
                     "type": "string"
                 },
                 "duration_ms": {
@@ -5691,6 +5931,12 @@ const docTemplate = `{
                 },
                 "snapshotter": {
                     "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
                 }
             }
         },
@@ -5822,6 +6068,14 @@ const docTemplate = `{
                 },
                 "snapshotter": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.LocalChannelMessageRequest": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "$ref": "#/definitions/channel.Message"
                 }
             }
         },
@@ -5971,6 +6225,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "managed": {
+                    "type": "boolean"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -5980,8 +6237,14 @@ const docTemplate = `{
                 "snapshotter": {
                     "type": "string"
                 },
+                "source": {
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
+                },
+                "version": {
+                    "type": "integer"
                 }
             }
         },
@@ -6451,22 +6714,19 @@ const docTemplate = `{
                 },
                 "source_reply_to_message_id": {
                     "type": "string"
+                },
+                "usage": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 }
             }
         },
         "message.MessageAsset": {
             "type": "object",
             "properties": {
-                "asset_id": {
-                    "type": "string"
-                },
-                "duration_ms": {
-                    "type": "integer"
-                },
-                "height": {
-                    "type": "integer"
-                },
-                "media_type": {
+                "content_hash": {
                     "type": "string"
                 },
                 "mime": {
@@ -6474,9 +6734,6 @@ const docTemplate = `{
                 },
                 "ordinal": {
                     "type": "integer"
-                },
-                "original_name": {
-                    "type": "string"
                 },
                 "role": {
                     "type": "string"
@@ -6486,15 +6743,15 @@ const docTemplate = `{
                 },
                 "storage_key": {
                     "type": "string"
-                },
-                "width": {
-                    "type": "integer"
                 }
             }
         },
         "models.AddRequest": {
             "type": "object",
             "properties": {
+                "client_type": {
+                    "$ref": "#/definitions/models.ClientType"
+                },
                 "dimensions": {
                     "type": "integer"
                 },
@@ -6529,6 +6786,21 @@ const docTemplate = `{
                 }
             }
         },
+        "models.ClientType": {
+            "type": "string",
+            "enum": [
+                "openai-responses",
+                "openai-completions",
+                "anthropic-messages",
+                "google-generative-ai"
+            ],
+            "x-enum-varnames": [
+                "ClientTypeOpenAIResponses",
+                "ClientTypeOpenAICompletions",
+                "ClientTypeAnthropicMessages",
+                "ClientTypeGoogleGenerativeAI"
+            ]
+        },
         "models.CountResponse": {
             "type": "object",
             "properties": {
@@ -6540,6 +6812,9 @@ const docTemplate = `{
         "models.GetResponse": {
             "type": "object",
             "properties": {
+                "client_type": {
+                    "$ref": "#/definitions/models.ClientType"
+                },
                 "dimensions": {
                     "type": "integer"
                 },
@@ -6577,6 +6852,9 @@ const docTemplate = `{
         "models.UpdateRequest": {
             "type": "object",
             "properties": {
+                "client_type": {
+                    "$ref": "#/definitions/models.ClientType"
+                },
                 "dimensions": {
                     "type": "integer"
                 },
@@ -6600,31 +6878,36 @@ const docTemplate = `{
                 }
             }
         },
-        "providers.ClientType": {
+        "providers.CheckResult": {
+            "type": "object",
+            "properties": {
+                "latency_ms": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/providers.CheckStatus"
+                },
+                "status_code": {
+                    "type": "integer"
+                }
+            }
+        },
+        "providers.CheckStatus": {
             "type": "string",
             "enum": [
-                "openai",
-                "openai-compat",
-                "anthropic",
-                "google",
-                "azure",
-                "bedrock",
-                "mistral",
-                "xai",
-                "ollama",
-                "dashscope"
+                "supported",
+                "auth_error",
+                "unsupported",
+                "error"
             ],
             "x-enum-varnames": [
-                "ClientTypeOpenAI",
-                "ClientTypeOpenAICompat",
-                "ClientTypeAnthropic",
-                "ClientTypeGoogle",
-                "ClientTypeAzure",
-                "ClientTypeBedrock",
-                "ClientTypeMistral",
-                "ClientTypeXAI",
-                "ClientTypeOllama",
-                "ClientTypeDashscope"
+                "CheckStatusSupported",
+                "CheckStatusAuthError",
+                "CheckStatusUnsupported",
+                "CheckStatusError"
             ]
         },
         "providers.CountResponse": {
@@ -6639,7 +6922,6 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "base_url",
-                "client_type",
                 "name"
             ],
             "properties": {
@@ -6648,9 +6930,6 @@ const docTemplate = `{
                 },
                 "base_url": {
                     "type": "string"
-                },
-                "client_type": {
-                    "$ref": "#/definitions/providers.ClientType"
                 },
                 "metadata": {
                     "type": "object",
@@ -6671,9 +6950,6 @@ const docTemplate = `{
                 "base_url": {
                     "type": "string"
                 },
-                "client_type": {
-                    "type": "string"
-                },
                 "created_at": {
                     "type": "string"
                 },
@@ -6692,6 +6968,26 @@ const docTemplate = `{
                 }
             }
         },
+        "providers.TestResponse": {
+            "type": "object",
+            "properties": {
+                "checks": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/providers.CheckResult"
+                    }
+                },
+                "latency_ms": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "reachable": {
+                    "type": "boolean"
+                }
+            }
+        },
         "providers.UpdateRequest": {
             "type": "object",
             "properties": {
@@ -6700,9 +6996,6 @@ const docTemplate = `{
                 },
                 "base_url": {
                     "type": "string"
-                },
-                "client_type": {
-                    "$ref": "#/definitions/providers.ClientType"
                 },
                 "metadata": {
                     "type": "object",
@@ -6949,6 +7242,9 @@ const docTemplate = `{
                 "max_context_load_time": {
                     "type": "integer"
                 },
+                "max_context_tokens": {
+                    "type": "integer"
+                },
                 "memory_model_id": {
                     "type": "string"
                 },
@@ -6973,6 +7269,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "max_context_load_time": {
+                    "type": "integer"
+                },
+                "max_context_tokens": {
                     "type": "integer"
                 },
                 "memory_model_id": {

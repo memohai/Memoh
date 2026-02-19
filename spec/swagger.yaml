@@ -209,12 +209,12 @@ definitions:
     type: object
   channel.Attachment:
     properties:
-      asset_id:
-        type: string
       base64:
         description: data URL for agent delivery
         type: string
       caption:
+        type: string
+      content_hash:
         type: string
       duration_ms:
         type: integer
@@ -603,6 +603,10 @@ definitions:
         type: string
       snapshotter:
         type: string
+      source:
+        type: string
+      version:
+        type: integer
     type: object
   handlers.EmbeddingsInput:
     properties:
@@ -688,6 +692,11 @@ definitions:
         type: array
       snapshotter:
         type: string
+    type: object
+  handlers.LocalChannelMessageRequest:
+    properties:
+      message:
+        $ref: '#/definitions/channel.Message'
     type: object
   handlers.LoginRequest:
     properties:
@@ -784,14 +793,20 @@ definitions:
         additionalProperties:
           type: string
         type: object
+      managed:
+        type: boolean
       name:
         type: string
       parent:
         type: string
       snapshotter:
         type: string
+      source:
+        type: string
       updated_at:
         type: string
+      version:
+        type: integer
     type: object
   handlers.listMyIdentitiesResponse:
     properties:
@@ -1101,34 +1116,30 @@ definitions:
         type: string
       source_reply_to_message_id:
         type: string
+      usage:
+        items:
+          type: integer
+        type: array
     type: object
   message.MessageAsset:
     properties:
-      asset_id:
-        type: string
-      duration_ms:
-        type: integer
-      height:
-        type: integer
-      media_type:
+      content_hash:
         type: string
       mime:
         type: string
       ordinal:
         type: integer
-      original_name:
-        type: string
       role:
         type: string
       size_bytes:
         type: integer
       storage_key:
         type: string
-      width:
-        type: integer
     type: object
   models.AddRequest:
     properties:
+      client_type:
+        $ref: '#/definitions/models.ClientType'
       dimensions:
         type: integer
       input_modalities:
@@ -1151,6 +1162,18 @@ definitions:
       model_id:
         type: string
     type: object
+  models.ClientType:
+    enum:
+    - openai-responses
+    - openai-completions
+    - anthropic-messages
+    - google-generative-ai
+    type: string
+    x-enum-varnames:
+    - ClientTypeOpenAIResponses
+    - ClientTypeOpenAICompletions
+    - ClientTypeAnthropicMessages
+    - ClientTypeGoogleGenerativeAI
   models.CountResponse:
     properties:
       count:
@@ -1158,6 +1181,8 @@ definitions:
     type: object
   models.GetResponse:
     properties:
+      client_type:
+        $ref: '#/definitions/models.ClientType'
       dimensions:
         type: integer
       input_modalities:
@@ -1183,6 +1208,8 @@ definitions:
     - ModelTypeEmbedding
   models.UpdateRequest:
     properties:
+      client_type:
+        $ref: '#/definitions/models.ClientType'
       dimensions:
         type: integer
       input_modalities:
@@ -1198,30 +1225,29 @@ definitions:
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
-  providers.ClientType:
+  providers.CheckResult:
+    properties:
+      latency_ms:
+        type: integer
+      message:
+        type: string
+      status:
+        $ref: '#/definitions/providers.CheckStatus'
+      status_code:
+        type: integer
+    type: object
+  providers.CheckStatus:
     enum:
-    - openai
-    - openai-compat
-    - anthropic
-    - google
-    - azure
-    - bedrock
-    - mistral
-    - xai
-    - ollama
-    - dashscope
+    - supported
+    - auth_error
+    - unsupported
+    - error
     type: string
     x-enum-varnames:
-    - ClientTypeOpenAI
-    - ClientTypeOpenAICompat
-    - ClientTypeAnthropic
-    - ClientTypeGoogle
-    - ClientTypeAzure
-    - ClientTypeBedrock
-    - ClientTypeMistral
-    - ClientTypeXAI
-    - ClientTypeOllama
-    - ClientTypeDashscope
+    - CheckStatusSupported
+    - CheckStatusAuthError
+    - CheckStatusUnsupported
+    - CheckStatusError
   providers.CountResponse:
     properties:
       count:
@@ -1233,8 +1259,6 @@ definitions:
         type: string
       base_url:
         type: string
-      client_type:
-        $ref: '#/definitions/providers.ClientType'
       metadata:
         additionalProperties: {}
         type: object
@@ -1242,7 +1266,6 @@ definitions:
         type: string
     required:
     - base_url
-    - client_type
     - name
     type: object
   providers.GetResponse:
@@ -1251,8 +1274,6 @@ definitions:
         description: masked in response
         type: string
       base_url:
-        type: string
-      client_type:
         type: string
       created_at:
         type: string
@@ -1266,14 +1287,25 @@ definitions:
       updated_at:
         type: string
     type: object
+  providers.TestResponse:
+    properties:
+      checks:
+        additionalProperties:
+          $ref: '#/definitions/providers.CheckResult'
+        type: object
+      latency_ms:
+        type: integer
+      message:
+        type: string
+      reachable:
+        type: boolean
+    type: object
   providers.UpdateRequest:
     properties:
       api_key:
         type: string
       base_url:
         type: string
-      client_type:
-        $ref: '#/definitions/providers.ClientType'
       metadata:
         additionalProperties: {}
         type: object
@@ -1435,6 +1467,8 @@ definitions:
         type: string
       max_context_load_time:
         type: integer
+      max_context_tokens:
+        type: integer
       memory_model_id:
         type: string
       search_provider_id:
@@ -1451,6 +1485,8 @@ definitions:
       language:
         type: string
       max_context_load_time:
+        type: integer
+      max_context_tokens:
         type: integer
       memory_model_id:
         type: string
@@ -1653,6 +1689,80 @@ paths:
       summary: Create bot user
       tags:
       - bots
+  /bots/{bot_id}/cli/messages:
+    post:
+      consumes:
+      - application/json
+      description: Post a user message (with optional attachments) through the local
+        channel pipeline.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Message payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.LocalChannelMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Send a message to a local channel
+      tags:
+      - local-channel
+  /bots/{bot_id}/cli/stream:
+    get:
+      description: Open a persistent SSE connection to receive real-time stream events
+        for the given bot.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Subscribe to local channel events via SSE
+      tags:
+      - local-channel
   /bots/{bot_id}/container:
     delete:
       parameters:
@@ -3153,6 +3263,80 @@ paths:
       summary: Unified MCP tools gateway
       tags:
       - containerd
+  /bots/{bot_id}/web/messages:
+    post:
+      consumes:
+      - application/json
+      description: Post a user message (with optional attachments) through the local
+        channel pipeline.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Message payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.LocalChannelMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Send a message to a local channel
+      tags:
+      - local-channel
+  /bots/{bot_id}/web/stream:
+    get:
+      description: Open a persistent SSE connection to receive real-time stream events
+        for the given bot.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Subscribe to local channel events via SSE
+      tags:
+      - local-channel
   /bots/{id}:
     delete:
       description: Delete a bot user (owner/admin only)
@@ -3766,8 +3950,8 @@ paths:
         in: query
         name: type
         type: string
-      - description: Client type (openai, openai-compat, anthropic, google, azure,
-          bedrock, mistral, xai, ollama, dashscope)
+      - description: Client type (openai-responses, openai-completions, anthropic-messages,
+          google-generative-ai)
         in: query
         name: client_type
         type: string
@@ -4020,14 +4204,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get a list of all configured LLM providers, optionally filtered
-        by client type
-      parameters:
-      - description: Client type filter (openai, openai-compat, anthropic, google,
-          azure, bedrock, mistral, xai, ollama, dashscope)
-        in: query
-        name: client_type
-        type: string
+      description: Get a list of all configured LLM providers
       produces:
       - application/json
       responses:
@@ -4037,10 +4214,6 @@ paths:
             items:
               $ref: '#/definitions/providers.GetResponse'
             type: array
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -4213,17 +4386,17 @@ paths:
       summary: List provider models
       tags:
       - providers
-  /providers/count:
-    get:
+  /providers/{id}/test:
+    post:
       consumes:
       - application/json
-      description: Get the total count of providers, optionally filtered by client
-        type
+      description: Probe a provider's base URL to check reachability, supported client
+        types, and embedding support
       parameters:
-      - description: Client type filter (openai, openai-compat, anthropic, google,
-          azure, bedrock, mistral, xai, ollama, dashscope)
-        in: query
-        name: client_type
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
         type: string
       produces:
       - application/json
@@ -4231,11 +4404,34 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/providers.CountResponse'
+            $ref: '#/definitions/providers.TestResponse'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Test provider connectivity
+      tags:
+      - providers
+  /providers/count:
+    get:
+      consumes:
+      - application/json
+      description: Get the total count of providers
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/providers.CountResponse'
         "500":
           description: Internal Server Error
           schema:

@@ -7,7 +7,8 @@ import {
   dedupeAttachments,
   AttachmentsStreamExtractor,
 } from '../utils/attachments'
-import type { ContainerFileAttachment } from '../types/attachment'
+import { buildNativeImageParts } from '../agent'
+import type { ContainerFileAttachment, GatewayInputAttachment } from '../types/attachment'
 
 // ---------------------------------------------------------------------------
 // parseAttachmentPaths
@@ -193,6 +194,27 @@ describe('dedupeAttachments', () => {
       { type: 'image', base64: 'abc' },
     ])
     expect(result).toHaveLength(2)
+  })
+})
+
+describe('buildNativeImageParts', () => {
+  test('keeps inline data url and public url images', () => {
+    const attachments: GatewayInputAttachment[] = [
+      { type: 'image', transport: 'inline_data_url', payload: 'data:image/png;base64,AAAA' },
+      { type: 'image', transport: 'public_url', payload: 'https://example.com/demo.png' },
+    ]
+    const parts = buildNativeImageParts(attachments)
+    expect(parts).toHaveLength(2)
+    expect(parts[0].image).toBe('data:image/png;base64,AAAA')
+    expect(parts[1].image).toBe('https://example.com/demo.png')
+  })
+
+  test('drops tool_file_ref images', () => {
+    const attachments: GatewayInputAttachment[] = [
+      { type: 'image', transport: 'tool_file_ref', payload: '/data/media/image/demo.png' },
+    ]
+    const parts = buildNativeImageParts(attachments)
+    expect(parts).toEqual([])
   })
 })
 

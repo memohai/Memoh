@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
+	"github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/route"
@@ -38,8 +40,9 @@ type RouteResolver interface {
 
 type mediaIngestor interface {
 	Ingest(ctx context.Context, input media.IngestInput) (media.Asset, error)
+	// GetByStorageKey resolves an asset by reading its sidecar JSON.
+	GetByStorageKey(ctx context.Context, botID, storageKey string) (media.Asset, error)
 	// AccessPath returns a consumer-accessible reference for a persisted asset.
-	// The format depends on the storage backend (e.g. container path, URL).
 	AccessPath(asset media.Asset) string
 }
 
@@ -54,6 +57,7 @@ type ChannelInboundProcessor struct {
 	jwtSecret     string
 	tokenTTL      time.Duration
 	identity      *IdentityResolver
+	observer      channel.StreamObserver
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -106,6 +110,16 @@ func (p *ChannelInboundProcessor) SetMediaService(mediaService mediaIngestor) {
 	p.mediaService = mediaService
 }
 
+// SetStreamObserver configures an observer that receives copies of all stream
+// events produced for non-local channels (e.g. Telegram, Feishu). This enables
+// cross-channel visibility in the WebUI without coupling adapters to the hub.
+func (p *ChannelInboundProcessor) SetStreamObserver(observer channel.StreamObserver) {
+	if p == nil {
+		return
+	}
+	p.observer = observer
+}
+
 // HandleInbound processes an inbound channel message through identity resolution and chat gateway.
 func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, sender channel.StreamReplySender) error {
 	if p.runner == nil {
@@ -156,7 +170,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	identity := state.Identity
 	resolvedAttachments := p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Attachments)
-	attachments := mapChannelAttachments(resolvedAttachments)
+	attachments := mapChannelToChatAttachments(resolvedAttachments)
 
 	// Resolve or create the route via channel_routes.
 	if p.routeResolver == nil {
@@ -293,6 +307,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		_ = stream.Close(context.WithoutCancel(ctx))
 	}()
 
+	// For non-local channels, wrap the stream so events are mirrored to the
+	// RouteHub (and thus to WebUI/CLI subscribers).
+	if p.observer != nil && !isLocalChannelType(msg.Channel) {
+		stream = channel.NewTeeStream(stream, p.observer, strings.TrimSpace(identity.BotID), msg.Channel)
+		// Broadcast the inbound user message so WebUI can display it.
+		p.broadcastInboundMessage(ctx, strings.TrimSpace(identity.BotID), msg, text, identity, resolvedAttachments)
+	}
+
 	if err := stream.Push(ctx, channel.StreamEvent{
 		Type:   channel.StreamEventStatus,
 		Status: channel.StreamStatusStarted,
@@ -303,6 +325,20 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 		}
 		return err
+	}
+
+	// Mutex-protected collector for outbound asset refs. The resolver's
+	// streaming goroutine calls OutboundAssetCollector at persist time.
+	var (
+		assetMu           sync.Mutex
+		outboundAssetRefs []conversation.OutboundAssetRef
+	)
+	assetCollector := func() []conversation.OutboundAssetRef {
+		assetMu.Lock()
+		defer assetMu.Unlock()
+		result := make([]conversation.OutboundAssetRef, len(outboundAssetRefs))
+		copy(result, outboundAssetRefs)
+		return result
 	}
 
 	chunkCh, streamErrCh := p.runner.StreamChat(ctx, conversation.ChatRequest{
@@ -321,11 +357,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		Channels:                []string{msg.Channel.String()},
 		UserMessagePersisted:    userMessagePersisted,
 		Attachments:             attachments,
+		OutboundAssetCollector:  assetCollector,
 	})
 
 	var (
-		finalMessages []conversation.ModelMessage
-		streamErr     error
+		finalMessages       []conversation.ModelMessage
+		outboundAttachments []channel.Attachment
+		streamErr           error
 	)
 	for chunkCh != nil || streamErrCh != nil {
 		select {
@@ -347,8 +385,34 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				}
 				continue
 			}
-			for _, event := range events {
-				if pushErr := stream.Push(ctx, event); pushErr != nil {
+			for i, event := range events {
+				if event.Type == channel.StreamEventAttachment && len(event.Attachments) > 0 {
+					ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), event.Attachments)
+					events[i].Attachments = ingested
+					outboundAttachments = append(outboundAttachments, ingested...)
+					assetMu.Lock()
+					for _, att := range ingested {
+						contentHash := strings.TrimSpace(att.ContentHash)
+						if contentHash == "" {
+							continue
+						}
+						ref := conversation.OutboundAssetRef{
+							ContentHash: contentHash,
+							Role:        "attachment",
+							Ordinal:     len(outboundAssetRefs),
+							Mime:        strings.TrimSpace(att.Mime),
+							SizeBytes:   att.Size,
+						}
+						if att.Metadata != nil {
+							if sk, ok := att.Metadata["storage_key"].(string); ok {
+								ref.StorageKey = sk
+							}
+						}
+						outboundAssetRefs = append(outboundAssetRefs, ref)
+					}
+					assetMu.Unlock()
+				}
+				if pushErr := stream.Push(ctx, events[i]); pushErr != nil {
 					streamErr = pushErr
 					break
 				}
@@ -409,9 +473,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	outputs := flow.ExtractAssistantOutputs(finalMessages)
+	attachmentsApplied := false
 	for _, output := range outputs {
 		outMessage := buildChannelMessage(output, desc.Capabilities)
-		if outMessage.IsEmpty() {
+		if outMessage.IsEmpty() && !(len(outboundAttachments) > 0 && !attachmentsApplied) {
 			continue
 		}
 		plainText := strings.TrimSpace(outMessage.PlainText())
@@ -420,6 +485,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		if isMessagingToolDuplicate(plainText, sentTexts) {
 			continue
+		}
+		if !attachmentsApplied && len(outboundAttachments) > 0 {
+			outMessage.Attachments = append(outMessage.Attachments, outboundAttachments...)
+			attachmentsApplied = true
 		}
 		if outMessage.Reply == nil && sourceMessageID != "" {
 			outMessage.Reply = &channel.ReplyRef{
@@ -432,6 +501,18 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			Final: &channel.StreamFinalizePayload{
 				Message: outMessage,
 			},
+		}); err != nil {
+			return err
+		}
+	}
+	if !attachmentsApplied && len(outboundAttachments) > 0 {
+		attachMsg := channel.Message{Attachments: outboundAttachments}
+		if sourceMessageID != "" {
+			attachMsg.Reply = &channel.ReplyRef{Target: target, MessageID: sourceMessageID}
+		}
+		if err := stream.Push(ctx, channel.StreamEvent{
+			Type:  channel.StreamEventFinal,
+			Final: &channel.StreamFinalizePayload{Message: attachMsg},
 		}); err != nil {
 			return err
 		}
@@ -858,7 +939,18 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 }
 
 func buildInboundQuery(message channel.Message) string {
-	return strings.TrimSpace(message.PlainText())
+	text := strings.TrimSpace(message.PlainText())
+	if text != "" {
+		return text
+	}
+	if len(message.Attachments) == 0 {
+		return ""
+	}
+	count := len(message.Attachments)
+	if count == 1 {
+		return "[User sent 1 attachment]"
+	}
+	return fmt.Sprintf("[User sent %d attachments]", count)
 }
 
 func normalizeContentPartType(raw string) channel.MessagePartType {
@@ -1176,35 +1268,6 @@ func parseRawJSON(raw json.RawMessage) any {
 	return v
 }
 
-// mapChannelAttachments converts channel.Attachment slice to conversation.ChatAttachment slice.
-// When an attachment has been ingested (AssetID is set), the URL field contains
-// the container-internal path; it is mapped to Path for downstream consumers.
-func mapChannelAttachments(attachments []channel.Attachment) []conversation.ChatAttachment {
-	if len(attachments) == 0 {
-		return nil
-	}
-	result := make([]conversation.ChatAttachment, 0, len(attachments))
-	for _, att := range attachments {
-		ca := conversation.ChatAttachment{
-			Type:        string(att.Type),
-			PlatformKey: att.PlatformKey,
-			AssetID:     att.AssetID,
-			Name:        att.Name,
-			Mime:        att.Mime,
-			Size:        att.Size,
-			Metadata:    att.Metadata,
-		}
-		if strings.TrimSpace(att.AssetID) != "" {
-			ca.Path = att.URL
-			ca.Base64 = att.Base64
-		} else {
-			ca.URL = att.URL
-		}
-		result = append(result, ca)
-	}
-	return result
-}
-
 func (p *ChannelInboundProcessor) ingestInboundAttachments(
 	ctx context.Context,
 	cfg channel.ChannelConfig,
@@ -1218,7 +1281,7 @@ func (p *ChannelInboundProcessor) ingestInboundAttachments(
 	result := make([]channel.Attachment, 0, len(attachments))
 	for _, att := range attachments {
 		item := att
-		if strings.TrimSpace(item.AssetID) != "" {
+		if strings.TrimSpace(item.ContentHash) != "" {
 			result = append(result, item)
 			continue
 		}
@@ -1236,8 +1299,9 @@ func (p *ChannelInboundProcessor) ingestInboundAttachments(
 			result = append(result, item)
 			continue
 		}
-		if strings.TrimSpace(item.Mime) == "" {
-			item.Mime = strings.TrimSpace(payload.mime)
+		sourceMime := attachment.NormalizeMime(item.Mime)
+		if sourceMime == "" {
+			sourceMime = attachment.NormalizeMime(payload.mime)
 		}
 		if strings.TrimSpace(item.Name) == "" {
 			item.Name = strings.TrimSpace(payload.name)
@@ -1245,15 +1309,31 @@ func (p *ChannelInboundProcessor) ingestInboundAttachments(
 		if item.Size == 0 && payload.size > 0 {
 			item.Size = payload.size
 		}
+		mediaType := attachment.MapMediaType(string(item.Type))
+		preparedReader, finalMime, err := attachment.PrepareReaderAndMime(payload.reader, mediaType, sourceMime)
+		if err != nil {
+			if payload.reader != nil {
+				_ = payload.reader.Close()
+			}
+			if p.logger != nil {
+				p.logger.Warn(
+					"inbound attachment mime prepare failed",
+					slog.Any("error", err),
+					slog.String("attachment_type", strings.TrimSpace(string(item.Type))),
+					slog.String("attachment_url", strings.TrimSpace(item.URL)),
+					slog.String("platform_key", strings.TrimSpace(item.PlatformKey)),
+				)
+			}
+			result = append(result, item)
+			continue
+		}
+		item.Mime = finalMime
 		maxBytes := media.MaxAssetBytes
 		asset, err := p.mediaService.Ingest(ctx, media.IngestInput{
-			BotID:        botID,
-			MediaType:    mapInboundAttachmentMediaType(string(item.Type)),
-			Mime:         strings.TrimSpace(item.Mime),
-			OriginalName: strings.TrimSpace(item.Name),
-			Metadata:     item.Metadata,
-			Reader:       payload.reader,
-			MaxBytes:     maxBytes,
+			BotID:    botID,
+			Mime:     strings.TrimSpace(item.Mime),
+			Reader:   preparedReader,
+			MaxBytes: maxBytes,
 		})
 		if payload.reader != nil {
 			_ = payload.reader.Close()
@@ -1271,11 +1351,17 @@ func (p *ChannelInboundProcessor) ingestInboundAttachments(
 			result = append(result, item)
 			continue
 		}
-		item.AssetID = asset.ID
+		item.ContentHash = asset.ContentHash
 		item.URL = p.mediaService.AccessPath(asset)
 		item.PlatformKey = ""
+		item.Base64 = ""
+		if item.Metadata == nil {
+			item.Metadata = make(map[string]any)
+		}
+		item.Metadata["bot_id"] = botID
+		item.Metadata["storage_key"] = asset.StorageKey
 		if strings.TrimSpace(item.Mime) == "" {
-			item.Mime = strings.TrimSpace(asset.Mime)
+			item.Mime = attachment.NormalizeMime(asset.Mime)
 		}
 		if item.Size == 0 && asset.SizeBytes > 0 {
 			item.Size = asset.SizeBytes
@@ -1310,10 +1396,26 @@ func (p *ChannelInboundProcessor) loadInboundAttachmentPayload(
 			}
 			return payload, nil
 		}
-		// When URL download fails and platform_key exists, attempt resolver fallback.
-		if strings.TrimSpace(att.PlatformKey) == "" {
+		// When URL download fails and no other source exists, return URL error.
+		if strings.TrimSpace(att.PlatformKey) == "" && strings.TrimSpace(att.Base64) == "" {
 			return inboundAttachmentPayload{}, err
 		}
+	}
+	rawBase64 := strings.TrimSpace(att.Base64)
+	if rawBase64 != "" {
+		decoded, err := attachment.DecodeBase64(rawBase64, media.MaxAssetBytes)
+		if err != nil {
+			return inboundAttachmentPayload{}, fmt.Errorf("decode attachment base64: %w", err)
+		}
+		mimeType := strings.TrimSpace(att.Mime)
+		if mimeType == "" {
+			mimeType = strings.TrimSpace(attachment.MimeFromDataURL(rawBase64))
+		}
+		return inboundAttachmentPayload{
+			reader: io.NopCloser(decoded),
+			mime:   mimeType,
+			name:   strings.TrimSpace(att.Name),
+		}, nil
 	}
 	platformKey := strings.TrimSpace(att.PlatformKey)
 	if platformKey == "" {
@@ -1387,17 +1489,197 @@ func (p *ChannelInboundProcessor) resolveAttachmentResolver(channelType channel.
 	return resolver
 }
 
-func mapInboundAttachmentMediaType(t string) media.MediaType {
-	switch strings.ToLower(strings.TrimSpace(t)) {
-	case "image", "gif":
-		return media.MediaTypeImage
-	case "audio", "voice":
-		return media.MediaTypeAudio
-	case "video":
-		return media.MediaTypeVideo
-	default:
-		return media.MediaTypeFile
+// ingestOutboundAttachments persists LLM-generated attachment data URLs via the
+// media service, replacing ephemeral data URLs with stable asset references.
+// For container-internal paths (non-HTTP), it attempts to resolve the existing
+// asset by matching the storage key extracted from the path.
+func (p *ChannelInboundProcessor) ingestOutboundAttachments(ctx context.Context, botID string, attachments []channel.Attachment) []channel.Attachment {
+	if len(attachments) == 0 || p.mediaService == nil || strings.TrimSpace(botID) == "" {
+		return attachments
 	}
+	result := make([]channel.Attachment, 0, len(attachments))
+	for _, att := range attachments {
+		item := att
+		rawURL := strings.TrimSpace(item.URL)
+		if strings.TrimSpace(item.ContentHash) != "" {
+			result = append(result, item)
+			continue
+		}
+		// Non-data-URL, non-HTTP path: try to resolve as an existing asset via storage key.
+		if rawURL != "" && !isDataURL(rawURL) && !isHTTPURL(rawURL) {
+			if resolved := p.resolveContainerPathAsset(ctx, botID, rawURL, &item); resolved {
+				result = append(result, item)
+				continue
+			}
+			result = append(result, item)
+			continue
+		}
+		if !isDataURL(rawURL) {
+			result = append(result, item)
+			continue
+		}
+		decoded, err := attachment.DecodeBase64(rawURL, media.MaxAssetBytes)
+		if err != nil {
+			if p.logger != nil {
+				p.logger.Warn("decode outbound attachment data url failed", slog.Any("error", err))
+			}
+			result = append(result, item)
+			continue
+		}
+		mimeType := attachment.NormalizeMime(item.Mime)
+		if mimeType == "" {
+			mimeType = attachment.MimeFromDataURL(rawURL)
+		}
+		asset, err := p.mediaService.Ingest(ctx, media.IngestInput{
+			BotID:    botID,
+			Mime:     mimeType,
+			Reader:   decoded,
+			MaxBytes: media.MaxAssetBytes,
+		})
+		if err != nil {
+			if p.logger != nil {
+				p.logger.Warn("ingest outbound attachment failed", slog.Any("error", err))
+			}
+			result = append(result, item)
+			continue
+		}
+		item.ContentHash = asset.ContentHash
+		item.URL = ""
+		item.Base64 = ""
+		if item.Metadata == nil {
+			item.Metadata = make(map[string]any)
+		}
+		item.Metadata["bot_id"] = botID
+		item.Metadata["storage_key"] = asset.StorageKey
+		if strings.TrimSpace(item.Mime) == "" {
+			item.Mime = attachment.NormalizeMime(asset.Mime)
+		}
+		if item.Size == 0 && asset.SizeBytes > 0 {
+			item.Size = asset.SizeBytes
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+func isDataURL(raw string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), "data:")
+}
+
+func isHTTPURL(raw string) bool {
+	lower := strings.ToLower(strings.TrimSpace(raw))
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+// resolveContainerPathAsset attempts to match a container-internal file path
+// to an existing media asset by extracting the storage key from the path.
+// Returns true if the asset was resolved and item was updated.
+func (p *ChannelInboundProcessor) resolveContainerPathAsset(ctx context.Context, botID, accessPath string, item *channel.Attachment) bool {
+	storageKey := extractStorageKey(accessPath, botID)
+	if storageKey == "" {
+		return false
+	}
+	asset, err := p.mediaService.GetByStorageKey(ctx, botID, storageKey)
+	if err != nil {
+		return false
+	}
+	item.ContentHash = asset.ContentHash
+	if item.Metadata == nil {
+		item.Metadata = make(map[string]any)
+	}
+	item.Metadata["bot_id"] = botID
+	item.Metadata["storage_key"] = asset.StorageKey
+	if strings.TrimSpace(item.Mime) == "" {
+		item.Mime = attachment.NormalizeMime(asset.Mime)
+	}
+	if item.Size == 0 && asset.SizeBytes > 0 {
+		item.Size = asset.SizeBytes
+	}
+	return true
+}
+
+// extractStorageKey derives the media storage key from a container-internal
+// access path. The expected path format is /data/media/<storage_key>.
+func extractStorageKey(accessPath, _ string) string {
+	const marker = "/data/media/"
+	idx := strings.Index(accessPath, marker)
+	if idx < 0 {
+		return ""
+	}
+	return accessPath[idx+len(marker):]
+}
+
+// isLocalChannelType returns true for channels that already publish to RouteHub
+// natively (Web, CLI). Wrapping these with a tee would cause duplicate events.
+func isLocalChannelType(ct channel.ChannelType) bool {
+	s := strings.ToLower(strings.TrimSpace(string(ct)))
+	return s == "web" || s == "cli"
+}
+
+// broadcastInboundMessage notifies the observer about the user's inbound
+// message so WebUI subscribers see the full conversation, not just the bot reply.
+func (p *ChannelInboundProcessor) broadcastInboundMessage(
+	ctx context.Context,
+	botID string,
+	msg channel.InboundMessage,
+	text string,
+	identity InboundIdentity,
+	resolvedAttachments []channel.Attachment,
+) {
+	if p.observer == nil || strings.TrimSpace(botID) == "" {
+		return
+	}
+	inboundMsg := channel.Message{
+		Text:        text,
+		Attachments: resolvedAttachments,
+		Metadata: map[string]any{
+			"external_message_id": strings.TrimSpace(msg.Message.ID),
+			"sender_display_name": strings.TrimSpace(identity.DisplayName),
+		},
+	}
+	p.observer.OnStreamEvent(ctx, botID, msg.Channel, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: inboundMsg,
+		},
+		Metadata: map[string]any{
+			"source_channel": string(msg.Channel),
+			"role":           "user",
+			"sender_user_id": strings.TrimSpace(identity.UserID),
+		},
+	})
+}
+
+// channelAttachmentsToAssetRefs converts channel Attachments to message AssetRefs
+// with full metadata for denormalized persistence.
+func channelAttachmentsToAssetRefs(attachments []channel.Attachment, role string) []messagepkg.AssetRef {
+	if len(attachments) == 0 {
+		return nil
+	}
+	refs := make([]messagepkg.AssetRef, 0, len(attachments))
+	for idx, att := range attachments {
+		contentHash := strings.TrimSpace(att.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		ref := messagepkg.AssetRef{
+			ContentHash: contentHash,
+			Role:        role,
+			Ordinal:     idx,
+			Mime:        strings.TrimSpace(att.Mime),
+			SizeBytes:   att.Size,
+		}
+		if att.Metadata != nil {
+			if sk, ok := att.Metadata["storage_key"].(string); ok {
+				ref.StorageKey = sk
+			}
+		}
+		refs = append(refs, ref)
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	return refs
 }
 
 func chatAttachmentsToAssetRefs(attachments []conversation.ChatAttachment) []messagepkg.AssetRef {
@@ -1406,20 +1688,54 @@ func chatAttachmentsToAssetRefs(attachments []conversation.ChatAttachment) []mes
 	}
 	refs := make([]messagepkg.AssetRef, 0, len(attachments))
 	for idx, att := range attachments {
-		assetID := strings.TrimSpace(att.AssetID)
-		if assetID == "" {
+		contentHash := strings.TrimSpace(att.ContentHash)
+		if contentHash == "" {
 			continue
 		}
-		refs = append(refs, messagepkg.AssetRef{
-			AssetID: assetID,
-			Role:    "attachment",
-			Ordinal: idx,
-		})
+		ref := messagepkg.AssetRef{
+			ContentHash: contentHash,
+			Role:        "attachment",
+			Ordinal:     idx,
+			Mime:        strings.TrimSpace(att.Mime),
+			SizeBytes:   att.Size,
+		}
+		if att.Metadata != nil {
+			if sk, ok := att.Metadata["storage_key"].(string); ok {
+				ref.StorageKey = sk
+			}
+		}
+		refs = append(refs, ref)
 	}
 	if len(refs) == 0 {
 		return nil
 	}
 	return refs
+}
+
+func mapChannelToChatAttachments(attachments []channel.Attachment) []conversation.ChatAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	result := make([]conversation.ChatAttachment, 0, len(attachments))
+	for _, att := range attachments {
+		ca := conversation.ChatAttachment{
+			Type:        string(att.Type),
+			PlatformKey: att.PlatformKey,
+			ContentHash:     att.ContentHash,
+			Name:        att.Name,
+			Mime:        attachment.NormalizeMime(att.Mime),
+			Size:        att.Size,
+			Metadata:    att.Metadata,
+			Base64:      attachment.NormalizeBase64DataURL(att.Base64, attachment.NormalizeMime(att.Mime)),
+		}
+		if strings.TrimSpace(att.ContentHash) != "" {
+			ca.Path = att.URL
+		} else {
+			ca.URL = att.URL
+		}
+		result = append(result, ca)
+	}
+	return result
 }
 
 // parseAttachmentDelta converts raw JSON attachment data to channel Attachments.
@@ -1432,7 +1748,7 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 		URL         string `json:"url"`
 		Path        string `json:"path"`
 		PlatformKey string `json:"platform_key"`
-		AssetID     string `json:"asset_id"`
+		ContentHash string `json:"content_hash"`
 		Name        string `json:"name"`
 		Mime        string `json:"mime"`
 		Size        int64  `json:"size"`
@@ -1450,7 +1766,7 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 			Type:        channel.AttachmentType(strings.TrimSpace(item.Type)),
 			URL:         url,
 			PlatformKey: strings.TrimSpace(item.PlatformKey),
-			AssetID:     strings.TrimSpace(item.AssetID),
+			ContentHash: strings.TrimSpace(item.ContentHash),
 			Name:        strings.TrimSpace(item.Name),
 			Mime:        strings.TrimSpace(item.Mime),
 			Size:        item.Size,

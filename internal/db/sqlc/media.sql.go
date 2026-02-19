@@ -11,110 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createMediaAsset = `-- name: CreateMediaAsset :one
-INSERT INTO media_assets (
-  bot_id, storage_provider_id, content_hash, media_type, mime,
-  size_bytes, storage_key, original_name, width, height, duration_ms, metadata
-)
+const createMessageAsset = `-- name: CreateMessageAsset :one
+INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash)
 VALUES (
   $1,
-  $2::uuid,
+  $2,
   $3,
-  $4,
-  $5,
-  $6,
-  $7,
-  $8::text,
-  $9::integer,
-  $10::integer,
-  $11::bigint,
-  $12
+  $4
 )
-ON CONFLICT (bot_id, content_hash) DO UPDATE SET
-  bot_id = media_assets.bot_id
-RETURNING id, bot_id, storage_provider_id, content_hash, media_type, mime, size_bytes, storage_key, original_name, width, height, duration_ms, metadata, created_at
-`
-
-type CreateMediaAssetParams struct {
-	BotID             pgtype.UUID `json:"bot_id"`
-	StorageProviderID pgtype.UUID `json:"storage_provider_id"`
-	ContentHash       string      `json:"content_hash"`
-	MediaType         string      `json:"media_type"`
-	Mime              string      `json:"mime"`
-	SizeBytes         int64       `json:"size_bytes"`
-	StorageKey        string      `json:"storage_key"`
-	OriginalName      pgtype.Text `json:"original_name"`
-	Width             pgtype.Int4 `json:"width"`
-	Height            pgtype.Int4 `json:"height"`
-	DurationMs        pgtype.Int8 `json:"duration_ms"`
-	Metadata          []byte      `json:"metadata"`
-}
-
-func (q *Queries) CreateMediaAsset(ctx context.Context, arg CreateMediaAssetParams) (MediaAsset, error) {
-	row := q.db.QueryRow(ctx, createMediaAsset,
-		arg.BotID,
-		arg.StorageProviderID,
-		arg.ContentHash,
-		arg.MediaType,
-		arg.Mime,
-		arg.SizeBytes,
-		arg.StorageKey,
-		arg.OriginalName,
-		arg.Width,
-		arg.Height,
-		arg.DurationMs,
-		arg.Metadata,
-	)
-	var i MediaAsset
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.StorageProviderID,
-		&i.ContentHash,
-		&i.MediaType,
-		&i.Mime,
-		&i.SizeBytes,
-		&i.StorageKey,
-		&i.OriginalName,
-		&i.Width,
-		&i.Height,
-		&i.DurationMs,
-		&i.Metadata,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const createMessageAsset = `-- name: CreateMessageAsset :one
-INSERT INTO bot_history_message_assets (message_id, asset_id, role, ordinal)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (message_id, asset_id) DO UPDATE SET
+ON CONFLICT (message_id, content_hash) DO UPDATE SET
   role = EXCLUDED.role,
   ordinal = EXCLUDED.ordinal
-RETURNING id, message_id, asset_id, role, ordinal, created_at
+RETURNING id, message_id, role, ordinal, content_hash, created_at
 `
 
 type CreateMessageAssetParams struct {
-	MessageID pgtype.UUID `json:"message_id"`
-	AssetID   pgtype.UUID `json:"asset_id"`
-	Role      string      `json:"role"`
-	Ordinal   int32       `json:"ordinal"`
+	MessageID   pgtype.UUID `json:"message_id"`
+	Role        string      `json:"role"`
+	Ordinal     int32       `json:"ordinal"`
+	ContentHash string      `json:"content_hash"`
 }
 
 func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAssetParams) (BotHistoryMessageAsset, error) {
 	row := q.db.QueryRow(ctx, createMessageAsset,
 		arg.MessageID,
-		arg.AssetID,
 		arg.Role,
 		arg.Ordinal,
+		arg.ContentHash,
 	)
 	var i BotHistoryMessageAsset
 	err := row.Scan(
 		&i.ID,
 		&i.MessageID,
-		&i.AssetID,
 		&i.Role,
 		&i.Ordinal,
+		&i.ContentHash,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -146,15 +77,6 @@ func (q *Queries) CreateStorageProvider(ctx context.Context, arg CreateStoragePr
 	return i, err
 }
 
-const deleteMediaAsset = `-- name: DeleteMediaAsset :exec
-DELETE FROM media_assets WHERE id = $1
-`
-
-func (q *Queries) DeleteMediaAsset(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMediaAsset, id)
-	return err
-}
-
 const deleteMessageAssets = `-- name: DeleteMessageAssets :exec
 DELETE FROM bot_history_message_assets WHERE message_id = $1
 `
@@ -178,64 +100,6 @@ func (q *Queries) GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (
 		&i.BasePath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getMediaAssetByHash = `-- name: GetMediaAssetByHash :one
-SELECT id, bot_id, storage_provider_id, content_hash, media_type, mime, size_bytes, storage_key, original_name, width, height, duration_ms, metadata, created_at FROM media_assets
-WHERE bot_id = $1 AND content_hash = $2
-`
-
-type GetMediaAssetByHashParams struct {
-	BotID       pgtype.UUID `json:"bot_id"`
-	ContentHash string      `json:"content_hash"`
-}
-
-func (q *Queries) GetMediaAssetByHash(ctx context.Context, arg GetMediaAssetByHashParams) (MediaAsset, error) {
-	row := q.db.QueryRow(ctx, getMediaAssetByHash, arg.BotID, arg.ContentHash)
-	var i MediaAsset
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.StorageProviderID,
-		&i.ContentHash,
-		&i.MediaType,
-		&i.Mime,
-		&i.SizeBytes,
-		&i.StorageKey,
-		&i.OriginalName,
-		&i.Width,
-		&i.Height,
-		&i.DurationMs,
-		&i.Metadata,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getMediaAssetByID = `-- name: GetMediaAssetByID :one
-SELECT id, bot_id, storage_provider_id, content_hash, media_type, mime, size_bytes, storage_key, original_name, width, height, duration_ms, metadata, created_at FROM media_assets WHERE id = $1
-`
-
-func (q *Queries) GetMediaAssetByID(ctx context.Context, id pgtype.UUID) (MediaAsset, error) {
-	row := q.db.QueryRow(ctx, getMediaAssetByID, id)
-	var i MediaAsset
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.StorageProviderID,
-		&i.ContentHash,
-		&i.MediaType,
-		&i.Mime,
-		&i.SizeBytes,
-		&i.StorageKey,
-		&i.OriginalName,
-		&i.Width,
-		&i.Height,
-		&i.DurationMs,
-		&i.Metadata,
-		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -276,84 +140,19 @@ func (q *Queries) GetStorageProviderByName(ctx context.Context, name string) (St
 	return i, err
 }
 
-const listMediaAssetsByBotID = `-- name: ListMediaAssetsByBotID :many
-SELECT id, bot_id, storage_provider_id, content_hash, media_type, mime, size_bytes, storage_key, original_name, width, height, duration_ms, metadata, created_at FROM media_assets
-WHERE bot_id = $1
-ORDER BY created_at DESC
-`
-
-func (q *Queries) ListMediaAssetsByBotID(ctx context.Context, botID pgtype.UUID) ([]MediaAsset, error) {
-	rows, err := q.db.Query(ctx, listMediaAssetsByBotID, botID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []MediaAsset
-	for rows.Next() {
-		var i MediaAsset
-		if err := rows.Scan(
-			&i.ID,
-			&i.BotID,
-			&i.StorageProviderID,
-			&i.ContentHash,
-			&i.MediaType,
-			&i.Mime,
-			&i.SizeBytes,
-			&i.StorageKey,
-			&i.OriginalName,
-			&i.Width,
-			&i.Height,
-			&i.DurationMs,
-			&i.Metadata,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listMessageAssets = `-- name: ListMessageAssets :many
-SELECT
-  ma.id AS rel_id,
-  ma.message_id,
-  ma.asset_id,
-  ma.role,
-  ma.ordinal,
-  a.media_type,
-  a.mime,
-  a.size_bytes,
-  a.storage_key,
-  a.original_name,
-  a.width,
-  a.height,
-  a.duration_ms,
-  a.metadata AS asset_metadata
-FROM bot_history_message_assets ma
-JOIN media_assets a ON a.id = ma.asset_id
-WHERE ma.message_id = $1
-ORDER BY ma.ordinal ASC
+SELECT id AS rel_id, message_id, role, ordinal, content_hash
+FROM bot_history_message_assets
+WHERE message_id = $1
+ORDER BY ordinal ASC
 `
 
 type ListMessageAssetsRow struct {
-	RelID         pgtype.UUID `json:"rel_id"`
-	MessageID     pgtype.UUID `json:"message_id"`
-	AssetID       pgtype.UUID `json:"asset_id"`
-	Role          string      `json:"role"`
-	Ordinal       int32       `json:"ordinal"`
-	MediaType     string      `json:"media_type"`
-	Mime          string      `json:"mime"`
-	SizeBytes     int64       `json:"size_bytes"`
-	StorageKey    string      `json:"storage_key"`
-	OriginalName  pgtype.Text `json:"original_name"`
-	Width         pgtype.Int4 `json:"width"`
-	Height        pgtype.Int4 `json:"height"`
-	DurationMs    pgtype.Int8 `json:"duration_ms"`
-	AssetMetadata []byte      `json:"asset_metadata"`
+	RelID       pgtype.UUID `json:"rel_id"`
+	MessageID   pgtype.UUID `json:"message_id"`
+	Role        string      `json:"role"`
+	Ordinal     int32       `json:"ordinal"`
+	ContentHash string      `json:"content_hash"`
 }
 
 func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) ([]ListMessageAssetsRow, error) {
@@ -368,18 +167,9 @@ func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) 
 		if err := rows.Scan(
 			&i.RelID,
 			&i.MessageID,
-			&i.AssetID,
 			&i.Role,
 			&i.Ordinal,
-			&i.MediaType,
-			&i.Mime,
-			&i.SizeBytes,
-			&i.StorageKey,
-			&i.OriginalName,
-			&i.Width,
-			&i.Height,
-			&i.DurationMs,
-			&i.AssetMetadata,
+			&i.ContentHash,
 		); err != nil {
 			return nil, err
 		}
@@ -392,42 +182,18 @@ func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) 
 }
 
 const listMessageAssetsBatch = `-- name: ListMessageAssetsBatch :many
-SELECT
-  ma.id AS rel_id,
-  ma.message_id,
-  ma.asset_id,
-  ma.role,
-  ma.ordinal,
-  a.media_type,
-  a.mime,
-  a.size_bytes,
-  a.storage_key,
-  a.original_name,
-  a.width,
-  a.height,
-  a.duration_ms,
-  a.metadata AS asset_metadata
-FROM bot_history_message_assets ma
-JOIN media_assets a ON a.id = ma.asset_id
-WHERE ma.message_id = ANY($1::uuid[])
-ORDER BY ma.message_id, ma.ordinal ASC
+SELECT id AS rel_id, message_id, role, ordinal, content_hash
+FROM bot_history_message_assets
+WHERE message_id = ANY($1::uuid[])
+ORDER BY message_id, ordinal ASC
 `
 
 type ListMessageAssetsBatchRow struct {
-	RelID         pgtype.UUID `json:"rel_id"`
-	MessageID     pgtype.UUID `json:"message_id"`
-	AssetID       pgtype.UUID `json:"asset_id"`
-	Role          string      `json:"role"`
-	Ordinal       int32       `json:"ordinal"`
-	MediaType     string      `json:"media_type"`
-	Mime          string      `json:"mime"`
-	SizeBytes     int64       `json:"size_bytes"`
-	StorageKey    string      `json:"storage_key"`
-	OriginalName  pgtype.Text `json:"original_name"`
-	Width         pgtype.Int4 `json:"width"`
-	Height        pgtype.Int4 `json:"height"`
-	DurationMs    pgtype.Int8 `json:"duration_ms"`
-	AssetMetadata []byte      `json:"asset_metadata"`
+	RelID       pgtype.UUID `json:"rel_id"`
+	MessageID   pgtype.UUID `json:"message_id"`
+	Role        string      `json:"role"`
+	Ordinal     int32       `json:"ordinal"`
+	ContentHash string      `json:"content_hash"`
 }
 
 func (q *Queries) ListMessageAssetsBatch(ctx context.Context, messageIds []pgtype.UUID) ([]ListMessageAssetsBatchRow, error) {
@@ -442,18 +208,9 @@ func (q *Queries) ListMessageAssetsBatch(ctx context.Context, messageIds []pgtyp
 		if err := rows.Scan(
 			&i.RelID,
 			&i.MessageID,
-			&i.AssetID,
 			&i.Role,
 			&i.Ordinal,
-			&i.MediaType,
-			&i.Mime,
-			&i.SizeBytes,
-			&i.StorageKey,
-			&i.OriginalName,
-			&i.Width,
-			&i.Height,
-			&i.DurationMs,
-			&i.AssetMetadata,
+			&i.ContentHash,
 		); err != nil {
 			return nil, err
 		}

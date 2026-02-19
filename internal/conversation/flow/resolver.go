@@ -2,8 +2,8 @@ package flow
 
 import (
 	"bufio"
-	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
@@ -31,6 +32,8 @@ const (
 	memoryContextMaxItems      = 8
 	memoryContextItemMaxChars  = 220
 	sharedMemoryNamespace      = "bot"
+	// Keep gateway payload bounded when inlining binary attachments as data URLs.
+	gatewayInlineAttachmentMaxBytes int64 = 20 * 1024 * 1024
 )
 
 // SkillEntry represents a skill loaded from the container.
@@ -51,6 +54,11 @@ type ConversationSettingsReader interface {
 	GetSettings(ctx context.Context, conversationID string) (conversation.Settings, error)
 }
 
+// gatewayAssetLoader resolves content_hash references to binary payloads for gateway dispatch.
+type gatewayAssetLoader interface {
+	OpenForGateway(ctx context.Context, botID, contentHash string) (reader io.ReadCloser, mime string, err error)
+}
+
 // Resolver orchestrates chat with the agent gateway.
 type Resolver struct {
 	modelsService   *models.Service
@@ -60,6 +68,7 @@ type Resolver struct {
 	messageService  messagepkg.Service
 	settingsService *settings.Service
 	skillLoader     SkillLoader
+	assetLoader     gatewayAssetLoader
 	gatewayBaseURL  string
 	timeout         time.Duration
 	logger          *slog.Logger
@@ -106,6 +115,12 @@ func (r *Resolver) SetSkillLoader(sl SkillLoader) {
 	r.skillLoader = sl
 }
 
+// SetGatewayAssetLoader configures optional asset loading used to inline
+// attachments before calling the agent gateway.
+func (r *Resolver) SetGatewayAssetLoader(loader gatewayAssetLoader) {
+	r.assetLoader = loader
+}
+
 // --- gateway payload ---
 
 type gatewayModelConfig struct {
@@ -142,7 +157,7 @@ type gatewayRequest struct {
 	Messages          []conversation.ModelMessage `json:"messages"`
 	Skills            []string                    `json:"skills"`
 	UsableSkills      []gatewaySkill              `json:"usableSkills"`
-	Query             string                      `json:"query,omitempty"`
+	Query             string                      `json:"query"`
 	Identity          gatewayIdentity             `json:"identity"`
 	Attachments       []any                       `json:"attachments"`
 }
@@ -150,6 +165,12 @@ type gatewayRequest struct {
 type gatewayResponse struct {
 	Messages []conversation.ModelMessage `json:"messages"`
 	Skills   []string                    `json:"skills"`
+	Usage    json.RawMessage             `json:"usage,omitempty"`
+}
+
+type gatewayUsage struct {
+	InputTokens  *int `json:"inputTokens"`
+	OutputTokens *int `json:"outputTokens"`
 }
 
 // gatewaySchedule matches the agent gateway ScheduleModel for /chat/trigger-schedule.
@@ -163,9 +184,28 @@ type gatewaySchedule struct {
 }
 
 // triggerScheduleRequest is the payload for POST /chat/trigger-schedule.
+// It omits "query" from JSON so the trigger-schedule endpoint does not receive it.
 type triggerScheduleRequest struct {
 	gatewayRequest
 	Schedule gatewaySchedule `json:"schedule"`
+}
+
+// MarshalJSON marshals the request without the "query" field for trigger-schedule.
+func (t triggerScheduleRequest) MarshalJSON() ([]byte, error) {
+	type alias struct {
+		gatewayRequest
+		Schedule gatewaySchedule `json:"schedule"`
+	}
+	raw, err := json.Marshal(alias(t))
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	delete(m, "query")
+	return json.Marshal(m)
 }
 
 // --- resolved context (shared by Chat / StreamChat / TriggerSchedule) ---
@@ -207,20 +247,40 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if err != nil {
 		return resolvedContext{}, err
 	}
-	clientType, err := normalizeClientType(provider.ClientType)
-	if err != nil {
-		return resolvedContext{}, err
-	}
+	clientType := string(chatModel.ClientType)
+
 	maxCtx := coalescePositiveInt(req.MaxContextLoadTime, botSettings.MaxContextLoadTime, defaultMaxContextMinutes)
+	maxTokens := botSettings.MaxContextTokens
+
+	// Build non-history parts first so we can reserve their token cost before
+	// trimming history messages.
+	memoryMsg := r.loadMemoryContextMessage(ctx, req)
+	var overhead int
+	if memoryMsg != nil {
+		overhead += estimateMessageTokens(*memoryMsg)
+	}
+	for _, m := range req.Messages {
+		overhead += estimateMessageTokens(m)
+	}
+	// Reserve space for the system prompt built by the agent gateway
+	// (IDENTITY.md, SOUL.md, TOOLS.md, skills, boilerplate, user prompt, etc.).
+	const systemPromptReserve = 4096
+	overhead += systemPromptReserve
+
+	historyBudget := maxTokens - overhead
+	if historyBudget < 0 {
+		historyBudget = 0
+	}
 
 	var messages []conversation.ModelMessage
 	if !skipHistory && r.conversationSvc != nil {
-		messages, err = r.loadMessages(ctx, req.ChatID, maxCtx)
-		if err != nil {
-			return resolvedContext{}, err
+		loaded, loadErr := r.loadMessages(ctx, req.ChatID, maxCtx)
+		if loadErr != nil {
+			return resolvedContext{}, loadErr
 		}
+		messages = trimMessagesByTokens(loaded, historyBudget)
 	}
-	if memoryMsg := r.loadMemoryContextMessage(ctx, req); memoryMsg != nil {
+	if memoryMsg != nil {
 		messages = append(messages, *memoryMsg)
 	}
 	messages = append(messages, req.Messages...)
@@ -273,7 +333,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			ConversationType:  strings.TrimSpace(req.ConversationType),
 			SessionToken:      req.ChatToken,
 		},
-		Attachments: r.routeAndMergeAttachments(chatModel, req),
+		Attachments: r.routeAndMergeAttachments(ctx, chatModel, req),
 	}
 
 	return resolvedContext{payload: payload, model: chatModel, provider: provider}, nil
@@ -291,14 +351,14 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
-	if err := r.storeRound(ctx, req, resp.Messages); err != nil {
+	if err := r.storeRound(ctx, req, resp.Messages, resp.Usage); err != nil {
 		return conversation.ChatResponse{}, err
 	}
 	return conversation.ChatResponse{
 		Messages: resp.Messages,
 		Skills:   resp.Skills,
 		Model:    rc.model.ModelID,
-		Provider: rc.provider.ClientType,
+		Provider: string(rc.model.ClientType),
 	}, nil
 }
 
@@ -345,7 +405,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 	if err != nil {
 		return err
 	}
-	return r.storeRound(ctx, req, resp.Messages)
+	return r.storeRound(ctx, req, resp.Messages, resp.Usage)
 }
 
 // --- StreamChat ---
@@ -401,18 +461,18 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 // --- HTTP helpers ---
 
 func (r *Resolver) postChat(ctx context.Context, payload gatewayRequest, token string) (gatewayResponse, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return gatewayResponse{}, err
-	}
 	url := r.gatewayBaseURL + "/chat/"
-	r.logger.Info("gateway request", slog.String("url", url), slog.String("body_prefix", truncate(string(body), 200)))
+	r.logger.Info(
+		"gateway request",
+		slog.String("url", url),
+		slog.Int("messages", len(payload.Messages)),
+		slog.Int("attachments", len(payload.Attachments)),
+	)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := newJSONRequestWithContext(ctx, http.MethodPost, url, payload)
 	if err != nil {
 		return gatewayResponse{}, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
 	if strings.TrimSpace(token) != "" {
 		httpReq.Header.Set("Authorization", token)
 	}
@@ -442,18 +502,13 @@ func (r *Resolver) postChat(ctx context.Context, payload gatewayRequest, token s
 
 // postTriggerSchedule sends a trigger-schedule request to the agent gateway.
 func (r *Resolver) postTriggerSchedule(ctx context.Context, payload triggerScheduleRequest, token string) (gatewayResponse, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return gatewayResponse{}, err
-	}
 	url := r.gatewayBaseURL + "/chat/trigger-schedule"
 	r.logger.Info("gateway trigger-schedule request", slog.String("url", url), slog.String("schedule_id", payload.Schedule.ID))
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := newJSONRequestWithContext(ctx, http.MethodPost, url, payload)
 	if err != nil {
 		return gatewayResponse{}, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
 	if strings.TrimSpace(token) != "" {
 		httpReq.Header.Set("Authorization", token)
 	}
@@ -482,17 +537,17 @@ func (r *Resolver) postTriggerSchedule(ctx context.Context, payload triggerSched
 }
 
 func (r *Resolver) streamChat(ctx context.Context, payload gatewayRequest, req conversation.ChatRequest, chunkCh chan<- conversation.StreamChunk) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
 	url := r.gatewayBaseURL + "/chat/stream"
-	r.logger.Info("gateway stream request", slog.String("url", url), slog.String("body_prefix", truncate(string(body), 200)))
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	r.logger.Info(
+		"gateway stream request",
+		slog.String("url", url),
+		slog.Int("messages", len(payload.Messages)),
+		slog.Int("attachments", len(payload.Attachments)),
+	)
+	httpReq, err := newJSONRequestWithContext(ctx, http.MethodPost, url, payload)
 	if err != nil {
 		return err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
 	if strings.TrimSpace(req.Token) != "" {
 		httpReq.Header.Set("Authorization", req.Token)
@@ -546,13 +601,28 @@ func (r *Resolver) streamChat(ctx context.Context, payload gatewayRequest, req c
 	return scanner.Err()
 }
 
+func newJSONRequestWithContext(ctx context.Context, method, url string, payload any) (*http.Request, error) {
+	pr, pw := io.Pipe()
+	go func() {
+		enc := json.NewEncoder(pw)
+		_ = pw.CloseWithError(enc.Encode(payload))
+	}()
+	req, err := http.NewRequestWithContext(ctx, method, url, pr)
+	if err != nil {
+		_ = pr.Close()
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return req, nil
+}
+
 // tryStoreStream attempts to extract final messages from a stream event and persist them.
 func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequest, eventType, data string) (bool, error) {
 	// event: done + data: {messages: [...]}
 	if eventType == "done" {
 		var resp gatewayResponse
 		if err := json.Unmarshal([]byte(data), &resp); err == nil && len(resp.Messages) > 0 {
-			return true, r.storeRound(ctx, req, resp.Messages)
+			return true, r.storeRound(ctx, req, resp.Messages, resp.Usage)
 		}
 	}
 
@@ -562,15 +632,16 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 		Data     json.RawMessage             `json:"data"`
 		Messages []conversation.ModelMessage `json:"messages"`
 		Skills   []string                    `json:"skills"`
+		Usage    json.RawMessage             `json:"usage,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(data), &envelope); err == nil {
 		if (envelope.Type == "agent_end" || envelope.Type == "done") && len(envelope.Messages) > 0 {
-			return true, r.storeRound(ctx, req, envelope.Messages)
+			return true, r.storeRound(ctx, req, envelope.Messages, envelope.Usage)
 		}
 		if envelope.Type == "done" && len(envelope.Data) > 0 {
 			var resp gatewayResponse
 			if err := json.Unmarshal(envelope.Data, &resp); err == nil && len(resp.Messages) > 0 {
-				return true, r.storeRound(ctx, req, resp.Messages)
+				return true, r.storeRound(ctx, req, resp.Messages, resp.Usage)
 			}
 		}
 	}
@@ -578,7 +649,7 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	// fallback: data: {messages: [...]}
 	var resp gatewayResponse
 	if err := json.Unmarshal([]byte(data), &resp); err == nil && len(resp.Messages) > 0 {
-		return true, r.storeRound(ctx, req, resp.Messages)
+		return true, r.storeRound(ctx, req, resp.Messages, resp.Usage)
 	}
 	return false, nil
 }
@@ -586,37 +657,38 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 // routeAndMergeAttachments applies CapabilityFallbackPolicy to split
 // request attachments by model input modalities, then merges the results
 // into a single []any for the gateway request.
-func (r *Resolver) routeAndMergeAttachments(model models.GetResponse, req conversation.ChatRequest) []any {
+func (r *Resolver) routeAndMergeAttachments(ctx context.Context, model models.GetResponse, req conversation.ChatRequest) []any {
 	if len(req.Attachments) == 0 {
 		return []any{}
 	}
-	typed := make([]gatewayAttachment, 0, len(req.Attachments))
-	for _, raw := range req.Attachments {
-		typed = append(typed, gatewayAttachment{
-			Type:     raw.Type,
-			Base64:   raw.Base64,
-			Path:     raw.Path,
-			Mime:     raw.Mime,
-			Name:     raw.Name,
-			Metadata: raw.Metadata,
-		})
-	}
+	typed := r.prepareGatewayAttachments(ctx, req)
 	routed := routeAttachmentsByCapability(model.InputModalities, typed)
-	// Convert unsupported attachments to file-path references.
+	// Convert unsupported attachments to tool file references.
 	for i := range routed.Fallback {
-		if routed.Fallback[i].Path == "" && routed.Fallback[i].Base64 != "" {
-			// Cannot downgrade base64-only to path; keep as native so the agent can
-			// attempt best-effort processing or skip.
-			routed.Native = append(routed.Native, routed.Fallback[i])
+		fallbackPath := strings.TrimSpace(routed.Fallback[i].FallbackPath)
+		if fallbackPath == "" {
+			// Cannot downgrade non-file payloads to tool file references.
+			// Drop them explicitly to keep gateway contract deterministic.
+			if r != nil && r.logger != nil {
+				r.logger.Warn(
+					"drop attachment without fallback path",
+					slog.String("type", strings.TrimSpace(routed.Fallback[i].Type)),
+					slog.String("transport", strings.TrimSpace(routed.Fallback[i].Transport)),
+					slog.String("content_hash", strings.TrimSpace(routed.Fallback[i].ContentHash)),
+					slog.Bool("has_payload", strings.TrimSpace(routed.Fallback[i].Payload) != ""),
+				)
+			}
 			routed.Fallback[i] = gatewayAttachment{}
 			continue
 		}
 		routed.Fallback[i].Type = "file"
+		routed.Fallback[i].Transport = gatewayTransportToolFileRef
+		routed.Fallback[i].Payload = fallbackPath
 	}
 	merged := make([]any, 0, len(routed.Native)+len(routed.Fallback))
 	merged = append(merged, attachmentsToAny(routed.Native)...)
 	for _, fb := range routed.Fallback {
-		if fb.Type == "" {
+		if fb.Type == "" || strings.TrimSpace(fb.Transport) == "" || strings.TrimSpace(fb.Payload) == "" {
 			continue
 		}
 		merged = append(merged, fb)
@@ -625,6 +697,203 @@ func (r *Resolver) routeAndMergeAttachments(model models.GetResponse, req conver
 		return []any{}
 	}
 	return merged
+}
+
+func (r *Resolver) prepareGatewayAttachments(ctx context.Context, req conversation.ChatRequest) []gatewayAttachment {
+	if len(req.Attachments) == 0 {
+		return nil
+	}
+	prepared := make([]gatewayAttachment, 0, len(req.Attachments))
+	for _, raw := range req.Attachments {
+		attachmentType := strings.ToLower(strings.TrimSpace(raw.Type))
+		payload := strings.TrimSpace(raw.Base64)
+		transport := ""
+		fallbackPath := strings.TrimSpace(raw.Path)
+		if payload != "" {
+			transport = gatewayTransportInlineDataURL
+		} else {
+			rawURL := strings.TrimSpace(raw.URL)
+			if isDataURL(rawURL) {
+				payload = rawURL
+				transport = gatewayTransportInlineDataURL
+			} else if isLikelyPublicURL(rawURL) {
+				payload = rawURL
+				transport = gatewayTransportPublicURL
+			} else if rawURL != "" && fallbackPath == "" {
+				fallbackPath = rawURL
+			}
+		}
+		item := gatewayAttachment{
+			ContentHash:  strings.TrimSpace(raw.ContentHash),
+			Type:         attachmentType,
+			Mime:         strings.TrimSpace(raw.Mime),
+			Size:         raw.Size,
+			Name:         strings.TrimSpace(raw.Name),
+			Transport:    transport,
+			Payload:      payload,
+			Metadata:     raw.Metadata,
+			FallbackPath: fallbackPath,
+		}
+		item = normalizeGatewayAttachmentPayload(item)
+		item = r.inlineImageAttachmentAssetIfNeeded(ctx, strings.TrimSpace(req.BotID), item)
+		prepared = append(prepared, item)
+	}
+	return prepared
+}
+
+func normalizeGatewayAttachmentPayload(item gatewayAttachment) gatewayAttachment {
+	if item.Transport != gatewayTransportInlineDataURL {
+		return item
+	}
+	payload := strings.TrimSpace(item.Payload)
+	if payload == "" {
+		return item
+	}
+	lower := strings.ToLower(payload)
+	if strings.HasPrefix(lower, "data:") {
+		if strings.TrimSpace(item.Mime) == "" || strings.EqualFold(strings.TrimSpace(item.Mime), "application/octet-stream") {
+			if start := strings.Index(payload, ":"); start >= 0 {
+				rest := payload[start+1:]
+				if end := strings.Index(rest, ";"); end > 0 {
+					mime := strings.TrimSpace(rest[:end])
+					if mime != "" {
+						item.Mime = mime
+					}
+				}
+			}
+		}
+		return item
+	}
+	mime := strings.TrimSpace(item.Mime)
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	item.Payload = attachmentpkg.NormalizeBase64DataURL(payload, mime)
+	return item
+}
+
+func isLikelyPublicURL(raw string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	return strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://")
+}
+
+func isDataURL(raw string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	return strings.HasPrefix(trimmed, "data:")
+}
+
+func (r *Resolver) inlineImageAttachmentAssetIfNeeded(ctx context.Context, botID string, item gatewayAttachment) gatewayAttachment {
+	if item.Type != "image" {
+		return item
+	}
+	if strings.TrimSpace(item.Payload) != "" &&
+		(item.Transport == gatewayTransportInlineDataURL || item.Transport == gatewayTransportPublicURL) {
+		return item
+	}
+	contentHash := strings.TrimSpace(item.ContentHash)
+	if contentHash == "" {
+		return item
+	}
+	dataURL, mime, err := r.inlineAssetAsDataURL(ctx, botID, contentHash, item.Type, item.Mime)
+	if err != nil {
+		if r != nil && r.logger != nil {
+			r.logger.Warn(
+				"inline gateway image attachment failed",
+				slog.Any("error", err),
+				slog.String("bot_id", botID),
+				slog.String("content_hash", contentHash),
+			)
+		}
+		return item
+	}
+	item.Transport = gatewayTransportInlineDataURL
+	item.Payload = dataURL
+	if strings.TrimSpace(item.Mime) == "" {
+		item.Mime = mime
+	}
+	return item
+}
+
+func (r *Resolver) inlineAssetAsDataURL(ctx context.Context, botID, contentHash, attachmentType, fallbackMime string) (string, string, error) {
+	if r == nil || r.assetLoader == nil {
+		return "", "", fmt.Errorf("gateway asset loader not configured")
+	}
+	reader, assetMime, err := r.assetLoader.OpenForGateway(ctx, botID, contentHash)
+	if err != nil {
+		return "", "", fmt.Errorf("open asset: %w", err)
+	}
+	defer func() {
+		_ = reader.Close()
+	}()
+	mime := strings.TrimSpace(fallbackMime)
+	if mime == "" {
+		mime = strings.TrimSpace(assetMime)
+	}
+	dataURL, resolvedMime, err := encodeReaderAsDataURL(reader, gatewayInlineAttachmentMaxBytes, attachmentType, mime)
+	if err != nil {
+		return "", "", err
+	}
+	return dataURL, resolvedMime, nil
+}
+
+func encodeReaderAsDataURL(reader io.Reader, maxBytes int64, attachmentType, fallbackMime string) (string, string, error) {
+	if reader == nil {
+		return "", "", fmt.Errorf("reader is required")
+	}
+	if maxBytes <= 0 {
+		return "", "", fmt.Errorf("max bytes must be greater than 0")
+	}
+	limited := &io.LimitedReader{R: reader, N: maxBytes + 1}
+	head := make([]byte, 512)
+	n, err := limited.Read(head)
+	if err != nil && err != io.EOF {
+		return "", "", fmt.Errorf("read asset: %w", err)
+	}
+	head = head[:n]
+
+	mime := strings.TrimSpace(fallbackMime)
+	if strings.EqualFold(strings.TrimSpace(attachmentType), "image") &&
+		(strings.TrimSpace(mime) == "" || strings.EqualFold(strings.TrimSpace(mime), "application/octet-stream")) {
+		detected := strings.TrimSpace(http.DetectContentType(head))
+		if strings.HasPrefix(strings.ToLower(detected), "image/") {
+			mime = detected
+		}
+	}
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+
+	var encoded strings.Builder
+	encoded.Grow(len("data:") + len(mime) + len(";base64,"))
+	encoded.WriteString("data:")
+	encoded.WriteString(mime)
+	encoded.WriteString(";base64,")
+
+	encoder := base64.NewEncoder(base64.StdEncoding, &encoded)
+	if len(head) > 0 {
+		if _, err := encoder.Write(head); err != nil {
+			_ = encoder.Close()
+			return "", "", fmt.Errorf("encode asset head: %w", err)
+		}
+	}
+	copied, err := io.Copy(encoder, limited)
+	if err != nil {
+		_ = encoder.Close()
+		return "", "", fmt.Errorf("encode asset body: %w", err)
+	}
+	if err := encoder.Close(); err != nil {
+		return "", "", fmt.Errorf("finalize asset encoding: %w", err)
+	}
+
+	total := int64(len(head)) + copied
+	if total > maxBytes {
+		return "", "", fmt.Errorf(
+			"asset too large to inline: %d > %d",
+			total,
+			maxBytes,
+		)
+	}
+	return encoded.String(), mime, nil
 }
 
 // --- container resolution ---
@@ -648,7 +917,12 @@ func (r *Resolver) resolveContainerID(ctx context.Context, botID, explicit strin
 
 // --- message loading ---
 
-func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMinutes int) ([]conversation.ModelMessage, error) {
+type messageWithUsage struct {
+	Message          conversation.ModelMessage
+	UsageInputTokens *int
+}
+
+func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMinutes int) ([]messageWithUsage, error) {
 	if r.messageService == nil {
 		return nil, nil
 	}
@@ -657,7 +931,7 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMi
 	if err != nil {
 		return nil, err
 	}
-	var result []conversation.ModelMessage
+	var result []messageWithUsage
 	for _, m := range msgs {
 		var mm conversation.ModelMessage
 		if err := json.Unmarshal(m.Content, &mm); err != nil {
@@ -667,9 +941,89 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMi
 		} else {
 			mm.Role = m.Role
 		}
-		result = append(result, mm)
+		var inputTokens *int
+		if len(m.Usage) > 0 {
+			var u gatewayUsage
+			if json.Unmarshal(m.Usage, &u) == nil {
+				inputTokens = u.InputTokens
+			}
+		}
+		result = append(result, messageWithUsage{Message: mm, UsageInputTokens: inputTokens})
 	}
 	return result, nil
+}
+
+func estimateMessageTokens(msg conversation.ModelMessage) int {
+	text := msg.TextContent()
+	if len(text) == 0 {
+		data, _ := json.Marshal(msg.Content)
+		return len(data) / 4
+	}
+	return len(text) / 4
+}
+
+func trimMessagesByTokens(messages []messageWithUsage, maxTokens int) []conversation.ModelMessage {
+	if maxTokens <= 0 || len(messages) == 0 {
+		result := make([]conversation.ModelMessage, len(messages))
+		for i, m := range messages {
+			result[i] = m.Message
+		}
+		return result
+	}
+
+	// Scan backwards. When a message with UsageInputTokens is found, that value
+	// represents the cumulative input tokens for all messages up to and including
+	// that message. Messages after it are estimated with chars/4.
+	totalTokens := 0
+	anchorFound := false
+	cutoff := 0
+
+	tailEstimate := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		if !anchorFound && messages[i].UsageInputTokens != nil {
+			anchorFound = true
+			totalTokens = *messages[i].UsageInputTokens + tailEstimate
+			if totalTokens > maxTokens {
+				cutoff = i + 1
+				break
+			}
+			continue
+		}
+		est := estimateMessageTokens(messages[i].Message)
+		if anchorFound {
+			totalTokens += est
+			if totalTokens > maxTokens {
+				cutoff = i + 1
+				break
+			}
+		} else {
+			tailEstimate += est
+		}
+	}
+
+	if !anchorFound {
+		totalTokens = 0
+		for i := len(messages) - 1; i >= 0; i-- {
+			totalTokens += estimateMessageTokens(messages[i].Message)
+			if totalTokens > maxTokens {
+				cutoff = i + 1
+				break
+			}
+		}
+	}
+
+	// Keep provider-valid message order: a "tool" message must follow a preceding
+	// assistant tool call. When history is head-trimmed, a leading tool message
+	// may become orphaned and cause provider 400 errors.
+	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Message.Role), "tool") {
+		cutoff++
+	}
+
+	result := make([]conversation.ModelMessage, 0, len(messages)-cutoff)
+	for _, m := range messages[cutoff:] {
+		result = append(result, m.Message)
+	}
+	return result
 }
 
 type memoryContextItem struct {
@@ -792,28 +1146,10 @@ func (r *Resolver) persistUserMessage(ctx context.Context, req conversation.Chat
 	return err
 }
 
-func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage) error {
-	// Add user query as the first message if not already present in the round.
-	// This ensures the user's prompt is persisted alongside the assistant's response.
-	fullRound := make([]conversation.ModelMessage, 0, len(messages)+1)
-	hasUserQuery := false
-	for _, m := range messages {
-		if m.Role == "user" && m.TextContent() == req.Query {
-			hasUserQuery = true
-			break
-		}
-	}
-	needUserInRound := !req.UserMessagePersisted && !hasUserQuery &&
-		(strings.TrimSpace(req.Query) != "" || len(req.Attachments) > 0)
-	if needUserInRound {
-		fullRound = append(fullRound, conversation.ModelMessage{
-			Role:    "user",
-			Content: conversation.NewTextContent(req.Query),
-		})
-	}
+func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage) error {
+	fullRound := make([]conversation.ModelMessage, 0, len(messages))
 	for _, m := range messages {
 		if req.UserMessagePersisted && m.Role == "user" && strings.TrimSpace(m.TextContent()) == strings.TrimSpace(req.Query) {
-			// User message was already persisted before streaming; skip duplicate copy in round payload.
 			continue
 		}
 		fullRound = append(fullRound, m)
@@ -822,14 +1158,12 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 		return nil
 	}
 
-	r.storeMessages(ctx, req, fullRound)
-	// Run memory extraction in the background so that the SSE stream can
-	// finish immediately after messages are persisted.
+	r.storeMessages(ctx, req, fullRound, usage)
 	go r.storeMemory(context.WithoutCancel(ctx), req.BotID, fullRound)
 	return nil
 }
 
-func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage) {
+func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage) {
 	if r.messageService == nil {
 		return
 	}
@@ -838,7 +1172,23 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 	meta := buildRouteMetadata(req)
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
-	for _, msg := range messages {
+
+	// Determine the last assistant message index for outbound asset attachment.
+	lastAssistantIdx := -1
+	if req.OutboundAssetCollector != nil {
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role == "assistant" {
+				lastAssistantIdx = i
+				break
+			}
+		}
+	}
+	var outboundAssets []messagepkg.AssetRef
+	if lastAssistantIdx >= 0 {
+		outboundAssets = outboundAssetRefsToMessageRefs(req.OutboundAssetCollector())
+	}
+
+	for i, msg := range messages {
 		content, err := json.Marshal(msg)
 		if err != nil {
 			r.logger.Warn("storeMessages: marshal failed", slog.Any("error", err))
@@ -857,8 +1207,14 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 				assets = chatAttachmentsToAssetRefs(req.Attachments)
 			}
 		} else if strings.TrimSpace(req.ExternalMessageID) != "" {
-			// Assistant/tool/system outputs are linked to the inbound source message for cross-channel reply threading.
 			sourceReplyToMessageID = req.ExternalMessageID
+		}
+		if i == lastAssistantIdx && len(outboundAssets) > 0 {
+			assets = append(assets, outboundAssets...)
+		}
+		var msgUsage json.RawMessage
+		if i == len(messages)-1 && len(usage) > 0 {
+			msgUsage = usage
 		}
 		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:                   req.BotID,
@@ -871,6 +1227,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			Role:                    msg.Role,
 			Content:                 content,
 			Metadata:                meta,
+			Usage:                   msgUsage,
 			Assets:                  assets,
 		}); err != nil {
 			r.logger.Warn("persist message failed", slog.Any("error", err))
@@ -878,23 +1235,59 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 }
 
+// outboundAssetRefsToMessageRefs converts outbound asset refs from the streaming
+// collector into message-level asset refs for persistence.
+func outboundAssetRefsToMessageRefs(refs []conversation.OutboundAssetRef) []messagepkg.AssetRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	result := make([]messagepkg.AssetRef, 0, len(refs))
+	for _, ref := range refs {
+		contentHash := strings.TrimSpace(ref.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		role := ref.Role
+		if strings.TrimSpace(role) == "" {
+			role = "attachment"
+		}
+		result = append(result, messagepkg.AssetRef{
+			ContentHash: contentHash,
+			Role:        role,
+			Ordinal:     ref.Ordinal,
+			Mime:        ref.Mime,
+			SizeBytes:   ref.SizeBytes,
+			StorageKey:  ref.StorageKey,
+		})
+	}
+	return result
+}
+
 // chatAttachmentsToAssetRefs converts ChatAttachment slice to message AssetRef slice.
-// Only attachments that carry an asset_id are included; others have not been ingested yet.
+// Only attachments that carry a content_hash are included.
 func chatAttachmentsToAssetRefs(attachments []conversation.ChatAttachment) []messagepkg.AssetRef {
 	if len(attachments) == 0 {
 		return nil
 	}
 	refs := make([]messagepkg.AssetRef, 0, len(attachments))
 	for i, att := range attachments {
-		id := strings.TrimSpace(att.AssetID)
-		if id == "" {
+		contentHash := strings.TrimSpace(att.ContentHash)
+		if contentHash == "" {
 			continue
 		}
-		refs = append(refs, messagepkg.AssetRef{
-			AssetID: id,
-			Role:    "attachment",
-			Ordinal: i,
-		})
+		ref := messagepkg.AssetRef{
+			ContentHash: contentHash,
+			Role:        "attachment",
+			Ordinal:     i,
+			Mime:        strings.TrimSpace(att.Mime),
+			SizeBytes:   att.Size,
+		}
+		if att.Metadata != nil {
+			if sk, ok := att.Metadata["storage_key"].(string); ok {
+				ref.StorageKey = sk
+			}
+		}
+		refs = append(refs, ref)
 	}
 	return refs
 }
@@ -1149,8 +1542,7 @@ func (r *Resolver) loadBotSettings(ctx context.Context, botID string) (settings.
 func normalizeClientType(clientType string) (string, error) {
 	ct := strings.ToLower(strings.TrimSpace(clientType))
 	switch ct {
-	case "openai", "openai-compat", "anthropic", "google",
-		"azure", "bedrock", "mistral", "xai", "ollama", "dashscope":
+	case "openai-responses", "openai-completions", "anthropic-messages", "google-generative-ai":
 		return ct, nil
 	default:
 		return "", fmt.Errorf("unsupported agent gateway client type: %s", clientType)

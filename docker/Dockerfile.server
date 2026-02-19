@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.25-alpine AS builder
+
+# ---- Stage 1: Build server binary ----
+FROM golang:1.25-alpine AS server-builder
 
 WORKDIR /build
-
 RUN apk add --no-cache git make
 
 COPY go.mod go.sum ./
@@ -14,7 +15,6 @@ COPY . .
 ARG VERSION=dev
 ARG COMMIT_HASH=unknown
 ARG BUILD_TIME=unknown
-
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -39,11 +39,79 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
     -o memoh-server ./cmd/agent/main.go
 
+# ---- Stage 2: Build MCP binary ----
+FROM golang:1.25-alpine AS mcp-builder
+
+WORKDIR /src
+RUN apk add --no-cache ca-certificates git
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+ARG TARGETARCH=amd64
+ARG COMMIT_HASH=unknown
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -trimpath \
+    -ldflags "-s -w -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH}" \
+    -o /out/mcp ./cmd/mcp
+
+# ---- Stage 3: Assemble MCP image rootfs ----
+FROM alpine:latest AS mcp-rootfs
+
+RUN apk add --no-cache grep curl bash
+RUN apk add --no-cache nodejs npm
+RUN apk add --no-cache python3 && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ln -sf /root/.local/bin/uv /usr/local/bin/uv && \
+    ln -sf /root/.local/bin/uvx /usr/local/bin/uvx
+
+COPY --from=mcp-builder /out/mcp /opt/mcp
+COPY cmd/mcp/template /opt/mcp-template
+
+RUN printf '#!/bin/sh\n\
+[ -e /app/mcp ] || { mkdir -p /app; [ -f /opt/mcp ] && cp -a /opt/mcp /app/mcp 2>/dev/null || true; }\n\
+if [ -x /app/mcp ]; then exec /app/mcp "$@"; fi\n\
+exec /opt/mcp "$@"\n' > /opt/entrypoint.sh && chmod +x /opt/entrypoint.sh
+
+RUN tar -cf /tmp/rootfs.tar \
+    --exclude='./proc' --exclude='./sys' --exclude='./dev' \
+    --exclude='./tmp' --exclude='./run' \
+    -C / .
+
+# ---- Stage 4: Package rootfs as OCI image tar ----
+FROM alpine:latest AS oci-exporter
+
+COPY --from=mcp-rootfs /tmp/rootfs.tar /tmp/layer.tar
+ARG MCP_IMAGE_TAG=docker.io/library/memoh-mcp:latest
+
+RUN set -e \
+    && LAYER_SHA=$(sha256sum /tmp/layer.tar | awk '{print $1}') \
+    && LAYER_SIZE=$(wc -c < /tmp/layer.tar) \
+    && mkdir -p "/tmp/image/${LAYER_SHA}" /out \
+    && mv /tmp/layer.tar "/tmp/image/${LAYER_SHA}/layer.tar" \
+    && printf '{"architecture":"amd64","os":"linux","created":"1970-01-01T00:00:00Z","config":{"Entrypoint":["/opt/entrypoint.sh"],"WorkingDir":"/app","Env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]},"rootfs":{"type":"layers","diff_ids":["sha256:%s"]},"history":[{"created":"1970-01-01T00:00:00Z","comment":"memoh-mcp image"}]}' \
+       "${LAYER_SHA}" > /tmp/config.json \
+    && CONFIG_SHA=$(sha256sum /tmp/config.json | awk '{print $1}') \
+    && mv /tmp/config.json "/tmp/image/${CONFIG_SHA}.json" \
+    && printf '[{"Config":"%s.json","RepoTags":["%s"],"Layers":["%s/layer.tar"]}]' \
+       "${CONFIG_SHA}" "${MCP_IMAGE_TAG}" "${LAYER_SHA}" > /tmp/image/manifest.json \
+    && cd /tmp/image && tar -cf /out/memoh-mcp.tar manifest.json "${CONFIG_SHA}.json" "${LAYER_SHA}/"
+
+# ---- Stage 5: Final runtime (containerd + server + CNI) ----
 FROM alpine:latest
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata wget nerdctl cni-plugins iptables \
+# containerd runtime
+RUN apk add --no-cache containerd containerd-ctr
+
+# CNI plugins + iptables (for MCP container networking)
+RUN apk add --no-cache ca-certificates tzdata wget cni-plugins iptables \
     && mkdir -p /opt/cni/bin \
     && (cp -a /usr/lib/cni/. /opt/cni/bin/ 2>/dev/null || true) \
     && (cp -a /usr/libexec/cni/. /opt/cni/bin/ 2>/dev/null || true) \
@@ -58,7 +126,7 @@ RUN apk add --no-cache ca-certificates tzdata wget nerdctl cni-plugins iptables 
       '      "bridge": "cni0",' \
       '      "isGateway": true,' \
       '      "ipMasq": true,' \
-      '      "promiscMode": true,' \
+      '      "hairpinMode": true,' \
       '      "ipam": {' \
       '        "type": "host-local",' \
       '        "ranges": [[' \
@@ -76,16 +144,24 @@ RUN apk add --no-cache ca-certificates tzdata wget nerdctl cni-plugins iptables 
       '  ]' \
       '}' > /etc/cni/net.d/10-memoh.conflist
 
-COPY --from=builder /build/memoh-server /app/memoh-server
-COPY --from=builder /build/spec /app/spec
+# MCP image for containerd import
+COPY --from=oci-exporter /out/memoh-mcp.tar /opt/images/memoh-mcp.tar
 
-RUN mkdir -p /opt/memoh/data
+# Server binary and spec
+COPY --from=server-builder /build/memoh-server /app/memoh-server
+COPY --from=server-builder /build/spec /app/spec
+
+# Entrypoint: start containerd, then server
+COPY docker/server-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+RUN mkdir -p /opt/memoh/data /run/containerd /var/lib/containerd
+
+VOLUME ["/var/lib/containerd", "/opt/memoh/data"]
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health \
-      || wget --no-verbose --tries=1 --spider http://server:8080/health \
-      || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1
 
-CMD ["/app/memoh-server"]
+ENTRYPOINT ["/entrypoint.sh"]

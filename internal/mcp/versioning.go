@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/opencontainers/runtime-spec/specs-go"
 
@@ -18,22 +20,102 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 )
 
+const (
+	SnapshotSourceManual   = "manual"
+	SnapshotSourcePreExec  = "pre_exec"
+	SnapshotSourceRollback = "rollback"
+)
+
 type VersionInfo struct {
-	ID         string
-	Version    int
-	SnapshotID string
-	CreatedAt  time.Time
+	ID           string
+	Version      int
+	SnapshotName string
+	CreatedAt    time.Time
 }
 
-func (m *Manager) CreateVersion(ctx context.Context, userID string) (*VersionInfo, error) {
+type SnapshotCreateInfo struct {
+	ContainerID  string
+	SnapshotName string
+	Snapshotter  string
+	Version      int
+	CreatedAt    time.Time
+}
+
+func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, source string) (*SnapshotCreateInfo, error) {
 	if m.db == nil || m.queries == nil {
 		return nil, fmt.Errorf("db is not configured")
 	}
-	if err := validateBotID(userID); err != nil {
+	if err := validateBotID(botID); err != nil {
 		return nil, err
 	}
 
-	containerID := m.containerID(userID)
+	containerID := m.containerID(botID)
+	unlock := m.lockContainer(containerID)
+	defer unlock()
+
+	container, err := m.service.GetContainer(ctx, containerID)
+	if err != nil {
+		return nil, err
+	}
+	info, err := container.Info(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := m.ensureDBRecords(ctx, botID, info.ID, info.Runtime.Name, info.Image); err != nil {
+		return nil, err
+	}
+
+	normalizedSnapshotName := strings.TrimSpace(snapshotName)
+	if normalizedSnapshotName == "" {
+		normalizedSnapshotName = fmt.Sprintf("%s-%s", containerID, time.Now().Format("20060102150405"))
+	}
+	normalizedSource := normalizeSnapshotSource(source)
+
+	if err := m.service.CommitSnapshot(ctx, info.Snapshotter, normalizedSnapshotName, info.SnapshotKey); err != nil {
+		return nil, err
+	}
+
+	_, versionNumber, createdAt, err := m.recordSnapshotVersion(
+		ctx,
+		containerID,
+		normalizedSnapshotName,
+		info.SnapshotKey,
+		info.Snapshotter,
+		normalizedSource,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.insertEvent(ctx, containerID, "snapshot_create", map[string]any{
+		"snapshot_name": normalizedSnapshotName,
+		"snapshotter":   info.Snapshotter,
+		"source":        normalizedSource,
+		"version":       versionNumber,
+	}); err != nil {
+		return nil, err
+	}
+
+	return &SnapshotCreateInfo{
+		ContainerID:  containerID,
+		SnapshotName: normalizedSnapshotName,
+		Snapshotter:  info.Snapshotter,
+		Version:      versionNumber,
+		CreatedAt:    createdAt,
+	}, nil
+}
+
+func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo, error) {
+	if m.db == nil || m.queries == nil {
+		return nil, fmt.Errorf("db is not configured")
+	}
+	if err := validateBotID(botID); err != nil {
+		return nil, err
+	}
+
+	containerID := m.containerID(botID)
+	unlock := m.lockContainer(containerID)
+	defer unlock()
+
 	container, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
 		return nil, err
@@ -44,7 +126,7 @@ func (m *Manager) CreateVersion(ctx context.Context, userID string) (*VersionInf
 		return nil, err
 	}
 
-	if _, err := m.ensureDBRecords(ctx, userID, info.ID, info.Runtime.Name, info.Image); err != nil {
+	if _, err := m.ensureDBRecords(ctx, botID, info.ID, info.Runtime.Name, info.Image); err != nil {
 		return nil, err
 	}
 
@@ -52,13 +134,13 @@ func (m *Manager) CreateVersion(ctx context.Context, userID string) (*VersionInf
 		return nil, err
 	}
 
-	versionSnapshotID := fmt.Sprintf("%s-v%d", containerID, time.Now().UnixNano())
-	if err := m.service.CommitSnapshot(ctx, info.Snapshotter, versionSnapshotID, info.SnapshotKey); err != nil {
+	versionSnapshotName := fmt.Sprintf("%s-v%d", containerID, time.Now().UnixNano())
+	if err := m.service.CommitSnapshot(ctx, info.Snapshotter, versionSnapshotName, info.SnapshotKey); err != nil {
 		return nil, err
 	}
 
-	activeSnapshotID := fmt.Sprintf("%s-active-%d", containerID, time.Now().UnixNano())
-	if err := m.service.PrepareSnapshot(ctx, info.Snapshotter, activeSnapshotID, versionSnapshotID); err != nil {
+	activeSnapshotName := fmt.Sprintf("%s-active-%d", containerID, time.Now().UnixNano())
+	if err := m.service.PrepareSnapshot(ctx, info.Snapshotter, activeSnapshotName, versionSnapshotName); err != nil {
 		return nil, err
 	}
 
@@ -66,7 +148,7 @@ func (m *Manager) CreateVersion(ctx context.Context, userID string) (*VersionInf
 		return nil, err
 	}
 
-	dataDir, err := m.ensureBotDir(userID)
+	dataDir, err := m.ensureBotDir(botID)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +181,7 @@ func (m *Manager) CreateVersion(ctx context.Context, userID string) (*VersionInf
 	_, err = m.service.CreateContainerFromSnapshot(ctx, ctr.CreateContainerRequest{
 		ID:          containerID,
 		ImageRef:    info.Image,
-		SnapshotID:  activeSnapshotID,
+		SnapshotID:  activeSnapshotName,
 		Snapshotter: info.Snapshotter,
 		Labels:      info.Labels,
 		SpecOpts:    specOpts,
@@ -108,35 +190,43 @@ func (m *Manager) CreateVersion(ctx context.Context, userID string) (*VersionInf
 		return nil, err
 	}
 
-	versionID, versionNumber, createdAt, err := m.insertVersion(ctx, containerID, versionSnapshotID, info.Snapshotter)
+	versionID, versionNumber, createdAt, err := m.recordSnapshotVersion(
+		ctx,
+		containerID,
+		versionSnapshotName,
+		info.SnapshotKey,
+		info.Snapshotter,
+		SnapshotSourcePreExec,
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := m.insertEvent(ctx, containerID, "version_create", map[string]any{
-		"snapshot_id": versionSnapshotID,
-		"version":     versionNumber,
+		"snapshot_name": versionSnapshotName,
+		"version":       versionNumber,
+		"version_id":    versionID,
 	}); err != nil {
 		return nil, err
 	}
 
 	return &VersionInfo{
-		ID:         versionID,
-		Version:    versionNumber,
-		SnapshotID: versionSnapshotID,
-		CreatedAt:  createdAt,
+		ID:           versionID,
+		Version:      versionNumber,
+		SnapshotName: versionSnapshotName,
+		CreatedAt:    createdAt,
 	}, nil
 }
 
-func (m *Manager) ListVersions(ctx context.Context, userID string) ([]VersionInfo, error) {
+func (m *Manager) ListVersions(ctx context.Context, botID string) ([]VersionInfo, error) {
 	if m.db == nil || m.queries == nil {
 		return nil, fmt.Errorf("db is not configured")
 	}
-	if err := validateBotID(userID); err != nil {
+	if err := validateBotID(botID); err != nil {
 		return nil, err
 	}
 
-	containerID := m.containerID(userID)
+	containerID := m.containerID(botID)
 	versions, err := m.queries.ListVersionsByContainerID(ctx, containerID)
 	if err != nil {
 		return nil, err
@@ -149,25 +239,28 @@ func (m *Manager) ListVersions(ctx context.Context, userID string) ([]VersionInf
 			createdAt = row.CreatedAt.Time
 		}
 		out = append(out, VersionInfo{
-			ID:         row.ID,
-			Version:    int(row.Version),
-			SnapshotID: row.SnapshotID,
-			CreatedAt:  createdAt,
+			ID:           uuidString(row.ID),
+			Version:      int(row.Version),
+			SnapshotName: row.RuntimeSnapshotName,
+			CreatedAt:    createdAt,
 		})
 	}
 	return out, nil
 }
 
-func (m *Manager) RollbackVersion(ctx context.Context, userID string, version int) error {
+func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int) error {
 	if m.db == nil || m.queries == nil {
 		return fmt.Errorf("db is not configured")
 	}
-	if err := validateBotID(userID); err != nil {
+	if err := validateBotID(botID); err != nil {
 		return err
 	}
 
-	containerID := m.containerID(userID)
-	snapshotID, err := m.queries.GetVersionSnapshotID(ctx, dbsqlc.GetVersionSnapshotIDParams{
+	containerID := m.containerID(botID)
+	unlock := m.lockContainer(containerID)
+	defer unlock()
+
+	snapshotName, err := m.queries.GetVersionSnapshotRuntimeName(ctx, dbsqlc.GetVersionSnapshotRuntimeNameParams{
 		ContainerID: containerID,
 		Version:     int32(version),
 	})
@@ -188,8 +281,8 @@ func (m *Manager) RollbackVersion(ctx context.Context, userID string, version in
 		return err
 	}
 
-	activeSnapshotID := fmt.Sprintf("%s-rollback-%d", containerID, time.Now().UnixNano())
-	if err := m.service.PrepareSnapshot(ctx, info.Snapshotter, activeSnapshotID, snapshotID); err != nil {
+	activeSnapshotName := fmt.Sprintf("%s-rollback-%d", containerID, time.Now().UnixNano())
+	if err := m.service.PrepareSnapshot(ctx, info.Snapshotter, activeSnapshotName, snapshotName); err != nil {
 		return err
 	}
 
@@ -197,7 +290,7 @@ func (m *Manager) RollbackVersion(ctx context.Context, userID string, version in
 		return err
 	}
 
-	dataDir, err := m.ensureBotDir(userID)
+	dataDir, err := m.ensureBotDir(botID)
 	if err != nil {
 		return err
 	}
@@ -229,7 +322,7 @@ func (m *Manager) RollbackVersion(ctx context.Context, userID string, version in
 	_, err = m.service.CreateContainerFromSnapshot(ctx, ctr.CreateContainerRequest{
 		ID:          containerID,
 		ImageRef:    info.Image,
-		SnapshotID:  activeSnapshotID,
+		SnapshotID:  activeSnapshotName,
 		Snapshotter: info.Snapshotter,
 		Labels:      info.Labels,
 		SpecOpts:    specOpts,
@@ -239,21 +332,22 @@ func (m *Manager) RollbackVersion(ctx context.Context, userID string, version in
 	}
 
 	return m.insertEvent(ctx, containerID, "version_rollback", map[string]any{
-		"snapshot_id": snapshotID,
-		"version":     version,
+		"snapshot_name": snapshotName,
+		"version":       version,
+		"source":        SnapshotSourceRollback,
 	})
 }
 
-func (m *Manager) VersionSnapshotID(ctx context.Context, userID string, version int) (string, error) {
+func (m *Manager) VersionSnapshotName(ctx context.Context, botID string, version int) (string, error) {
 	if m.db == nil || m.queries == nil {
 		return "", fmt.Errorf("db is not configured")
 	}
-	if err := validateBotID(userID); err != nil {
+	if err := validateBotID(botID); err != nil {
 		return "", err
 	}
 
-	containerID := m.containerID(userID)
-	return m.queries.GetVersionSnapshotID(ctx, dbsqlc.GetVersionSnapshotIDParams{
+	containerID := m.containerID(botID)
+	return m.queries.GetVersionSnapshotRuntimeName(ctx, dbsqlc.GetVersionSnapshotRuntimeNameParams{
 		ContainerID: containerID,
 		Version:     int32(version),
 	})
@@ -310,7 +404,14 @@ func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, runti
 	return botUUID, nil
 }
 
-func (m *Manager) insertVersion(ctx context.Context, containerID, snapshotID, snapshotter string) (string, int, time.Time, error) {
+func (m *Manager) recordSnapshotVersion(ctx context.Context, containerID, runtimeSnapshotName, parentRuntimeSnapshotName, snapshotter, source string) (string, int, time.Time, error) {
+	containerID = strings.TrimSpace(containerID)
+	runtimeSnapshotName = strings.TrimSpace(runtimeSnapshotName)
+	snapshotter = strings.TrimSpace(snapshotter)
+	if containerID == "" || runtimeSnapshotName == "" || snapshotter == "" {
+		return "", 0, time.Time{}, ctr.ErrInvalidArgument
+	}
+
 	tx, err := m.db.Begin(ctx)
 	if err != nil {
 		return "", 0, time.Time{}, err
@@ -319,26 +420,30 @@ func (m *Manager) insertVersion(ctx context.Context, containerID, snapshotID, sn
 
 	qtx := m.queries.WithTx(tx)
 
+	parent := pgtype.Text{}
+	normalizedParent := strings.TrimSpace(parentRuntimeSnapshotName)
+	if normalizedParent != "" {
+		parent = pgtype.Text{String: normalizedParent, Valid: true}
+	}
+	snapshotRow, err := qtx.UpsertSnapshot(ctx, dbsqlc.UpsertSnapshotParams{
+		ContainerID:               containerID,
+		RuntimeSnapshotName:       runtimeSnapshotName,
+		ParentRuntimeSnapshotName: parent,
+		Snapshotter:               snapshotter,
+		Source:                    normalizeSnapshotSource(source),
+	})
+	if err != nil {
+		return "", 0, time.Time{}, err
+	}
+
 	version, err := qtx.NextVersion(ctx, containerID)
 	if err != nil {
 		return "", 0, time.Time{}, err
 	}
 
-	if err := qtx.InsertSnapshot(ctx, dbsqlc.InsertSnapshotParams{
-		ID:               snapshotID,
-		ContainerID:      containerID,
-		ParentSnapshotID: pgtype.Text{},
-		Snapshotter:      snapshotter,
-		Digest:           pgtype.Text{},
-	}); err != nil {
-		return "", 0, time.Time{}, err
-	}
-
-	id := fmt.Sprintf("%s-%d", containerID, version)
 	versionRow, err := qtx.InsertVersion(ctx, dbsqlc.InsertVersionParams{
-		ID:          id,
 		ContainerID: containerID,
-		SnapshotID:  snapshotID,
+		SnapshotID:  snapshotRow.ID,
 		Version:     version,
 	})
 	if err != nil {
@@ -354,7 +459,7 @@ func (m *Manager) insertVersion(ctx context.Context, containerID, snapshotID, sn
 		createdAt = versionRow.CreatedAt.Time
 	}
 
-	return id, int(version), createdAt, nil
+	return uuidString(versionRow.ID), int(version), createdAt, nil
 }
 
 func (m *Manager) insertEvent(ctx context.Context, containerID, eventType string, payload map[string]any) error {
@@ -370,3 +475,17 @@ func (m *Manager) insertEvent(ctx context.Context, containerID, eventType string
 	})
 }
 
+func normalizeSnapshotSource(source string) string {
+	s := strings.TrimSpace(source)
+	if s == "" {
+		return SnapshotSourceManual
+	}
+	return s
+}
+
+func uuidString(v pgtype.UUID) string {
+	if !v.Valid {
+		return ""
+	}
+	return uuid.UUID(v.Bytes).String()
+}

@@ -50,7 +50,18 @@ func (h *LocalChannelHandler) Register(e *echo.Echo) {
 	group.POST("/messages", h.PostMessage)
 }
 
-// StreamMessages streams responses for the bot route.
+// StreamMessages godoc
+// @Summary Subscribe to local channel events via SSE
+// @Description Open a persistent SSE connection to receive real-time stream events for the given bot.
+// @Tags local-channel
+// @Produce text/event-stream
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {string} string "SSE stream"
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/web/stream [get]
+// @Router /bots/{bot_id}/cli/stream [get]
 func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -92,11 +103,7 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 			if !ok {
 				return nil
 			}
-			payload := map[string]any{
-				"target": msg.Target,
-				"event":  msg.Event,
-			}
-			data, err := json.Marshal(payload)
+			data, err := formatLocalStreamEvent(msg.Event)
 			if err != nil {
 				continue
 			}
@@ -109,11 +116,29 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	}
 }
 
-type localMessageRequest struct {
+func formatLocalStreamEvent(event channel.StreamEvent) ([]byte, error) {
+	return json.Marshal(event)
+}
+
+// LocalChannelMessageRequest is the request body for posting a local channel message.
+type LocalChannelMessageRequest struct {
 	Message channel.Message `json:"message"`
 }
 
-// PostMessage sends a message through the local channel.
+// PostMessage godoc
+// @Summary Send a message to a local channel
+// @Description Post a user message (with optional attachments) through the local channel pipeline.
+// @Tags local-channel
+// @Accept json
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Param payload body LocalChannelMessageRequest true "Message payload"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/web/messages [post]
+// @Router /bots/{bot_id}/cli/messages [post]
 func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -132,7 +157,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	if h.channelManager == nil || h.channelStore == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel manager not configured")
 	}
-	var req localMessageRequest
+	var req LocalChannelMessageRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}

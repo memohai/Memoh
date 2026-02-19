@@ -9,7 +9,8 @@ INSERT INTO bot_history_messages (
   source_reply_to_message_id,
   role,
   content,
-  metadata
+  metadata,
+  usage
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -21,7 +22,8 @@ VALUES (
   sqlc.narg(source_reply_to_message_id)::text,
   sqlc.arg(role),
   sqlc.arg(content),
-  sqlc.arg(metadata)
+  sqlc.arg(metadata),
+  sqlc.arg(usage)
 )
 RETURNING
   id,
@@ -35,6 +37,7 @@ RETURNING
   role,
   content,
   metadata,
+  usage,
   created_at;
 
 -- name: ListMessages :many
@@ -50,6 +53,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url
@@ -72,6 +76,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url
@@ -94,6 +99,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url
@@ -117,6 +123,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url

@@ -110,6 +110,7 @@ func TestModel_Validate(t *testing.T) {
 				ModelID:       "gpt-4",
 				Name:          "GPT-4",
 				LlmProviderID: "11111111-1111-1111-1111-111111111111",
+				ClientType:    models.ClientTypeOpenAIResponses,
 				Type:          models.ModelTypeChat,
 			},
 			wantErr: false,
@@ -120,8 +121,30 @@ func TestModel_Validate(t *testing.T) {
 				ModelID:         "gpt-4o",
 				Name:            "GPT-4o",
 				LlmProviderID:   "11111111-1111-1111-1111-111111111111",
+				ClientType:      models.ClientTypeOpenAIResponses,
 				InputModalities: []string{"text", "image", "audio"},
 				Type:            models.ModelTypeChat,
+			},
+			wantErr: false,
+		},
+		{
+			name: "chat model missing client_type",
+			model: models.Model{
+				ModelID:       "gpt-4",
+				Name:          "GPT-4",
+				LlmProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:          models.ModelTypeChat,
+			},
+			wantErr: true,
+		},
+		{
+			name: "embedding model without client_type is valid",
+			model: models.Model{
+				ModelID:       "text-embedding-3-small",
+				Name:          "Embedding",
+				LlmProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:          models.ModelTypeEmbedding,
+				Dimensions:    1536,
 			},
 			wantErr: false,
 		},
@@ -185,6 +208,7 @@ func TestModel_Validate(t *testing.T) {
 			model: models.Model{
 				ModelID:         "gpt-4",
 				LlmProviderID:   "11111111-1111-1111-1111-111111111111",
+				ClientType:      models.ClientTypeOpenAIResponses,
 				Type:            models.ModelTypeChat,
 				InputModalities: []string{"text", "smell"},
 			},
@@ -262,15 +286,9 @@ func TestModelTypes(t *testing.T) {
 	})
 
 	t.Run("ClientType constants", func(t *testing.T) {
-		assert.Equal(t, models.ClientType("openai"), models.ClientTypeOpenAI)
-		assert.Equal(t, models.ClientType("openai-compat"), models.ClientTypeOpenAICompat)
-		assert.Equal(t, models.ClientType("anthropic"), models.ClientTypeAnthropic)
-		assert.Equal(t, models.ClientType("google"), models.ClientTypeGoogle)
-		assert.Equal(t, models.ClientType("azure"), models.ClientTypeAzure)
-		assert.Equal(t, models.ClientType("bedrock"), models.ClientTypeBedrock)
-		assert.Equal(t, models.ClientType("mistral"), models.ClientTypeMistral)
-		assert.Equal(t, models.ClientType("xai"), models.ClientTypeXAI)
-		assert.Equal(t, models.ClientType("ollama"), models.ClientTypeOllama)
-		assert.Equal(t, models.ClientType("dashscope"), models.ClientTypeDashscope)
+		assert.Equal(t, models.ClientType("openai-responses"), models.ClientTypeOpenAIResponses)
+		assert.Equal(t, models.ClientType("openai-completions"), models.ClientTypeOpenAICompletions)
+		assert.Equal(t, models.ClientType("anthropic-messages"), models.ClientTypeAnthropicMessages)
+		assert.Equal(t, models.ClientType("google-generative-ai"), models.ClientTypeGoogleGenerativeAI)
 	})
 }

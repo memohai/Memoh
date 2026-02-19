@@ -1,6 +1,6 @@
 import { client } from '@memoh/sdk/client'
-import { getBots } from '@memoh/sdk'
-import type { BotsBot } from '@memoh/sdk'
+import { getBots, postBotsByBotIdWebMessages } from '@memoh/sdk'
+import type { BotsBot, ChannelAttachment, ChannelMessage } from '@memoh/sdk'
 
 // ---- Types ----
 
@@ -19,17 +19,12 @@ export interface ChatSummary {
 }
 
 export interface MessageAsset {
-  asset_id: string
+  content_hash: string
   role: string
   ordinal: number
-  media_type: string
   mime: string
   size_bytes: number
   storage_key: string
-  original_name?: string
-  width?: number
-  height?: number
-  duration_ms?: number
 }
 
 export interface Message {
@@ -150,9 +145,117 @@ function parseStreamPayload(payload: string): StreamEvent | null {
     return { type: 'text_delta', delta: current.trim() } as StreamEvent
   }
   if (current && typeof current === 'object') {
-    return current as StreamEvent
+    return normalizeStreamEvent(current as Record<string, unknown>)
   }
   return null
+}
+
+const LEGACY_STREAM_EVENT_TYPES = new Set<string>([
+  'text_start',
+  'text_delta',
+  'text_end',
+  'reasoning_start',
+  'reasoning_delta',
+  'reasoning_end',
+  'attachment_delta',
+  'agent_start',
+  'agent_end',
+  'processing_started',
+  'processing_completed',
+  'processing_failed',
+  'error',
+])
+
+function normalizeStreamEvent(raw: Record<string, unknown>): StreamEvent | null {
+  const eventType = String(raw.type ?? '').trim().toLowerCase()
+  if (!eventType) return null
+
+  // Preserve metadata across all normalization paths so cross-channel
+  // source_channel / role tags survive to the store handler.
+  const metadata = (raw.metadata && typeof raw.metadata === 'object')
+    ? raw.metadata as Record<string, unknown>
+    : undefined
+
+  function withMeta(event: StreamEvent): StreamEvent {
+    if (metadata) (event as Record<string, unknown>).metadata = metadata
+    return event
+  }
+
+  if (LEGACY_STREAM_EVENT_TYPES.has(eventType)) {
+    return raw as StreamEvent
+  }
+  switch (eventType) {
+    case 'status': {
+      const status = String(raw.status ?? '').trim().toLowerCase()
+      if (status === 'started') return withMeta({ type: 'processing_started' })
+      if (status === 'completed') return withMeta({ type: 'processing_completed' })
+      if (status === 'failed') {
+        const err = String(raw.error ?? '').trim()
+        return withMeta({ type: 'processing_failed', error: err, message: err })
+      }
+      return null
+    }
+    case 'delta': {
+      const delta = String(raw.delta ?? '')
+      const phase = String(raw.phase ?? '').trim().toLowerCase()
+      if (phase === 'reasoning') {
+        return withMeta({ type: 'reasoning_delta', delta })
+      }
+      return withMeta({ type: 'text_delta', delta })
+    }
+    case 'phase_start': {
+      const phase = String(raw.phase ?? '').trim().toLowerCase()
+      if (phase === 'reasoning') return withMeta({ type: 'reasoning_start' })
+      if (phase === 'text') return withMeta({ type: 'text_start' })
+      return null
+    }
+    case 'phase_end': {
+      const phase = String(raw.phase ?? '').trim().toLowerCase()
+      if (phase === 'reasoning') return withMeta({ type: 'reasoning_end' })
+      if (phase === 'text') return withMeta({ type: 'text_end' })
+      return null
+    }
+    case 'tool_call_start':
+    case 'tool_call_end': {
+      const toolCall = (raw.tool_call && typeof raw.tool_call === 'object')
+        ? raw.tool_call as Record<string, unknown>
+        : {}
+      return withMeta({
+        type: eventType as StreamEvent['type'],
+        toolCallId: String(toolCall.call_id ?? ''),
+        toolName: String(toolCall.name ?? ''),
+        input: toolCall.input,
+        result: toolCall.result,
+      })
+    }
+    case 'attachment': {
+      const attachments = Array.isArray(raw.attachments)
+        ? raw.attachments as Array<Record<string, unknown>>
+        : []
+      if (!attachments.length) return null
+      return withMeta({ type: 'attachment_delta', attachments })
+    }
+    case 'final': {
+      // Cross-channel final messages (user inbound or assistant reply).
+      // Pass through the full raw event so the store can extract final.message.
+      return raw as StreamEvent
+    }
+    case 'processing_started':
+    case 'processing_completed':
+    case 'agent_start':
+    case 'agent_end':
+      return withMeta({ type: eventType as StreamEvent['type'] })
+    case 'processing_failed': {
+      const err = String(raw.error ?? raw.message ?? '').trim()
+      return withMeta({ type: 'processing_failed', error: err, message: err })
+    }
+    case 'error': {
+      const err = String(raw.error ?? raw.message ?? 'Stream error').trim()
+      return withMeta({ type: 'error', error: err, message: err })
+    }
+    default:
+      return null
+  }
 }
 
 // ---- Bot API ----
@@ -213,10 +316,6 @@ export async function fetchMessages(
 
 // ---- Stream API ----
 
-/**
- * Stream a chat message via SSE. Sends parsed StreamEvents to onEvent callback.
- * Returns an abort function.
- */
 export interface ChatAttachment {
   type: string
   base64: string
@@ -224,51 +323,53 @@ export interface ChatAttachment {
   name?: string
 }
 
-export function streamMessage(
+export async function sendLocalChannelMessage(
   botId: string,
-  _chatId: string,
   text: string,
-  onEvent: StreamEventHandler,
-  onDone: () => void,
-  onError: (err: Error) => void,
   attachments?: ChatAttachment[],
-): () => void {
-  const controller = new AbortController()
+): Promise<void> {
+  const msg: ChannelMessage = {}
+  const trimmedText = text.trim()
+  if (trimmedText) {
+    msg.text = trimmedText
+  }
+  if (attachments?.length) {
+    msg.attachments = attachments.map((item): ChannelAttachment => ({
+      type: item.type as ChannelAttachment['type'],
+      base64: item.base64,
+      mime: item.mime ?? '',
+      name: item.name ?? '',
+    }))
+  }
+  await postBotsByBotIdWebMessages({
+    path: { bot_id: botId },
+    body: { message: msg },
+    throwOnError: true,
+  })
+}
 
-  ;(async () => {
-    try {
-      const reqBody: Record<string, unknown> = { query: text, current_channel: 'web', channels: ['web'] }
-      if (attachments?.length) {
-        reqBody.attachments = attachments
-      }
-      const { data: body } = await client.post({
-        url: '/bots/{bot_id}/messages/stream',
-        path: { bot_id: botId },
-        body: reqBody,
-        parseAs: 'stream',
-        signal: controller.signal,
-        throwOnError: true,
-      }) as { data: ReadableStream<Uint8Array> }
+export async function streamLocalChannel(
+  botId: string,
+  signal: AbortSignal,
+  onEvent: StreamEventHandler,
+): Promise<void> {
+  const id = botId.trim()
+  if (!id) throw new Error('bot id is required')
 
-      if (!body) {
-        onError(new Error('No response body'))
-        return
-      }
+  const { data: body } = await client.get({
+    url: '/bots/{bot_id}/web/stream',
+    path: { bot_id: id },
+    parseAs: 'stream',
+    signal,
+    throwOnError: true,
+  }) as { data: ReadableStream<Uint8Array> }
 
-      await readSSEStream(body, (payload) => {
-        const event = parseStreamPayload(payload)
-        if (event) onEvent(event)
-      })
+  if (!body) throw new Error('No response body')
 
-      onDone()
-    } catch (err) {
-      if ((err as Error).name !== 'AbortError') {
-        onError(err instanceof Error ? err : new Error(String(err)))
-      }
-    }
-  })()
-
-  return () => controller.abort()
+  await readSSEStream(body, (payload) => {
+    const event = parseStreamPayload(payload)
+    if (event) onEvent(event)
+  })
 }
 
 /**

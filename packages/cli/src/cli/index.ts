@@ -81,14 +81,13 @@ const ensureModelsReady = async () => {
 }
 
 const renderProvidersTable = (providers: ProvidersGetResponse[], models: ModelsGetResponse[]) => {
-  const rows: string[][] = [['Provider', 'Type', 'Base URL', 'Models']]
+  const rows: string[][] = [['Provider', 'Base URL', 'Models']]
   for (const provider of providers) {
     const providerModels = models
       .filter(m => getProviderId(m) === provider.id)
       .map(m => `${getModelId(m)} (${getModelType(m)})`)
     rows.push([
       provider.name ?? '',
-      provider.client_type ?? '',
       provider.base_url ?? '',
       providerModels.join(', ') || '-',
     ])
@@ -259,21 +258,12 @@ provider
   .command('create')
   .description('Create provider')
   .option('--name <name>')
-  .option('--type <type>')
   .option('--base_url <url>')
   .option('--api_key <key>')
   .action(async (opts) => {
     ensureAuth()
     const questions = []
     if (!opts.name) questions.push({ type: 'input', name: 'name', message: 'Provider name:' })
-    if (!opts.type) {
-      questions.push({
-        type: 'list',
-        name: 'client_type',
-        message: 'Client type:',
-        choices: ['openai', 'openai-compat', 'anthropic', 'google', 'azure', 'bedrock', 'mistral', 'xai', 'ollama', 'dashscope'],
-      })
-    }
     if (!opts.base_url) questions.push({ type: 'input', name: 'base_url', message: 'Base URL:' })
     if (!opts.api_key) questions.push({ type: 'password', name: 'api_key', message: 'API key:' })
     const answers = questions.length ? await inquirer.prompt(questions) : {}
@@ -282,7 +272,6 @@ provider
       await postProviders({
         body: {
           name: opts.name ?? answers.name,
-          client_type: opts.type ?? answers.client_type,
           base_url: opts.base_url ?? answers.base_url,
           api_key: opts.api_key ?? answers.api_key,
         },
@@ -349,6 +338,7 @@ model
   .option('--model_id <model_id>')
   .option('--name <name>')
   .option('--provider <provider>')
+  .option('--client_type <client_type>', 'Client type: openai-responses, openai-completions, anthropic-messages, google-generative-ai')
   .option('--type <type>')
   .option('--dimensions <dimensions>')
   .option('--multimodal', 'Is multimodal')
@@ -376,6 +366,16 @@ model
     const answers = questions.length ? await inquirer.prompt(questions) : {}
     const modelId = opts.model_id ?? answers.model_id
     const modelType = opts.type ?? answers.type
+    let clientType = opts.client_type
+    if (modelType === 'chat' && !clientType) {
+      const ctAnswer = await inquirer.prompt([{
+        type: 'list',
+        name: 'client_type',
+        message: 'Client type:',
+        choices: ['openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai'],
+      }])
+      clientType = ctAnswer.client_type
+    }
     let dimensions = opts.dimensions ? Number.parseInt(opts.dimensions, 10) : undefined
     if (modelType === 'embedding' && (!dimensions || Number.isNaN(dimensions))) {
       const dimAnswer = await inquirer.prompt([{
@@ -392,17 +392,18 @@ model
     const inputModalities = opts.multimodal ? ['text', 'image'] : ['text']
     const spinner = ora('Creating model...').start()
     try {
-      await postModels({
-        body: {
-          model_id: modelId,
-          name: opts.name ?? modelId,
-          llm_provider_id: provider.id,
-          input_modalities: inputModalities,
-          type: modelType,
-          dimensions,
-        },
-        throwOnError: true,
-      })
+      const body: Record<string, unknown> = {
+        model_id: modelId,
+        name: opts.name ?? modelId,
+        llm_provider_id: provider.id,
+        input_modalities: inputModalities,
+        type: modelType,
+        dimensions,
+      }
+      if (modelType === 'chat' && clientType) {
+        body.client_type = clientType
+      }
+      await postModels({ body: body as any, throwOnError: true })
       spinner.succeed('Model created')
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Failed to create model')

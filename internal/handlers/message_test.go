@@ -1,57 +1,87 @@
 package handlers
 
 import (
-	"encoding/base64"
-	"io"
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestDecodeAttachmentBase64(t *testing.T) {
+type testFlusher struct{}
+
+func (f *testFlusher) Flush() {}
+
+func TestParseSinceParam(t *testing.T) {
 	t.Parallel()
 
-	data := []byte("hello")
-	encoded := base64.StdEncoding.EncodeToString(data)
-	decoded, err := decodeAttachmentBase64(encoded, 16)
+	now := time.Now().UTC().Truncate(time.Second)
+	parsed, ok, err := parseSinceParam(now.Format(time.RFC3339))
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("parse RFC3339 failed: %v", err)
 	}
-	got, err := io.ReadAll(decoded)
+	if !ok {
+		t.Fatalf("expected parseSinceParam ok=true")
+	}
+	if !parsed.Equal(now) {
+		t.Fatalf("expected parsed time %s, got %s", now, parsed)
+	}
+
+	parsedEpoch, ok, err := parseSinceParam("1735689600000")
 	if err != nil {
-		t.Fatalf("read decoded failed: %v", err)
+		t.Fatalf("parse epoch millis failed: %v", err)
 	}
-	if string(got) != "hello" {
-		t.Fatalf("unexpected decoded value: %q", string(got))
+	if !ok {
+		t.Fatalf("expected epoch parse ok=true")
+	}
+	if parsedEpoch.UnixMilli() != 1735689600000 {
+		t.Fatalf("expected parsed epoch millis 1735689600000, got %d", parsedEpoch.UnixMilli())
+	}
+
+	if _, _, err := parseSinceParam("invalid-time"); err == nil {
+		t.Fatalf("expected invalid since parameter error")
 	}
 }
 
-func TestDecodeAttachmentBase64DataURL(t *testing.T) {
+func TestParseBeforeParam(t *testing.T) {
 	t.Parallel()
 
-	encoded := "data:text/plain;base64," + base64.StdEncoding.EncodeToString([]byte("payload"))
-	decoded, err := decodeAttachmentBase64(encoded, 32)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if _, ok := parseBeforeParam(""); ok {
+		t.Fatalf("expected empty before value to be ignored")
 	}
-	got, err := io.ReadAll(decoded)
-	if err != nil {
-		t.Fatalf("read decoded failed: %v", err)
+	parsed, ok := parseBeforeParam("1735689600000")
+	if !ok {
+		t.Fatalf("expected epoch millis before value to parse")
 	}
-	if string(got) != "payload" {
-		t.Fatalf("unexpected decoded value: %q", string(got))
+	if parsed.UnixMilli() != 1735689600000 {
+		t.Fatalf("expected parsed epoch millis 1735689600000, got %d", parsed.UnixMilli())
 	}
 }
 
-func TestNormalizeBase64DataURL(t *testing.T) {
+func TestWriteSSEJSON(t *testing.T) {
 	t.Parallel()
 
-	raw := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("a", 4)))
-	got := normalizeBase64DataURL(raw, "image/png")
-	if !strings.HasPrefix(got, "data:image/png;base64,") {
-		t.Fatalf("expected data url prefix, got %q", got)
+	var output bytes.Buffer
+	writer := bufio.NewWriter(&output)
+	flusher := &testFlusher{}
+
+	if err := writeSSEJSON(writer, flusher, map[string]any{"type": "ping"}); err != nil {
+		t.Fatalf("writeSSEJSON failed: %v", err)
 	}
-	existing := "data:text/plain;base64,AAA="
-	if normalizeBase64DataURL(existing, "image/png") != existing {
-		t.Fatalf("expected existing data url unchanged")
+	raw := output.String()
+	if !strings.HasPrefix(raw, "data: ") {
+		t.Fatalf("expected SSE data prefix, got %q", raw)
+	}
+	if !strings.HasSuffix(raw, "\n\n") {
+		t.Fatalf("expected SSE payload suffix, got %q", raw)
+	}
+	payloadText := strings.TrimSuffix(strings.TrimPrefix(raw, "data: "), "\n\n")
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(payloadText), &payload); err != nil {
+		t.Fatalf("decode SSE payload failed: %v", err)
+	}
+	if payload["type"] != "ping" {
+		t.Fatalf("expected payload type ping, got %#v", payload["type"])
 	}
 }

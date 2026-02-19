@@ -14,6 +14,7 @@ import (
 const deleteSettingsByBotID = `-- name: DeleteSettingsByBotID :exec
 UPDATE bots
 SET max_context_load_time = 1440,
+    max_context_tokens = 0,
     language = 'auto',
     allow_guest = false,
     chat_model_id = NULL,
@@ -33,6 +34,7 @@ const getSettingsByBotID = `-- name: GetSettingsByBotID :one
 SELECT
   bots.id AS bot_id,
   bots.max_context_load_time,
+  bots.max_context_tokens,
   bots.language,
   bots.allow_guest,
   chat_models.model_id AS chat_model_id,
@@ -50,6 +52,7 @@ WHERE bots.id = $1
 type GetSettingsByBotIDRow struct {
 	BotID              pgtype.UUID `json:"bot_id"`
 	MaxContextLoadTime int32       `json:"max_context_load_time"`
+	MaxContextTokens   int32       `json:"max_context_tokens"`
 	Language           string      `json:"language"`
 	AllowGuest         bool        `json:"allow_guest"`
 	ChatModelID        pgtype.Text `json:"chat_model_id"`
@@ -64,6 +67,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 	err := row.Scan(
 		&i.BotID,
 		&i.MaxContextLoadTime,
+		&i.MaxContextTokens,
 		&i.Language,
 		&i.AllowGuest,
 		&i.ChatModelID,
@@ -78,19 +82,21 @@ const upsertBotSettings = `-- name: UpsertBotSettings :one
 WITH updated AS (
   UPDATE bots
   SET max_context_load_time = $1,
-      language = $2,
-      allow_guest = $3,
-      chat_model_id = COALESCE($4::uuid, bots.chat_model_id),
-      memory_model_id = COALESCE($5::uuid, bots.memory_model_id),
-      embedding_model_id = COALESCE($6::uuid, bots.embedding_model_id),
-      search_provider_id = COALESCE($7::uuid, bots.search_provider_id),
+      max_context_tokens = $2,
+      language = $3,
+      allow_guest = $4,
+      chat_model_id = COALESCE($5::uuid, bots.chat_model_id),
+      memory_model_id = COALESCE($6::uuid, bots.memory_model_id),
+      embedding_model_id = COALESCE($7::uuid, bots.embedding_model_id),
+      search_provider_id = COALESCE($8::uuid, bots.search_provider_id),
       updated_at = now()
-  WHERE bots.id = $8
-  RETURNING bots.id, bots.max_context_load_time, bots.language, bots.allow_guest, bots.chat_model_id, bots.memory_model_id, bots.embedding_model_id, bots.search_provider_id
+  WHERE bots.id = $9
+  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.language, bots.allow_guest, bots.chat_model_id, bots.memory_model_id, bots.embedding_model_id, bots.search_provider_id
 )
 SELECT
   updated.id AS bot_id,
   updated.max_context_load_time,
+  updated.max_context_tokens,
   updated.language,
   updated.allow_guest,
   chat_models.model_id AS chat_model_id,
@@ -106,6 +112,7 @@ LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id
 
 type UpsertBotSettingsParams struct {
 	MaxContextLoadTime int32       `json:"max_context_load_time"`
+	MaxContextTokens   int32       `json:"max_context_tokens"`
 	Language           string      `json:"language"`
 	AllowGuest         bool        `json:"allow_guest"`
 	ChatModelID        pgtype.UUID `json:"chat_model_id"`
@@ -118,6 +125,7 @@ type UpsertBotSettingsParams struct {
 type UpsertBotSettingsRow struct {
 	BotID              pgtype.UUID `json:"bot_id"`
 	MaxContextLoadTime int32       `json:"max_context_load_time"`
+	MaxContextTokens   int32       `json:"max_context_tokens"`
 	Language           string      `json:"language"`
 	AllowGuest         bool        `json:"allow_guest"`
 	ChatModelID        pgtype.Text `json:"chat_model_id"`
@@ -129,6 +137,7 @@ type UpsertBotSettingsRow struct {
 func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsParams) (UpsertBotSettingsRow, error) {
 	row := q.db.QueryRow(ctx, upsertBotSettings,
 		arg.MaxContextLoadTime,
+		arg.MaxContextTokens,
 		arg.Language,
 		arg.AllowGuest,
 		arg.ChatModelID,
@@ -141,6 +150,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 	err := row.Scan(
 		&i.BotID,
 		&i.MaxContextLoadTime,
+		&i.MaxContextTokens,
 		&i.Language,
 		&i.AllowGuest,
 		&i.ChatModelID,

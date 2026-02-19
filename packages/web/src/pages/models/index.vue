@@ -14,12 +14,6 @@ import {
   InputGroup, InputGroupAddon, InputGroupInput,
   SidebarFooter,
   Toggle,
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -28,31 +22,20 @@ import {
   EmptyTitle,
 } from '@memoh/ui'
 import { getProviders } from '@memoh/sdk'
-import type { ProvidersGetResponse, ProvidersClientType } from '@memoh/sdk'
+import type { ProvidersGetResponse } from '@memoh/sdk'
 import AddProvider from '@/components/add-provider/index.vue'
 import { useQuery } from '@pinia/colada'
 
-const CLIENT_TYPES: ProvidersClientType[] = [
-  'openai', 'openai-compat', 'anthropic', 'google',
-  'azure', 'bedrock', 'mistral', 'xai', 'ollama', 'dashscope',
-]
-
-const filterProvider = ref('')
 const { data: providerData } = useQuery({
-  key: () => ['providers', filterProvider.value],
+  key: () => ['providers'],
   query: async () => {
     const { data } = await getProviders({
-      query: filterProvider.value ? { client_type: filterProvider.value } : undefined,
       throwOnError: true,
     })
     return data
   },
 })
 const queryCache = useQueryCache()
-
-watch(filterProvider, () => {
-  queryCache.invalidateQueries({ key: ['providers'] })
-}, { immediate: true })
 
 const curProvider = ref<ProvidersGetResponse>()
 provide('curProvider', curProvider)
@@ -142,22 +125,6 @@ const openStatus = reactive({
             </SidebarMenu>
           </SidebarContent>
           <SidebarFooter>
-            <Select v-model:model-value="filterProvider">
-              <SelectTrigger class="w-full">
-                <SelectValue :placeholder="$t('common.typePlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem
-                    v-for="type in CLIENT_TYPES"
-                    :key="type"
-                    :value="type"
-                  >
-                    {{ type }}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
             <AddProvider v-model:open="openStatus.provideOpen" />
           </SidebarFooter>
         </Sidebar>

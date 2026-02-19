@@ -7,49 +7,48 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getVersionSnapshotID = `-- name: GetVersionSnapshotID :one
-SELECT snapshot_id FROM container_versions WHERE container_id = $1 AND version = $2
+const getVersionSnapshotRuntimeName = `-- name: GetVersionSnapshotRuntimeName :one
+SELECT s.runtime_snapshot_name
+FROM container_versions cv
+JOIN snapshots s ON s.id = cv.snapshot_id
+WHERE cv.container_id = $1
+  AND cv.version = $2
 `
 
-type GetVersionSnapshotIDParams struct {
+type GetVersionSnapshotRuntimeNameParams struct {
 	ContainerID string `json:"container_id"`
 	Version     int32  `json:"version"`
 }
 
-func (q *Queries) GetVersionSnapshotID(ctx context.Context, arg GetVersionSnapshotIDParams) (string, error) {
-	row := q.db.QueryRow(ctx, getVersionSnapshotID, arg.ContainerID, arg.Version)
-	var snapshot_id string
-	err := row.Scan(&snapshot_id)
-	return snapshot_id, err
+func (q *Queries) GetVersionSnapshotRuntimeName(ctx context.Context, arg GetVersionSnapshotRuntimeNameParams) (string, error) {
+	row := q.db.QueryRow(ctx, getVersionSnapshotRuntimeName, arg.ContainerID, arg.Version)
+	var runtime_snapshot_name string
+	err := row.Scan(&runtime_snapshot_name)
+	return runtime_snapshot_name, err
 }
 
 const insertVersion = `-- name: InsertVersion :one
-INSERT INTO container_versions (id, container_id, snapshot_id, version)
+INSERT INTO container_versions (container_id, snapshot_id, version)
 VALUES (
   $1,
   $2,
-  $3,
-  $4
+  $3
 )
 RETURNING id, container_id, snapshot_id, version, created_at
 `
 
 type InsertVersionParams struct {
-	ID          string `json:"id"`
-	ContainerID string `json:"container_id"`
-	SnapshotID  string `json:"snapshot_id"`
-	Version     int32  `json:"version"`
+	ContainerID string      `json:"container_id"`
+	SnapshotID  pgtype.UUID `json:"snapshot_id"`
+	Version     int32       `json:"version"`
 }
 
 func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) (ContainerVersion, error) {
-	row := q.db.QueryRow(ctx, insertVersion,
-		arg.ID,
-		arg.ContainerID,
-		arg.SnapshotID,
-		arg.Version,
-	)
+	row := q.db.QueryRow(ctx, insertVersion, arg.ContainerID, arg.SnapshotID, arg.Version)
 	var i ContainerVersion
 	err := row.Scan(
 		&i.ID,
@@ -62,24 +61,44 @@ func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) (C
 }
 
 const listVersionsByContainerID = `-- name: ListVersionsByContainerID :many
-SELECT id, container_id, snapshot_id, version, created_at FROM container_versions WHERE container_id = $1 ORDER BY version ASC
+SELECT
+  cv.id,
+  cv.container_id,
+  cv.snapshot_id,
+  cv.version,
+  cv.created_at,
+  s.runtime_snapshot_name
+FROM container_versions cv
+JOIN snapshots s ON s.id = cv.snapshot_id
+WHERE cv.container_id = $1
+ORDER BY cv.version ASC
 `
 
-func (q *Queries) ListVersionsByContainerID(ctx context.Context, containerID string) ([]ContainerVersion, error) {
+type ListVersionsByContainerIDRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	ContainerID         string             `json:"container_id"`
+	SnapshotID          pgtype.UUID        `json:"snapshot_id"`
+	Version             int32              `json:"version"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	RuntimeSnapshotName string             `json:"runtime_snapshot_name"`
+}
+
+func (q *Queries) ListVersionsByContainerID(ctx context.Context, containerID string) ([]ListVersionsByContainerIDRow, error) {
 	rows, err := q.db.Query(ctx, listVersionsByContainerID, containerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ContainerVersion
+	var items []ListVersionsByContainerIDRow
 	for rows.Next() {
-		var i ContainerVersion
+		var i ListVersionsByContainerIDRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ContainerID,
 			&i.SnapshotID,
 			&i.Version,
 			&i.CreatedAt,
+			&i.RuntimeSnapshotName,
 		); err != nil {
 			return nil, err
 		}

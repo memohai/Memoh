@@ -1,6 +1,16 @@
 package flow
 
-import "github.com/memohai/memoh/internal/models"
+import (
+	"strings"
+
+	"github.com/memohai/memoh/internal/models"
+)
+
+const (
+	gatewayTransportInlineDataURL = "inline_data_url"
+	gatewayTransportPublicURL     = "public_url"
+	gatewayTransportToolFileRef   = "tool_file_ref"
+)
 
 // attachmentModality maps an attachment type string to the input modality it requires.
 var attachmentModality = map[string]string{
@@ -10,16 +20,20 @@ var attachmentModality = map[string]string{
 	"file":  models.ModelInputFile,
 }
 
-// gatewayAttachment is the structured attachment payload sent to the agent gateway.
-// Only fields consumable by the agent/LLM are serialized; internal references
-// (asset_id, platform_key, url) are stripped before dispatch.
+// gatewayAttachment is the strict server-to-gateway attachment contract.
+// ContentHash is the content reference (replaces legacy assetId).
 type gatewayAttachment struct {
-	Type     string         `json:"type"`
-	Base64   string         `json:"base64,omitempty"`
-	Path     string         `json:"path,omitempty"`
-	Mime     string         `json:"mime,omitempty"`
-	Name     string         `json:"name,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	ContentHash string         `json:"contentHash,omitempty"`
+	Type        string         `json:"type"`
+	Mime        string         `json:"mime,omitempty"`
+	Size        int64          `json:"size,omitempty"`
+	Name        string         `json:"name,omitempty"`
+	Transport   string         `json:"transport"`
+	Payload     string         `json:"payload"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+
+	// FallbackPath is an internal helper only used by server-side routing.
+	FallbackPath string `json:"-"`
 }
 
 // capabilityRouteResult holds the outcome of splitting attachments by model capability.
@@ -31,13 +45,12 @@ type capabilityRouteResult struct {
 	Fallback []gatewayAttachment
 }
 
-// routeAttachmentsByCapability splits attachments based on the model's supported
-// input modalities. Supported modalities produce native multimodal input; unsupported
-// modalities produce container path references for tool-based access.
+// routeAttachmentsByCapability splits attachments based on both model capability
+// and gateway native support. Unsupported items are routed through fallback.
 func routeAttachmentsByCapability(modalities []string, attachments []gatewayAttachment) capabilityRouteResult {
 	supported := make(map[string]struct{}, len(modalities))
 	for _, m := range modalities {
-		supported[m] = struct{}{}
+		supported[strings.ToLower(strings.TrimSpace(m))] = struct{}{}
 	}
 
 	result := capabilityRouteResult{
@@ -45,9 +58,15 @@ func routeAttachmentsByCapability(modalities []string, attachments []gatewayAtta
 		Fallback: make([]gatewayAttachment, 0),
 	}
 	for _, att := range attachments {
+		att.Type = strings.ToLower(strings.TrimSpace(att.Type))
+		att.Transport = strings.ToLower(strings.TrimSpace(att.Transport))
 		requiredModality, known := attachmentModality[att.Type]
 		if !known {
 			// Unknown attachment types always go through fallback path.
+			result.Fallback = append(result.Fallback, att)
+			continue
+		}
+		if !isGatewayNativeAttachment(att) {
 			result.Fallback = append(result.Fallback, att)
 			continue
 		}
@@ -58,6 +77,19 @@ func routeAttachmentsByCapability(modalities []string, attachments []gatewayAtta
 		}
 	}
 	return result
+}
+
+func isGatewayNativeAttachment(att gatewayAttachment) bool {
+	switch att.Type {
+	case "image":
+		transport := strings.ToLower(strings.TrimSpace(att.Transport))
+		if transport != gatewayTransportInlineDataURL && transport != gatewayTransportPublicURL {
+			return false
+		}
+		return strings.TrimSpace(att.Payload) != ""
+	default:
+		return false
+	}
 }
 
 // attachmentsToAny converts typed gateway attachments to []any for JSON serialization.

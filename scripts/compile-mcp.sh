@@ -28,11 +28,7 @@ GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" go build -trimpath -ldflags "-s -w" -o "
 mv -f "${APP_DIR}/${BIN_NAME}.new" "${APP_DIR}/${BIN_NAME}"
 
 if [ -n "$CONTAINER_NAME" ]; then
-  if [ "$(uname -s)" = "Darwin" ]; then
-    limactl shell default -- nerdctl kill -s "$STOP_SIGNAL" "$CONTAINER_NAME"
-  else
-    nerdctl kill -s "$STOP_SIGNAL" "$CONTAINER_NAME"
-  fi
+  nerdctl kill -s "$STOP_SIGNAL" "$CONTAINER_NAME"
 else
   echo "CONTAINER_NAME is empty; skip sending stop signal."
 fi

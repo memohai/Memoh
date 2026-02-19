@@ -46,10 +46,10 @@ Bots come with a rich set of built-in tools:
 
 ### Multi-LLM Provider Support
 
-Flexibly switch between a wide range of LLM providers:
+Flexibly switch between a wide range of LLM providers via four client types:
 
-- OpenAI, Anthropic, Google, Azure, AWS Bedrock
-- Mistral, XAI, Ollama, Dashscope (Qwen), and more
+- OpenAI Responses API, OpenAI Chat Completions API (including compatible services)
+- Anthropic Messages API, Google Generative AI API
 
 ### MCP Protocol Support
 

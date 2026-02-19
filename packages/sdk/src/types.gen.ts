@@ -138,12 +138,12 @@ export type ChannelAction = {
 };
 
 export type ChannelAttachment = {
-    asset_id?: string;
     /**
      * data URL for agent delivery
      */
     base64?: string;
     caption?: string;
+    content_hash?: string;
     duration_ms?: number;
     height?: number;
     metadata?: {
@@ -359,6 +359,8 @@ export type HandlersCreateSnapshotResponse = {
     container_id?: string;
     snapshot_name?: string;
     snapshotter?: string;
+    source?: string;
+    version?: number;
 };
 
 export type HandlersEmbeddingsInput = {
@@ -410,6 +412,10 @@ export type HandlersGetContainerResponse = {
 export type HandlersListSnapshotsResponse = {
     snapshots?: Array<HandlersSnapshotInfo>;
     snapshotter?: string;
+};
+
+export type HandlersLocalChannelMessageRequest = {
+    message?: ChannelMessage;
 };
 
 export type HandlersLoginRequest = {
@@ -470,10 +476,13 @@ export type HandlersSnapshotInfo = {
     labels?: {
         [key: string]: string;
     };
+    managed?: boolean;
     name?: string;
     parent?: string;
     snapshotter?: string;
+    source?: string;
     updated_at?: string;
+    version?: number;
 };
 
 export type HandlersListMyIdentitiesResponse = {
@@ -673,23 +682,20 @@ export type MessageMessage = {
     sender_display_name?: string;
     sender_user_id?: string;
     source_reply_to_message_id?: string;
+    usage?: Array<number>;
 };
 
 export type MessageMessageAsset = {
-    asset_id?: string;
-    duration_ms?: number;
-    height?: number;
-    media_type?: string;
+    content_hash?: string;
     mime?: string;
     ordinal?: number;
-    original_name?: string;
     role?: string;
     size_bytes?: number;
     storage_key?: string;
-    width?: number;
 };
 
 export type ModelsAddRequest = {
+    client_type?: ModelsClientType;
     dimensions?: number;
     input_modalities?: Array<string>;
     llm_provider_id?: string;
@@ -703,11 +709,14 @@ export type ModelsAddResponse = {
     model_id?: string;
 };
 
+export type ModelsClientType = 'openai-responses' | 'openai-completions' | 'anthropic-messages' | 'google-generative-ai';
+
 export type ModelsCountResponse = {
     count?: number;
 };
 
 export type ModelsGetResponse = {
+    client_type?: ModelsClientType;
     dimensions?: number;
     input_modalities?: Array<string>;
     llm_provider_id?: string;
@@ -719,6 +728,7 @@ export type ModelsGetResponse = {
 export type ModelsModelType = 'chat' | 'embedding';
 
 export type ModelsUpdateRequest = {
+    client_type?: ModelsClientType;
     dimensions?: number;
     input_modalities?: Array<string>;
     llm_provider_id?: string;
@@ -727,7 +737,14 @@ export type ModelsUpdateRequest = {
     type?: ModelsModelType;
 };
 
-export type ProvidersClientType = 'openai' | 'openai-compat' | 'anthropic' | 'google' | 'azure' | 'bedrock' | 'mistral' | 'xai' | 'ollama' | 'dashscope';
+export type ProvidersCheckResult = {
+    latency_ms?: number;
+    message?: string;
+    status?: ProvidersCheckStatus;
+    status_code?: number;
+};
+
+export type ProvidersCheckStatus = 'supported' | 'auth_error' | 'unsupported' | 'error';
 
 export type ProvidersCountResponse = {
     count?: number;
@@ -736,7 +753,6 @@ export type ProvidersCountResponse = {
 export type ProvidersCreateRequest = {
     api_key?: string;
     base_url: string;
-    client_type: ProvidersClientType;
     metadata?: {
         [key: string]: unknown;
     };
@@ -749,7 +765,6 @@ export type ProvidersGetResponse = {
      */
     api_key?: string;
     base_url?: string;
-    client_type?: string;
     created_at?: string;
     id?: string;
     metadata?: {
@@ -759,10 +774,18 @@ export type ProvidersGetResponse = {
     updated_at?: string;
 };
 
+export type ProvidersTestResponse = {
+    checks?: {
+        [key: string]: ProvidersCheckResult;
+    };
+    latency_ms?: number;
+    message?: string;
+    reachable?: boolean;
+};
+
 export type ProvidersUpdateRequest = {
     api_key?: string;
     base_url?: string;
-    client_type?: ProvidersClientType;
     metadata?: {
         [key: string]: unknown;
     };
@@ -866,6 +889,7 @@ export type SettingsSettings = {
     embedding_model_id?: string;
     language?: string;
     max_context_load_time?: number;
+    max_context_tokens?: number;
     memory_model_id?: string;
     search_provider_id?: string;
 };
@@ -876,6 +900,7 @@ export type SettingsUpsertRequest = {
     embedding_model_id?: string;
     language?: string;
     max_context_load_time?: number;
+    max_context_tokens?: number;
     memory_model_id?: string;
     search_provider_id?: string;
 };
@@ -1055,6 +1080,87 @@ export type PostBotsResponses = {
 };
 
 export type PostBotsResponse = PostBotsResponses[keyof PostBotsResponses];
+
+export type PostBotsByBotIdCliMessagesData = {
+    /**
+     * Message payload
+     */
+    body: HandlersLocalChannelMessageRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/cli/messages';
+};
+
+export type PostBotsByBotIdCliMessagesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdCliMessagesError = PostBotsByBotIdCliMessagesErrors[keyof PostBotsByBotIdCliMessagesErrors];
+
+export type PostBotsByBotIdCliMessagesResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type PostBotsByBotIdCliMessagesResponse = PostBotsByBotIdCliMessagesResponses[keyof PostBotsByBotIdCliMessagesResponses];
+
+export type GetBotsByBotIdCliStreamData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/cli/stream';
+};
+
+export type GetBotsByBotIdCliStreamErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdCliStreamError = GetBotsByBotIdCliStreamErrors[keyof GetBotsByBotIdCliStreamErrors];
+
+export type GetBotsByBotIdCliStreamResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetBotsByBotIdCliStreamResponse = GetBotsByBotIdCliStreamResponses[keyof GetBotsByBotIdCliStreamResponses];
 
 export type DeleteBotsByBotIdContainerData = {
     body?: never;
@@ -2929,6 +3035,87 @@ export type PostBotsByBotIdToolsResponses = {
 
 export type PostBotsByBotIdToolsResponse = PostBotsByBotIdToolsResponses[keyof PostBotsByBotIdToolsResponses];
 
+export type PostBotsByBotIdWebMessagesData = {
+    /**
+     * Message payload
+     */
+    body: HandlersLocalChannelMessageRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/web/messages';
+};
+
+export type PostBotsByBotIdWebMessagesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdWebMessagesError = PostBotsByBotIdWebMessagesErrors[keyof PostBotsByBotIdWebMessagesErrors];
+
+export type PostBotsByBotIdWebMessagesResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type PostBotsByBotIdWebMessagesResponse = PostBotsByBotIdWebMessagesResponses[keyof PostBotsByBotIdWebMessagesResponses];
+
+export type GetBotsByBotIdWebStreamData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/web/stream';
+};
+
+export type GetBotsByBotIdWebStreamErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdWebStreamError = GetBotsByBotIdWebStreamErrors[keyof GetBotsByBotIdWebStreamErrors];
+
+export type GetBotsByBotIdWebStreamResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetBotsByBotIdWebStreamResponse = GetBotsByBotIdWebStreamResponses[keyof GetBotsByBotIdWebStreamResponses];
+
 export type DeleteBotsByIdData = {
     body?: never;
     path: {
@@ -3668,7 +3855,7 @@ export type GetModelsData = {
          */
         type?: string;
         /**
-         * Client type (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)
+         * Client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)
          */
         client_type?: string;
     };
@@ -3996,20 +4183,11 @@ export type PutModelsByIdResponse = PutModelsByIdResponses[keyof PutModelsByIdRe
 export type GetProvidersData = {
     body?: never;
     path?: never;
-    query?: {
-        /**
-         * Client type filter (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)
-         */
-        client_type?: string;
-    };
+    query?: never;
     url: '/providers';
 };
 
 export type GetProvidersErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
     /**
      * Internal Server Error
      */
@@ -4062,20 +4240,11 @@ export type PostProvidersResponse = PostProvidersResponses[keyof PostProvidersRe
 export type GetProvidersCountData = {
     body?: never;
     path?: never;
-    query?: {
-        /**
-         * Client type filter (openai, openai-compat, anthropic, google, azure, bedrock, mistral, xai, ollama, dashscope)
-         */
-        client_type?: string;
-    };
+    query?: never;
     url: '/providers/count';
 };
 
 export type GetProvidersCountErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
     /**
      * Internal Server Error
      */
@@ -4288,6 +4457,44 @@ export type GetProvidersByIdModelsResponses = {
 };
 
 export type GetProvidersByIdModelsResponse = GetProvidersByIdModelsResponses[keyof GetProvidersByIdModelsResponses];
+
+export type PostProvidersByIdTestData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/test';
+};
+
+export type PostProvidersByIdTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostProvidersByIdTestError = PostProvidersByIdTestErrors[keyof PostProvidersByIdTestErrors];
+
+export type PostProvidersByIdTestResponses = {
+    /**
+     * OK
+     */
+    200: ProvidersTestResponse;
+};
+
+export type PostProvidersByIdTestResponse = PostProvidersByIdTestResponses[keyof PostProvidersByIdTestResponses];
 
 export type GetSearchProvidersData = {
     body?: never;

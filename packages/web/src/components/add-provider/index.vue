@@ -73,34 +73,6 @@
                 </FormControl>
               </FormItem>
             </FormField>
-            <FormField
-              v-slot="{ componentField }"
-              name="client_type"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  {{ $t('common.type') }}
-                </Label>
-                <FormControl>
-                  <Select v-bind="componentField">
-                    <SelectTrigger class="w-full">
-                      <SelectValue :placeholder="$t('common.typePlaceholder')" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem
-                          v-for="type in CLIENT_TYPES"
-                          :key="type"
-                          :value="type"
-                        >
-                          {{ type }}
-                        </SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </FormControl>
-              </FormItem>
-            </FormField>
           </div>
           <DialogFooter class="mt-8">
             <DialogClose as-child>
@@ -139,12 +111,6 @@ import {
   FormControl,
   FormItem,
   DialogDescription,
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
   Separator,
   Label,
   Spinner,
@@ -154,12 +120,6 @@ import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postProviders } from '@memoh/sdk'
-import type { ProvidersClientType } from '@memoh/sdk'
-
-const CLIENT_TYPES: ProvidersClientType[] = [
-  'openai', 'openai-compat', 'anthropic', 'google',
-  'azure', 'bedrock', 'mistral', 'xai', 'ollama', 'dashscope',
-]
 
 const open = defineModel<boolean>('open')
 
@@ -175,7 +135,6 @@ const { mutate: providerFetch, isLoading } = useMutation({
 const providerSchema = toTypedSchema(z.object({
   api_key: z.string().min(1),
   base_url: z.string().min(1),
-  client_type: z.string().min(1),
   name: z.string().min(1),
   metadata: z.object({
     additionalProp1: z.object({}),

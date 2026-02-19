@@ -14,7 +14,7 @@ Click **Models** in the left sidebar to open the Provider and Model configuratio
 ![Models page - sidebar](/getting-started/provider-model-01-sidebar.png)
 
 The page has two panels:
-- **Left**: Provider list and filter
+- **Left**: Provider list and search
 - **Right**: Selected provider's details and models (or an empty state if none selected)
 
 ## Step 2: Add a Provider
@@ -30,7 +30,6 @@ In the dialog, fill in:
 | **Name** | A display name for this provider (e.g. `my-openai`, `ollama-local`) |
 | **API Key** | Your API key. For local services like Ollama, you can use a placeholder like `ollama` |
 | **Base URL** | The API base URL (e.g. `https://api.openai.com/v1`, `http://localhost:11434/v1` for Ollama) |
-| **Type** | Client type: `openai`, `openai-compat`, `anthropic`, `google`, `azure`, `bedrock`, `mistral`, `xai`, `ollama`, `dashscope` |
 
 ![Add Provider dialog](/getting-started/provider-model-03-provider-dialog.png)
 
@@ -38,13 +37,11 @@ In the dialog, fill in:
 - Name: `openai`
 - API Key: `sk-...`
 - Base URL: `https://api.openai.com/v1`
-- Type: `openai`
 
 **Example — Ollama (local):**
 - Name: `ollama`
 - API Key: `ollama`
 - Base URL: `http://localhost:11434/v1`
-- Type: `ollama`
 
 Click **Add** to save. The new provider appears in the left sidebar.
 
@@ -60,6 +57,7 @@ Fill in:
 
 | Field | Description |
 |-------|-------------|
+| **Client Type** | API protocol: `openai-responses`, `openai-completions`, `anthropic-messages`, or `google-generative-ai` |
 | **Type** | `chat` or `embedding` |
 | **Model** | Model ID (e.g. `gpt-4`, `llama3.2`, `text-embedding-3-small`) |
 | **Display Name** | Optional display name |
@@ -71,8 +69,8 @@ Fill in:
 - One **embedding** model (for memory)
 
 Add them under the same or different providers. For example:
-- Chat: `gpt-4` (OpenAI) or `llama3.2` (Ollama)
-- Embedding: `text-embedding-3-small` (OpenAI) or `nomic-embed-text` (Ollama)
+- Chat: `gpt-4` with client type `openai-responses` (OpenAI) or `llama3.2` with client type `openai-completions` (Ollama)
+- Embedding: `text-embedding-3-small` with client type `openai-completions` (OpenAI) or `nomic-embed-text` with client type `openai-completions` (Ollama)
 
 ## Step 4: Edit or Delete
 

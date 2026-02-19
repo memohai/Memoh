@@ -207,6 +207,32 @@ func TestExtractFeishuInboundImageAttachmentReference(t *testing.T) {
 	}
 }
 
+func TestExtractFeishuInboundFileAttachmentInfersVideoType(t *testing.T) {
+	t.Parallel()
+
+	content := `{"file_key":"file_1","file_name":"clip.mp4","mime_type":"video/mp4"}`
+	msgType := larkim.MsgTypeFile
+	event := &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Message: &larkim.EventMessage{
+				MessageType: &msgType,
+				Content:     &content,
+			},
+		},
+	}
+	got := extractFeishuInbound(event, "")
+	if len(got.Message.Attachments) != 1 {
+		t.Fatalf("expected one attachment, got %d", len(got.Message.Attachments))
+	}
+	att := got.Message.Attachments[0]
+	if att.Type != channel.AttachmentVideo {
+		t.Fatalf("expected inferred video type, got %s", att.Type)
+	}
+	if att.Mime != "video/mp4" {
+		t.Fatalf("expected normalized mime video/mp4, got %s", att.Mime)
+	}
+}
+
 func TestFeishuDescriptorIncludesStreamingAndMedia(t *testing.T) {
 	t.Parallel()
 

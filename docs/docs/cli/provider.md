@@ -1,6 +1,6 @@
 # Provider Commands
 
-Manage LLM providers (OpenAI, Anthropic, Ollama, etc.).
+Manage LLM providers (API endpoints and credentials).
 
 ## provider list
 
@@ -32,16 +32,13 @@ memoh provider create [options]
 | Option | Description |
 |--------|-------------|
 | `--name <name>` | Provider name |
-| `--type <type>` | Client type |
 | `--base_url <url>` | Base URL for the API |
 | `--api_key <key>` | API key |
-
-Supported client types: `openai`, `openai-compat`, `anthropic`, `google`, `azure`, `bedrock`, `mistral`, `xai`, `ollama`, `dashscope`
 
 Examples:
 
 ```bash
-memoh provider create --name my-ollama --type ollama --base_url http://localhost:11434
+memoh provider create --name my-ollama --base_url http://localhost:11434/v1
 memoh provider create
 # Interactive prompts
 ```
