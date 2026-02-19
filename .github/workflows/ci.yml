@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: memoh_test
+          POSTGRES_USER: memoh
+          POSTGRES_PASSWORD: memoh123
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U memoh"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generate config
+        run: |
+          cat > config.toml <<'TOML'
+          [postgres]
+          host = "127.0.0.1"
+          port = 5432
+          user = "memoh"
+          password = "memoh123"
+          database = "memoh_test"
+          sslmode = "disable"
+          TOML
+
+      - name: Migrate up
+        run: go run ./cmd/agent migrate up
+
+      - name: Migrate down
+        run: go run ./cmd/agent migrate down
+
+      - name: Migrate up (idempotent)
+        run: go run ./cmd/agent migrate up
