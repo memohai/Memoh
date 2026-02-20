@@ -1,34 +1,10 @@
 #!/usr/bin/env sh
 
-export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-pnpm lint:fix || true
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-pnpm web:build
+sh "$SCRIPT_DIR/check-large-files" || exit 1
 
-MAX_SIZE=1048576 # 1MB
-
-files=$(git diff --cached --name-only --diff-filter=ACMR)
-has_large_file=false
-large_files=""
-
-for file in $files; do
-  if [ -f "$file" ]; then
-    size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
-    if [ "$size" -gt "$MAX_SIZE" ]; then
-      size_mb=$(echo "scale=2; $size / 1048576" | bc 2>/dev/null || echo "$((size / 1048576))")
-      large_files="$large_files $file"
-      has_large_file=true
-    fi
-  fi
-done
-
-if [ "$has_large_file" = true ]; then
-  echo "Error: The following files are too large (maximum allowed is $((MAX_SIZE/1048576))MB):"
-  for file in $large_files; do
-    size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
-    size_mb=$(echo "scale=2; $size / 1048576" | bc 2>/dev/null || echo "$((size / 1048576))")
-    echo "  - $file (${size_mb}MB)"
-  done
-  exit 1
-fi
+echo ""
+sh "$SCRIPT_DIR/check-pnpm" || exit 1
