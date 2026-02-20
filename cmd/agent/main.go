@@ -799,6 +799,22 @@ func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, 
 	}, nil
 }
 
+func (a *mediaAssetResolverAdapter) IngestContainerFile(ctx context.Context, botID, containerPath string) (mcpmessage.AssetMeta, error) {
+	if a == nil || a.media == nil {
+		return mcpmessage.AssetMeta{}, fmt.Errorf("media service not configured")
+	}
+	asset, err := a.media.IngestContainerFile(ctx, botID, containerPath)
+	if err != nil {
+		return mcpmessage.AssetMeta{}, err
+	}
+	return mcpmessage.AssetMeta{
+		ContentHash: asset.ContentHash,
+		Mime:        asset.Mime,
+		SizeBytes:   asset.SizeBytes,
+		StorageKey:  asset.StorageKey,
+	}, nil
+}
+
 // gatewayAssetLoaderAdapter bridges media service to flow gateway asset loader.
 type gatewayAssetLoaderAdapter struct {
 	media *media.Service

@@ -142,6 +142,25 @@ func (s *Service) AccessPath(asset Asset) string {
 	return s.provider.AccessPath(routingKey)
 }
 
+// IngestContainerFile reads an arbitrary file from a bot's /data/ directory
+// and ingests it into the media store. The provider must implement ContainerFileOpener.
+func (s *Service) IngestContainerFile(ctx context.Context, botID, containerPath string) (Asset, error) {
+	if s.provider == nil {
+		return Asset{}, ErrProviderUnavailable
+	}
+	opener, ok := s.provider.(storage.ContainerFileOpener)
+	if !ok {
+		return Asset{}, fmt.Errorf("provider does not support container file reading")
+	}
+	f, err := opener.OpenContainerFile(botID, containerPath)
+	if err != nil {
+		return Asset{}, fmt.Errorf("open container file: %w", err)
+	}
+	defer f.Close()
+	mime := mimeFromExtension(path.Ext(containerPath))
+	return s.Ingest(ctx, IngestInput{BotID: botID, Mime: mime, Reader: f})
+}
+
 // resolveByContentHash scans hash-prefix directory by extension to find the file.
 func (s *Service) resolveByContentHash(ctx context.Context, botID, contentHash string) (Asset, error) {
 	if strings.TrimSpace(contentHash) == "" || len(contentHash) < 2 {

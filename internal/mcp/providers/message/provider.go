@@ -43,6 +43,9 @@ type AssetMeta struct {
 // AssetResolver looks up persisted media assets by storage key.
 type AssetResolver interface {
 	GetByStorageKey(ctx context.Context, botID, storageKey string) (AssetMeta, error)
+	// IngestContainerFile reads a file from the container's /data directory,
+	// ingests it into the media store, and returns the resulting asset metadata.
+	IngestContainerFile(ctx context.Context, botID, containerPath string) (AssetMeta, error)
 }
 
 // Executor exposes send and react as MCP tools.
@@ -389,29 +392,27 @@ func (p *Executor) resolveAttachmentRef(ctx context.Context, botID, ref, attType
 		storageKey := ref[idx+len(mediaMarker):]
 		asset, err := p.assetResolver.GetByStorageKey(ctx, botID, storageKey)
 		if err == nil {
-			t := channel.AttachmentType(attType)
-			if t == "" {
-				t = inferAttachmentTypeFromMime(asset.Mime)
-			}
-			att := channel.Attachment{
-				Type:        t,
-				ContentHash: asset.ContentHash,
-				Mime:        asset.Mime,
-				Size:        asset.SizeBytes,
-				Name:        name,
-				Metadata: map[string]any{
-					"bot_id":      botID,
-					"storage_key": asset.StorageKey,
-				},
-			}
-			return &att
+			return assetMetaToAttachment(asset, botID, attType, name)
 		}
 		if p.logger != nil {
 			p.logger.Warn("resolve media path failed", slog.String("path", ref), slog.Any("error", err))
 		}
 	}
 
-	// Unknown container path — pass through with the path as URL.
+	// Other container /data/ path — ingest into media store first.
+	const dataPrefix = "/data/"
+	if strings.HasPrefix(ref, dataPrefix) && p.assetResolver != nil {
+		asset, err := p.assetResolver.IngestContainerFile(ctx, botID, ref)
+		if err == nil {
+			return assetMetaToAttachment(asset, botID, attType, name)
+		}
+		if p.logger != nil {
+			p.logger.Warn("ingest container file failed", slog.String("path", ref), slog.Any("error", err))
+		}
+		return nil
+	}
+
+	// Unknown path — pass through as URL (may fail for non-HTTP paths).
 	t := channel.AttachmentType(attType)
 	if t == "" {
 		t = inferAttachmentTypeFromExt(ref)
@@ -420,6 +421,24 @@ func (p *Executor) resolveAttachmentRef(ctx context.Context, botID, ref, attType
 		Type: t,
 		URL:  ref,
 		Name: name,
+	}
+}
+
+func assetMetaToAttachment(asset AssetMeta, botID, attType, name string) *channel.Attachment {
+	t := channel.AttachmentType(attType)
+	if t == "" {
+		t = inferAttachmentTypeFromMime(asset.Mime)
+	}
+	return &channel.Attachment{
+		Type:        t,
+		ContentHash: asset.ContentHash,
+		Mime:        asset.Mime,
+		Size:        asset.SizeBytes,
+		Name:        name,
+		Metadata: map[string]any{
+			"bot_id":      botID,
+			"storage_key": asset.StorageKey,
+		},
 	}
 }
 

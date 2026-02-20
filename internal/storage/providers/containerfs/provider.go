@@ -103,6 +103,24 @@ func (p *Provider) hostPath(key string) (string, error) {
 	return joined, nil
 }
 
+// OpenContainerFile opens a file from a bot's /data/ directory on the host.
+// containerPath must start with "/data/".
+func (p *Provider) OpenContainerFile(botID, containerPath string) (io.ReadCloser, error) {
+	const dataPrefix = "/data/"
+	if !strings.HasPrefix(containerPath, dataPrefix) {
+		return nil, fmt.Errorf("path must start with /data/")
+	}
+	subPath := containerPath[len(dataPrefix):]
+	if subPath == "" || strings.Contains(subPath, "..") {
+		return nil, fmt.Errorf("invalid container path")
+	}
+	hostPath := filepath.Join(p.dataRoot, "bots", botID, subPath)
+	if !strings.HasPrefix(hostPath, p.dataRoot+string(filepath.Separator)) {
+		return nil, fmt.Errorf("path escapes data root")
+	}
+	return os.Open(hostPath)
+}
+
 // splitRoutingKey splits a routing key "<bot_id>/<storage_key>" into its parts.
 func splitRoutingKey(key string) (botID, storageKey string) {
 	idx := strings.IndexByte(key, filepath.Separator)

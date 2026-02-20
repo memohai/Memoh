@@ -44,6 +44,8 @@ type mediaIngestor interface {
 	GetByStorageKey(ctx context.Context, botID, storageKey string) (media.Asset, error)
 	// AccessPath returns a consumer-accessible reference for a persisted asset.
 	AccessPath(asset media.Asset) string
+	// IngestContainerFile reads a file from /data/ and ingests it into media store.
+	IngestContainerFile(ctx context.Context, botID, containerPath string) (media.Asset, error)
 }
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
@@ -1589,17 +1591,38 @@ func isHTTPURL(raw string) bool {
 
 // resolveContainerPathAsset attempts to match a container-internal file path
 // to an existing media asset by extracting the storage key from the path.
+// For non-/data/media/ paths, it ingests the file into the media store first.
 // Returns true if the asset was resolved and item was updated.
 func (p *ChannelInboundProcessor) resolveContainerPathAsset(ctx context.Context, botID, accessPath string, item *channel.Attachment) bool {
+	// Try /data/media/ lookup first.
 	storageKey := extractStorageKey(accessPath, botID)
-	if storageKey == "" {
-		return false
+	if storageKey != "" {
+		asset, err := p.mediaService.GetByStorageKey(ctx, botID, storageKey)
+		if err == nil {
+			applyAssetToAttachment(asset, botID, item)
+			return true
+		}
 	}
-	asset, err := p.mediaService.GetByStorageKey(ctx, botID, storageKey)
-	if err != nil {
-		return false
+
+	// For any /data/ path, ingest the file into media store.
+	if strings.HasPrefix(accessPath, "/data/") {
+		asset, err := p.mediaService.IngestContainerFile(ctx, botID, accessPath)
+		if err != nil {
+			if p.logger != nil {
+				p.logger.Warn("ingest container file for stream failed", slog.String("path", accessPath), slog.Any("error", err))
+			}
+			return false
+		}
+		applyAssetToAttachment(asset, botID, item)
+		return true
 	}
+
+	return false
+}
+
+func applyAssetToAttachment(asset media.Asset, botID string, item *channel.Attachment) {
 	item.ContentHash = asset.ContentHash
+	item.URL = ""
 	if item.Metadata == nil {
 		item.Metadata = make(map[string]any)
 	}
@@ -1611,7 +1634,6 @@ func (p *ChannelInboundProcessor) resolveContainerPathAsset(ctx context.Context,
 	if item.Size == 0 && asset.SizeBytes > 0 {
 		item.Size = asset.SizeBytes
 	}
-	return true
 }
 
 // extractStorageKey derives the media storage key from a container-internal

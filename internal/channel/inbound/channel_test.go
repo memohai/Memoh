@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -214,6 +215,10 @@ func (f *fakeMediaIngestor) Ingest(ctx context.Context, input media.IngestInput)
 
 func (f *fakeMediaIngestor) GetByStorageKey(_ context.Context, _, _ string) (media.Asset, error) {
 	return f.storageKeyAsset, f.storageKeyErr
+}
+
+func (f *fakeMediaIngestor) IngestContainerFile(_ context.Context, _, _ string) (media.Asset, error) {
+	return media.Asset{}, fmt.Errorf("not implemented in test")
 }
 
 func (f *fakeMediaIngestor) AccessPath(asset media.Asset) string {

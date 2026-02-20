@@ -18,3 +18,9 @@ type Provider interface {
 	// The format depends on the backend (e.g. container path, signed URL).
 	AccessPath(key string) string
 }
+
+// ContainerFileOpener is an optional interface that providers can implement
+// to open arbitrary files from a bot's container data directory.
+type ContainerFileOpener interface {
+	OpenContainerFile(botID, containerPath string) (io.ReadCloser, error)
+}
