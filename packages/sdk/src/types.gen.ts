@@ -397,6 +397,50 @@ export type HandlersErrorResponse = {
     message?: string;
 };
 
+export type HandlersFsDeleteRequest = {
+    path?: string;
+    recursive?: boolean;
+};
+
+export type HandlersFsFileInfo = {
+    isDir?: boolean;
+    modTime?: string;
+    mode?: string;
+    name?: string;
+    path?: string;
+    size?: number;
+};
+
+export type HandlersFsListResponse = {
+    entries?: Array<HandlersFsFileInfo>;
+    path?: string;
+};
+
+export type HandlersFsMkdirRequest = {
+    path?: string;
+};
+
+export type HandlersFsReadResponse = {
+    content?: string;
+    path?: string;
+    size?: number;
+};
+
+export type HandlersFsRenameRequest = {
+    newPath?: string;
+    oldPath?: string;
+};
+
+export type HandlersFsUploadResponse = {
+    path?: string;
+    size?: number;
+};
+
+export type HandlersFsWriteRequest = {
+    content?: string;
+    path?: string;
+};
+
 export type HandlersGetContainerResponse = {
     container_id?: string;
     container_path?: string;
@@ -483,6 +527,10 @@ export type HandlersSnapshotInfo = {
     source?: string;
     updated_at?: string;
     version?: number;
+};
+
+export type HandlersFsOpResponse = {
+    ok?: boolean;
 };
 
 export type HandlersListMyIdentitiesResponse = {
@@ -1295,6 +1343,399 @@ export type PostBotsByBotIdContainerResponses = {
 };
 
 export type PostBotsByBotIdContainerResponse = PostBotsByBotIdContainerResponses[keyof PostBotsByBotIdContainerResponses];
+
+export type GetBotsByBotIdContainerFsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query: {
+        /**
+         * Container path
+         */
+        path: string;
+    };
+    url: '/bots/{bot_id}/container/fs';
+};
+
+export type GetBotsByBotIdContainerFsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerFsError = GetBotsByBotIdContainerFsErrors[keyof GetBotsByBotIdContainerFsErrors];
+
+export type GetBotsByBotIdContainerFsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFsFileInfo;
+};
+
+export type GetBotsByBotIdContainerFsResponse = GetBotsByBotIdContainerFsResponses[keyof GetBotsByBotIdContainerFsResponses];
+
+export type PostBotsByBotIdContainerFsDeleteData = {
+    /**
+     * Delete request
+     */
+    body: HandlersFsDeleteRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/fs/delete';
+};
+
+export type PostBotsByBotIdContainerFsDeleteErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerFsDeleteError = PostBotsByBotIdContainerFsDeleteErrors[keyof PostBotsByBotIdContainerFsDeleteErrors];
+
+export type PostBotsByBotIdContainerFsDeleteResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFsOpResponse;
+};
+
+export type PostBotsByBotIdContainerFsDeleteResponse = PostBotsByBotIdContainerFsDeleteResponses[keyof PostBotsByBotIdContainerFsDeleteResponses];
+
+export type GetBotsByBotIdContainerFsDownloadData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query: {
+        /**
+         * Container file path
+         */
+        path: string;
+    };
+    url: '/bots/{bot_id}/container/fs/download';
+};
+
+export type GetBotsByBotIdContainerFsDownloadErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerFsDownloadError = GetBotsByBotIdContainerFsDownloadErrors[keyof GetBotsByBotIdContainerFsDownloadErrors];
+
+export type GetBotsByBotIdContainerFsDownloadResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetBotsByBotIdContainerFsListData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query: {
+        /**
+         * Container directory path
+         */
+        path: string;
+    };
+    url: '/bots/{bot_id}/container/fs/list';
+};
+
+export type GetBotsByBotIdContainerFsListErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerFsListError = GetBotsByBotIdContainerFsListErrors[keyof GetBotsByBotIdContainerFsListErrors];
+
+export type GetBotsByBotIdContainerFsListResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFsListResponse;
+};
+
+export type GetBotsByBotIdContainerFsListResponse = GetBotsByBotIdContainerFsListResponses[keyof GetBotsByBotIdContainerFsListResponses];
+
+export type PostBotsByBotIdContainerFsMkdirData = {
+    /**
+     * Mkdir request
+     */
+    body: HandlersFsMkdirRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/fs/mkdir';
+};
+
+export type PostBotsByBotIdContainerFsMkdirErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerFsMkdirError = PostBotsByBotIdContainerFsMkdirErrors[keyof PostBotsByBotIdContainerFsMkdirErrors];
+
+export type PostBotsByBotIdContainerFsMkdirResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFsOpResponse;
+};
+
+export type PostBotsByBotIdContainerFsMkdirResponse = PostBotsByBotIdContainerFsMkdirResponses[keyof PostBotsByBotIdContainerFsMkdirResponses];
+
+export type GetBotsByBotIdContainerFsReadData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query: {
+        /**
+         * Container file path
+         */
+        path: string;
+    };
+    url: '/bots/{bot_id}/container/fs/read';
+};
+
+export type GetBotsByBotIdContainerFsReadErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerFsReadError = GetBotsByBotIdContainerFsReadErrors[keyof GetBotsByBotIdContainerFsReadErrors];
+
+export type GetBotsByBotIdContainerFsReadResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFsReadResponse;
+};
+
+export type GetBotsByBotIdContainerFsReadResponse = GetBotsByBotIdContainerFsReadResponses[keyof GetBotsByBotIdContainerFsReadResponses];
+
+export type PostBotsByBotIdContainerFsRenameData = {
+    /**
+     * Rename request
+     */
+    body: HandlersFsRenameRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/fs/rename';
+};
+
+export type PostBotsByBotIdContainerFsRenameErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerFsRenameError = PostBotsByBotIdContainerFsRenameErrors[keyof PostBotsByBotIdContainerFsRenameErrors];
+
+export type PostBotsByBotIdContainerFsRenameResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFsOpResponse;
+};
+
+export type PostBotsByBotIdContainerFsRenameResponse = PostBotsByBotIdContainerFsRenameResponses[keyof PostBotsByBotIdContainerFsRenameResponses];
+
+export type PostBotsByBotIdContainerFsUploadData = {
+    body: {
+        /**
+         * Destination container path
+         */
+        path: string;
+        /**
+         * File to upload
+         */
+        file: Blob | File;
+    };
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/fs/upload';
+};
+
+export type PostBotsByBotIdContainerFsUploadErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerFsUploadError = PostBotsByBotIdContainerFsUploadErrors[keyof PostBotsByBotIdContainerFsUploadErrors];
+
+export type PostBotsByBotIdContainerFsUploadResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFsUploadResponse;
+};
+
+export type PostBotsByBotIdContainerFsUploadResponse = PostBotsByBotIdContainerFsUploadResponses[keyof PostBotsByBotIdContainerFsUploadResponses];
+
+export type PostBotsByBotIdContainerFsWriteData = {
+    /**
+     * Write request
+     */
+    body: HandlersFsWriteRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/fs/write';
+};
+
+export type PostBotsByBotIdContainerFsWriteErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerFsWriteError = PostBotsByBotIdContainerFsWriteErrors[keyof PostBotsByBotIdContainerFsWriteErrors];
+
+export type PostBotsByBotIdContainerFsWriteResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFsOpResponse;
+};
+
+export type PostBotsByBotIdContainerFsWriteResponse = PostBotsByBotIdContainerFsWriteResponses[keyof PostBotsByBotIdContainerFsWriteResponses];
 
 export type DeleteBotsByBotIdContainerSkillsData = {
     /**
