@@ -1,5 +1,5 @@
 import z from 'zod'
-import { allActions } from './types'
+import { allActions } from '@memoh/agent'
 
 export const AgentSkillModel = z.object({
   name: z.string().min(1, 'Skill name is required'),

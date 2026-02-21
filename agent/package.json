@@ -8,10 +8,7 @@
   },
   "dependencies": {
     "@memoh/config": "workspace:*",
-    "@ai-sdk/anthropic": "^3.0.9",
-    "@ai-sdk/google": "^3.0.6",
-    "@ai-sdk/mcp": "^1.0.6",
-    "@ai-sdk/openai": "^3.0.7",
+    "@memoh/agent": "workspace:*",
     "@elysiajs/bearer": "^1.4.2",
     "@elysiajs/cors": "^1.4.1",
     "@modelcontextprotocol/sdk": "^1.25.2",

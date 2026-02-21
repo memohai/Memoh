@@ -1,11 +1,9 @@
 import { Elysia } from 'elysia'
 import z from 'zod'
-import { createAgent } from '../agent'
+import { createAgent, ModelConfig, allActions } from '@memoh/agent'
 import { createAuthFetcher, getBaseUrl } from '../index'
-import { ModelConfig } from '../types'
 import { bearerMiddleware } from '../middlewares/bearer'
 import { AgentSkillModel, AllowedActionModel, AttachmentModel, IdentityContextModel, InboxItemModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
-import { allActions } from '../types'
 import { sseChunked } from '../utils/sse'
 
 const AgentModel = z.object({
