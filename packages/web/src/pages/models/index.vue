@@ -11,7 +11,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-  InputGroup, InputGroupAddon, InputGroupInput,
+  InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput,
   SidebarFooter,
   Toggle,
   Empty,
@@ -89,13 +89,19 @@ const openStatus = reactive({
               <InputGroupInput
                 v-model="searchInput"
                 :placeholder="$t('models.searchPlaceholder')"
+                aria-label="Search models"
               />
               <InputGroupAddon
                 align="inline-end"
-                class="cursor-pointer"
-                @click="searchText = searchInput"
               >
-                <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
+                <InputGroupButton
+                  type="button"
+                  size="icon-xs"
+                  aria-label="Search models"
+                  @click="searchText = searchInput"
+                >
+                  <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
+                </InputGroupButton>
               </InputGroupAddon>
             </InputGroup>
           </SidebarHeader>

@@ -14,9 +14,9 @@
           </AvatarFallback>
         </Avatar>
         <div class="min-w-0">
-          <h4 class="font-semibold truncate">
+          <p class="font-semibold truncate">
             {{ displayTitle }}
-          </h4>
+          </p>
           <p class="text-sm text-muted-foreground truncate">
             {{ displayUserID }}
           </p>
@@ -25,13 +25,13 @@
 
       <!-- Display Settings -->
       <section>
-        <h6 class="mb-2 flex items-center">
+        <h2 class="mb-2 flex items-center text-base font-semibold">
           <FontAwesomeIcon
             :icon="['fas', 'gear']"
             class="mr-2"
           />
           {{ $t('settings.display') }}
-        </h6>
+        </h2>
         <Separator />
         <div class="mt-4 space-y-4">
           <div class="flex items-center justify-between">
@@ -40,7 +40,10 @@
               :model-value="language"
               @update:model-value="(v) => v && setLanguage(v as Locale)"
             >
-              <SelectTrigger class="w-40">
+              <SelectTrigger
+                class="w-40"
+                :aria-label="$t('settings.language')"
+              >
                 <SelectValue :placeholder="$t('settings.languagePlaceholder')" />
               </SelectTrigger>
               <SelectContent>
@@ -62,7 +65,10 @@
               :model-value="theme"
               @update:model-value="(v) => v && setTheme(v as 'light' | 'dark')"
             >
-              <SelectTrigger class="w-40">
+              <SelectTrigger
+                class="w-40"
+                :aria-label="$t('settings.theme')"
+              >
                 <SelectValue :placeholder="$t('settings.themePlaceholder')" />
               </SelectTrigger>
               <SelectContent>
@@ -97,38 +103,48 @@
 
       <!-- User Profile -->
       <section>
-        <h6 class="mb-2 flex items-center">
+        <h2 class="mb-2 flex items-center text-base font-semibold">
           <FontAwesomeIcon
             :icon="['fas', 'user']"
             class="mr-2"
           />
           {{ $t('settings.userProfile') }}
-        </h6>
+        </h2>
         <Separator />
         <div class="mt-4 space-y-4">
           <div class="space-y-2">
-            <Label>{{ $t('settings.userID') }}</Label>
+            <Label for="settings-user-id">{{ $t('settings.userID') }}</Label>
             <Input
+              id="settings-user-id"
               :model-value="displayUserID"
+              :aria-label="$t('settings.userID')"
               readonly
             />
           </div>
           <div class="space-y-2">
-            <Label>{{ $t('auth.username') }}</Label>
+            <Label for="settings-username">{{ $t('auth.username') }}</Label>
             <Input
+              id="settings-username"
               :model-value="displayUsername"
+              :aria-label="$t('auth.username')"
               readonly
             />
           </div>
           <div class="space-y-2">
-            <Label>{{ $t('settings.displayName') }}</Label>
-            <Input v-model="profileForm.display_name" />
+            <Label for="settings-display-name">{{ $t('settings.displayName') }}</Label>
+            <Input
+              id="settings-display-name"
+              v-model="profileForm.display_name"
+              :aria-label="$t('settings.displayName')"
+            />
           </div>
           <div class="space-y-2">
-            <Label>{{ $t('settings.avatarUrl') }}</Label>
+            <Label for="settings-avatar-url">{{ $t('settings.avatarUrl') }}</Label>
             <Input
+              id="settings-avatar-url"
               v-model="profileForm.avatar_url"
               type="url"
+              :aria-label="$t('settings.avatarUrl')"
             />
           </div>
           <div class="flex justify-end">
@@ -145,34 +161,40 @@
 
       <!-- Change Password -->
       <section>
-        <h6 class="mb-2 flex items-center">
+        <h2 class="mb-2 flex items-center text-base font-semibold">
           <FontAwesomeIcon
             :icon="['fas', 'gear']"
             class="mr-2"
           />
           {{ $t('settings.changePassword') }}
-        </h6>
+        </h2>
         <Separator />
         <div class="mt-4 space-y-4">
           <div class="space-y-2">
-            <Label>{{ $t('settings.currentPassword') }}</Label>
+            <Label for="settings-current-password">{{ $t('settings.currentPassword') }}</Label>
             <Input
+              id="settings-current-password"
               v-model="passwordForm.currentPassword"
               type="password"
+              :aria-label="$t('settings.currentPassword')"
             />
           </div>
           <div class="space-y-2">
-            <Label>{{ $t('settings.newPassword') }}</Label>
+            <Label for="settings-new-password">{{ $t('settings.newPassword') }}</Label>
             <Input
+              id="settings-new-password"
               v-model="passwordForm.newPassword"
               type="password"
+              :aria-label="$t('settings.newPassword')"
             />
           </div>
           <div class="space-y-2">
-            <Label>{{ $t('settings.confirmPassword') }}</Label>
+            <Label for="settings-confirm-password">{{ $t('settings.confirmPassword') }}</Label>
             <Input
+              id="settings-confirm-password"
               v-model="passwordForm.confirmPassword"
               type="password"
+              :aria-label="$t('settings.confirmPassword')"
             />
           </div>
           <div class="flex justify-end">
@@ -189,13 +211,13 @@
 
       <!-- Linked Channels -->
       <section>
-        <h6 class="mb-2 flex items-center">
+        <h2 class="mb-2 flex items-center text-base font-semibold">
           <FontAwesomeIcon
             :icon="['fas', 'network-wired']"
             class="mr-2"
           />
           {{ $t('settings.linkedChannels') }}
-        </h6>
+        </h2>
         <Separator />
         <div class="mt-4 space-y-3">
           <p
@@ -237,13 +259,13 @@
 
       <!-- Bind Code -->
       <section>
-        <h6 class="mb-2 flex items-center">
+        <h2 class="mb-2 flex items-center text-base font-semibold">
           <FontAwesomeIcon
             :icon="['fas', 'plug']"
             class="mr-2"
           />
           {{ $t('settings.bindCode') }}
-        </h6>
+        </h2>
         <Separator />
         <div class="mt-4 space-y-4">
           <div class="flex flex-wrap gap-3 items-end">
@@ -253,7 +275,10 @@
                 :model-value="bindForm.platform || anyPlatformValue"
                 @update:model-value="onPlatformChange"
               >
-                <SelectTrigger class="w-56">
+                <SelectTrigger
+                  class="w-56"
+                  :aria-label="$t('settings.platform')"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -273,12 +298,14 @@
               </Select>
             </div>
             <div class="space-y-2">
-              <Label>{{ $t('settings.bindCodeTTL') }}</Label>
+              <Label for="settings-bind-ttl">{{ $t('settings.bindCodeTTL') }}</Label>
               <Input
+                id="settings-bind-ttl"
                 v-model.number="bindForm.ttlSeconds"
                 type="number"
                 min="60"
                 class="w-40"
+                :aria-label="$t('settings.bindCodeTTL')"
               />
             </div>
             <Button
@@ -293,10 +320,12 @@
             v-if="bindCode"
             class="space-y-2"
           >
-            <Label>{{ $t('settings.bindCodeValue') }}</Label>
+            <Label for="settings-bind-code-value">{{ $t('settings.bindCodeValue') }}</Label>
             <div class="flex gap-2">
               <Input
+                id="settings-bind-code-value"
                 :model-value="bindCode.token"
+                :aria-label="$t('settings.bindCodeValue')"
                 readonly
               />
               <Button

@@ -27,14 +27,19 @@
               name="name"
             >
               <FormItem>
-                <Label class="mb-2">
+                <Label
+                  class="mb-2"
+                  :for="componentField.id || 'search-provider-create-name'"
+                >
                   {{ $t('common.name') }}
                 </Label>
                 <FormControl>
                   <Input
+                    :id="componentField.id || 'search-provider-create-name'"
                     type="text"
                     :placeholder="$t('common.namePlaceholder')"
                     v-bind="componentField"
+                    :aria-label="$t('common.name')"
                   />
                 </FormControl>
               </FormItem>
@@ -44,12 +49,19 @@
               name="provider"
             >
               <FormItem>
-                <Label class="mb-2">
+                <Label
+                  class="mb-2"
+                  :for="componentField.id || 'search-provider-create-type'"
+                >
                   {{ $t('searchProvider.provider') }}
                 </Label>
                 <FormControl>
                   <Select v-bind="componentField">
-                    <SelectTrigger class="w-full">
+                    <SelectTrigger
+                      :id="componentField.id || 'search-provider-create-type'"
+                      class="w-full"
+                      :aria-label="$t('searchProvider.provider')"
+                    >
                       <SelectValue :placeholder="$t('common.typePlaceholder')" />
                     </SelectTrigger>
                     <SelectContent>

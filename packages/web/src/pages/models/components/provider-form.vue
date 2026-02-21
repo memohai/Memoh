@@ -14,6 +14,7 @@
               <Input
                 type="text"
                 :placeholder="$t('common.namePlaceholder')"
+                :aria-label="$t('common.name')"
                 v-bind="componentField"
               />
             </FormControl>
@@ -34,6 +35,7 @@
               <Input
                 type="password"
                 :placeholder="props.provider?.api_key || $t('provider.apiKeyPlaceholder')"
+                :aria-label="$t('provider.apiKey')"
                 v-bind="componentField"
               />
             </FormControl>
@@ -54,6 +56,7 @@
               <Input
                 type="text"
                 :placeholder="$t('provider.urlPlaceholder')"
+                :aria-label="$t('provider.url')"
                 v-bind="componentField"
               />
             </FormControl>
@@ -80,7 +83,11 @@
           @confirm="$emit('delete')"
         >
           <template #trigger>
-            <Button variant="outline">
+            <Button
+              type="button"
+              variant="outline"
+              :aria-label="$t('common.delete')"
+            >
               <FontAwesomeIcon :icon="['far', 'trash-can']" />
             </Button>
           </template>

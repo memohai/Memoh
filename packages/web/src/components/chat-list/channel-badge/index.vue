@@ -3,6 +3,8 @@
     v-if="showBadge"
     class="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center overflow-hidden rounded-full bg-muted border border-background text-muted-foreground"
     :title="channelLabel"
+    role="img"
+    :aria-label="channelLabel"
   >
     <img
       v-if="channelImage"
@@ -14,6 +16,7 @@
       v-else
       :icon="channelIcon!"
       class="size-2.5"
+      aria-hidden="true"
     />
   </span>
 </template>

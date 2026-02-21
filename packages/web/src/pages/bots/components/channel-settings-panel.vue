@@ -60,7 +60,7 @@
         :key="key"
         class="space-y-2"
       >
-        <Label>
+        <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `channel-field-${key}`">
           {{ field.title || key }}
           <span
             v-if="!field.required"
@@ -80,6 +80,7 @@
           class="relative"
         >
           <Input
+            :id="`channel-field-${key}`"
             v-model="form.credentials[key]"
             :type="visibleSecrets[key] ? 'text' : 'password'"
             :placeholder="field.example ? String(field.example) : ''"
@@ -87,6 +88,8 @@
           <button
             type="button"
             class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            :aria-label="`${visibleSecrets[key] ? 'Hide' : 'Show'} ${field.title || key}`"
+            :aria-pressed="!!visibleSecrets[key]"
             @click="visibleSecrets[key] = !visibleSecrets[key]"
           >
             <FontAwesomeIcon
@@ -106,6 +109,7 @@
         <!-- Number field -->
         <Input
           v-else-if="field.type === 'number'"
+          :id="`channel-field-${key}`"
           v-model.number="form.credentials[key]"
           type="number"
           :placeholder="field.example ? String(field.example) : ''"
@@ -117,7 +121,7 @@
           :model-value="String(form.credentials[key] || '')"
           @update:model-value="(val) => form.credentials[key] = val"
         >
-          <SelectTrigger>
+          <SelectTrigger :aria-label="field.title || key">
             <SelectValue :placeholder="field.title" />
           </SelectTrigger>
           <SelectContent>
@@ -134,6 +138,7 @@
         <!-- String field (default) -->
         <Input
           v-else
+          :id="`channel-field-${key}`"
           v-model="form.credentials[key]"
           type="text"
           :placeholder="field.example ? String(field.example) : ''"

@@ -230,7 +230,10 @@
                       v-model="formData.transport"
                       @update:model-value="syncFormToEditJson"
                     >
-                      <SelectTrigger class="w-full">
+                      <SelectTrigger
+                        class="w-full"
+                        aria-label="Transport"
+                      >
                         <SelectValue placeholder="http" />
                       </SelectTrigger>
                       <SelectContent>
@@ -425,7 +428,10 @@
                     <div class="space-y-1.5">
                       <Label>Transport</Label>
                       <Select v-model="formData.transport">
-                        <SelectTrigger class="w-full">
+                        <SelectTrigger
+                          class="w-full"
+                          aria-label="Transport"
+                        >
                           <SelectValue placeholder="http" />
                         </SelectTrigger>
                         <SelectContent>
@@ -726,6 +732,7 @@ const columns = computed<ColumnDef<McpItem>[]>(() => [
         h('input', {
           type: 'checkbox',
           class: 'size-4 cursor-pointer rounded border border-input',
+          'aria-label': 'Select all MCP servers',
           checked: isAllSelected.value,
           onChange: (e: Event) => {
             toggleSelectAll((e.target as HTMLInputElement).checked)
@@ -738,6 +745,7 @@ const columns = computed<ColumnDef<McpItem>[]>(() => [
         h('input', {
           type: 'checkbox',
           class: 'size-4 cursor-pointer rounded border border-input',
+          'aria-label': `Select MCP server ${row.original.name}`,
           checked: selectedIds.value.includes(id),
           onChange: (e: Event) => {
             toggleSelection(id, (e.target as HTMLInputElement).checked)

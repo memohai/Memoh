@@ -11,9 +11,11 @@
             <Button
               variant="ghost"
               size="sm"
+              type="button"
               class="size-8 p-0"
               :disabled="loading || compactLoading || memories.length === 0"
               :title="$t('bots.memory.compact')"
+              :aria-label="$t('bots.memory.compact')"
               @click="openCompactDialog"
             >
               <FontAwesomeIcon
@@ -24,8 +26,10 @@
             <Button
               variant="ghost"
               size="sm"
+              type="button"
               class="size-8 p-0"
               :disabled="loading"
+              :aria-label="$t('common.refresh')"
               @click="loadMemories"
             >
               <FontAwesomeIcon
@@ -66,8 +70,10 @@
           <button
             v-for="item in filteredMemories"
             :key="item.id"
+            type="button"
             class="w-full text-left px-3 py-2 rounded-md text-xs transition-colors hover:bg-accent group relative"
             :class="{ 'bg-accent font-medium text-primary': selectedId === item.id }"
+            :aria-label="`Open memory ${formatDate(item.created_at)}`"
             @click="selectMemory(item)"
           >
             <div class="flex items-center gap-2">
@@ -117,8 +123,10 @@
                 <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5">
                   <span class="font-mono">ID: {{ selectedMemory.id }}</span>
                   <button
+                    type="button"
                     class="hover:text-foreground transition-colors"
                     :title="$t('common.copy')"
+                    :aria-label="$t('common.copy')"
                     @click="copyToClipboard(selectedMemory.id)"
                   >
                     <FontAwesomeIcon
@@ -138,8 +146,10 @@
                   <Button
                     variant="ghost"
                     size="sm"
+                    type="button"
                     class="size-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                     :disabled="actionLoading"
+                    :aria-label="$t('common.delete')"
                   >
                     <FontAwesomeIcon
                       :icon="['far', 'trash-can']"
@@ -382,10 +392,12 @@
             class="h-48 border rounded-md p-2 bg-muted/10 shrink-0"
           >
             <div class="space-y-2">
-              <div
+              <button
                 v-for="(msg, idx) in historyMessages"
                 :key="idx"
-                class="flex items-start gap-2 p-2 rounded hover:bg-muted/50 transition-colors group cursor-pointer"
+                type="button"
+                class="w-full text-left flex items-start gap-2 p-2 rounded hover:bg-muted/50 transition-colors group cursor-pointer"
+                :aria-pressed="selectedHistoryMessages.includes(msg)"
                 @click="toggleMessageSelection(msg)"
               >
                 <div
@@ -409,7 +421,7 @@
                     {{ msg.content?.text || (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)) }}
                   </p>
                 </div>
-              </div>
+              </button>
             </div>
           </ScrollArea>
 

@@ -27,14 +27,19 @@
               name="name"
             >
               <FormItem>
-                <Label class="mb-2">
+                <Label
+                  class="mb-2"
+                  :for="componentField.id || 'provider-create-name'"
+                >
                   {{ $t('common.name') }}
                 </Label>
                 <FormControl>
                   <Input
+                    :id="componentField.id || 'provider-create-name'"
                     type="text"
                     :placeholder="$t('common.namePlaceholder')"
                     v-bind="componentField"
+                    :aria-label="$t('common.name')"
                   />
                 </FormControl>
               </FormItem>
@@ -44,14 +49,19 @@
               name="api_key"
             >
               <FormItem>
-                <Label class="mb-2">
+                <Label
+                  class="mb-2"
+                  :for="componentField.id || 'provider-create-api-key'"
+                >
                   {{ $t('provider.apiKey') }}
                 </Label>
                 <FormControl>
                   <Input
+                    :id="componentField.id || 'provider-create-api-key'"
                     type="text"
                     :placeholder="$t('provider.apiKeyPlaceholder')"
                     v-bind="componentField"
+                    :aria-label="$t('provider.apiKey')"
                   />
                 </FormControl>
               </FormItem>
@@ -61,14 +71,19 @@
               name="base_url"
             >
               <FormItem>
-                <Label class="mb-2">
+                <Label
+                  class="mb-2"
+                  :for="componentField.id || 'provider-create-base-url'"
+                >
                   {{ $t('provider.url') }}
                 </Label>
                 <FormControl>
                   <Input
+                    :id="componentField.id || 'provider-create-base-url'"
                     type="text"
                     :placeholder="$t('provider.urlPlaceholder')"
                     v-bind="componentField"
+                    :aria-label="$t('provider.url')"
                   />
                 </FormControl>
               </FormItem>

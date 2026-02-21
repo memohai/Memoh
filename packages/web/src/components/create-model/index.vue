@@ -28,7 +28,10 @@
                 </Label>
                 <FormControl>
                   <Select v-bind="componentField">
-                    <SelectTrigger class="w-full">
+                    <SelectTrigger
+                      class="w-full"
+                      :aria-label="$t('common.type')"
+                    >
                       <SelectValue :placeholder="$t('common.typePlaceholder')" />
                     </SelectTrigger>
                     <SelectContent>
@@ -75,6 +78,9 @@
                   <button
                     v-for="ct in CLIENT_TYPE_LIST"
                     :key="ct.value"
+                    type="button"
+                    role="option"
+                    :aria-selected="form.values.client_type === ct.value"
                     class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
                     :class="{ 'bg-accent': form.values.client_type === ct.value }"
                     @click="selectClientType(ct.value)"

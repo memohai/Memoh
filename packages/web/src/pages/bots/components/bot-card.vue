@@ -2,7 +2,13 @@
   <Card
     class="group relative transition-shadow"
     :class="isPending ? 'opacity-80 cursor-not-allowed' : 'hover:shadow-md cursor-pointer'"
+    role="button"
+    :tabindex="isPending ? -1 : 0"
+    :aria-disabled="isPending"
+    :aria-label="`Open bot ${(bot.display_name || bot.id)}`"
     @click="onOpenDetail"
+    @keydown.enter.prevent="onOpenDetail"
+    @keydown.space.prevent="onOpenDetail"
   >
     <CardHeader class="flex flex-row items-start gap-3 space-y-0 pb-2">
       <Avatar class="size-11 shrink-0">

@@ -36,6 +36,9 @@
     </header>
     <Separator />
     <section class="w-full relative">
+      <h1 class="sr-only">
+        {{ currentPageTitle }}
+      </h1>
       <ScrollArea class="absolute! inset-0">
         <router-view
           v-slot="{ Component }"
@@ -76,6 +79,12 @@ const curBreadcrumb = computed(() => {
         breadcrumb: typeof raw === 'function' ? raw(route) : raw,
       }
     })
+})
+
+const currentPageTitle = computed(() => {
+  const last = curBreadcrumb.value[curBreadcrumb.value.length - 1]
+  const title = String(last?.breadcrumb ?? '').trim()
+  return title || 'Memoh'
 })
 
 </script>

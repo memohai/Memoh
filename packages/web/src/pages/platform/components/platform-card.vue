@@ -26,7 +26,10 @@
         </CardContent>
       </CardHeader>
       <CardFooter class="flex gap-4">
-        <Switch :model-value="platform.active" />
+        <Switch
+          :model-value="platform.active"
+          :aria-label="`Toggle ${platform.name}`"
+        />
         <Button
           class="ml-auto"
           @click="$emit('edit', platform)"

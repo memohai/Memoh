@@ -1,9 +1,9 @@
 <template>
   <div class="w-56 shrink-0 border-r flex flex-col h-full">
     <div class="p-3 border-b">
-      <h3 class="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+      <p class="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
         {{ $t('sidebar.bots') }}
-      </h3>
+      </p>
     </div>
 
     <ScrollArea class="flex-1">
@@ -23,6 +23,8 @@
         <button
           v-for="bot in bots"
           :key="bot.id"
+          type="button"
+          :aria-pressed="currentBotId === bot.id"
           class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors hover:bg-accent"
           :class="{ 'bg-accent': currentBotId === bot.id }"
           @click="handleSelect(bot)"

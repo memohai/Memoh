@@ -5,6 +5,7 @@
         variant="outline"
         role="combobox"
         :aria-expanded="open"
+        :aria-label="placeholder || 'Select model'"
         class="w-full justify-between font-normal"
       >
         <span class="truncate">
@@ -29,12 +30,16 @@
         <input
           v-model="searchTerm"
           :placeholder="$t('bots.settings.searchModel')"
+          aria-label="Search models"
           class="flex h-10 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
         >
       </div>
 
       <!-- Model list -->
-      <ScrollArea class="max-h-64">
+      <ScrollArea
+        class="max-h-64"
+        role="listbox"
+      >
         <div
           v-if="filteredGroups.length === 0"
           class="py-6 text-center text-sm text-muted-foreground"
@@ -53,6 +58,9 @@
           <button
             v-for="model in group.models"
             :key="model.model_id"
+            type="button"
+            role="option"
+            :aria-selected="selected === model.model_id"
             class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
             :class="{ 'bg-accent': selected === model.model_id }"
             @click="selectModel(model.model_id)"

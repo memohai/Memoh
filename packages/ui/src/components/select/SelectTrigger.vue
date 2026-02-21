@@ -22,7 +22,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     v-bind="forwardedProps"
     :class="cn(
       'flex w-fit items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm whitespace-nowrap shadow-sm transition-all outline-none',
-      'data-[placeholder]:text-gray-400 dark:data-[placeholder]:text-gray-500',
+      'data-[placeholder]:text-gray-500 dark:data-[placeholder]:text-gray-400',
       '[&_svg:not([class*=\'text-\'])]:text-gray-500 dark:[&_svg:not([class*=\'text-\'])]:text-gray-400',
       'focus:border-primary focus:ring-2 focus:ring-primary/20',
       'hover:bg-gray-50 dark:hover:bg-gray-700',

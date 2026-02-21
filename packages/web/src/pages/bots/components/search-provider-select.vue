@@ -5,6 +5,7 @@
         variant="outline"
         role="combobox"
         :aria-expanded="open"
+        :aria-label="placeholder || 'Select search provider'"
         class="w-full justify-between font-normal"
       >
         <span class="flex items-center gap-2 truncate">
@@ -34,12 +35,16 @@
         <input
           v-model="searchTerm"
           :placeholder="$t('searchProvider.searchPlaceholder')"
+          aria-label="Search providers"
           class="flex h-10 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
         >
       </div>
 
       <!-- Provider list -->
-      <ScrollArea class="max-h-64">
+      <ScrollArea
+        class="max-h-64"
+        role="listbox"
+      >
         <div
           v-if="filteredProviders.length === 0 && !searchTerm"
           class="py-6 text-center text-sm text-muted-foreground"
@@ -56,6 +61,9 @@
         <div class="p-1">
           <!-- None option -->
           <button
+            type="button"
+            role="option"
+            :aria-selected="!selected"
             class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
             :class="{ 'bg-accent': !selected }"
             @click="selectProvider('')"
@@ -76,6 +84,9 @@
           <button
             v-for="item in filteredProviders"
             :key="item.id"
+            type="button"
+            role="option"
+            :aria-selected="selected === item.id"
             class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
             :class="{ 'bg-accent': selected === item.id }"
             @click="selectProvider(item.id || '')"

@@ -1,12 +1,19 @@
 <template>
-  <aside class="[&_[data-state=collapsed]_:is(.title-container,.exist-btn)]:hidden">
-    <Sidebar collapsible="icon">
+  <aside
+    aria-label="Primary"
+    class="[&_[data-state=collapsed]_:is(.title-container,.exist-btn)]:hidden"
+  >
+    <Sidebar
+      collapsible="icon"
+      role="navigation"
+      aria-label="Primary"
+    >
       <SidebarHeader class="group-data-[state=collapsed]:hidden">
         <div class="flex items-center gap-2 px-3 py-2">
           <img
             src="/logo.png"
             class="size-8"
-            alt="logo"
+            alt="Memoh logo"
           >
           <span class="text-xl font-bold text-gray-500 dark:text-gray-400">
             Memoh
@@ -30,6 +37,7 @@
                   <Toggle
                     :class="`border border-transparent w-full flex justify-start ${curSlider === sidebarItem.name ? 'border-inherit' : ''}`"
                     :model-value="curSelectSlide(sidebarItem.name as string).value"
+                    :aria-current="curSelectSlide(sidebarItem.name as string).value ? 'page' : undefined"
                     @update:model-value="(isSelect) => {
                       if (isSelect) {
                         curSlider = sidebarItem.name
@@ -61,7 +69,7 @@
                   :src="userInfo.avatarUrl"
                   :alt="displayTitle"
                 />
-                <AvatarFallback class="text-[10px]">
+                <AvatarFallback class="text-[10px] text-gray-600 dark:text-gray-300">
                   {{ avatarFallback }}
                 </AvatarFallback>
               </Avatar>

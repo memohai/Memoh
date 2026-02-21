@@ -55,6 +55,7 @@
         v-model.number="form.max_context_load_time"
         type="number"
         :min="0"
+        :aria-label="$t('bots.settings.maxContextLoadTime')"
       />
     </div>
 
@@ -66,6 +67,7 @@
         type="number"
         :min="0"
         placeholder="0"
+        :aria-label="$t('bots.settings.maxContextTokens')"
       />
     </div>
 
@@ -75,6 +77,7 @@
       <Input
         v-model="form.language"
         type="text"
+        :aria-label="$t('bots.settings.language')"
       />
     </div>
 

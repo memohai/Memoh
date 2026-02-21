@@ -69,7 +69,10 @@
               </Label>
               <FormControl>
                 <Select v-bind="componentField">
-                  <SelectTrigger class="w-full">
+                  <SelectTrigger
+                    class="w-full"
+                    :aria-label="$t('common.type')"
+                  >
                     <SelectValue :placeholder="$t('bots.typePlaceholder')" />
                   </SelectTrigger>
                   <SelectContent>

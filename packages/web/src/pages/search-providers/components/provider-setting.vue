@@ -6,9 +6,9 @@
           :provider="curProvider?.provider || ''"
           size="lg"
         />
-        <h4 class="scroll-m-20 tracking-tight">
+        <h2 class="scroll-m-20 text-base font-semibold tracking-tight">
           {{ curProvider?.name }}
-        </h4>
+        </h2>
       </div>
     </section>
     <Separator class="mt-4 mb-6" />
@@ -16,18 +16,23 @@
     <form @submit="editProvider">
       <div class="**:[input]:mt-3 **:[input]:mb-4">
         <section>
-          <h4 class="scroll-m-20 font-semibold tracking-tight">
-            {{ $t('common.name') }}
-          </h4>
           <FormField
             v-slot="{ componentField }"
             name="name"
           >
             <FormItem>
+              <Label
+                :for="componentField.id || 'search-provider-name'"
+                class="scroll-m-20 font-semibold tracking-tight"
+              >
+                {{ $t('common.name') }}
+              </Label>
               <FormControl>
                 <Input
+                  :id="componentField.id || 'search-provider-name'"
                   type="text"
                   :placeholder="$t('common.namePlaceholder')"
+                  :aria-label="$t('common.name')"
                   v-bind="componentField"
                 />
               </FormControl>
@@ -36,15 +41,22 @@
         </section>
 
         <section>
-          <h4 class="scroll-m-20 font-semibold tracking-tight">
+          <Label
+            for="search-provider-type"
+            class="scroll-m-20 font-semibold tracking-tight"
+          >
             {{ $t('searchProvider.provider') }}
-          </h4>
+          </Label>
           <div class="mt-3 mb-4">
             <Select
               :model-value="form.values.provider"
               @update:model-value="(val) => form.setFieldValue('provider', val)"
             >
-              <SelectTrigger class="w-full">
+              <SelectTrigger
+                id="search-provider-type"
+                class="w-full"
+                :aria-label="$t('searchProvider.provider')"
+              >
                 <SelectValue :placeholder="$t('common.typePlaceholder')" />
               </SelectTrigger>
               <SelectContent>
@@ -82,7 +94,11 @@
           @confirm="deleteProvider"
         >
           <template #trigger>
-            <Button variant="outline">
+            <Button
+              type="button"
+              variant="outline"
+              :aria-label="$t('common.delete')"
+            >
               <FontAwesomeIcon :icon="['far', 'trash-can']" />
             </Button>
           </template>
@@ -115,6 +131,7 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  Label,
 } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import BraveSettings from './brave-settings.vue'
