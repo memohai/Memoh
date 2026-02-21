@@ -6,6 +6,8 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 )
 
+func intPtr(v int) *int { return &v }
+
 func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 	t.Parallel()
 
@@ -30,6 +32,7 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 					},
 				},
 			},
+			UsageOutputTokens: intPtr(50),
 		},
 		{
 			Message: conversation.ModelMessage{
@@ -43,10 +46,13 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 				Role:    "assistant",
 				Content: conversation.NewTextContent("done"),
 			},
+			UsageOutputTokens: intPtr(60),
 		},
 	}
 
-	trimmed := trimMessagesByTokens(messages, 2)
+	// Budget 70: assistant(60) fits, adding assistant-tool-call(50) exceeds →
+	// cutoff lands on the tool message which must be skipped.
+	trimmed := trimMessagesByTokens(messages, 70)
 	if len(trimmed) == 0 {
 		t.Fatal("expected non-empty trimmed messages")
 	}
@@ -73,6 +79,7 @@ func TestTrimMessagesByTokens_KeepsToolWhenPaired(t *testing.T) {
 					},
 				},
 			},
+			UsageOutputTokens: intPtr(10),
 		},
 		{
 			Message: conversation.ModelMessage{
@@ -89,5 +96,19 @@ func TestTrimMessagesByTokens_KeepsToolWhenPaired(t *testing.T) {
 	}
 	if trimmed[0].Role != "assistant" || trimmed[1].Role != "tool" {
 		t.Fatalf("unexpected role order: %q -> %q", trimmed[0].Role, trimmed[1].Role)
+	}
+}
+
+func TestTrimMessagesByTokens_NoUsage_KeepsAll(t *testing.T) {
+	t.Parallel()
+
+	messages := []messageWithUsage{
+		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}},
+		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("hi")}},
+	}
+
+	trimmed := trimMessagesByTokens(messages, 10)
+	if len(trimmed) != 2 {
+		t.Fatalf("messages without outputTokens should all be kept, got %d", len(trimmed))
 	}
 }

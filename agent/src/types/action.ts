@@ -64,6 +64,7 @@ export interface AgentEndAction extends BaseAction {
   skills: string[]
   reasoning: string[]
   usage: LanguageModelUsage
+  usages: (LanguageModelUsage | null)[]
 }
 
 export type AgentAction = 

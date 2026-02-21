@@ -22,6 +22,18 @@ import { system, schedule, subagentSystem } from './prompts'
 import { AuthFetcher } from './index'
 import { createModel } from './model'
 import { AgentAction } from './types/action'
+
+const buildStepUsages = (
+  steps: { usage: LanguageModelUsage; response: { messages: unknown[] } }[],
+): (LanguageModelUsage | null)[] => {
+  const usages: (LanguageModelUsage | null)[] = []
+  for (const step of steps) {
+    for (let i = 0; i < step.response.messages.length; i++) {
+      usages.push(i === 0 ? step.usage : null)
+    }
+  }
+  return usages
+}
 import {
   extractAttachmentsFromText,
   stripAttachmentsFromMessages,
@@ -206,7 +218,7 @@ export const createAgent = (
     input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
     const { tools, close } = await getAgentTools()
-    const { response, reasoning, text, usage } = await generateText({
+    const { response, reasoning, text, usage, steps } = await generateText({
       model,
       messages,
       system: systemPrompt,
@@ -221,6 +233,7 @@ export const createAgent = (
       },
       tools,
     })
+    const stepUsages = buildStepUsages(steps)
     const { cleanedText, attachments: textAttachments } =
       extractAttachmentsFromText(text)
     const { messages: strippedMessages, attachments: messageAttachments } =
@@ -234,6 +247,7 @@ export const createAgent = (
         userPrompt,
         ...strippedMessages,
       ],
+      usages: [null, ...stepUsages] as (LanguageModelUsage | null)[],
       reasoning: reasoning.map((part) => part.text),
       usage,
       text: cleanedText,
@@ -261,7 +275,7 @@ export const createAgent = (
     }
     const messages = [...params.messages, userPrompt]
     const { tools, close } = await getAgentTools()
-    const { response, reasoning, text, usage } = await generateText({
+    const { response, reasoning, text, usage, steps } = await generateText({
       model,
       messages,
       system: generateSubagentSystemPrompt(),
@@ -276,8 +290,10 @@ export const createAgent = (
       },
       tools,
     })
+    const stepUsages = buildStepUsages(steps)
     return {
       messages: [userPrompt, ...response.messages],
+      usages: [null, ...stepUsages] as (LanguageModelUsage | null)[],
       reasoning: reasoning.map((part) => part.text),
       usage,
       text,
@@ -302,7 +318,7 @@ export const createAgent = (
     const messages = [...params.messages, scheduleMessage]
     params.skills.forEach((skill) => enableSkill(skill))
     const { tools, close } = await getAgentTools()
-    const { response, reasoning, text, usage } = await generateText({
+    const { response, reasoning, text, usage, steps } = await generateText({
       model,
       messages,
       system: await generateSystemPrompt(),
@@ -312,8 +328,10 @@ export const createAgent = (
       },
       tools,
     })
+    const stepUsages = buildStepUsages(steps)
     return {
       messages: [scheduleMessage, ...response.messages],
+      usages: [null, ...stepUsages] as (LanguageModelUsage | null)[],
       reasoning: reasoning.map((part) => part.text),
       usage,
       text,
@@ -353,148 +371,157 @@ export const createAgent = (
       messages: ModelMessage[];
       reasoning: string[];
       usage: LanguageModelUsage | null;
+      usages: (LanguageModelUsage | null)[];
     } = {
       messages: [],
       reasoning: [],
       usage: null,
+      usages: [],
     }
     const { tools, close } = await getAgentTools()
-    const { fullStream } = streamText({
-      model,
-      messages,
-      system: systemPrompt,
-      stopWhen: stepCountIs(Infinity),
-      prepareStep: () => {
-        return {
-          system: systemPrompt,
-        }
-      },
-      tools,
-      onFinish: async ({ usage, reasoning, response }) => {
-        await close()
-        result.usage = usage as never
-        result.reasoning = reasoning.map((part) => part.text)
-        result.messages = response.messages
-      },
-    })
-    yield {
-      type: 'agent_start',
-      input,
-    }
-    for await (const chunk of fullStream) {
-      if (chunk.type === 'error') {
-        throw new Error(
-          resolveStreamErrorMessage((chunk as { error?: unknown }).error),
-        )
+    try {
+      const { fullStream } = streamText({
+        model,
+        messages,
+        system: systemPrompt,
+        stopWhen: stepCountIs(Infinity),
+        prepareStep: () => {
+          return {
+            system: systemPrompt,
+          }
+        },
+        tools,
+        onFinish: async ({ usage, reasoning, response, steps }) => {
+          await close()
+          result.usage = usage as never
+          result.reasoning = reasoning.map((part) => part.text)
+          result.messages = response.messages
+          result.usages = buildStepUsages(steps)
+        },
+      })
+      yield {
+        type: 'agent_start',
+        input,
       }
-      switch (chunk.type) {
-        case 'reasoning-start':
-          yield {
-            type: 'reasoning_start',
-            metadata: chunk,
-          }
-          break
-        case 'reasoning-delta':
-          yield {
-            type: 'reasoning_delta',
-            delta: chunk.text,
-          }
-          break
-        case 'reasoning-end':
-          yield {
-            type: 'reasoning_end',
-            metadata: chunk,
-          }
-          break
-        case 'text-start':
-          yield {
-            type: 'text_start',
-          }
-          break
-        case 'text-delta': {
-          const { visibleText, attachments } = attachmentsExtractor.push(
-            chunk.text,
+      for await (const chunk of fullStream) {
+        if (chunk.type === 'error') {
+          throw new Error(
+            resolveStreamErrorMessage((chunk as { error?: unknown }).error),
           )
-          if (visibleText) {
+        }
+        switch (chunk.type) {
+          case 'reasoning-start':
             yield {
-              type: 'text_delta',
-              delta: visibleText,
+              type: 'reasoning_start',
+              metadata: chunk,
             }
+            break
+          case 'reasoning-delta':
+            yield {
+              type: 'reasoning_delta',
+              delta: chunk.text,
+            }
+            break
+          case 'reasoning-end':
+            yield {
+              type: 'reasoning_end',
+              metadata: chunk,
+            }
+            break
+          case 'text-start':
+            yield {
+              type: 'text_start',
+            }
+            break
+          case 'text-delta': {
+            const { visibleText, attachments } = attachmentsExtractor.push(
+              chunk.text,
+            )
+            if (visibleText) {
+              yield {
+                type: 'text_delta',
+                delta: visibleText,
+              }
+            }
+            if (attachments.length) {
+              yield {
+                type: 'attachment_delta',
+                attachments,
+              }
+            }
+            break
           }
-          if (attachments.length) {
+          case 'text-end': {
+            // Flush any remaining buffered content before ending the text stream.
+            const remainder = attachmentsExtractor.flushRemainder()
+            if (remainder.visibleText) {
+              yield {
+                type: 'text_delta',
+                delta: remainder.visibleText,
+              }
+            }
+            if (remainder.attachments.length) {
+              yield {
+                type: 'attachment_delta',
+                attachments: remainder.attachments,
+              }
+            }
+            yield {
+              type: 'text_end',
+              metadata: chunk,
+            }
+            break
+          }
+          case 'tool-call':
+            yield {
+              type: 'tool_call_start',
+              toolName: chunk.toolName,
+              toolCallId: chunk.toolCallId,
+              input: chunk.input,
+              metadata: chunk,
+            }
+            break
+          case 'tool-result':
+            yield {
+              type: 'tool_call_end',
+              toolName: chunk.toolName,
+              toolCallId: chunk.toolCallId,
+              input: chunk.input,
+              result: chunk.output,
+              metadata: chunk,
+            }
+            break
+          case 'file':
             yield {
               type: 'attachment_delta',
-              attachments,
+              attachments: [
+                {
+                  type: 'image',
+                  url: `data:${chunk.file.mediaType ?? 'image/png'};base64,${chunk.file.base64}`,
+                  mime: chunk.file.mediaType ?? 'image/png',
+                },
+              ],
             }
-          }
-          break
         }
-        case 'text-end': {
-          // Flush any remaining buffered content before ending the text stream.
-          const remainder = attachmentsExtractor.flushRemainder()
-          if (remainder.visibleText) {
-            yield {
-              type: 'text_delta',
-              delta: remainder.visibleText,
-            }
-          }
-          if (remainder.attachments.length) {
-            yield {
-              type: 'attachment_delta',
-              attachments: remainder.attachments,
-            }
-          }
-          yield {
-            type: 'text_end',
-            metadata: chunk,
-          }
-          break
-        }
-        case 'tool-call':
-          yield {
-            type: 'tool_call_start',
-            toolName: chunk.toolName,
-            toolCallId: chunk.toolCallId,
-            input: chunk.input,
-            metadata: chunk,
-          }
-          break
-        case 'tool-result':
-          yield {
-            type: 'tool_call_end',
-            toolName: chunk.toolName,
-            toolCallId: chunk.toolCallId,
-            input: chunk.input,
-            result: chunk.output,
-            metadata: chunk,
-          }
-          break
-        case 'file':
-          yield {
-            type: 'attachment_delta',
-            attachments: [
-              {
-                type: 'image',
-                url: `data:${chunk.file.mediaType ?? 'image/png'};base64,${chunk.file.base64}`,
-                mime: chunk.file.mediaType ?? 'image/png',
-              },
-            ],
-          }
       }
-    }
-
-    const { messages: strippedMessages } = stripAttachmentsFromMessages(
-      result.messages,
-    )
-    yield {
-      type: 'agent_end',
-      messages: [
-        userPrompt,
-        ...strippedMessages,
-      ],
-      reasoning: result.reasoning,
-      usage: result.usage!,
-      skills: getEnabledSkills(),
+  
+      const { messages: strippedMessages } = stripAttachmentsFromMessages(
+        result.messages,
+      )
+      yield {
+        type: 'agent_end',
+        messages: [
+          userPrompt,
+          ...strippedMessages,
+        ],
+        usages: [null, ...result.usages],
+        reasoning: result.reasoning,
+        usage: result.usage!,
+        skills: getEnabledSkills(),
+      }
+    } catch (error) {
+      console.error(error)
+      throw error
     }
   }
 
