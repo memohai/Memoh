@@ -31,6 +31,7 @@ import type { GatewayInputAttachment } from './types/attachment'
 import { getMCPTools } from './tools/mcp'
 import { getTools } from './tools'
 import { buildIdentityHeaders } from './utils/headers'
+import { createFS } from './utils'
 
 const buildStepUsages = (
   steps: { usage: LanguageModelUsage; response: { messages: unknown[] } }[],
@@ -77,6 +78,7 @@ export const createAgent = (
 ) => {
   const model = createModel(modelConfig)
   const enabledSkills: AgentSkill[] = []
+  const fs = createFS({ fetch, botId: identity.botId })
 
   const enableSkill = (skill: string) => {
     const agentSkill = skills.find((s) => s.name === skill)
@@ -90,58 +92,12 @@ export const createAgent = (
   }
 
   const loadSystemFiles = async () => {
-    if (!auth?.bearer || !identity.botId) {
-      return {
-        identityContent: '',
-        soulContent: '',
-        toolsContent: '',
-      }
-    }
-    const readViaMCP = async (path: string): Promise<string> => {
-      const url = `${auth.baseUrl.replace(/\/$/, '')}/bots/${identity.botId}/tools`
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        Accept: 'application/json, text/event-stream',
-        Authorization: `Bearer ${auth.bearer}`,
-      }
-      if (identity.channelIdentityId) {
-        headers['X-Memoh-Channel-Identity-Id'] = identity.channelIdentityId
-      }
-      const body = JSON.stringify({
-        jsonrpc: '2.0',
-        id: `read-${path}`,
-        method: 'tools/call',
-        params: { name: 'read', arguments: { path } },
-      })
-      const response = await fetch(url, { method: 'POST', headers, body })
-      if (!response.ok) return ''
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = await response.json().catch(() => ({})) as any
-      const structured =
-        data?.result?.structuredContent ?? data?.result?.content?.[0]?.text
-      if (typeof structured === 'string') {
-        try {
-          const parsed = JSON.parse(structured)
-          return typeof parsed?.content === 'string' ? parsed.content : ''
-        } catch {
-          return structured
-        }
-      }
-      if (typeof structured === 'object' && structured?.content) {
-        return typeof structured.content === 'string' ? structured.content : ''
-      }
-      return ''
-    }
     const [identityContent, soulContent, toolsContent] = await Promise.all([
-      readViaMCP('IDENTITY.md'),
-      readViaMCP('SOUL.md'),
-      readViaMCP('TOOLS.md'),
+      fs.readText('/data/IDENTITY.md'),
+      fs.readText('/data/SOUL.md'),
+      fs.readText('/data/TOOLS.md'),
     ])
-    return {
-      identityContent,
-      soulContent,
-      toolsContent,
-    }
+    return { identityContent, soulContent, toolsContent }
   }
 
   const generateSystemPrompt = async () => {
