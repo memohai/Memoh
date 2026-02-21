@@ -3,7 +3,7 @@ package handlers
 import (
 	"testing"
 
-	"github.com/containerd/containerd/v2/core/snapshots"
+	ctr "github.com/memohai/memoh/internal/containerd"
 )
 
 func TestSnapshotLineage(t *testing.T) {
@@ -12,14 +12,14 @@ func TestSnapshotLineage(t *testing.T) {
 	tests := []struct {
 		name      string
 		root      string
-		input     []snapshots.Info
+		input     []ctr.SnapshotInfo
 		wantFound bool
 		wantNames []string
 	}{
 		{
 			name: "walk full snapshot ancestry",
 			root: "active-3",
-			input: []snapshots.Info{
+			input: []ctr.SnapshotInfo{
 				{Name: "active-3", Parent: "version-2"},
 				{Name: "version-2", Parent: "version-1"},
 				{Name: "version-1", Parent: "sha256:base-layer"},
@@ -32,7 +32,7 @@ func TestSnapshotLineage(t *testing.T) {
 		{
 			name: "root snapshot not found",
 			root: "missing",
-			input: []snapshots.Info{
+			input: []ctr.SnapshotInfo{
 				{Name: "active-1", Parent: "sha256:base-layer"},
 				{Name: "sha256:base-layer", Parent: ""},
 			},
@@ -42,7 +42,7 @@ func TestSnapshotLineage(t *testing.T) {
 		{
 			name: "missing parent keeps known chain",
 			root: "active-1",
-			input: []snapshots.Info{
+			input: []ctr.SnapshotInfo{
 				{Name: "active-1", Parent: "version-1"},
 			},
 			wantFound: true,
@@ -51,7 +51,7 @@ func TestSnapshotLineage(t *testing.T) {
 		{
 			name: "cycle is bounded by visited set",
 			root: "a",
-			input: []snapshots.Info{
+			input: []ctr.SnapshotInfo{
 				{Name: "a", Parent: "b"},
 				{Name: "b", Parent: "a"},
 			},

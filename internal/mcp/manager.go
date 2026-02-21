@@ -11,10 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
@@ -118,23 +116,22 @@ func (m *Manager) EnsureBot(ctx context.Context, botID string) error {
 		return err
 	}
 
-	specOpts := []oci.SpecOpts{
-		oci.WithMounts([]specs.Mount{
-			{
-				Destination: dataMount,
-				Type:        "bind",
-				Source:      dataDir,
-				Options:     []string{"rbind", "rw"},
-			},
-			{
-				Destination: "/etc/resolv.conf",
-				Type:        "bind",
-				Source:      resolvPath,
-				Options:     []string{"rbind", "ro"},
-			},
-		}),
+	mounts := []ctr.MountSpec{
+		{
+			Destination: dataMount,
+			Type:        "bind",
+			Source:      dataDir,
+			Options:     []string{"rbind", "rw"},
+		},
+		{
+			Destination: "/etc/resolv.conf",
+			Type:        "bind",
+			Source:      resolvPath,
+			Options:     []string{"rbind", "ro"},
+		},
 	}
-	specOpts = append(specOpts, ctr.TimezoneSpecOpts()...)
+	tzMounts, tzEnv := ctr.TimezoneSpec()
+	mounts = append(mounts, tzMounts...)
 
 	_, err = m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
 		ID:          m.containerID(botID),
@@ -143,7 +140,10 @@ func (m *Manager) EnsureBot(ctx context.Context, botID string) error {
 		Labels: map[string]string{
 			BotLabelKey: botID,
 		},
-		SpecOpts: specOpts,
+		Spec: ctr.ContainerSpec{
+			Mounts: mounts,
+			Env:    tzEnv,
+		},
 	})
 	if err == nil {
 		return nil
@@ -164,11 +164,7 @@ func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 	}
 
 	botIDs := make([]string, 0, len(containers))
-	for _, container := range containers {
-		info, err := container.Info(ctx)
-		if err != nil {
-			return nil, err
-		}
+	for _, info := range containers {
 		if strings.HasPrefix(info.ID, ContainerPrefix) {
 			if botID, ok := info.Labels[BotLabelKey]; ok {
 				botIDs = append(botIDs, botID)
@@ -183,14 +179,17 @@ func (m *Manager) Start(ctx context.Context, botID string) error {
 		return err
 	}
 
-	task, err := m.service.StartTask(ctx, m.containerID(botID), &ctr.StartTaskOptions{
+	if err := m.service.StartContainer(ctx, m.containerID(botID), &ctr.StartTaskOptions{
 		UseStdio: false,
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
-	if err := ctr.SetupNetwork(ctx, task, m.containerID(botID), m.cfg.CNIBinaryDir, m.cfg.CNIConfigDir); err != nil {
-		if stopErr := m.service.StopTask(ctx, m.containerID(botID), &ctr.StopTaskOptions{Force: true}); stopErr != nil {
+	if err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+		ContainerID: m.containerID(botID),
+		CNIBinDir:   m.cfg.CNIBinaryDir,
+		CNIConfDir:  m.cfg.CNIConfigDir,
+	}); err != nil {
+		if stopErr := m.service.StopContainer(ctx, m.containerID(botID), &ctr.StopTaskOptions{Force: true}); stopErr != nil {
 			m.logger.Warn("cleanup: stop task failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", stopErr))
 		}
 		return err
@@ -202,7 +201,7 @@ func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration)
 	if err := validateBotID(botID); err != nil {
 		return err
 	}
-	return m.service.StopTask(ctx, m.containerID(botID), &ctr.StopTaskOptions{
+	return m.service.StopContainer(ctx, m.containerID(botID), &ctr.StopTaskOptions{
 		Timeout: timeout,
 		Force:   true,
 	})
@@ -213,10 +212,12 @@ func (m *Manager) Delete(ctx context.Context, botID string) error {
 		return err
 	}
 
-	if task, taskErr := m.service.GetTask(ctx, m.containerID(botID)); taskErr == nil {
-		if err := ctr.RemoveNetwork(ctx, task, m.containerID(botID), m.cfg.CNIBinaryDir, m.cfg.CNIConfigDir); err != nil {
-			m.logger.Warn("cleanup: remove network failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", err))
-		}
+	if err := m.service.RemoveNetwork(ctx, ctr.NetworkSetupRequest{
+		ContainerID: m.containerID(botID),
+		CNIBinDir:   m.cfg.CNIBinaryDir,
+		CNIConfDir:  m.cfg.CNIConfigDir,
+	}); err != nil {
+		m.logger.Warn("cleanup: remove network failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", err))
 	}
 	if err := m.service.DeleteTask(ctx, m.containerID(botID), &ctr.DeleteTaskOptions{Force: true}); err != nil {
 		m.logger.Warn("cleanup: delete task failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", err))
