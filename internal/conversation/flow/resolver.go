@@ -1753,21 +1753,69 @@ func parseResolverUUID(id string) (pgtype.UUID, error) {
 	return db.ParseUUID(id)
 }
 
+// UserMessageMeta holds the structured metadata attached to every user
+// message. It is the single source of truth shared by the YAML header
+// (sent to the LLM) and the inbox content JSONB.
+type UserMessageMeta struct {
+	ChannelIdentityID string   `json:"channel-identity-id"`
+	DisplayName       string   `json:"display-name"`
+	Channel           string   `json:"channel"`
+	ConversationType  string   `json:"conversation-type"`
+	Time              string   `json:"time"`
+	AttachmentPaths   []string `json:"attachments"`
+}
+
+// BuildUserMessageMeta constructs a UserMessageMeta from the inbound
+// parameters. Both FormatUserHeader and inbox content use this.
+func BuildUserMessageMeta(channelIdentityID, displayName, channel, conversationType string, attachmentPaths []string) UserMessageMeta {
+	if attachmentPaths == nil {
+		attachmentPaths = []string{}
+	}
+	return UserMessageMeta{
+		ChannelIdentityID: channelIdentityID,
+		DisplayName:       displayName,
+		Channel:           channel,
+		ConversationType:  conversationType,
+		Time:              time.Now().UTC().Format(time.RFC3339),
+		AttachmentPaths:   attachmentPaths,
+	}
+}
+
+// ToMap returns the metadata as a map with the same keys used in the YAML
+// header, suitable for storing as inbox content JSONB.
+func (m UserMessageMeta) ToMap() map[string]any {
+	return map[string]any{
+		"channel-identity-id": m.ChannelIdentityID,
+		"display-name":        m.DisplayName,
+		"channel":             m.Channel,
+		"conversation-type":   m.ConversationType,
+		"time":                m.Time,
+		"attachments":         m.AttachmentPaths,
+	}
+}
+
 // FormatUserHeader wraps a user query with YAML front-matter metadata so
 // the LLM sees structured context (sender, channel, time, attachments)
 // alongside the raw message. This must be the single source of truth for
 // user-message formatting — the agent gateway must NOT add its own header.
 func FormatUserHeader(channelIdentityID, displayName, channel, conversationType string, attachmentPaths []string, query string) string {
+	meta := BuildUserMessageMeta(channelIdentityID, displayName, channel, conversationType, attachmentPaths)
+	return FormatUserHeaderFromMeta(meta, query)
+}
+
+// FormatUserHeaderFromMeta formats a pre-built UserMessageMeta into the
+// YAML front-matter string sent to the LLM.
+func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
-	writeYAMLString(&sb, "channel-identity-id", channelIdentityID)
-	writeYAMLString(&sb, "display-name", displayName)
-	writeYAMLString(&sb, "channel", channel)
-	writeYAMLString(&sb, "conversation-type", conversationType)
-	writeYAMLString(&sb, "time", time.Now().UTC().Format(time.RFC3339))
-	if len(attachmentPaths) > 0 {
+	writeYAMLString(&sb, "channel-identity-id", meta.ChannelIdentityID)
+	writeYAMLString(&sb, "display-name", meta.DisplayName)
+	writeYAMLString(&sb, "channel", meta.Channel)
+	writeYAMLString(&sb, "conversation-type", meta.ConversationType)
+	writeYAMLString(&sb, "time", meta.Time)
+	if len(meta.AttachmentPaths) > 0 {
 		sb.WriteString("attachments:\n")
-		for _, p := range attachmentPaths {
+		for _, p := range meta.AttachmentPaths {
 			sb.WriteString("  - ")
 			sb.WriteString(p)
 			sb.WriteByte('\n')

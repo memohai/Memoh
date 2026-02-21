@@ -224,8 +224,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				slog.Int("attachments", len(attachments)),
 			)
 		}
-		p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, attachments, "passive_sync")
-		p.createInboxItem(ctx, identity, msg, text, resolved.RouteID)
+		p.createInboxItem(ctx, identity, msg, text, attachments, resolved.RouteID)
 		return nil
 	}
 	userMessagePersisted := p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, attachments, "active_chat")
@@ -709,29 +708,47 @@ func (p *ChannelInboundProcessor) createInboxItem(
 	ident InboundIdentity,
 	msg channel.InboundMessage,
 	text string,
+	attachments []conversation.ChatAttachment,
 	routeID string,
 ) {
 	if p.inboxService == nil {
 		return
 	}
 	botID := strings.TrimSpace(ident.BotID)
-	if botID == "" || strings.TrimSpace(text) == "" {
+	if botID == "" {
+		return
+	}
+	trimmedText := strings.TrimSpace(text)
+	if trimmedText == "" && len(attachments) == 0 {
 		return
 	}
 	displayName := strings.TrimSpace(ident.DisplayName)
 	if displayName == "" {
 		displayName = "Unknown"
 	}
+
+	var attachmentPaths []string
+	for _, att := range attachments {
+		if p := strings.TrimSpace(att.Path); p != "" {
+			attachmentPaths = append(attachmentPaths, p)
+		}
+	}
+
+	meta := flow.BuildUserMessageMeta(
+		strings.TrimSpace(ident.ChannelIdentityID),
+		displayName,
+		msg.Channel.String(),
+		strings.TrimSpace(msg.Conversation.Type),
+		attachmentPaths,
+	)
+	content := meta.ToMap()
+	content["text"] = trimmedText
+	content["route_id"] = strings.TrimSpace(routeID)
+
 	if _, err := p.inboxService.Create(ctx, inbox.CreateRequest{
-		BotID:  botID,
-		Source: msg.Channel.String(),
-		Content: map[string]any{
-			"text":                strings.TrimSpace(text),
-			"sender_display_name": displayName,
-			"sender_identity_id":  strings.TrimSpace(ident.ChannelIdentityID),
-			"route_id":            strings.TrimSpace(routeID),
-			"conversation_type":   strings.TrimSpace(msg.Conversation.Type),
-		},
+		BotID:   botID,
+		Source:  msg.Channel.String(),
+		Content: content,
 	}); err != nil && p.logger != nil {
 		p.logger.Warn("create inbox item failed", slog.Any("error", err), slog.String("bot_id", botID))
 	}

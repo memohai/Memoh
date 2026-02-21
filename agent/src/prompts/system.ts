@@ -28,18 +28,13 @@ ${skill.content}
 
 const formatInbox = (items: InboxItem[]): string => {
   if (!items || items.length === 0) return ''
-  const lines = items.map(item => {
-    const time = item.createdAt
-    const text = (item.content.text as string) || JSON.stringify(item.content)
-    return `- [${time}] ${item.source}: ${text}`
-  })
   return `
 ## Inbox
 
 You have ${items.length} unread message(s) in your inbox. These are messages from group conversations where you were not directly mentioned, or notifications from external sources. Review them to stay informed about ongoing discussions.
 
 <inbox>
-${lines.join('\n')}
+${JSON.stringify(items)}
 </inbox>
 
 Use ${quote('search_inbox')} to find older messages by keyword.
