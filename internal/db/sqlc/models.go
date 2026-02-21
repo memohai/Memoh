@@ -20,6 +20,7 @@ type Bot struct {
 	MaxContextTokens   int32              `json:"max_context_tokens"`
 	Language           string             `json:"language"`
 	AllowGuest         bool               `json:"allow_guest"`
+	MaxInboxItems      int32              `json:"max_inbox_items"`
 	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
 	MemoryModelID      pgtype.UUID        `json:"memory_model_id"`
 	EmbeddingModelID   pgtype.UUID        `json:"embedding_model_id"`
@@ -81,6 +82,16 @@ type BotHistoryMessageAsset struct {
 	Ordinal     int32              `json:"ordinal"`
 	ContentHash string             `json:"content_hash"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type BotInbox struct {
+	ID        pgtype.UUID        `json:"id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	Source    string             `json:"source"`
+	Content   []byte             `json:"content"`
+	IsRead    bool               `json:"is_read"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ReadAt    pgtype.Timestamptz `json:"read_at"`
 }
 
 type BotMember struct {

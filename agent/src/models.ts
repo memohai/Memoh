@@ -76,3 +76,10 @@ export const StdioMCPConnectionModel = z.object({
 })
 
 export const MCPConnectionModel = z.union([HTTPMCPConnectionModel, SSEMCPConnectionModel, StdioMCPConnectionModel])
+
+export const InboxItemModel = z.object({
+  id: z.string(),
+  source: z.string(),
+  content: z.record(z.string(), z.unknown()).default({}),
+  createdAt: z.string(),
+})

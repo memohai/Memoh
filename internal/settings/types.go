@@ -2,6 +2,7 @@ package settings
 
 const (
 	DefaultMaxContextLoadTime = 24 * 60
+	DefaultMaxInboxItems      = 50
 	DefaultLanguage           = "auto"
 )
 
@@ -12,6 +13,7 @@ type Settings struct {
 	SearchProviderID   string `json:"search_provider_id"`
 	MaxContextLoadTime int    `json:"max_context_load_time"`
 	MaxContextTokens   int    `json:"max_context_tokens"`
+	MaxInboxItems      int    `json:"max_inbox_items"`
 	Language           string `json:"language"`
 	AllowGuest         bool   `json:"allow_guest"`
 }
@@ -23,6 +25,7 @@ type UpsertRequest struct {
 	SearchProviderID   string `json:"search_provider_id,omitempty"`
 	MaxContextLoadTime *int   `json:"max_context_load_time,omitempty"`
 	MaxContextTokens   *int   `json:"max_context_tokens,omitempty"`
+	MaxInboxItems      *int   `json:"max_inbox_items,omitempty"`
 	Language           string `json:"language,omitempty"`
 	AllowGuest         *bool  `json:"allow_guest,omitempty"`
 }

@@ -30,6 +30,13 @@ export enum AgentAction {
 
 export const allActions = Object.values(AgentAction)
 
+export interface InboxItem {
+  id: string
+  source: string
+  content: Record<string, unknown>
+  createdAt: string
+}
+
 export interface AgentParams {
   model: ModelConfig
   language?: string
@@ -41,6 +48,7 @@ export interface AgentParams {
   identity?: IdentityContext
   auth: AgentAuthContext
   skills?: AgentSkill[]
+  inbox?: InboxItem[]
 }
 
 export interface AgentInput {

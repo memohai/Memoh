@@ -142,11 +142,11 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err != nil {
 		return Bot{}, err
 	}
-	bot, err := toBot(row)
+	bot, err := toBot(asSQLCBot(row))
 	if err != nil {
 		return Bot{}, err
 	}
-	if err := s.attachCheckSummary(ctx, &bot, row); err != nil {
+	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
 	s.enqueueCreateLifecycle(bot.ID)
@@ -166,11 +166,11 @@ func (s *Service) Get(ctx context.Context, botID string) (Bot, error) {
 	if err != nil {
 		return Bot{}, err
 	}
-	bot, err := toBot(row)
+	bot, err := toBot(asSQLCBot(row))
 	if err != nil {
 		return Bot{}, err
 	}
-	if err := s.attachCheckSummary(ctx, &bot, row); err != nil {
+	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
 	return bot, nil
@@ -191,11 +191,11 @@ func (s *Service) ListByOwner(ctx context.Context, ownerUserID string) ([]Bot, e
 	}
 	items := make([]Bot, 0, len(rows))
 	for _, row := range rows {
-		item, err := toBot(row)
+		item, err := toBot(asSQLCBot(row))
 		if err != nil {
 			return nil, err
 		}
-		if err := s.attachCheckSummary(ctx, &item, row); err != nil {
+		if err := s.attachCheckSummary(ctx, &item, asSQLCBot(row)); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -218,11 +218,11 @@ func (s *Service) ListByMember(ctx context.Context, channelIdentityID string) ([
 	}
 	items := make([]Bot, 0, len(rows))
 	for _, row := range rows {
-		item, err := toBot(row)
+		item, err := toBot(asSQLCBot(row))
 		if err != nil {
 			return nil, err
 		}
-		if err := s.attachCheckSummary(ctx, &item, row); err != nil {
+		if err := s.attachCheckSummary(ctx, &item, asSQLCBot(row)); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -305,11 +305,11 @@ func (s *Service) Update(ctx context.Context, botID string, req UpdateBotRequest
 	if err != nil {
 		return Bot{}, err
 	}
-	bot, err := toBot(row)
+	bot, err := toBot(asSQLCBot(row))
 	if err != nil {
 		return Bot{}, err
 	}
-	if err := s.attachCheckSummary(ctx, &bot, row); err != nil {
+	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
 	return bot, nil
@@ -338,11 +338,11 @@ func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID s
 	if err != nil {
 		return Bot{}, err
 	}
-	bot, err := toBot(row)
+	bot, err := toBot(asSQLCBot(row))
 	if err != nil {
 		return Bot{}, err
 	}
-	if err := s.attachCheckSummary(ctx, &bot, row); err != nil {
+	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
 	return bot, nil
@@ -387,7 +387,7 @@ func (s *Service) ListChecks(ctx context.Context, botID string) ([]BotCheck, err
 	if err != nil {
 		return nil, err
 	}
-	return s.buildRuntimeChecks(ctx, row, true)
+	return s.buildRuntimeChecks(ctx, asSQLCBot(row), true)
 }
 
 func (s *Service) enqueueCreateLifecycle(botID string) {
@@ -614,6 +614,27 @@ func normalizeMemberRole(raw string) (string, error) {
 		return role, nil
 	default:
 		return "", fmt.Errorf("invalid member role: %s", raw)
+	}
+}
+
+func asSQLCBot(v any) sqlc.Bot {
+	switch r := v.(type) {
+	case sqlc.Bot:
+		return r
+	case sqlc.CreateBotRow:
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, MemoryModelID: r.MemoryModelID, EmbeddingModelID: r.EmbeddingModelID, SearchProviderID: r.SearchProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	case sqlc.GetBotByIDRow:
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, MemoryModelID: r.MemoryModelID, EmbeddingModelID: r.EmbeddingModelID, SearchProviderID: r.SearchProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	case sqlc.ListBotsByOwnerRow:
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, MemoryModelID: r.MemoryModelID, EmbeddingModelID: r.EmbeddingModelID, SearchProviderID: r.SearchProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	case sqlc.ListBotsByMemberRow:
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, MemoryModelID: r.MemoryModelID, EmbeddingModelID: r.EmbeddingModelID, SearchProviderID: r.SearchProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	case sqlc.UpdateBotProfileRow:
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, MemoryModelID: r.MemoryModelID, EmbeddingModelID: r.EmbeddingModelID, SearchProviderID: r.SearchProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	case sqlc.UpdateBotOwnerRow:
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, MemoryModelID: r.MemoryModelID, EmbeddingModelID: r.EmbeddingModelID, SearchProviderID: r.SearchProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	default:
+		return sqlc.Bot{}
 	}
 }
 

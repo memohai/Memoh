@@ -12,6 +12,7 @@ import {
   AgentInput,
   AgentParams,
   AgentSkill,
+  InboxItem,
   allActions,
   MCPConnection,
   Schedule,
@@ -59,6 +60,7 @@ export const createAgent = (
       displayName: '',
     },
     auth,
+    inbox = [],
   }: AgentParams,
   fetch: AuthFetcher,
 ) => {
@@ -144,6 +146,7 @@ export const createAgent = (
       identityContent,
       soulContent,
       toolsContent,
+      inbox,
     })
   }
 

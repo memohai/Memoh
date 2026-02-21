@@ -21,6 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/memory"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
@@ -75,6 +76,7 @@ type Resolver struct {
 	conversationSvc ConversationSettingsReader
 	messageService  messagepkg.Service
 	settingsService *settings.Service
+	inboxService    *inbox.Service
 	skillLoader     SkillLoader
 	assetLoader     gatewayAssetLoader
 	gatewayBaseURL  string
@@ -129,6 +131,12 @@ func (r *Resolver) SetGatewayAssetLoader(loader gatewayAssetLoader) {
 	r.assetLoader = loader
 }
 
+// SetInboxService configures inbox support for injecting unread items into the
+// system prompt and marking them as read after a response.
+func (r *Resolver) SetInboxService(service *inbox.Service) {
+	r.inboxService = service
+}
+
 // --- gateway payload ---
 
 type gatewayModelConfig struct {
@@ -156,6 +164,13 @@ type gatewaySkill struct {
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
+type gatewayInboxItem struct {
+	ID        string         `json:"id"`
+	Source    string         `json:"source"`
+	Content   map[string]any `json:"content"`
+	CreatedAt string         `json:"createdAt"`
+}
+
 type gatewayRequest struct {
 	Model             gatewayModelConfig          `json:"model"`
 	ActiveContextTime int                         `json:"activeContextTime"`
@@ -168,6 +183,7 @@ type gatewayRequest struct {
 	Query             string                      `json:"query"`
 	Identity          gatewayIdentity             `json:"identity"`
 	Attachments       []any                       `json:"attachments"`
+	Inbox             []gatewayInboxItem          `json:"inbox,omitempty"`
 }
 
 type gatewayResponse struct {
@@ -219,9 +235,10 @@ func (t triggerScheduleRequest) MarshalJSON() ([]byte, error) {
 // --- resolved context (shared by Chat / StreamChat / TriggerSchedule) ---
 
 type resolvedContext struct {
-	payload  gatewayRequest
-	model    models.GetResponse
-	provider sqlc.LlmProvider
+	payload      gatewayRequest
+	model        models.GetResponse
+	provider     sqlc.LlmProvider
+	inboxItemIDs []string
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
@@ -322,6 +339,31 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		usableSkills = []gatewaySkill{}
 	}
 
+	var inboxGatewayItems []gatewayInboxItem
+	var inboxItemIDs []string
+	if r.inboxService != nil {
+		maxInbox := botSettings.MaxInboxItems
+		if maxInbox <= 0 {
+			maxInbox = settings.DefaultMaxInboxItems
+		}
+		items, err := r.inboxService.ListUnread(ctx, req.BotID, maxInbox)
+		if err != nil {
+			r.logger.Warn("failed to load inbox items", slog.String("bot_id", req.BotID), slog.Any("error", err))
+		} else if len(items) > 0 {
+			inboxGatewayItems = make([]gatewayInboxItem, 0, len(items))
+			inboxItemIDs = make([]string, 0, len(items))
+			for _, item := range items {
+				inboxGatewayItems = append(inboxGatewayItems, gatewayInboxItem{
+					ID:        item.ID,
+					Source:    item.Source,
+					Content:   item.Content,
+					CreatedAt: item.CreatedAt.Format(time.RFC3339),
+				})
+				inboxItemIDs = append(inboxItemIDs, item.ID)
+			}
+		}
+	}
+
 	attachments := r.routeAndMergeAttachments(ctx, chatModel, req)
 	displayName := r.resolveDisplayName(ctx, req)
 
@@ -360,9 +402,10 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			SessionToken:      req.ChatToken,
 		},
 		Attachments: attachments,
+		Inbox:       inboxGatewayItems,
 	}
 
-	return resolvedContext{payload: payload, model: chatModel, provider: provider}, nil
+	return resolvedContext{payload: payload, model: chatModel, provider: provider, inboxItemIDs: inboxItemIDs}, nil
 }
 
 // --- Chat ---
@@ -381,6 +424,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err := r.storeRound(ctx, req, resp.Messages, resp.Usage); err != nil {
 		return conversation.ChatResponse{}, err
 	}
+	r.markInboxRead(ctx, req.BotID, rc.inboxItemIDs)
 	return conversation.ChatResponse{
 		Messages: resp.Messages,
 		Skills:   resp.Skills,
@@ -481,7 +525,9 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 				slog.Any("error", err),
 			)
 			errCh <- err
+			return
 		}
+		r.markInboxRead(ctx, streamReq.BotID, rc.inboxItemIDs)
 	}()
 	return chunkCh, errCh
 }
@@ -968,7 +1014,7 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMi
 		return nil, nil
 	}
 	since := time.Now().UTC().Add(-time.Duration(maxContextMinutes) * time.Minute)
-	msgs, err := r.messageService.ListSince(ctx, chatID, since)
+	msgs, err := r.messageService.ListActiveSince(ctx, chatID, since)
 	if err != nil {
 		return nil, err
 	}
@@ -1567,6 +1613,17 @@ func (r *Resolver) listCandidates(ctx context.Context, providerFilter string) ([
 		}
 	}
 	return filtered, nil
+}
+
+// --- inbox ---
+
+func (r *Resolver) markInboxRead(ctx context.Context, botID string, ids []string) {
+	if r.inboxService == nil || len(ids) == 0 {
+		return
+	}
+	if err := r.inboxService.MarkRead(ctx, botID, ids); err != nil {
+		r.logger.Warn("failed to mark inbox items as read", slog.String("bot_id", botID), slog.Any("error", err))
+	}
 }
 
 // --- settings ---

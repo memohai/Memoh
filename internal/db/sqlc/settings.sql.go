@@ -15,6 +15,7 @@ const deleteSettingsByBotID = `-- name: DeleteSettingsByBotID :exec
 UPDATE bots
 SET max_context_load_time = 1440,
     max_context_tokens = 0,
+    max_inbox_items = 50,
     language = 'auto',
     allow_guest = false,
     chat_model_id = NULL,
@@ -35,6 +36,7 @@ SELECT
   bots.id AS bot_id,
   bots.max_context_load_time,
   bots.max_context_tokens,
+  bots.max_inbox_items,
   bots.language,
   bots.allow_guest,
   chat_models.model_id AS chat_model_id,
@@ -53,6 +55,7 @@ type GetSettingsByBotIDRow struct {
 	BotID              pgtype.UUID `json:"bot_id"`
 	MaxContextLoadTime int32       `json:"max_context_load_time"`
 	MaxContextTokens   int32       `json:"max_context_tokens"`
+	MaxInboxItems      int32       `json:"max_inbox_items"`
 	Language           string      `json:"language"`
 	AllowGuest         bool        `json:"allow_guest"`
 	ChatModelID        pgtype.Text `json:"chat_model_id"`
@@ -68,6 +71,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.BotID,
 		&i.MaxContextLoadTime,
 		&i.MaxContextTokens,
+		&i.MaxInboxItems,
 		&i.Language,
 		&i.AllowGuest,
 		&i.ChatModelID,
@@ -83,20 +87,22 @@ WITH updated AS (
   UPDATE bots
   SET max_context_load_time = $1,
       max_context_tokens = $2,
-      language = $3,
-      allow_guest = $4,
-      chat_model_id = COALESCE($5::uuid, bots.chat_model_id),
-      memory_model_id = COALESCE($6::uuid, bots.memory_model_id),
-      embedding_model_id = COALESCE($7::uuid, bots.embedding_model_id),
-      search_provider_id = COALESCE($8::uuid, bots.search_provider_id),
+      max_inbox_items = $3,
+      language = $4,
+      allow_guest = $5,
+      chat_model_id = COALESCE($6::uuid, bots.chat_model_id),
+      memory_model_id = COALESCE($7::uuid, bots.memory_model_id),
+      embedding_model_id = COALESCE($8::uuid, bots.embedding_model_id),
+      search_provider_id = COALESCE($9::uuid, bots.search_provider_id),
       updated_at = now()
-  WHERE bots.id = $9
-  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.language, bots.allow_guest, bots.chat_model_id, bots.memory_model_id, bots.embedding_model_id, bots.search_provider_id
+  WHERE bots.id = $10
+  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.allow_guest, bots.chat_model_id, bots.memory_model_id, bots.embedding_model_id, bots.search_provider_id
 )
 SELECT
   updated.id AS bot_id,
   updated.max_context_load_time,
   updated.max_context_tokens,
+  updated.max_inbox_items,
   updated.language,
   updated.allow_guest,
   chat_models.model_id AS chat_model_id,
@@ -113,6 +119,7 @@ LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id
 type UpsertBotSettingsParams struct {
 	MaxContextLoadTime int32       `json:"max_context_load_time"`
 	MaxContextTokens   int32       `json:"max_context_tokens"`
+	MaxInboxItems      int32       `json:"max_inbox_items"`
 	Language           string      `json:"language"`
 	AllowGuest         bool        `json:"allow_guest"`
 	ChatModelID        pgtype.UUID `json:"chat_model_id"`
@@ -126,6 +133,7 @@ type UpsertBotSettingsRow struct {
 	BotID              pgtype.UUID `json:"bot_id"`
 	MaxContextLoadTime int32       `json:"max_context_load_time"`
 	MaxContextTokens   int32       `json:"max_context_tokens"`
+	MaxInboxItems      int32       `json:"max_inbox_items"`
 	Language           string      `json:"language"`
 	AllowGuest         bool        `json:"allow_guest"`
 	ChatModelID        pgtype.Text `json:"chat_model_id"`
@@ -138,6 +146,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 	row := q.db.QueryRow(ctx, upsertBotSettings,
 		arg.MaxContextLoadTime,
 		arg.MaxContextTokens,
+		arg.MaxInboxItems,
 		arg.Language,
 		arg.AllowGuest,
 		arg.ChatModelID,
@@ -151,6 +160,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.BotID,
 		&i.MaxContextLoadTime,
 		&i.MaxContextTokens,
+		&i.MaxInboxItems,
 		&i.Language,
 		&i.AllowGuest,
 		&i.ChatModelID,

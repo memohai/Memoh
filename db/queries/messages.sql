@@ -86,6 +86,30 @@ WHERE m.bot_id = sqlc.arg(bot_id)
   AND m.created_at >= sqlc.arg(created_at)
 ORDER BY m.created_at ASC;
 
+-- name: ListActiveMessagesSince :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.route_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.channel_type AS platform,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.created_at >= sqlc.arg(created_at)
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.created_at ASC;
+
 -- name: ListMessagesBefore :many
 SELECT
   m.id,

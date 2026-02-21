@@ -4,7 +4,7 @@ import { createAgent } from '../agent'
 import { createAuthFetcher, getBaseUrl } from '../index'
 import { ModelConfig } from '../types'
 import { bearerMiddleware } from '../middlewares/bearer'
-import { AgentSkillModel, AllowedActionModel, AttachmentModel, IdentityContextModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
+import { AgentSkillModel, AllowedActionModel, AttachmentModel, IdentityContextModel, InboxItemModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
 import { allActions } from '../types'
 import { sseChunked } from '../utils/sse'
 
@@ -20,6 +20,7 @@ const AgentModel = z.object({
   identity: IdentityContextModel,
   attachments: z.array(AttachmentModel).optional().default([]),
   mcpConnections: z.array(MCPConnectionModel).optional().default([]),
+  inbox: z.array(InboxItemModel).optional().default([]),
 })
 
 export const chatModule = new Elysia({ prefix: '/chat' })
@@ -40,6 +41,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       },
       skills: body.usableSkills,
       mcpConnections: body.mcpConnections,
+      inbox: body.inbox,
     }, authFetcher)
     return ask({
       query: body.query,
@@ -69,6 +71,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
         },
         skills: body.usableSkills,
         mcpConnections: body.mcpConnections,
+        inbox: body.inbox,
       }, authFetcher)
       for await (const action of stream({
         query: body.query,
@@ -108,6 +111,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       },
       skills: body.usableSkills,
       mcpConnections: body.mcpConnections,
+      inbox: body.inbox,
     }, authFetcher)
     return triggerSchedule({
       schedule: body.schedule,
