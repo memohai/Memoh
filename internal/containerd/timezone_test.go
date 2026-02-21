@@ -5,32 +5,26 @@ import (
 	"testing"
 )
 
-func TestTimezoneSpecOpts_WithTZ(t *testing.T) {
+func TestTimezoneSpec_WithTZ(t *testing.T) {
 	t.Setenv("TZ", "Asia/Shanghai")
-	opts := TimezoneSpecOpts()
+	mounts, env := TimezoneSpec()
 	if _, err := os.Stat("/etc/localtime"); err == nil {
-		if len(opts) < 1 {
-			t.Fatal("expected at least mount opt when /etc/localtime exists")
+		if len(mounts) < 1 {
+			t.Fatal("expected at least one mount when /etc/localtime exists")
 		}
 	}
-	found := false
-	for range opts {
-		found = true
-	}
-	if !found {
-		t.Fatal("expected at least one spec opt when TZ is set")
+	if len(env) == 0 {
+		t.Fatal("expected at least one env var when TZ is set")
 	}
 }
 
-func TestTimezoneSpecOpts_WithoutTZ(t *testing.T) {
+func TestTimezoneSpec_WithoutTZ(t *testing.T) {
 	t.Setenv("TZ", "")
-	opts := TimezoneSpecOpts()
-	for _, opt := range opts {
-		if opt == nil {
-			t.Fatal("unexpected nil spec opt")
-		}
+	mounts, env := TimezoneSpec()
+	if len(env) != 0 {
+		t.Fatalf("expected no env when TZ empty, got %d", len(env))
 	}
-	if _, err := os.Stat("/etc/localtime"); err != nil && len(opts) != 0 {
-		t.Fatalf("expected no opts when /etc/localtime absent and TZ empty, got %d", len(opts))
+	if _, err := os.Stat("/etc/localtime"); err != nil && len(mounts) != 0 {
+		t.Fatalf("expected no mounts when /etc/localtime absent and TZ empty, got %d", len(mounts))
 	}
 }

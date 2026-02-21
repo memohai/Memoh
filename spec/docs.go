@@ -1038,6 +1038,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ListSnapshotsResponse"
                         }
+                    },
+                    "501": {
+                        "description": "Snapshots currently not supported on this backend",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
                     }
                 }
             },
@@ -1079,6 +1085,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "501": {
+                        "description": "Snapshots currently not supported on this backend",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -4738,6 +4750,22 @@ const docTemplate = `{
                 }
             }
         },
+        "/ping": {
+            "get": {
+                "tags": [
+                    "system"
+                ],
+                "summary": "Health check with server capabilities",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PingResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/providers": {
             "get": {
                 "description": "Get a list of all configured LLM providers",
@@ -7083,6 +7111,20 @@ const docTemplate = `{
                     }
                 },
                 "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PingResponse": {
+            "type": "object",
+            "properties": {
+                "container_backend": {
+                    "type": "string"
+                },
+                "snapshot_supported": {
+                    "type": "boolean"
+                },
+                "status": {
                     "type": "string"
                 }
             }

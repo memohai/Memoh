@@ -77,9 +77,9 @@ description = "Install CLI"
 depends = ["//:pnpm-install"]
 run = "cd packages/cli && npm install -g"
 
-[tasks.compile-mcp]
-description = "Build MCP binary into /app and signal container"
-run = "scripts/compile-mcp.sh"
+[task.install-socktainer]
+description = "Install socktainer"
+run = "brew tap socktainer/tap && brew install socktainer"
 
 [tasks.dev]
 description = "Start development environment"

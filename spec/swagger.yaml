@@ -816,6 +816,15 @@ definitions:
       url:
         type: string
     type: object
+  handlers.PingResponse:
+    properties:
+      container_backend:
+        type: string
+      snapshot_supported:
+        type: boolean
+      status:
+        type: string
+    type: object
   handlers.SkillItem:
     properties:
       content:
@@ -2426,6 +2435,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/handlers.ListSnapshotsResponse'
+        "501":
+          description: Snapshots currently not supported on this backend
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       summary: List snapshots
       tags:
       - containerd
@@ -2453,6 +2466,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "501":
+          description: Snapshots currently not supported on this backend
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Create container snapshot for bot
@@ -4896,6 +4913,16 @@ paths:
       summary: Update model by model ID
       tags:
       - models
+  /ping:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.PingResponse'
+      summary: Health check with server capabilities
+      tags:
+      - system
   /providers:
     get:
       consumes:
