@@ -101,113 +101,29 @@
         </ConfirmPopover>
       </section>
 
-      <!-- User Profile -->
-      <section>
-        <h2 class="mb-2 flex items-center text-base font-semibold">
-          <FontAwesomeIcon
-            :icon="['fas', 'user']"
-            class="mr-2"
-          />
-          {{ $t('settings.userProfile') }}
-        </h2>
-        <Separator />
-        <div class="mt-4 space-y-4">
-          <div class="space-y-2">
-            <Label for="settings-user-id">{{ $t('settings.userID') }}</Label>
-            <Input
-              id="settings-user-id"
-              :model-value="displayUserID"
-              :aria-label="$t('settings.userID')"
-              readonly
-            />
-          </div>
-          <div class="space-y-2">
-            <Label for="settings-username">{{ $t('auth.username') }}</Label>
-            <Input
-              id="settings-username"
-              :model-value="displayUsername"
-              :aria-label="$t('auth.username')"
-              readonly
-            />
-          </div>
-          <div class="space-y-2">
-            <Label for="settings-display-name">{{ $t('settings.displayName') }}</Label>
-            <Input
-              id="settings-display-name"
-              v-model="profileForm.display_name"
-              :aria-label="$t('settings.displayName')"
-            />
-          </div>
-          <div class="space-y-2">
-            <Label for="settings-avatar-url">{{ $t('settings.avatarUrl') }}</Label>
-            <Input
-              id="settings-avatar-url"
-              v-model="profileForm.avatar_url"
-              type="url"
-              :aria-label="$t('settings.avatarUrl')"
-            />
-          </div>
-          <div class="flex justify-end">
-            <Button
-              :disabled="savingProfile || loadingInitial"
-              @click="onSaveProfile"
-            >
-              <Spinner v-if="savingProfile" />
-              {{ $t('settings.saveProfile') }}
-            </Button>
-          </div>
-        </div>
-      </section>
+      <ProfileSection
+        :display-user-id="displayUserID"
+        :display-username="displayUsername"
+        :display-name="profileForm.display_name"
+        :avatar-url="profileForm.avatar_url"
+        :saving="savingProfile"
+        :loading="loadingInitial"
+        @update:display-name="profileForm.display_name = $event"
+        @update:avatar-url="profileForm.avatar_url = $event"
+        @save="onSaveProfile"
+      />
 
-      <!-- Change Password -->
-      <section>
-        <h2 class="mb-2 flex items-center text-base font-semibold">
-          <FontAwesomeIcon
-            :icon="['fas', 'gear']"
-            class="mr-2"
-          />
-          {{ $t('settings.changePassword') }}
-        </h2>
-        <Separator />
-        <div class="mt-4 space-y-4">
-          <div class="space-y-2">
-            <Label for="settings-current-password">{{ $t('settings.currentPassword') }}</Label>
-            <Input
-              id="settings-current-password"
-              v-model="passwordForm.currentPassword"
-              type="password"
-              :aria-label="$t('settings.currentPassword')"
-            />
-          </div>
-          <div class="space-y-2">
-            <Label for="settings-new-password">{{ $t('settings.newPassword') }}</Label>
-            <Input
-              id="settings-new-password"
-              v-model="passwordForm.newPassword"
-              type="password"
-              :aria-label="$t('settings.newPassword')"
-            />
-          </div>
-          <div class="space-y-2">
-            <Label for="settings-confirm-password">{{ $t('settings.confirmPassword') }}</Label>
-            <Input
-              id="settings-confirm-password"
-              v-model="passwordForm.confirmPassword"
-              type="password"
-              :aria-label="$t('settings.confirmPassword')"
-            />
-          </div>
-          <div class="flex justify-end">
-            <Button
-              :disabled="savingPassword || loadingInitial"
-              @click="onUpdatePassword"
-            >
-              <Spinner v-if="savingPassword" />
-              {{ $t('settings.updatePassword') }}
-            </Button>
-          </div>
-        </div>
-      </section>
+      <PasswordSection
+        :current-password="passwordForm.currentPassword"
+        :new-password="passwordForm.newPassword"
+        :confirm-password="passwordForm.confirmPassword"
+        :saving="savingPassword"
+        :loading="loadingInitial"
+        @update:current-password="passwordForm.currentPassword = $event"
+        @update:new-password="passwordForm.newPassword = $event"
+        @update:confirm-password="passwordForm.confirmPassword = $event"
+        @update-password="onUpdatePassword"
+      />
 
       <!-- Linked Channels -->
       <section>
@@ -257,90 +173,21 @@
         </div>
       </section>
 
-      <!-- Bind Code -->
-      <section>
-        <h2 class="mb-2 flex items-center text-base font-semibold">
-          <FontAwesomeIcon
-            :icon="['fas', 'plug']"
-            class="mr-2"
-          />
-          {{ $t('settings.bindCode') }}
-        </h2>
-        <Separator />
-        <div class="mt-4 space-y-4">
-          <div class="flex flex-wrap gap-3 items-end">
-            <div class="space-y-2">
-              <Label>{{ $t('settings.platform') }}</Label>
-              <Select
-                :model-value="bindForm.platform || anyPlatformValue"
-                @update:model-value="onPlatformChange"
-              >
-                <SelectTrigger
-                  class="w-56"
-                  :aria-label="$t('settings.platform')"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem :value="anyPlatformValue">
-                      {{ $t('settings.platformAny') }}
-                    </SelectItem>
-                    <SelectItem
-                      v-for="platform in platformOptions"
-                      :key="platform"
-                      :value="platform"
-                    >
-                      {{ platformLabel(platform) }}
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="space-y-2">
-              <Label for="settings-bind-ttl">{{ $t('settings.bindCodeTTL') }}</Label>
-              <Input
-                id="settings-bind-ttl"
-                v-model.number="bindForm.ttlSeconds"
-                type="number"
-                min="60"
-                class="w-40"
-                :aria-label="$t('settings.bindCodeTTL')"
-              />
-            </div>
-            <Button
-              :disabled="generatingBindCode || loadingInitial"
-              @click="onGenerateBindCode"
-            >
-              <Spinner v-if="generatingBindCode" />
-              {{ $t('settings.generateBindCode') }}
-            </Button>
-          </div>
-          <div
-            v-if="bindCode"
-            class="space-y-2"
-          >
-            <Label for="settings-bind-code-value">{{ $t('settings.bindCodeValue') }}</Label>
-            <div class="flex gap-2">
-              <Input
-                id="settings-bind-code-value"
-                :model-value="bindCode.token"
-                :aria-label="$t('settings.bindCodeValue')"
-                readonly
-              />
-              <Button
-                variant="outline"
-                @click="copyBindCode"
-              >
-                {{ $t('settings.copyBindCode') }}
-              </Button>
-            </div>
-            <p class="text-xs text-muted-foreground">
-              {{ $t('settings.bindCodeExpiresAt') }}: {{ formatDate(bindCode.expires_at) }}
-            </p>
-          </div>
-        </div>
-      </section>
+      <BindCodeSection
+        :any-platform-value="anyPlatformValue"
+        :platform="bindForm.platform"
+        :platform-options="platformOptions"
+        :ttl-seconds="bindForm.ttlSeconds"
+        :generating="generatingBindCode"
+        :loading="loadingInitial"
+        :bind-code="bindCode"
+        :platform-label="platformLabel"
+        :format-date="formatDate"
+        @update:platform="onPlatformChange"
+        @update:ttl-seconds="bindForm.ttlSeconds = $event"
+        @generate="onGenerateBindCode"
+        @copy="copyBindCode"
+      />
     </div>
   </section>
 </template>
@@ -352,7 +199,6 @@ import {
   AvatarImage,
   Badge,
   Button,
-  Input,
   Label,
   Select,
   SelectContent,
@@ -361,7 +207,6 @@ import {
   SelectTrigger,
   SelectValue,
   Separator,
-  Spinner,
 } from '@memoh/ui'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -369,6 +214,9 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import ProfileSection from './components/profile-section.vue'
+import PasswordSection from './components/password-section.vue'
+import BindCodeSection from './components/bind-code-section.vue'
 import { getUsersMe, putUsersMe, putUsersMePassword, getUsersMeIdentities } from '@memoh/sdk'
 import { client } from '@memoh/sdk/client'
 import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest } from '@memoh/sdk'

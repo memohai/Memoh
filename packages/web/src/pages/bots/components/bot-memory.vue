@@ -581,6 +581,8 @@ import {
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import { useClipboard } from '@/composables/useClipboard'
+import { formatDateTimeSeconds } from '@/utils/date-time'
 
 interface MemoryItem {
   id: string
@@ -602,6 +604,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const { copyText } = useClipboard()
 const loading = ref(false)
 const actionLoading = ref(false)
 const compactLoading = ref(false)
@@ -859,39 +862,13 @@ async function handleCompact() {
 }
 
 function formatDate(dateStr?: string) {
-  if (!dateStr) return 'Unknown'
-  try {
-    const d = new Date(dateStr)
-    const year = d.getFullYear()
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    const hours = String(d.getHours()).padStart(2, '0')
-    const minutes = String(d.getMinutes()).padStart(2, '0')
-    const seconds = String(d.getSeconds()).padStart(2, '0')
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
-  } catch {
-    return dateStr
-  }
+  return formatDateTimeSeconds(dateStr, { fallback: 'Unknown' })
 }
 
 async function copyToClipboard(text: string) {
   try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text)
-    } else {
-      // Fallback for non-secure contexts
-      const textArea = document.createElement('textarea')
-      textArea.value = text
-      textArea.style.position = 'fixed'
-      textArea.style.left = '-9999px'
-      textArea.style.top = '0'
-      document.body.appendChild(textArea)
-      textArea.focus()
-      textArea.select()
-      const success = document.execCommand('copy')
-      document.body.removeChild(textArea)
-      if (!success) throw new Error('execCommand failed')
-    }
+    const copied = await copyText(text)
+    if (!copied) throw new Error('copy failed')
     toast.success(t('bots.memory.idCopied'))
   } catch (err) {
     console.error('Failed to copy:', err)
