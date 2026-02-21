@@ -227,9 +227,13 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 		if workDir == "" {
 			workDir = p.execWorkDir
 		}
+		wrappedCmd := command
+		if workDir != "" {
+			wrappedCmd = "cd " + ShellQuote(workDir) + " && " + command
+		}
 		result, err := p.execRunner.ExecWithCapture(ctx, mcpgw.ExecRequest{
 			BotID:   botID,
-			Command: []string{shellCommandName, shellCommandFlag, command},
+			Command: []string{shellCommandName, shellCommandFlag, wrappedCmd},
 			WorkDir: workDir,
 		})
 		if err != nil {

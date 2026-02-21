@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/core/mount"
 )
 
 type MountedSnapshot struct {
 	Dir     string
-	Info    containers.Container
+	Info    ContainerInfo
 	Unmount func() error
 }
 
@@ -21,18 +20,23 @@ func MountContainerSnapshot(ctx context.Context, service Service, containerID st
 		return nil, ErrInvalidArgument
 	}
 
-	container, err := service.GetContainer(ctx, containerID)
-	if err != nil {
-		return nil, err
-	}
-	info, err := container.Info(ctx)
+	info, err := service.GetContainer(ctx, containerID)
 	if err != nil {
 		return nil, err
 	}
 
-	mounts, err := service.SnapshotMounts(ctx, info.Snapshotter, info.SnapshotKey)
+	mountInfos, err := service.SnapshotMounts(ctx, info.Snapshotter, info.SnapshotKey)
 	if err != nil {
 		return nil, err
+	}
+
+	mounts := make([]mount.Mount, len(mountInfos))
+	for i, m := range mountInfos {
+		mounts[i] = mount.Mount{
+			Type:    m.Type,
+			Source:  m.Source,
+			Options: m.Options,
+		}
 	}
 
 	dir, err := os.MkdirTemp("", "memoh-snapshot-*")
@@ -66,9 +70,18 @@ func MountSnapshot(ctx context.Context, service Service, snapshotter, key string
 		return "", nil, ErrInvalidArgument
 	}
 
-	mounts, err := service.SnapshotMounts(ctx, snapshotter, key)
+	mountInfos, err := service.SnapshotMounts(ctx, snapshotter, key)
 	if err != nil {
 		return "", nil, err
+	}
+
+	mounts := make([]mount.Mount, len(mountInfos))
+	for i, m := range mountInfos {
+		mounts[i] = mount.Mount{
+			Type:    m.Type,
+			Source:  m.Source,
+			Options: m.Options,
+		}
 	}
 
 	dir, err := os.MkdirTemp("", "memoh-snapshot-*")
