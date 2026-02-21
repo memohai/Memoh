@@ -386,6 +386,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		displayName,
 		req.CurrentChannel,
 		strings.TrimSpace(req.ConversationType),
+		strings.TrimSpace(req.ConversationName),
 		extractFileRefPaths(attachments),
 		req.Query,
 	)
@@ -1775,13 +1776,14 @@ type UserMessageMeta struct {
 	DisplayName       string   `json:"display-name"`
 	Channel           string   `json:"channel"`
 	ConversationType  string   `json:"conversation-type"`
+	ConversationName  string   `json:"conversation-name,omitempty"`
 	Time              string   `json:"time"`
 	AttachmentPaths   []string `json:"attachments"`
 }
 
 // BuildUserMessageMeta constructs a UserMessageMeta from the inbound
 // parameters. Both FormatUserHeader and inbox content use this.
-func BuildUserMessageMeta(channelIdentityID, displayName, channel, conversationType string, attachmentPaths []string) UserMessageMeta {
+func BuildUserMessageMeta(channelIdentityID, displayName, channel, conversationType, conversationName string, attachmentPaths []string) UserMessageMeta {
 	if attachmentPaths == nil {
 		attachmentPaths = []string{}
 	}
@@ -1790,6 +1792,7 @@ func BuildUserMessageMeta(channelIdentityID, displayName, channel, conversationT
 		DisplayName:       displayName,
 		Channel:           channel,
 		ConversationType:  conversationType,
+		ConversationName:  conversationName,
 		Time:              time.Now().UTC().Format(time.RFC3339),
 		AttachmentPaths:   attachmentPaths,
 	}
@@ -1798,7 +1801,7 @@ func BuildUserMessageMeta(channelIdentityID, displayName, channel, conversationT
 // ToMap returns the metadata as a map with the same keys used in the YAML
 // header, suitable for storing as inbox content JSONB.
 func (m UserMessageMeta) ToMap() map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"channel-identity-id": m.ChannelIdentityID,
 		"display-name":        m.DisplayName,
 		"channel":             m.Channel,
@@ -1806,14 +1809,18 @@ func (m UserMessageMeta) ToMap() map[string]any {
 		"time":                m.Time,
 		"attachments":         m.AttachmentPaths,
 	}
+	if m.ConversationName != "" {
+		result["conversation-name"] = m.ConversationName
+	}
+	return result
 }
 
 // FormatUserHeader wraps a user query with YAML front-matter metadata so
 // the LLM sees structured context (sender, channel, time, attachments)
 // alongside the raw message. This must be the single source of truth for
 // user-message formatting — the agent gateway must NOT add its own header.
-func FormatUserHeader(channelIdentityID, displayName, channel, conversationType string, attachmentPaths []string, query string) string {
-	meta := BuildUserMessageMeta(channelIdentityID, displayName, channel, conversationType, attachmentPaths)
+func FormatUserHeader(channelIdentityID, displayName, channel, conversationType, conversationName string, attachmentPaths []string, query string) string {
+	meta := BuildUserMessageMeta(channelIdentityID, displayName, channel, conversationType, conversationName, attachmentPaths)
 	return FormatUserHeaderFromMeta(meta, query)
 }
 
@@ -1826,6 +1833,9 @@ func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 	writeYAMLString(&sb, "display-name", meta.DisplayName)
 	writeYAMLString(&sb, "channel", meta.Channel)
 	writeYAMLString(&sb, "conversation-type", meta.ConversationType)
+	if meta.ConversationName != "" {
+		writeYAMLString(&sb, "conversation-name", meta.ConversationName)
+	}
 	writeYAMLString(&sb, "time", meta.Time)
 	if len(meta.AttachmentPaths) > 0 {
 		sb.WriteString("attachments:\n")

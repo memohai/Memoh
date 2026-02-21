@@ -228,6 +228,7 @@ type ChatRequest struct {
 	ChatToken               string `json:"-"`
 	ExternalMessageID       string `json:"-"`
 	ConversationType        string `json:"-"`
+	ConversationName        string `json:"-"`
 	UserMessagePersisted    bool   `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.

@@ -12,7 +12,6 @@ import {
   AgentInput,
   AgentParams,
   AgentSkill,
-  InboxItem,
   allActions,
   MCPConnection,
   Schedule,
@@ -22,6 +21,16 @@ import { system, schedule, subagentSystem } from './prompts'
 import { AuthFetcher } from './index'
 import { createModel } from './model'
 import { AgentAction } from './types/action'
+import {
+  extractAttachmentsFromText,
+  stripAttachmentsFromMessages,
+  dedupeAttachments,
+  AttachmentsStreamExtractor,
+} from './utils/attachments'
+import type { GatewayInputAttachment } from './types/attachment'
+import { getMCPTools } from './tools/mcp'
+import { getTools } from './tools'
+import { buildIdentityHeaders } from './utils/headers'
 
 const buildStepUsages = (
   steps: { usage: LanguageModelUsage; response: { messages: unknown[] } }[],
@@ -34,16 +43,6 @@ const buildStepUsages = (
   }
   return usages
 }
-import {
-  extractAttachmentsFromText,
-  stripAttachmentsFromMessages,
-  dedupeAttachments,
-  AttachmentsStreamExtractor,
-} from './utils/attachments'
-import type { GatewayInputAttachment } from './types/attachment'
-import { getMCPTools } from './tools/mcp'
-import { getTools } from './tools'
-import { buildIdentityHeaders } from './utils/headers'
 
 export const buildNativeImageParts = (attachments: GatewayInputAttachment[]): ImagePart[] => {
   return attachments

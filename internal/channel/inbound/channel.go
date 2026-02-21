@@ -367,6 +367,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		ChatToken:               chatToken,
 		ExternalMessageID:       sourceMessageID,
 		ConversationType:        msg.Conversation.Type,
+		ConversationName:        msg.Conversation.Name,
 		Query:                   text,
 		CurrentChannel:          msg.Channel.String(),
 		Channels:                []string{msg.Channel.String()},
@@ -667,6 +668,7 @@ func (p *ChannelInboundProcessor) persistInboundUser(
 		strings.TrimSpace(identity.DisplayName),
 		msg.Channel.String(),
 		strings.TrimSpace(msg.Conversation.Type),
+		strings.TrimSpace(msg.Conversation.Name),
 		attachmentPaths,
 		query,
 	)
@@ -739,6 +741,7 @@ func (p *ChannelInboundProcessor) createInboxItem(
 		displayName,
 		msg.Channel.String(),
 		strings.TrimSpace(msg.Conversation.Type),
+		strings.TrimSpace(msg.Conversation.Name),
 		attachmentPaths,
 	)
 	content := meta.ToMap()
