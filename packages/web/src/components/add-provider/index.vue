@@ -22,73 +22,73 @@
       </template>
       <template #body>
         <div class="flex-col gap-3 flex mt-4">
-            <FormField
-              v-slot="{ componentField }"
-              name="name"
-            >
-              <FormItem>
-                <Label
-                  class="mb-2"
-                  :for="componentField.id || 'provider-create-name'"
-                >
-                  {{ $t('common.name') }}
-                </Label>
-                <FormControl>
-                  <Input
-                    :id="componentField.id || 'provider-create-name'"
-                    type="text"
-                    :placeholder="$t('common.namePlaceholder')"
-                    v-bind="componentField"
-                    :aria-label="$t('common.name')"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-            <FormField
-              v-slot="{ componentField }"
-              name="api_key"
-            >
-              <FormItem>
-                <Label
-                  class="mb-2"
-                  :for="componentField.id || 'provider-create-api-key'"
-                >
-                  {{ $t('provider.apiKey') }}
-                </Label>
-                <FormControl>
-                  <Input
-                    :id="componentField.id || 'provider-create-api-key'"
-                    type="text"
-                    :placeholder="$t('provider.apiKeyPlaceholder')"
-                    v-bind="componentField"
-                    :aria-label="$t('provider.apiKey')"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-            <FormField
-              v-slot="{ componentField }"
-              name="base_url"
-            >
-              <FormItem>
-                <Label
-                  class="mb-2"
-                  :for="componentField.id || 'provider-create-base-url'"
-                >
-                  {{ $t('provider.url') }}
-                </Label>
-                <FormControl>
-                  <Input
-                    :id="componentField.id || 'provider-create-base-url'"
-                    type="text"
-                    :placeholder="$t('provider.urlPlaceholder')"
-                    v-bind="componentField"
-                    :aria-label="$t('provider.url')"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-          </div>
+          <FormField
+            v-slot="{ componentField }"
+            name="name"
+          >
+            <FormItem>
+              <Label
+                class="mb-2"
+                :for="componentField.id || 'provider-create-name'"
+              >
+                {{ $t('common.name') }}
+              </Label>
+              <FormControl>
+                <Input
+                  :id="componentField.id || 'provider-create-name'"
+                  type="text"
+                  :placeholder="$t('common.namePlaceholder')"
+                  v-bind="componentField"
+                  :aria-label="$t('common.name')"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+          <FormField
+            v-slot="{ componentField }"
+            name="api_key"
+          >
+            <FormItem>
+              <Label
+                class="mb-2"
+                :for="componentField.id || 'provider-create-api-key'"
+              >
+                {{ $t('provider.apiKey') }}
+              </Label>
+              <FormControl>
+                <Input
+                  :id="componentField.id || 'provider-create-api-key'"
+                  type="text"
+                  :placeholder="$t('provider.apiKeyPlaceholder')"
+                  v-bind="componentField"
+                  :aria-label="$t('provider.apiKey')"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+          <FormField
+            v-slot="{ componentField }"
+            name="base_url"
+          >
+            <FormItem>
+              <Label
+                class="mb-2"
+                :for="componentField.id || 'provider-create-base-url'"
+              >
+                {{ $t('provider.url') }}
+              </Label>
+              <FormControl>
+                <Input
+                  :id="componentField.id || 'provider-create-base-url'"
+                  type="text"
+                  :placeholder="$t('provider.urlPlaceholder')"
+                  v-bind="componentField"
+                  :aria-label="$t('provider.url')"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+        </div>
       </template>
     </FormDialogShell>
   </section>

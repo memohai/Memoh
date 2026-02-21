@@ -34,13 +34,13 @@
                   class="justify-start py-5! px-4"
                   :tooltip="sidebarItem.title"
                 >
-                    <Toggle
-                      class="border border-transparent w-full flex justify-start"
-                      :class="{ 'border-inherit': isActive(sidebarItem.name as string) }"
-                      :model-value="isActive(sidebarItem.name as string)"
-                      :aria-current="isActive(sidebarItem.name as string) ? 'page' : undefined"
-                      @click="router.push({ name: sidebarItem.name })"
-                    >
+                  <Toggle
+                    class="border border-transparent w-full flex justify-start"
+                    :class="{ 'border-inherit': isActive(sidebarItem.name as string) }"
+                    :model-value="isActive(sidebarItem.name as string)"
+                    :aria-current="isActive(sidebarItem.name as string) ? 'page' : undefined"
+                    @click="router.push({ name: sidebarItem.name })"
+                  >
                     <FontAwesomeIcon :icon="sidebarItem.icon" />
                     <span>{{ sidebarItem.title }}</span>
                   </Toggle>

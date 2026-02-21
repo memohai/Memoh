@@ -19,86 +19,86 @@
 
       <template #body>
         <div class="flex flex-col gap-3 mt-4">
-            <!-- Name -->
-            <FormField
-              v-slot="{ componentField }"
-              name="name"
-            >
-              <FormItem>
-                <FormLabel class="mb-2">
-                  {{ $t('platform.name') }}
-                </FormLabel>
-                <FormControl>
-                  <Input
-                    type="text"
-                    :placeholder="$t('platform.namePlaceholder')"
-                    v-bind="componentField"
-                    autocomplete="name"
-                  />
-                </FormControl>
-                <blockquote class="h-5">
-                  <FormMessage />
-                </blockquote>
-              </FormItem>
-            </FormField>
+          <!-- Name -->
+          <FormField
+            v-slot="{ componentField }"
+            name="name"
+          >
+            <FormItem>
+              <FormLabel class="mb-2">
+                {{ $t('platform.name') }}
+              </FormLabel>
+              <FormControl>
+                <Input
+                  type="text"
+                  :placeholder="$t('platform.namePlaceholder')"
+                  v-bind="componentField"
+                  autocomplete="name"
+                />
+              </FormControl>
+              <blockquote class="h-5">
+                <FormMessage />
+              </blockquote>
+            </FormItem>
+          </FormField>
 
-            <!-- Config (key:value tags) -->
-            <FormField
-              v-slot="{ componentField }"
-              name="config"
-            >
-              <FormItem>
-                <FormLabel class="mb-2">
-                  {{ $t('platform.config') }}
-                </FormLabel>
-                <FormControl>
-                  <TagsInput
-                    :add-on-blur="true"
-                    :model-value="configTags.tagList.value"
-                    :convert-value="configTags.convertValue"
-                    @update:model-value="(tags) => configTags.handleUpdate(tags.map(String), componentField['onUpdate:modelValue'])"
+          <!-- Config (key:value tags) -->
+          <FormField
+            v-slot="{ componentField }"
+            name="config"
+          >
+            <FormItem>
+              <FormLabel class="mb-2">
+                {{ $t('platform.config') }}
+              </FormLabel>
+              <FormControl>
+                <TagsInput
+                  :add-on-blur="true"
+                  :model-value="configTags.tagList.value"
+                  :convert-value="configTags.convertValue"
+                  @update:model-value="(tags) => configTags.handleUpdate(tags.map(String), componentField['onUpdate:modelValue'])"
+                >
+                  <TagsInputItem
+                    v-for="(value, index) in configTags.tagList.value"
+                    :key="index"
+                    :value="value"
                   >
-                    <TagsInputItem
-                      v-for="(value, index) in configTags.tagList.value"
-                      :key="index"
-                      :value="value"
-                    >
-                      <TagsInputItemText />
-                      <TagsInputItemDelete />
-                    </TagsInputItem>
-                    <TagsInputInput
-                      :placeholder="$t('platform.configPlaceholder')"
-                      class="w-full py-1"
-                    />
-                  </TagsInput>
-                </FormControl>
-                <blockquote class="h-5">
-                  <FormMessage />
-                </blockquote>
-              </FormItem>
-            </FormField>
-
-            <!-- Active -->
-            <FormField
-              v-slot="{ componentField }"
-              name="active"
-            >
-              <FormItem>
-                <FormLabel class="mb-2">
-                  {{ $t('platform.active') }}
-                </FormLabel>
-                <FormControl>
-                  <Switch
-                    :model-value="componentField.modelValue"
-                    @update:model-value="componentField['onUpdate:modelValue']"
+                    <TagsInputItemText />
+                    <TagsInputItemDelete />
+                  </TagsInputItem>
+                  <TagsInputInput
+                    :placeholder="$t('platform.configPlaceholder')"
+                    class="w-full py-1"
                   />
-                </FormControl>
-                <blockquote class="h-5">
-                  <FormMessage />
-                </blockquote>
-              </FormItem>
-            </FormField>
-          </div>
+                </TagsInput>
+              </FormControl>
+              <blockquote class="h-5">
+                <FormMessage />
+              </blockquote>
+            </FormItem>
+          </FormField>
+
+          <!-- Active -->
+          <FormField
+            v-slot="{ componentField }"
+            name="active"
+          >
+            <FormItem>
+              <FormLabel class="mb-2">
+                {{ $t('platform.active') }}
+              </FormLabel>
+              <FormControl>
+                <Switch
+                  :model-value="componentField.modelValue"
+                  @update:model-value="componentField['onUpdate:modelValue']"
+                />
+              </FormControl>
+              <blockquote class="h-5">
+                <FormMessage />
+              </blockquote>
+            </FormItem>
+          </FormField>
+        </div>
       </template>
     </FormDialogShell>
   </section>

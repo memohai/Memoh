@@ -16,152 +16,152 @@
       </template>
       <template #body>
         <div class="flex flex-col gap-3 mt-4">
-            <!-- Type -->
-            <FormField
-              v-slot="{ componentField }"
-              name="type"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  {{ $t('common.type') }}
-                </Label>
-                <FormControl>
-                  <Select v-bind="componentField">
-                    <SelectTrigger
-                      class="w-full"
-                      :aria-label="$t('common.type')"
-                    >
-                      <SelectValue :placeholder="$t('common.typePlaceholder')" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="chat">
-                          Chat
-                        </SelectItem>
-                        <SelectItem value="embedding">
-                          Embedding
-                        </SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </FormControl>
-              </FormItem>
-            </FormField>
-
-            <!-- Client Type (chat only) -->
-            <div v-if="selectedType === 'chat'">
+          <!-- Type -->
+          <FormField
+            v-slot="{ componentField }"
+            name="type"
+          >
+            <FormItem>
               <Label class="mb-2">
-                {{ $t('models.clientType') }}
+                {{ $t('common.type') }}
               </Label>
-              <SearchableSelectPopover
-                v-model="clientTypeModel"
-                :options="clientTypeOptions"
-                :placeholder="$t('models.clientTypePlaceholder')"
-                :aria-label="$t('models.clientType')"
-                :search-placeholder="$t('models.clientTypePlaceholder')"
-                :search-aria-label="$t('models.clientType')"
-                class="mt-2"
-                :show-group-headers="false"
-              >
-                <template #trigger="{ open, displayLabel }">
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    :aria-expanded="open"
-                    class="w-full justify-between font-normal mt-2"
+              <FormControl>
+                <Select v-bind="componentField">
+                  <SelectTrigger
+                    class="w-full"
+                    :aria-label="$t('common.type')"
                   >
-                    <span class="truncate">
-                      {{ displayLabel || $t('models.clientTypePlaceholder') }}
-                    </span>
-                    <FontAwesomeIcon
-                      :icon="['fas', 'chevron-down']"
-                      class="ml-2 size-3 shrink-0 text-muted-foreground"
-                    />
-                  </Button>
-                </template>
-              </SearchableSelectPopover>
-            </div>
+                    <SelectValue :placeholder="$t('common.typePlaceholder')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="chat">
+                        Chat
+                      </SelectItem>
+                      <SelectItem value="embedding">
+                        Embedding
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </FormControl>
+            </FormItem>
+          </FormField>
 
-            <!-- Model -->
-            <FormField
-              v-slot="{ componentField }"
-              name="model_id"
+          <!-- Client Type (chat only) -->
+          <div v-if="selectedType === 'chat'">
+            <Label class="mb-2">
+              {{ $t('models.clientType') }}
+            </Label>
+            <SearchableSelectPopover
+              v-model="clientTypeModel"
+              :options="clientTypeOptions"
+              :placeholder="$t('models.clientTypePlaceholder')"
+              :aria-label="$t('models.clientType')"
+              :search-placeholder="$t('models.clientTypePlaceholder')"
+              :search-aria-label="$t('models.clientType')"
+              class="mt-2"
+              :show-group-headers="false"
             >
-              <FormItem>
-                <Label class="mb-2">
-                  {{ $t('models.model') }}
-                </Label>
-                <FormControl>
-                  <Input
-                    type="text"
-                    :placeholder="$t('models.modelPlaceholder')"
-                    v-bind="componentField"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-
-            <!-- Display Name -->
-            <FormField
-              name="name"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  {{ $t('models.displayName') }}
-                  <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
-                </Label>
-                <FormControl>
-                  <Input
-                    type="text"
-                    :placeholder="$t('models.displayNamePlaceholder')"
-                    :model-value="form.values.name ?? ''"
-                    @input="onNameInput"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-
-            <!-- Dimensions (embedding only) -->
-            <FormField
-              v-if="selectedType === 'embedding'"
-              v-slot="{ componentField }"
-              name="dimensions"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  {{ $t('models.dimensions') }}
-                </Label>
-                <FormControl>
-                  <Input
-                    type="number"
-                    :placeholder="$t('models.dimensionsPlaceholder')"
-                    v-bind="componentField"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-
-            <!-- Input Modalities (chat only) -->
-            <div v-if="selectedType === 'chat'">
-              <Label class="mb-2">
-                {{ $t('models.inputModalities') }}
-              </Label>
-              <div class="flex flex-wrap gap-3 mt-2">
-                <label
-                  v-for="mod in availableInputModalities"
-                  :key="mod"
-                  class="flex items-center gap-1.5 text-sm"
+              <template #trigger="{ open, displayLabel }">
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  :aria-expanded="open"
+                  class="w-full justify-between font-normal mt-2"
                 >
-                  <Checkbox
-                    :model-value="selectedModalities.includes(mod)"
-                    :disabled="mod === 'text'"
-                    @update:model-value="(val: boolean) => toggleModality(mod, val)"
+                  <span class="truncate">
+                    {{ displayLabel || $t('models.clientTypePlaceholder') }}
+                  </span>
+                  <FontAwesomeIcon
+                    :icon="['fas', 'chevron-down']"
+                    class="ml-2 size-3 shrink-0 text-muted-foreground"
                   />
-                  {{ $t(`models.modality.${mod}`) }}
-                </label>
-              </div>
+                </Button>
+              </template>
+            </SearchableSelectPopover>
+          </div>
+
+          <!-- Model -->
+          <FormField
+            v-slot="{ componentField }"
+            name="model_id"
+          >
+            <FormItem>
+              <Label class="mb-2">
+                {{ $t('models.model') }}
+              </Label>
+              <FormControl>
+                <Input
+                  type="text"
+                  :placeholder="$t('models.modelPlaceholder')"
+                  v-bind="componentField"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+
+          <!-- Display Name -->
+          <FormField
+            name="name"
+          >
+            <FormItem>
+              <Label class="mb-2">
+                {{ $t('models.displayName') }}
+                <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+              </Label>
+              <FormControl>
+                <Input
+                  type="text"
+                  :placeholder="$t('models.displayNamePlaceholder')"
+                  :model-value="form.values.name ?? ''"
+                  @input="onNameInput"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+
+          <!-- Dimensions (embedding only) -->
+          <FormField
+            v-if="selectedType === 'embedding'"
+            v-slot="{ componentField }"
+            name="dimensions"
+          >
+            <FormItem>
+              <Label class="mb-2">
+                {{ $t('models.dimensions') }}
+              </Label>
+              <FormControl>
+                <Input
+                  type="number"
+                  :placeholder="$t('models.dimensionsPlaceholder')"
+                  v-bind="componentField"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+
+          <!-- Input Modalities (chat only) -->
+          <div v-if="selectedType === 'chat'">
+            <Label class="mb-2">
+              {{ $t('models.inputModalities') }}
+            </Label>
+            <div class="flex flex-wrap gap-3 mt-2">
+              <label
+                v-for="mod in availableInputModalities"
+                :key="mod"
+                class="flex items-center gap-1.5 text-sm"
+              >
+                <Checkbox
+                  :model-value="selectedModalities.includes(mod)"
+                  :disabled="mod === 'text'"
+                  @update:model-value="(val: boolean) => toggleModality(mod, val)"
+                />
+                {{ $t(`models.modality.${mod}`) }}
+              </label>
             </div>
           </div>
+        </div>
       </template>
     </FormDialogShell>
   </section>

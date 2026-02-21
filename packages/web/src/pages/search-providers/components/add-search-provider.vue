@@ -22,64 +22,64 @@
       </template>
       <template #body>
         <div class="flex-col gap-3 flex mt-4">
-            <FormField
-              v-slot="{ componentField }"
-              name="name"
-            >
-              <FormItem>
-                <Label
-                  class="mb-2"
-                  :for="componentField.id || 'search-provider-create-name'"
-                >
-                  {{ $t('common.name') }}
-                </Label>
-                <FormControl>
-                  <Input
-                    :id="componentField.id || 'search-provider-create-name'"
-                    type="text"
-                    :placeholder="$t('common.namePlaceholder')"
-                    v-bind="componentField"
-                    :aria-label="$t('common.name')"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-            <FormField
-              v-slot="{ componentField }"
-              name="provider"
-            >
-              <FormItem>
-                <Label
-                  class="mb-2"
-                  :for="componentField.id || 'search-provider-create-type'"
-                >
-                  {{ $t('searchProvider.provider') }}
-                </Label>
-                <FormControl>
-                  <Select v-bind="componentField">
-                    <SelectTrigger
-                      :id="componentField.id || 'search-provider-create-type'"
-                      class="w-full"
-                      :aria-label="$t('searchProvider.provider')"
-                    >
-                      <SelectValue :placeholder="$t('common.typePlaceholder')" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem
-                          v-for="type in PROVIDER_TYPES"
-                          :key="type"
-                          :value="type"
-                        >
-                          {{ type }}
-                        </SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </FormControl>
-              </FormItem>
-            </FormField>
-          </div>
+          <FormField
+            v-slot="{ componentField }"
+            name="name"
+          >
+            <FormItem>
+              <Label
+                class="mb-2"
+                :for="componentField.id || 'search-provider-create-name'"
+              >
+                {{ $t('common.name') }}
+              </Label>
+              <FormControl>
+                <Input
+                  :id="componentField.id || 'search-provider-create-name'"
+                  type="text"
+                  :placeholder="$t('common.namePlaceholder')"
+                  v-bind="componentField"
+                  :aria-label="$t('common.name')"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+          <FormField
+            v-slot="{ componentField }"
+            name="provider"
+          >
+            <FormItem>
+              <Label
+                class="mb-2"
+                :for="componentField.id || 'search-provider-create-type'"
+              >
+                {{ $t('searchProvider.provider') }}
+              </Label>
+              <FormControl>
+                <Select v-bind="componentField">
+                  <SelectTrigger
+                    :id="componentField.id || 'search-provider-create-type'"
+                    class="w-full"
+                    :aria-label="$t('searchProvider.provider')"
+                  >
+                    <SelectValue :placeholder="$t('common.typePlaceholder')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem
+                        v-for="type in PROVIDER_TYPES"
+                        :key="type"
+                        :value="type"
+                      >
+                        {{ type }}
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </FormControl>
+            </FormItem>
+          </FormField>
+        </div>
       </template>
     </FormDialogShell>
   </section>
