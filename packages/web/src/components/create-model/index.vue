@@ -1,22 +1,21 @@
 <template>
   <section class="ml-auto">
-    <Dialog v-model:open="open">
-      <DialogTrigger as-child>
+    <FormDialogShell
+      v-model:open="open"
+      :title="title === 'edit' ? $t('models.editModel') : $t('models.addModel')"
+      :cancel-text="$t('common.cancel')"
+      :submit-text="title === 'edit' ? $t('common.save') : $t('models.addModel')"
+      :submit-disabled="!canSubmit"
+      :loading="isLoading"
+      @submit="addModel"
+    >
+      <template #trigger>
         <Button variant="default">
           {{ $t('models.addModel') }}
         </Button>
-      </DialogTrigger>
-      <DialogContent class="sm:max-w-106.25">
-        <form @submit="addModel">
-          <DialogHeader>
-            <DialogTitle>
-              {{ title === 'edit' ? $t('models.editModel') : $t('models.addModel') }}
-            </DialogTitle>
-            <DialogDescription class="mb-4">
-              <Separator class="my-4" />
-            </DialogDescription>
-          </DialogHeader>
-          <div class="flex flex-col gap-3">
+      </template>
+      <template #body>
+        <div class="flex flex-col gap-3 mt-4">
             <!-- Type -->
             <FormField
               v-slot="{ componentField }"
@@ -54,51 +53,33 @@
               <Label class="mb-2">
                 {{ $t('models.clientType') }}
               </Label>
-              <Popover v-model:open="clientTypeOpen">
-                <PopoverTrigger as-child>
+              <SearchableSelectPopover
+                v-model="clientTypeModel"
+                :options="clientTypeOptions"
+                :placeholder="$t('models.clientTypePlaceholder')"
+                :aria-label="$t('models.clientType')"
+                :search-placeholder="$t('models.clientTypePlaceholder')"
+                :search-aria-label="$t('models.clientType')"
+                class="mt-2"
+                :show-group-headers="false"
+              >
+                <template #trigger="{ open, displayLabel }">
                   <Button
                     variant="outline"
                     role="combobox"
-                    :aria-expanded="clientTypeOpen"
+                    :aria-expanded="open"
                     class="w-full justify-between font-normal mt-2"
                   >
                     <span class="truncate">
-                      {{ selectedClientTypeLabel || $t('models.clientTypePlaceholder') }}
+                      {{ displayLabel || $t('models.clientTypePlaceholder') }}
                     </span>
                     <FontAwesomeIcon
                       :icon="['fas', 'chevron-down']"
                       class="ml-2 size-3 shrink-0 text-muted-foreground"
                     />
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  class="w-[--reka-popover-trigger-width] p-1"
-                  align="start"
-                >
-                  <button
-                    v-for="ct in CLIENT_TYPE_LIST"
-                    :key="ct.value"
-                    type="button"
-                    role="option"
-                    :aria-selected="form.values.client_type === ct.value"
-                    class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
-                    :class="{ 'bg-accent': form.values.client_type === ct.value }"
-                    @click="selectClientType(ct.value)"
-                  >
-                    <FontAwesomeIcon
-                      v-if="form.values.client_type === ct.value"
-                      :icon="['fas', 'check']"
-                      class="size-3.5"
-                    />
-                    <span
-                      v-else
-                      class="size-3.5"
-                    />
-                    <span class="truncate">{{ ct.label }}</span>
-                    <span class="ml-auto text-xs text-muted-foreground">{{ ct.hint }}</span>
-                  </button>
-                </PopoverContent>
-              </Popover>
+                </template>
+              </SearchableSelectPopover>
             </div>
 
             <!-- Model -->
@@ -181,36 +162,13 @@
               </div>
             </div>
           </div>
-          <DialogFooter class="mt-4">
-            <DialogClose as-child>
-              <Button variant="outline">
-                {{ $t('common.cancel') }}
-              </Button>
-            </DialogClose>
-            <Button
-              type="submit"
-              :disabled="!canSubmit"
-            >
-              <Spinner v-if="isLoading" />
-              {{ title === 'edit' ? $t('common.save') : $t('models.addModel') }}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      </template>
+    </FormDialogShell>
   </section>
 </template>
 
 <script setup lang="ts">
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
   Input,
   Button,
   FormField,
@@ -222,13 +180,8 @@ import {
   SelectTrigger,
   SelectValue,
   FormItem,
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
   Checkbox,
-  Separator,
   Label,
-  Spinner,
 } from '@memoh/ui'
 import { useForm } from 'vee-validate'
 import { inject, computed, watch, nextTick, type Ref, ref } from 'vue'
@@ -238,6 +191,9 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { postModels, putModelsModelByModelId } from '@memoh/sdk'
 import type { ModelsGetResponse } from '@memoh/sdk'
 import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
+import FormDialogShell from '@/components/form-dialog-shell/index.vue'
+import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
+import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 
 const availableInputModalities = ['text', 'image', 'audio', 'video', 'file'] as const
 const selectedModalities = ref<string[]>(['text'])
@@ -259,18 +215,19 @@ const form = useForm({
 
 const selectedType = computed(() => form.values.type || 'chat')
 
-const clientTypeOpen = ref(false)
-
-const selectedClientTypeLabel = computed(() => {
-  const ct = form.values.client_type
-  if (!ct) return ''
-  return CLIENT_TYPE_META[ct]?.label ?? ct
+const clientTypeModel = computed({
+  get: () => form.values.client_type || '',
+  set: (value: string) => form.setFieldValue('client_type', value),
 })
 
-function selectClientType(value: string) {
-  form.setFieldValue('client_type', value)
-  clientTypeOpen.value = false
-}
+const clientTypeOptions = computed<SearchableSelectOption[]>(() =>
+  CLIENT_TYPE_LIST.map((ct) => ({
+    value: ct.value,
+    label: ct.label,
+    description: ct.hint,
+    keywords: [ct.label, ct.hint, CLIENT_TYPE_META[ct.value]?.value ?? ct.value],
+  })),
+)
 
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))

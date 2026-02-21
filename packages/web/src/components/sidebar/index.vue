@@ -34,17 +34,13 @@
                   class="justify-start py-5! px-4"
                   :tooltip="sidebarItem.title"
                 >
-                  <Toggle
-                    :class="`border border-transparent w-full flex justify-start ${curSlider === sidebarItem.name ? 'border-inherit' : ''}`"
-                    :model-value="curSelectSlide(sidebarItem.name as string).value"
-                    :aria-current="curSelectSlide(sidebarItem.name as string).value ? 'page' : undefined"
-                    @update:model-value="(isSelect) => {
-                      if (isSelect) {
-                        curSlider = sidebarItem.name
-                      }
-                    }"
-                    @click="router.push({ name: sidebarItem.name })"
-                  >
+                    <Toggle
+                      class="border border-transparent w-full flex justify-start"
+                      :class="{ 'border-inherit': isActive(sidebarItem.name as string) }"
+                      :model-value="isActive(sidebarItem.name as string)"
+                      :aria-current="isActive(sidebarItem.name as string) ? 'page' : undefined"
+                      @click="router.push({ name: sidebarItem.name })"
+                    >
                     <FontAwesomeIcon :icon="sidebarItem.icon" />
                     <span>{{ sidebarItem.title }}</span>
                   </Toggle>
@@ -98,10 +94,11 @@ import {
   SidebarMenuItem,
   Toggle,
 } from '@memoh/ui'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
+import { useAvatarInitials } from '@/composables/useAvatarInitials'
 
 const router = useRouter()
 const route = useRoute()
@@ -114,14 +111,11 @@ const displayNameLabel = computed(() =>
 const displayTitle = computed(() =>
   userInfo.displayName || userInfo.username || userInfo.id || t('settings.user'),
 )
-const avatarFallback = computed(() =>
-  displayTitle.value.slice(0, 2).toUpperCase() || 'U',
-)
+const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
 
-const curSlider = ref()
-const curSelectSlide = (cur: string) => computed(() => {
-  return curSlider.value === cur || new RegExp(`^/${cur}$`).test(route.path)
-})
+function isActive(name: string) {
+  return route.name === name || route.path === `/${name}`
+}
 
 const sidebarInfo = computed(() => [
   {

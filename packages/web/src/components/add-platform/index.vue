@@ -1,24 +1,24 @@
 <template>
   <section class="flex">
-    <Dialog v-model:open="open">
-      <DialogTrigger as-child>
+    <FormDialogShell
+      v-model:open="open"
+      :title="$t('platform.addTitle')"
+      :description="$t('platform.addDescription')"
+      :cancel-text="$t('common.cancel')"
+      :submit-text="$t('platform.addTitle')"
+      @submit="addPlatform"
+    >
+      <template #trigger>
         <Button
           variant="default"
           class="ml-auto my-4"
         >
           {{ $t('platform.addTitle') }}
         </Button>
-      </DialogTrigger>
-      <DialogContent class="sm:max-w-106.25">
-        <form @submit="addPlatform">
-          <DialogHeader>
-            <DialogTitle>{{ $t('platform.addTitle') }}</DialogTitle>
-            <DialogDescription class="mb-4">
-              {{ $t('platform.addDescription') }}
-            </DialogDescription>
-          </DialogHeader>
+      </template>
 
-          <div class="flex flex-col gap-3">
+      <template #body>
+        <div class="flex flex-col gap-3 mt-4">
             <!-- Name -->
             <FormField
               v-slot="{ componentField }"
@@ -99,34 +99,14 @@
               </FormItem>
             </FormField>
           </div>
-
-          <DialogFooter class="mt-4">
-            <DialogClose as-child>
-              <Button variant="outline">
-                {{ $t('common.cancel') }}
-              </Button>
-            </DialogClose>
-            <Button type="submit">
-              {{ $t('platform.addTitle') }}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      </template>
+    </FormDialogShell>
   </section>
 </template>
 
 <script setup lang="ts">
 import {
   Button,
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
   Input,
   FormField,
   FormControl,
@@ -146,6 +126,7 @@ import { useForm } from 'vee-validate'
 import { ref, inject } from 'vue'
 import { useKeyValueTags } from '@/composables/useKeyValueTags'
 import { useCreatePlatform } from '@/composables/api/usePlatform'
+import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 
 const configTags = useKeyValueTags()
 

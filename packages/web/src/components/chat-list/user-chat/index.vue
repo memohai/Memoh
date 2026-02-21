@@ -71,6 +71,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 import { useUserStore } from '@/store/user'
 import type { ChatMessage, TextBlock } from '@/store/chat-list'
+import { useAvatarInitials } from '@/composables/useAvatarInitials'
 
 const props = defineProps<{
   message: ChatMessage
@@ -86,13 +87,10 @@ const textContent = computed(() => {
 })
 
 const userAvatarUrl = computed(() => userStore.userInfo.avatarUrl ?? '')
-const userFallback = computed(() => {
-  const name = userStore.userInfo.displayName || userStore.userInfo.username || ''
-  return name.slice(0, 2).toUpperCase() || 'U'
-})
+const userFallback = useAvatarInitials(
+  () => userStore.userInfo.displayName || userStore.userInfo.username || '',
+  'U',
+)
 
-const senderFallback = computed(() => {
-  const name = props.message.senderDisplayName ?? ''
-  return name.slice(0, 2).toUpperCase() || '?'
-})
+const senderFallback = useAvatarInitials(() => props.message.senderDisplayName ?? '', '?')
 </script>

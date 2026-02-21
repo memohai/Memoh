@@ -375,6 +375,10 @@ import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePassw
 import { useUserStore } from '@/store/user'
 import { useSettingsStore } from '@/store/settings'
 import type { Locale } from '@/i18n'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import { formatDateTime } from '@/utils/date-time'
+import { useClipboard } from '@/composables/useClipboard'
+import { useAvatarInitials } from '@/composables/useAvatarInitials'
 
 interface ChannelIdentity {
   id: string
@@ -400,6 +404,7 @@ const anyPlatformValue = '__all__'
 const { t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
+const { copyText } = useClipboard()
 const { userInfo, exitLogin, patchUserInfo } = userStore
 
 // ---- Display settings ----
@@ -439,10 +444,7 @@ const displayUsername = computed(() => account.value?.username || userInfo.usern
 const displayTitle = computed(() => {
   return profileForm.display_name.trim() || displayUsername.value || displayUserID.value || t('settings.user')
 })
-const avatarFallback = computed(() => {
-  const source = displayTitle.value.trim()
-  return source.slice(0, 2).toUpperCase() || 'U'
-})
+const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
 
 function platformLabel(platformKey: string): string {
   if (!platformKey?.trim()) return platformKey ?? ''
@@ -519,7 +521,7 @@ async function onSaveProfile() {
     })
     toast.success(t('settings.profileUpdated'))
   } catch (error) {
-    toast.error(resolveErrorMessage(error, t('settings.profileUpdateFailed')))
+    toast.error(resolveApiErrorMessage(error, t('settings.profileUpdateFailed'), { prefixFallback: true }))
   } finally {
     savingProfile.value = false
   }
@@ -549,7 +551,7 @@ async function onUpdatePassword() {
     passwordForm.confirmPassword = ''
     toast.success(t('settings.passwordUpdated'))
   } catch (error) {
-    toast.error(resolveErrorMessage(error, t('settings.passwordUpdateFailed')))
+    toast.error(resolveApiErrorMessage(error, t('settings.passwordUpdateFailed'), { prefixFallback: true }))
   } finally {
     savingPassword.value = false
   }
@@ -574,7 +576,7 @@ async function onGenerateBindCode() {
     bindCode.value = data
     toast.success(t('settings.bindCodeGenerated'))
   } catch (error) {
-    toast.error(resolveErrorMessage(error, t('settings.bindCodeGenerateFailed')))
+    toast.error(resolveApiErrorMessage(error, t('settings.bindCodeGenerateFailed'), { prefixFallback: true }))
   } finally {
     generatingBindCode.value = false
   }
@@ -585,19 +587,19 @@ async function copyBindCode() {
     return
   }
   try {
-    await navigator.clipboard.writeText(bindCode.value.token)
-    toast.success(t('settings.bindCodeCopied'))
+    const copied = await copyText(bindCode.value.token)
+    if (copied) {
+      toast.success(t('settings.bindCodeCopied'))
+      return
+    }
+    toast.error(t('settings.bindCodeCopyFailed'))
   } catch {
     toast.error(t('settings.bindCodeCopyFailed'))
   }
 }
 
 function formatDate(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  return date.toLocaleString()
+  return formatDateTime(value, { fallback: value })
 }
 
 function onLogout() {
@@ -605,14 +607,4 @@ function onLogout() {
   void router.replace({ name: 'Login' })
 }
 
-function resolveErrorMessage(error: unknown, fallback: string) {
-  if (error && typeof error === 'object') {
-    const body = error as { message?: string; error?: string; detail?: string }
-    const detail = body.message || body.error || body.detail
-    if (detail) {
-      return `${fallback}: ${detail}`
-    }
-  }
-  return fallback
-}
 </script>

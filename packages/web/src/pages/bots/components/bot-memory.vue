@@ -196,13 +196,10 @@
               </p>
               <div class="flex-1 flex items-end gap-0.5 relative group min-h-0 pt-2 pb-4">
                 <div
-                  v-for="(bucket, idx) in selectedMemory.top_k_buckets"
+                  v-for="(bucket, idx) in selectedTopKBuckets"
                   :key="idx"
                   class="flex-1 bg-primary/25 hover:bg-primary/50 transition-colors relative group/bar"
-                  :style="{ 
-                    height: `${((bucket.value - Math.min(...selectedMemory.top_k_buckets.map(b => b.value))) / 
-                      (Math.max(...selectedMemory.top_k_buckets.map(b => b.value)) - Math.min(...selectedMemory.top_k_buckets.map(b => b.value)) || 1) * 80) + 20}%` 
-                  }"
+                  :style="{ height: `${topKBarHeights[idx]}%` }"
                 >
                   <!-- Tooltip for Bar -->
                   <div class="absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1 bg-popover border text-popover-foreground px-2 py-1 rounded shadow-lg text-[10px] hidden group-hover/bar:block whitespace-nowrap pointer-events-none">
@@ -214,8 +211,8 @@
                 </div>
                 <!-- Axis labels (showing actual range) -->
                 <div class="absolute left-[-2px] top-2 bottom-4 border-l border-muted-foreground/10 flex flex-col justify-between text-[8px] font-mono text-muted-foreground/40 pr-1">
-                  <span>{{ Math.max(...selectedMemory.top_k_buckets.map(b => b.value)).toFixed(4) }}</span>
-                  <span>{{ Math.min(...selectedMemory.top_k_buckets.map(b => b.value)).toFixed(4) }}</span>
+                  <span>{{ topKMaxValue.toFixed(4) }}</span>
+                  <span>{{ topKMinValue.toFixed(4) }}</span>
                 </div>
               </div>
             </div>
@@ -638,6 +635,17 @@ const hoveredCdfY = computed(() => {
   if (!hoveredCdfPoint.value) return 0
   return (100 - 5) - (hoveredCdfPoint.value.cumulative * 90)
 })
+
+const selectedTopKBuckets = computed(() => selectedMemory.value?.top_k_buckets ?? [])
+const topKBucketValues = computed(() => selectedTopKBuckets.value.map((bucket: any) => bucket.value))
+const topKMinValue = computed(() => Math.min(...topKBucketValues.value))
+const topKMaxValue = computed(() => Math.max(...topKBucketValues.value))
+const topKRange = computed(() => (topKMaxValue.value - topKMinValue.value) || 1)
+const topKBarHeights = computed(() =>
+  selectedTopKBuckets.value.map(
+    (bucket: any) => (((bucket.value - topKMinValue.value) / topKRange.value) * 80) + 20,
+  ),
+)
 
 const compactDecayDays = computed(() => {
   if (!compactDecayDate.value) return 0

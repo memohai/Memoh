@@ -1,7 +1,15 @@
 <template>
   <section>
-    <Dialog v-model:open="open">
-      <DialogTrigger as-child>
+    <FormDialogShell
+      v-model:open="open"
+      :title="$t('provider.add')"
+      :cancel-text="$t('common.cancel')"
+      :submit-text="$t('provider.add')"
+      :submit-disabled="(form.meta.value.valid === false) || isLoading"
+      :loading="isLoading"
+      @submit="createProvider"
+    >
+      <template #trigger>
         <Button
           class="w-full shadow-none! text-muted-foreground mb-4"
           variant="outline"
@@ -11,17 +19,9 @@
             class="mr-1"
           /> {{ $t('provider.addBtn') }}
         </Button>
-      </DialogTrigger>
-      <DialogContent class="sm:max-w-106.25">
-        <form @submit="createProvider">
-          <DialogHeader>
-            <DialogTitle>{{ $t('provider.add') }}</DialogTitle>
-            <DialogDescription>
-              <Separator class="my-4" />
-            </DialogDescription>
-          </DialogHeader>
-
-          <div class="flex-col gap-3 flex">
+      </template>
+      <template #body>
+        <div class="flex-col gap-3 flex mt-4">
             <FormField
               v-slot="{ componentField }"
               name="name"
@@ -89,52 +89,25 @@
               </FormItem>
             </FormField>
           </div>
-          <DialogFooter class="mt-8">
-            <DialogClose as-child>
-              <Button variant="outline">
-                {{ $t('common.cancel') }}
-              </Button>
-            </DialogClose>
-            <Button
-              type="submit"
-              :disabled="(form.meta.value.valid===false)||isLoading"
-            >
-              <Spinner
-                v-if="isLoading"
-                class="mr-1"
-              />
-              {{ $t('provider.add') }}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      </template>
+    </FormDialogShell>
   </section>
 </template>
 <script setup lang="ts">
 import {
   Button,
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
   Input,
   FormField,
   FormControl,
   FormItem,
-  DialogDescription,
-  Separator,
   Label,
-  Spinner,
 } from '@memoh/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postProviders } from '@memoh/sdk'
+import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 
 const open = defineModel<boolean>('open')
 
