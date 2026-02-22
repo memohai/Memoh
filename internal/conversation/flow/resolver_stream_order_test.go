@@ -37,6 +37,10 @@ func (s *blockingMessageService) ListSince(ctx context.Context, botID string, si
 	return nil, nil
 }
 
+func (s *blockingMessageService) ListActiveSince(ctx context.Context, botID string, since time.Time) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
 func (s *blockingMessageService) ListLatest(ctx context.Context, botID string, limit int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }

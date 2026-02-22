@@ -1,7 +1,7 @@
 {
   "name": "@memoh/web",
   "private": true,
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "type": "module",
   "scripts": {
     "dev": "vite",

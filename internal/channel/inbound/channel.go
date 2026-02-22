@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
@@ -54,6 +55,7 @@ type ChannelInboundProcessor struct {
 	routeResolver RouteResolver
 	message       messagepkg.Writer
 	mediaService  mediaIngestor
+	inboxService  *inbox.Service
 	registry      *channel.Registry
 	logger        *slog.Logger
 	jwtSecret     string
@@ -120,6 +122,15 @@ func (p *ChannelInboundProcessor) SetStreamObserver(observer channel.StreamObser
 		return
 	}
 	p.observer = observer
+}
+
+// SetInboxService configures the inbox service for storing non-mentioned
+// group messages as inbox items.
+func (p *ChannelInboundProcessor) SetInboxService(service *inbox.Service) {
+	if p == nil {
+		return
+	}
+	p.inboxService = service
 }
 
 // HandleInbound processes an inbound channel message through identity resolution and chat gateway.
@@ -213,7 +224,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				slog.Int("attachments", len(attachments)),
 			)
 		}
-		p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, attachments, "passive_sync")
+		p.createInboxItem(ctx, identity, msg, text, attachments, resolved.RouteID)
 		return nil
 	}
 	userMessagePersisted := p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, attachments, "active_chat")
@@ -356,6 +367,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		ChatToken:               chatToken,
 		ExternalMessageID:       sourceMessageID,
 		ConversationType:        msg.Conversation.Type,
+		ConversationName:        msg.Conversation.Name,
 		Query:                   text,
 		CurrentChannel:          msg.Channel.String(),
 		Channels:                []string{msg.Channel.String()},
@@ -656,6 +668,7 @@ func (p *ChannelInboundProcessor) persistInboundUser(
 		strings.TrimSpace(identity.DisplayName),
 		msg.Channel.String(),
 		strings.TrimSpace(msg.Conversation.Type),
+		strings.TrimSpace(msg.Conversation.Name),
 		attachmentPaths,
 		query,
 	)
@@ -690,6 +703,58 @@ func (p *ChannelInboundProcessor) persistInboundUser(
 		return false
 	}
 	return true
+}
+
+func (p *ChannelInboundProcessor) createInboxItem(
+	ctx context.Context,
+	ident InboundIdentity,
+	msg channel.InboundMessage,
+	text string,
+	attachments []conversation.ChatAttachment,
+	routeID string,
+) {
+	if p.inboxService == nil {
+		return
+	}
+	botID := strings.TrimSpace(ident.BotID)
+	if botID == "" {
+		return
+	}
+	trimmedText := strings.TrimSpace(text)
+	if trimmedText == "" && len(attachments) == 0 {
+		return
+	}
+	displayName := strings.TrimSpace(ident.DisplayName)
+	if displayName == "" {
+		displayName = "Unknown"
+	}
+
+	var attachmentPaths []string
+	for _, att := range attachments {
+		if p := strings.TrimSpace(att.Path); p != "" {
+			attachmentPaths = append(attachmentPaths, p)
+		}
+	}
+
+	meta := flow.BuildUserMessageMeta(
+		strings.TrimSpace(ident.ChannelIdentityID),
+		displayName,
+		msg.Channel.String(),
+		strings.TrimSpace(msg.Conversation.Type),
+		strings.TrimSpace(msg.Conversation.Name),
+		attachmentPaths,
+	)
+	content := meta.ToMap()
+	content["text"] = trimmedText
+	content["route_id"] = strings.TrimSpace(routeID)
+
+	if _, err := p.inboxService.Create(ctx, inbox.CreateRequest{
+		BotID:   botID,
+		Source:  msg.Channel.String(),
+		Content: content,
+	}); err != nil && p.logger != nil {
+		p.logger.Warn("create inbox item failed", slog.Any("error", err), slog.String("bot_id", botID))
+	}
 }
 
 func buildChannelMessage(output conversation.AssistantOutput, capabilities channel.ChannelCapabilities) channel.Message {

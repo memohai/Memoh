@@ -1,5 +1,5 @@
 import { block, quote } from './utils'
-import { AgentSkill } from '../types'
+import { AgentSkill, InboxItem } from '../types'
 
 export interface SystemParams {
   date: Date
@@ -14,6 +14,7 @@ export interface SystemParams {
   soulContent?: string
   toolsContent?: string
   attachments?: string[]
+  inbox?: InboxItem[]
 }
 
 export const skillPrompt = (skill: AgentSkill) => {
@@ -23,6 +24,21 @@ export const skillPrompt = (skill: AgentSkill) => {
 
 ${skill.content}
   `.trim()
+}
+
+const formatInbox = (items: InboxItem[]): string => {
+  if (!items || items.length === 0) return ''
+  return `
+## Inbox
+
+You have ${items.length} unread message(s) in your inbox. These are messages from group conversations where you were not directly mentioned, or notifications from external sources. Review them to stay informed about ongoing discussions.
+
+<inbox>
+${JSON.stringify(items)}
+</inbox>
+
+Use ${quote('search_inbox')} to find older messages by keyword.
+`.trim()
 }
 
 export const system = ({
@@ -36,6 +52,7 @@ export const system = ({
   identityContent,
   soulContent,
   toolsContent,
+  inbox = [],
 }: SystemParams) => {
   // ── Static section (stable prefix for LLM prompt caching) ──────────
   const staticHeaders = {
@@ -119,6 +136,8 @@ ${soulContent}
 ${toolsContent}
 
 ${enabledSkills.map(skill => skillPrompt(skill)).join('\n\n---\n\n')}
+
+${formatInbox(inbox)}
 
 ## Session Context
 

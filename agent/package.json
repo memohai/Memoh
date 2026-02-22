@@ -1,6 +1,6 @@
 {
   "name": "@memoh/agent-gateway",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outfile dist/index.js --target bun --minify",
@@ -8,10 +8,7 @@
   },
   "dependencies": {
     "@memoh/config": "workspace:*",
-    "@ai-sdk/anthropic": "^3.0.9",
-    "@ai-sdk/google": "^3.0.6",
-    "@ai-sdk/mcp": "^1.0.6",
-    "@ai-sdk/openai": "^3.0.7",
+    "@memoh/agent": "workspace:*",
     "@elysiajs/bearer": "^1.4.2",
     "@elysiajs/cors": "^1.4.1",
     "@modelcontextprotocol/sdk": "^1.25.2",

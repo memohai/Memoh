@@ -817,6 +817,13 @@ definitions:
       user_id:
         type: string
     type: object
+  handlers.markReadRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
+    type: object
   handlers.memoryAddPayload:
     properties:
       embedding_enabled:
@@ -899,6 +906,41 @@ definitions:
       updated_at:
         type: string
       user_id:
+        type: string
+    type: object
+  inbox.CountResult:
+    properties:
+      total:
+        type: integer
+      unread:
+        type: integer
+    type: object
+  inbox.CreateRequest:
+    properties:
+      bot_id:
+        type: string
+      content:
+        additionalProperties: {}
+        type: object
+      source:
+        type: string
+    type: object
+  inbox.Item:
+    properties:
+      bot_id:
+        type: string
+      content:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      is_read:
+        type: boolean
+      read_at:
+        type: string
+      source:
         type: string
     type: object
   mcp.ExportResponse:
@@ -1469,6 +1511,8 @@ definitions:
         type: integer
       max_context_tokens:
         type: integer
+      max_inbox_items:
+        type: integer
       memory_model_id:
         type: string
       search_provider_id:
@@ -1487,6 +1531,8 @@ definitions:
       max_context_load_time:
         type: integer
       max_context_tokens:
+        type: integer
+      max_inbox_items:
         type: integer
       memory_model_id:
         type: string
@@ -2028,6 +2074,196 @@ paths:
       summary: Stop container task for bot
       tags:
       - containerd
+  /bots/{bot_id}/inbox:
+    get:
+      description: List inbox items for a bot with optional filters
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Filter by read status (true/false)
+        in: query
+        name: is_read
+        type: string
+      - description: Filter by source
+        in: query
+        name: source
+        type: string
+      - default: 50
+        description: Max items to return
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset for pagination
+        in: query
+        name: offset
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/inbox.Item'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List inbox items
+      tags:
+      - inbox
+    post:
+      description: Create a new inbox item (for external integrations)
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Inbox item payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/inbox.CreateRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/inbox.Item'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create inbox item
+      tags:
+      - inbox
+  /bots/{bot_id}/inbox/{id}:
+    delete:
+      description: Delete a single inbox item
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Inbox item ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete inbox item
+      tags:
+      - inbox
+    get:
+      description: Get a single inbox item by ID
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Inbox item ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/inbox.Item'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get inbox item
+      tags:
+      - inbox
+  /bots/{bot_id}/inbox/count:
+    get:
+      description: Count unread and total inbox items
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/inbox.CountResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Count inbox items
+      tags:
+      - inbox
+  /bots/{bot_id}/inbox/mark-read:
+    post:
+      description: Batch mark inbox items as read
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Item IDs to mark as read
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.markReadRequest'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Mark inbox items as read
+      tags:
+      - inbox
   /bots/{bot_id}/mcp:
     get:
       description: List MCP connections for a bot

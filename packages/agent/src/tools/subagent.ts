@@ -2,7 +2,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { createAgent } from '../agent'
 import { ModelConfig, AgentAuthContext } from '../types'
-import { AuthFetcher } from '..'
+import { AuthFetcher } from '../types'
 import { AgentAction, IdentityContext } from '../types/agent'
 
 export interface SubagentToolParams {

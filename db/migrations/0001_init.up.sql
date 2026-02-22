@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS bots (
   max_context_tokens INTEGER NOT NULL DEFAULT 0,
   language TEXT NOT NULL DEFAULT 'auto',
   allow_guest BOOLEAN NOT NULL DEFAULT false,
+  max_inbox_items INTEGER NOT NULL DEFAULT 50,
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   memory_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   embedding_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
@@ -389,4 +390,18 @@ CREATE TABLE IF NOT EXISTS bot_history_message_assets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_assets_message_id ON bot_history_message_assets(message_id);
+
+-- bot_inbox: per-bot message inbox for non-mentioned group messages, emails, etc.
+CREATE TABLE IF NOT EXISTS bot_inbox (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  source TEXT NOT NULL DEFAULT '',
+  content JSONB NOT NULL DEFAULT '{}'::jsonb,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  read_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_inbox_bot_unread ON bot_inbox(bot_id, created_at DESC) WHERE is_read = FALSE;
+CREATE INDEX IF NOT EXISTS idx_bot_inbox_bot_created ON bot_inbox(bot_id, created_at DESC);
 

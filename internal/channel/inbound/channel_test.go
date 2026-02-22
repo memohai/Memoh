@@ -850,11 +850,8 @@ func TestChannelInboundProcessorPersonalGroupOwnerWithoutMentionUsesPassivePersi
 	if len(sender.sent) != 0 {
 		t.Fatalf("owner group message without mention should not send reply")
 	}
-	if len(chatSvc.persisted) != 1 {
-		t.Fatalf("expected one passive persisted message, got: %d", len(chatSvc.persisted))
-	}
-	if got := chatSvc.persisted[0].Metadata["trigger_mode"]; got != "passive_sync" {
-		t.Fatalf("expected trigger_mode passive_sync, got: %v", got)
+	if len(chatSvc.persisted) != 0 {
+		t.Fatalf("non-mentioned message should not persist to messages (only inbox), got: %d", len(chatSvc.persisted))
 	}
 }
 

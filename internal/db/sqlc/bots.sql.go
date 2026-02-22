@@ -14,7 +14,7 @@ import (
 const createBot = `-- name: CreateBot :one
 INSERT INTO bots (owner_user_id, type, display_name, avatar_url, is_active, metadata, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, search_provider_id, metadata, created_at, updated_at
+RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, search_provider_id, metadata, created_at, updated_at
 `
 
 type CreateBotParams struct {
@@ -27,7 +27,29 @@ type CreateBotParams struct {
 	Status      string      `json:"status"`
 }
 
-func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (Bot, error) {
+type CreateBotRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
+	Type               string             `json:"type"`
+	DisplayName        pgtype.Text        `json:"display_name"`
+	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	IsActive           bool               `json:"is_active"`
+	Status             string             `json:"status"`
+	MaxContextLoadTime int32              `json:"max_context_load_time"`
+	MaxContextTokens   int32              `json:"max_context_tokens"`
+	MaxInboxItems      int32              `json:"max_inbox_items"`
+	Language           string             `json:"language"`
+	AllowGuest         bool               `json:"allow_guest"`
+	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
+	MemoryModelID      pgtype.UUID        `json:"memory_model_id"`
+	EmbeddingModelID   pgtype.UUID        `json:"embedding_model_id"`
+	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
+	Metadata           []byte             `json:"metadata"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (CreateBotRow, error) {
 	row := q.db.QueryRow(ctx, createBot,
 		arg.OwnerUserID,
 		arg.Type,
@@ -37,7 +59,7 @@ func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (Bot, erro
 		arg.Metadata,
 		arg.Status,
 	)
-	var i Bot
+	var i CreateBotRow
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerUserID,
@@ -48,6 +70,7 @@ func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (Bot, erro
 		&i.Status,
 		&i.MaxContextLoadTime,
 		&i.MaxContextTokens,
+		&i.MaxInboxItems,
 		&i.Language,
 		&i.AllowGuest,
 		&i.ChatModelID,
@@ -85,14 +108,36 @@ func (q *Queries) DeleteBotMember(ctx context.Context, arg DeleteBotMemberParams
 }
 
 const getBotByID = `-- name: GetBotByID :one
-SELECT id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, search_provider_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, search_provider_id, metadata, created_at, updated_at
 FROM bots
 WHERE id = $1
 `
 
-func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (Bot, error) {
+type GetBotByIDRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
+	Type               string             `json:"type"`
+	DisplayName        pgtype.Text        `json:"display_name"`
+	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	IsActive           bool               `json:"is_active"`
+	Status             string             `json:"status"`
+	MaxContextLoadTime int32              `json:"max_context_load_time"`
+	MaxContextTokens   int32              `json:"max_context_tokens"`
+	MaxInboxItems      int32              `json:"max_inbox_items"`
+	Language           string             `json:"language"`
+	AllowGuest         bool               `json:"allow_guest"`
+	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
+	MemoryModelID      pgtype.UUID        `json:"memory_model_id"`
+	EmbeddingModelID   pgtype.UUID        `json:"embedding_model_id"`
+	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
+	Metadata           []byte             `json:"metadata"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (GetBotByIDRow, error) {
 	row := q.db.QueryRow(ctx, getBotByID, id)
-	var i Bot
+	var i GetBotByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerUserID,
@@ -103,6 +148,7 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (Bot, error) {
 		&i.Status,
 		&i.MaxContextLoadTime,
 		&i.MaxContextTokens,
+		&i.MaxInboxItems,
 		&i.Language,
 		&i.AllowGuest,
 		&i.ChatModelID,
@@ -173,22 +219,44 @@ func (q *Queries) ListBotMembers(ctx context.Context, botID pgtype.UUID) ([]BotM
 }
 
 const listBotsByMember = `-- name: ListBotsByMember :many
-SELECT b.id, b.owner_user_id, b.type, b.display_name, b.avatar_url, b.is_active, b.status, b.max_context_load_time, b.max_context_tokens, b.language, b.allow_guest, b.chat_model_id, b.memory_model_id, b.embedding_model_id, b.search_provider_id, b.metadata, b.created_at, b.updated_at
+SELECT b.id, b.owner_user_id, b.type, b.display_name, b.avatar_url, b.is_active, b.status, b.max_context_load_time, b.max_context_tokens, b.max_inbox_items, b.language, b.allow_guest, b.chat_model_id, b.memory_model_id, b.embedding_model_id, b.search_provider_id, b.metadata, b.created_at, b.updated_at
 FROM bots b
 JOIN bot_members m ON m.bot_id = b.id
 WHERE m.user_id = $1
 ORDER BY b.created_at DESC
 `
 
-func (q *Queries) ListBotsByMember(ctx context.Context, userID pgtype.UUID) ([]Bot, error) {
+type ListBotsByMemberRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
+	Type               string             `json:"type"`
+	DisplayName        pgtype.Text        `json:"display_name"`
+	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	IsActive           bool               `json:"is_active"`
+	Status             string             `json:"status"`
+	MaxContextLoadTime int32              `json:"max_context_load_time"`
+	MaxContextTokens   int32              `json:"max_context_tokens"`
+	MaxInboxItems      int32              `json:"max_inbox_items"`
+	Language           string             `json:"language"`
+	AllowGuest         bool               `json:"allow_guest"`
+	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
+	MemoryModelID      pgtype.UUID        `json:"memory_model_id"`
+	EmbeddingModelID   pgtype.UUID        `json:"embedding_model_id"`
+	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
+	Metadata           []byte             `json:"metadata"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListBotsByMember(ctx context.Context, userID pgtype.UUID) ([]ListBotsByMemberRow, error) {
 	rows, err := q.db.Query(ctx, listBotsByMember, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bot
+	var items []ListBotsByMemberRow
 	for rows.Next() {
-		var i Bot
+		var i ListBotsByMemberRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OwnerUserID,
@@ -199,6 +267,7 @@ func (q *Queries) ListBotsByMember(ctx context.Context, userID pgtype.UUID) ([]B
 			&i.Status,
 			&i.MaxContextLoadTime,
 			&i.MaxContextTokens,
+			&i.MaxInboxItems,
 			&i.Language,
 			&i.AllowGuest,
 			&i.ChatModelID,
@@ -220,21 +289,43 @@ func (q *Queries) ListBotsByMember(ctx context.Context, userID pgtype.UUID) ([]B
 }
 
 const listBotsByOwner = `-- name: ListBotsByOwner :many
-SELECT id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, search_provider_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, search_provider_id, metadata, created_at, updated_at
 FROM bots
 WHERE owner_user_id = $1
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID pgtype.UUID) ([]Bot, error) {
+type ListBotsByOwnerRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
+	Type               string             `json:"type"`
+	DisplayName        pgtype.Text        `json:"display_name"`
+	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	IsActive           bool               `json:"is_active"`
+	Status             string             `json:"status"`
+	MaxContextLoadTime int32              `json:"max_context_load_time"`
+	MaxContextTokens   int32              `json:"max_context_tokens"`
+	MaxInboxItems      int32              `json:"max_inbox_items"`
+	Language           string             `json:"language"`
+	AllowGuest         bool               `json:"allow_guest"`
+	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
+	MemoryModelID      pgtype.UUID        `json:"memory_model_id"`
+	EmbeddingModelID   pgtype.UUID        `json:"embedding_model_id"`
+	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
+	Metadata           []byte             `json:"metadata"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID pgtype.UUID) ([]ListBotsByOwnerRow, error) {
 	rows, err := q.db.Query(ctx, listBotsByOwner, ownerUserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bot
+	var items []ListBotsByOwnerRow
 	for rows.Next() {
-		var i Bot
+		var i ListBotsByOwnerRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OwnerUserID,
@@ -245,6 +336,7 @@ func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID pgtype.UUID) 
 			&i.Status,
 			&i.MaxContextLoadTime,
 			&i.MaxContextTokens,
+			&i.MaxInboxItems,
 			&i.Language,
 			&i.AllowGuest,
 			&i.ChatModelID,
@@ -270,7 +362,7 @@ UPDATE bots
 SET owner_user_id = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, search_provider_id, metadata, created_at, updated_at
+RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, search_provider_id, metadata, created_at, updated_at
 `
 
 type UpdateBotOwnerParams struct {
@@ -278,9 +370,31 @@ type UpdateBotOwnerParams struct {
 	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 }
 
-func (q *Queries) UpdateBotOwner(ctx context.Context, arg UpdateBotOwnerParams) (Bot, error) {
+type UpdateBotOwnerRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
+	Type               string             `json:"type"`
+	DisplayName        pgtype.Text        `json:"display_name"`
+	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	IsActive           bool               `json:"is_active"`
+	Status             string             `json:"status"`
+	MaxContextLoadTime int32              `json:"max_context_load_time"`
+	MaxContextTokens   int32              `json:"max_context_tokens"`
+	MaxInboxItems      int32              `json:"max_inbox_items"`
+	Language           string             `json:"language"`
+	AllowGuest         bool               `json:"allow_guest"`
+	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
+	MemoryModelID      pgtype.UUID        `json:"memory_model_id"`
+	EmbeddingModelID   pgtype.UUID        `json:"embedding_model_id"`
+	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
+	Metadata           []byte             `json:"metadata"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpdateBotOwner(ctx context.Context, arg UpdateBotOwnerParams) (UpdateBotOwnerRow, error) {
 	row := q.db.QueryRow(ctx, updateBotOwner, arg.ID, arg.OwnerUserID)
-	var i Bot
+	var i UpdateBotOwnerRow
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerUserID,
@@ -291,6 +405,7 @@ func (q *Queries) UpdateBotOwner(ctx context.Context, arg UpdateBotOwnerParams) 
 		&i.Status,
 		&i.MaxContextLoadTime,
 		&i.MaxContextTokens,
+		&i.MaxInboxItems,
 		&i.Language,
 		&i.AllowGuest,
 		&i.ChatModelID,
@@ -312,7 +427,7 @@ SET display_name = $2,
     metadata = $5,
     updated_at = now()
 WHERE id = $1
-RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, search_provider_id, metadata, created_at, updated_at
+RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest, chat_model_id, memory_model_id, embedding_model_id, search_provider_id, metadata, created_at, updated_at
 `
 
 type UpdateBotProfileParams struct {
@@ -323,7 +438,29 @@ type UpdateBotProfileParams struct {
 	Metadata    []byte      `json:"metadata"`
 }
 
-func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfileParams) (Bot, error) {
+type UpdateBotProfileRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
+	Type               string             `json:"type"`
+	DisplayName        pgtype.Text        `json:"display_name"`
+	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	IsActive           bool               `json:"is_active"`
+	Status             string             `json:"status"`
+	MaxContextLoadTime int32              `json:"max_context_load_time"`
+	MaxContextTokens   int32              `json:"max_context_tokens"`
+	MaxInboxItems      int32              `json:"max_inbox_items"`
+	Language           string             `json:"language"`
+	AllowGuest         bool               `json:"allow_guest"`
+	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
+	MemoryModelID      pgtype.UUID        `json:"memory_model_id"`
+	EmbeddingModelID   pgtype.UUID        `json:"embedding_model_id"`
+	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
+	Metadata           []byte             `json:"metadata"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfileParams) (UpdateBotProfileRow, error) {
 	row := q.db.QueryRow(ctx, updateBotProfile,
 		arg.ID,
 		arg.DisplayName,
@@ -331,7 +468,7 @@ func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfilePara
 		arg.IsActive,
 		arg.Metadata,
 	)
-	var i Bot
+	var i UpdateBotProfileRow
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerUserID,
@@ -342,6 +479,7 @@ func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfilePara
 		&i.Status,
 		&i.MaxContextLoadTime,
 		&i.MaxContextTokens,
+		&i.MaxInboxItems,
 		&i.Language,
 		&i.AllowGuest,
 		&i.ChatModelID,

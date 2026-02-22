@@ -1,6 +1,6 @@
 import { HTTPMCPConnection, MCPConnection, SSEMCPConnection, StdioMCPConnection } from '../types'
 import { createMCPClient } from '@ai-sdk/mcp'
-import { AuthFetcher } from '../index'
+import { AuthFetcher } from '../types'
 import type { AgentAuthContext } from '../types/agent'
 
 type MCPToolOptions = {
@@ -59,7 +59,7 @@ export const getMCPTools = async (connections: MCPConnection[], options: MCPTool
       const text = await response.text().catch(() => '')
       throw new Error(`mcp-stdio failed: ${response.status} ${text}`)
     }
-    const data = await response.json().catch(() => ({} as { url?: string }))
+    const data = await response.json().catch(() => ({})) as { url?: string }
     const rawUrl = typeof data?.url === 'string' ? data.url : ''
     if (!rawUrl) {
       throw new Error('mcp-stdio response missing url')

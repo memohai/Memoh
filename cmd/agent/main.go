@@ -40,12 +40,14 @@ import (
 	"github.com/memohai/memoh/internal/embeddings"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/healthcheck"
+	"github.com/memohai/memoh/internal/inbox"
 	channelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/channel"
 	mcpchecker "github.com/memohai/memoh/internal/healthcheck/checkers/mcp"
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
 	mcpcontainer "github.com/memohai/memoh/internal/mcp/providers/container"
 	mcpcontacts "github.com/memohai/memoh/internal/mcp/providers/contacts"
+	mcpinbox "github.com/memohai/memoh/internal/mcp/providers/inbox"
 	mcpmemory "github.com/memohai/memoh/internal/mcp/providers/memory"
 	mcpmessage "github.com/memohai/memoh/internal/mcp/providers/message"
 	mcpschedule "github.com/memohai/memoh/internal/mcp/providers/schedule"
@@ -160,6 +162,7 @@ func runServe() {
 			identities.NewService,
 			bind.NewService,
 			event.NewHub,
+			inbox.NewService,
 
 			// services requiring provide functions
 			provideRouteService,
@@ -201,6 +204,7 @@ func runServe() {
 			provideServerHandler(handlers.NewChannelHandler),
 			provideServerHandler(provideUsersHandler),
 			provideServerHandler(handlers.NewMCPHandler),
+			provideServerHandler(handlers.NewInboxHandler),
 			provideServerHandler(provideCLIHandler),
 			provideServerHandler(provideWebHandler),
 
@@ -373,10 +377,11 @@ func provideScheduleTriggerer(resolver *flow.Resolver) schedule.Triggerer {
 // conversation flow
 // ---------------------------------------------------------------------------
 
-func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, memoryService *memory.Service, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler) *flow.Resolver {
+func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, memoryService *memory.Service, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, memoryService, chatService, msgService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
+	resolver.SetInboxService(inboxService)
 	return resolver
 }
 
@@ -408,11 +413,13 @@ func provideChannelRouter(
 	preauthService *preauth.Service,
 	bindService *bind.Service,
 	mediaService *media.Service,
+	inboxService *inbox.Service,
 	rc *boot.RuntimeConfig,
 ) *inbound.ChannelInboundProcessor {
 	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, botService, policyService, preauthService, bindService, rc.JwtSecret, 5*time.Minute)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
+	processor.SetInboxService(inboxService)
 	return processor
 }
 
@@ -436,7 +443,7 @@ func provideContainerdHandler(log *slog.Logger, service ctr.Service, manager *mc
 	return handlers.NewContainerdHandler(log, service, manager, cfg.MCP, cfg.Containerd.Namespace, botService, accountService, policyService, queries)
 }
 
-func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, memoryService *memory.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, memoryService *memory.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service) *mcp.ToolGatewayService {
 	var assetResolver mcpmessage.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -446,6 +453,7 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	scheduleExec := mcpschedule.NewExecutor(log, scheduleService)
 	memoryExec := mcpmemory.NewExecutor(log, memoryService, chatService, accountService)
 	webExec := mcpweb.NewExecutor(log, settingsService, searchProviderService)
+	inboxExec := mcpinbox.NewExecutor(log, inboxService)
 	execWorkDir := cfg.MCP.DataMount
 	if strings.TrimSpace(execWorkDir) == "" {
 		execWorkDir = config.DefaultDataMount
@@ -457,7 +465,7 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 
 	svc := mcp.NewToolGatewayService(
 		log,
-		[]mcp.ToolExecutor{messageExec, contactsExec, scheduleExec, memoryExec, webExec, fsExec},
+		[]mcp.ToolExecutor{messageExec, contactsExec, scheduleExec, memoryExec, webExec, fsExec, inboxExec},
 		[]mcp.ToolSource{fedSource},
 	)
 	containerdHandler.SetToolGatewayService(svc)

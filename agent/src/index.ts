@@ -3,6 +3,7 @@ import { chatModule } from './modules/chat'
 import { corsMiddleware } from './middlewares/cors'
 import { errorMiddleware } from './middlewares/error'
 import { loadConfig, getBaseUrl as getBaseUrlByConfig } from '@memoh/config'
+import { AuthFetcher } from '@memoh/agent'
 
 const config = loadConfig('../config.toml')
 
@@ -10,10 +11,6 @@ export const getBaseUrl = () => {
   return getBaseUrlByConfig(config)
 }
 
-export type AuthFetcher = (
-  url: string,
-  options?: RequestInit,
-) => Promise<Response>;
 export const createAuthFetcher = (bearer: string | undefined): AuthFetcher => {
   return async (url: string, options?: RequestInit) => {
     const requestOptions = options ?? {}

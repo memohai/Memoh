@@ -167,6 +167,24 @@ func (s *DBService) ListSince(ctx context.Context, botID string, since time.Time
 	return msgs, nil
 }
 
+// ListActiveSince returns bot messages since a given time, excluding passive_sync messages.
+func (s *DBService) ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error) {
+	pgBotID, err := dbpkg.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListActiveMessagesSince(ctx, sqlc.ListActiveMessagesSinceParams{
+		BotID:     pgBotID,
+		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromActiveSince(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
 // ListLatest returns the latest N bot messages (newest first in DB; caller may reverse for ASC).
 func (s *DBService) ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
@@ -273,6 +291,26 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 	)
 }
 
+func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.RouteID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.CreatedAt,
+	)
+}
+
 func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 	return toMessageFields(
 		row.ID,
@@ -341,6 +379,14 @@ func toMessagesFromSince(rows []sqlc.ListMessagesSinceRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, toMessageFromSinceRow(row))
+	}
+	return messages
+}
+
+func toMessagesFromActiveSince(rows []sqlc.ListActiveMessagesSinceRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromActiveSinceRow(row))
 	}
 	return messages
 }

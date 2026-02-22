@@ -1,7 +1,7 @@
 {
   "name": "@memoh/monorepo",
   "private": true,
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "scripts": {
     "web:dev": "pnpm --filter @memoh/web dev",
     "web:build": "pnpm --filter @memoh/web build",
