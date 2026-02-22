@@ -83,7 +83,7 @@ const curBreadcrumb = computed(() => {
 
 const currentPageTitle = computed(() => {
   const last = curBreadcrumb.value[curBreadcrumb.value.length - 1]
-  const title = String(last?.breadcrumb ?? '').trim()
+  const title = String(last?.breadcrumb?.value ?? '').trim()
   return title || 'Memoh'
 })
 
