@@ -176,6 +176,7 @@
     "unsupported": "不支持",
     "error": "错误",
     "embedding": "Embedding",
+    "openaiCompletionsModelsOutput": "OpenAI Completions Models",
     "testFailed": "测试失败"
   },
   "searchProvider": {

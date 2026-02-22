@@ -134,6 +134,13 @@
             {{ statusText(testResult.checks['embedding']?.status) }}
           </Badge>
         </div>
+
+        <div class="flex items-center justify-between">
+          <span>{{ $t('provider.openaiCompletionsModelsOutput') }}</span>
+          <Badge :variant="statusVariant(testResult.checks['openai-completions-models-output']?.status)">
+            {{ statusText(testResult.checks['openai-completions-models-output']?.status) }}
+          </Badge>
+        </div>
       </template>
 
       <div

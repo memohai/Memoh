@@ -180,6 +180,7 @@
     "unsupported": "Unsupported",
     "error": "Error",
     "embedding": "Embedding",
+    "openaiCompletionsModelsOutput": "OpenAI Completions Models",
     "testFailed": "Test failed"
   },
   "searchProvider": {
