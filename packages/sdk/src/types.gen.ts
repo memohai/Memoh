@@ -778,6 +778,7 @@ export type ModelsAddRequest = {
     llm_provider_id?: string;
     model_id?: string;
     name?: string;
+    supports_reasoning?: boolean;
     type?: ModelsModelType;
 };
 
@@ -800,6 +801,7 @@ export type ModelsGetResponse = {
     llm_provider_id?: string;
     model_id?: string;
     name?: string;
+    supports_reasoning?: boolean;
     type?: ModelsModelType;
 };
 
@@ -812,6 +814,7 @@ export type ModelsUpdateRequest = {
     llm_provider_id?: string;
     model_id?: string;
     name?: string;
+    supports_reasoning?: boolean;
     type?: ModelsModelType;
 };
 
@@ -970,6 +973,8 @@ export type SettingsSettings = {
     max_context_tokens?: number;
     max_inbox_items?: number;
     memory_model_id?: string;
+    reasoning_effort?: string;
+    reasoning_enabled?: boolean;
     search_provider_id?: string;
 };
 
@@ -982,6 +987,8 @@ export type SettingsUpsertRequest = {
     max_context_tokens?: number;
     max_inbox_items?: number;
     memory_model_id?: string;
+    reasoning_effort?: string;
+    reasoning_enabled?: boolean;
     search_provider_id?: string;
 };
 

@@ -12,12 +12,18 @@ export const ClientTypeModel = z.enum([
   'openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai',
 ])
 
+export const ReasoningConfigModel = z.object({
+  enabled: z.boolean(),
+  effort: z.enum(['low', 'medium', 'high']),
+}).optional()
+
 export const ModelConfigModel = z.object({
   modelId: z.string().min(1, 'Model ID is required'),
   clientType: ClientTypeModel,
   input: z.array(z.enum(['text', 'image', 'audio', 'video', 'file'])),
   apiKey: z.string().min(1, 'API key is required'),
   baseUrl: z.string(),
+  reasoning: ReasoningConfigModel,
 })
 
 export const AllowedActionModel = z.enum(allActions)

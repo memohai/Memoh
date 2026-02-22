@@ -49,10 +49,11 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 		inputMod = normalizeModalities(model.InputModalities, []string{ModelInputText})
 	}
 	params := sqlc.CreateModelParams{
-		ModelID:         model.ModelID,
-		LlmProviderID:   llmProviderID,
-		InputModalities: inputMod,
-		Type:            string(model.Type),
+		ModelID:           model.ModelID,
+		LlmProviderID:    llmProviderID,
+		InputModalities:   inputMod,
+		SupportsReasoning: model.SupportsReasoning,
+		Type:              string(model.Type),
 	}
 	if model.ClientType != "" {
 		params.ClientType = pgtype.Text{String: string(model.ClientType), Valid: true}
@@ -214,10 +215,11 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		inputMod = normalizeModalities(model.InputModalities, []string{ModelInputText})
 	}
 	params := sqlc.UpdateModelParams{
-		ID:              uuid,
-		ModelID:         model.ModelID,
-		InputModalities: inputMod,
-		Type:            string(model.Type),
+		ID:                uuid,
+		ModelID:           model.ModelID,
+		InputModalities:   inputMod,
+		SupportsReasoning: model.SupportsReasoning,
+		Type:              string(model.Type),
 	}
 	if model.ClientType != "" {
 		params.ClientType = pgtype.Text{String: string(model.ClientType), Valid: true}
@@ -268,9 +270,10 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 		inputMod = normalizeModalities(model.InputModalities, []string{ModelInputText})
 	}
 	params := sqlc.UpdateModelParams{
-		ID:              current.ID,
-		InputModalities: inputMod,
-		Type:            string(model.Type),
+		ID:                current.ID,
+		InputModalities:   inputMod,
+		SupportsReasoning: model.SupportsReasoning,
+		Type:              string(model.Type),
 	}
 	if model.ClientType != "" {
 		params.ClientType = pgtype.Text{String: string(model.ClientType), Valid: true}
@@ -363,8 +366,9 @@ func convertToGetResponse(dbModel sqlc.Model) GetResponse {
 		ID:      dbModel.ID.String(),
 		ModelID: dbModel.ModelID,
 		Model: Model{
-			ModelID: dbModel.ModelID,
-			Type:    ModelType(dbModel.Type),
+			ModelID:           dbModel.ModelID,
+			SupportsReasoning: dbModel.SupportsReasoning,
+			Type:              ModelType(dbModel.Type),
 		},
 	}
 	if dbModel.ClientType.Valid {

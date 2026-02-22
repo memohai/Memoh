@@ -7728,6 +7728,9 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "supports_reasoning": {
+                    "type": "boolean"
+                },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
                 }
@@ -7794,6 +7797,9 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "supports_reasoning": {
+                    "type": "boolean"
+                },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
                 }
@@ -7833,6 +7839,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "supports_reasoning": {
+                    "type": "boolean"
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
@@ -8212,6 +8221,12 @@ const docTemplate = `{
                 "memory_model_id": {
                     "type": "string"
                 },
+                "reasoning_effort": {
+                    "type": "string"
+                },
+                "reasoning_enabled": {
+                    "type": "boolean"
+                },
                 "search_provider_id": {
                     "type": "string"
                 }
@@ -8243,6 +8258,12 @@ const docTemplate = `{
                 },
                 "memory_model_id": {
                     "type": "string"
+                },
+                "reasoning_effort": {
+                    "type": "string"
+                },
+                "reasoning_enabled": {
+                    "type": "boolean"
                 },
                 "search_provider_id": {
                     "type": "string"

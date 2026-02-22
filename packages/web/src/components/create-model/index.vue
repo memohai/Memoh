@@ -161,6 +161,18 @@
               </label>
             </div>
           </div>
+
+          <!-- Supports Reasoning (chat only) -->
+          <div
+            v-if="selectedType === 'chat'"
+            class="flex items-center justify-between"
+          >
+            <Label>{{ $t('models.supportsReasoning') }}</Label>
+            <Switch
+              :model-value="supportsReasoning"
+              @update:model-value="(val) => supportsReasoning = !!val"
+            />
+          </div>
         </div>
       </template>
     </FormDialogShell>
@@ -182,6 +194,7 @@ import {
   FormItem,
   Checkbox,
   Label,
+  Switch,
 } from '@memoh/ui'
 import { useForm } from 'vee-validate'
 import { inject, computed, watch, nextTick, type Ref, ref } from 'vue'
@@ -199,6 +212,7 @@ import { useDialogMutation } from '@/composables/useDialogMutation'
 
 const availableInputModalities = ['text', 'image', 'audio', 'video', 'file'] as const
 const selectedModalities = ref<string[]>(['text'])
+const supportsReasoning = ref(false)
 const { t } = useI18n()
 const { run } = useDialogMutation()
 
@@ -340,6 +354,7 @@ async function addModel(e: Event) {
 
   if (type === 'chat') {
     payload.input_modalities = selectedModalities.value.length > 0 ? selectedModalities.value : ['text']
+    payload.supports_reasoning = supportsReasoning.value
   }
 
   await run(
@@ -375,10 +390,12 @@ watch(open, async () => {
     const { client_type, type, model_id, name, dimensions, input_modalities } = editInfo.value
     form.resetForm({ values: { type: type || 'chat', client_type: client_type || '', model_id, name, dimensions } })
     selectedModalities.value = input_modalities ?? ['text']
+    supportsReasoning.value = !!editInfo.value.supports_reasoning
     userEditedName.value = !!(name && name !== model_id)
   } else {
     form.resetForm({ values: { type: 'chat', client_type: '', model_id: '', name: '', dimensions: undefined } })
     selectedModalities.value = ['text']
+    supportsReasoning.value = false
     userEditedName.value = false
   }
 }, {

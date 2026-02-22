@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS models (
   client_type TEXT,
   dimensions INTEGER,
   input_modalities TEXT[] NOT NULL DEFAULT ARRAY['text']::TEXT[],
+  supports_reasoning BOOLEAN NOT NULL DEFAULT false,
   type TEXT NOT NULL DEFAULT 'chat',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -121,6 +122,8 @@ CREATE TABLE IF NOT EXISTS bots (
   max_context_tokens INTEGER NOT NULL DEFAULT 0,
   language TEXT NOT NULL DEFAULT 'auto',
   allow_guest BOOLEAN NOT NULL DEFAULT false,
+  reasoning_enabled BOOLEAN NOT NULL DEFAULT false,
+  reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   max_inbox_items INTEGER NOT NULL DEFAULT 50,
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   memory_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
@@ -130,7 +133,8 @@ CREATE TABLE IF NOT EXISTS bots (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
-  CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting'))
+  CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
+  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('low', 'medium', 'high'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_bots_owner_user_id ON bots(owner_user_id);

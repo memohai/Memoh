@@ -81,6 +81,47 @@
       />
     </div>
 
+    <!-- Reasoning (only if chat model supports it) -->
+    <template v-if="chatModelSupportsReasoning">
+      <Separator />
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <Label>{{ $t('bots.settings.reasoningEnabled') }}</Label>
+          <Switch
+            :model-value="form.reasoning_enabled"
+            @update:model-value="(val) => form.reasoning_enabled = !!val"
+          />
+        </div>
+        <div
+          v-if="form.reasoning_enabled"
+          class="space-y-2"
+        >
+          <Label>{{ $t('bots.settings.reasoningEffort') }}</Label>
+          <Select
+            :model-value="form.reasoning_effort"
+            @update:model-value="(val) => form.reasoning_effort = val ?? 'medium'"
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="low">
+                  {{ $t('bots.settings.reasoningEffortLow') }}
+                </SelectItem>
+                <SelectItem value="medium">
+                  {{ $t('bots.settings.reasoningEffortMedium') }}
+                </SelectItem>
+                <SelectItem value="high">
+                  {{ $t('bots.settings.reasoningEffortHigh') }}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </template>
+
     <!-- Allow Guest: only for public bot -->
     <template v-if="isPublicBot">
       <div class="flex items-center justify-between">
@@ -149,6 +190,12 @@ import {
   Button,
   Separator,
   Spinner,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@memoh/ui'
 import { reactive, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -237,6 +284,12 @@ const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 const searchProviders = computed(() => searchProviderData.value ?? [])
 
+const chatModelSupportsReasoning = computed(() => {
+  if (!form.chat_model_id) return false
+  const m = models.value.find((m) => m.id === form.chat_model_id)
+  return !!m?.supports_reasoning
+})
+
 // ---- Form ----
 const form = reactive<SettingsSettings>({
   chat_model_id: '',
@@ -247,9 +300,10 @@ const form = reactive<SettingsSettings>({
   max_context_tokens: 0,
   language: '',
   allow_guest: false,
+  reasoning_enabled: false,
+  reasoning_effort: 'medium',
 })
 
-// 同步服务端数据到表单
 watch(settings, (val) => {
   if (val) {
     form.chat_model_id = val.chat_model_id ?? ''
@@ -260,6 +314,8 @@ watch(settings, (val) => {
     form.max_context_tokens = val.max_context_tokens ?? 0
     form.language = val.language ?? ''
     form.allow_guest = val.allow_guest ?? false
+    form.reasoning_enabled = val.reasoning_enabled ?? false
+    form.reasoning_effort = val.reasoning_effort || 'medium'
   }
 }, { immediate: true })
 
@@ -274,6 +330,8 @@ const hasChanges = computed(() => {
     || form.max_context_load_time !== (s.max_context_load_time ?? 0)
     || form.max_context_tokens !== (s.max_context_tokens ?? 0)
     || form.language !== (s.language ?? '')
+    || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
+    || form.reasoning_effort !== (s.reasoning_effort || 'medium')
   if (isPublicBot.value) {
     changed = changed || form.allow_guest !== (s.allow_guest ?? false)
   }

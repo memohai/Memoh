@@ -140,12 +140,18 @@ func (r *Resolver) SetInboxService(service *inbox.Service) {
 
 // --- gateway payload ---
 
+type gatewayReasoningConfig struct {
+	Enabled bool   `json:"enabled"`
+	Effort  string `json:"effort"`
+}
+
 type gatewayModelConfig struct {
-	ModelID    string   `json:"modelId"`
-	ClientType string   `json:"clientType"`
-	Input      []string `json:"input"`
-	APIKey     string   `json:"apiKey"`
-	BaseURL    string   `json:"baseUrl"`
+	ModelID    string                  `json:"modelId"`
+	ClientType string                  `json:"clientType"`
+	Input      []string                `json:"input"`
+	APIKey     string                  `json:"apiKey"`
+	BaseURL    string                  `json:"baseUrl"`
+	Reasoning  *gatewayReasoningConfig `json:"reasoning,omitempty"`
 }
 
 type gatewayIdentity struct {
@@ -393,6 +399,14 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		req.Query,
 	)
 
+	var reasoning *gatewayReasoningConfig
+	if chatModel.SupportsReasoning && botSettings.ReasoningEnabled {
+		reasoning = &gatewayReasoningConfig{
+			Enabled: true,
+			Effort:  botSettings.ReasoningEffort,
+		}
+	}
+
 	payload := gatewayRequest{
 		Model: gatewayModelConfig{
 			ModelID:    chatModel.ModelID,
@@ -400,6 +414,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			Input:      chatModel.InputModalities,
 			APIKey:     provider.ApiKey,
 			BaseURL:    provider.BaseUrl,
+			Reasoning:  reasoning,
 		},
 		ActiveContextTime: maxCtx,
 		Channels:          nonNilStrings(req.Channels),

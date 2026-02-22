@@ -13,12 +13,20 @@ export enum ModelInput {
   File = 'file',
 }
 
+export type ReasoningEffort = 'low' | 'medium' | 'high'
+
+export interface ReasoningConfig {
+  enabled: boolean
+  effort: ReasoningEffort
+}
+
 export interface ModelConfig {
   apiKey: string
   baseUrl: string
   modelId: string
   clientType: ClientType
   input: ModelInput[]
+  reasoning?: ReasoningConfig
 }
 
 export const hasInputModality = (config: ModelConfig, modality: ModelInput): boolean =>

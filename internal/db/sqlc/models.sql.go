@@ -83,7 +83,7 @@ func (q *Queries) CreateLlmProvider(ctx context.Context, arg CreateLlmProviderPa
 }
 
 const createModel = `-- name: CreateModel :one
-INSERT INTO models (model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type)
+INSERT INTO models (model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type)
 VALUES (
   $1,
   $2,
@@ -91,19 +91,21 @@ VALUES (
   $4,
   $5,
   $6,
-  $7
+  $7,
+  $8
 )
-RETURNING id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at
+RETURNING id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at
 `
 
 type CreateModelParams struct {
-	ModelID         string      `json:"model_id"`
-	Name            pgtype.Text `json:"name"`
-	LlmProviderID   pgtype.UUID `json:"llm_provider_id"`
-	ClientType      pgtype.Text `json:"client_type"`
-	Dimensions      pgtype.Int4 `json:"dimensions"`
-	InputModalities []string    `json:"input_modalities"`
-	Type            string      `json:"type"`
+	ModelID           string      `json:"model_id"`
+	Name              pgtype.Text `json:"name"`
+	LlmProviderID     pgtype.UUID `json:"llm_provider_id"`
+	ClientType        pgtype.Text `json:"client_type"`
+	Dimensions        pgtype.Int4 `json:"dimensions"`
+	InputModalities   []string    `json:"input_modalities"`
+	SupportsReasoning bool        `json:"supports_reasoning"`
+	Type              string      `json:"type"`
 }
 
 func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model, error) {
@@ -114,6 +116,7 @@ func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model
 		arg.ClientType,
 		arg.Dimensions,
 		arg.InputModalities,
+		arg.SupportsReasoning,
 		arg.Type,
 	)
 	var i Model
@@ -125,6 +128,7 @@ func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model
 		&i.ClientType,
 		&i.Dimensions,
 		&i.InputModalities,
+		&i.SupportsReasoning,
 		&i.Type,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -236,7 +240,7 @@ func (q *Queries) GetLlmProviderByName(ctx context.Context, name string) (LlmPro
 }
 
 const getModelByID = `-- name: GetModelByID :one
-SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models WHERE id = $1
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at FROM models WHERE id = $1
 `
 
 func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, error) {
@@ -250,6 +254,7 @@ func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, erro
 		&i.ClientType,
 		&i.Dimensions,
 		&i.InputModalities,
+		&i.SupportsReasoning,
 		&i.Type,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -258,7 +263,7 @@ func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, erro
 }
 
 const getModelByModelID = `-- name: GetModelByModelID :one
-SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models WHERE model_id = $1
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at FROM models WHERE model_id = $1
 `
 
 func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model, error) {
@@ -272,6 +277,7 @@ func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model,
 		&i.ClientType,
 		&i.Dimensions,
 		&i.InputModalities,
+		&i.SupportsReasoning,
 		&i.Type,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -347,7 +353,7 @@ func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid pg
 }
 
 const listModels = `-- name: ListModels :many
-SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at FROM models
 ORDER BY created_at DESC
 `
 
@@ -368,6 +374,7 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
+			&i.SupportsReasoning,
 			&i.Type,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -383,7 +390,7 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 }
 
 const listModelsByClientType = `-- name: ListModelsByClientType :many
-SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at FROM models
 WHERE client_type = $1
 ORDER BY created_at DESC
 `
@@ -405,6 +412,7 @@ func (q *Queries) ListModelsByClientType(ctx context.Context, clientType pgtype.
 			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
+			&i.SupportsReasoning,
 			&i.Type,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -420,7 +428,7 @@ func (q *Queries) ListModelsByClientType(ctx context.Context, clientType pgtype.
 }
 
 const listModelsByModelID = `-- name: ListModelsByModelID :many
-SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at FROM models
 WHERE model_id = $1
 ORDER BY created_at DESC
 `
@@ -442,6 +450,7 @@ func (q *Queries) ListModelsByModelID(ctx context.Context, modelID string) ([]Mo
 			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
+			&i.SupportsReasoning,
 			&i.Type,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -457,7 +466,7 @@ func (q *Queries) ListModelsByModelID(ctx context.Context, modelID string) ([]Mo
 }
 
 const listModelsByProviderID = `-- name: ListModelsByProviderID :many
-SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at FROM models
 WHERE llm_provider_id = $1
 ORDER BY created_at DESC
 `
@@ -479,6 +488,7 @@ func (q *Queries) ListModelsByProviderID(ctx context.Context, llmProviderID pgty
 			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
+			&i.SupportsReasoning,
 			&i.Type,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -494,7 +504,7 @@ func (q *Queries) ListModelsByProviderID(ctx context.Context, llmProviderID pgty
 }
 
 const listModelsByProviderIDAndType = `-- name: ListModelsByProviderIDAndType :many
-SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at FROM models
 WHERE llm_provider_id = $1
   AND type = $2
 ORDER BY created_at DESC
@@ -522,6 +532,7 @@ func (q *Queries) ListModelsByProviderIDAndType(ctx context.Context, arg ListMod
 			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
+			&i.SupportsReasoning,
 			&i.Type,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -537,7 +548,7 @@ func (q *Queries) ListModelsByProviderIDAndType(ctx context.Context, arg ListMod
 }
 
 const listModelsByType = `-- name: ListModelsByType :many
-SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at FROM models
+SELECT id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at FROM models
 WHERE type = $1
 ORDER BY created_at DESC
 `
@@ -559,6 +570,7 @@ func (q *Queries) ListModelsByType(ctx context.Context, type_ string) ([]Model, 
 			&i.ClientType,
 			&i.Dimensions,
 			&i.InputModalities,
+			&i.SupportsReasoning,
 			&i.Type,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -623,21 +635,23 @@ SET
   client_type = $4,
   dimensions = $5,
   input_modalities = $6,
-  type = $7,
+  supports_reasoning = $7,
+  type = $8,
   updated_at = now()
-WHERE id = $8
-RETURNING id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at
+WHERE id = $9
+RETURNING id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at
 `
 
 type UpdateModelParams struct {
-	ModelID         string      `json:"model_id"`
-	Name            pgtype.Text `json:"name"`
-	LlmProviderID   pgtype.UUID `json:"llm_provider_id"`
-	ClientType      pgtype.Text `json:"client_type"`
-	Dimensions      pgtype.Int4 `json:"dimensions"`
-	InputModalities []string    `json:"input_modalities"`
-	Type            string      `json:"type"`
-	ID              pgtype.UUID `json:"id"`
+	ModelID           string      `json:"model_id"`
+	Name              pgtype.Text `json:"name"`
+	LlmProviderID     pgtype.UUID `json:"llm_provider_id"`
+	ClientType        pgtype.Text `json:"client_type"`
+	Dimensions        pgtype.Int4 `json:"dimensions"`
+	InputModalities   []string    `json:"input_modalities"`
+	SupportsReasoning bool        `json:"supports_reasoning"`
+	Type              string      `json:"type"`
+	ID                pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model, error) {
@@ -648,6 +662,7 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 		arg.ClientType,
 		arg.Dimensions,
 		arg.InputModalities,
+		arg.SupportsReasoning,
 		arg.Type,
 		arg.ID,
 	)
@@ -660,6 +675,7 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 		&i.ClientType,
 		&i.Dimensions,
 		&i.InputModalities,
+		&i.SupportsReasoning,
 		&i.Type,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -676,21 +692,23 @@ SET
   client_type = $4,
   dimensions = $5,
   input_modalities = $6,
-  type = $7,
+  supports_reasoning = $7,
+  type = $8,
   updated_at = now()
-WHERE model_id = $8
-RETURNING id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type, created_at, updated_at
+WHERE model_id = $9
+RETURNING id, model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type, created_at, updated_at
 `
 
 type UpdateModelByModelIDParams struct {
-	NewModelID      string      `json:"new_model_id"`
-	Name            pgtype.Text `json:"name"`
-	LlmProviderID   pgtype.UUID `json:"llm_provider_id"`
-	ClientType      pgtype.Text `json:"client_type"`
-	Dimensions      pgtype.Int4 `json:"dimensions"`
-	InputModalities []string    `json:"input_modalities"`
-	Type            string      `json:"type"`
-	ModelID         string      `json:"model_id"`
+	NewModelID        string      `json:"new_model_id"`
+	Name              pgtype.Text `json:"name"`
+	LlmProviderID     pgtype.UUID `json:"llm_provider_id"`
+	ClientType        pgtype.Text `json:"client_type"`
+	Dimensions        pgtype.Int4 `json:"dimensions"`
+	InputModalities   []string    `json:"input_modalities"`
+	SupportsReasoning bool        `json:"supports_reasoning"`
+	Type              string      `json:"type"`
+	ModelID           string      `json:"model_id"`
 }
 
 func (q *Queries) UpdateModelByModelID(ctx context.Context, arg UpdateModelByModelIDParams) (Model, error) {
@@ -701,6 +719,7 @@ func (q *Queries) UpdateModelByModelID(ctx context.Context, arg UpdateModelByMod
 		arg.ClientType,
 		arg.Dimensions,
 		arg.InputModalities,
+		arg.SupportsReasoning,
 		arg.Type,
 		arg.ModelID,
 	)
@@ -713,6 +732,7 @@ func (q *Queries) UpdateModelByModelID(ctx context.Context, arg UpdateModelByMod
 		&i.ClientType,
 		&i.Dimensions,
 		&i.InputModalities,
+		&i.SupportsReasoning,
 		&i.Type,
 		&i.CreatedAt,
 		&i.UpdatedAt,

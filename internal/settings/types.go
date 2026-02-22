@@ -4,6 +4,7 @@ const (
 	DefaultMaxContextLoadTime = 24 * 60
 	DefaultMaxInboxItems      = 50
 	DefaultLanguage           = "auto"
+	DefaultReasoningEffort    = "medium"
 )
 
 type Settings struct {
@@ -16,16 +17,20 @@ type Settings struct {
 	MaxInboxItems      int    `json:"max_inbox_items"`
 	Language           string `json:"language"`
 	AllowGuest         bool   `json:"allow_guest"`
+	ReasoningEnabled   bool   `json:"reasoning_enabled"`
+	ReasoningEffort    string `json:"reasoning_effort"`
 }
 
 type UpsertRequest struct {
-	ChatModelID        string `json:"chat_model_id,omitempty"`
-	MemoryModelID      string `json:"memory_model_id,omitempty"`
-	EmbeddingModelID   string `json:"embedding_model_id,omitempty"`
-	SearchProviderID   string `json:"search_provider_id,omitempty"`
-	MaxContextLoadTime *int   `json:"max_context_load_time,omitempty"`
-	MaxContextTokens   *int   `json:"max_context_tokens,omitempty"`
-	MaxInboxItems      *int   `json:"max_inbox_items,omitempty"`
-	Language           string `json:"language,omitempty"`
-	AllowGuest         *bool  `json:"allow_guest,omitempty"`
+	ChatModelID        string  `json:"chat_model_id,omitempty"`
+	MemoryModelID      string  `json:"memory_model_id,omitempty"`
+	EmbeddingModelID   string  `json:"embedding_model_id,omitempty"`
+	SearchProviderID   string  `json:"search_provider_id,omitempty"`
+	MaxContextLoadTime *int    `json:"max_context_load_time,omitempty"`
+	MaxContextTokens   *int    `json:"max_context_tokens,omitempty"`
+	MaxInboxItems      *int    `json:"max_inbox_items,omitempty"`
+	Language           string  `json:"language,omitempty"`
+	AllowGuest         *bool   `json:"allow_guest,omitempty"`
+	ReasoningEnabled   *bool   `json:"reasoning_enabled,omitempty"`
+	ReasoningEffort    *string `json:"reasoning_effort,omitempty"`
 }

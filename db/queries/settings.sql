@@ -6,6 +6,8 @@ SELECT
   bots.max_inbox_items,
   bots.language,
   bots.allow_guest,
+  bots.reasoning_enabled,
+  bots.reasoning_effort,
   chat_models.id AS chat_model_id,
   memory_models.id AS memory_model_id,
   embedding_models.id AS embedding_model_id,
@@ -25,13 +27,15 @@ WITH updated AS (
       max_inbox_items = sqlc.arg(max_inbox_items),
       language = sqlc.arg(language),
       allow_guest = sqlc.arg(allow_guest),
+      reasoning_enabled = sqlc.arg(reasoning_enabled),
+      reasoning_effort = sqlc.arg(reasoning_effort),
       chat_model_id = COALESCE(sqlc.narg(chat_model_id)::uuid, bots.chat_model_id),
       memory_model_id = COALESCE(sqlc.narg(memory_model_id)::uuid, bots.memory_model_id),
       embedding_model_id = COALESCE(sqlc.narg(embedding_model_id)::uuid, bots.embedding_model_id),
       search_provider_id = COALESCE(sqlc.narg(search_provider_id)::uuid, bots.search_provider_id),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.allow_guest, bots.chat_model_id, bots.memory_model_id, bots.embedding_model_id, bots.search_provider_id
+  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.allow_guest, bots.reasoning_enabled, bots.reasoning_effort, bots.chat_model_id, bots.memory_model_id, bots.embedding_model_id, bots.search_provider_id
 )
 SELECT
   updated.id AS bot_id,
@@ -40,6 +44,8 @@ SELECT
   updated.max_inbox_items,
   updated.language,
   updated.allow_guest,
+  updated.reasoning_enabled,
+  updated.reasoning_effort,
   chat_models.id AS chat_model_id,
   memory_models.id AS memory_model_id,
   embedding_models.id AS embedding_model_id,
@@ -57,6 +63,8 @@ SET max_context_load_time = 1440,
     max_inbox_items = 50,
     language = 'auto',
     allow_guest = false,
+    reasoning_enabled = false,
+    reasoning_effort = 'medium',
     chat_model_id = NULL,
     memory_model_id = NULL,
     embedding_model_id = NULL,

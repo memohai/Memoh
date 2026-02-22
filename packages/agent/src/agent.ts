@@ -17,7 +17,7 @@ import {
   MCPConnection,
   Schedule,
 } from './types'
-import { ModelInput, hasInputModality } from './types/model'
+import { ClientType, ModelConfig, ModelInput, hasInputModality } from './types/model'
 import { system, schedule, subagentSystem } from './prompts'
 import { AuthFetcher } from './types'
 import { createModel } from './model'
@@ -32,6 +32,25 @@ import { getMCPTools } from './tools/mcp'
 import { getTools } from './tools'
 import { buildIdentityHeaders } from './utils/headers'
 import { createFS } from './utils'
+
+const ANTHROPIC_BUDGET: Record<string, number> = { low: 5000, medium: 16000, high: 50000 }
+const GOOGLE_BUDGET: Record<string, number> = { low: 5000, medium: 16000, high: 50000 }
+
+const buildProviderOptions = (config: ModelConfig): Record<string, Record<string, unknown>> | undefined => {
+  if (!config.reasoning?.enabled) return undefined
+  const effort = config.reasoning.effort ?? 'medium'
+  switch (config.clientType) {
+    case ClientType.AnthropicMessages:
+      return { anthropic: { thinking: { type: 'enabled' as const, budgetTokens: ANTHROPIC_BUDGET[effort] } } }
+    case ClientType.OpenAIResponses:
+    case ClientType.OpenAICompletions:
+      return { openai: { reasoningEffort: effort } }
+    case ClientType.GoogleGenerativeAI:
+      return { google: { thinkingConfig: { thinkingBudget: GOOGLE_BUDGET[effort] } } }
+    default:
+      return undefined
+  }
+}
 
 const buildStepUsages = (
   steps: { usage: LanguageModelUsage; response: { messages: unknown[] } }[],
@@ -77,6 +96,8 @@ export const createAgent = (
   fetch: AuthFetcher,
 ) => {
   const model = createModel(modelConfig)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const providerOptions = buildProviderOptions(modelConfig) as any
   const enabledSkills: AgentSkill[] = []
   const fs = createFS({ fetch, botId: identity.botId })
 
@@ -181,6 +202,7 @@ export const createAgent = (
       model,
       messages,
       system: systemPrompt,
+      ...(providerOptions && { providerOptions }),
       stopWhen: stepCountIs(Infinity),
       prepareStep: () => {
         return {
@@ -238,6 +260,7 @@ export const createAgent = (
       model,
       messages,
       system: generateSubagentSystemPrompt(),
+      ...(providerOptions && { providerOptions }),
       stopWhen: stepCountIs(Infinity),
       prepareStep: () => {
         return {
@@ -281,6 +304,7 @@ export const createAgent = (
       model,
       messages,
       system: await generateSystemPrompt(),
+      ...(providerOptions && { providerOptions }),
       stopWhen: stepCountIs(Infinity),
       onFinish: async () => {
         await close()
@@ -343,6 +367,7 @@ export const createAgent = (
         model,
         messages,
         system: systemPrompt,
+        ...(providerOptions && { providerOptions }),
         stopWhen: stepCountIs(Infinity),
         prepareStep: () => {
           return {

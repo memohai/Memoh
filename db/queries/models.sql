@@ -36,7 +36,7 @@ DELETE FROM llm_providers WHERE id = sqlc.arg(id);
 SELECT COUNT(*) FROM llm_providers;
 
 -- name: CreateModel :one
-INSERT INTO models (model_id, name, llm_provider_id, client_type, dimensions, input_modalities, type)
+INSERT INTO models (model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type)
 VALUES (
   sqlc.arg(model_id),
   sqlc.arg(name),
@@ -44,6 +44,7 @@ VALUES (
   sqlc.narg(client_type),
   sqlc.arg(dimensions),
   sqlc.arg(input_modalities),
+  sqlc.arg(supports_reasoning),
   sqlc.arg(type)
 )
 RETURNING *;
@@ -93,6 +94,7 @@ SET
   client_type = sqlc.narg(client_type),
   dimensions = sqlc.arg(dimensions),
   input_modalities = sqlc.arg(input_modalities),
+  supports_reasoning = sqlc.arg(supports_reasoning),
   type = sqlc.arg(type),
   updated_at = now()
 WHERE id = sqlc.arg(id)
@@ -107,6 +109,7 @@ SET
   client_type = sqlc.narg(client_type),
   dimensions = sqlc.arg(dimensions),
   input_modalities = sqlc.arg(input_modalities),
+  supports_reasoning = sqlc.arg(supports_reasoning),
   type = sqlc.arg(type),
   updated_at = now()
 WHERE model_id = sqlc.arg(model_id)

@@ -57,7 +57,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	isPersonalBot := strings.EqualFold(strings.TrimSpace(botRow.Type), "personal")
 
-	current := normalizeBotSetting(botRow.MaxContextLoadTime, botRow.MaxContextTokens, botRow.MaxInboxItems, botRow.Language, botRow.AllowGuest)
+	current := normalizeBotSetting(botRow.MaxContextLoadTime, botRow.MaxContextTokens, botRow.MaxInboxItems, botRow.Language, botRow.AllowGuest, botRow.ReasoningEnabled, botRow.ReasoningEffort)
 	if req.MaxContextLoadTime != nil && *req.MaxContextLoadTime > 0 {
 		current.MaxContextLoadTime = *req.MaxContextLoadTime
 	}
@@ -77,6 +77,12 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		current.AllowGuest = false
 	} else if req.AllowGuest != nil {
 		current.AllowGuest = *req.AllowGuest
+	}
+	if req.ReasoningEnabled != nil {
+		current.ReasoningEnabled = *req.ReasoningEnabled
+	}
+	if req.ReasoningEffort != nil && isValidReasoningEffort(*req.ReasoningEffort) {
+		current.ReasoningEffort = *req.ReasoningEffort
 	}
 
 	chatModelUUID := pgtype.UUID{}
@@ -119,6 +125,8 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		MaxInboxItems:      int32(current.MaxInboxItems),
 		Language:           current.Language,
 		AllowGuest:         current.AllowGuest,
+		ReasoningEnabled:   current.ReasoningEnabled,
+		ReasoningEffort:    current.ReasoningEffort,
 		ChatModelID:        chatModelUUID,
 		MemoryModelID:      memoryModelUUID,
 		EmbeddingModelID:   embeddingModelUUID,
@@ -141,13 +149,15 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return s.queries.DeleteSettingsByBotID(ctx, pgID)
 }
 
-func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, maxInboxItems int32, language string, allowGuest bool) Settings {
+func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, maxInboxItems int32, language string, allowGuest bool, reasoningEnabled bool, reasoningEffort string) Settings {
 	settings := Settings{
 		MaxContextLoadTime: int(maxContextLoadTime),
 		MaxContextTokens:   int(maxContextTokens),
 		MaxInboxItems:      int(maxInboxItems),
 		Language:           strings.TrimSpace(language),
 		AllowGuest:         allowGuest,
+		ReasoningEnabled:   reasoningEnabled,
+		ReasoningEffort:    strings.TrimSpace(reasoningEffort),
 	}
 	if settings.MaxContextLoadTime <= 0 {
 		settings.MaxContextLoadTime = DefaultMaxContextLoadTime
@@ -161,7 +171,19 @@ func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, maxIn
 	if settings.Language == "" {
 		settings.Language = DefaultLanguage
 	}
+	if !isValidReasoningEffort(settings.ReasoningEffort) {
+		settings.ReasoningEffort = DefaultReasoningEffort
+	}
 	return settings
+}
+
+func isValidReasoningEffort(effort string) bool {
+	switch effort {
+	case "low", "medium", "high":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
@@ -171,6 +193,8 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.MaxInboxItems,
 		row.Language,
 		row.AllowGuest,
+		row.ReasoningEnabled,
+		row.ReasoningEffort,
 		row.ChatModelID,
 		row.MemoryModelID,
 		row.EmbeddingModelID,
@@ -185,6 +209,8 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.MaxInboxItems,
 		row.Language,
 		row.AllowGuest,
+		row.ReasoningEnabled,
+		row.ReasoningEffort,
 		row.ChatModelID,
 		row.MemoryModelID,
 		row.EmbeddingModelID,
@@ -198,12 +224,14 @@ func normalizeBotSettingsFields(
 	maxInboxItems int32,
 	language string,
 	allowGuest bool,
+	reasoningEnabled bool,
+	reasoningEffort string,
 	chatModelID pgtype.UUID,
 	memoryModelID pgtype.UUID,
 	embeddingModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 ) Settings {
-	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, maxInboxItems, language, allowGuest)
+	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, maxInboxItems, language, allowGuest, reasoningEnabled, reasoningEffort)
 	if chatModelID.Valid {
 		settings.ChatModelID = uuid.UUID(chatModelID.Bytes).String()
 	}

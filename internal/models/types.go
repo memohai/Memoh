@@ -32,13 +32,14 @@ const (
 )
 
 type Model struct {
-	ModelID         string     `json:"model_id"`
-	Name            string     `json:"name"`
-	LlmProviderID   string     `json:"llm_provider_id"`
-	ClientType      ClientType `json:"client_type,omitempty"`
-	InputModalities []string   `json:"input_modalities,omitempty"`
-	Type            ModelType  `json:"type"`
-	Dimensions      int        `json:"dimensions"`
+	ModelID            string     `json:"model_id"`
+	Name               string     `json:"name"`
+	LlmProviderID      string     `json:"llm_provider_id"`
+	ClientType         ClientType `json:"client_type,omitempty"`
+	InputModalities    []string   `json:"input_modalities,omitempty"`
+	SupportsReasoning  bool       `json:"supports_reasoning"`
+	Type               ModelType  `json:"type"`
+	Dimensions         int        `json:"dimensions"`
 }
 
 // validInputModalities is the set of recognised input modality tokens.
