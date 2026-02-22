@@ -259,10 +259,12 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 			}
 		}
 		return nil
-	case channel.StreamEventProcessingFailed, channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
+	case channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd:
+		return nil
+	case channel.StreamEventProcessingFailed, channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventDelta:
-		if event.Delta == "" {
+		if event.Delta == "" || event.Phase == channel.StreamPhaseReasoning {
 			return nil
 		}
 		s.mu.Lock()

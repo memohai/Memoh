@@ -109,6 +109,7 @@ export function extractTextFromContent(content: unknown): string {
         if (!part || typeof part !== 'object') return ''
         const value = part as Record<string, unknown>
         const partType = String(value.type ?? '').toLowerCase()
+        if (partType === 'reasoning') return ''
         if (partType === 'text' && typeof value.text === 'string') return value.text.trim()
         if (partType === 'link' && typeof value.url === 'string') return value.url.trim()
         if (partType === 'emoji' && typeof value.emoji === 'string') return value.emoji.trim()
@@ -126,4 +127,45 @@ export function extractTextFromContent(content: unknown): string {
   }
 
   return ''
+}
+
+export function extractMessageReasoning(message: Message): string[] {
+  const raw = message.content
+  if (!raw) return []
+
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      return extractReasoningParts(parsed?.content ?? parsed)
+    } catch {
+      return []
+    }
+  }
+
+  if (typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    if ('content' in obj && obj.content !== undefined && obj.content !== null) {
+      return extractReasoningParts(obj.content)
+    }
+    return extractReasoningParts(raw)
+  }
+
+  return []
+}
+
+function extractReasoningParts(content: unknown): string[] {
+  if (!Array.isArray(content)) {
+    if (content && typeof content === 'object') {
+      const obj = content as Record<string, unknown>
+      if (Array.isArray(obj.content)) return extractReasoningParts(obj.content)
+    }
+    return []
+  }
+  return content
+    .filter((part) => {
+      if (!part || typeof part !== 'object') return false
+      const value = part as Record<string, unknown>
+      return String(value.type ?? '').toLowerCase() === 'reasoning' && typeof value.text === 'string' && value.text.trim() !== ''
+    })
+    .map((part) => ((part as Record<string, unknown>).text as string).trim())
 }

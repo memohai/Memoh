@@ -16,6 +16,7 @@ import {
   extractMessageText,
   extractToolCalls,
   extractAllToolResults,
+  extractMessageReasoning,
   sendLocalChannelMessage,
   streamLocalChannel,
   streamMessageEvents,
@@ -153,9 +154,14 @@ export const useChatStore = defineStore('chat', () => {
 
     const text = extractMessageText(raw)
     const assetBlocks = buildAssetBlocks(raw)
-    if (!text && assetBlocks.length === 0) return null
+    const reasoningTexts = extractMessageReasoning(raw)
+
+    if (!text && assetBlocks.length === 0 && reasoningTexts.length === 0) return null
 
     const blocks: ContentBlock[] = []
+    for (const r of reasoningTexts) {
+      blocks.push({ type: 'thinking', content: r, done: true })
+    }
     if (text) blocks.push({ type: 'text', content: text })
     blocks.push(...assetBlocks)
 
@@ -226,6 +232,7 @@ export const useChatStore = defineStore('chat', () => {
       if (raw.role === 'assistant') {
         const toolCalls = extractToolCalls(raw)
         const text = extractMessageText(raw)
+        const reasoningTexts = extractMessageReasoning(raw)
 
         if (toolCalls.length > 0) {
           if (!pendingAssistant) {
@@ -239,6 +246,9 @@ export const useChatStore = defineStore('chat', () => {
               streaming: false,
               ...(channelTag && { platform: channelTag }),
             }
+          }
+          for (const r of reasoningTexts) {
+            pendingAssistant.blocks.push({ type: 'thinking', content: r, done: true })
           }
           if (text) {
             pendingAssistant.blocks.push({ type: 'text', content: text })
@@ -258,8 +268,10 @@ export const useChatStore = defineStore('chat', () => {
           continue
         }
 
-        // Assistant message without tool_calls
         if (pendingAssistant && text) {
+          for (const r of reasoningTexts) {
+            pendingAssistant.blocks.push({ type: 'thinking', content: r, done: true })
+          }
           pendingAssistant.blocks.push({ type: 'text', content: text })
           flushPending()
           continue
@@ -481,7 +493,12 @@ export const useChatStore = defineStore('chat', () => {
         break
       case 'reasoning_end':
         if (session.thinkingBlockIdx >= 0 && session.assistantMsg.blocks[session.thinkingBlockIdx]?.type === 'thinking') {
-          ;(session.assistantMsg.blocks[session.thinkingBlockIdx] as ThinkingBlock).done = true
+          const tb = session.assistantMsg.blocks[session.thinkingBlockIdx] as ThinkingBlock
+          if (tb.content.trim() === '') {
+            session.assistantMsg.blocks.splice(session.thinkingBlockIdx, 1)
+          } else {
+            tb.done = true
+          }
         }
         session.thinkingBlockIdx = -1
         break

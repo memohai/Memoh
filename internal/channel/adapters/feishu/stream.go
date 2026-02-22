@@ -58,7 +58,7 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		}
 		return nil
 	case channel.StreamEventDelta:
-		if event.Delta == "" {
+		if event.Delta == "" || event.Phase == channel.StreamPhaseReasoning {
 			return nil
 		}
 		s.textBuffer.WriteString(event.Delta)
@@ -96,7 +96,9 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEve
 			Target:  s.target,
 			Message: media,
 		})
-	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted, channel.StreamEventProcessingFailed:
+	case channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd:
+		return nil
+	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted, channel.StreamEventProcessingFailed:
 		return nil
 	case channel.StreamEventFinal:
 		if event.Final == nil || event.Final.Message.IsEmpty() {
