@@ -13,16 +13,11 @@ import (
 	"sync"
 	"time"
 
-	tasktypes "github.com/containerd/containerd/api/types/task"
-	"github.com/containerd/containerd/v2/core/snapshots"
-	"github.com/containerd/containerd/v2/pkg/namespaces"
-	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
-	"github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
@@ -35,20 +30,21 @@ import (
 )
 
 type ContainerdHandler struct {
-	service        ctr.Service
-	manager        *mcp.Manager
-	cfg            config.MCPConfig
-	namespace      string
-	logger         *slog.Logger
-	toolGateway    *mcp.ToolGatewayService
-	mcpMu          sync.Mutex
-	mcpSess        map[string]*mcpSession
-	mcpStdioMu     sync.Mutex
-	mcpStdioSess   map[string]*mcpStdioSession
-	botService     *bots.Service
-	accountService *accounts.Service
-	policyService  *policy.Service
-	queries        *dbsqlc.Queries
+	service          ctr.Service
+	manager          *mcp.Manager
+	cfg              config.MCPConfig
+	namespace        string
+	containerBackend string
+	logger           *slog.Logger
+	toolGateway      *mcp.ToolGatewayService
+	mcpMu            sync.Mutex
+	mcpSess          map[string]*mcpSession
+	mcpStdioMu       sync.Mutex
+	mcpStdioSess     map[string]*mcpStdioSession
+	botService       *bots.Service
+	accountService   *accounts.Service
+	policyService    *policy.Service
+	queries          *dbsqlc.Queries
 }
 
 type CreateContainerRequest struct {
@@ -104,19 +100,20 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.MCPConfig, namespace string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.MCPConfig, namespace string, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *ContainerdHandler {
 	return &ContainerdHandler{
-		service:        service,
-		manager:        manager,
-		cfg:            cfg,
-		namespace:      namespace,
-		logger:         log.With(slog.String("handler", "containerd")),
-		mcpSess:        make(map[string]*mcpSession),
-		mcpStdioSess:   make(map[string]*mcpStdioSession),
-		botService:     botService,
-		accountService: accountService,
-		policyService:  policyService,
-		queries:        queries,
+		service:          service,
+		manager:          manager,
+		cfg:              cfg,
+		namespace:        namespace,
+		containerBackend: containerBackend,
+		logger:           log.With(slog.String("handler", "containerd")),
+		mcpSess:          make(map[string]*mcpSession),
+		mcpStdioSess:     make(map[string]*mcpStdioSession),
+		botService:       botService,
+		accountService:   accountService,
+		policyService:    policyService,
+		queries:          queries,
 	}
 }
 
@@ -176,9 +173,6 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	if strings.TrimSpace(h.namespace) != "" {
-		ctx = namespaces.WithNamespace(ctx, h.namespace)
-	}
 	dataRoot := strings.TrimSpace(h.cfg.DataRoot)
 	if dataRoot == "" {
 		dataRoot = config.DefaultDataRoot
@@ -203,24 +197,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	specOpts := []oci.SpecOpts{
-		oci.WithMounts([]specs.Mount{
-			{
-				Destination: dataMount,
-				Type:        "bind",
-				Source:      dataDir,
-				Options:     []string{"rbind", "rw"},
-			},
-			{
-				Destination: "/etc/resolv.conf",
-				Type:        "bind",
-				Source:      resolvPath,
-				Options:     []string{"rbind", "ro"},
-			},
-		}),
-		oci.WithProcessArgs("/bin/sh", "-lc", fmt.Sprintf("bootstrap(){ [ -e /app/mcp ] || { mkdir -p /app; [ -f /opt/mcp ] && cp -a /opt/mcp /app/mcp 2>/dev/null || true; }; if [ -d /opt/mcp-template ]; then mkdir -p %q; for f in /opt/mcp-template/*; do name=$(basename \"$f\"); [ -e %q/\"$name\" ] || cp -a \"$f\" %q/\"$name\" 2>/dev/null || true; done; fi; }; bootstrap; exec /app/mcp", dataMount, dataMount, dataMount)),
-	}
-	specOpts = append(specOpts, ctr.TimezoneSpecOpts()...)
+	spec := h.buildMCPContainerSpec(dataDir, dataMount, resolvPath)
 
 	_, err = h.service.CreateContainer(ctx, ctr.CreateContainerRequest{
 		ID:          containerID,
@@ -229,7 +206,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		Labels: map[string]string{
 			mcp.BotLabelKey: botID,
 		},
-		SpecOpts: specOpts,
+		Spec: spec,
 	})
 	if err != nil && !errdefs.IsAlreadyExists(err) {
 		return echo.NewHTTPError(http.StatusInternalServerError, "snapshotter="+snapshotter+" image="+image+" err="+err.Error())
@@ -260,11 +237,15 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}
 
 	started := false
-	if task, err := h.service.StartTask(ctx, containerID, &ctr.StartTaskOptions{
+	if err := h.service.StartContainer(ctx, containerID, &ctr.StartTaskOptions{
 		UseStdio: false,
 	}); err == nil {
 		started = true
-		if netErr := ctr.SetupNetwork(ctx, task, containerID, h.cfg.CNIBinaryDir, h.cfg.CNIConfigDir); netErr != nil {
+		if netErr := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+			ContainerID: containerID,
+			CNIBinDir:   h.cfg.CNIBinaryDir,
+			CNIConfDir:  h.cfg.CNIConfigDir,
+		}); netErr != nil {
 			h.logger.Warn("mcp container network setup failed, task kept running",
 				slog.String("container_id", containerID),
 				slog.Any("error", netErr),
@@ -297,13 +278,11 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 // running. If the container is missing (e.g. after a VM restart) it is recreated via
 // SetupBotContainer. This prevents permanent desync between DB and containerd state.
 func (h *ContainerdHandler) ensureContainerAndTask(ctx context.Context, containerID, botID string) error {
-	// Check whether the container exists in containerd.
 	_, err := h.service.GetContainer(ctx, containerID)
 	if err != nil {
 		if !errdefs.IsNotFound(err) {
 			return err
 		}
-		// Container gone — rebuild from scratch.
 		h.logger.Warn("container missing in containerd, rebuilding",
 			slog.String("bot_id", botID),
 			slog.String("container_id", containerID),
@@ -311,7 +290,6 @@ func (h *ContainerdHandler) ensureContainerAndTask(ctx context.Context, containe
 		return h.SetupBotContainer(ctx, botID)
 	}
 
-	// Container exists — make sure the task is running.
 	tasks, err := h.service.ListTasks(ctx, &ctr.ListTasksOptions{
 		Filter: "container.id==" + containerID,
 	})
@@ -319,14 +297,14 @@ func (h *ContainerdHandler) ensureContainerAndTask(ctx context.Context, containe
 		return err
 	}
 	if len(tasks) > 0 {
-		if tasks[0].Status == tasktypes.Status_RUNNING {
-			// Task is running but CNI state may be stale (e.g. server container restarted).
-			// Re-apply network to ensure connectivity.
-			if task, taskErr := h.service.GetTask(ctx, containerID); taskErr == nil {
-				if netErr := ctr.SetupNetwork(ctx, task, containerID, h.cfg.CNIBinaryDir, h.cfg.CNIConfigDir); netErr != nil {
-					h.logger.Warn("network re-setup failed for running task",
-						slog.String("container_id", containerID), slog.Any("error", netErr))
-				}
+		if tasks[0].Status == ctr.TaskStatusRunning {
+			if netErr := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+				ContainerID: containerID,
+				CNIBinDir:   h.cfg.CNIBinaryDir,
+				CNIConfDir:  h.cfg.CNIConfigDir,
+			}); netErr != nil {
+				h.logger.Warn("network re-setup failed for running task",
+					slog.String("container_id", containerID), slog.Any("error", netErr))
 			}
 			return nil
 		}
@@ -335,13 +313,16 @@ func (h *ContainerdHandler) ensureContainerAndTask(ctx context.Context, containe
 		}
 	}
 
-	task, err := h.service.StartTask(ctx, containerID, &ctr.StartTaskOptions{
+	if err := h.service.StartContainer(ctx, containerID, &ctr.StartTaskOptions{
 		UseStdio: false,
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
-	if netErr := ctr.SetupNetwork(ctx, task, containerID, h.cfg.CNIBinaryDir, h.cfg.CNIConfigDir); netErr != nil {
+	if netErr := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+		ContainerID: containerID,
+		CNIBinDir:   h.cfg.CNIBinaryDir,
+		CNIConfDir:  h.cfg.CNIConfigDir,
+	}); netErr != nil {
 		h.logger.Warn("network setup failed, task kept running",
 			slog.String("container_id", containerID), slog.Any("error", netErr))
 	}
@@ -363,7 +344,6 @@ func (h *ContainerdHandler) botContainerID(ctx context.Context, botID string) (s
 			}
 		}
 	}
-	// Fallback: search by containerd label
 	containers, err := h.service.ListContainersByLabel(ctx, mcp.BotLabelKey, botID)
 	if err != nil {
 		return "", err
@@ -371,17 +351,9 @@ func (h *ContainerdHandler) botContainerID(ctx context.Context, botID string) (s
 	if len(containers) == 0 {
 		return "", echo.NewHTTPError(http.StatusNotFound, "container not found")
 	}
-	infoCtx := ctx
-	if strings.TrimSpace(h.namespace) != "" {
-		infoCtx = namespaces.WithNamespace(ctx, h.namespace)
-	}
 	bestID := ""
 	var bestUpdated time.Time
-	for _, container := range containers {
-		info, err := container.Info(infoCtx)
-		if err != nil {
-			return "", err
-		}
+	for _, info := range containers {
 		if bestID == "" || info.UpdatedAt.After(bestUpdated) {
 			bestID = info.ID
 			bestUpdated = info.UpdatedAt
@@ -442,19 +414,11 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
 	}
-	infoCtx := ctx
-	if strings.TrimSpace(h.namespace) != "" {
-		infoCtx = namespaces.WithNamespace(ctx, h.namespace)
-	}
-	container, err := h.service.GetContainer(infoCtx, containerID)
+	info, err := h.service.GetContainer(ctx, containerID)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "container not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	info, err := container.Info(infoCtx)
-	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, GetContainerResponse{
@@ -537,7 +501,7 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
 	}
-	if err := h.service.StopTask(ctx, containerID, &ctr.StopTaskOptions{
+	if err := h.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{
 		Timeout: 10 * time.Second,
 		Force:   true,
 	}); err != nil && !errdefs.IsNotFound(err) {
@@ -565,8 +529,12 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 // @Success 200 {object} CreateSnapshotResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 501 {object} ErrorResponse "Snapshots currently not supported on this backend"
 // @Router /bots/{bot_id}/container/snapshots [post]
 func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
+	if h.containerBackend == "apple" {
+		return echo.NewHTTPError(http.StatusNotImplemented, "snapshots currently not supported on Apple Container backend")
+	}
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
@@ -600,8 +568,12 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param snapshotter query string false "Snapshotter name"
 // @Success 200 {object} ListSnapshotsResponse
+// @Failure 501 {object} ErrorResponse "Snapshots currently not supported on this backend"
 // @Router /bots/{bot_id}/container/snapshots [get]
 func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
+	if h.containerBackend == "apple" {
+		return echo.NewHTTPError(http.StatusNotImplemented, "snapshots currently not supported on Apple Container backend")
+	}
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
@@ -611,19 +583,11 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
 	}
-	container, err := h.service.GetContainer(ctx, containerID)
+	containerInfo, err := h.service.GetContainer(ctx, containerID)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "container not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	infoCtx := ctx
-	if strings.TrimSpace(h.namespace) != "" {
-		infoCtx = namespaces.WithNamespace(ctx, h.namespace)
-	}
-	containerInfo, err := container.Info(infoCtx)
-	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -650,7 +614,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	runtimeByName := make(map[string]snapshots.Info, len(allSnapshots))
+	runtimeByName := make(map[string]ctr.SnapshotInfo, len(allSnapshots))
 	for _, info := range allSnapshots {
 		name := strings.TrimSpace(info.Name)
 		if name == "" {
@@ -685,7 +649,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 
 	items := make([]SnapshotInfo, 0, len(lineage)+len(metadataByName))
 	seen := make(map[string]struct{}, len(lineage)+len(metadataByName))
-	appendRuntime := func(runtimeInfo snapshots.Info, fallbackSource string, meta *dbsqlc.ListSnapshotsWithVersionByContainerIDRow) {
+	appendRuntime := func(runtimeInfo ctr.SnapshotInfo, fallbackSource string, meta *dbsqlc.ListSnapshotsWithVersionByContainerIDRow) {
 		source := fallbackSource
 		managed := false
 		var version *int
@@ -703,7 +667,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 			Snapshotter: snapshotter,
 			Name:        runtimeInfo.Name,
 			Parent:      runtimeInfo.Parent,
-			Kind:        runtimeInfo.Kind.String(),
+			Kind:        runtimeInfo.Kind,
 			CreatedAt:   runtimeInfo.Created,
 			UpdatedAt:   runtimeInfo.Updated,
 			Labels:      runtimeInfo.Labels,
@@ -751,12 +715,12 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	})
 }
 
-func snapshotLineage(root string, all []snapshots.Info) ([]snapshots.Info, bool) {
+func snapshotLineage(root string, all []ctr.SnapshotInfo) ([]ctr.SnapshotInfo, bool) {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return nil, false
 	}
-	index := make(map[string]snapshots.Info, len(all))
+	index := make(map[string]ctr.SnapshotInfo, len(all))
 	for _, info := range all {
 		name := strings.TrimSpace(info.Name)
 		if name == "" {
@@ -767,7 +731,7 @@ func snapshotLineage(root string, all []snapshots.Info) ([]snapshots.Info, bool)
 	if _, ok := index[root]; !ok {
 		return nil, false
 	}
-	lineage := make([]snapshots.Info, 0, len(index))
+	lineage := make([]ctr.SnapshotInfo, 0, len(index))
 	visited := make(map[string]struct{}, len(index))
 	current := root
 	for current != "" {
@@ -843,10 +807,6 @@ func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string)
 	image := h.mcpImageRef()
 	snapshotter := strings.TrimSpace(h.cfg.Snapshotter)
 
-	if strings.TrimSpace(h.namespace) != "" {
-		ctx = namespaces.WithNamespace(ctx, h.namespace)
-	}
-
 	dataRoot := strings.TrimSpace(h.cfg.DataRoot)
 	if dataRoot == "" {
 		dataRoot = config.DefaultDataRoot
@@ -872,24 +832,7 @@ func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string)
 		return err
 	}
 
-	specOpts := []oci.SpecOpts{
-		oci.WithMounts([]specs.Mount{
-			{
-				Destination: dataMount,
-				Type:        "bind",
-				Source:      dataDir,
-				Options:     []string{"rbind", "rw"},
-			},
-			{
-				Destination: "/etc/resolv.conf",
-				Type:        "bind",
-				Source:      resolvPath,
-				Options:     []string{"rbind", "ro"},
-			},
-		}),
-		oci.WithProcessArgs("/bin/sh", "-lc", fmt.Sprintf("bootstrap(){ [ -e /app/mcp ] || { mkdir -p /app; [ -f /opt/mcp ] && cp -a /opt/mcp /app/mcp 2>/dev/null || true; }; if [ -d /opt/mcp-template ]; then mkdir -p %q; for f in /opt/mcp-template/*; do name=$(basename \"$f\"); [ -e %q/\"$name\" ] || cp -a \"$f\" %q/\"$name\" 2>/dev/null || true; done; fi; }; bootstrap; exec /app/mcp", dataMount, dataMount, dataMount)),
-	}
-	specOpts = append(specOpts, ctr.TimezoneSpecOpts()...)
+	spec := h.buildMCPContainerSpec(dataDir, dataMount, resolvPath)
 
 	_, err = h.service.CreateContainer(ctx, ctr.CreateContainerRequest{
 		ID:          containerID,
@@ -898,7 +841,7 @@ func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string)
 		Labels: map[string]string{
 			mcp.BotLabelKey: botID,
 		},
-		SpecOpts: specOpts,
+		Spec: spec,
 	})
 	if err != nil && !errdefs.IsAlreadyExists(err) {
 		return err
@@ -928,10 +871,14 @@ func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string)
 		}
 	}
 
-	if task, err := h.service.StartTask(ctx, containerID, &ctr.StartTaskOptions{
+	if err := h.service.StartContainer(ctx, containerID, &ctr.StartTaskOptions{
 		UseStdio: false,
 	}); err == nil {
-		if netErr := ctr.SetupNetwork(ctx, task, containerID, h.cfg.CNIBinaryDir, h.cfg.CNIConfigDir); netErr != nil {
+		if netErr := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+			ContainerID: containerID,
+			CNIBinDir:   h.cfg.CNIBinaryDir,
+			CNIConfDir:  h.cfg.CNIConfigDir,
+		}); netErr != nil {
 			h.logger.Warn("setup bot container: network setup failed, task kept running",
 				slog.String("bot_id", botID),
 				slog.String("container_id", containerID),
@@ -981,14 +928,16 @@ func (h *ContainerdHandler) CleanupBotContainer(ctx context.Context, botID strin
 		slog.String("container_id", containerID),
 	)
 
-	if task, taskErr := h.service.GetTask(ctx, containerID); taskErr == nil {
-		h.logger.Info("CleanupBotContainer: removing network", slog.String("container_id", containerID))
-		if err := ctr.RemoveNetwork(ctx, task, containerID, h.cfg.CNIBinaryDir, h.cfg.CNIConfigDir); err != nil {
-			h.logger.Warn("cleanup: remove network failed", slog.String("container_id", containerID), slog.Any("error", err))
-		}
+	h.logger.Info("CleanupBotContainer: removing network", slog.String("container_id", containerID))
+	if err := h.service.RemoveNetwork(ctx, ctr.NetworkSetupRequest{
+		ContainerID: containerID,
+		CNIBinDir:   h.cfg.CNIBinaryDir,
+		CNIConfDir:  h.cfg.CNIConfigDir,
+	}); err != nil {
+		h.logger.Warn("cleanup: remove network failed", slog.String("container_id", containerID), slog.Any("error", err))
 	}
 	h.logger.Info("CleanupBotContainer: stopping task", slog.String("container_id", containerID))
-	if err := h.service.StopTask(ctx, containerID, &ctr.StopTaskOptions{
+	if err := h.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{
 		Timeout: 5 * time.Second,
 		Force:   true,
 	}); err != nil {
@@ -1027,7 +976,7 @@ func (h *ContainerdHandler) isTaskRunning(ctx context.Context, containerID strin
 	tasks, err := h.service.ListTasks(ctx, &ctr.ListTasksOptions{
 		Filter: "container.id==" + containerID,
 	})
-	return err == nil && len(tasks) > 0 && tasks[0].Status == tasktypes.Status_RUNNING
+	return err == nil && len(tasks) > 0 && tasks[0].Status == ctr.TaskStatusRunning
 }
 
 // ReconcileContainers compares the DB containers table against actual containerd
@@ -1086,19 +1035,15 @@ func (h *ContainerdHandler) ReconcileContainers(ctx context.Context) {
 						slog.String("bot_id", botID), slog.Any("error", dbErr))
 				}
 			}
-			// Re-apply CNI networking: server container restart drops cni0 bridge,
-			// veth endpoints and iptables masquerade rules while the MCP task keeps
-			// running inside containerd.
-			if task, taskErr := h.service.GetTask(ctx, containerID); taskErr == nil {
-				if netErr := ctr.SetupNetwork(ctx, task, containerID, h.cfg.CNIBinaryDir, h.cfg.CNIConfigDir); netErr != nil {
-					h.logger.Warn("reconcile: network re-setup failed for running task",
-						slog.String("bot_id", botID),
-						slog.String("container_id", containerID),
-						slog.Any("error", netErr))
-				}
-			} else {
-				h.logger.Warn("reconcile: failed to get task for network re-setup",
-					slog.String("bot_id", botID), slog.Any("error", taskErr))
+			if netErr := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+				ContainerID: containerID,
+				CNIBinDir:   h.cfg.CNIBinaryDir,
+				CNIConfDir:  h.cfg.CNIConfigDir,
+			}); netErr != nil {
+				h.logger.Warn("reconcile: network re-setup failed for running task",
+					slog.String("bot_id", botID),
+					slog.String("container_id", containerID),
+					slog.Any("error", netErr))
 			}
 			h.logger.Info("reconcile: container healthy",
 				slog.String("bot_id", botID), slog.String("container_id", containerID))
@@ -1123,6 +1068,38 @@ func (h *ContainerdHandler) ReconcileContainers(ctx context.Context) {
 		}
 	}
 	h.logger.Info("reconcile: completed")
+}
+
+func (h *ContainerdHandler) buildMCPContainerSpec(dataDir, dataMount, resolvPath string) ctr.ContainerSpec {
+	mounts := []ctr.MountSpec{
+		{
+			Destination: dataMount,
+			Type:        "bind",
+			Source:      dataDir,
+			Options:     []string{"rbind", "rw"},
+		},
+		{
+			Destination: "/etc/resolv.conf",
+			Type:        "bind",
+			Source:      resolvPath,
+			Options:     []string{"rbind", "ro"},
+		},
+	}
+	tzMounts, tzEnv := ctr.TimezoneSpec()
+	mounts = append(mounts, tzMounts...)
+
+	bootScript := fmt.Sprintf(
+		"[ -e /app/mcp ] || { mkdir -p /app; cp -a /opt/mcp /app/mcp 2>/dev/null; true; }; "+
+			"cp -an /opt/mcp-template/* %s/ 2>/dev/null; true; "+
+			"exec /app/mcp",
+		dataMount,
+	)
+
+	return ctr.ContainerSpec{
+		Cmd:    []string{"/bin/sh", "-c", bootScript},
+		Env:    tzEnv,
+		Mounts: mounts,
+	}
 }
 
 func (h *ContainerdHandler) ensureBotDataRoot(botID string) (string, error) {

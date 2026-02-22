@@ -22,11 +22,18 @@ type FileEntry struct {
 	ModTime time.Time
 }
 
+func wrapWithCd(workDir, script string) string {
+	if workDir == "" {
+		return script
+	}
+	return "cd " + ShellQuote(workDir) + " && " + script
+}
+
 // ExecRead reads a file inside the container via cat.
 func ExecRead(ctx context.Context, runner ExecRunner, botID, workDir, filePath string) (string, error) {
 	result, err := runner.ExecWithCapture(ctx, mcpgw.ExecRequest{
 		BotID:   botID,
-		Command: []string{"/bin/sh", "-c", "cat " + ShellQuote(filePath)},
+		Command: []string{"/bin/sh", "-c", wrapWithCd(workDir, "cat "+ShellQuote(filePath))},
 		WorkDir: workDir,
 	})
 	if err != nil {
@@ -47,7 +54,7 @@ func ExecWrite(ctx context.Context, runner ExecRunner, botID, workDir, filePath,
 		ShellQuote(dir), ShellQuote(encoded), ShellQuote(filePath))
 	result, err := runner.ExecWithCapture(ctx, mcpgw.ExecRequest{
 		BotID:   botID,
-		Command: []string{"/bin/sh", "-c", script},
+		Command: []string{"/bin/sh", "-c", wrapWithCd(workDir, script)},
 		WorkDir: workDir,
 	})
 	if err != nil {
@@ -74,7 +81,7 @@ func ExecList(ctx context.Context, runner ExecRunner, botID, workDir, dirPath st
 	)
 	result, err := runner.ExecWithCapture(ctx, mcpgw.ExecRequest{
 		BotID:   botID,
-		Command: []string{"/bin/sh", "-c", script},
+		Command: []string{"/bin/sh", "-c", wrapWithCd(workDir, script)},
 		WorkDir: workDir,
 	})
 	if err != nil {

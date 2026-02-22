@@ -15,8 +15,8 @@ const (
 	DefaultMCPImage         = "docker.io/library/memoh-mcp:latest"
 	DefaultDataRoot         = "data"
 	DefaultDataMount        = "/data"
-	DefaultCNIBinaryDir    = "/opt/cni/bin"
-	DefaultCNIConfigDir    = "/etc/cni/net.d"
+	DefaultCNIBinaryDir     = "/opt/cni/bin"
+	DefaultCNIConfigDir     = "/etc/cni/net.d"
 	DefaultJWTExpiresIn     = "24h"
 	DefaultPGHost           = "127.0.0.1"
 	DefaultPGPort           = 5432
@@ -60,8 +60,14 @@ type AuthConfig struct {
 }
 
 type ContainerdConfig struct {
+	SocketPath string           `toml:"socket_path"`
+	Namespace  string           `toml:"namespace"`
+	Socktainer SocktainerConfig `toml:"socktainer"`
+}
+
+type SocktainerConfig struct {
 	SocketPath string `toml:"socket_path"`
-	Namespace  string `toml:"namespace"`
+	BinaryPath string `toml:"binary_path"`
 }
 
 type MCPConfig struct {

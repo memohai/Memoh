@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
 	"github.com/labstack/echo/v4"
 	sdkjsonrpc "github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -28,20 +27,11 @@ func (h *ContainerdHandler) validateMCPContainer(ctx context.Context, containerI
 	if strings.TrimSpace(botID) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	container, err := h.service.GetContainer(ctx, containerID)
+	info, err := h.service.GetContainer(ctx, containerID)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "container not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-
-	infoCtx := ctx
-	if strings.TrimSpace(h.namespace) != "" {
-		infoCtx = namespaces.WithNamespace(ctx, h.namespace)
-	}
-	info, err := container.Info(infoCtx)
-	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	labelBotID := strings.TrimSpace(info.Labels[mcptools.BotLabelKey])

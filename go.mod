@@ -18,6 +18,7 @@ require (
 	github.com/labstack/echo-jwt/v4 v4.4.0
 	github.com/labstack/echo/v4 v4.15.0
 	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
+	github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7
 	github.com/modelcontextprotocol/go-sdk v1.3.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
