@@ -291,6 +291,7 @@ type Subagent struct {
 	Messages    []byte             `json:"messages"`
 	Metadata    []byte             `json:"metadata"`
 	Skills      []byte             `json:"skills"`
+	Usage       []byte             `json:"usage"`
 }
 
 type User struct {

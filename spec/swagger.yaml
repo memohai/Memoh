@@ -1624,6 +1624,9 @@ definitions:
           additionalProperties: {}
           type: object
         type: array
+      usage:
+        additionalProperties: {}
+        type: object
     type: object
   subagent.CreateRequest:
     properties:
@@ -1688,6 +1691,9 @@ definitions:
         type: array
       updated_at:
         type: string
+      usage:
+        additionalProperties: {}
+        type: object
     type: object
   subagent.UpdateContextRequest:
     properties:
@@ -1696,6 +1702,9 @@ definitions:
           additionalProperties: {}
           type: object
         type: array
+      usage:
+        additionalProperties: {}
+        type: object
     type: object
   subagent.UpdateRequest:
     properties:

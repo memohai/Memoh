@@ -2,9 +2,10 @@ FROM oven/bun:1 AS builder
 
 WORKDIR /build
 
-# Set up workspace structure so bun can resolve @memoh/config
+# Set up workspace structure so bun can resolve workspace deps (@memoh/config, @memoh/agent)
 COPY agent/package.json agent/bun.lock* ./agent/
 COPY packages/config/package.json ./packages/config/package.json
+COPY packages/agent/package.json ./packages/agent/package.json
 
 # Create root package.json with workspace config
 RUN echo '{"name":"@memoh/monorepo","private":true,"workspaces":["agent","packages/*"]}' > package.json
@@ -13,6 +14,7 @@ RUN cd agent && bun install
 
 # Copy source files
 COPY packages/config/ ./packages/config/
+COPY packages/agent/ ./packages/agent/
 COPY agent/ ./agent/
 
 RUN cd agent && bun run build --external jsdom

@@ -10,6 +10,7 @@ type Subagent struct {
 	Messages    []map[string]any `json:"messages"`
 	Metadata    map[string]any   `json:"metadata"`
 	Skills      []string         `json:"skills"`
+	Usage       map[string]any   `json:"usage"`
 	CreatedAt   time.Time        `json:"created_at"`
 	UpdatedAt   time.Time        `json:"updated_at"`
 	Deleted     bool             `json:"deleted"`
@@ -32,6 +33,7 @@ type UpdateRequest struct {
 
 type UpdateContextRequest struct {
 	Messages []map[string]any `json:"messages"`
+	Usage    map[string]any   `json:"usage,omitempty"`
 }
 
 type UpdateSkillsRequest struct {
@@ -48,6 +50,7 @@ type ListResponse struct {
 
 type ContextResponse struct {
 	Messages []map[string]any `json:"messages"`
+	Usage    map[string]any   `json:"usage"`
 }
 
 type SkillsResponse struct {

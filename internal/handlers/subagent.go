@@ -255,7 +255,7 @@ func (h *SubagentHandler) GetContext(c echo.Context) error {
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, subagent.ContextResponse{Messages: item.Messages})
+	return c.JSON(http.StatusOK, subagent.ContextResponse{Messages: item.Messages, Usage: item.Usage})
 }
 
 // UpdateContext godoc
@@ -300,7 +300,7 @@ func (h *SubagentHandler) UpdateContext(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, subagent.ContextResponse{Messages: updated.Messages})
+	return c.JSON(http.StatusOK, subagent.ContextResponse{Messages: updated.Messages, Usage: updated.Usage})
 }
 
 // GetSkills godoc

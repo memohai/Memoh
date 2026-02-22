@@ -83,6 +83,32 @@ func (s *Service) Get(ctx context.Context, id string) (Subagent, error) {
 	return toSubagent(row)
 }
 
+func (s *Service) GetByBotAndName(ctx context.Context, botID string, name string) (Subagent, error) {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return Subagent{}, err
+	}
+	row, err := s.queries.GetSubagentByBotAndName(ctx, sqlc.GetSubagentByBotAndNameParams{
+		BotID: pgBotID,
+		Name:  strings.TrimSpace(name),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Subagent{}, fmt.Errorf("subagent not found")
+		}
+		return Subagent{}, err
+	}
+	return toSubagent(row)
+}
+
+func (s *Service) GetOrCreate(ctx context.Context, botID string, req CreateRequest) (Subagent, error) {
+	existing, err := s.GetByBotAndName(ctx, botID, req.Name)
+	if err == nil {
+		return existing, nil
+	}
+	return s.Create(ctx, botID, req)
+}
+
 func (s *Service) List(ctx context.Context, botID string) ([]Subagent, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -154,6 +180,21 @@ func (s *Service) UpdateContext(ctx context.Context, id string, req UpdateContex
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
 		return Subagent{}, err
+	}
+	if req.Usage != nil {
+		usagePayload, err := marshalUsage(req.Usage)
+		if err != nil {
+			return Subagent{}, err
+		}
+		row, err := s.queries.UpdateSubagentMessagesAndUsage(ctx, sqlc.UpdateSubagentMessagesAndUsageParams{
+			ID:       pgID,
+			Messages: messagesPayload,
+			Usage:    usagePayload,
+		})
+		if err != nil {
+			return Subagent{}, err
+		}
+		return toSubagent(row)
 	}
 	row, err := s.queries.UpdateSubagentMessages(ctx, sqlc.UpdateSubagentMessagesParams{
 		ID:       pgID,
@@ -229,6 +270,10 @@ func toSubagent(row sqlc.Subagent) (Subagent, error) {
 	if err != nil {
 		return Subagent{}, err
 	}
+	usage, err := unmarshalUsage(row.Usage)
+	if err != nil {
+		return Subagent{}, err
+	}
 	item := Subagent{
 		ID:          row.ID.String(),
 		Name:        row.Name,
@@ -237,6 +282,7 @@ func toSubagent(row sqlc.Subagent) (Subagent, error) {
 		Messages:    messages,
 		Metadata:    metadata,
 		Skills:      skills,
+		Usage:       usage,
 		Deleted:     row.Deleted,
 	}
 	if row.CreatedAt.Valid {
@@ -294,6 +340,27 @@ func unmarshalMetadata(payload []byte) (map[string]any, error) {
 	return metadata, nil
 }
 
+func marshalUsage(usage map[string]any) ([]byte, error) {
+	if usage == nil {
+		usage = map[string]any{}
+	}
+	return json.Marshal(usage)
+}
+
+func unmarshalUsage(payload []byte) (map[string]any, error) {
+	if len(payload) == 0 {
+		return map[string]any{}, nil
+	}
+	var usage map[string]any
+	if err := json.Unmarshal(payload, &usage); err != nil {
+		return nil, err
+	}
+	if usage == nil {
+		usage = map[string]any{}
+	}
+	return usage, nil
+}
+
 func marshalSkills(skills []string) ([]byte, error) {
 	return json.Marshal(normalizeSkills(skills))
 }
@@ -334,4 +401,3 @@ func mergeSkills(existing []string, incoming []string) []string {
 	merged = append(merged, incoming...)
 	return normalizeSkills(merged)
 }
-

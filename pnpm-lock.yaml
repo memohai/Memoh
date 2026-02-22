@@ -121,6 +121,12 @@ importers:
       '@mozilla/readability':
         specifier: ^0.6.0
         version: 0.6.0
+      '@types/jsdom':
+        specifier: ^27.0.0
+        version: 27.0.0
+      '@types/turndown':
+        specifier: ^5.0.6
+        version: 5.0.6
       ai:
         specifier: ^6.0.25
         version: 6.0.25(zod@4.3.6)

@@ -14,7 +14,7 @@ import (
 const createSubagent = `-- name: CreateSubagent :one
 INSERT INTO subagents (name, description, bot_id, messages, metadata, skills)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills
+RETURNING id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills, usage
 `
 
 type CreateSubagentParams struct {
@@ -48,12 +48,44 @@ func (q *Queries) CreateSubagent(ctx context.Context, arg CreateSubagentParams) 
 		&i.Messages,
 		&i.Metadata,
 		&i.Skills,
+		&i.Usage,
+	)
+	return i, err
+}
+
+const getSubagentByBotAndName = `-- name: GetSubagentByBotAndName :one
+SELECT id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills, usage
+FROM subagents
+WHERE bot_id = $1 AND name = $2 AND deleted = false
+`
+
+type GetSubagentByBotAndNameParams struct {
+	BotID pgtype.UUID `json:"bot_id"`
+	Name  string      `json:"name"`
+}
+
+func (q *Queries) GetSubagentByBotAndName(ctx context.Context, arg GetSubagentByBotAndNameParams) (Subagent, error) {
+	row := q.db.QueryRow(ctx, getSubagentByBotAndName, arg.BotID, arg.Name)
+	var i Subagent
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Deleted,
+		&i.DeletedAt,
+		&i.BotID,
+		&i.Messages,
+		&i.Metadata,
+		&i.Skills,
+		&i.Usage,
 	)
 	return i, err
 }
 
 const getSubagentByID = `-- name: GetSubagentByID :one
-SELECT id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills
+SELECT id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills, usage
 FROM subagents
 WHERE id = $1 AND deleted = false
 `
@@ -73,12 +105,13 @@ func (q *Queries) GetSubagentByID(ctx context.Context, id pgtype.UUID) (Subagent
 		&i.Messages,
 		&i.Metadata,
 		&i.Skills,
+		&i.Usage,
 	)
 	return i, err
 }
 
 const listSubagentsByBot = `-- name: ListSubagentsByBot :many
-SELECT id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills
+SELECT id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills, usage
 FROM subagents
 WHERE bot_id = $1 AND deleted = false
 ORDER BY created_at DESC
@@ -105,6 +138,7 @@ func (q *Queries) ListSubagentsByBot(ctx context.Context, botID pgtype.UUID) ([]
 			&i.Messages,
 			&i.Metadata,
 			&i.Skills,
+			&i.Usage,
 		); err != nil {
 			return nil, err
 		}
@@ -136,7 +170,7 @@ SET name = $2,
     metadata = $4,
     updated_at = now()
 WHERE id = $1 AND deleted = false
-RETURNING id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills
+RETURNING id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills, usage
 `
 
 type UpdateSubagentParams struct {
@@ -166,6 +200,7 @@ func (q *Queries) UpdateSubagent(ctx context.Context, arg UpdateSubagentParams) 
 		&i.Messages,
 		&i.Metadata,
 		&i.Skills,
+		&i.Usage,
 	)
 	return i, err
 }
@@ -175,7 +210,7 @@ UPDATE subagents
 SET messages = $2,
     updated_at = now()
 WHERE id = $1 AND deleted = false
-RETURNING id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills
+RETURNING id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills, usage
 `
 
 type UpdateSubagentMessagesParams struct {
@@ -198,6 +233,42 @@ func (q *Queries) UpdateSubagentMessages(ctx context.Context, arg UpdateSubagent
 		&i.Messages,
 		&i.Metadata,
 		&i.Skills,
+		&i.Usage,
+	)
+	return i, err
+}
+
+const updateSubagentMessagesAndUsage = `-- name: UpdateSubagentMessagesAndUsage :one
+UPDATE subagents
+SET messages = $2,
+    usage = $3,
+    updated_at = now()
+WHERE id = $1 AND deleted = false
+RETURNING id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills, usage
+`
+
+type UpdateSubagentMessagesAndUsageParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Messages []byte      `json:"messages"`
+	Usage    []byte      `json:"usage"`
+}
+
+func (q *Queries) UpdateSubagentMessagesAndUsage(ctx context.Context, arg UpdateSubagentMessagesAndUsageParams) (Subagent, error) {
+	row := q.db.QueryRow(ctx, updateSubagentMessagesAndUsage, arg.ID, arg.Messages, arg.Usage)
+	var i Subagent
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Deleted,
+		&i.DeletedAt,
+		&i.BotID,
+		&i.Messages,
+		&i.Metadata,
+		&i.Skills,
+		&i.Usage,
 	)
 	return i, err
 }
@@ -207,7 +278,7 @@ UPDATE subagents
 SET skills = $2,
     updated_at = now()
 WHERE id = $1 AND deleted = false
-RETURNING id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills
+RETURNING id, name, description, created_at, updated_at, deleted, deleted_at, bot_id, messages, metadata, skills, usage
 `
 
 type UpdateSubagentSkillsParams struct {
@@ -230,6 +301,7 @@ func (q *Queries) UpdateSubagentSkills(ctx context.Context, arg UpdateSubagentSk
 		&i.Messages,
 		&i.Metadata,
 		&i.Skills,
+		&i.Usage,
 	)
 	return i, err
 }

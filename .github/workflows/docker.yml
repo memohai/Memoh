@@ -1,8 +1,13 @@
-name: Docker Publish
+name: Docker
 
 on:
   push:
+    branches: [main]
     tags: ["v*.*.*"]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "devenv/**"
   pull_request:
     branches: [main]
     paths-ignore:
@@ -46,6 +51,7 @@ jobs:
             memohai/${{ matrix.image }}
             ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') }}
             type=ref,event=pr
             type=semver,pattern={{version}}
@@ -58,20 +64,21 @@ jobs:
             org.opencontainers.image.vendor=memohai
 
       - name: Set up QEMU
+        if: startsWith(github.ref, 'refs/tags/')
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Login to GitHub Container Registry
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -83,7 +90,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          push: ${{ startsWith(github.ref, 'refs/tags/') }}
+          push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
@@ -93,7 +100,7 @@ jobs:
             BUILD_TIME=${{ fromJson(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
             VITE_API_URL=/api
             VITE_AGENT_URL=/agent
-          provenance: true
-          sbom: true
+          provenance: ${{ startsWith(github.ref, 'refs/tags/') }}
+          sbom: ${{ startsWith(github.ref, 'refs/tags/') }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max

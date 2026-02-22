@@ -17,6 +17,8 @@
     "@ai-sdk/mcp": "^1.0.6",
     "@ai-sdk/openai": "^3.0.7",
     "@mozilla/readability": "^0.6.0",
+    "@types/jsdom": "^27.0.0",
+    "@types/turndown": "^5.0.6",
     "ai": "^6.0.25",
     "jsdom": "^27.4.0",
     "toml": "^3.0.0",

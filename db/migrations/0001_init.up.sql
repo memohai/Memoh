@@ -346,6 +346,7 @@ CREATE TABLE IF NOT EXISTS subagents (
   messages JSONB NOT NULL DEFAULT '[]'::jsonb,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   skills JSONB NOT NULL DEFAULT '[]'::jsonb,
+  usage JSONB NOT NULL DEFAULT '{}'::jsonb,
   CONSTRAINT subagents_name_unique UNIQUE (bot_id, name)
 );
 
