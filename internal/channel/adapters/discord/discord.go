@@ -221,19 +221,32 @@ func (a *DiscordAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, ms
         return fmt.Errorf("discord target is required")
     }
 
-    text := strings.TrimSpace(msg.Message.PlainText())
-    if text == "" && len(msg.Message.Attachments) == 0 {
-        return fmt.Errorf("message is required")
+    err = sendDiscordText(session, channelID, msg)
+    return err
+}
+
+func sendDiscordText(session *discordgo.Session, channelID string, message channel.OutboundMessage) error {
+    text_truncated := truncateDiscordText(message.Message.Text)
+    var err error
+    if message.Message.Reply != nil && message.Message.Reply.MessageID != "" {
+        _, err = session.ChannelMessageSendReply(channelID, text_truncated, &discordgo.MessageReference{
+            ChannelID: channelID,
+            MessageID: message.Message.Reply.MessageID,
+        })
+    } else {
+        _, err = session.ChannelMessageSend(channelID, text_truncated)
     }
 
-    // Discord limit: 2000 characters
+    return err
+
+}
+
+func truncateDiscordText(text string) string {
     const discordMaxLength = 2000
     if len(text) > discordMaxLength {
         text = text[:discordMaxLength-3] + "..."
     }
-
-    _, err = session.ChannelMessageSend(channelID, text)
-    return err
+    return text
 }
 
 func (a *DiscordAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
