@@ -28,6 +28,7 @@ const modelValue = useVModel(props, 'modelValue', emits, {
       'placeholder:text-gray-400 dark:placeholder:text-gray-500',
       'shadow-sm transition-all outline-none',
       'focus:border-primary focus:ring-2 focus:ring-primary/20',
+      'read-only:bg-gray-50 dark:read-only:bg-gray-900/40 read-only:text-gray-500 dark:read-only:text-gray-400 read-only:cursor-not-allowed',
       'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
       'file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium',
       props.class,
