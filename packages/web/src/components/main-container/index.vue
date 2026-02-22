@@ -62,7 +62,7 @@ import {
   ScrollArea,
 } from '@memoh/ui'
 import { useRoute } from 'vue-router'
-import { computed } from 'vue'
+import { computed, unref } from 'vue'
 
 const route = useRoute()
 
@@ -80,7 +80,7 @@ const curBreadcrumb = computed(() => {
 
 const currentPageTitle = computed(() => {
   const last = curBreadcrumb.value[curBreadcrumb.value.length - 1]
-  const title = String(last?.breadcrumb?.value ?? '').trim()
+  const title = String(unref(last?.breadcrumb) ?? '').trim()
   return title || 'Memoh'
 })
 
