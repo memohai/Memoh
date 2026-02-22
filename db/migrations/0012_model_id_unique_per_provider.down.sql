@@ -1,4 +1,4 @@
--- 0011_model_id_unique_per_provider
+-- 0012_model_id_unique_per_provider
 -- Revert model_id uniqueness back to global uniqueness.
 
 DO $$
@@ -9,7 +9,7 @@ BEGIN
     GROUP BY model_id
     HAVING COUNT(*) > 1
   ) THEN
-    RAISE EXCEPTION 'cannot rollback 0011_model_id_unique_per_provider: duplicate model_id values exist across providers';
+    RAISE EXCEPTION 'cannot rollback 0012_model_id_unique_per_provider: duplicate model_id values exist across providers';
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'models_provider_model_id_unique') THEN
