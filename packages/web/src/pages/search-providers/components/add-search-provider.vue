@@ -105,14 +105,18 @@ import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postSearchProviders } from '@memoh/sdk'
+import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
+import { useDialogMutation } from '@/composables/useDialogMutation'
 
 const PROVIDER_TYPES = ['brave'] as const
 
 const open = defineModel<boolean>('open')
+const { t } = useI18n()
+const { run } = useDialogMutation()
 
 const queryCache = useQueryCache()
-const { mutate: providerFetch, isLoading } = useMutation({
+const { mutateAsync: createProviderMutation, isLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
     const { data: result } = await postSearchProviders({ body: data as any, throwOnError: true })
     return result
@@ -130,11 +134,14 @@ const form = useForm({
 })
 
 const handleCreate = form.handleSubmit(async (value) => {
-  try {
-    await providerFetch({ ...value, config: {} })
-    open.value = false
-  } catch {
-    return
-  }
+  await run(
+    () => createProviderMutation({ ...value, config: {} }),
+    {
+      fallbackMessage: t('common.saveFailed'),
+      onSuccess: () => {
+        open.value = false
+      },
+    },
+  )
 })
 </script>

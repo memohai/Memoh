@@ -123,12 +123,16 @@ import {
 import z from 'zod'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
-import { ref, inject } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useKeyValueTags } from '@/composables/useKeyValueTags'
 import { useCreatePlatform } from '@/composables/api/usePlatform'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
+import { useDialogMutation } from '@/composables/useDialogMutation'
 
 const configTags = useKeyValueTags()
+const open = defineModel<boolean>('open', { default: false })
+const { t } = useI18n()
+const { run } = useDialogMutation()
 
 const validationSchema = toTypedSchema(z.object({
   name: z.string().min(1),
@@ -138,16 +142,17 @@ const validationSchema = toTypedSchema(z.object({
 
 const form = useForm({ validationSchema })
 
-const { mutate: addFetchPlatform } = useCreatePlatform()
+const { mutateAsync: addFetchPlatform } = useCreatePlatform()
 
 const addPlatform = form.handleSubmit(async (value) => {
-  try {
-    await addFetchPlatform(value)
-    open.value = false
-  } catch {
-    return
-  }
+  await run(
+    () => addFetchPlatform(value),
+    {
+      fallbackMessage: t('common.saveFailed'),
+      onSuccess: () => {
+        open.value = false
+      },
+    },
+  )
 })
-
-const open = inject('open', ref<boolean>(false))
 </script>

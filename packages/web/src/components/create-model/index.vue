@@ -190,13 +190,17 @@ import z from 'zod'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postModels, putModelsModelByModelId } from '@memoh/sdk'
 import type { ModelsGetResponse } from '@memoh/sdk'
+import { useI18n } from 'vue-i18n'
 import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
+import { useDialogMutation } from '@/composables/useDialogMutation'
 
 const availableInputModalities = ['text', 'image', 'audio', 'video', 'file'] as const
 const selectedModalities = ref<string[]>(['text'])
+const { t } = useI18n()
+const { run } = useDialogMutation()
 
 const formSchema = toTypedSchema(z.object({
   type: z.string().min(1),
@@ -305,38 +309,42 @@ async function addModel(e: Event) {
   if (!type || !model_id) return
   if (type === 'chat' && !client_type) return
 
-  try {
-    const payload: Record<string, unknown> = {
-      type,
-      model_id,
-      llm_provider_id: id,
-    }
-
-    if (type === 'chat' && client_type) {
-      payload.client_type = client_type
-    }
-
-    if (name) {
-      payload.name = name
-    }
-
-    if (type === 'embedding' && dimensions) {
-      payload.dimensions = dimensions
-    }
-
-    if (type === 'chat') {
-      payload.input_modalities = selectedModalities.value.length > 0 ? selectedModalities.value : ['text']
-    }
-
-    if (isEdit) {
-      await updateModel({ modelId: fallback!.model_id, data: payload as any })
-    } else {
-      await createModel(payload as any)
-    }
-    open.value = false
-  } catch {
-    return
+  const payload: Record<string, unknown> = {
+    type,
+    model_id,
+    llm_provider_id: id,
   }
+
+  if (type === 'chat' && client_type) {
+    payload.client_type = client_type
+  }
+
+  if (name) {
+    payload.name = name
+  }
+
+  if (type === 'embedding' && dimensions) {
+    payload.dimensions = dimensions
+  }
+
+  if (type === 'chat') {
+    payload.input_modalities = selectedModalities.value.length > 0 ? selectedModalities.value : ['text']
+  }
+
+  await run(
+    () => {
+      if (isEdit) {
+        return updateModel({ modelId: fallback!.model_id, data: payload as any })
+      }
+      return createModel(payload as any)
+    },
+    {
+      fallbackMessage: t('common.saveFailed'),
+      onSuccess: () => {
+        open.value = false
+      },
+    },
+  )
 }
 
 watch(open, async () => {
