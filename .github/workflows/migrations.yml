@@ -1,4 +1,4 @@
-name: CI
+name: Migrations
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
       - "db/migrations/**"
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: migrations-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
