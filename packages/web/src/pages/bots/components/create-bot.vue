@@ -69,7 +69,10 @@
               </Label>
               <FormControl>
                 <Select v-bind="componentField">
-                  <SelectTrigger class="w-full">
+                  <SelectTrigger
+                    class="w-full"
+                    :aria-label="$t('common.type')"
+                  >
                     <SelectValue :placeholder="$t('bots.typePlaceholder')" />
                   </SelectTrigger>
                   <SelectContent>
@@ -138,8 +141,12 @@ import z from 'zod'
 import { watch } from 'vue'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postBotsMutation, getBotsQueryKey } from '@memoh/sdk/colada'
+import { useI18n } from 'vue-i18n'
+import { useDialogMutation } from '@/composables/useDialogMutation'
 
 const open = defineModel<boolean>('open', { default: false })
+const { t } = useI18n()
+const { run } = useDialogMutation()
 
 const formSchema = toTypedSchema(z.object({
   display_name: z.string().min(1),
@@ -157,7 +164,7 @@ const form = useForm({
 })
 
 const queryCache = useQueryCache()
-const { mutate: createBot, isLoading: submitLoading } = useMutation({
+const { mutateAsync: createBot, isLoading: submitLoading } = useMutation({
   ...postBotsMutation(),
   onSettled: () => queryCache.invalidateQueries({ key: getBotsQueryKey() }),
 })
@@ -177,18 +184,21 @@ watch(open, (val) => {
 })
 
 const handleSubmit = form.handleSubmit(async (values) => {
-  try {
-    await createBot({
+  await run(
+    () => createBot({
       body: {
         display_name: values.display_name,
         avatar_url: values.avatar_url || undefined,
         type: values.type,
         is_active: true,
       },
-    })
-    open.value = false
-  } catch {
-    return
-  }
+    }),
+    {
+      fallbackMessage: t('common.saveFailed'),
+      onSuccess: () => {
+        open.value = false
+      },
+    },
+  )
 })
 </script>

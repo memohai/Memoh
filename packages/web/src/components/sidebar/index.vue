@@ -1,12 +1,19 @@
 <template>
-  <aside class="[&_[data-state=collapsed]_:is(.title-container,.exist-btn)]:hidden">
-    <Sidebar collapsible="icon">
+  <aside
+    aria-label="Primary"
+    class="[&_[data-state=collapsed]_:is(.title-container,.exist-btn)]:hidden"
+  >
+    <Sidebar
+      collapsible="icon"
+      role="navigation"
+      aria-label="Primary"
+    >
       <SidebarHeader class="group-data-[state=collapsed]:hidden">
         <div class="flex items-center gap-2 px-3 py-2">
           <img
             src="/logo.png"
             class="size-8"
-            alt="logo"
+            alt="Memoh logo"
           >
           <span class="text-xl font-bold text-gray-500 dark:text-gray-400">
             Memoh
@@ -28,13 +35,10 @@
                   :tooltip="sidebarItem.title"
                 >
                   <Toggle
-                    :class="`border border-transparent w-full flex justify-start ${curSlider === sidebarItem.name ? 'border-inherit' : ''}`"
-                    :model-value="curSelectSlide(sidebarItem.name as string).value"
-                    @update:model-value="(isSelect) => {
-                      if (isSelect) {
-                        curSlider = sidebarItem.name
-                      }
-                    }"
+                    class="border border-transparent w-full flex justify-start"
+                    :class="{ 'border-inherit': isActive(sidebarItem.name as string) }"
+                    :model-value="isActive(sidebarItem.name as string)"
+                    :aria-current="isActive(sidebarItem.name as string) ? 'page' : undefined"
                     @click="router.push({ name: sidebarItem.name })"
                   >
                     <FontAwesomeIcon :icon="sidebarItem.icon" />
@@ -61,7 +65,7 @@
                   :src="userInfo.avatarUrl"
                   :alt="displayTitle"
                 />
-                <AvatarFallback class="text-[10px]">
+                <AvatarFallback class="text-[10px] text-gray-600 dark:text-gray-300">
                   {{ avatarFallback }}
                 </AvatarFallback>
               </Avatar>
@@ -90,10 +94,11 @@ import {
   SidebarMenuItem,
   Toggle,
 } from '@memoh/ui'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
+import { useAvatarInitials } from '@/composables/useAvatarInitials'
 
 const router = useRouter()
 const route = useRoute()
@@ -106,14 +111,11 @@ const displayNameLabel = computed(() =>
 const displayTitle = computed(() =>
   userInfo.displayName || userInfo.username || userInfo.id || t('settings.user'),
 )
-const avatarFallback = computed(() =>
-  displayTitle.value.slice(0, 2).toUpperCase() || 'U',
-)
+const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
 
-const curSlider = ref()
-const curSelectSlide = (cur: string) => computed(() => {
-  return curSlider.value === cur || new RegExp(`^/${cur}$`).test(route.path)
-})
+function isActive(name: string) {
+  return route.name === name || route.path === `/${name}`
+}
 
 const sidebarInfo = computed(() => [
   {

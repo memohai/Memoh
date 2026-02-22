@@ -3,15 +3,10 @@ import { computed, ref, provide, watch, reactive } from 'vue'
 import { useQueryCache, useQuery } from '@pinia/colada'
 import {
   ScrollArea,
-  Sidebar,
-  SidebarContent,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarProvider,
-  InputGroup, InputGroupAddon, InputGroupInput,
-  SidebarFooter,
+  InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput,
   Toggle,
   Select,
   SelectTrigger,
@@ -31,6 +26,7 @@ import type { SearchprovidersGetResponse } from '@memoh/sdk'
 import AddSearchProvider from './components/add-search-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
+import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 const PROVIDER_TYPES = ['brave'] as const
 
@@ -90,102 +86,105 @@ const openStatus = reactive({
 </script>
 
 <template>
-  <div class="w-full mx-auto">
-    <div class="model-select">
-      <SidebarProvider
-        :open="true"
-        class="min-h-[initial]! flex **:data-[sidebar=sidebar]:bg-transparent absolute inset-0"
+  <MasterDetailSidebarLayout>
+    <template #sidebar-header>
+      <InputGroup class="shadow-none">
+        <InputGroupInput
+          v-model="searchInput"
+          :placeholder="$t('searchProvider.searchPlaceholder')"
+          aria-label="Search providers"
+        />
+        <InputGroupAddon
+          align="inline-end"
+        >
+          <InputGroupButton
+            type="button"
+            size="icon-xs"
+            aria-label="Search providers"
+            @click="searchText = searchInput"
+          >
+            <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
+    </template>
+
+    <template #sidebar-content>
+      <SidebarMenu
+        v-for="item in curFilterProvider"
+        :key="item.name"
       >
-        <Sidebar class="h-full relative top-0">
-          <SidebarHeader>
-            <InputGroup class="shadow-none">
-              <InputGroupInput
-                v-model="searchInput"
-                :placeholder="$t('searchProvider.searchPlaceholder')"
-              />
-              <InputGroupAddon
-                align="inline-end"
-                class="cursor-pointer"
-                @click="searchText = searchInput"
-              >
-                <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
-              </InputGroupAddon>
-            </InputGroup>
-          </SidebarHeader>
-          <SidebarContent class="px-2 scrollbar-none">
-            <SidebarMenu
-              v-for="item in curFilterProvider"
-              :key="item.name"
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            as-child
+            class="justify-start py-5! px-4"
+          >
+            <Toggle
+              :class="`py-4 border border-transparent ${curProvider?.name === item.name ? 'border-inherit' : ''}`"
+              :model-value="selectProvider(item.name as string).value"
+              @update:model-value="(isSelect) => {
+                if (isSelect) {
+                  curProvider = item
+                }
+              }"
             >
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  as-child
-                  class="justify-start py-5! px-4"
-                >
-                  <Toggle
-                    :class="`py-4 border border-transparent ${curProvider?.name === item.name ? 'border-inherit' : ''}`"
-                    :model-value="selectProvider(item.name as string).value"
-                    @update:model-value="(isSelect) => {
-                      if (isSelect) {
-                        curProvider = item
-                      }
-                    }"
-                  >
-                    <SearchProviderLogo
-                      :provider="item.provider || ''"
-                      size="sm"
-                      class="mr-2"
-                    />
-                    {{ item.name }}
-                  </Toggle>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarContent>
-          <SidebarFooter>
-            <Select v-model:model-value="filterProvider">
-              <SelectTrigger class="w-full">
-                <SelectValue :placeholder="$t('common.typePlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem
-                    v-for="type in PROVIDER_TYPES"
-                    :key="type"
-                    :value="type"
-                  >
-                    {{ type }}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            <AddSearchProvider v-model:open="openStatus.addOpen" />
-          </SidebarFooter>
-        </Sidebar>
-        <section class="flex-1 h-full">
-          <ScrollArea
-            v-if="curProvider?.id"
-            class="max-h-full h-full"
-          >
-            <ProviderSetting />
-          </ScrollArea>
-          <Empty
-            v-else
-            class="h-full flex justify-center items-center"
-          >
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <FontAwesomeIcon :icon="['fas', 'globe']" />
-              </EmptyMedia>
-            </EmptyHeader>
-            <EmptyTitle>{{ $t('searchProvider.emptyTitle') }}</EmptyTitle>
-            <EmptyDescription>{{ $t('searchProvider.emptyDescription') }}</EmptyDescription>
-            <EmptyContent>
-              <AddSearchProvider v-model:open="openStatus.addOpen" />
-            </EmptyContent>
-          </Empty>
-        </section>
-      </SidebarProvider>
-    </div>
-  </div>
+              <SearchProviderLogo
+                :provider="item.provider || ''"
+                size="sm"
+                class="mr-2"
+              />
+              {{ item.name }}
+            </Toggle>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    </template>
+
+    <template #sidebar-footer>
+      <Select v-model:model-value="filterProvider">
+        <SelectTrigger
+          class="w-full"
+          :aria-label="$t('searchProvider.provider')"
+        >
+          <SelectValue :placeholder="$t('common.typePlaceholder')" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem
+              v-for="type in PROVIDER_TYPES"
+              :key="type"
+              :value="type"
+            >
+              {{ type }}
+            </SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <AddSearchProvider v-model:open="openStatus.addOpen" />
+    </template>
+
+    <template #detail>
+      <ScrollArea
+        v-if="curProvider?.id"
+        class="max-h-full h-full"
+      >
+        <ProviderSetting />
+      </ScrollArea>
+      <Empty
+        v-else
+        class="h-full flex justify-center items-center"
+      >
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <FontAwesomeIcon :icon="['fas', 'globe']" />
+          </EmptyMedia>
+        </EmptyHeader>
+        <EmptyTitle>{{ $t('searchProvider.emptyTitle') }}</EmptyTitle>
+        <EmptyDescription>{{ $t('searchProvider.emptyDescription') }}</EmptyDescription>
+        <EmptyContent>
+          <AddSearchProvider v-model:open="openStatus.addOpen" />
+        </EmptyContent>
+      </Empty>
+    </template>
+  </MasterDetailSidebarLayout>
 </template>

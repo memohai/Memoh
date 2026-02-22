@@ -10,12 +10,14 @@
         </p>
         <div class="flex justify-end gap-3">
           <Button
+            type="button"
             variant="outline"
             @click="close"
           >
             {{ cancelText || $t('common.cancel') }}
           </Button>
           <Button
+            type="button"
             :disabled="loading"
             @click="$emit('confirm'); close()"
           >

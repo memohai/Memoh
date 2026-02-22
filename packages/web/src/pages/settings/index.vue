@@ -14,9 +14,9 @@
           </AvatarFallback>
         </Avatar>
         <div class="min-w-0">
-          <h4 class="font-semibold truncate">
+          <p class="font-semibold truncate">
             {{ displayTitle }}
-          </h4>
+          </p>
           <p class="text-sm text-muted-foreground truncate">
             {{ displayUserID }}
           </p>
@@ -25,13 +25,13 @@
 
       <!-- Display Settings -->
       <section>
-        <h6 class="mb-2 flex items-center">
+        <h2 class="mb-2 flex items-center text-base font-semibold">
           <FontAwesomeIcon
             :icon="['fas', 'gear']"
             class="mr-2"
           />
           {{ $t('settings.display') }}
-        </h6>
+        </h2>
         <Separator />
         <div class="mt-4 space-y-4">
           <div class="flex items-center justify-between">
@@ -40,7 +40,10 @@
               :model-value="language"
               @update:model-value="(v) => v && setLanguage(v as Locale)"
             >
-              <SelectTrigger class="w-40">
+              <SelectTrigger
+                class="w-40"
+                :aria-label="$t('settings.language')"
+              >
                 <SelectValue :placeholder="$t('settings.languagePlaceholder')" />
               </SelectTrigger>
               <SelectContent>
@@ -62,7 +65,10 @@
               :model-value="theme"
               @update:model-value="(v) => v && setTheme(v as 'light' | 'dark')"
             >
-              <SelectTrigger class="w-40">
+              <SelectTrigger
+                class="w-40"
+                :aria-label="$t('settings.theme')"
+              >
                 <SelectValue :placeholder="$t('settings.themePlaceholder')" />
               </SelectTrigger>
               <SelectContent>
@@ -95,107 +101,39 @@
         </ConfirmPopover>
       </section>
 
-      <!-- User Profile -->
-      <section>
-        <h6 class="mb-2 flex items-center">
-          <FontAwesomeIcon
-            :icon="['fas', 'user']"
-            class="mr-2"
-          />
-          {{ $t('settings.userProfile') }}
-        </h6>
-        <Separator />
-        <div class="mt-4 space-y-4">
-          <div class="space-y-2">
-            <Label>{{ $t('settings.userID') }}</Label>
-            <Input
-              :model-value="displayUserID"
-              readonly
-            />
-          </div>
-          <div class="space-y-2">
-            <Label>{{ $t('auth.username') }}</Label>
-            <Input
-              :model-value="displayUsername"
-              readonly
-            />
-          </div>
-          <div class="space-y-2">
-            <Label>{{ $t('settings.displayName') }}</Label>
-            <Input v-model="profileForm.display_name" />
-          </div>
-          <div class="space-y-2">
-            <Label>{{ $t('settings.avatarUrl') }}</Label>
-            <Input
-              v-model="profileForm.avatar_url"
-              type="url"
-            />
-          </div>
-          <div class="flex justify-end">
-            <Button
-              :disabled="savingProfile || loadingInitial"
-              @click="onSaveProfile"
-            >
-              <Spinner v-if="savingProfile" />
-              {{ $t('settings.saveProfile') }}
-            </Button>
-          </div>
-        </div>
-      </section>
+      <ProfileSection
+        :display-user-id="displayUserID"
+        :display-username="displayUsername"
+        :display-name="profileForm.display_name"
+        :avatar-url="profileForm.avatar_url"
+        :saving="savingProfile"
+        :loading="loadingInitial"
+        @update:display-name="profileForm.display_name = $event"
+        @update:avatar-url="profileForm.avatar_url = $event"
+        @save="onSaveProfile"
+      />
 
-      <!-- Change Password -->
-      <section>
-        <h6 class="mb-2 flex items-center">
-          <FontAwesomeIcon
-            :icon="['fas', 'gear']"
-            class="mr-2"
-          />
-          {{ $t('settings.changePassword') }}
-        </h6>
-        <Separator />
-        <div class="mt-4 space-y-4">
-          <div class="space-y-2">
-            <Label>{{ $t('settings.currentPassword') }}</Label>
-            <Input
-              v-model="passwordForm.currentPassword"
-              type="password"
-            />
-          </div>
-          <div class="space-y-2">
-            <Label>{{ $t('settings.newPassword') }}</Label>
-            <Input
-              v-model="passwordForm.newPassword"
-              type="password"
-            />
-          </div>
-          <div class="space-y-2">
-            <Label>{{ $t('settings.confirmPassword') }}</Label>
-            <Input
-              v-model="passwordForm.confirmPassword"
-              type="password"
-            />
-          </div>
-          <div class="flex justify-end">
-            <Button
-              :disabled="savingPassword || loadingInitial"
-              @click="onUpdatePassword"
-            >
-              <Spinner v-if="savingPassword" />
-              {{ $t('settings.updatePassword') }}
-            </Button>
-          </div>
-        </div>
-      </section>
+      <PasswordSection
+        :current-password="passwordForm.currentPassword"
+        :new-password="passwordForm.newPassword"
+        :confirm-password="passwordForm.confirmPassword"
+        :saving="savingPassword"
+        :loading="loadingInitial"
+        @update:current-password="passwordForm.currentPassword = $event"
+        @update:new-password="passwordForm.newPassword = $event"
+        @update:confirm-password="passwordForm.confirmPassword = $event"
+        @update-password="onUpdatePassword"
+      />
 
       <!-- Linked Channels -->
       <section>
-        <h6 class="mb-2 flex items-center">
+        <h2 class="mb-2 flex items-center text-base font-semibold">
           <FontAwesomeIcon
             :icon="['fas', 'network-wired']"
             class="mr-2"
           />
           {{ $t('settings.linkedChannels') }}
-        </h6>
+        </h2>
         <Separator />
         <div class="mt-4 space-y-3">
           <p
@@ -235,83 +173,21 @@
         </div>
       </section>
 
-      <!-- Bind Code -->
-      <section>
-        <h6 class="mb-2 flex items-center">
-          <FontAwesomeIcon
-            :icon="['fas', 'plug']"
-            class="mr-2"
-          />
-          {{ $t('settings.bindCode') }}
-        </h6>
-        <Separator />
-        <div class="mt-4 space-y-4">
-          <div class="flex flex-wrap gap-3 items-end">
-            <div class="space-y-2">
-              <Label>{{ $t('settings.platform') }}</Label>
-              <Select
-                :model-value="bindForm.platform || anyPlatformValue"
-                @update:model-value="onPlatformChange"
-              >
-                <SelectTrigger class="w-56">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem :value="anyPlatformValue">
-                      {{ $t('settings.platformAny') }}
-                    </SelectItem>
-                    <SelectItem
-                      v-for="platform in platformOptions"
-                      :key="platform"
-                      :value="platform"
-                    >
-                      {{ platformLabel(platform) }}
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="space-y-2">
-              <Label>{{ $t('settings.bindCodeTTL') }}</Label>
-              <Input
-                v-model.number="bindForm.ttlSeconds"
-                type="number"
-                min="60"
-                class="w-40"
-              />
-            </div>
-            <Button
-              :disabled="generatingBindCode || loadingInitial"
-              @click="onGenerateBindCode"
-            >
-              <Spinner v-if="generatingBindCode" />
-              {{ $t('settings.generateBindCode') }}
-            </Button>
-          </div>
-          <div
-            v-if="bindCode"
-            class="space-y-2"
-          >
-            <Label>{{ $t('settings.bindCodeValue') }}</Label>
-            <div class="flex gap-2">
-              <Input
-                :model-value="bindCode.token"
-                readonly
-              />
-              <Button
-                variant="outline"
-                @click="copyBindCode"
-              >
-                {{ $t('settings.copyBindCode') }}
-              </Button>
-            </div>
-            <p class="text-xs text-muted-foreground">
-              {{ $t('settings.bindCodeExpiresAt') }}: {{ formatDate(bindCode.expires_at) }}
-            </p>
-          </div>
-        </div>
-      </section>
+      <BindCodeSection
+        :any-platform-value="anyPlatformValue"
+        :platform="bindForm.platform"
+        :platform-options="platformOptions"
+        :ttl-seconds="bindForm.ttlSeconds"
+        :generating="generatingBindCode"
+        :loading="loadingInitial"
+        :bind-code="bindCode"
+        :platform-label="platformLabel"
+        :format-date="formatDate"
+        @update:platform="onPlatformChange"
+        @update:ttl-seconds="bindForm.ttlSeconds = $event"
+        @generate="onGenerateBindCode"
+        @copy="copyBindCode"
+      />
     </div>
   </section>
 </template>
@@ -323,7 +199,6 @@ import {
   AvatarImage,
   Badge,
   Button,
-  Input,
   Label,
   Select,
   SelectContent,
@@ -332,7 +207,6 @@ import {
   SelectTrigger,
   SelectValue,
   Separator,
-  Spinner,
 } from '@memoh/ui'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -340,12 +214,19 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import ProfileSection from './components/profile-section.vue'
+import PasswordSection from './components/password-section.vue'
+import BindCodeSection from './components/bind-code-section.vue'
 import { getUsersMe, putUsersMe, putUsersMePassword, getUsersMeIdentities } from '@memoh/sdk'
 import { client } from '@memoh/sdk/client'
 import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest } from '@memoh/sdk'
 import { useUserStore } from '@/store/user'
 import { useSettingsStore } from '@/store/settings'
 import type { Locale } from '@/i18n'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import { formatDateTime } from '@/utils/date-time'
+import { useClipboard } from '@/composables/useClipboard'
+import { useAvatarInitials } from '@/composables/useAvatarInitials'
 
 interface ChannelIdentity {
   id: string
@@ -371,6 +252,7 @@ const anyPlatformValue = '__all__'
 const { t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
+const { copyText } = useClipboard()
 const { userInfo, exitLogin, patchUserInfo } = userStore
 
 // ---- Display settings ----
@@ -410,10 +292,7 @@ const displayUsername = computed(() => account.value?.username || userInfo.usern
 const displayTitle = computed(() => {
   return profileForm.display_name.trim() || displayUsername.value || displayUserID.value || t('settings.user')
 })
-const avatarFallback = computed(() => {
-  const source = displayTitle.value.trim()
-  return source.slice(0, 2).toUpperCase() || 'U'
-})
+const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
 
 function platformLabel(platformKey: string): string {
   if (!platformKey?.trim()) return platformKey ?? ''
@@ -490,7 +369,7 @@ async function onSaveProfile() {
     })
     toast.success(t('settings.profileUpdated'))
   } catch (error) {
-    toast.error(resolveErrorMessage(error, t('settings.profileUpdateFailed')))
+    toast.error(resolveApiErrorMessage(error, t('settings.profileUpdateFailed'), { prefixFallback: true }))
   } finally {
     savingProfile.value = false
   }
@@ -520,7 +399,7 @@ async function onUpdatePassword() {
     passwordForm.confirmPassword = ''
     toast.success(t('settings.passwordUpdated'))
   } catch (error) {
-    toast.error(resolveErrorMessage(error, t('settings.passwordUpdateFailed')))
+    toast.error(resolveApiErrorMessage(error, t('settings.passwordUpdateFailed'), { prefixFallback: true }))
   } finally {
     savingPassword.value = false
   }
@@ -545,7 +424,7 @@ async function onGenerateBindCode() {
     bindCode.value = data
     toast.success(t('settings.bindCodeGenerated'))
   } catch (error) {
-    toast.error(resolveErrorMessage(error, t('settings.bindCodeGenerateFailed')))
+    toast.error(resolveApiErrorMessage(error, t('settings.bindCodeGenerateFailed'), { prefixFallback: true }))
   } finally {
     generatingBindCode.value = false
   }
@@ -556,19 +435,19 @@ async function copyBindCode() {
     return
   }
   try {
-    await navigator.clipboard.writeText(bindCode.value.token)
-    toast.success(t('settings.bindCodeCopied'))
+    const copied = await copyText(bindCode.value.token)
+    if (copied) {
+      toast.success(t('settings.bindCodeCopied'))
+      return
+    }
+    toast.error(t('settings.bindCodeCopyFailed'))
   } catch {
     toast.error(t('settings.bindCodeCopyFailed'))
   }
 }
 
 function formatDate(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  return date.toLocaleString()
+  return formatDateTime(value, { fallback: value })
 }
 
 function onLogout() {
@@ -576,14 +455,4 @@ function onLogout() {
   void router.replace({ name: 'Login' })
 }
 
-function resolveErrorMessage(error: unknown, fallback: string) {
-  if (error && typeof error === 'object') {
-    const body = error as { message?: string; error?: string; detail?: string }
-    const detail = body.message || body.error || body.detail
-    if (detail) {
-      return `${fallback}: ${detail}`
-    }
-  }
-  return fallback
-}
 </script>

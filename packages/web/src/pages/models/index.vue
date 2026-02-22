@@ -4,15 +4,10 @@ import modelSetting from './model-setting.vue'
 import { useQueryCache } from '@pinia/colada'
 import {
   ScrollArea,
-  Sidebar,
-  SidebarContent,
-  SidebarHeader,
+  InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarProvider,
-  InputGroup, InputGroupAddon, InputGroupInput,
-  SidebarFooter,
   Toggle,
   Empty,
   EmptyContent,
@@ -24,6 +19,7 @@ import {
 import { getProviders } from '@memoh/sdk'
 import type { ProvidersGetResponse } from '@memoh/sdk'
 import AddProvider from '@/components/add-provider/index.vue'
+import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 import { useQuery } from '@pinia/colada'
 
 const { data: providerData } = useQuery({
@@ -77,81 +73,81 @@ const openStatus = reactive({
 </script>
 
 <template>
-  <div class="w-full  mx-auto">
-    <div class="[&_td:last-child]:w-45 model-select">
-      <SidebarProvider
-        :open="true"
-        class="min-h-[initial]! flex **:data-[sidebar=sidebar]:bg-transparent absolute inset-0"
+  <MasterDetailSidebarLayout class="[&_td:last-child]:w-45">
+    <template #sidebar-header>
+      <InputGroup class="shadow-none">
+        <InputGroupInput
+          v-model="searchInput"
+          :placeholder="$t('models.searchPlaceholder')"
+          aria-label="Search models"
+        />
+        <InputGroupAddon
+          align="inline-end"
+        >
+          <InputGroupButton
+            type="button"
+            size="icon-xs"
+            aria-label="Search models"
+            @click="searchText = searchInput"
+          >
+            <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
+    </template>
+
+    <template #sidebar-content>
+      <SidebarMenu
+        v-for="providerItem in curFilterProvider"
+        :key="providerItem.name"
       >
-        <Sidebar class="h-full relative top-0 ">
-          <SidebarHeader>
-            <InputGroup class="shadow-none">
-              <InputGroupInput
-                v-model="searchInput"
-                :placeholder="$t('models.searchPlaceholder')"
-              />
-              <InputGroupAddon
-                align="inline-end"
-                class="cursor-pointer"
-                @click="searchText = searchInput"
-              >
-                <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
-              </InputGroupAddon>
-            </InputGroup>
-          </SidebarHeader>
-          <SidebarContent class="px-2 scrollbar-none">
-            <SidebarMenu
-              v-for="providerItem in curFilterProvider"
-              :key="providerItem.name"
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            as-child
+            class="justify-start py-5! px-4"
+          >
+            <Toggle
+              :class="`py-4 border border-transparent ${curProvider?.name === providerItem.name ? 'border-inherit' : ''}`"
+              :model-value="selectProvider(providerItem.name as string).value"
+              @update:model-value="(isSelect) => {
+                if (isSelect) {
+                  curProvider = providerItem
+                }
+              }"
             >
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  as-child
-                  class="justify-start py-5! px-4"
-                >
-                  <Toggle
-                    :class="`py-4 border border-transparent ${curProvider?.name === providerItem.name ? 'border-inherit' : ''}`"
-                    :model-value="selectProvider(providerItem.name as string).value"
-                    @update:model-value="(isSelect) => {
-                      if (isSelect) {
-                        curProvider = providerItem
-                      }
-                    }"
-                  >
-                    {{ providerItem.name }}
-                  </Toggle>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarContent>
-          <SidebarFooter>
-            <AddProvider v-model:open="openStatus.provideOpen" />
-          </SidebarFooter>
-        </Sidebar>
-        <section class="flex-1 h-full ">
-          <ScrollArea
-            v-if="curProvider?.id"
-            class="max-h-full h-full"
-          >
-            <model-setting />
-          </ScrollArea>
-          <Empty
-            v-else
-            class="h-full flex justify-center items-center"
-          >
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <FontAwesomeIcon :icon="['far', 'rectangle-list']" />
-              </EmptyMedia>
-            </EmptyHeader>
-            <EmptyTitle>{{ $t('provider.emptyTitle') }}</EmptyTitle>
-            <EmptyDescription>{{ $t('provider.emptyDescription') }}</EmptyDescription>
-            <EmptyContent>
-              <AddProvider v-model:open="openStatus.provideOpen" />
-            </EmptyContent>
-          </Empty>
-        </section>
-      </SidebarProvider>
-    </div>
-  </div>
+              {{ providerItem.name }}
+            </Toggle>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    </template>
+
+    <template #sidebar-footer>
+      <AddProvider v-model:open="openStatus.provideOpen" />
+    </template>
+
+    <template #detail>
+      <ScrollArea
+        v-if="curProvider?.id"
+        class="max-h-full h-full"
+      >
+        <model-setting />
+      </ScrollArea>
+      <Empty
+        v-else
+        class="h-full flex justify-center items-center"
+      >
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <FontAwesomeIcon :icon="['far', 'rectangle-list']" />
+          </EmptyMedia>
+        </EmptyHeader>
+        <EmptyTitle>{{ $t('provider.emptyTitle') }}</EmptyTitle>
+        <EmptyDescription>{{ $t('provider.emptyDescription') }}</EmptyDescription>
+        <EmptyContent>
+          <AddProvider v-model:open="openStatus.provideOpen" />
+        </EmptyContent>
+      </Empty>
+    </template>
+  </MasterDetailSidebarLayout>
 </template>    

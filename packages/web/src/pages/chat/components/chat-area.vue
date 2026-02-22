@@ -3,13 +3,13 @@
     <!-- No bot selected -->
     <div
       v-if="!currentBotId"
-      class="flex-1 flex items-center justify-center text-muted-foreground"
+      class="flex-1 flex items-center justify-center"
     >
       <div class="text-center">
-        <p class="text-lg">
+        <p class="text-xl font-semibold tracking-tight text-foreground">
           {{ $t('chat.selectBot') }}
         </p>
-        <p class="text-sm mt-1">
+        <p class="mt-1 text-sm text-muted-foreground">
           {{ $t('chat.selectBotHint') }}
         </p>
       </div>
@@ -49,6 +49,9 @@
       <div
         ref="scrollContainer"
         class="flex-1 overflow-y-auto"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
         @scroll="handleScroll"
       >
         <div class="max-w-3xl mx-auto px-4 py-6 space-y-6">
@@ -109,7 +112,9 @@
               />
               <span class="truncate max-w-[120px]">{{ file.name }}</span>
               <button
+                type="button"
                 class="ml-1 text-muted-foreground hover:text-foreground"
+                :aria-label="`${$t('common.delete')}: ${file.name}`"
                 @click="pendingFiles.splice(i, 1)"
               >
                 <FontAwesomeIcon
@@ -132,6 +137,7 @@
               ref="fileInput"
               type="file"
               class="hidden"
+              aria-label="Attach files"
               multiple
               accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
               @change="handleFileSelect"
@@ -139,9 +145,11 @@
             <div class="absolute right-2 bottom-2 flex items-center gap-1">
               <Button
                 v-if="!streaming"
+                type="button"
                 size="sm"
                 variant="ghost"
                 :disabled="!currentBotId || activeChatReadOnly"
+                aria-label="Attach files"
                 @click="fileInput?.click()"
               >
                 <FontAwesomeIcon
@@ -151,8 +159,10 @@
               </Button>
               <Button
                 v-if="!streaming"
+                type="button"
                 size="sm"
                 :disabled="(!inputText.trim() && !pendingFiles.length) || !currentBotId || activeChatReadOnly"
+                aria-label="Send message"
                 @click="handleSend"
               >
                 <FontAwesomeIcon
@@ -162,8 +172,10 @@
               </Button>
               <Button
                 v-else
+                type="button"
                 size="sm"
                 variant="destructive"
+                aria-label="Stop generating response"
                 @click="chatStore.abort()"
               >
                 <FontAwesomeIcon

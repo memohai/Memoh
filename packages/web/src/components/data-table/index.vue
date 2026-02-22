@@ -9,6 +9,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableEmpty,
   TableHead,
   TableHeader,
   TableRow,
@@ -65,14 +66,9 @@ const table = useVueTable({
           </TableRow>
         </template>
         <template v-else>
-          <TableRow>
-            <TableCell
-              :colspan="columns.length"
-              class="h-24 text-center"
-            >
-              No results.
-            </TableCell>
-          </TableRow>
+          <TableEmpty :colspan="columns.length">
+            No results.
+          </TableEmpty>
         </template>
       </TableBody>
     </Table>

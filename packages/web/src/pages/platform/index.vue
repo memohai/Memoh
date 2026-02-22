@@ -1,6 +1,6 @@
 <template>
   <section>
-    <AddPlatform />
+    <AddPlatform v-model:open="open" />
 
     <menu class="grid grid-cols-4 gap-4 [&_li>*]:h-full">
       <PlatformCard
@@ -14,13 +14,12 @@
 </template>
 
 <script setup lang="ts">
-import { provide, ref } from 'vue'
+import { ref } from 'vue'
 import AddPlatform from '@/components/add-platform/index.vue'
 import PlatformCard from './components/platform-card.vue'
 import { usePlatformList } from '@/composables/api/usePlatform'
 
 const open = ref(false)
-provide('open', open)
 
 const { data: platformList } = usePlatformList()
 </script>

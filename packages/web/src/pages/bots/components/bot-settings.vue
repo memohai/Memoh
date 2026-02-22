@@ -55,6 +55,7 @@
         v-model.number="form.max_context_load_time"
         type="number"
         :min="0"
+        :aria-label="$t('bots.settings.maxContextLoadTime')"
       />
     </div>
 
@@ -66,6 +67,7 @@
         type="number"
         :min="0"
         placeholder="0"
+        :aria-label="$t('bots.settings.maxContextTokens')"
       />
     </div>
 
@@ -75,6 +77,7 @@
       <Input
         v-model="form.language"
         type="text"
+        :aria-label="$t('bots.settings.language')"
       />
     </div>
 
@@ -158,6 +161,7 @@ import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders } from '@memoh/sdk'
 import type { SettingsSettings } from '@memoh/sdk'
 import type { Ref } from 'vue'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{
   botId: string
@@ -285,22 +289,13 @@ async function handleSave() {
   }
 }
 
-function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) return error.message
-  if (error && typeof error === 'object' && 'message' in error) {
-    const msg = (error as { message?: string }).message
-    if (msg && msg.trim()) return msg
-  }
-  return fallback
-}
-
 async function handleDeleteBot() {
   try {
     await deleteBot()
     toast.success(t('bots.deleteSuccess'))
     await router.push({ name: 'bots' })
   } catch (error) {
-    toast.error(resolveErrorMessage(error, t('bots.lifecycle.deleteFailed')))
+    toast.error(resolveApiErrorMessage(error, t('bots.lifecycle.deleteFailed')))
   }
 }
 </script>

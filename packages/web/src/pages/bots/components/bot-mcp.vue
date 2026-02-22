@@ -230,7 +230,10 @@
                       v-model="formData.transport"
                       @update:model-value="syncFormToEditJson"
                     >
-                      <SelectTrigger class="w-full">
+                      <SelectTrigger
+                        class="w-full"
+                        aria-label="Transport"
+                      >
                         <SelectValue placeholder="http" />
                       </SelectTrigger>
                       <SelectContent>
@@ -425,7 +428,10 @@
                     <div class="space-y-1.5">
                       <Label>Transport</Label>
                       <Select v-model="formData.transport">
-                        <SelectTrigger class="w-full">
+                        <SelectTrigger
+                          class="w-full"
+                          aria-label="Transport"
+                        >
                           <SelectValue placeholder="http" />
                         </SelectTrigger>
                         <SelectContent>
@@ -583,7 +589,11 @@ import {
   deleteBotsByBotIdMcpById,
   postBotsByBotIdMcpOpsBatchDelete,
 } from '@memoh/sdk'
+import { client } from '@memoh/sdk/client'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import { tagsToRecord } from '@/utils/key-value-tags'
+import { useClipboard } from '@/composables/useClipboard'
 
 interface McpItem {
   id: string
@@ -605,6 +615,7 @@ interface McpServerEntry {
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
+const { copyText } = useClipboard()
 
 const loading = ref(false)
 const items = ref<McpItem[]>([])
@@ -726,6 +737,7 @@ const columns = computed<ColumnDef<McpItem>[]>(() => [
         h('input', {
           type: 'checkbox',
           class: 'size-4 cursor-pointer rounded border border-input',
+          'aria-label': 'Select all MCP servers',
           checked: isAllSelected.value,
           onChange: (e: Event) => {
             toggleSelectAll((e.target as HTMLInputElement).checked)
@@ -738,6 +750,7 @@ const columns = computed<ColumnDef<McpItem>[]>(() => [
         h('input', {
           type: 'checkbox',
           class: 'size-4 cursor-pointer rounded border border-input',
+          'aria-label': `Select MCP server ${row.original.name}`,
           checked: selectedIds.value.includes(id),
           onChange: (e: Event) => {
             toggleSelection(id, (e.target as HTMLInputElement).checked)
@@ -860,11 +873,7 @@ function buildFormToEntry(): McpServerEntry | null {
       args: argsTags.value.length ? argsTags.value : undefined,
       cwd: d.cwd.trim() || undefined,
     }
-    const env: Record<string, string> = {}
-    envTags.tagList.value.forEach((tag) => {
-      const [k, v] = tag.split(':')
-      if (k && v) env[k] = v
-    })
+    const env = tagsToRecord(envTags.tagList.value)
     if (Object.keys(env).length > 0) entry.env = env
     return entry
   }
@@ -873,11 +882,7 @@ function buildFormToEntry(): McpServerEntry | null {
       url: d.url.trim(),
       transport: d.transport === 'sse' ? 'sse' : undefined,
     }
-    const headers: Record<string, string> = {}
-    headerTags.tagList.value.forEach((tag) => {
-      const [k, v] = tag.split(':')
-      if (k && v) headers[k] = v
-    })
+    const headers = tagsToRecord(headerTags.tagList.value)
     if (Object.keys(headers).length > 0) entry.headers = headers
     return entry
   }
@@ -958,20 +963,12 @@ function buildRequestBody() {
   if (formData.value.command.trim()) {
     body.command = formData.value.command.trim()
     if (argsTags.value.length > 0) body.args = argsTags.value
-    const env: Record<string, string> = {}
-    envTags.tagList.value.forEach((tag) => {
-      const [k, v] = tag.split(':')
-      if (k && v) env[k] = v
-    })
+    const env = tagsToRecord(envTags.tagList.value)
     if (Object.keys(env).length > 0) body.env = env
     if (formData.value.cwd.trim()) body.cwd = formData.value.cwd.trim()
   } else if (formData.value.url.trim()) {
     body.url = formData.value.url.trim()
-    const headers: Record<string, string> = {}
-    headerTags.tagList.value.forEach((tag) => {
-      const [k, v] = tag.split(':')
-      if (k && v) headers[k] = v
-    })
+    const headers = tagsToRecord(headerTags.tagList.value)
     if (Object.keys(headers).length > 0) body.headers = headers
     if (formData.value.transport === 'sse') body.transport = 'sse'
   }
@@ -1070,17 +1067,12 @@ async function handleImport() {
 }
 
 function handleCopyExport() {
-  navigator.clipboard.writeText(exportJson.value)
+  void copyText(exportJson.value)
   toast.success(t('common.copied'))
 }
 
 function resolveError(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) return error.message
-  if (error && typeof error === 'object' && 'message' in error) {
-    const msg = (error as { message?: string }).message
-    if (msg?.trim()) return msg
-  }
-  return fallback
+  return resolveApiErrorMessage(error, fallback)
 }
 
 watch(() => props.botId, () => {

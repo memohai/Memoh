@@ -1,11 +1,14 @@
 <template>
-  <section class="w-screen h-screen flex *:m-auto bg-background relative">
-    <div class="absolute top-6 right-6 flex items-center gap-2">
+  <main class="w-screen h-screen flex *:m-auto bg-background relative">
+    <header class="absolute top-6 right-6 flex items-center gap-2">
       <Select
         :model-value="language"
         @update:model-value="(v) => v && setLanguage(v as Locale)"
       >
-        <SelectTrigger class="w-28 h-9">
+        <SelectTrigger
+          class="w-28 h-9"
+          :aria-label="$t('settings.language')"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -22,6 +25,8 @@
       <Button
         variant="ghost"
         size="icon"
+        type="button"
+        aria-label="Toggle theme"
         @click="toggleTheme"
       >
         <Sun
@@ -33,14 +38,14 @@
           class="size-5"
         />
       </Button>
-    </div>
+    </header>
     <section class="w-full max-w-sm flex flex-col gap-10 ">
       <section>
-        <h3
+        <h1
           class="scroll-m-20 text-3xl tracking-wide font-semibold text-foreground text-center"
         >
           {{ $t('auth.welcome') }}
-        </h3>
+        </h1>
       </section>
       <form
         @submit="login"
@@ -114,7 +119,7 @@
         </Card>
       </form>
     </section>
-  </section>
+  </main>
 </template>
 
 <script setup lang="ts">

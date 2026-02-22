@@ -1,210 +1,174 @@
 <template>
   <section class="ml-auto">
-    <Dialog v-model:open="open">
-      <DialogTrigger as-child>
+    <FormDialogShell
+      v-model:open="open"
+      :title="title === 'edit' ? $t('models.editModel') : $t('models.addModel')"
+      :cancel-text="$t('common.cancel')"
+      :submit-text="title === 'edit' ? $t('common.save') : $t('models.addModel')"
+      :submit-disabled="!canSubmit"
+      :loading="isLoading"
+      @submit="addModel"
+    >
+      <template #trigger>
         <Button variant="default">
           {{ $t('models.addModel') }}
         </Button>
-      </DialogTrigger>
-      <DialogContent class="sm:max-w-106.25">
-        <form @submit="addModel">
-          <DialogHeader>
-            <DialogTitle>
-              {{ title === 'edit' ? $t('models.editModel') : $t('models.addModel') }}
-            </DialogTitle>
-            <DialogDescription class="mb-4">
-              <Separator class="my-4" />
-            </DialogDescription>
-          </DialogHeader>
-          <div class="flex flex-col gap-3">
-            <!-- Type -->
-            <FormField
-              v-slot="{ componentField }"
-              name="type"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  {{ $t('common.type') }}
-                </Label>
-                <FormControl>
-                  <Select v-bind="componentField">
-                    <SelectTrigger class="w-full">
-                      <SelectValue :placeholder="$t('common.typePlaceholder')" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="chat">
-                          Chat
-                        </SelectItem>
-                        <SelectItem value="embedding">
-                          Embedding
-                        </SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </FormControl>
-              </FormItem>
-            </FormField>
-
-            <!-- Client Type (chat only) -->
-            <div v-if="selectedType === 'chat'">
+      </template>
+      <template #body>
+        <div class="flex flex-col gap-3 mt-4">
+          <!-- Type -->
+          <FormField
+            v-slot="{ componentField }"
+            name="type"
+          >
+            <FormItem>
               <Label class="mb-2">
-                {{ $t('models.clientType') }}
+                {{ $t('common.type') }}
               </Label>
-              <Popover v-model:open="clientTypeOpen">
-                <PopoverTrigger as-child>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    :aria-expanded="clientTypeOpen"
-                    class="w-full justify-between font-normal mt-2"
+              <FormControl>
+                <Select v-bind="componentField">
+                  <SelectTrigger
+                    class="w-full"
+                    :aria-label="$t('common.type')"
                   >
-                    <span class="truncate">
-                      {{ selectedClientTypeLabel || $t('models.clientTypePlaceholder') }}
-                    </span>
-                    <FontAwesomeIcon
-                      :icon="['fas', 'chevron-down']"
-                      class="ml-2 size-3 shrink-0 text-muted-foreground"
-                    />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  class="w-[--reka-popover-trigger-width] p-1"
-                  align="start"
+                    <SelectValue :placeholder="$t('common.typePlaceholder')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="chat">
+                        Chat
+                      </SelectItem>
+                      <SelectItem value="embedding">
+                        Embedding
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </FormControl>
+            </FormItem>
+          </FormField>
+
+          <!-- Client Type (chat only) -->
+          <div v-if="selectedType === 'chat'">
+            <Label class="mb-2">
+              {{ $t('models.clientType') }}
+            </Label>
+            <SearchableSelectPopover
+              v-model="clientTypeModel"
+              :options="clientTypeOptions"
+              :placeholder="$t('models.clientTypePlaceholder')"
+              :aria-label="$t('models.clientType')"
+              :search-placeholder="$t('models.clientTypePlaceholder')"
+              :search-aria-label="$t('models.clientType')"
+              class="mt-2"
+              :show-group-headers="false"
+            >
+              <template #trigger="{ open, displayLabel }">
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  :aria-expanded="open"
+                  class="w-full justify-between font-normal mt-2"
                 >
-                  <button
-                    v-for="ct in CLIENT_TYPE_LIST"
-                    :key="ct.value"
-                    class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
-                    :class="{ 'bg-accent': form.values.client_type === ct.value }"
-                    @click="selectClientType(ct.value)"
-                  >
-                    <FontAwesomeIcon
-                      v-if="form.values.client_type === ct.value"
-                      :icon="['fas', 'check']"
-                      class="size-3.5"
-                    />
-                    <span
-                      v-else
-                      class="size-3.5"
-                    />
-                    <span class="truncate">{{ ct.label }}</span>
-                    <span class="ml-auto text-xs text-muted-foreground">{{ ct.hint }}</span>
-                  </button>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <!-- Model -->
-            <FormField
-              v-slot="{ componentField }"
-              name="model_id"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  {{ $t('models.model') }}
-                </Label>
-                <FormControl>
-                  <Input
-                    type="text"
-                    :placeholder="$t('models.modelPlaceholder')"
-                    v-bind="componentField"
+                  <span class="truncate">
+                    {{ displayLabel || $t('models.clientTypePlaceholder') }}
+                  </span>
+                  <FontAwesomeIcon
+                    :icon="['fas', 'chevron-down']"
+                    class="ml-2 size-3 shrink-0 text-muted-foreground"
                   />
-                </FormControl>
-              </FormItem>
-            </FormField>
+                </Button>
+              </template>
+            </SearchableSelectPopover>
+          </div>
 
-            <!-- Display Name -->
-            <FormField
-              name="name"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  {{ $t('models.displayName') }}
-                  <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
-                </Label>
-                <FormControl>
-                  <Input
-                    type="text"
-                    :placeholder="$t('models.displayNamePlaceholder')"
-                    :model-value="form.values.name ?? ''"
-                    @input="onNameInput"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-
-            <!-- Dimensions (embedding only) -->
-            <FormField
-              v-if="selectedType === 'embedding'"
-              v-slot="{ componentField }"
-              name="dimensions"
-            >
-              <FormItem>
-                <Label class="mb-2">
-                  {{ $t('models.dimensions') }}
-                </Label>
-                <FormControl>
-                  <Input
-                    type="number"
-                    :placeholder="$t('models.dimensionsPlaceholder')"
-                    v-bind="componentField"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-
-            <!-- Input Modalities (chat only) -->
-            <div v-if="selectedType === 'chat'">
+          <!-- Model -->
+          <FormField
+            v-slot="{ componentField }"
+            name="model_id"
+          >
+            <FormItem>
               <Label class="mb-2">
-                {{ $t('models.inputModalities') }}
+                {{ $t('models.model') }}
               </Label>
-              <div class="flex flex-wrap gap-3 mt-2">
-                <label
-                  v-for="mod in availableInputModalities"
-                  :key="mod"
-                  class="flex items-center gap-1.5 text-sm"
-                >
-                  <Checkbox
-                    :model-value="selectedModalities.includes(mod)"
-                    :disabled="mod === 'text'"
-                    @update:model-value="(val: boolean) => toggleModality(mod, val)"
-                  />
-                  {{ $t(`models.modality.${mod}`) }}
-                </label>
-              </div>
+              <FormControl>
+                <Input
+                  type="text"
+                  :placeholder="$t('models.modelPlaceholder')"
+                  v-bind="componentField"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+
+          <!-- Display Name -->
+          <FormField
+            name="name"
+          >
+            <FormItem>
+              <Label class="mb-2">
+                {{ $t('models.displayName') }}
+                <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+              </Label>
+              <FormControl>
+                <Input
+                  type="text"
+                  :placeholder="$t('models.displayNamePlaceholder')"
+                  :model-value="form.values.name ?? ''"
+                  @input="onNameInput"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+
+          <!-- Dimensions (embedding only) -->
+          <FormField
+            v-if="selectedType === 'embedding'"
+            v-slot="{ componentField }"
+            name="dimensions"
+          >
+            <FormItem>
+              <Label class="mb-2">
+                {{ $t('models.dimensions') }}
+              </Label>
+              <FormControl>
+                <Input
+                  type="number"
+                  :placeholder="$t('models.dimensionsPlaceholder')"
+                  v-bind="componentField"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+
+          <!-- Input Modalities (chat only) -->
+          <div v-if="selectedType === 'chat'">
+            <Label class="mb-2">
+              {{ $t('models.inputModalities') }}
+            </Label>
+            <div class="flex flex-wrap gap-3 mt-2">
+              <label
+                v-for="mod in availableInputModalities"
+                :key="mod"
+                class="flex items-center gap-1.5 text-sm"
+              >
+                <Checkbox
+                  :model-value="selectedModalities.includes(mod)"
+                  :disabled="mod === 'text'"
+                  @update:model-value="(val: boolean) => toggleModality(mod, val)"
+                />
+                {{ $t(`models.modality.${mod}`) }}
+              </label>
             </div>
           </div>
-          <DialogFooter class="mt-4">
-            <DialogClose as-child>
-              <Button variant="outline">
-                {{ $t('common.cancel') }}
-              </Button>
-            </DialogClose>
-            <Button
-              type="submit"
-              :disabled="!canSubmit"
-            >
-              <Spinner v-if="isLoading" />
-              {{ title === 'edit' ? $t('common.save') : $t('models.addModel') }}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </template>
+    </FormDialogShell>
   </section>
 </template>
 
 <script setup lang="ts">
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
   Input,
   Button,
   FormField,
@@ -216,13 +180,8 @@ import {
   SelectTrigger,
   SelectValue,
   FormItem,
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
   Checkbox,
-  Separator,
   Label,
-  Spinner,
 } from '@memoh/ui'
 import { useForm } from 'vee-validate'
 import { inject, computed, watch, nextTick, type Ref, ref } from 'vue'
@@ -231,13 +190,17 @@ import z from 'zod'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postModels, putModelsById, putModelsModelByModelId } from '@memoh/sdk'
 import type { ModelsGetResponse } from '@memoh/sdk'
-import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
+import FormDialogShell from '@/components/form-dialog-shell/index.vue'
+import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
+import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
+import { useDialogMutation } from '@/composables/useDialogMutation'
 
 const availableInputModalities = ['text', 'image', 'audio', 'video', 'file'] as const
 const selectedModalities = ref<string[]>(['text'])
 const { t } = useI18n()
+const { run } = useDialogMutation()
 
 const formSchema = toTypedSchema(z.object({
   type: z.string().min(1),
@@ -256,18 +219,19 @@ const form = useForm({
 
 const selectedType = computed(() => form.values.type || 'chat')
 
-const clientTypeOpen = ref(false)
-
-const selectedClientTypeLabel = computed(() => {
-  const ct = form.values.client_type
-  if (!ct) return ''
-  return CLIENT_TYPE_META[ct]?.label ?? ct
+const clientTypeModel = computed({
+  get: () => form.values.client_type || '',
+  set: (value: string) => form.setFieldValue('client_type', value),
 })
 
-function selectClientType(value: string) {
-  form.setFieldValue('client_type', value)
-  clientTypeOpen.value = false
-}
+const clientTypeOptions = computed<SearchableSelectOption[]>(() =>
+  CLIENT_TYPE_LIST.map((ct) => ({
+    value: ct.value,
+    label: ct.label,
+    description: ct.hint,
+    keywords: [ct.label, ct.hint, CLIENT_TYPE_META[ct.value]?.value ?? ct.value],
+  })),
+)
 
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))
@@ -356,53 +320,46 @@ async function addModel(e: Event) {
   if (!type || !model_id) return
   if (type === 'chat' && !client_type) return
 
-  try {
-    const payload: Record<string, unknown> = {
-      type,
-      model_id,
-      llm_provider_id: id,
-    }
+  const payload: Record<string, unknown> = {
+    type,
+    model_id,
+    llm_provider_id: id,
+  }
 
-    if (type === 'chat' && client_type) {
-      payload.client_type = client_type
-    }
+  if (type === 'chat' && client_type) {
+    payload.client_type = client_type
+  }
 
-    if (name) {
-      payload.name = name
-    }
+  if (name) {
+    payload.name = name
+  }
 
-    if (type === 'embedding' && dimensions) {
-      payload.dimensions = dimensions
-    }
+  if (type === 'embedding' && dimensions) {
+    payload.dimensions = dimensions
+  }
 
-    if (type === 'chat') {
-      payload.input_modalities = selectedModalities.value.length > 0 ? selectedModalities.value : ['text']
-    }
+  if (type === 'chat') {
+    payload.input_modalities = selectedModalities.value.length > 0 ? selectedModalities.value : ['text']
+  }
 
-    if (isEdit) {
-      const modelUUID = fallback?.id
-      if (modelUUID) {
-        await updateModel({ id: modelUUID, data: payload as any })
-      } else {
-        await updateModelByLegacyModelID({ modelId: fallback!.model_id, data: payload as any })
+  await run(
+    () => {
+      if (isEdit) {
+        const modelUUID = fallback?.id
+        if (modelUUID) {
+          return updateModel({ id: modelUUID, data: payload as any })
+        }
+        return updateModelByLegacyModelID({ modelId: fallback!.model_id, data: payload as any })
       }
-    } else {
-      await createModel(payload as any)
-    }
-    open.value = false
-  } catch (error) {
-    toast.error(resolveErrorMessage(error, t('common.saveFailed')))
-    return
-  }
-}
-
-function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) return error.message
-  if (error && typeof error === 'object' && 'message' in error) {
-    const msg = (error as { message?: string }).message
-    if (msg && msg.trim()) return msg
-  }
-  return fallback
+      return createModel(payload as any)
+    },
+    {
+      fallbackMessage: t('common.saveFailed'),
+      onSuccess: () => {
+        open.value = false
+      },
+    },
+  )
 }
 
 watch(open, async () => {

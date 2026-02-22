@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { recordToTags, tagsToRecord } from '@/utils/key-value-tags'
 
 /**
  * TagsInput key:value two-way conversion for platform config and MCP env/headers.
@@ -13,22 +14,12 @@ export function useKeyValueTags() {
 
   function handleUpdate(tags: string[], onUpdate?: (obj: Record<string, string>) => void) {
     tagList.value = tags.filter(Boolean) as string[]
-    const obj: Record<string, string> = {}
-    tagList.value.forEach((item) => {
-      const [key, value] = item.split(':')
-      if (key && value) {
-        obj[key] = value
-      }
-    })
+    const obj = tagsToRecord(tagList.value)
     onUpdate?.(obj)
   }
 
   function initFromObject(obj: Record<string, string> | undefined | null) {
-    if (!obj) {
-      tagList.value = []
-      return
-    }
-    tagList.value = Object.entries(obj).map(([k, v]) => `${k}:${v}`)
+    tagList.value = recordToTags(obj)
   }
 
   return {

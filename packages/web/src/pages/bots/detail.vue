@@ -19,6 +19,7 @@
           type="button"
           class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
           :title="$t('common.edit')"
+          :aria-label="$t('common.edit')"
           :disabled="!bot || botLifecyclePending"
           @click="handleEditAvatar"
         >
@@ -65,11 +66,13 @@
             </h2>
             <Button
               v-if="bot"
+              type="button"
               variant="ghost"
               size="sm"
               class="size-7 p-0"
               :disabled="botLifecyclePending"
               :title="$t('common.edit')"
+              :aria-label="$t('common.edit')"
               @click="handleStartEditBotName"
             >
               <FontAwesomeIcon
@@ -591,7 +594,7 @@ import {
   TabsContent,
 } from '@memoh/ui'
 import { computed, ref, watch, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
@@ -611,13 +614,17 @@ import BotSettings from './components/bot-settings.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
 import BotMemory from './components/bot-memory.vue'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import { formatDateTime } from '@/utils/date-time'
+import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
+import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 
 type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
 
 const route = useRoute()
-const router = useRouter()
 const { t } = useI18n()
 const botId = computed(() => route.params.botId as string)
 
@@ -662,28 +669,11 @@ watch(bot, (val) => {
   }
 }, { immediate: true })
 
-const activeTab = ref((route.query.tab as string) || 'overview')
-
-// Sync tab to URL
-watch(activeTab, (val) => {
-  if (val !== route.query.tab) {
-    router.push({ query: { ...route.query, tab: val } })
-  }
-})
-
-// Sync URL to tab (e.g. on back button)
-watch(() => route.query.tab, (val) => {
-  if (val && val !== activeTab.value) {
-    activeTab.value = val as string
-  }
-})
+const activeTab = useSyncedQueryParam('tab', 'overview')
 const avatarDialogOpen = ref(false)
 const avatarUrlDraft = ref('')
 
-const avatarFallback = computed(() => {
-  const name = bot.value?.display_name || botId.value || ''
-  return name.slice(0, 2).toUpperCase()
-})
+const avatarFallback = useAvatarInitials(() => bot.value?.display_name || botId.value || '')
 const isSavingBotName = computed(() => updateBotLoading.value)
 const avatarSaving = computed(() => updateBotLoading.value)
 const canConfirmAvatar = computed(() => {
@@ -698,42 +688,19 @@ const canConfirmBotName = computed(() => {
   if (!nextName) return false
   return nextName !== (bot.value.display_name || '').trim()
 })
-const hasIssue = computed(() => bot.value?.check_state === 'issue')
-const issueTitle = computed(() => {
-  const count = Number(bot.value?.check_issue_count ?? 0)
-  if (count <= 0) return t('bots.checks.hasIssue')
-  return t('bots.checks.issueCount', { count })
-})
-
-const statusVariant = computed<'default' | 'secondary' | 'destructive'>(() => {
-  if (!bot.value) return 'secondary'
-  if (bot.value.status === 'creating' || bot.value.status === 'deleting') {
-    return 'secondary'
-  }
-  if (hasIssue.value) {
-    return 'destructive'
-  }
-  return bot.value.is_active ? 'default' : 'secondary'
-})
-
-const statusLabel = computed(() => {
-  if (!bot.value) return ''
-  if (bot.value.status === 'creating') return t('bots.lifecycle.creating')
-  if (bot.value.status === 'deleting') return t('bots.lifecycle.deleting')
-  if (hasIssue.value) return issueTitle.value
-  return bot.value.is_active ? t('bots.active') : t('bots.inactive')
-})
+const {
+  hasIssue,
+  isPending: botLifecyclePending,
+  issueTitle,
+  statusLabel,
+  statusVariant,
+} = useBotStatusMeta(bot, t)
 
 const botTypeLabel = computed(() => {
   const type = bot.value?.type
   if (type === 'personal' || type === 'public') return t('bots.types.' + type)
   return type ?? ''
 })
-
-const botLifecyclePending = computed(() => (
-  bot.value?.status === 'creating'
-  || bot.value?.status === 'deleting'
-))
 
 const checks = ref<BotCheck[]>([])
 const checksLoading = ref(false)
@@ -817,21 +784,11 @@ watch([activeTab, botId], ([tab]) => {
 }, { immediate: true })
 
 function formatDate(value: string | undefined): string {
-  if (!value) return '-'
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return '-'
-  return parsed.toLocaleString()
+  return formatDateTime(value, { fallback: '-' })
 }
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-  if (error && typeof error === 'object' && 'message' in error) {
-    const msg = (error as { message?: string }).message
-    if (msg && msg.trim()) return msg
-  }
-  return fallback
+  return resolveApiErrorMessage(error, fallback)
 }
 
 function handleEditAvatar() {

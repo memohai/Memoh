@@ -11,9 +11,11 @@
             <Button
               variant="ghost"
               size="sm"
+              type="button"
               class="size-8 p-0"
               :disabled="loading || compactLoading || memories.length === 0"
               :title="$t('bots.memory.compact')"
+              :aria-label="$t('bots.memory.compact')"
               @click="openCompactDialog"
             >
               <FontAwesomeIcon
@@ -24,8 +26,10 @@
             <Button
               variant="ghost"
               size="sm"
+              type="button"
               class="size-8 p-0"
               :disabled="loading"
+              :aria-label="$t('common.refresh')"
               @click="loadMemories"
             >
               <FontAwesomeIcon
@@ -66,8 +70,10 @@
           <button
             v-for="item in filteredMemories"
             :key="item.id"
+            type="button"
             class="w-full text-left px-3 py-2 rounded-md text-xs transition-colors hover:bg-accent group relative"
             :class="{ 'bg-accent font-medium text-primary': selectedId === item.id }"
+            :aria-label="`Open memory ${formatDate(item.created_at)}`"
             @click="selectMemory(item)"
           >
             <div class="flex items-center gap-2">
@@ -117,8 +123,10 @@
                 <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5">
                   <span class="font-mono">ID: {{ selectedMemory.id }}</span>
                   <button
+                    type="button"
                     class="hover:text-foreground transition-colors"
                     :title="$t('common.copy')"
+                    :aria-label="$t('common.copy')"
                     @click="copyToClipboard(selectedMemory.id)"
                   >
                     <FontAwesomeIcon
@@ -138,8 +146,10 @@
                   <Button
                     variant="ghost"
                     size="sm"
+                    type="button"
                     class="size-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                     :disabled="actionLoading"
+                    :aria-label="$t('common.delete')"
                   >
                     <FontAwesomeIcon
                       :icon="['far', 'trash-can']"
@@ -186,13 +196,10 @@
               </p>
               <div class="flex-1 flex items-end gap-0.5 relative group min-h-0 pt-2 pb-4">
                 <div
-                  v-for="(bucket, idx) in selectedMemory.top_k_buckets"
+                  v-for="(bucket, idx) in selectedTopKBuckets"
                   :key="idx"
                   class="flex-1 bg-primary/25 hover:bg-primary/50 transition-colors relative group/bar"
-                  :style="{ 
-                    height: `${((bucket.value - Math.min(...selectedMemory.top_k_buckets.map(b => b.value))) / 
-                      (Math.max(...selectedMemory.top_k_buckets.map(b => b.value)) - Math.min(...selectedMemory.top_k_buckets.map(b => b.value)) || 1) * 80) + 20}%` 
-                  }"
+                  :style="{ height: `${topKBarHeights[idx]}%` }"
                 >
                   <!-- Tooltip for Bar -->
                   <div class="absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1 bg-popover border text-popover-foreground px-2 py-1 rounded shadow-lg text-[10px] hidden group-hover/bar:block whitespace-nowrap pointer-events-none">
@@ -204,8 +211,8 @@
                 </div>
                 <!-- Axis labels (showing actual range) -->
                 <div class="absolute left-[-2px] top-2 bottom-4 border-l border-muted-foreground/10 flex flex-col justify-between text-[8px] font-mono text-muted-foreground/40 pr-1">
-                  <span>{{ Math.max(...selectedMemory.top_k_buckets.map(b => b.value)).toFixed(4) }}</span>
-                  <span>{{ Math.min(...selectedMemory.top_k_buckets.map(b => b.value)).toFixed(4) }}</span>
+                  <span>{{ topKMaxValue.toFixed(4) }}</span>
+                  <span>{{ topKMinValue.toFixed(4) }}</span>
                 </div>
               </div>
             </div>
@@ -382,10 +389,12 @@
             class="h-48 border rounded-md p-2 bg-muted/10 shrink-0"
           >
             <div class="space-y-2">
-              <div
+              <button
                 v-for="(msg, idx) in historyMessages"
                 :key="idx"
-                class="flex items-start gap-2 p-2 rounded hover:bg-muted/50 transition-colors group cursor-pointer"
+                type="button"
+                class="w-full text-left flex items-start gap-2 p-2 rounded hover:bg-muted/50 transition-colors group cursor-pointer"
+                :aria-pressed="selectedHistoryMessages.includes(msg)"
                 @click="toggleMessageSelection(msg)"
               >
                 <div
@@ -409,7 +418,7 @@
                     {{ msg.content?.text || (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)) }}
                   </p>
                 </div>
-              </div>
+              </button>
             </div>
           </ScrollArea>
 
@@ -572,6 +581,8 @@ import {
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import { useClipboard } from '@/composables/useClipboard'
+import { formatDateTimeSeconds } from '@/utils/date-time'
 
 interface MemoryItem {
   id: string
@@ -593,6 +604,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const { copyText } = useClipboard()
 const loading = ref(false)
 const actionLoading = ref(false)
 const compactLoading = ref(false)
@@ -626,6 +638,17 @@ const hoveredCdfY = computed(() => {
   if (!hoveredCdfPoint.value) return 0
   return (100 - 5) - (hoveredCdfPoint.value.cumulative * 90)
 })
+
+const selectedTopKBuckets = computed(() => selectedMemory.value?.top_k_buckets ?? [])
+const topKBucketValues = computed(() => selectedTopKBuckets.value.map((bucket: any) => bucket.value))
+const topKMinValue = computed(() => Math.min(...topKBucketValues.value))
+const topKMaxValue = computed(() => Math.max(...topKBucketValues.value))
+const topKRange = computed(() => (topKMaxValue.value - topKMinValue.value) || 1)
+const topKBarHeights = computed(() =>
+  selectedTopKBuckets.value.map(
+    (bucket: any) => (((bucket.value - topKMinValue.value) / topKRange.value) * 80) + 20,
+  ),
+)
 
 const compactDecayDays = computed(() => {
   if (!compactDecayDate.value) return 0
@@ -839,39 +862,13 @@ async function handleCompact() {
 }
 
 function formatDate(dateStr?: string) {
-  if (!dateStr) return 'Unknown'
-  try {
-    const d = new Date(dateStr)
-    const year = d.getFullYear()
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    const hours = String(d.getHours()).padStart(2, '0')
-    const minutes = String(d.getMinutes()).padStart(2, '0')
-    const seconds = String(d.getSeconds()).padStart(2, '0')
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
-  } catch {
-    return dateStr
-  }
+  return formatDateTimeSeconds(dateStr, { fallback: 'Unknown' })
 }
 
 async function copyToClipboard(text: string) {
   try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text)
-    } else {
-      // Fallback for non-secure contexts
-      const textArea = document.createElement('textarea')
-      textArea.value = text
-      textArea.style.position = 'fixed'
-      textArea.style.left = '-9999px'
-      textArea.style.top = '0'
-      document.body.appendChild(textArea)
-      textArea.focus()
-      textArea.select()
-      const success = document.execCommand('copy')
-      document.body.removeChild(textArea)
-      if (!success) throw new Error('execCommand failed')
-    }
+    const copied = await copyText(text)
+    if (!copied) throw new Error('copy failed')
     toast.success(t('bots.memory.idCopied'))
   } catch (err) {
     console.error('Failed to copy:', err)

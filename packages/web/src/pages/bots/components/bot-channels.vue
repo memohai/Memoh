@@ -35,6 +35,8 @@
           <button
             v-for="item in configuredChannels"
             :key="item.meta.type"
+            type="button"
+            :aria-pressed="selectedType === item.meta.type"
             class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors hover:bg-accent"
             :class="{ 'bg-accent': selectedType === item.meta.type }"
             @click="selectedType = item.meta.type"
@@ -98,6 +100,7 @@
             <button
               v-for="item in unconfiguredChannels"
               :key="item.meta.type"
+              type="button"
               class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors"
               @click="addChannel(item.meta.type)"
             >

@@ -2,7 +2,13 @@
   <Card
     class="group relative transition-shadow"
     :class="isPending ? 'opacity-80 cursor-not-allowed' : 'hover:shadow-md cursor-pointer'"
+    role="button"
+    :tabindex="isPending ? -1 : 0"
+    :aria-disabled="isPending"
+    :aria-label="`Open bot ${(bot.display_name || bot.id)}`"
     @click="onOpenDetail"
+    @keydown.enter.prevent="onOpenDetail"
+    @keydown.space.prevent="onOpenDetail"
   >
     <CardHeader class="flex flex-row items-start gap-3 space-y-0 pb-2">
       <Avatar class="size-11 shrink-0">
@@ -67,6 +73,9 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { BotsBot } from '@memoh/sdk'
+import { formatDate } from '@/utils/date-time'
+import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -75,38 +84,16 @@ const props = defineProps<{
   bot: BotsBot
 }>()
 
-const avatarFallback = computed(() => {
-  const name = props.bot.display_name || props.bot.id
-  return name.slice(0, 2).toUpperCase()
-})
+const botRef = computed(() => props.bot)
+
+const avatarFallback = useAvatarInitials(() => props.bot.display_name || props.bot.id)
 
 const formattedDate = computed(() => {
   if (!props.bot.created_at) return ''
-  return new Date(props.bot.created_at).toLocaleDateString()
+  return formatDate(props.bot.created_at)
 })
 
-const isCreating = computed(() => props.bot.status === 'creating')
-const isDeleting = computed(() => props.bot.status === 'deleting')
-const isPending = computed(() => isCreating.value || isDeleting.value)
-const hasIssue = computed(() => props.bot.check_state === 'issue')
-const issueTitle = computed(() => {
-  const count = Number(props.bot.check_issue_count ?? 0)
-  if (count <= 0) return t('bots.checks.hasIssue')
-  return t('bots.checks.issueCount', { count })
-})
-
-const statusVariant = computed<'default' | 'secondary' | 'destructive'>(() => {
-  if (isPending.value) return 'secondary'
-  if (hasIssue.value) return 'destructive'
-  return props.bot.is_active ? 'default' : 'secondary'
-})
-
-const statusLabel = computed(() => {
-  if (isCreating.value) return t('bots.lifecycle.creating')
-  if (isDeleting.value) return t('bots.lifecycle.deleting')
-  if (hasIssue.value) return issueTitle.value
-  return props.bot.is_active ? t('bots.active') : t('bots.inactive')
-})
+const { hasIssue, isPending, issueTitle, statusLabel, statusVariant } = useBotStatusMeta(botRef, t)
 
 const botTypeLabel = computed(() => {
   const type = props.bot.type
