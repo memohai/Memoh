@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-[calc(100vh-calc(var(--spacing)*20))]">
+  <div class="flex h-full">
     <!-- Left: Bot sidebar -->
     <BotSidebar />
 
