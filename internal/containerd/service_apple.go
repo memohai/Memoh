@@ -356,6 +356,19 @@ func (s *AppleService) ListTasks(ctx context.Context, opts *ListTasksOptions) ([
 // Exec
 // ---------------------------------------------------------------------------
 
+// ExecTask executes a command inside the container.
+//
+// Limitations compared to the containerd backend:
+//   - WorkDir: the Apple Container exec API (ExecCreateRequest) has no working-directory
+//     field; req.WorkDir is silently ignored.
+//   - Env: similarly, environment variables cannot be injected at exec time via this
+//     API; req.Env is silently ignored.
+//   - Stdin: the acgo exec interface does not expose a write channel, so req.Stdin
+//     is not connected and the process receives no stdin input.
+//   - Stderr: the Apple Container API returns stdout and stderr as a single combined
+//     stream; they cannot be routed to separate writers. The combined output is sent
+//     to req.Stdout when set, otherwise to req.Stderr when set, otherwise discarded.
+//   - FIFODir: a containerd-specific concept; not applicable here.
 func (s *AppleService) ExecTask(ctx context.Context, containerID string, req ExecTaskRequest) (ExecTaskResult, error) {
 	if containerID == "" || len(req.Args) == 0 {
 		return ExecTaskResult{}, ErrInvalidArgument
@@ -377,6 +390,9 @@ func (s *AppleService) ExecTask(ctx context.Context, containerID string, req Exe
 	}
 	if result.Output != nil {
 		dest := req.Stdout
+		if dest == nil {
+			dest = req.Stderr
+		}
 		if dest == nil {
 			dest = io.Discard
 		}
