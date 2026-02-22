@@ -1,6 +1,6 @@
 <template>
   <div class="w-56 shrink-0 border-r flex flex-col h-full">
-    <div class="p-3 border-b">
+    <div class="p-4 border-b">
       <p class="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
         {{ $t('sidebar.bots') }}
       </p>

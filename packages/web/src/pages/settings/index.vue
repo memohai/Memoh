@@ -1,5 +1,5 @@
 <template>
-  <section class="h-full max-w-7xl mx-auto p-6">
+  <section class="h-full max-w-7xl mx-auto p-4">
     <div class="max-w-3xl mx-auto space-y-8">
       <!-- Avatar & name -->
       <div class="flex items-center gap-4">

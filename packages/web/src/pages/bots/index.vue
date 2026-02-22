@@ -1,5 +1,5 @@
 <template>
-  <section class="p-6 max-w-7xl mx-auto">
+  <section class="p-4 max-w-7xl mx-auto">
     <!-- Header: search + create -->
     <div class="flex items-center justify-between mb-6">
       <h2 class="text-xl font-semibold tracking-tight">
@@ -93,18 +93,18 @@ const hasPendingBots = computed(() =>
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 watch(hasPendingBots, (pending) => {
-  if (pending) {
-    if (pollTimer == null) {
-      pollTimer = setInterval(() => {
-        queryCache.invalidateQueries({ key: getBotsQueryKey() })
-      }, 2000)
+    if (pending) {
+      if (pollTimer == null) {
+        pollTimer = setInterval(() => {
+          queryCache.invalidateQueries({ key: getBotsQueryKey() })
+        }, 2000)
+      }
+      return
     }
-    return
-  }
-  if (pollTimer != null) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
+    if (pollTimer != null) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
 }, { immediate: true })
 
 onUnmounted(() => {

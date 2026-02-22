@@ -1,5 +1,5 @@
 <template>
-  <section>
+  <section class="p-4">
     <AddPlatform v-model:open="open" />
 
     <menu class="grid grid-cols-4 gap-4 [&_li>*]:h-full">

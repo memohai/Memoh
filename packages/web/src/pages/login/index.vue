@@ -1,5 +1,5 @@
 <template>
-  <main class="w-screen h-screen flex *:m-auto bg-background relative">
+  <main class="w-screen h-screen flex *:m-auto bg-background relative p-4">
     <header class="absolute top-6 right-6 flex items-center gap-2">
       <Select
         :model-value="language"

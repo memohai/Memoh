@@ -40,10 +40,7 @@
         {{ currentPageTitle }}
       </h1>
       <ScrollArea class="absolute! inset-0">
-        <router-view
-          v-slot="{ Component }"
-          class="p-4"
-        >
+        <router-view v-slot="{ Component }">
           <KeepAlive>
             <component :is="Component" />
           </KeepAlive>

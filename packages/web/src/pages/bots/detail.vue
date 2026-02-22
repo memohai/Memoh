@@ -1,5 +1,5 @@
 <template>
-  <section class="p-6 max-w-7xl mx-auto">
+  <section class="p-4 max-w-7xl mx-auto">
     <!-- Header -->
     <div class="flex items-center gap-4 mb-8">
       <div
