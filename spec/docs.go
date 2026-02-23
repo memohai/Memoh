@@ -8380,6 +8380,9 @@ const docTemplate = `{
                 "heartbeat_interval": {
                     "type": "integer"
                 },
+                "heartbeat_model_id": {
+                    "type": "string"
+                },
                 "language": {
                     "type": "string"
                 },
@@ -8423,6 +8426,9 @@ const docTemplate = `{
                 },
                 "heartbeat_interval": {
                     "type": "integer"
+                },
+                "heartbeat_model_id": {
+                    "type": "string"
                 },
                 "language": {
                     "type": "string"

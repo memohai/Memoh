@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS bots (
   heartbeat_enabled BOOLEAN NOT NULL DEFAULT false,
   heartbeat_interval INTEGER NOT NULL DEFAULT 30,
   heartbeat_prompt TEXT NOT NULL DEFAULT '',
+  heartbeat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

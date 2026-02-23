@@ -114,6 +114,14 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		embeddingModelUUID = modelID
 	}
+	heartbeatModelUUID := pgtype.UUID{}
+	if value := strings.TrimSpace(req.HeartbeatModelID); value != "" {
+		modelID, err := s.resolveModelUUID(ctx, value)
+		if err != nil {
+			return Settings{}, err
+		}
+		heartbeatModelUUID = modelID
+	}
 	searchProviderUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.SearchProviderID); value != "" {
 		providerID, err := db.ParseUUID(value)
@@ -138,6 +146,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		ChatModelID:        chatModelUUID,
 		MemoryModelID:      memoryModelUUID,
 		EmbeddingModelID:   embeddingModelUUID,
+		HeartbeatModelID:   heartbeatModelUUID,
 		SearchProviderID:   searchProviderUUID,
 	})
 	if err != nil {
@@ -213,6 +222,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.ChatModelID,
 		row.MemoryModelID,
 		row.EmbeddingModelID,
+		row.HeartbeatModelID,
 		row.SearchProviderID,
 	)
 }
@@ -231,6 +241,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.ChatModelID,
 		row.MemoryModelID,
 		row.EmbeddingModelID,
+		row.HeartbeatModelID,
 		row.SearchProviderID,
 	)
 }
@@ -248,6 +259,7 @@ func normalizeBotSettingsFields(
 	chatModelID pgtype.UUID,
 	memoryModelID pgtype.UUID,
 	embeddingModelID pgtype.UUID,
+	heartbeatModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 ) Settings {
 	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, maxInboxItems, language, allowGuest, reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval)
@@ -259,6 +271,9 @@ func normalizeBotSettingsFields(
 	}
 	if embeddingModelID.Valid {
 		settings.EmbeddingModelID = uuid.UUID(embeddingModelID.Bytes).String()
+	}
+	if heartbeatModelID.Valid {
+		settings.HeartbeatModelID = uuid.UUID(heartbeatModelID.Bytes).String()
 	}
 	if searchProviderID.Valid {
 		settings.SearchProviderID = uuid.UUID(searchProviderID.Bytes).String()

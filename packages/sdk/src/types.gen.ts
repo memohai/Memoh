@@ -985,6 +985,7 @@ export type SettingsSettings = {
     embedding_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
+    heartbeat_model_id?: string;
     language?: string;
     max_context_load_time?: number;
     max_context_tokens?: number;
@@ -1001,6 +1002,7 @@ export type SettingsUpsertRequest = {
     embedding_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
+    heartbeat_model_id?: string;
     language?: string;
     max_context_load_time?: number;
     max_context_tokens?: number;

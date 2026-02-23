@@ -16,16 +16,31 @@
       </div>
       <div
         v-if="settingsForm.heartbeat_enabled"
-        class="space-y-2"
+        class="space-y-4"
       >
-        <Label>{{ $t('bots.settings.heartbeatInterval') }}</Label>
-        <Input
-          v-model.number="settingsForm.heartbeat_interval"
-          type="number"
-          :min="1"
-          :placeholder="'30'"
-          :aria-label="$t('bots.settings.heartbeatInterval')"
-        />
+        <div class="space-y-2">
+          <Label>{{ $t('bots.settings.heartbeatInterval') }}</Label>
+          <Input
+            v-model.number="settingsForm.heartbeat_interval"
+            type="number"
+            :min="1"
+            :placeholder="'30'"
+            :aria-label="$t('bots.settings.heartbeatInterval')"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label>{{ $t('bots.settings.heartbeatModel') }}</Label>
+          <p class="text-xs text-muted-foreground mt-0.5">
+            {{ $t('bots.settings.heartbeatModelDescription') }}
+          </p>
+          <ModelSelect
+            v-model="settingsForm.heartbeat_model_id"
+            :models="models"
+            :providers="providers"
+            model-type="chat"
+            :placeholder="$t('bots.settings.heartbeatModelPlaceholder')"
+          />
+        </div>
       </div>
       <div class="flex justify-end">
         <Button
@@ -227,8 +242,9 @@ import {
   Button, Badge, Spinner, NativeSelect, Label, Switch, Input, Separator,
 } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import ModelSelect from './model-select.vue'
 import { client } from '@memoh/sdk/client'
-import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memoh/sdk'
+import { getBotsByBotIdSettings, putBotsByBotIdSettings, getModels, getProviders } from '@memoh/sdk'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
@@ -253,15 +269,36 @@ const { data: settings } = useQuery({
   enabled: () => !!botIdRef.value,
 })
 
+const { data: modelData } = useQuery({
+  key: ['all-models'],
+  query: async () => {
+    const { data } = await getModels({ throwOnError: true })
+    return data
+  },
+})
+
+const { data: providerData } = useQuery({
+  key: ['all-providers'],
+  query: async () => {
+    const { data } = await getProviders({ throwOnError: true })
+    return data
+  },
+})
+
+const models = computed(() => modelData.value ?? [])
+const providers = computed(() => providerData.value ?? [])
+
 const settingsForm = reactive({
   heartbeat_enabled: false,
   heartbeat_interval: 30,
+  heartbeat_model_id: '',
 })
 
 watch(settings, (val) => {
   if (val) {
     settingsForm.heartbeat_enabled = (val as any).heartbeat_enabled ?? false
     settingsForm.heartbeat_interval = (val as any).heartbeat_interval ?? 30
+    settingsForm.heartbeat_model_id = (val as any).heartbeat_model_id ?? ''
   }
 }, { immediate: true })
 
@@ -270,6 +307,7 @@ const settingsChanged = computed(() => {
   const s = settings.value as any
   return settingsForm.heartbeat_enabled !== (s.heartbeat_enabled ?? false)
     || settingsForm.heartbeat_interval !== (s.heartbeat_interval ?? 30)
+    || settingsForm.heartbeat_model_id !== (s.heartbeat_model_id ?? '')
 })
 
 const { mutateAsync: updateSettings, isLoading: isSaving } = useMutation({

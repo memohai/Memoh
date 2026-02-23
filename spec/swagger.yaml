@@ -1617,6 +1617,8 @@ definitions:
         type: boolean
       heartbeat_interval:
         type: integer
+      heartbeat_model_id:
+        type: string
       language:
         type: string
       max_context_load_time:
@@ -1646,6 +1648,8 @@ definitions:
         type: boolean
       heartbeat_interval:
         type: integer
+      heartbeat_model_id:
+        type: string
       language:
         type: string
       max_context_load_time:

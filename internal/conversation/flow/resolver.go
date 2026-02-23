@@ -550,12 +550,21 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 		return heartbeat.TriggerResult{}, fmt.Errorf("bot id is required")
 	}
 
+	// If a dedicated heartbeat model is configured, use it instead of the
+	// default chat model.  We load the bot settings first so that we can
+	// set req.Model, which takes highest priority in selectChatModel.
+	var heartbeatModel string
+	if botSettings, err := r.loadBotSettings(ctx, botID); err == nil {
+		heartbeatModel = strings.TrimSpace(botSettings.HeartbeatModelID)
+	}
+
 	req := conversation.ChatRequest{
 		BotID:  botID,
 		ChatID: botID,
 		Query:  "heartbeat",
 		UserID: payload.OwnerUserID,
 		Token:  token,
+		Model:  heartbeatModel,
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {

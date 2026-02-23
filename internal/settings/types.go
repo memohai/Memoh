@@ -20,8 +20,9 @@ type Settings struct {
 	AllowGuest         bool   `json:"allow_guest"`
 	ReasoningEnabled   bool   `json:"reasoning_enabled"`
 	ReasoningEffort    string `json:"reasoning_effort"`
-	HeartbeatEnabled  bool `json:"heartbeat_enabled"`
-	HeartbeatInterval int  `json:"heartbeat_interval"`
+	HeartbeatEnabled  bool   `json:"heartbeat_enabled"`
+	HeartbeatInterval int    `json:"heartbeat_interval"`
+	HeartbeatModelID  string `json:"heartbeat_model_id"`
 }
 
 type UpsertRequest struct {
@@ -36,6 +37,7 @@ type UpsertRequest struct {
 	AllowGuest         *bool   `json:"allow_guest,omitempty"`
 	ReasoningEnabled   *bool   `json:"reasoning_enabled,omitempty"`
 	ReasoningEffort    *string `json:"reasoning_effort,omitempty"`
-	HeartbeatEnabled  *bool `json:"heartbeat_enabled,omitempty"`
-	HeartbeatInterval *int  `json:"heartbeat_interval,omitempty"`
+	HeartbeatEnabled  *bool  `json:"heartbeat_enabled,omitempty"`
+	HeartbeatInterval *int   `json:"heartbeat_interval,omitempty"`
+	HeartbeatModelID  string `json:"heartbeat_model_id,omitempty"`
 }

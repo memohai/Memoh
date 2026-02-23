@@ -30,6 +30,7 @@ type Bot struct {
 	HeartbeatEnabled   bool               `json:"heartbeat_enabled"`
 	HeartbeatInterval  int32              `json:"heartbeat_interval"`
 	HeartbeatPrompt    string             `json:"heartbeat_prompt"`
+	HeartbeatModelID   pgtype.UUID        `json:"heartbeat_model_id"`
 	Metadata           []byte             `json:"metadata"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
