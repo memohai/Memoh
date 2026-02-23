@@ -1,6 +1,7 @@
 export * from './agent'
 export * from './model'
 export * from './schedule'
+export * from './heartbeat'
 export * from './attachment'
 export * from './mcp'
 export * from './auth'

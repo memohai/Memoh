@@ -47,6 +47,10 @@ export const ScheduleModel = z.object({
   command: z.string().min(1, 'Schedule command is required'),
 })
 
+export const HeartbeatModel = z.object({
+  interval: z.number().int().positive().default(30),
+})
+
 export const AttachmentModel = z.object({
   contentHash: z.string().optional(),
   type: z.string().min(1, 'Attachment type is required'),

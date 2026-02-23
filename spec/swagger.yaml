@@ -957,6 +957,31 @@ definitions:
       ok:
         type: boolean
     type: object
+  heartbeat.ListLogsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/heartbeat.Log'
+        type: array
+    type: object
+  heartbeat.Log:
+    properties:
+      bot_id:
+        type: string
+      completed_at:
+        type: string
+      error_message:
+        type: string
+      id:
+        type: string
+      result_text:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      usage: {}
+    type: object
   identities.ChannelIdentity:
     properties:
       avatar_url:
@@ -1588,6 +1613,10 @@ definitions:
         type: string
       embedding_model_id:
         type: string
+      heartbeat_enabled:
+        type: boolean
+      heartbeat_interval:
+        type: integer
       language:
         type: string
       max_context_load_time:
@@ -1613,6 +1642,10 @@ definitions:
         type: string
       embedding_model_id:
         type: string
+      heartbeat_enabled:
+        type: boolean
+      heartbeat_interval:
+        type: integer
       language:
         type: string
       max_context_load_time:
@@ -2506,6 +2539,62 @@ paths:
       summary: Stop container task for bot
       tags:
       - containerd
+  /bots/{bot_id}/heartbeat/logs:
+    delete:
+      description: Delete all heartbeat execution logs for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete heartbeat logs
+      tags:
+      - heartbeat
+    get:
+      description: List heartbeat execution logs for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Before timestamp (RFC3339)
+        in: query
+        name: before
+        type: string
+      - default: 50
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/heartbeat.ListLogsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List heartbeat logs
+      tags:
+      - heartbeat
   /bots/{bot_id}/inbox:
     get:
       description: List inbox items for a bot with optional filters

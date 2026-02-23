@@ -128,6 +128,9 @@ CREATE TABLE IF NOT EXISTS bots (
   memory_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   embedding_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   search_provider_id UUID REFERENCES search_providers(id) ON DELETE SET NULL,
+  heartbeat_enabled BOOLEAN NOT NULL DEFAULT false,
+  heartbeat_interval INTEGER NOT NULL DEFAULT 30,
+  heartbeat_prompt TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -408,3 +411,17 @@ CREATE TABLE IF NOT EXISTS bot_inbox (
 
 CREATE INDEX IF NOT EXISTS idx_bot_inbox_bot_unread ON bot_inbox(bot_id, created_at DESC) WHERE is_read = FALSE;
 CREATE INDEX IF NOT EXISTS idx_bot_inbox_bot_created ON bot_inbox(bot_id, created_at DESC);
+
+-- bot_heartbeat_logs: structured execution records for periodic heartbeat checks.
+CREATE TABLE IF NOT EXISTS bot_heartbeat_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'alert', 'error')),
+  result_text TEXT NOT NULL DEFAULT '',
+  error_message TEXT NOT NULL DEFAULT '',
+  usage JSONB,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_bot_started ON bot_heartbeat_logs(bot_id, started_at DESC);

@@ -1160,6 +1160,90 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/heartbeat/logs": {
+            "get": {
+                "description": "List heartbeat execution logs for a bot",
+                "tags": [
+                    "heartbeat"
+                ],
+                "summary": "List heartbeat logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Before timestamp (RFC3339)",
+                        "name": "before",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/heartbeat.ListLogsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete all heartbeat execution logs for a bot",
+                "tags": [
+                    "heartbeat"
+                ],
+                "summary": "Delete heartbeat logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/inbox": {
             "get": {
                 "description": "List inbox items for a bot with optional filters",
@@ -7303,6 +7387,44 @@ const docTemplate = `{
                 }
             }
         },
+        "heartbeat.ListLogsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/heartbeat.Log"
+                    }
+                }
+            }
+        },
+        "heartbeat.Log": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "result_text": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "usage": {}
+            }
+        },
         "identities.ChannelIdentity": {
             "type": "object",
             "properties": {
@@ -8252,6 +8374,12 @@ const docTemplate = `{
                 "embedding_model_id": {
                     "type": "string"
                 },
+                "heartbeat_enabled": {
+                    "type": "boolean"
+                },
+                "heartbeat_interval": {
+                    "type": "integer"
+                },
                 "language": {
                     "type": "string"
                 },
@@ -8289,6 +8417,12 @@ const docTemplate = `{
                 },
                 "embedding_model_id": {
                     "type": "string"
+                },
+                "heartbeat_enabled": {
+                    "type": "boolean"
+                },
+                "heartbeat_interval": {
+                    "type": "integer"
                 },
                 "language": {
                     "type": "string"

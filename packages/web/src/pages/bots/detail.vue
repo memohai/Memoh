@@ -125,6 +125,9 @@
         <TabsTrigger value="subagents">
           {{ $t('bots.tabs.subagents') }}
         </TabsTrigger>
+        <TabsTrigger value="heartbeat">
+          {{ $t('bots.tabs.heartbeat') }}
+        </TabsTrigger>
         <TabsTrigger value="history">
           {{ $t('bots.tabs.history') }}
         </TabsTrigger>
@@ -511,6 +514,12 @@
         <BotHistory :bot-id="botId" />
       </TabsContent>
       <TabsContent
+        value="heartbeat"
+        class="mt-6"
+      >
+        <BotHeartbeat :bot-id="botId" />
+      </TabsContent>
+      <TabsContent
         value="skills"
         class="mt-6"
       >
@@ -625,6 +634,7 @@ import BotMcp from './components/bot-mcp.vue'
 import BotMemory from './components/bot-memory.vue'
 import BotSkills from './components/bot-skills.vue'
 import BotHistory from './components/bot-history.vue'
+import BotHeartbeat from './components/bot-heartbeat.vue'
 import BotSubagents from './components/bot-subagents.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'

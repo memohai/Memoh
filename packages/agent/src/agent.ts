@@ -14,11 +14,12 @@ import {
   AgentSkill,
   AgentStreamAction,
   allActions,
+  Heartbeat,
   MCPConnection,
   Schedule,
 } from './types'
 import { ClientType, ModelConfig, ModelInput, hasInputModality } from './types/model'
-import { system, schedule, subagentSystem } from './prompts'
+import { system, schedule, heartbeat, subagentSystem } from './prompts'
 import { AuthFetcher } from './types'
 import { createModel } from './model'
 import {
@@ -322,6 +323,46 @@ export const createAgent = (
     }
   }
 
+  const triggerHeartbeat = async (params: {
+    heartbeat: Heartbeat;
+    messages: ModelMessage[];
+    skills: string[];
+  }) => {
+    const heartbeatText = await heartbeat({ interval: params.heartbeat.interval, date: new Date(), fs })
+    const heartbeatMessage: UserModelMessage = {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: heartbeatText,
+        },
+      ],
+    }
+    const messages = [...params.messages, heartbeatMessage]
+    params.skills.forEach((skill) => enableSkill(skill))
+    const { tools, close } = await getAgentTools()
+    const { response, reasoning, text, usage, steps } = await generateText({
+      model,
+      messages,
+      system: await generateSystemPrompt(),
+      ...(providerOptions && { providerOptions }),
+      stopWhen: stepCountIs(Infinity),
+      onFinish: async () => {
+        await close()
+      },
+      tools,
+    })
+    const stepUsages = buildStepUsages(steps)
+    return {
+      messages: [heartbeatMessage, ...response.messages],
+      usages: [null, ...stepUsages] as (LanguageModelUsage | null)[],
+      reasoning: reasoning.map((part) => part.text),
+      usage,
+      text,
+      skills: getEnabledSkills(),
+    }
+  }
+
   const resolveStreamErrorMessage = (raw: unknown): string => {
     if (raw instanceof Error && raw.message.trim()) {
       return raw.message
@@ -514,5 +555,6 @@ export const createAgent = (
     ask,
     askAsSubagent,
     triggerSchedule,
+    triggerHeartbeat,
   }
 }

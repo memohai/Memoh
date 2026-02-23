@@ -20,6 +20,9 @@ SET max_context_load_time = 1440,
     allow_guest = false,
     reasoning_enabled = false,
     reasoning_effort = 'medium',
+    heartbeat_enabled = false,
+    heartbeat_interval = 30,
+    heartbeat_prompt = '',
     chat_model_id = NULL,
     memory_model_id = NULL,
     embedding_model_id = NULL,
@@ -43,6 +46,9 @@ SELECT
   bots.allow_guest,
   bots.reasoning_enabled,
   bots.reasoning_effort,
+  bots.heartbeat_enabled,
+  bots.heartbeat_interval,
+  bots.heartbeat_prompt,
   chat_models.id AS chat_model_id,
   memory_models.id AS memory_model_id,
   embedding_models.id AS embedding_model_id,
@@ -64,6 +70,9 @@ type GetSettingsByBotIDRow struct {
 	AllowGuest         bool        `json:"allow_guest"`
 	ReasoningEnabled   bool        `json:"reasoning_enabled"`
 	ReasoningEffort    string      `json:"reasoning_effort"`
+	HeartbeatEnabled   bool        `json:"heartbeat_enabled"`
+	HeartbeatInterval  int32       `json:"heartbeat_interval"`
+	HeartbeatPrompt    string      `json:"heartbeat_prompt"`
 	ChatModelID        pgtype.UUID `json:"chat_model_id"`
 	MemoryModelID      pgtype.UUID `json:"memory_model_id"`
 	EmbeddingModelID   pgtype.UUID `json:"embedding_model_id"`
@@ -82,6 +91,9 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.AllowGuest,
 		&i.ReasoningEnabled,
 		&i.ReasoningEffort,
+		&i.HeartbeatEnabled,
+		&i.HeartbeatInterval,
+		&i.HeartbeatPrompt,
 		&i.ChatModelID,
 		&i.MemoryModelID,
 		&i.EmbeddingModelID,
@@ -100,13 +112,16 @@ WITH updated AS (
       allow_guest = $5,
       reasoning_enabled = $6,
       reasoning_effort = $7,
-      chat_model_id = COALESCE($8::uuid, bots.chat_model_id),
-      memory_model_id = COALESCE($9::uuid, bots.memory_model_id),
-      embedding_model_id = COALESCE($10::uuid, bots.embedding_model_id),
-      search_provider_id = COALESCE($11::uuid, bots.search_provider_id),
+      heartbeat_enabled = $8,
+      heartbeat_interval = $9,
+      heartbeat_prompt = $10,
+      chat_model_id = COALESCE($11::uuid, bots.chat_model_id),
+      memory_model_id = COALESCE($12::uuid, bots.memory_model_id),
+      embedding_model_id = COALESCE($13::uuid, bots.embedding_model_id),
+      search_provider_id = COALESCE($14::uuid, bots.search_provider_id),
       updated_at = now()
-  WHERE bots.id = $12
-  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.allow_guest, bots.reasoning_enabled, bots.reasoning_effort, bots.chat_model_id, bots.memory_model_id, bots.embedding_model_id, bots.search_provider_id
+  WHERE bots.id = $15
+  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.allow_guest, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.chat_model_id, bots.memory_model_id, bots.embedding_model_id, bots.search_provider_id
 )
 SELECT
   updated.id AS bot_id,
@@ -117,6 +132,9 @@ SELECT
   updated.allow_guest,
   updated.reasoning_enabled,
   updated.reasoning_effort,
+  updated.heartbeat_enabled,
+  updated.heartbeat_interval,
+  updated.heartbeat_prompt,
   chat_models.id AS chat_model_id,
   memory_models.id AS memory_model_id,
   embedding_models.id AS embedding_model_id,
@@ -136,6 +154,9 @@ type UpsertBotSettingsParams struct {
 	AllowGuest         bool        `json:"allow_guest"`
 	ReasoningEnabled   bool        `json:"reasoning_enabled"`
 	ReasoningEffort    string      `json:"reasoning_effort"`
+	HeartbeatEnabled   bool        `json:"heartbeat_enabled"`
+	HeartbeatInterval  int32       `json:"heartbeat_interval"`
+	HeartbeatPrompt    string      `json:"heartbeat_prompt"`
 	ChatModelID        pgtype.UUID `json:"chat_model_id"`
 	MemoryModelID      pgtype.UUID `json:"memory_model_id"`
 	EmbeddingModelID   pgtype.UUID `json:"embedding_model_id"`
@@ -152,6 +173,9 @@ type UpsertBotSettingsRow struct {
 	AllowGuest         bool        `json:"allow_guest"`
 	ReasoningEnabled   bool        `json:"reasoning_enabled"`
 	ReasoningEffort    string      `json:"reasoning_effort"`
+	HeartbeatEnabled   bool        `json:"heartbeat_enabled"`
+	HeartbeatInterval  int32       `json:"heartbeat_interval"`
+	HeartbeatPrompt    string      `json:"heartbeat_prompt"`
 	ChatModelID        pgtype.UUID `json:"chat_model_id"`
 	MemoryModelID      pgtype.UUID `json:"memory_model_id"`
 	EmbeddingModelID   pgtype.UUID `json:"embedding_model_id"`
@@ -167,6 +191,9 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.AllowGuest,
 		arg.ReasoningEnabled,
 		arg.ReasoningEffort,
+		arg.HeartbeatEnabled,
+		arg.HeartbeatInterval,
+		arg.HeartbeatPrompt,
 		arg.ChatModelID,
 		arg.MemoryModelID,
 		arg.EmbeddingModelID,
@@ -183,6 +210,9 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.AllowGuest,
 		&i.ReasoningEnabled,
 		&i.ReasoningEffort,
+		&i.HeartbeatEnabled,
+		&i.HeartbeatInterval,
+		&i.HeartbeatPrompt,
 		&i.ChatModelID,
 		&i.MemoryModelID,
 		&i.EmbeddingModelID,

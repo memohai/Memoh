@@ -582,6 +582,21 @@ export type HandlersSkillsOpResponse = {
     ok?: boolean;
 };
 
+export type HeartbeatListLogsResponse = {
+    items?: Array<HeartbeatLog>;
+};
+
+export type HeartbeatLog = {
+    bot_id?: string;
+    completed_at?: string;
+    error_message?: string;
+    id?: string;
+    result_text?: string;
+    started_at?: string;
+    status?: string;
+    usage?: unknown;
+};
+
 export type IdentitiesChannelIdentity = {
     avatar_url?: string;
     channel?: string;
@@ -968,6 +983,8 @@ export type SettingsSettings = {
     allow_guest?: boolean;
     chat_model_id?: string;
     embedding_model_id?: string;
+    heartbeat_enabled?: boolean;
+    heartbeat_interval?: number;
     language?: string;
     max_context_load_time?: number;
     max_context_tokens?: number;
@@ -982,6 +999,8 @@ export type SettingsUpsertRequest = {
     allow_guest?: boolean;
     chat_model_id?: string;
     embedding_model_id?: string;
+    heartbeat_enabled?: boolean;
+    heartbeat_interval?: number;
     language?: string;
     max_context_load_time?: number;
     max_context_tokens?: number;
@@ -2008,6 +2027,81 @@ export type PostBotsByBotIdContainerStopResponses = {
 };
 
 export type PostBotsByBotIdContainerStopResponse = PostBotsByBotIdContainerStopResponses[keyof PostBotsByBotIdContainerStopResponses];
+
+export type DeleteBotsByBotIdHeartbeatLogsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/heartbeat/logs';
+};
+
+export type DeleteBotsByBotIdHeartbeatLogsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdHeartbeatLogsError = DeleteBotsByBotIdHeartbeatLogsErrors[keyof DeleteBotsByBotIdHeartbeatLogsErrors];
+
+export type DeleteBotsByBotIdHeartbeatLogsResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdHeartbeatLogsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Before timestamp (RFC3339)
+         */
+        before?: string;
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/heartbeat/logs';
+};
+
+export type GetBotsByBotIdHeartbeatLogsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdHeartbeatLogsError = GetBotsByBotIdHeartbeatLogsErrors[keyof GetBotsByBotIdHeartbeatLogsErrors];
+
+export type GetBotsByBotIdHeartbeatLogsResponses = {
+    /**
+     * OK
+     */
+    200: HeartbeatListLogsResponse;
+};
+
+export type GetBotsByBotIdHeartbeatLogsResponse = GetBotsByBotIdHeartbeatLogsResponses[keyof GetBotsByBotIdHeartbeatLogsResponses];
 
 export type GetBotsByBotIdInboxData = {
     body?: never;

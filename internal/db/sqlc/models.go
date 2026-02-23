@@ -27,6 +27,9 @@ type Bot struct {
 	MemoryModelID      pgtype.UUID        `json:"memory_model_id"`
 	EmbeddingModelID   pgtype.UUID        `json:"embedding_model_id"`
 	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
+	HeartbeatEnabled   bool               `json:"heartbeat_enabled"`
+	HeartbeatInterval  int32              `json:"heartbeat_interval"`
+	HeartbeatPrompt    string             `json:"heartbeat_prompt"`
 	Metadata           []byte             `json:"metadata"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
@@ -59,6 +62,17 @@ type BotChannelRoute struct {
 	Metadata               []byte             `json:"metadata"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BotHeartbeatLog struct {
+	ID           pgtype.UUID        `json:"id"`
+	BotID        pgtype.UUID        `json:"bot_id"`
+	Status       string             `json:"status"`
+	ResultText   string             `json:"result_text"`
+	ErrorMessage string             `json:"error_message"`
+	Usage        []byte             `json:"usage"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
 }
 
 type BotHistoryMessage struct {

@@ -5,6 +5,7 @@ const (
 	DefaultMaxInboxItems      = 50
 	DefaultLanguage           = "auto"
 	DefaultReasoningEffort    = "medium"
+	DefaultHeartbeatInterval  = 30
 )
 
 type Settings struct {
@@ -19,6 +20,8 @@ type Settings struct {
 	AllowGuest         bool   `json:"allow_guest"`
 	ReasoningEnabled   bool   `json:"reasoning_enabled"`
 	ReasoningEffort    string `json:"reasoning_effort"`
+	HeartbeatEnabled  bool `json:"heartbeat_enabled"`
+	HeartbeatInterval int  `json:"heartbeat_interval"`
 }
 
 type UpsertRequest struct {
@@ -33,4 +36,6 @@ type UpsertRequest struct {
 	AllowGuest         *bool   `json:"allow_guest,omitempty"`
 	ReasoningEnabled   *bool   `json:"reasoning_enabled,omitempty"`
 	ReasoningEffort    *string `json:"reasoning_effort,omitempty"`
+	HeartbeatEnabled  *bool `json:"heartbeat_enabled,omitempty"`
+	HeartbeatInterval *int  `json:"heartbeat_interval,omitempty"`
 }

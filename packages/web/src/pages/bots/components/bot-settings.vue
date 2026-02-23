@@ -291,7 +291,7 @@ const chatModelSupportsReasoning = computed(() => {
 })
 
 // ---- Form ----
-const form = reactive<SettingsSettings>({
+const form = reactive({
   chat_model_id: '',
   memory_model_id: '',
   embedding_model_id: '',

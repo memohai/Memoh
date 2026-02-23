@@ -62,6 +62,7 @@ import (
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/preauth"
 	"github.com/memohai/memoh/internal/providers"
+	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/server"
@@ -182,6 +183,8 @@ func runServe() {
 			provideChatResolver,
 			provideScheduleTriggerer,
 			schedule.NewService,
+			provideHeartbeatTriggerer,
+			heartbeat.NewService,
 
 			// containerd handler & tool gateway
 			provideContainerdHandler,
@@ -201,6 +204,7 @@ func runServe() {
 			provideServerHandler(handlers.NewPreauthHandler),
 			provideServerHandler(handlers.NewBindHandler),
 			provideServerHandler(handlers.NewScheduleHandler),
+			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewSubagentHandler),
 			provideServerHandler(handlers.NewChannelHandler),
 			provideServerHandler(provideUsersHandler),
@@ -214,6 +218,7 @@ func runServe() {
 		fx.Invoke(
 			startMemoryWarmup,
 			startScheduleService,
+			startHeartbeatService,
 			startChannelManager,
 			startContainerReconciliation,
 			startServer,
@@ -372,6 +377,10 @@ func provideMessageService(log *slog.Logger, queries *dbsqlc.Queries, hub *event
 
 func provideScheduleTriggerer(resolver *flow.Resolver) schedule.Triggerer {
 	return flow.NewScheduleGateway(resolver)
+}
+
+func provideHeartbeatTriggerer(resolver *flow.Resolver) heartbeat.Triggerer {
+	return flow.NewHeartbeatGateway(resolver)
 }
 
 // ---------------------------------------------------------------------------
@@ -566,6 +575,14 @@ func startScheduleService(lc fx.Lifecycle, scheduleService *schedule.Service) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			return scheduleService.Bootstrap(ctx)
+		},
+	})
+}
+
+func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			return heartbeatService.Bootstrap(ctx)
 		},
 	})
 }

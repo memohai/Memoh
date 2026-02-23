@@ -3,7 +3,7 @@ import z from 'zod'
 import { createAgent, ModelConfig, allActions } from '@memoh/agent'
 import { createAuthFetcher, getBaseUrl } from '../index'
 import { bearerMiddleware } from '../middlewares/bearer'
-import { AgentSkillModel, AllowedActionModel, AttachmentModel, IdentityContextModel, InboxItemModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
+import { AgentSkillModel, AllowedActionModel, AttachmentModel, HeartbeatModel, IdentityContextModel, InboxItemModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
 import { sseChunked } from '../utils/sse'
 
 const AgentModel = z.object({
@@ -119,5 +119,32 @@ export const chatModule = new Elysia({ prefix: '/chat' })
   }, {
     body: AgentModel.extend({
       schedule: ScheduleModel,
+    }),
+  })
+  .post('/trigger-heartbeat', async ({ body, bearer }) => {
+    console.log('trigger-heartbeat', body)
+    const authFetcher = createAuthFetcher(bearer)
+    const { triggerHeartbeat } = createAgent({
+      model: body.model as ModelConfig,
+      activeContextTime: body.activeContextTime,
+      channels: body.channels,
+      currentChannel: body.currentChannel,
+      identity: body.identity,
+      auth: {
+        bearer: bearer!,
+        baseUrl: getBaseUrl(),
+      },
+      skills: body.usableSkills,
+      mcpConnections: body.mcpConnections,
+      inbox: body.inbox,
+    }, authFetcher)
+    return triggerHeartbeat({
+      heartbeat: body.heartbeat,
+      messages: body.messages,
+      skills: body.skills,
+    })
+  }, {
+    body: AgentModel.extend({
+      heartbeat: HeartbeatModel,
     }),
   })
