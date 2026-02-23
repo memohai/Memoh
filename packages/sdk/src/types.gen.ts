@@ -493,6 +493,12 @@ export type HandlersMcpStdioResponse = {
     url?: string;
 };
 
+export type HandlersPingResponse = {
+    container_backend?: string;
+    snapshot_supported?: boolean;
+    status?: string;
+};
+
 export type HandlersSkillItem = {
     content?: string;
     description?: string;
@@ -1912,6 +1918,15 @@ export type GetBotsByBotIdContainerSnapshotsData = {
     url: '/bots/{bot_id}/container/snapshots';
 };
 
+export type GetBotsByBotIdContainerSnapshotsErrors = {
+    /**
+     * Snapshots currently not supported on this backend
+     */
+    501: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerSnapshotsError = GetBotsByBotIdContainerSnapshotsErrors[keyof GetBotsByBotIdContainerSnapshotsErrors];
+
 export type GetBotsByBotIdContainerSnapshotsResponses = {
     /**
      * OK
@@ -1945,6 +1960,10 @@ export type PostBotsByBotIdContainerSnapshotsErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Snapshots currently not supported on this backend
+     */
+    501: HandlersErrorResponse;
 };
 
 export type PostBotsByBotIdContainerSnapshotsError = PostBotsByBotIdContainerSnapshotsErrors[keyof PostBotsByBotIdContainerSnapshotsErrors];
@@ -5035,6 +5054,22 @@ export type PutModelsByIdResponses = {
 };
 
 export type PutModelsByIdResponse = PutModelsByIdResponses[keyof PutModelsByIdResponses];
+
+export type GetPingData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/ping';
+};
+
+export type GetPingResponses = {
+    /**
+     * OK
+     */
+    200: HandlersPingResponse;
+};
+
+export type GetPingResponse = GetPingResponses[keyof GetPingResponses];
 
 export type GetProvidersData = {
     body?: never;

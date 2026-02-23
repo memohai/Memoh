@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: memoh.cn/postgres:18-alpine
+  qdrant:
+    image: memoh.cn/qdrant/qdrant:latest
+  migrate:
+    image: memoh.cn/memohai/server:latest
+  server:
+    image: memoh.cn/memohai/server:latest
+  agent:
+    image: memoh.cn/memohai/agent:latest
+  web:
+    image: memoh.cn/memohai/web:latest

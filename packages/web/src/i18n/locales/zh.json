@@ -406,9 +406,13 @@
       "actionDisable": "停用",
       "saveOnly": "仅保存",
       "saveAndEnable": "立即启用",
+      "copyFailed": "复制失败",
       "deleteConfirm": "确定要移除这个平台吗？",
       "deleteSuccess": "平台已移除",
       "deleteFailed": "移除平台失败",
+      "webhookCallback": "WebHook 回调地址",
+      "webhookCallbackHint": "将该地址配置到飞书/Lark 事件订阅的请求 URL。",
+      "webhookCallbackPending": "保存平台配置后会生成回调地址。",
       "noAvailableTypes": "所有平台类型均已配置",
       "types": {
         "feishu": "飞书",

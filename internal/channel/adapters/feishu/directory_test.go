@@ -38,6 +38,7 @@ func Test_parseFeishuUserInput(t *testing.T) {
 		{"user_id:u_yyy", "u_yyy", larkcontact.UserIdTypeUserId},
 		{"ou_abc", "ou_abc", larkcontact.UserIdTypeOpenId},
 		{"u_123", "u_123", larkcontact.UserIdTypeUserId},
+		{"b3f195f9", "b3f195f9", larkcontact.UserIdTypeUserId},
 		{"  open_id: ou_zzz  ", "ou_zzz", larkcontact.UserIdTypeOpenId},
 		{"", "", ""},
 	}

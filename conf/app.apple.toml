@@ -1,0 +1,51 @@
+# Memoh Apple Container configuration (macOS / Darwin)
+# Uses socktainer + Apple Containerization framework instead of containerd.
+
+[log]
+level = "debug"
+format = "text"
+
+[server]
+addr = ":8080"
+
+[admin]
+username = "admin"
+password = "admin123"
+email = "dev@memoh.local"
+
+[auth]
+jwt_secret = "memoh-dev-secret-do-not-use-in-production"
+jwt_expires_in = "168h"
+
+[containerd]
+# socket_path / namespace are unused on macOS; socktainer takes over.
+
+[containerd.socktainer]
+# NOTE: Apple Container are now experimental feature and only support on macOS 26 and later.
+# socket_path and binary_path use sensible defaults when left empty.
+# socket_path = "/path/to/your/.socktainer/container.sock"
+# binary_path = "/opt/homebrew/bin/socktainer"
+
+[mcp]
+image = "memohai/mcp:latest"
+data_root = "data"
+data_mount = "/data"
+
+[postgres]
+host = "127.0.0.1"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh"
+sslmode = "disable"
+
+[qdrant]
+base_url = "http://127.0.0.1:6334"
+api_key = ""
+collection = "memory"
+timeout_seconds = 10
+
+[agent_gateway]
+host = "127.0.0.1"
+port = 8081
+server_addr = "127.0.0.1:8080"

@@ -33,7 +33,7 @@ func (a *FeishuAdapter) ListPeers(ctx context.Context, cfg channel.ChannelConfig
 	if err != nil {
 		return nil, err
 	}
-	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret)
+	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret, lark.WithOpenBaseUrl(feishuCfg.openBaseURL()))
 	pageSize := directoryLimit(query.Limit)
 	req := larkcontact.NewListUserReqBuilder().
 		UserIdType(larkcontact.UserIdTypeOpenId).
@@ -65,7 +65,7 @@ func (a *FeishuAdapter) ListGroups(ctx context.Context, cfg channel.ChannelConfi
 	if err != nil {
 		return nil, err
 	}
-	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret)
+	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret, lark.WithOpenBaseUrl(feishuCfg.openBaseURL()))
 	pageSize := directoryLimit(query.Limit)
 	var items []*larkim.ListChat
 	if strings.TrimSpace(query.Query) != "" {
@@ -116,7 +116,7 @@ func (a *FeishuAdapter) ListGroupMembers(ctx context.Context, cfg channel.Channe
 	if chatID == "" {
 		return nil, fmt.Errorf("feishu list group members: empty group id")
 	}
-	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret)
+	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret, lark.WithOpenBaseUrl(feishuCfg.openBaseURL()))
 	pageSize := directoryLimit(query.Limit)
 	req := larkim.NewGetChatMembersReqBuilder().
 		ChatId(chatID).
@@ -147,7 +147,7 @@ func (a *FeishuAdapter) ResolveEntry(ctx context.Context, cfg channel.ChannelCon
 	if err != nil {
 		return channel.DirectoryEntry{}, err
 	}
-	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret)
+	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret, lark.WithOpenBaseUrl(feishuCfg.openBaseURL()))
 	input = strings.TrimSpace(input)
 	switch kind {
 	case channel.DirectoryEntryUser:
@@ -226,7 +226,9 @@ func parseFeishuUserInput(raw string) (userID, userIDType string) {
 	if strings.HasPrefix(raw, "u_") || strings.HasPrefix(raw, "u-") {
 		return raw, larkcontact.UserIdTypeUserId
 	}
-	return raw, larkcontact.UserIdTypeOpenId
+	// For raw IDs without explicit prefix, default to user_id. In practice
+	// open_id is usually "ou_*", while bare IDs are commonly user_id.
+	return raw, larkcontact.UserIdTypeUserId
 }
 
 func feishuUserToEntry(u *larkcontact.User) channel.DirectoryEntry {

@@ -7,11 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/memohai/memoh/internal/config"
 
@@ -53,11 +51,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 	unlock := m.lockContainer(containerID)
 	defer unlock()
 
-	container, err := m.service.GetContainer(ctx, containerID)
-	if err != nil {
-		return nil, err
-	}
-	info, err := container.Info(ctx)
+	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
 		return nil, err
 	}
@@ -116,12 +110,7 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 	unlock := m.lockContainer(containerID)
 	defer unlock()
 
-	container, err := m.service.GetContainer(ctx, containerID)
-	if err != nil {
-		return nil, err
-	}
-
-	info, err := container.Info(ctx)
+	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
 		return nil, err
 	}
@@ -148,36 +137,10 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		return nil, err
 	}
 
-	dataDir, err := m.ensureBotDir(botID)
+	spec, err := m.buildVersionSpec(botID)
 	if err != nil {
 		return nil, err
 	}
-	dataMount := m.cfg.DataMount
-	if dataMount == "" {
-		dataMount = config.DefaultDataMount
-	}
-	resolvPath, err := ctr.ResolveConfSource(dataDir)
-	if err != nil {
-		return nil, err
-	}
-
-	specOpts := []oci.SpecOpts{
-		oci.WithMounts([]specs.Mount{
-			{
-				Destination: dataMount,
-				Type:        "bind",
-				Source:      dataDir,
-				Options:     []string{"rbind", "rw"},
-			},
-			{
-				Destination: "/etc/resolv.conf",
-				Type:        "bind",
-				Source:      resolvPath,
-				Options:     []string{"rbind", "ro"},
-			},
-		}),
-	}
-	specOpts = append(specOpts, ctr.TimezoneSpecOpts()...)
 
 	_, err = m.service.CreateContainerFromSnapshot(ctx, ctr.CreateContainerRequest{
 		ID:          containerID,
@@ -185,7 +148,7 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		SnapshotID:  activeSnapshotName,
 		Snapshotter: info.Snapshotter,
 		Labels:      info.Labels,
-		SpecOpts:    specOpts,
+		Spec:        spec,
 	})
 	if err != nil {
 		return nil, err
@@ -269,11 +232,7 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 		return err
 	}
 
-	container, err := m.service.GetContainer(ctx, containerID)
-	if err != nil {
-		return err
-	}
-	info, err := container.Info(ctx)
+	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
 		return err
 	}
@@ -291,35 +250,10 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 		return err
 	}
 
-	dataDir, err := m.ensureBotDir(botID)
+	spec, err := m.buildVersionSpec(botID)
 	if err != nil {
 		return err
 	}
-	dataMount := m.cfg.DataMount
-	if dataMount == "" {
-		dataMount = config.DefaultDataMount
-	}
-	resolvPath, err := ctr.ResolveConfSource(dataDir)
-	if err != nil {
-		return err
-	}
-	specOpts := []oci.SpecOpts{
-		oci.WithMounts([]specs.Mount{
-			{
-				Destination: dataMount,
-				Type:        "bind",
-				Source:      dataDir,
-				Options:     []string{"rbind", "rw"},
-			},
-			{
-				Destination: "/etc/resolv.conf",
-				Type:        "bind",
-				Source:      resolvPath,
-				Options:     []string{"rbind", "ro"},
-			},
-		}),
-	}
-	specOpts = append(specOpts, ctr.TimezoneSpecOpts()...)
 
 	_, err = m.service.CreateContainerFromSnapshot(ctx, ctr.CreateContainerRequest{
 		ID:          containerID,
@@ -327,7 +261,7 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 		SnapshotID:  activeSnapshotName,
 		Snapshotter: info.Snapshotter,
 		Labels:      info.Labels,
-		SpecOpts:    specOpts,
+		Spec:        spec,
 	})
 	if err != nil {
 		return err
@@ -355,8 +289,43 @@ func (m *Manager) VersionSnapshotName(ctx context.Context, botID string, version
 	})
 }
 
+func (m *Manager) buildVersionSpec(botID string) (ctr.ContainerSpec, error) {
+	dataDir, err := m.ensureBotDir(botID)
+	if err != nil {
+		return ctr.ContainerSpec{}, err
+	}
+	dataMount := m.cfg.DataMount
+	if dataMount == "" {
+		dataMount = config.DefaultDataMount
+	}
+	resolvPath, err := ctr.ResolveConfSource(dataDir)
+	if err != nil {
+		return ctr.ContainerSpec{}, err
+	}
+	mounts := []ctr.MountSpec{
+		{
+			Destination: dataMount,
+			Type:        "bind",
+			Source:      dataDir,
+			Options:     []string{"rbind", "rw"},
+		},
+		{
+			Destination: "/etc/resolv.conf",
+			Type:        "bind",
+			Source:      resolvPath,
+			Options:     []string{"rbind", "ro"},
+		},
+	}
+	tzMounts, tzEnv := ctr.TimezoneSpec()
+	mounts = append(mounts, tzMounts...)
+	return ctr.ContainerSpec{
+		Mounts: mounts,
+		Env:    tzEnv,
+	}, nil
+}
+
 func (m *Manager) safeStopTask(ctx context.Context, containerID string) error {
-	err := m.service.StopTask(ctx, containerID, &ctr.StopTaskOptions{
+	err := m.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{
 		Timeout: 10 * time.Second,
 		Force:   true,
 	})

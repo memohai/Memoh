@@ -414,9 +414,12 @@
               </dl>
             </div>
 
-            <Separator />
+            <Separator v-if="capabilitiesStore.snapshotSupported" />
 
-            <div class="space-y-3">
+            <div
+              v-if="capabilitiesStore.snapshotSupported"
+              class="space-y-3"
+            >
               <div class="flex flex-col gap-2 sm:flex-row">
                 <Input
                   v-model="newSnapshotName"
@@ -627,6 +630,7 @@ import type {
   BotsBotCheck, HandlersGetContainerResponse,
   HandlersListSnapshotsResponse,
 } from '@memoh/sdk'
+import { useCapabilitiesStore } from '@/store/capabilities'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import BotSettings from './components/bot-settings.vue'
 import BotChannels from './components/bot-channels.vue'
@@ -649,6 +653,11 @@ type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: 
 const route = useRoute()
 const { t } = useI18n()
 const botId = computed(() => route.params.botId as string)
+
+const capabilitiesStore = useCapabilitiesStore()
+onMounted(() => {
+  void capabilitiesStore.load()
+})
 
 const { data: bot } = useQuery({
   key: () => ['bot', botId.value],
@@ -908,6 +917,7 @@ async function handleRefreshChecks() {
 }
 
 async function loadContainerData(showLoadingToast: boolean) {
+  await capabilitiesStore.load()
   containerLoading.value = true
   try {
     const result = await getBotsByBotIdContainer({ path: { bot_id: botId.value } })
@@ -922,7 +932,9 @@ async function loadContainerData(showLoadingToast: boolean) {
     }
     containerInfo.value = result.data
     containerMissing.value = false
-    await loadSnapshots()
+    if (capabilitiesStore.snapshotSupported) {
+      await loadSnapshots()
+    }
   } catch (error) {
     if (showLoadingToast) {
       toast.error(resolveErrorMessage(error, t('bots.container.loadFailed')))
@@ -933,7 +945,7 @@ async function loadContainerData(showLoadingToast: boolean) {
 }
 
 async function loadSnapshots() {
-  if (!containerInfo.value) {
+  if (!containerInfo.value || !capabilitiesStore.snapshotSupported) {
     snapshots.value = []
     return
   }
@@ -1028,7 +1040,7 @@ async function handleDeleteContainer() {
 }
 
 async function handleCreateSnapshot() {
-  if (botLifecyclePending.value || !containerInfo.value) return
+  if (botLifecyclePending.value || !containerInfo.value || !capabilitiesStore.snapshotSupported) return
   await runContainerAction(
     'snapshot',
     async () => {

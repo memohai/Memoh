@@ -294,6 +294,34 @@ func TestIsFeishuImageAttachment(t *testing.T) {
 	}
 }
 
+func TestResolveFeishuFileType(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		file string
+		mime string
+		want string
+	}{
+		{name: "video mime", file: "clip.bin", mime: "video/mp4", want: larkim.FileTypeMp4},
+		{name: "pdf mime", file: "doc.bin", mime: "application/pdf", want: larkim.FileTypePdf},
+		{name: "doc ext", file: "a.docx", mime: "application/octet-stream", want: larkim.FileTypeDoc},
+		{name: "xls ext", file: "a.xlsx", mime: "application/octet-stream", want: larkim.FileTypeXls},
+		{name: "ppt ext", file: "a.pptx", mime: "application/octet-stream", want: larkim.FileTypePpt},
+		{name: "zip mime", file: "a.bin", mime: "application/zip", want: larkim.FileTypeStream},
+		{name: "tar gz ext", file: "backup.tar.gz", mime: "application/octet-stream", want: larkim.FileTypeStream},
+		{name: "default stream", file: "notes.txt", mime: "text/plain", want: larkim.FileTypeStream},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := resolveFeishuFileType(tc.file, tc.mime); got != tc.want {
+				t.Fatalf("resolveFeishuFileType(%q,%q)=%q want=%q", tc.file, tc.mime, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildFeishuStreamCardContent(t *testing.T) {
 	t.Parallel()
 
@@ -557,6 +585,38 @@ func TestExtractFeishuInboundPostMentionOtherIgnored(t *testing.T) {
 	got := extractFeishuInbound(event, "ou_bot_123")
 	if mentioned, _ := got.Metadata["is_mentioned"].(bool); mentioned {
 		t.Fatalf("expected no mention for post mentioning other user")
+	}
+}
+
+func TestResolveConfiguredBotOpenIDPrefersSelfIdentity(t *testing.T) {
+	t.Parallel()
+
+	cfg := channel.ChannelConfig{
+		SelfIdentity: map[string]any{
+			"open_id": "ou_self_1",
+		},
+		ExternalIdentity: "open_id:ou_external_1",
+	}
+	if got := resolveConfiguredBotOpenID(cfg); got != "ou_self_1" {
+		t.Fatalf("expected self identity open_id, got %q", got)
+	}
+}
+
+func TestResolveConfiguredBotOpenIDFromExternalIdentity(t *testing.T) {
+	t.Parallel()
+
+	cfg := channel.ChannelConfig{ExternalIdentity: "open_id:ou_external_2"}
+	if got := resolveConfiguredBotOpenID(cfg); got != "ou_external_2" {
+		t.Fatalf("expected external identity open_id, got %q", got)
+	}
+}
+
+func TestResolveConfiguredBotOpenIDIgnoresNonOpenIDExternalIdentity(t *testing.T) {
+	t.Parallel()
+
+	cfg := channel.ChannelConfig{ExternalIdentity: "chat_id:oc_group_1"}
+	if got := resolveConfiguredBotOpenID(cfg); got != "" {
+		t.Fatalf("expected empty open_id for non-open external identity, got %q", got)
 	}
 }
 

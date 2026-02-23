@@ -11,8 +11,7 @@ import (
 	gocni "github.com/containerd/go-cni"
 )
 
-// SetupNetwork attaches CNI networking to a running task.
-func SetupNetwork(ctx context.Context, task client.Task, containerID string, CNIBinDir string, CNIConfDir string) error {
+func setupCNINetwork(ctx context.Context, task client.Task, containerID string, CNIBinDir string, CNIConfDir string) error {
 	if task == nil {
 		return ErrInvalidArgument
 	}
@@ -65,8 +64,7 @@ func SetupNetwork(ctx context.Context, task client.Task, containerID string, CNI
 	return nil
 }
 
-// RemoveNetwork detaches CNI networking for a running task.
-func RemoveNetwork(ctx context.Context, task client.Task, containerID string, CNIBinDir string, CNIConfDir string) error {
+func removeCNINetwork(ctx context.Context, task client.Task, containerID string, CNIBinDir string, CNIConfDir string) error {
 	if task == nil {
 		return ErrInvalidArgument
 	}

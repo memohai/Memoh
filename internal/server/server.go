@@ -47,14 +47,7 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 		},
 	}))
 	e.Use(auth.JWTMiddleware(jwtSecret, func(c echo.Context) bool {
-		path := c.Request().URL.Path
-		if path == "/ping" || path == "/health" || path == "/api/swagger.json" || path == "/auth/login" {
-			return true
-		}
-		if strings.HasPrefix(path, "/api/docs") {
-			return true
-		}
-		return false
+		return shouldSkipJWT(c.Request().URL.Path)
 	}))
 
 	for _, h := range handlers {
@@ -76,4 +69,17 @@ func (s *Server) Start() error {
 
 func (s *Server) Stop(ctx context.Context) error {
 	return s.echo.Shutdown(ctx)
+}
+
+func shouldSkipJWT(path string) bool {
+	if path == "/ping" || path == "/health" || path == "/api/swagger.json" || path == "/auth/login" {
+		return true
+	}
+	if strings.HasPrefix(path, "/api/docs") {
+		return true
+	}
+	if strings.HasPrefix(path, "/channels/feishu/webhook/") {
+		return true
+	}
+	return false
 }

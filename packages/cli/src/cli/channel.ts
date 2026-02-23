@@ -6,6 +6,7 @@ import { table } from 'table'
 
 import { apiRequest } from '../core/api'
 import { ensureAuth, getErrorMessage, resolveBotId } from './shared'
+import { getBaseURL, readConfig } from '../utils/store'
 
 type ChannelFieldSchema = {
   type: 'string' | 'secret' | 'bool' | 'number' | 'enum'
@@ -54,6 +55,28 @@ type ChannelConfig = {
   updated_at: string
 }
 
+const readInboundMode = (credentials: Record<string, unknown>) => {
+  const raw = credentials.inboundMode ?? credentials.inbound_mode
+  if (typeof raw !== 'string') return ''
+  return raw.trim().toLowerCase()
+}
+
+const buildWebhookCallbackUrl = (configId: string) => {
+  const baseUrl = getBaseURL(readConfig()).replace(/\/+$/, '')
+  return `${baseUrl}/channels/feishu/webhook/${encodeURIComponent(configId)}`
+}
+
+const printWebhookCallbackIfEnabled = (channelType: string, config: ChannelConfig) => {
+  if (channelType !== 'feishu') return
+  if (readInboundMode(config.credentials || {}) !== 'webhook') return
+  const configId = String(config.id || '').trim()
+  if (!configId) {
+    console.log(chalk.yellow('Webhook is enabled, but config id is missing so callback URL cannot be generated yet.'))
+    return
+  }
+  console.log(chalk.cyan(`Webhook callback URL: ${buildWebhookCallbackUrl(configId)}`))
+}
+
 const renderChannelsTable = (items: ChannelMeta[]) => {
   const rows: string[][] = [['Type', 'Name', 'Configless']]
   for (const item of items) {
@@ -100,6 +123,8 @@ const collectFeishuCredentials = async (opts: Record<string, unknown>) => {
   let appSecret = typeof opts.app_secret === 'string' ? opts.app_secret : undefined
   let encryptKey = typeof opts.encrypt_key === 'string' ? opts.encrypt_key : undefined
   let verificationToken = typeof opts.verification_token === 'string' ? opts.verification_token : undefined
+  let region = typeof opts.region === 'string' ? opts.region : undefined
+  let inboundMode = typeof opts.inbound_mode === 'string' ? opts.inbound_mode : undefined
 
   const questions = []
   if (!appId) questions.push({ type: 'input', name: 'appId', message: 'Feishu App ID:' })
@@ -110,16 +135,44 @@ const collectFeishuCredentials = async (opts: Record<string, unknown>) => {
   if (!verificationToken) {
     questions.push({ type: 'input', name: 'verificationToken', message: 'Verification Token (optional):', default: '' })
   }
+  if (!region) {
+    questions.push({
+      type: 'list',
+      name: 'region',
+      message: 'Region:',
+      choices: [
+        { name: 'Feishu (open.feishu.cn)', value: 'feishu' },
+        { name: 'Lark (open.larksuite.com)', value: 'lark' },
+      ],
+      default: 'feishu',
+    })
+  }
+  if (!inboundMode) {
+    questions.push({
+      type: 'list',
+      name: 'inboundMode',
+      message: 'Inbound mode:',
+      choices: [
+        { name: 'WebSocket', value: 'websocket' },
+        { name: 'Webhook', value: 'webhook' },
+      ],
+      default: 'websocket',
+    })
+  }
   const answers = questions.length ? await inquirer.prompt<Record<string, string>>(questions) : {}
 
   appId = appId ?? answers.appId
   appSecret = appSecret ?? answers.appSecret
   encryptKey = encryptKey ?? answers.encryptKey
   verificationToken = verificationToken ?? answers.verificationToken
+  region = region ?? answers.region
+  inboundMode = inboundMode ?? answers.inboundMode
 
   const payload: Record<string, unknown> = {
     appId: String(appId).trim(),
     appSecret: String(appSecret).trim(),
+    region: String(region || 'feishu').trim(),
+    inboundMode: String(inboundMode || 'websocket').trim(),
   }
   if (String(encryptKey || '').trim()) payload.encryptKey = String(encryptKey).trim()
   if (String(verificationToken || '').trim()) payload.verificationToken = String(verificationToken).trim()
@@ -200,6 +253,7 @@ export const registerChannelCommands = (program: Command) => {
       const channelType = await resolveChannelType(token, opts.type)
       const resp = await apiRequest<ChannelConfig>(`/bots/${encodeURIComponent(resolvedBotId)}/channel/${encodeURIComponent(channelType)}`, {}, token)
       console.log(JSON.stringify(resp, null, 2))
+      printWebhookCallbackIfEnabled(channelType, resp)
     })
 
   config
@@ -211,6 +265,8 @@ export const registerChannelCommands = (program: Command) => {
     .option('--app_secret <app_secret>')
     .option('--encrypt_key <encrypt_key>')
     .option('--verification_token <verification_token>')
+    .option('--region <region>', 'feishu|lark')
+    .option('--inbound_mode <inbound_mode>', 'websocket|webhook')
     .action(async (botId, opts) => {
       const token = ensureAuth()
       const resolvedBotId = await resolveBotId(token, botId)
@@ -222,11 +278,12 @@ export const registerChannelCommands = (program: Command) => {
       const credentials = await collectFeishuCredentials(opts)
       const spinner = ora('Updating channel config...').start()
       try {
-        await apiRequest(`/bots/${encodeURIComponent(resolvedBotId)}/channel/${encodeURIComponent(channelType)}`, {
+        const resp = await apiRequest<ChannelConfig>(`/bots/${encodeURIComponent(resolvedBotId)}/channel/${encodeURIComponent(channelType)}`, {
           method: 'PUT',
           body: JSON.stringify({ credentials }),
         }, token)
         spinner.succeed('Channel config updated')
+        printWebhookCallbackIfEnabled(channelType, resp)
       } catch (err: unknown) {
         spinner.fail(getErrorMessage(err) || 'Failed to update channel config')
         process.exit(1)
@@ -273,4 +330,3 @@ export const registerChannelCommands = (program: Command) => {
       }
     })
 }
-

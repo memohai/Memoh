@@ -15,7 +15,7 @@ export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
   'openai-completions': {
     value: 'openai-completions',
     label: 'OpenAI Completions',
-    hint: '/v1/chat/completions',
+    hint: '/v1/models',
   },
   'anthropic-messages': {
     value: 'anthropic-messages',

@@ -114,7 +114,16 @@ func (s *discordOutboundStream) ensureMessage(text string) error {
 
 	content := truncateDiscordText(text)
 
-    msg, err := s.session.ChannelMessageSend(s.target, content)
+	var msg *discordgo.Message
+	var err error
+	if s.reply != nil && s.reply.MessageID != "" {
+		msg, err = s.session.ChannelMessageSendReply(s.target, content, &discordgo.MessageReference{
+			ChannelID: s.target,
+			MessageID: s.reply.MessageID,
+		})
+	} else {
+		msg, err = s.session.ChannelMessageSend(s.target, content)
+	}
     if err != nil {
         return err
     }
@@ -155,7 +164,16 @@ func (s *discordOutboundStream) finalizeMessage(text string) error {
 	text = truncateDiscordText(text)
 
     if s.msgID == "" {
-		msg, err := s.session.ChannelMessageSend(s.target, text)
+		var msg *discordgo.Message
+		var err error
+		if s.reply != nil && s.reply.MessageID != "" {
+			msg, err = s.session.ChannelMessageSendReply(s.target, text, &discordgo.MessageReference{
+				ChannelID: s.target,
+				MessageID: s.reply.MessageID,
+			})
+		} else {
+			msg, err = s.session.ChannelMessageSend(s.target, text)
+		}
 		if err != nil {
 			return err
 		}

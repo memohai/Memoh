@@ -4,7 +4,17 @@ import (
 	"fmt"
 	"strings"
 
+	lark "github.com/larksuite/oapi-sdk-go/v3"
+
 	"github.com/memohai/memoh/internal/channel"
+)
+
+const (
+	regionFeishu = "feishu"
+	regionLark   = "lark"
+
+	inboundModeWebsocket = "websocket"
+	inboundModeWebhook   = "webhook"
 )
 
 // Config holds the Feishu app credentials extracted from a channel configuration.
@@ -13,6 +23,8 @@ type Config struct {
 	AppSecret         string
 	EncryptKey        string
 	VerificationToken string
+	Region            string
+	InboundMode       string
 }
 
 // UserConfig holds the identifiers used to target a Feishu user.
@@ -27,8 +39,10 @@ func normalizeConfig(raw map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	result := map[string]any{
-		"appId":     cfg.AppID,
-		"appSecret": cfg.AppSecret,
+		"appId":       cfg.AppID,
+		"appSecret":   cfg.AppSecret,
+		"region":      cfg.Region,
+		"inboundMode": cfg.InboundMode,
 	}
 	if cfg.EncryptKey != "" {
 		result["encryptKey"] = cfg.EncryptKey
@@ -103,6 +117,14 @@ func parseConfig(raw map[string]any) (Config, error) {
 	appSecret := strings.TrimSpace(channel.ReadString(raw, "appSecret", "app_secret"))
 	encryptKey := strings.TrimSpace(channel.ReadString(raw, "encryptKey", "encrypt_key"))
 	verificationToken := strings.TrimSpace(channel.ReadString(raw, "verificationToken", "verification_token"))
+	region, err := normalizeRegion(channel.ReadString(raw, "region"))
+	if err != nil {
+		return Config{}, err
+	}
+	inboundMode, err := normalizeInboundMode(channel.ReadString(raw, "inboundMode", "inbound_mode"))
+	if err != nil {
+		return Config{}, err
+	}
 	if appID == "" || appSecret == "" {
 		return Config{}, fmt.Errorf("feishu appId and appSecret are required")
 	}
@@ -111,6 +133,8 @@ func parseConfig(raw map[string]any) (Config, error) {
 		AppSecret:         appSecret,
 		EncryptKey:        encryptKey,
 		VerificationToken: verificationToken,
+		Region:            region,
+		InboundMode:       inboundMode,
 	}, nil
 }
 
@@ -138,4 +162,33 @@ func normalizeTarget(raw string) string {
 		return "chat_id:" + value
 	}
 	return "open_id:" + value
+}
+
+func normalizeRegion(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", regionFeishu, "cn", "china":
+		return regionFeishu, nil
+	case regionLark, "global", "intl", "international":
+		return regionLark, nil
+	default:
+		return "", fmt.Errorf("feishu region must be feishu or lark")
+	}
+}
+
+func normalizeInboundMode(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", inboundModeWebsocket:
+		return inboundModeWebsocket, nil
+	case inboundModeWebhook:
+		return inboundModeWebhook, nil
+	default:
+		return "", fmt.Errorf("feishu inbound_mode must be websocket or webhook")
+	}
+}
+
+func (c Config) openBaseURL() string {
+	if c.Region == regionLark {
+		return lark.LarkBaseUrl
+	}
+	return lark.FeishuBaseUrl
 }

@@ -254,12 +254,10 @@ func probeReachable(ctx context.Context, baseURL string) (bool, string) {
 }
 
 func probeOpenAICompletions(ctx context.Context, baseURL, apiKey string) CheckResult {
-	body := `{"model":"probe-test","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`
-	return probeEndpoint(ctx, http.MethodPost, baseURL+"/chat/completions",
+	return probeEndpoint(ctx, http.MethodGet, baseURL+"/models",
 		map[string]string{
 			"Authorization": "Bearer " + apiKey,
-			"Content-Type":  "application/json",
-		}, body)
+		}, "")
 }
 
 func probeOpenAIResponses(ctx context.Context, baseURL, apiKey string) CheckResult {

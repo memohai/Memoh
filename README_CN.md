@@ -44,6 +44,11 @@ cd Memoh
 sudo docker compose up -d
 ```
 
+> 若镜像拉取较慢，可使用中国大陆镜像源配置：
+```bash
+sudo docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml up -d
+```
+
 > macOS 或用户已在 `docker` 用户组中时，无需 `sudo`。
 
 启动后访问 <http://localhost:8082>。默认登录：`admin` / `admin123`

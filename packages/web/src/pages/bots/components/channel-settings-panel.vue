@@ -47,6 +47,40 @@
       </div>
     </div>
 
+    <div
+      v-if="showWebhookCallback"
+      class="space-y-2"
+    >
+      <h4 class="text-sm font-medium">
+        {{ $t('bots.channels.webhookCallback') }}
+      </h4>
+      <p class="text-xs text-muted-foreground">
+        {{ $t('bots.channels.webhookCallbackHint') }}
+      </p>
+      <template v-if="webhookCallbackUrl">
+        <div class="flex gap-2">
+          <Input
+            :model-value="webhookCallbackUrl"
+            readonly
+            class="font-mono text-xs"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            @click="copyWebhookCallback"
+          >
+            {{ $t('common.copy') }}
+          </Button>
+        </div>
+      </template>
+      <p
+        v-else
+        class="text-xs text-muted-foreground"
+      >
+        {{ $t('bots.channels.webhookCallbackPending') }}
+      </p>
+    </div>
+
     <Separator />
 
     <!-- Credentials form (dynamic from config_schema) -->
@@ -254,6 +288,7 @@ const { mutateAsync: updateChannelStatus, isLoading: isStatusLoading } = useMuta
 const action = ref<'save' | 'toggle' | 'delete' | ''>('')
 const isBusy = computed(() => isLoading.value || isStatusLoading.value || action.value !== '')
 const isEditMode = computed(() => props.channelItem.configured)
+const lastSavedConfigId = ref('')
 
 // ---- Form state ----
 
@@ -279,6 +314,23 @@ const orderedFields = computed(() => {
   return Object.fromEntries(entries) as Record<string, ChannelFieldSchema>
 })
 
+const currentInboundMode = computed(() => {
+  const value = form.credentials.inboundMode ?? form.credentials.inbound_mode
+  if (typeof value !== 'string') return ''
+  return value.trim().toLowerCase()
+})
+
+const showWebhookCallback = computed(() => {
+  return props.channelItem.meta.type === 'feishu' && currentInboundMode.value === 'webhook'
+})
+
+const webhookCallbackUrl = computed(() => {
+  if (!showWebhookCallback.value) return ''
+  const configId = String(props.channelItem.config?.id || lastSavedConfigId.value || '').trim()
+  if (!configId) return ''
+  return buildWebhookCallbackUrl(configId)
+})
+
 function initForm() {
   const schema = props.channelItem.meta.config_schema?.fields ?? {}
   const existingCredentials = props.channelItem.config?.credentials ?? {}
@@ -289,6 +341,7 @@ function initForm() {
   }
   form.credentials = creds
   form.disabled = props.channelItem.config?.disabled ?? false
+  lastSavedConfigId.value = String(props.channelItem.config?.id || '').trim()
 }
 
 watch(
@@ -325,13 +378,14 @@ async function saveChannel(disabled: boolean, nextAction: 'save' | 'toggle') {
   if (!validateRequired()) return
   action.value = nextAction
   try {
-    await upsertChannel({
+    const result = await upsertChannel({
       platform: props.channelItem.meta.type,
       data: {
         credentials: buildCredentials(),
         disabled,
       },
     })
+    lastSavedConfigId.value = String(result?.id || lastSavedConfigId.value || '').trim()
     form.disabled = disabled
     toast.success(t('bots.channels.saveSuccess'))
     emit('saved')
@@ -384,6 +438,7 @@ async function handleDelete() {
       url: `/bots/${botIdRef.value}/channel/${props.channelItem.meta.type}`,
       throwOnError: true,
     })
+    lastSavedConfigId.value = ''
     toast.success(t('bots.channels.deleteSuccess'))
     emit('saved')
   } catch (err) {
@@ -391,6 +446,67 @@ async function handleDelete() {
     toast.error(detail ? `${t('bots.channels.deleteFailed')}: ${detail}` : t('bots.channels.deleteFailed'))
   } finally {
     action.value = ''
+  }
+}
+
+function buildWebhookCallbackUrl(configId: string): string {
+  const normalizedBase = resolveWebhookCallbackBaseUrl()
+  if (!normalizedBase) return ''
+  if (typeof window !== 'undefined') {
+    const baseUrl = new URL(normalizedBase, window.location.origin)
+    baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/channels/feishu/webhook/${encodeURIComponent(configId)}`
+    baseUrl.search = ''
+    baseUrl.hash = ''
+    return baseUrl.toString()
+  }
+  const base = normalizedBase.replace(/\/+$/, '')
+  return `${base}/channels/feishu/webhook/${encodeURIComponent(configId)}`
+}
+
+function resolveWebhookCallbackBaseUrl(): string {
+  const explicitRaw = String(
+    import.meta.env.VITE_WEBHOOK_PUBLIC_BASE_URL?.trim() ||
+    import.meta.env.VITE_API_PUBLIC_URL?.trim() ||
+    '',
+  ).trim()
+  if (isAbsoluteHttpUrl(explicitRaw)) {
+    return explicitRaw
+  }
+
+  const apiBase = String(client.getConfig().baseUrl || import.meta.env.VITE_API_URL?.trim() || '').trim()
+  if (isAbsoluteHttpUrl(apiBase)) {
+    return apiBase
+  }
+
+  if (typeof window === 'undefined') {
+    return ''
+  }
+  const fallbackApiPort = String(import.meta.env.VITE_API_PORT || '8080').trim()
+  const fallback = new URL(window.location.origin)
+  if (fallbackApiPort) {
+    fallback.port = fallbackApiPort
+  }
+  fallback.search = ''
+  fallback.hash = ''
+  return fallback.toString().replace(/\/+$/, '')
+}
+
+function isAbsoluteHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value)
+}
+
+async function copyWebhookCallback() {
+  if (!webhookCallbackUrl.value) return
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      await navigator.clipboard.writeText(webhookCallbackUrl.value)
+      toast.success(t('common.copied'))
+      return
+    }
+    toast.error(t('bots.channels.copyFailed'))
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : ''
+    toast.error(detail ? `${t('bots.channels.copyFailed')}: ${detail}` : t('bots.channels.copyFailed'))
   }
 }
 </script>
