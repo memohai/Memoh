@@ -97,16 +97,16 @@ Memoh/
 
 | Command | Description |
 |---------|-------------|
-| `mise run dev` | Start the full dev environment (backend + agent gateway + frontend) |
-| `mise run setup` | Initialize dev environment (sqlc gen + DB migration + dependency install) |
+| `mise run dev` | Start the containerized dev environment (all services) |
+| `mise run dev:down` | Stop the dev environment |
+| `mise run dev:logs` | View dev environment logs |
+| `mise run dev:restart` | Restart a service (e.g. `-- server`) |
+| `mise run setup` | Copy config + install dependencies |
 | `mise run sqlc-generate` | Regenerate Go code after modifying SQL files |
 | `mise run swagger-generate` | Generate Swagger documentation |
 | `mise run sdk-generate` | Generate TypeScript SDK (depends on swagger-generate) |
 | `mise run db-up` | Initialize and migrate the database |
 | `mise run db-down` | Drop the database |
-| `mise run //agent:dev` | Start Agent Gateway only |
-| `mise run //cmd/agent:start` | Start the backend server only |
-| `mise run //packages/web:dev` | Start the frontend dev server only |
 
 ### Docker Deployment
 
