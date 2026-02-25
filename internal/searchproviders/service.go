@@ -115,6 +115,34 @@ func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
 				},
 			},
 		},
+		{
+			Provider:    string(ProviderExa),
+			DisplayName: "Exa",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "Exa Search API key",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Exa API base URL",
+						Required:    false,
+						Example:     "https://api.exa.ai/search",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -245,7 +273,8 @@ func (s *Service) toGetResponse(row sqlc.SearchProvider) GetResponse {
 
 func isValidProviderName(name ProviderName) bool {
 	switch name {
-	case ProviderBrave, ProviderBing, ProviderGoogle:
+	case ProviderBrave, ProviderBing, ProviderGoogle,
+		ProviderExa:
 		return true
 	default:
 		return false
