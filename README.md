@@ -9,7 +9,6 @@
     <div>Memoh</div>
     <sub>🔊 /ˈmemoʊ/</sub>
   </h1>
-  
   <p>Multi-Member, Structured Long-Memory, Containerized AI Agent System.</p>
   <p>📌 <a href="https://docs.memoh.ai/blogs/2026-02-16.html">Introduction to Memoh - The Case for an Always-On, Containerized Home Agent</a></p>
   <div align="center">
