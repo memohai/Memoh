@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -108,6 +110,8 @@ func (p *Executor) callWebSearch(ctx context.Context, providerName string, confi
 		return p.callBingSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderGoogle):
 		return p.callGoogleSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderSerper):
+		return p.callSerperSearch(ctx, configJSON, query, count)
 	default:
 		return mcpgw.BuildToolErrorResult("unsupported search provider"), nil
 	}
@@ -294,6 +298,68 @@ func (p *Executor) callGoogleSearch(ctx context.Context, configJSON []byte, quer
 			"title":       item.Title,
 			"url":         item.Link,
 			"description": item.Snippet,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+func (p *Executor) callSerperSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://google.serper.dev/search")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return mcpgw.BuildToolErrorResult("Serper API key is required"), nil
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"q": query,
+	})
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-API-KEY", apiKey)
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return mcpgw.BuildToolErrorResult("search request failed"), nil
+	}
+	var raw struct {
+		Organic []struct {
+			Title       string `json:"title"`
+			Link        string `json:"link"`
+			Description string `json:"description"`
+			Position    int    `json:"position"`
+		} `json:"organic"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	sort.Slice(raw.Organic, func(i, j int) bool {
+		return raw.Organic[i].Position < raw.Organic[j].Position
+	})
+	results := make([]map[string]any, 0, len(raw.Organic))
+	for i, item := range raw.Organic {
+		if i >= count {
+			break
+		}
+		results = append(results, map[string]any{
+			"title":       item.Title,
+			"url":         item.Link,
+			"description": item.Description,
 		})
 	}
 	return mcpgw.BuildToolSuccessResult(map[string]any{
