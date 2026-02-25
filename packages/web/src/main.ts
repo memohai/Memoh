@@ -59,7 +59,7 @@ import {
   faComments,
   faComment,
 } from '@fortawesome/free-regular-svg-icons'
-import { faSlack, faBrave, faGoogle, faMicrosoft } from '@fortawesome/free-brands-svg-icons'
+import { faSlack, faBrave, faGoogle, faMicrosoft, faYandex } from '@fortawesome/free-brands-svg-icons'
 
 library.add(
   faGear,
@@ -105,6 +105,7 @@ library.add(
   faBrave,
   faGoogle,
   faMicrosoft,
+  faYandex,
 )
 
 createApp(App)

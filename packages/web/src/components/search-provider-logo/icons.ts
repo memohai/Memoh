@@ -13,6 +13,7 @@ const PROVIDER_ICONS: Record<string, [string, string]> = {
   brave: ['fab', 'brave'],
   bing: ['fab', 'microsoft'],
   google: ['fab', 'google'],
+  yandex: ['fab', 'yandex'],
 }
 
 const DEFAULT_ICON: [string, string] = ['fas', 'globe']
