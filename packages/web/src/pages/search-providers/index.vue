@@ -28,7 +28,7 @@ import ProviderSetting from './components/provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
-const PROVIDER_TYPES = ['brave', 'bing', 'google'] as const
+const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily'] as const
 
 const filterProvider = ref('')
 const { data: providerData } = useQuery({
@@ -155,7 +155,7 @@ const openStatus = reactive({
               :key="type"
               :value="type"
             >
-              {{ type }}
+              {{ $t(`searchProvider.providerNames.${type}`, type) }}
             </SelectItem>
           </SelectGroup>
         </SelectContent>

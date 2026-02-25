@@ -66,7 +66,7 @@
                     :key="type"
                     :value="type"
                   >
-                    {{ type }}
+                    {{ $t(`searchProvider.providerNames.${type}`, type) }}
                   </SelectItem>
                 </SelectGroup>
               </SelectContent>
@@ -84,6 +84,9 @@
         </template>
         <template v-else-if="form.values.provider === 'google'">
           <GoogleSettings v-model="configProxy" />
+        </template>
+        <template v-else-if="form.values.provider === 'tavily'">
+          <TavilySettings v-model="configProxy" />
         </template>
         <div
           v-else-if="form.values.provider"
@@ -143,6 +146,7 @@ import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import BraveSettings from './brave-settings.vue'
 import BingSettings from './bing-settings.vue'
 import GoogleSettings from './google-settings.vue'
+import TavilySettings from './tavily-settings.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import { computed, inject, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -152,7 +156,7 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { putSearchProvidersById, deleteSearchProvidersById } from '@memoh/sdk'
 import type { SearchprovidersGetResponse } from '@memoh/sdk'
 
-const PROVIDER_TYPES = ['brave', 'bing', 'google'] as const
+const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily'] as const
 
 const curProvider = inject('curSearchProvider', ref<SearchprovidersGetResponse>())
 const curProviderId = computed(() => curProvider.value?.id)

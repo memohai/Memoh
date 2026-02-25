@@ -71,7 +71,7 @@
                         :key="type"
                         :value="type"
                       >
-                        {{ type }}
+                        {{ $t(`searchProvider.providerNames.${type}`, type) }}
                       </SelectItem>
                     </SelectGroup>
                   </SelectContent>
@@ -109,7 +109,7 @@ import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
-const PROVIDER_TYPES = ['brave', 'bing', 'google'] as const
+const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily'] as const
 
 const open = defineModel<boolean>('open')
 const { t } = useI18n()

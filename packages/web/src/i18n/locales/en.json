@@ -196,7 +196,13 @@
     "searchPlaceholder": "Search providers...",
     "emptyTitle": "No Search Providers",
     "emptyDescription": "Add a search provider to configure web search",
-    "deleteConfirm": "Are you sure you want to delete this search provider? This action cannot be undone."
+    "deleteConfirm": "Are you sure you want to delete this search provider? This action cannot be undone.",
+    "providerNames": {
+      "brave": "Brave",
+      "bing": "Bing",
+      "google": "Google",
+      "tavily": "Tavily"
+    }
   },
   "mcp": {
     "addTitle": "Add MCP",

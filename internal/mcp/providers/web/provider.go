@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -108,6 +109,8 @@ func (p *Executor) callWebSearch(ctx context.Context, providerName string, confi
 		return p.callBingSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderGoogle):
 		return p.callGoogleSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderTavily):
+		return p.callTavilySearch(ctx, configJSON, query, count)
 	default:
 		return mcpgw.BuildToolErrorResult("unsupported search provider"), nil
 	}
@@ -294,6 +297,62 @@ func (p *Executor) callGoogleSearch(ctx context.Context, configJSON []byte, quer
 			"title":       item.Title,
 			"url":         item.Link,
 			"description": item.Snippet,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+func (p *Executor) callTavilySearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.tavily.com/search")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return mcpgw.BuildToolErrorResult("Tavily API key is required"), nil
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"query":       query,
+		"max_results": count,
+	})
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return mcpgw.BuildToolErrorResult("search request failed"), nil
+	}
+	var raw struct {
+		Results []struct {
+			Title   string `json:"title"`
+			URL     string `json:"url"`
+			Content string `json:"content"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	results := make([]map[string]any, 0, len(raw.Results))
+	for _, item := range raw.Results {
+		results = append(results, map[string]any{
+			"title":       item.Title,
+			"url":         item.URL,
+			"description": item.Content,
 		})
 	}
 	return mcpgw.BuildToolSuccessResult(map[string]any{

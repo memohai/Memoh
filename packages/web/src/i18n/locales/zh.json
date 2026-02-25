@@ -192,7 +192,13 @@
     "searchPlaceholder": "搜索提供方…",
     "emptyTitle": "暂无搜索提供方",
     "emptyDescription": "请先添加搜索提供方，才能配置搜索功能",
-    "deleteConfirm": "确定删除该搜索提供方？删除后无法恢复。"
+    "deleteConfirm": "确定删除该搜索提供方？删除后无法恢复。",
+    "providerNames": {
+      "brave": "Brave",
+      "bing": "Bing",
+      "google": "Google",
+      "tavily": "Tavily"
+    }
   },
   "mcp": {
     "addTitle": "添加 MCP",
