@@ -115,6 +115,40 @@ func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
 				},
 			},
 		},
+		{
+			Provider:    string(ProviderSogou),
+			DisplayName: "Sogou",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"secret_id": {
+						Type:        "secret",
+						Title:       "Secret ID",
+						Description: "Tencent Cloud SecretId for Sogou search",
+						Required:    true,
+					},
+					"secret_key": {
+						Type:        "secret",
+						Title:       "Secret Key",
+						Description: "Tencent Cloud SecretKey for Sogou search",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Tencent Cloud TMS API host",
+						Required:    false,
+						Example:     "tms.tencentcloudapi.com",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -245,7 +279,8 @@ func (s *Service) toGetResponse(row sqlc.SearchProvider) GetResponse {
 
 func isValidProviderName(name ProviderName) bool {
 	switch name {
-	case ProviderBrave, ProviderBing, ProviderGoogle:
+	case ProviderBrave, ProviderBing, ProviderGoogle,
+		ProviderSogou:
 		return true
 	default:
 		return false
