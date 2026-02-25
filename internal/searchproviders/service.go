@@ -115,6 +115,41 @@ func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
 				},
 			},
 		},
+		{
+			Provider:    string(ProviderYandex),
+			DisplayName: "Yandex",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "Yandex Search API key",
+						Required:    true,
+					},
+					"search_type": {
+						Type:        "string",
+						Title:       "Search Type",
+						Description: "Yandex search type (e.g. SEARCH_TYPE_RU, SEARCH_TYPE_TR, SEARCH_TYPE_COM)",
+						Required:    false,
+						Example:     "SEARCH_TYPE_RU",
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Yandex Search API base URL",
+						Required:    false,
+						Example:     "https://searchapi.api.cloud.yandex.net/v2/web/search",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -245,7 +280,8 @@ func (s *Service) toGetResponse(row sqlc.SearchProvider) GetResponse {
 
 func isValidProviderName(name ProviderName) bool {
 	switch name {
-	case ProviderBrave, ProviderBing, ProviderGoogle:
+	case ProviderBrave, ProviderBing, ProviderGoogle,
+		ProviderYandex:
 		return true
 	default:
 		return false
