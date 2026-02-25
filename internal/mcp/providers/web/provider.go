@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -108,6 +109,8 @@ func (p *Executor) callWebSearch(ctx context.Context, providerName string, confi
 		return p.callBingSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderGoogle):
 		return p.callGoogleSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderSearXNG):
+		return p.callSearXNGSearch(ctx, configJSON, query, count)
 	default:
 		return mcpgw.BuildToolErrorResult("unsupported search provider"), nil
 	}
@@ -294,6 +297,81 @@ func (p *Executor) callGoogleSearch(ctx context.Context, configJSON []byte, quer
 			"title":       item.Title,
 			"url":         item.Link,
 			"description": item.Snippet,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+func (p *Executor) callSearXNGSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	baseURL := stringValue(cfg["base_url"])
+	if baseURL == "" {
+		return mcpgw.BuildToolErrorResult("SearXNG base URL is required"), nil
+	}
+	reqURL, err := url.Parse(strings.TrimRight(baseURL, "/"))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult("invalid SearXNG base_url"), nil
+	}
+	params := reqURL.Query()
+	params.Set("q", query)
+	params.Set("format", "json")
+	params.Set("pageno", "1")
+	if lang := stringValue(cfg["language"]); lang != "" {
+		params.Set("language", lang)
+	}
+	if ss := stringValue(cfg["safesearch"]); ss != "" {
+		params.Set("safesearch", ss)
+	}
+	if cats := stringValue(cfg["categories"]); cats != "" {
+		params.Set("categories", cats)
+	}
+	reqURL.RawQuery = params.Encode()
+
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return mcpgw.BuildToolErrorResult("search request failed"), nil
+	}
+	var raw struct {
+		Results []struct {
+			Title   string  `json:"title"`
+			URL     string  `json:"url"`
+			Content string  `json:"content"`
+			Score   float64 `json:"score"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	sort.Slice(raw.Results, func(i, j int) bool {
+		return raw.Results[i].Score > raw.Results[j].Score
+	})
+	results := make([]map[string]any, 0, len(raw.Results))
+	for i, item := range raw.Results {
+		if i >= count {
+			break
+		}
+		results = append(results, map[string]any{
+			"title":       item.Title,
+			"url":         item.URL,
+			"description": item.Content,
 		})
 	}
 	return mcpgw.BuildToolSuccessResult(map[string]any{
