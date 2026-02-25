@@ -115,6 +115,28 @@ func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
 				},
 			},
 		},
+		{
+			Provider:    string(ProviderDuckDuckGo),
+			DisplayName: "DuckDuckGo",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "DuckDuckGo HTML search URL",
+						Required:    false,
+						Example:     "https://html.duckduckgo.com/html/",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -245,7 +267,8 @@ func (s *Service) toGetResponse(row sqlc.SearchProvider) GetResponse {
 
 func isValidProviderName(name ProviderName) bool {
 	switch name {
-	case ProviderBrave, ProviderBing, ProviderGoogle:
+	case ProviderBrave, ProviderBing, ProviderGoogle,
+		ProviderDuckDuckGo:
 		return true
 	default:
 		return false

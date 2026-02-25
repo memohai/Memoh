@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -108,6 +110,8 @@ func (p *Executor) callWebSearch(ctx context.Context, providerName string, confi
 		return p.callBingSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderGoogle):
 		return p.callGoogleSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderDuckDuckGo):
+		return p.callDuckDuckGoSearch(ctx, configJSON, query, count)
 	default:
 		return mcpgw.BuildToolErrorResult("unsupported search provider"), nil
 	}
@@ -300,6 +304,94 @@ func (p *Executor) callGoogleSearch(ctx context.Context, configJSON []byte, quer
 		"query":   query,
 		"results": results,
 	}), nil
+}
+
+func (p *Executor) callDuckDuckGoSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://html.duckduckgo.com/html/")
+
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	form := url.Values{}
+	form.Set("q", query)
+	form.Set("b", "")
+	form.Set("kl", "")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return mcpgw.BuildToolErrorResult("search request failed"), nil
+	}
+
+	htmlStr := string(body)
+	links := ddgResultLinkRe.FindAllStringSubmatch(htmlStr, -1)
+	titles := ddgResultTitleRe.FindAllStringSubmatch(htmlStr, -1)
+	snippets := ddgResultSnippetRe.FindAllStringSubmatch(htmlStr, -1)
+
+	n := len(links)
+	if len(titles) < n {
+		n = len(titles)
+	}
+	if count < n {
+		n = count
+	}
+
+	results := make([]map[string]any, 0, n)
+	for i := 0; i < n; i++ {
+		rawURL := html.UnescapeString(links[i][1])
+		realURL := extractDDGURL(rawURL)
+		title := html.UnescapeString(strings.TrimSpace(titles[i][1]))
+		snippet := ""
+		if i < len(snippets) {
+			snippet = html.UnescapeString(strings.TrimSpace(ddgHTMLTagRe.ReplaceAllString(snippets[i][1], "")))
+		}
+		if realURL == "" {
+			continue
+		}
+		results = append(results, map[string]any{
+			"title":       title,
+			"url":         realURL,
+			"description": snippet,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+var (
+	ddgResultLinkRe    = regexp.MustCompile(`class="result__a"[^>]*href="([^"]+)"`)
+	ddgResultTitleRe   = regexp.MustCompile(`class="result__a"[^>]*>([^<]+)<`)
+	ddgResultSnippetRe = regexp.MustCompile(`class="result__snippet"[^>]*>([\s\S]*?)</a>`)
+	ddgHTMLTagRe       = regexp.MustCompile(`<[^>]*>`)
+)
+
+func extractDDGURL(rawURL string) string {
+	if strings.Contains(rawURL, "uddg=") {
+		parsed, err := url.Parse(rawURL)
+		if err == nil {
+			if uddg := parsed.Query().Get("uddg"); uddg != "" {
+				return uddg
+			}
+		}
+	}
+	if strings.HasPrefix(rawURL, "//") {
+		return "https:" + rawURL
+	}
+	return rawURL
 }
 
 func parseTimeout(configJSON []byte, fallback time.Duration) time.Duration {
