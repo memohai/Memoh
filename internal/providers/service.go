@@ -193,31 +193,19 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		return resp, nil
 	}
 
+	// Get models for this provider to determine which models to use for the probes
+	models, err := s.queries.ListModelsByProviderID(ctx, providerID)
+	if err != nil {
+		return resp, fmt.Errorf("list models: %w", err)
+	}
+
 	type namedResult struct {
 		name   string
 		result CheckResult
 	}
 
-	probes := []struct {
-		name string
-		fn   func() CheckResult
-	}{
-		{"openai-completions", func() CheckResult {
-			return probeOpenAICompletions(ctx, baseURL, apiKey)
-		}},
-		{"openai-responses", func() CheckResult {
-			return probeOpenAIResponses(ctx, baseURL, apiKey)
-		}},
-		{"anthropic-messages", func() CheckResult {
-			return probeAnthropicMessages(ctx, baseURL, apiKey)
-		}},
-		{"google-generative-ai", func() CheckResult {
-			return probeGoogleGenerativeAI(ctx, baseURL, apiKey)
-		}},
-		{"embedding", func() CheckResult {
-			return probeEmbedding(ctx, baseURL, apiKey)
-		}},
-	}
+	// Build probes: always include all 5 checks, use user-configured models if available, otherwise use defaults
+	probes := buildAllProbes(ctx, models, baseURL, apiKey)
 
 	results := make([]namedResult, len(probes))
 	var wg sync.WaitGroup
@@ -253,6 +241,76 @@ func probeReachable(ctx context.Context, baseURL string) (bool, string) {
 	return true, ""
 }
 
+// buildAllProbes returns all 5 probes, using user-configured models if available, otherwise using defaults
+func buildAllProbes(ctx context.Context, models []sqlc.Model, baseURL, apiKey string) []struct {
+	name string
+	fn   func() CheckResult
+} {
+	defaultModels := map[string]string{
+		"openai-responses":   "gpt-4o-mini",
+		"anthropic-messages": "claude-3-haiku-20240307",
+		"embedding":          "text-embedding-3-small",
+	}
+
+	userChatModels := make(map[string]string) // client_type -> model_id
+	var userEmbeddingModel string
+
+	for _, m := range models {
+		clientType := m.ClientType.String
+		if m.Type == "chat" || m.Type == "" {
+			if clientType != "" && userChatModels[clientType] == "" {
+				userChatModels[clientType] = m.ModelID
+			}
+		}
+		if m.Type == "embedding" && userEmbeddingModel == "" {
+			userEmbeddingModel = m.ModelID
+		}
+	}
+
+	getModel := func(userModel, defaultKey string) string {
+		if userModel != "" {
+			return userModel
+		}
+		return defaultModels[defaultKey]
+	}
+
+	return []struct {
+		name string
+		fn   func() CheckResult
+	}{
+		{
+			name: "openai-completions",
+			fn: func() CheckResult {
+				return probeOpenAICompletions(ctx, baseURL, apiKey)
+			},
+		},
+		{
+			name: "openai-responses",
+			fn: func() CheckResult {
+				return probeOpenAIResponses(ctx, baseURL, apiKey, getModel(userChatModels["openai-responses"], "openai-responses"))
+			},
+		},
+		{
+			name: "anthropic-messages",
+			fn: func() CheckResult {
+				return probeAnthropicMessages(ctx, baseURL, apiKey, getModel(userChatModels["anthropic-messages"], "anthropic-messages"))
+			},
+		},
+		{
+			name: "google-generative-ai",
+			fn: func() CheckResult {
+				return probeGoogleGenerativeAI(ctx, baseURL, apiKey)
+			},
+		},
+		{
+			name: "embedding",
+			fn: func() CheckResult {
+				return probeEmbedding(ctx, baseURL, apiKey, getModel(userEmbeddingModel, "embedding"))
+			},
+		},
+	}
+}
+
 func probeOpenAICompletions(ctx context.Context, baseURL, apiKey string) CheckResult {
 	return probeEndpoint(ctx, http.MethodGet, baseURL+"/models",
 		map[string]string{
@@ -260,23 +318,37 @@ func probeOpenAICompletions(ctx context.Context, baseURL, apiKey string) CheckRe
 		}, "")
 }
 
-func probeOpenAIResponses(ctx context.Context, baseURL, apiKey string) CheckResult {
-	body := `{"model":"probe-test","input":"hi","max_output_tokens":1}`
+func probeOpenAIResponses(ctx context.Context, baseURL, apiKey, model string) CheckResult {
+	body, err := json.Marshal(map[string]any{
+		"model":           model,
+		"input":           "hi",
+		"max_output_tokens": 1,
+	})
+	if err != nil {
+		return CheckResult{Status: CheckStatusError, Message: err.Error()}
+	}
 	return probeEndpoint(ctx, http.MethodPost, baseURL+"/responses",
 		map[string]string{
 			"Authorization": "Bearer " + apiKey,
 			"Content-Type":  "application/json",
-		}, body)
+		}, string(body))
 }
 
-func probeAnthropicMessages(ctx context.Context, baseURL, apiKey string) CheckResult {
-	body := `{"model":"probe-test","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`
+func probeAnthropicMessages(ctx context.Context, baseURL, apiKey, model string) CheckResult {
+	body, err := json.Marshal(map[string]any{
+		"model":    model,
+		"messages": []map[string]string{{"role": "user", "content": "hi"}},
+		"max_tokens": 1,
+	})
+	if err != nil {
+		return CheckResult{Status: CheckStatusError, Message: err.Error()}
+	}
 	return probeEndpoint(ctx, http.MethodPost, baseURL+"/messages",
 		map[string]string{
 			"x-api-key":         apiKey,
 			"anthropic-version": "2023-06-01",
 			"Content-Type":      "application/json",
-		}, body)
+		}, string(body))
 }
 
 func probeGoogleGenerativeAI(ctx context.Context, baseURL, apiKey string) CheckResult {
@@ -286,13 +358,19 @@ func probeGoogleGenerativeAI(ctx context.Context, baseURL, apiKey string) CheckR
 		}, "")
 }
 
-func probeEmbedding(ctx context.Context, baseURL, apiKey string) CheckResult {
-	body := `{"model":"probe-test","input":"hello"}`
+func probeEmbedding(ctx context.Context, baseURL, apiKey, model string) CheckResult {
+	body, err := json.Marshal(map[string]any{
+		"model": model,
+		"input": "hello",
+	})
+	if err != nil {
+		return CheckResult{Status: CheckStatusError, Message: err.Error()}
+	}
 	return probeEndpoint(ctx, http.MethodPost, baseURL+"/embeddings",
 		map[string]string{
 			"Authorization": "Bearer " + apiKey,
 			"Content-Type":  "application/json",
-		}, body)
+		}, string(body))
 }
 
 func probeEndpoint(ctx context.Context, method, url string, headers map[string]string, body string) CheckResult {
