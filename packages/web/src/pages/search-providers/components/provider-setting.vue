@@ -91,6 +91,24 @@
         <template v-else-if="form.values.provider === 'sogou'">
           <SogouSettings v-model="configProxy" />
         </template>
+        <template v-else-if="form.values.provider === 'serper'">
+          <SerperSettings v-model="configProxy" />
+        </template>
+        <template v-else-if="form.values.provider === 'searxng'">
+          <SearxngSettings v-model="configProxy" />
+        </template>
+        <template v-else-if="form.values.provider === 'jina'">
+          <JinaSettings v-model="configProxy" />
+        </template>
+        <template v-else-if="form.values.provider === 'exa'">
+          <ExaSettings v-model="configProxy" />
+        </template>
+        <template v-else-if="form.values.provider === 'bocha'">
+          <BochaSettings v-model="configProxy" />
+        </template>
+        <template v-else-if="form.values.provider === 'duckduckgo'">
+          <DuckduckgoSettings v-model="configProxy" />
+        </template>
         <div
           v-else-if="form.values.provider"
           class="text-sm text-muted-foreground"
@@ -151,6 +169,12 @@ import BingSettings from './bing-settings.vue'
 import GoogleSettings from './google-settings.vue'
 import TavilySettings from './tavily-settings.vue'
 import SogouSettings from './sogou-settings.vue'
+import SerperSettings from './serper-settings.vue'
+import SearxngSettings from './searxng-settings.vue'
+import JinaSettings from './jina-settings.vue'
+import ExaSettings from './exa-settings.vue'
+import BochaSettings from './bocha-settings.vue'
+import DuckduckgoSettings from './duckduckgo-settings.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import { computed, inject, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -160,7 +184,7 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { putSearchProvidersById, deleteSearchProvidersById } from '@memoh/sdk'
 import type { SearchprovidersGetResponse } from '@memoh/sdk'
 
-const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou'] as const
+const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo'] as const
 
 const curProvider = inject('curSearchProvider', ref<SearchprovidersGetResponse>())
 const curProviderId = computed(() => curProvider.value?.id)

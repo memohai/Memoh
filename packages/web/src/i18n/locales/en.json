@@ -202,7 +202,13 @@
       "bing": "Bing",
       "google": "Google",
       "tavily": "Tavily",
-      "sogou": "Sogou"
+      "sogou": "Sogou",
+      "serper": "Serper",
+      "searxng": "SearXNG",
+      "jina": "Jina",
+      "exa": "Exa",
+      "bocha": "Bocha",
+      "duckduckgo": "DuckDuckGo"
     }
   },
   "mcp": {

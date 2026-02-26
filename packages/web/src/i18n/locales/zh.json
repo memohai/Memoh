@@ -198,7 +198,13 @@
       "bing": "Bing",
       "google": "Google",
       "tavily": "Tavily",
-      "sogou": "搜狗"
+      "sogou": "搜狗",
+      "serper": "Serper",
+      "searxng": "SearXNG",
+      "jina": "Jina",
+      "exa": "Exa",
+      "bocha": "博查",
+      "duckduckgo": "DuckDuckGo"
     }
   },
   "mcp": {
