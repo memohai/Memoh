@@ -153,7 +153,7 @@ func (p *Executor) callBraveSearch(ctx context.Context, configJSON []byte, query
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return mcpgw.BuildToolErrorResult("search request failed"), nil
+		return buildSearchHTTPError(resp.StatusCode, body), nil
 	}
 	var raw struct {
 		Web struct {
@@ -214,7 +214,7 @@ func (p *Executor) callBingSearch(ctx context.Context, configJSON []byte, query 
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return mcpgw.BuildToolErrorResult("search request failed"), nil
+		return buildSearchHTTPError(resp.StatusCode, body), nil
 	}
 	var raw struct {
 		WebPages struct {
@@ -283,7 +283,7 @@ func (p *Executor) callGoogleSearch(ctx context.Context, configJSON []byte, quer
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return mcpgw.BuildToolErrorResult("search request failed"), nil
+		return buildSearchHTTPError(resp.StatusCode, body), nil
 	}
 	var raw struct {
 		Items []struct {
@@ -370,7 +370,7 @@ func (p *Executor) callSogouSearch(ctx context.Context, configJSON []byte, query
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return mcpgw.BuildToolErrorResult("search request failed"), nil
+		return buildSearchHTTPError(resp.StatusCode, body), nil
 	}
 	var rawResp struct {
 		Response struct {
@@ -438,6 +438,47 @@ func hmacSHA256(key, data []byte) []byte {
 	h := hmac.New(sha256.New, key)
 	h.Write(data)
 	return h.Sum(nil)
+}
+
+// buildSearchHTTPError builds an error result for non-2xx search API responses.
+// It includes the HTTP status code and attempts to extract a brief error detail
+// from the response body (capped at 200 characters to avoid context blowout).
+func buildSearchHTTPError(statusCode int, body []byte) map[string]any {
+	detail := extractJSONErrorMessage(body)
+	if detail == "" {
+		detail = strings.TrimSpace(string(body))
+	}
+	if len(detail) > 200 {
+		detail = detail[:200] + "..."
+	}
+	if detail != "" {
+		return mcpgw.BuildToolErrorResult(fmt.Sprintf("search request failed (HTTP %d): %s", statusCode, detail))
+	}
+	return mcpgw.BuildToolErrorResult(fmt.Sprintf("search request failed (HTTP %d)", statusCode))
+}
+
+// extractJSONErrorMessage probes common JSON error response patterns and returns
+// the first human-readable message found, or "" if none.
+func extractJSONErrorMessage(body []byte) string {
+	var obj map[string]any
+	if json.Unmarshal(body, &obj) != nil {
+		return ""
+	}
+	for _, key := range []string{"error", "message", "detail", "error_message"} {
+		v, ok := obj[key]
+		if !ok {
+			continue
+		}
+		switch val := v.(type) {
+		case string:
+			return val
+		case map[string]any:
+			if msg, ok := val["message"].(string); ok {
+				return msg
+			}
+		}
+	}
+	return ""
 }
 
 func parseTimeout(configJSON []byte, fallback time.Duration) time.Duration {
