@@ -1,6 +1,6 @@
 # Docker Installation
 
-Docker is the recommended way to run Memoh. The stack includes PostgreSQL, Qdrant, Containerd, the main server, agent gateway, and web UI — all orchestrated via Docker Compose. You do not need to install containerd, nerdctl, or buildkit on your host; everything runs inside containers.
+Docker is the recommended way to run Memoh. The stack includes PostgreSQL, Qdrant, the main server (with embedded Containerd), agent gateway, and web UI — all orchestrated via Docker Compose. You do not need to install containerd, nerdctl, or buildkit on your host; everything runs inside containers.
 
 ## Prerequisites
 
@@ -8,7 +8,7 @@ Docker is the recommended way to run Memoh. The stack includes PostgreSQL, Qdran
 - [Docker Compose v2](https://docs.docker.com/compose/install/)
 - Git
 
-## One-Click Install
+## One-Click Install (Recommended)
 
 Run the official install script (requires Docker and Docker Compose):
 
@@ -19,10 +19,10 @@ curl -fsSL https://memoh.sh | sudo sh
 The script will:
 
 1. Check for Docker and Docker Compose
-2. Prompt for configuration (workspace, data directory, admin credentials, JWT secret, Postgres password)
+2. Prompt for configuration (workspace, data directory, admin credentials, JWT secret, Postgres password, China mirror)
 3. Clone the repository
-4. Generate `config.toml` from the Docker template
-5. Start all services with `docker compose up -d --build`
+4. Generate `config.toml` from the Docker template with your settings
+5. Pull images and start all services
 
 **Silent install** (use all defaults, no prompts):
 
@@ -40,17 +40,44 @@ Defaults when running silently:
 
 ## Manual Install
 
-Clone the repository and start with Docker Compose:
-
 ```bash
 git clone https://github.com/memohai/Memoh.git
 cd Memoh
-sudo docker compose up -d
+cp conf/app.docker.toml config.toml
+```
+
+Edit `config.toml` — at minimum change:
+
+- `admin.password` — Admin password
+- `auth.jwt_secret` — Generate with `openssl rand -base64 32`
+- `postgres.password` — Database password (also set `POSTGRES_PASSWORD` env var to match)
+
+Then start:
+
+```bash
+sudo POSTGRES_PASSWORD=your-db-password docker compose up -d
 ```
 
 > On macOS or if your user is in the `docker` group, `sudo` is not required.
 
-By default, Docker Compose uses `conf/app.docker.toml`. No config file in the project root is mounted — only this built-in config is used. See [config.toml reference](./config-toml) for all configuration fields.
+> **Important**: `docker-compose.yml` mounts `./config.toml` by default. You must create this file before starting — running without it will fail.
+
+### China Mainland Mirror
+
+For users in mainland China who cannot access Docker Hub directly, uncomment the `registry` line in `config.toml`:
+
+```toml
+[mcp]
+registry = "memoh.cn"
+```
+
+And use the China mirror compose overlay:
+
+```bash
+sudo docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml up -d
+```
+
+The install script handles this automatically when you answer "yes" to the China mirror prompt.
 
 ## Access Points
 
@@ -62,32 +89,9 @@ After startup:
 | API           | http://localhost:8080  |
 | Agent Gateway | http://localhost:8081  |
 
-Default login: `admin` / `admin123`
+Default login: `admin` / `admin123` (change this in `config.toml`).
 
-First startup may take 1–2 minutes while images build and services initialize.
-
-## Custom Configuration
-
-To use your own config file:
-
-1. Copy the Docker config template and edit it. See [config.toml reference](./config-toml) for field descriptions:
-
-```bash
-cp conf/app.docker.toml config.toml
-nano config.toml
-```
-
-2. Point `MEMOH_CONFIG` at your config when starting (path is on the host; run `docker compose` from the project root):
-
-```bash
-sudo MEMOH_CONFIG=./config.toml docker compose up -d
-```
-
-**Recommended changes for production** (see [config.toml reference](./config-toml) for details):
-
-- `admin.password` — Change the admin password
-- `auth.jwt_secret` — Generate with `openssl rand -base64 32`
-- `postgres.password` — Change the database password (and set `POSTGRES_PASSWORD` when running `docker compose`)
+First startup may take 1–2 minutes while images are pulled and services initialize.
 
 ## Common Commands
 
@@ -98,13 +102,13 @@ docker compose up -d           # Start
 docker compose down            # Stop
 docker compose logs -f         # View logs
 docker compose ps              # Status
-docker compose up -d --build   # Rebuild and restart
+docker compose pull && docker compose up -d  # Update to latest images
 ```
 
 ## Production Checklist
 
-1. **HTTPS** — Configure SSL (e.g. via `docker-compose.override.yml` with certs)
-2. **Passwords** — Change all default passwords and secrets
+1. **Passwords** — Change all default passwords and secrets in `config.toml`
+2. **HTTPS** — Configure SSL (e.g. via `docker-compose.override.yml` with certs or a reverse proxy)
 3. **Firewall** — Restrict access to necessary ports
 4. **Resource limits** — Set memory/CPU limits for containers
 5. **Backups** — Regular backups of Postgres and Qdrant data
@@ -113,8 +117,7 @@ docker compose up -d --build   # Rebuild and restart
 
 ```bash
 docker compose logs server      # View main service logs
-docker compose logs containerd # View containerd logs
-docker compose config          # Validate configuration
+docker compose config           # Validate configuration
 docker compose build --no-cache && docker compose up -d  # Full rebuild
 ```
 
