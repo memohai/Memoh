@@ -5,10 +5,7 @@
 
 <div align="center">
   <img src="./assets/logo.png" alt="Memoh" width="100" height="100">
-  <h1>
-    <div>Memoh</div>
-    <sub>🔊 /ˈmemoʊ/</sub>
-  </h1>
+  <h1>Memoh</h1>
   <p>多用户、结构化记忆、容器化的 AI Agent 系统。</p>
   <p>📌 <a href="https://docs.memoh.ai/blogs/2026-02-16.html">Introduction to Memoh - The Case for an Always-On, Containerized Home Agent</a></p>
   <div align="center">

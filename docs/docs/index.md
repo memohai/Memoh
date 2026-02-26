@@ -1,6 +1,6 @@
 # Memoh Documentation
 
-Memoh is a multi-member, structured long-memory, containerized AI agent system. Create your own AI bots, chat with them via Telegram, Lark (Feishu), Web, or CLI. Each bot runs in an isolated container with its own memory system — able to edit files, run commands, and access the network.
+Memoh(/ˈmemoʊ/) is a multi-member, structured long-memory, containerized AI agent system. Create your own AI bots, chat with them via Telegram, Lark (Feishu), Web, or CLI. Each bot runs in an isolated container with its own memory system — able to edit files, run commands, and access the network.
 
 ## Documentation
 
