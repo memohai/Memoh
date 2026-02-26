@@ -72,6 +72,7 @@ JWT_SECRET="$(gen_secret)"
 PG_PASS="memoh123"
 WORKSPACE="$WORKSPACE_DEFAULT"
 MEMOH_DATA_DIR="$MEMOH_DATA_DIR_DEFAULT"
+USE_CN_MIRROR=false
 
 if [ "$SILENT" = false ]; then
   echo "Configure Memoh (press Enter to use defaults):" > /dev/tty
@@ -115,6 +116,12 @@ if [ "$SILENT" = false ]; then
   read -r input < /dev/tty || true
   [ -n "$input" ] && PG_PASS="$input"
 
+  printf "  Use China mainland mirror? (y/N): " > /dev/tty
+  read -r input < /dev/tty || true
+  case "$input" in
+    [Yy]|[Yy][Ee][Ss]) USE_CN_MIRROR=true ;;
+  esac
+
   echo "" > /dev/tty
 fi
 
@@ -144,6 +151,9 @@ sed -i.bak "s|password = \"admin123\"|password = \"${ADMIN_PASS}\"|" config.toml
 sed -i.bak "s|jwt_secret = \".*\"|jwt_secret = \"${JWT_SECRET}\"|" config.toml
 sed -i.bak "s|password = \"memoh123\"|password = \"${PG_PASS}\"|" config.toml
 export POSTGRES_PASSWORD="${PG_PASS}"
+if [ "$USE_CN_MIRROR" = true ]; then
+  sed -i.bak 's|# registry = "memoh.cn"|registry = "memoh.cn"|' config.toml
+fi
 rm -f config.toml.bak
 
 # Use generated config and data dir
@@ -152,13 +162,19 @@ export MEMOH_CONFIG=./config.toml
 export MEMOH_DATA_DIR
 mkdir -p "$MEMOH_DATA_DIR"
 
+COMPOSE_FILES="-f docker-compose.yml"
+if [ "$USE_CN_MIRROR" = true ]; then
+  COMPOSE_FILES="$COMPOSE_FILES -f docker/docker-compose.cn.yml"
+  echo "${GREEN}✓ Using China mainland mirror (memoh.cn)${NC}"
+fi
+
 echo ""
 echo "${GREEN}Pulling latest Docker images...${NC}"
-$DOCKER compose pull
+$DOCKER compose $COMPOSE_FILES pull
 
 echo ""
 echo "${GREEN}Starting services (first startup may take a few minutes)...${NC}"
-$DOCKER compose up -d
+$DOCKER compose $COMPOSE_FILES up -d
 
 echo ""
 echo "${GREEN}========================================${NC}"
@@ -171,9 +187,10 @@ echo "  Agent Gateway:   http://localhost:8081"
 echo ""
 echo "  Admin login:     ${ADMIN_USER} / ${ADMIN_PASS}"
 echo ""
+COMPOSE_CMD="$DOCKER compose $COMPOSE_FILES"
 echo "Commands:"
-echo "  cd ${INSTALL_DIR} && $DOCKER compose ps       # Status"
-echo "  cd ${INSTALL_DIR} && $DOCKER compose logs -f   # Logs"
-echo "  cd ${INSTALL_DIR} && $DOCKER compose down      # Stop"
+echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} ps       # Status"
+echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} logs -f   # Logs"
+echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} down      # Stop"
 echo ""
 echo "${YELLOW}First startup may take 1-2 minutes, please be patient.${NC}"
