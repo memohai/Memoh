@@ -3,12 +3,16 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -111,6 +115,8 @@ func (p *Executor) callWebSearch(ctx context.Context, providerName string, confi
 		return p.callGoogleSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderTavily):
 		return p.callTavilySearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderSogou):
+		return p.callSogouSearch(ctx, configJSON, query, count)
 	default:
 		return mcpgw.BuildToolErrorResult("unsupported search provider"), nil
 	}
@@ -359,6 +365,137 @@ func (p *Executor) callTavilySearch(ctx context.Context, configJSON []byte, quer
 		"query":   query,
 		"results": results,
 	}), nil
+}
+
+func (p *Executor) callSogouSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	host := firstNonEmpty(stringValue(cfg["base_url"]), "tms.tencentcloudapi.com")
+	secretID := stringValue(cfg["secret_id"])
+	secretKey := stringValue(cfg["secret_key"])
+	if secretID == "" || secretKey == "" {
+		return mcpgw.BuildToolErrorResult("Sogou search requires Tencent Cloud SecretId and SecretKey"), nil
+	}
+
+	action := "SearchPro"
+	version := "2020-12-29"
+	service := "tms"
+	payload, _ := json.Marshal(map[string]any{
+		"Query": query,
+		"Cnt":   20,
+	})
+
+	now := time.Now().UTC()
+	timestamp := fmt.Sprintf("%d", now.Unix())
+	date := now.Format("2006-01-02")
+
+	hashedPayload := sha256Hex(payload)
+	canonicalHeaders := fmt.Sprintf("content-type:%s\nhost:%s\nx-tc-action:%s\n",
+		"application/json; charset=utf-8", host, strings.ToLower(action))
+	signedHeaders := "content-type;host;x-tc-action"
+	canonicalRequest := fmt.Sprintf("%s\n%s\n%s\n%s\n%s\n%s",
+		"POST", "/", "", canonicalHeaders, signedHeaders, hashedPayload)
+
+	credentialScope := fmt.Sprintf("%s/%s/tc3_request", date, service)
+	stringToSign := fmt.Sprintf("TC3-HMAC-SHA256\n%s\n%s\n%s",
+		timestamp, credentialScope, sha256Hex([]byte(canonicalRequest)))
+
+	secretDate := hmacSHA256([]byte("TC3"+secretKey), []byte(date))
+	secretService := hmacSHA256(secretDate, []byte(service))
+	secretSigning := hmacSHA256(secretService, []byte("tc3_request"))
+	signature := hex.EncodeToString(hmacSHA256(secretSigning, []byte(stringToSign)))
+
+	authorization := fmt.Sprintf("TC3-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
+		secretID, credentialScope, signedHeaders, signature)
+
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+host+"/", bytes.NewReader(payload))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", authorization)
+	req.Header.Set("X-TC-Action", action)
+	req.Header.Set("X-TC-Version", version)
+	req.Header.Set("X-TC-Timestamp", timestamp)
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return buildSearchHTTPError(resp.StatusCode, body), nil
+	}
+	var rawResp struct {
+		Response struct {
+			Error *struct {
+				Code    string `json:"Code"`
+				Message string `json:"Message"`
+			} `json:"Error,omitempty"`
+			Pages []json.RawMessage `json:"Pages"`
+		} `json:"Response"`
+	}
+	if err := json.Unmarshal(body, &rawResp); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	if rawResp.Response.Error != nil {
+		return mcpgw.BuildToolErrorResult("Sogou search failed: " + rawResp.Response.Error.Message), nil
+	}
+
+	type sogouPage struct {
+		Title   string  `json:"title"`
+		URL     string  `json:"url"`
+		Passage string  `json:"passage"`
+		Score   float64 `json:"scour"`
+	}
+	var pages []sogouPage
+	for _, raw := range rawResp.Response.Pages {
+		var rawStr string
+		if err := json.Unmarshal(raw, &rawStr); err == nil {
+			var page sogouPage
+			if err := json.Unmarshal([]byte(rawStr), &page); err == nil {
+				pages = append(pages, page)
+			}
+		} else {
+			var page sogouPage
+			if err := json.Unmarshal(raw, &page); err == nil {
+				pages = append(pages, page)
+			}
+		}
+	}
+	sort.Slice(pages, func(i, j int) bool {
+		return pages[i].Score > pages[j].Score
+	})
+	results := make([]map[string]any, 0, len(pages))
+	for i, page := range pages {
+		if i >= count {
+			break
+		}
+		results = append(results, map[string]any{
+			"title":       page.Title,
+			"url":         page.URL,
+			"description": page.Passage,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+func sha256Hex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+func hmacSHA256(key, data []byte) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write(data)
+	return h.Sum(nil)
 }
 
 // buildSearchHTTPError builds an error result for non-2xx search API responses.
