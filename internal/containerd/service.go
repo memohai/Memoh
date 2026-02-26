@@ -1,8 +1,6 @@
 package containerd
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -17,16 +15,13 @@ import (
 	tasksv1 "github.com/containerd/containerd/api/services/tasks/v1"
 	tasktypes "github.com/containerd/containerd/api/types/task"
 	containerd "github.com/containerd/containerd/v2/client"
-	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
-	"github.com/containerd/platforms"
 	"github.com/memohai/memoh/internal/config"
-	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
@@ -300,37 +295,12 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 }
 
 func (s *DefaultService) snapshotParentFromLayers(ctx context.Context, image containerd.Image) (string, error) {
-	manifest, err := images.Manifest(ctx, s.client.ContentStore(), image.Target(), platforms.Default())
+	diffIDs, err := image.RootFS(ctx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read image rootfs: %w", err)
 	}
-	if len(manifest.Layers) == 0 {
-		return "", fmt.Errorf("image has no layer descriptors")
-	}
-	diffIDs := make([]digest.Digest, 0, len(manifest.Layers))
-	for _, layer := range manifest.Layers {
-		blob, err := content.ReadBlob(ctx, s.client.ContentStore(), layer)
-		if err != nil {
-			return "", err
-		}
-		reader := bytes.NewReader(blob)
-		var r io.ReadCloser
-		if strings.Contains(layer.MediaType, "gzip") {
-			r, err = gzip.NewReader(reader)
-			if err != nil {
-				return "", err
-			}
-		} else {
-			r = io.NopCloser(reader)
-		}
-
-		digester := digest.Canonical.Digester()
-		if _, err := io.Copy(digester.Hash(), r); err != nil {
-			_ = r.Close()
-			return "", err
-		}
-		_ = r.Close()
-		diffIDs = append(diffIDs, digester.Digest())
+	if len(diffIDs) == 0 {
+		return "", fmt.Errorf("image has no layers")
 	}
 	chainIDs := identity.ChainIDs(diffIDs)
 	return chainIDs[len(chainIDs)-1].String(), nil
