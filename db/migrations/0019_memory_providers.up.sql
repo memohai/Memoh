@@ -16,23 +16,35 @@ CREATE TABLE IF NOT EXISTS memory_providers (
 ALTER TABLE bots ADD COLUMN IF NOT EXISTS memory_provider_id UUID REFERENCES memory_providers(id) ON DELETE SET NULL;
 
 -- Migrate: create a default builtin provider with existing model IDs, then link bots to it.
+-- Guard: only reference old columns if they actually exist (fresh installs won't have them).
+-- Uses dynamic SQL (EXECUTE) so PL/pgSQL doesn't validate column names at parse time.
 DO $$
 DECLARE
   _provider_id UUID;
+  _has_old_cols BOOLEAN;
+  _any_set BOOLEAN;
 BEGIN
-  -- Only migrate if any bot has memory_model_id or embedding_model_id set.
-  IF EXISTS (SELECT 1 FROM bots WHERE memory_model_id IS NOT NULL OR embedding_model_id IS NOT NULL) THEN
-    INSERT INTO memory_providers (name, provider, config, is_default)
-    VALUES ('Built-in Memory', 'builtin', '{}'::jsonb, true)
-    ON CONFLICT (name) DO UPDATE SET updated_at = now()
-    RETURNING id INTO _provider_id;
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'bots' AND column_name = 'memory_model_id'
+  ) INTO _has_old_cols;
 
-    UPDATE bots
-    SET memory_provider_id = _provider_id
-    WHERE memory_model_id IS NOT NULL OR embedding_model_id IS NOT NULL;
+  IF _has_old_cols THEN
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM bots WHERE memory_model_id IS NOT NULL OR embedding_model_id IS NOT NULL)'
+      INTO _any_set;
+
+    IF _any_set THEN
+      INSERT INTO memory_providers (name, provider, config, is_default)
+      VALUES ('Built-in Memory', 'builtin', '{}'::jsonb, true)
+      ON CONFLICT (name) DO UPDATE SET updated_at = now()
+      RETURNING id INTO _provider_id;
+
+      EXECUTE 'UPDATE bots SET memory_provider_id = $1 WHERE memory_model_id IS NOT NULL OR embedding_model_id IS NOT NULL'
+        USING _provider_id;
+    END IF;
   END IF;
 END $$;
 
--- Drop the old columns.
+-- Drop the old columns (safe even if they don't exist).
 ALTER TABLE bots DROP COLUMN IF EXISTS memory_model_id;
 ALTER TABLE bots DROP COLUMN IF EXISTS embedding_model_id;
