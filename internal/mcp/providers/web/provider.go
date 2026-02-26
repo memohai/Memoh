@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"html"
 	"io"
@@ -131,6 +133,8 @@ func (p *Executor) callWebSearch(ctx context.Context, providerName string, confi
 		return p.callBochaSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderDuckDuckGo):
 		return p.callDuckDuckGoSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderYandex):
+		return p.callYandexSearch(ctx, configJSON, query, count)
 	default:
 		return mcpgw.BuildToolErrorResult("unsupported search provider"), nil
 	}
@@ -919,6 +923,139 @@ func extractDDGURL(rawURL string) string {
 		return "https:" + rawURL
 	}
 	return rawURL
+}
+
+func (p *Executor) callYandexSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://searchapi.api.cloud.yandex.net/v2/web/search")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return mcpgw.BuildToolErrorResult("Yandex API key is required"), nil
+	}
+	searchType := firstNonEmpty(stringValue(cfg["search_type"]), "SEARCH_TYPE_RU")
+	payload, _ := json.Marshal(map[string]any{
+		"query": map[string]any{
+			"queryText":  query,
+			"searchType": searchType,
+		},
+		"groupSpec": map[string]any{
+			"groupMode":    "GROUP_MODE_DEEP",
+			"groupsOnPage": count,
+			"docsInGroup":  1,
+		},
+	})
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Api-Key "+apiKey)
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return buildSearchHTTPError(resp.StatusCode, body), nil
+	}
+	var rawResp struct {
+		RawData string `json:"rawData"`
+	}
+	if err := json.Unmarshal(body, &rawResp); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	xmlData, err := base64.StdEncoding.DecodeString(rawResp.RawData)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult("failed to decode Yandex response"), nil
+	}
+	results, err := parseYandexXML(xmlData)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult("failed to parse Yandex XML response"), nil
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+type xmlInnerText string
+
+func (t *xmlInnerText) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var buf strings.Builder
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			break
+		}
+		switch v := tok.(type) {
+		case xml.CharData:
+			buf.Write(v)
+		case xml.StartElement:
+			var inner xmlInnerText
+			if err := d.DecodeElement(&inner, &v); err != nil {
+				return err
+			}
+			buf.WriteString(string(inner))
+		case xml.EndElement:
+			*t = xmlInnerText(buf.String())
+			return nil
+		}
+	}
+	*t = xmlInnerText(buf.String())
+	return nil
+}
+
+type yandexResponse struct {
+	XMLName xml.Name      `xml:"response"`
+	Results yandexResults `xml:"results"`
+}
+
+type yandexResults struct {
+	Grouping yandexGrouping `xml:"grouping"`
+}
+
+type yandexGrouping struct {
+	Groups []yandexGroup `xml:"group"`
+}
+
+type yandexGroup struct {
+	Doc yandexDoc `xml:"doc"`
+}
+
+type yandexDoc struct {
+	URL      xmlInnerText   `xml:"url"`
+	Title    xmlInnerText   `xml:"title"`
+	Passages yandexPassages `xml:"passages"`
+}
+
+type yandexPassages struct {
+	Passage []xmlInnerText `xml:"passage"`
+}
+
+func parseYandexXML(data []byte) ([]map[string]any, error) {
+	var resp yandexResponse
+	if err := xml.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	results := make([]map[string]any, 0, len(resp.Results.Grouping.Groups))
+	for _, group := range resp.Results.Grouping.Groups {
+		snippet := ""
+		if len(group.Doc.Passages.Passage) > 0 {
+			snippet = string(group.Doc.Passages.Passage[0])
+		}
+		results = append(results, map[string]any{
+			"title":       string(group.Doc.Title),
+			"url":         string(group.Doc.URL),
+			"description": snippet,
+		})
+	}
+	return results, nil
 }
 
 // buildSearchHTTPError builds an error result for non-2xx search API responses.
