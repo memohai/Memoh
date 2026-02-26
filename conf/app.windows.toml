@@ -24,7 +24,8 @@ socket_path = "npipe:////./pipe/containerd-containerd"
 namespace = "default"
 
 [mcp]
-image = "docker.io/library/memoh-mcp:dev"
+# registry = "memoh.cn"  # Uncomment for China mainland mirror
+image = "memohai/mcp:latest"
 snapshotter = "overlayfs"
 data_root = "data"
 

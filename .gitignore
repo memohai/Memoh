@@ -88,6 +88,7 @@ Thumbs.db
 *.tmp
 *.temp
 .cache/
+tmp/
 
 docs/docs/.vitepress/cache
 .pnpm-store

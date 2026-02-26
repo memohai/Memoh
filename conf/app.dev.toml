@@ -22,7 +22,8 @@ socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
 
 [mcp]
-image = "docker.io/library/memoh-mcp:latest"
+# registry = "memoh.cn"  # Uncomment for China mainland mirror
+image = "memohai/mcp:latest"
 snapshotter = "overlayfs"
 data_root = "/opt/memoh/data"
 cni_bin_dir = "/opt/cni/bin"
@@ -43,7 +44,7 @@ collection = "memory"
 timeout_seconds = 10
 
 [agent_gateway]
-host = "0.0.0.0"
+host = "agent"
 port = 8081
 server_addr = "server:8080"
 

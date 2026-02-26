@@ -4,6 +4,8 @@ FROM golang:1.25-alpine
 
 WORKDIR /workspace
 
+RUN go install github.com/air-verse/air@latest
+
 RUN apk add --no-cache \
     bash \
     ca-certificates \

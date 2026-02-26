@@ -76,7 +76,7 @@ services:
     working_dir: /workspace
     privileged: true
     pid: host
-    command: ["go", "run", "./cmd/agent/main.go", "serve"]
+    command: ["air", "-c", ".air.toml"]
     environment:
       CONFIG_PATH: /workspace/conf/app.dev.toml
     volumes:

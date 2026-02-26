@@ -12,7 +12,7 @@ const (
 	DefaultHTTPAddr         = ":8080"
 	DefaultNamespace        = "default"
 	DefaultSocketPath       = "/run/containerd/containerd.sock"
-	DefaultMCPImage         = "docker.io/library/memoh-mcp:latest"
+	DefaultMCPImage         = "memohai/mcp:latest"
 	DefaultDataRoot         = "data"
 	DefaultDataMount        = "/data"
 	DefaultCNIBinaryDir     = "/opt/cni/bin"
@@ -71,11 +71,25 @@ type SocktainerConfig struct {
 }
 
 type MCPConfig struct {
+	Registry     string `toml:"registry"`
 	Image        string `toml:"image"`
 	Snapshotter  string `toml:"snapshotter"`
 	DataRoot     string `toml:"data_root"`
 	CNIBinaryDir string `toml:"cni_bin_dir"`
 	CNIConfigDir string `toml:"cni_conf_dir"`
+}
+
+// ImageRef returns the fully qualified image reference, prepending the
+// registry mirror when configured (e.g. "memoh.cn/memohai/mcp:latest").
+func (c MCPConfig) ImageRef() string {
+	img := c.Image
+	if img == "" {
+		img = DefaultMCPImage
+	}
+	if c.Registry != "" {
+		return c.Registry + "/" + img
+	}
+	return img
 }
 
 type PostgresConfig struct {
