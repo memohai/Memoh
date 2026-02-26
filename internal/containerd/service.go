@@ -130,6 +130,7 @@ func (s *DefaultService) PullImage(ctx context.Context, ref string, opts *PullIm
 	if ref == "" {
 		return ImageInfo{}, ErrInvalidArgument
 	}
+	ref = config.NormalizeImageRef(ref)
 
 	ctx = s.withNamespace(ctx)
 	pullOpts := []containerd.RemoteOpt{}

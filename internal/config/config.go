@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -80,7 +81,9 @@ type MCPConfig struct {
 }
 
 // ImageRef returns the fully qualified image reference, prepending the
-// registry mirror when configured (e.g. "memoh.cn/memohai/mcp:latest").
+// registry mirror when configured and normalizing for containerd compatibility.
+// Containerd requires a fully-qualified domain in image references — short
+// Docker Hub names like "memohai/mcp:latest" are misinterpreted as hosts.
 func (c MCPConfig) ImageRef() string {
 	img := c.Image
 	if img == "" {
@@ -89,7 +92,20 @@ func (c MCPConfig) ImageRef() string {
 	if c.Registry != "" {
 		return c.Registry + "/" + img
 	}
-	return img
+	return NormalizeImageRef(img)
+}
+
+// NormalizeImageRef ensures an image reference is fully qualified for containerd.
+func NormalizeImageRef(ref string) string {
+	firstSlash := strings.Index(ref, "/")
+	if firstSlash == -1 {
+		return "docker.io/library/" + ref
+	}
+	firstSegment := ref[:firstSlash]
+	if strings.Contains(firstSegment, ".") || strings.Contains(firstSegment, ":") || firstSegment == "localhost" {
+		return ref
+	}
+	return "docker.io/" + ref
 }
 
 type PostgresConfig struct {

@@ -1,6 +1,6 @@
 # config.toml Reference
 
-Memoh uses a TOML configuration file. By default it looks for `config.toml` in the current directory. With Docker, you can mount a custom config via `MEMOH_CONFIG` (see [Docker installation](./docker#custom-configuration)).
+Memoh uses a TOML configuration file (`config.toml`) in the project root. For Docker deployments, copy the template first: `cp conf/app.docker.toml config.toml`. See [Docker installation](./docker) for details.
 
 ## Full Example
 
@@ -26,14 +26,15 @@ socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
 
 [mcp]
-image = "docker.io/library/memoh-mcp:latest"
+# registry = "memoh.cn"  # Uncomment for China mainland mirror
+image = "memohai/mcp:latest"
 snapshotter = "overlayfs"
 data_root = "data"
 
 [postgres]
 host = "127.0.0.1"
 port = 5432
-user = "postgres"
+user = "memoh"
 password = "your-password"
 database = "memoh"
 sslmode = "disable"
@@ -47,14 +48,11 @@ timeout_seconds = 10
 [agent_gateway]
 host = "127.0.0.1"
 port = 8081
+server_addr = ":8080"
 
 [web]
 host = "127.0.0.1"
 port = 8082
-
-[brave]
-api_key = ""
-base_url = "https://api.search.brave.com/res/v1/"
 ```
 
 ## Section Reference
@@ -100,9 +98,12 @@ MCP (Model Context Protocol) container configuration. Each bot runs in a contain
 
 | Field         | Type   | Default | Description                                      |
 |---------------|--------|---------|--------------------------------------------------|
-| `image`       | string | `"docker.io/library/memoh-mcp:latest"` | MCP container image        |
+| `registry`    | string | `""`    | Image registry mirror prefix. Set to `"memoh.cn"` for China mainland. When set, the final image ref becomes `registry/image`. |
+| `image`       | string | `"memohai/mcp:latest"` | MCP container image. Short Docker Hub names are auto-normalized for containerd (e.g. `memohai/mcp:latest` → `docker.io/memohai/mcp:latest`). |
 | `snapshotter` | string | `"overlayfs"` | Containerd snapshotter                      |
 | `data_root`   | string | `"data"` | Host path for bot data (Docker: `/opt/memoh/data`) |
+| `cni_bin_dir` | string | `"/opt/cni/bin"` | CNI plugin binary directory              |
+| `cni_conf_dir`| string | `"/etc/cni/net.d"` | CNI configuration directory            |
 
 ### `[postgres]`
 
@@ -110,7 +111,7 @@ MCP (Model Context Protocol) container configuration. Each bot runs in a contain
 |-----------|--------|---------|--------------------------------------------------|
 | `host`    | string | `"127.0.0.1"` | PostgreSQL host                             |
 | `port`    | int    | `5432`  | PostgreSQL port                                  |
-| `user`    | string | `"postgres"` | Database user                               |
+| `user`    | string | `"memoh"` | Database user                                  |
 | `password`| string | —       | Database password                                |
 | `database`| string | `"memoh"` | Database name                                 |
 | `sslmode` | string | `"disable"` | SSL mode: `disable`, `require`, `verify-ca`, `verify-full` |
@@ -126,12 +127,11 @@ MCP (Model Context Protocol) container configuration. Each bot runs in a contain
 
 ### `[agent_gateway]`
 
-| Field  | Type   | Default | Description                                      |
-|--------|--------|---------|--------------------------------------------------|
-| `host` | string | `"127.0.0.1"` | Agent gateway bind host                       |
-| `port` | int    | `8081`  | Agent gateway port                               |
-
-In Docker Compose, `host` is typically `"agent"` (service name). The agent reads `[server].addr` to call the main API.
+| Field         | Type   | Default | Description                                      |
+|---------------|--------|---------|--------------------------------------------------|
+| `host`        | string | `"127.0.0.1"` | Agent gateway bind host. In Docker, use `"agent"` (service name). |
+| `port`        | int    | `8081`  | Agent gateway port                               |
+| `server_addr` | string | `":8080"` | Address the agent uses to reach the main server. In Docker, use `"server:8080"`. |
 
 ### `[web]`
 
@@ -140,11 +140,4 @@ In Docker Compose, `host` is typically `"agent"` (service name). The agent reads
 | `host` | string | `"127.0.0.1"` | Web UI bind host                              |
 | `port` | int    | `8082`  | Web UI port                                      |
 
-### `[brave]`
-
-Brave Search API for the web search tool. Leave `api_key` empty to disable web search.
-
-| Field     | Type   | Default | Description                                      |
-|-----------|--------|---------|--------------------------------------------------|
-| `api_key` | string | `""`    | Brave Search API key. Get one at [brave.com/search/api](https://brave.com/search/api). |
-| `base_url`| string | `"https://api.search.brave.com/res/v1/"` | Brave Search API base URL          |
+Web search providers (Brave, Bing, Google, Tavily, Serper, SearXNG, Jina, Exa, Bocha, DuckDuckGo, Yandex, Sogou) are configured through the web UI under **Search Providers**, not in `config.toml`.
