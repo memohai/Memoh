@@ -24,10 +24,9 @@ SET max_context_load_time = 1440,
     heartbeat_interval = 30,
     heartbeat_prompt = '',
     chat_model_id = NULL,
-    memory_model_id = NULL,
-    embedding_model_id = NULL,
     heartbeat_model_id = NULL,
     search_provider_id = NULL,
+    memory_provider_id = NULL,
     updated_at = now()
 WHERE id = $1
 `
@@ -51,16 +50,14 @@ SELECT
   bots.heartbeat_interval,
   bots.heartbeat_prompt,
   chat_models.id AS chat_model_id,
-  memory_models.id AS memory_model_id,
-  embedding_models.id AS embedding_model_id,
   heartbeat_models.id AS heartbeat_model_id,
-  search_providers.id AS search_provider_id
+  search_providers.id AS search_provider_id,
+  memory_providers.id AS memory_provider_id
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
-LEFT JOIN models AS memory_models ON memory_models.id = bots.memory_model_id
-LEFT JOIN models AS embedding_models ON embedding_models.id = bots.embedding_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
+LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
 WHERE bots.id = $1
 `
 
@@ -77,10 +74,9 @@ type GetSettingsByBotIDRow struct {
 	HeartbeatInterval  int32       `json:"heartbeat_interval"`
 	HeartbeatPrompt    string      `json:"heartbeat_prompt"`
 	ChatModelID        pgtype.UUID `json:"chat_model_id"`
-	MemoryModelID      pgtype.UUID `json:"memory_model_id"`
-	EmbeddingModelID   pgtype.UUID `json:"embedding_model_id"`
 	HeartbeatModelID   pgtype.UUID `json:"heartbeat_model_id"`
 	SearchProviderID   pgtype.UUID `json:"search_provider_id"`
+	MemoryProviderID   pgtype.UUID `json:"memory_provider_id"`
 }
 
 func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSettingsByBotIDRow, error) {
@@ -99,10 +95,9 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.HeartbeatInterval,
 		&i.HeartbeatPrompt,
 		&i.ChatModelID,
-		&i.MemoryModelID,
-		&i.EmbeddingModelID,
 		&i.HeartbeatModelID,
 		&i.SearchProviderID,
+		&i.MemoryProviderID,
 	)
 	return i, err
 }
@@ -121,13 +116,12 @@ WITH updated AS (
       heartbeat_interval = $9,
       heartbeat_prompt = $10,
       chat_model_id = COALESCE($11::uuid, bots.chat_model_id),
-      memory_model_id = COALESCE($12::uuid, bots.memory_model_id),
-      embedding_model_id = COALESCE($13::uuid, bots.embedding_model_id),
-      heartbeat_model_id = COALESCE($14::uuid, bots.heartbeat_model_id),
-      search_provider_id = COALESCE($15::uuid, bots.search_provider_id),
+      heartbeat_model_id = COALESCE($12::uuid, bots.heartbeat_model_id),
+      search_provider_id = COALESCE($13::uuid, bots.search_provider_id),
+      memory_provider_id = COALESCE($14::uuid, bots.memory_provider_id),
       updated_at = now()
-  WHERE bots.id = $16
-  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.allow_guest, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.chat_model_id, bots.memory_model_id, bots.embedding_model_id, bots.heartbeat_model_id, bots.search_provider_id
+  WHERE bots.id = $15
+  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.allow_guest, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.chat_model_id, bots.heartbeat_model_id, bots.search_provider_id, bots.memory_provider_id
 )
 SELECT
   updated.id AS bot_id,
@@ -142,16 +136,14 @@ SELECT
   updated.heartbeat_interval,
   updated.heartbeat_prompt,
   chat_models.id AS chat_model_id,
-  memory_models.id AS memory_model_id,
-  embedding_models.id AS embedding_model_id,
   heartbeat_models.id AS heartbeat_model_id,
-  search_providers.id AS search_provider_id
+  search_providers.id AS search_provider_id,
+  memory_providers.id AS memory_provider_id
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id
-LEFT JOIN models AS memory_models ON memory_models.id = updated.memory_model_id
-LEFT JOIN models AS embedding_models ON embedding_models.id = updated.embedding_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id
+LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id
 `
 
 type UpsertBotSettingsParams struct {
@@ -166,10 +158,9 @@ type UpsertBotSettingsParams struct {
 	HeartbeatInterval  int32       `json:"heartbeat_interval"`
 	HeartbeatPrompt    string      `json:"heartbeat_prompt"`
 	ChatModelID        pgtype.UUID `json:"chat_model_id"`
-	MemoryModelID      pgtype.UUID `json:"memory_model_id"`
-	EmbeddingModelID   pgtype.UUID `json:"embedding_model_id"`
 	HeartbeatModelID   pgtype.UUID `json:"heartbeat_model_id"`
 	SearchProviderID   pgtype.UUID `json:"search_provider_id"`
+	MemoryProviderID   pgtype.UUID `json:"memory_provider_id"`
 	ID                 pgtype.UUID `json:"id"`
 }
 
@@ -186,10 +177,9 @@ type UpsertBotSettingsRow struct {
 	HeartbeatInterval  int32       `json:"heartbeat_interval"`
 	HeartbeatPrompt    string      `json:"heartbeat_prompt"`
 	ChatModelID        pgtype.UUID `json:"chat_model_id"`
-	MemoryModelID      pgtype.UUID `json:"memory_model_id"`
-	EmbeddingModelID   pgtype.UUID `json:"embedding_model_id"`
 	HeartbeatModelID   pgtype.UUID `json:"heartbeat_model_id"`
 	SearchProviderID   pgtype.UUID `json:"search_provider_id"`
+	MemoryProviderID   pgtype.UUID `json:"memory_provider_id"`
 }
 
 func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsParams) (UpsertBotSettingsRow, error) {
@@ -205,10 +195,9 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.HeartbeatInterval,
 		arg.HeartbeatPrompt,
 		arg.ChatModelID,
-		arg.MemoryModelID,
-		arg.EmbeddingModelID,
 		arg.HeartbeatModelID,
 		arg.SearchProviderID,
+		arg.MemoryProviderID,
 		arg.ID,
 	)
 	var i UpsertBotSettingsRow
@@ -225,10 +214,9 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.HeartbeatInterval,
 		&i.HeartbeatPrompt,
 		&i.ChatModelID,
-		&i.MemoryModelID,
-		&i.EmbeddingModelID,
 		&i.HeartbeatModelID,
 		&i.SearchProviderID,
+		&i.MemoryProviderID,
 	)
 	return i, err
 }

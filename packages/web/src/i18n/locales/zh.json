@@ -54,6 +54,7 @@
     "bots": "Bots",
     "models": "模型管理",
     "searchProvider": "搜索提供方",
+    "memoryProvider": "记忆",
     "settings": "设置",
     "home": "首页",
     "mcp": "MCP",
@@ -198,6 +199,28 @@
       "bing": "Bing",
       "google": "Google",
       "tavily": "Tavily"
+    }
+  },
+  "memoryProvider": {
+    "title": "记忆提供方",
+    "add": "添加记忆提供方",
+    "empty": "暂无记忆提供方",
+    "provider": "提供方类型",
+    "searchPlaceholder": "搜索提供方...",
+    "emptyTitle": "暂无记忆提供方",
+    "emptyDescription": "添加记忆提供方以启用 Bot 的长期记忆功能",
+    "saveSuccess": "记忆提供方已保存",
+    "deleteSuccess": "记忆提供方已删除",
+    "deleteFailed": "删除记忆提供方失败",
+    "deleteConfirm": "确定要删除该记忆提供方吗？使用它的 Bot 将失去记忆访问。",
+    "name": "名称",
+    "namePlaceholder": "输入提供方名称",
+    "memoryModel": "记忆模型",
+    "memoryModelDescription": "用于记忆提取和决策的 LLM 模型",
+    "embeddingModel": "嵌入模型",
+    "embeddingModelDescription": "用于稠密向量搜索的嵌入模型",
+    "providerNames": {
+      "builtin": "内置"
     }
   },
   "mcp": {
@@ -369,6 +392,8 @@
       "embeddingModel": "向量模型",
       "searchProvider": "搜索提供方",
       "searchProviderPlaceholder": "选择搜索提供方",
+      "memoryProvider": "记忆提供方",
+      "memoryProviderPlaceholder": "选择记忆提供方（为空则禁用）",
       "maxContextLoadTime": "最大上下文加载时间",
       "maxContextTokens": "最大上下文Token数",
       "language": "语言",

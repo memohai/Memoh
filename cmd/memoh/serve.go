@@ -57,6 +57,8 @@ import (
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
 	"github.com/memohai/memoh/internal/media"
 	"github.com/memohai/memoh/internal/memory"
+	memprovider "github.com/memohai/memoh/internal/memory/provider"
+	"github.com/memohai/memoh/internal/memoryproviders"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
@@ -90,6 +92,8 @@ func runServe() {
 			provideQdrantStore,
 			memory.NewBM25Indexer,
 			provideMemoryService,
+			memoryproviders.NewService,
+			provideMemoryProviderRegistry,
 			models.NewService,
 			bots.NewService,
 			accounts.NewService,
@@ -136,6 +140,7 @@ func runServe() {
 			provideServerHandler(handlers.NewChannelHandler),
 			provideServerHandler(feishu.NewWebhookServerHandler),
 			provideServerHandler(provideUsersHandler),
+			provideServerHandler(handlers.NewMemoryProvidersHandler),
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewInboxHandler),
 			provideServerHandler(provideCLIHandler),
@@ -144,6 +149,7 @@ func runServe() {
 			provideServer,
 		),
 		fx.Invoke(
+			startMemoryProviderBootstrap,
 			startMemoryWarmup,
 			startScheduleService,
 			startChannelManager,
@@ -252,6 +258,30 @@ func provideQdrantStore(log *slog.Logger, cfg config.Config, setup embeddingSetu
 func provideMemoryService(log *slog.Logger, llm memory.LLM, embedder embeddings.Embedder, store *memory.QdrantStore, resolver *embeddings.Resolver, bm25 *memory.BM25Indexer, setup embeddingSetup) *memory.Service {
 	return memory.NewService(log, llm, embedder, store, resolver, bm25, setup.TextModel.ModelID, setup.MultimodalModel.ModelID)
 }
+func provideMemoryProviderRegistry(log *slog.Logger, memoryService *memory.Service, chatService *conversation.Service, accountService *accounts.Service) *memprovider.Registry {
+	registry := memprovider.NewRegistry(log)
+	registry.RegisterFactory(memprovider.BuiltinType, func(id string, config map[string]any) (memprovider.Provider, error) {
+		return memprovider.NewBuiltinProvider(log, memoryService, chatService, accountService), nil
+	})
+	return registry
+}
+func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *memoryproviders.Service, registry *memprovider.Registry) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			resp, err := mpService.EnsureDefault(ctx)
+			if err != nil {
+				log.Warn("failed to ensure default memory provider", slog.Any("error", err))
+				return nil
+			}
+			if _, regErr := registry.Instantiate(resp.ID, resp.Provider, resp.Config); regErr != nil {
+				log.Warn("failed to instantiate default memory provider", slog.Any("error", regErr))
+			} else {
+				log.Info("default memory provider ready", slog.String("id", resp.ID), slog.String("provider", resp.Provider))
+			}
+			return nil
+		},
+	})
+}
 func provideRouteService(log *slog.Logger, queries *dbsqlc.Queries, chatService *conversation.Service) *route.DBService {
 	return route.NewService(log, queries, chatService)
 }
@@ -261,8 +291,9 @@ func provideMessageService(log *slog.Logger, queries *dbsqlc.Queries, hub *event
 func provideScheduleTriggerer(resolver *flow.Resolver) schedule.Triggerer {
 	return flow.NewScheduleGateway(resolver)
 }
-func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, memoryService *memory.Service, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service) *flow.Resolver {
+func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, memoryService *memory.Service, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, memoryService, chatService, msgService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
+	resolver.SetMemoryRegistry(memoryRegistry)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
 	resolver.SetInboxService(inboxService)
@@ -302,7 +333,7 @@ func provideChannelLifecycleService(channelStore *channel.Store, channelManager 
 func provideContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *handlers.ContainerdHandler {
 	return handlers.NewContainerdHandler(log, service, manager, cfg.MCP, cfg.Containerd.Namespace, rc.ContainerBackend, botService, accountService, policyService, queries)
 }
-func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, memoryService *memory.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, memoryService *memory.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *mcp.ToolGatewayService {
 	var assetResolver mcpmessage.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -310,7 +341,7 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	messageExec := mcpmessage.NewExecutor(log, channelManager, channelManager, registry, assetResolver)
 	contactsExec := mcpcontacts.NewExecutor(log, routeService)
 	scheduleExec := mcpschedule.NewExecutor(log, scheduleService)
-	memoryExec := mcpmemory.NewExecutor(log, memoryService, chatService, accountService)
+	memoryExec := mcpmemory.NewExecutor(log, memoryRegistry, settingsService)
 	webExec := mcpweb.NewExecutor(log, settingsService, searchProviderService)
 	inboxExec := mcpinbox.NewExecutor(log, inboxService)
 	fsExec := mcpcontainer.NewExecutor(log, manager, config.DefaultDataMount)
@@ -320,8 +351,10 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	containerdHandler.SetToolGatewayService(svc)
 	return svc
 }
-func provideMemoryHandler(log *slog.Logger, service *memory.Service, chatService *conversation.Service, accountService *accounts.Service, cfg config.Config, manager *mcp.Manager) *handlers.MemoryHandler {
+func provideMemoryHandler(log *slog.Logger, service *memory.Service, chatService *conversation.Service, accountService *accounts.Service, cfg config.Config, manager *mcp.Manager, memoryRegistry *memprovider.Registry, settingsService *settings.Service) *handlers.MemoryHandler {
 	h := handlers.NewMemoryHandler(log, service, chatService, accountService)
+	h.SetMemoryRegistry(memoryRegistry)
+	h.SetSettingsService(settingsService)
 	if manager != nil {
 		execWorkDir := config.DefaultDataMount
 		h.SetMemoryFS(memory.NewMemoryFS(log, manager, execWorkDir))

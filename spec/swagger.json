@@ -4470,6 +4470,224 @@
                 }
             }
         },
+        "/memory-providers": {
+            "get": {
+                "description": "List configured memory providers",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "List memory providers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/memoryproviders.GetResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a memory provider configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "Create a memory provider",
+                "parameters": [
+                    {
+                        "description": "Memory provider configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/memoryproviders.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/memoryproviders.GetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/memory-providers/meta": {
+            "get": {
+                "description": "List available memory provider types and config schemas",
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "List memory provider metadata",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/memoryproviders.ProviderMeta"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/memory-providers/{id}": {
+            "get": {
+                "description": "Get memory provider by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "Get a memory provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/memoryproviders.GetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update memory provider by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "Update a memory provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/memoryproviders.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/memoryproviders.GetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete memory provider by ID",
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "Delete a memory provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/models": {
             "get": {
                 "description": "Get a list of all configured models, optionally filtered by type or client type",
@@ -7875,6 +8093,112 @@
                 }
             }
         },
+        "memoryproviders.CreateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "$ref": "#/definitions/memoryproviders.ProviderType"
+                }
+            }
+        },
+        "memoryproviders.GetResponse": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_default": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "memoryproviders.ProviderConfigSchema": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/memoryproviders.ProviderFieldSchema"
+                    }
+                }
+            }
+        },
+        "memoryproviders.ProviderFieldSchema": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "example": {},
+                "required": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "memoryproviders.ProviderMeta": {
+            "type": "object",
+            "properties": {
+                "config_schema": {
+                    "$ref": "#/definitions/memoryproviders.ProviderConfigSchema"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "memoryproviders.ProviderType": {
+            "type": "string",
+            "enum": [
+                "builtin"
+            ],
+            "x-enum-varnames": [
+                "ProviderBuiltin"
+            ]
+        },
+        "memoryproviders.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "message.Message": {
             "type": "object",
             "properties": {
@@ -8466,9 +8790,6 @@
                 "chat_model_id": {
                     "type": "string"
                 },
-                "embedding_model_id": {
-                    "type": "string"
-                },
                 "heartbeat_enabled": {
                     "type": "boolean"
                 },
@@ -8490,7 +8811,7 @@
                 "max_inbox_items": {
                     "type": "integer"
                 },
-                "memory_model_id": {
+                "memory_provider_id": {
                     "type": "string"
                 },
                 "reasoning_effort": {
@@ -8513,9 +8834,6 @@
                 "chat_model_id": {
                     "type": "string"
                 },
-                "embedding_model_id": {
-                    "type": "string"
-                },
                 "heartbeat_enabled": {
                     "type": "boolean"
                 },
@@ -8537,7 +8855,7 @@
                 "max_inbox_items": {
                     "type": "integer"
                 },
-                "memory_model_id": {
+                "memory_provider_id": {
                     "type": "string"
                 },
                 "reasoning_effort": {

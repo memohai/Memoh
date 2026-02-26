@@ -13,15 +13,19 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/memory"
+	memprovider "github.com/memohai/memoh/internal/memory/provider"
+	"github.com/memohai/memoh/internal/settings"
 )
 
 // MemoryHandler handles memory CRUD operations scoped by conversation.
 type MemoryHandler struct {
-	service        *memory.Service
-	chatService    *conversation.Service
-	accountService *accounts.Service
-	memoryFS       *memory.MemoryFS
-	logger         *slog.Logger
+	service         *memory.Service
+	chatService     *conversation.Service
+	accountService  *accounts.Service
+	settingsService *settings.Service
+	memoryRegistry  *memprovider.Registry
+	memoryFS        *memory.MemoryFS
+	logger          *slog.Logger
 }
 
 type memoryAddPayload struct {
@@ -72,6 +76,37 @@ func NewMemoryHandler(log *slog.Logger, service *memory.Service, chatService *co
 	}
 }
 
+// SetMemoryRegistry sets the provider registry for provider-based memory operations.
+func (h *MemoryHandler) SetMemoryRegistry(registry *memprovider.Registry) {
+	h.memoryRegistry = registry
+}
+
+// SetSettingsService sets the settings service for provider resolution.
+func (h *MemoryHandler) SetSettingsService(svc *settings.Service) {
+	h.settingsService = svc
+}
+
+// resolveProvider returns the memory provider for a bot, or nil if not configured.
+func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) memprovider.Provider {
+	if h.memoryRegistry == nil || h.settingsService == nil {
+		return nil
+	}
+	botSettings, err := h.settingsService.GetBot(ctx, botID)
+	if err != nil {
+		return nil
+	}
+	providerID := strings.TrimSpace(botSettings.MemoryProviderID)
+	if providerID == "" {
+		return nil
+	}
+	p, err := h.memoryRegistry.Get(providerID)
+	if err != nil {
+		h.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", err))
+		return nil
+	}
+	return p
+}
+
 // SetMemoryFS sets the optional filesystem persistence layer.
 func (h *MemoryHandler) SetMemoryFS(fs *memory.MemoryFS) {
 	h.memoryFS = fs
@@ -90,11 +125,14 @@ func (h *MemoryHandler) Register(e *echo.Echo) {
 	chatGroup.DELETE("/:memory_id", h.ChatDeleteOne)
 }
 
-func (h *MemoryHandler) checkService() error {
-	if h.service == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "memory service not available")
+func (h *MemoryHandler) checkService(ctx context.Context, botID string) (memprovider.Provider, error) {
+	if p := h.resolveProvider(ctx, botID); p != nil {
+		return p, nil
 	}
-	return nil
+	if h.service != nil {
+		return nil, nil
+	}
+	return nil, echo.NewHTTPError(http.StatusServiceUnavailable, "memory service not available")
 }
 
 // --- Chat-level memory endpoints ---
@@ -114,9 +152,6 @@ func (h *MemoryHandler) checkService() error {
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory [post]
 func (h *MemoryHandler) ChatAdd(c echo.Context) error {
-	if err := h.checkService(); err != nil {
-		return err
-	}
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
@@ -139,7 +174,6 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 		return err
 	}
 
-	// Resolve bot scope for shared memory.
 	scopeID, botID, err := h.resolveWriteScope(c.Request().Context(), containerID)
 	if err != nil {
 		return err
@@ -156,12 +190,21 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 		Infer:            payload.Infer,
 		EmbeddingEnabled: payload.EmbeddingEnabled,
 	}
-	resp, err := h.service.Add(c.Request().Context(), req)
+
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+	var resp memory.SearchResponse
+	if provider != nil {
+		resp, err = provider.Add(c.Request().Context(), req)
+	} else {
+		resp, err = h.service.Add(c.Request().Context(), req)
+	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	// Async persist to filesystem.
 	if h.memoryFS != nil && len(resp.Results) > 0 {
 		items := resp.Results
 		go func() {
@@ -192,9 +235,6 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory/search [post]
 func (h *MemoryHandler) ChatSearch(c echo.Context) error {
-	if err := h.checkService(); err != nil {
-		return err
-	}
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
@@ -222,7 +262,11 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(chatObj.BotID)
 
-	// Search shared namespace and merge results.
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+
 	var allResults []memory.MemoryItem
 	for _, scope := range scopes {
 		filters := buildNamespaceFilters(scope.Namespace, scope.ScopeID, payload.Filters)
@@ -239,9 +283,15 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 			EmbeddingEnabled: payload.EmbeddingEnabled,
 			NoStats:          payload.NoStats,
 		}
-		resp, err := h.service.Search(c.Request().Context(), req)
-		if err != nil {
-			h.logger.Warn("search namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", err))
+		var resp memory.SearchResponse
+		var searchErr error
+		if provider != nil {
+			resp, searchErr = provider.Search(c.Request().Context(), req)
+		} else {
+			resp, searchErr = h.service.Search(c.Request().Context(), req)
+		}
+		if searchErr != nil {
+			h.logger.Warn("search namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", searchErr))
 			continue
 		}
 		allResults = append(allResults, resp.Results...)
@@ -273,9 +323,6 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory [get]
 func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
-	if err := h.checkService(); err != nil {
-		return err
-	}
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
@@ -294,15 +341,31 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 		return err
 	}
 
+	chatObj, err := h.chatService.Get(c.Request().Context(), containerID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
+	}
+	botID := strings.TrimSpace(chatObj.BotID)
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+
 	var allResults []memory.MemoryItem
 	for _, scope := range scopes {
 		req := memory.GetAllRequest{
 			Filters: buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil),
 			NoStats: noStats,
 		}
-		resp, err := h.service.GetAll(c.Request().Context(), req)
-		if err != nil {
-			h.logger.Warn("getall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", err))
+		var resp memory.SearchResponse
+		var getAllErr error
+		if provider != nil {
+			resp, getAllErr = provider.GetAll(c.Request().Context(), req)
+		} else {
+			resp, getAllErr = h.service.GetAll(c.Request().Context(), req)
+		}
+		if getAllErr != nil {
+			h.logger.Warn("getall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", getAllErr))
 			continue
 		}
 		allResults = append(allResults, resp.Results...)
@@ -327,9 +390,6 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory [delete]
 func (h *MemoryHandler) ChatDelete(c echo.Context) error {
-	if err := h.checkService(); err != nil {
-		return err
-	}
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
@@ -342,17 +402,29 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 		return err
 	}
 
+	chatObj, err := h.chatService.Get(c.Request().Context(), containerID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
+	}
+	botID := strings.TrimSpace(chatObj.BotID)
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+
 	var payload memoryDeletePayload
-	// Body is optional; ignore bind errors for empty body.
 	_ = c.Bind(&payload)
 
-	// If memory_ids provided, delete specific memories.
 	if len(payload.MemoryIDs) > 0 {
-		resp, err := h.service.DeleteBatch(c.Request().Context(), payload.MemoryIDs)
+		var resp memory.DeleteResponse
+		if provider != nil {
+			resp, err = provider.DeleteBatch(c.Request().Context(), payload.MemoryIDs)
+		} else {
+			resp, err = h.service.DeleteBatch(c.Request().Context(), payload.MemoryIDs)
+		}
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-		// Sync remove from filesystem.
 		if h.memoryFS != nil {
 			if err := h.memoryFS.RemoveMemories(c.Request().Context(), containerID, payload.MemoryIDs); err != nil {
 				h.logger.Warn("delete memory fs remove failed", slog.Any("error", err))
@@ -361,7 +433,6 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 		return c.JSON(http.StatusOK, resp)
 	}
 
-	// Otherwise delete all memories in the bot-shared namespace.
 	scopes, err := h.resolveEnabledScopes(c.Request().Context(), containerID)
 	if err != nil {
 		return err
@@ -370,11 +441,16 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 		req := memory.DeleteAllRequest{
 			Filters: buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil),
 		}
-		if _, err := h.service.DeleteAll(c.Request().Context(), req); err != nil {
-			h.logger.Warn("deleteall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", err))
+		if provider != nil {
+			if _, delErr := provider.DeleteAll(c.Request().Context(), req); delErr != nil {
+				h.logger.Warn("deleteall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", delErr))
+			}
+		} else {
+			if _, delErr := h.service.DeleteAll(c.Request().Context(), req); delErr != nil {
+				h.logger.Warn("deleteall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", delErr))
+			}
 		}
 	}
-	// Sync remove all from filesystem.
 	if h.memoryFS != nil {
 		if err := h.memoryFS.RemoveAllMemories(c.Request().Context(), containerID); err != nil {
 			h.logger.Warn("deleteall memory fs remove failed", slog.Any("error", err))
@@ -397,9 +473,6 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory/{id} [delete]
 func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
-	if err := h.checkService(); err != nil {
-		return err
-	}
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
@@ -412,15 +485,29 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 		return err
 	}
 
+	chatObj, err := h.chatService.Get(c.Request().Context(), containerID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
+	}
+	botID := strings.TrimSpace(chatObj.BotID)
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+
 	memoryID := strings.TrimSpace(c.Param("memory_id"))
 	if memoryID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
 	}
-	resp, err := h.service.Delete(c.Request().Context(), memoryID)
+	var resp memory.DeleteResponse
+	if provider != nil {
+		resp, err = provider.Delete(c.Request().Context(), memoryID)
+	} else {
+		resp, err = h.service.Delete(c.Request().Context(), memoryID)
+	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	// Sync remove from filesystem.
 	if h.memoryFS != nil {
 		if err := h.memoryFS.RemoveMemories(c.Request().Context(), containerID, []string{memoryID}); err != nil {
 			h.logger.Warn("delete one memory fs remove failed", slog.Any("error", err))
@@ -451,9 +538,6 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory/compact [post]
 func (h *MemoryHandler) ChatCompact(c echo.Context) error {
-	if err := h.checkService(); err != nil {
-		return err
-	}
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
@@ -487,15 +571,28 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "no memory scopes found")
 	}
 
-	// Compact the first (primary) scope.
+	chatObj, err := h.chatService.Get(c.Request().Context(), containerID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
+	}
+	botID := strings.TrimSpace(chatObj.BotID)
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+
 	scope := scopes[0]
 	filters := buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil)
-	result, err := h.service.Compact(c.Request().Context(), filters, ratio, decayDays)
+	var result memory.CompactResult
+	if provider != nil {
+		result, err = provider.Compact(c.Request().Context(), filters, ratio, decayDays)
+	} else {
+		result, err = h.service.Compact(c.Request().Context(), filters, ratio, decayDays)
+	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	// Sync rebuild filesystem.
 	if h.memoryFS != nil {
 		if err := h.memoryFS.RebuildFiles(c.Request().Context(), containerID, result.Results, filters); err != nil {
 			h.logger.Warn("compact memory fs rebuild failed", slog.Any("error", err))
@@ -518,9 +615,6 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory/usage [get]
 func (h *MemoryHandler) ChatUsage(c echo.Context) error {
-	if err := h.checkService(); err != nil {
-		return err
-	}
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
@@ -533,6 +627,16 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 		return err
 	}
 
+	chatObj, err := h.chatService.Get(c.Request().Context(), containerID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
+	}
+	botID := strings.TrimSpace(chatObj.BotID)
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+
 	scopes, err := h.resolveEnabledScopes(c.Request().Context(), containerID)
 	if err != nil {
 		return err
@@ -541,9 +645,15 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 	var totalUsage memory.UsageResponse
 	for _, scope := range scopes {
 		filters := buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil)
-		usage, err := h.service.Usage(c.Request().Context(), filters)
-		if err != nil {
-			h.logger.Warn("usage namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", err))
+		var usage memory.UsageResponse
+		var usageErr error
+		if provider != nil {
+			usage, usageErr = provider.Usage(c.Request().Context(), filters)
+		} else {
+			usage, usageErr = h.service.Usage(c.Request().Context(), filters)
+		}
+		if usageErr != nil {
+			h.logger.Warn("usage namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", usageErr))
 			continue
 		}
 		totalUsage.Count += usage.Count
@@ -569,8 +679,8 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory/rebuild [post]
 func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
-	if err := h.checkService(); err != nil {
-		return err
+	if h.service == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "memory service not available")
 	}
 	if h.memoryFS == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "memory filesystem not configured")

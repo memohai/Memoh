@@ -41,10 +41,14 @@ func (d *fakeDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 }
 
 // makeBotRow creates a fakeRow that populates a sqlc.Bot via Scan.
+// Column order: id, owner_user_id, type, display_name, avatar_url, is_active, status,
+// max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest,
+// reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id,
+// heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 func makeBotRow(botID, ownerUserID pgtype.UUID, botType string, allowGuest bool) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) < 21 {
+			if len(dest) < 23 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -61,13 +65,15 @@ func makeBotRow(botID, ownerUserID pgtype.UUID, botType string, allowGuest bool)
 			*dest[11].(*bool) = allowGuest
 			*dest[12].(*bool) = false      // ReasoningEnabled
 			*dest[13].(*string) = "medium" // ReasoningEffort
-			*dest[14].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[15].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[16].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[17].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[18].(*[]byte) = []byte(`{}`)
-			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[20].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[14].(*pgtype.UUID) = pgtype.UUID{} // ChatModelID
+			*dest[15].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
+			*dest[16].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
+			*dest[17].(*bool) = false                // HeartbeatEnabled
+			*dest[18].(*int32) = 30                  // HeartbeatInterval
+			*dest[19].(*string) = ""                 // HeartbeatPrompt
+			*dest[20].(*[]byte) = []byte(`{}`)
+			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/memory"
+	memprovider "github.com/memohai/memoh/internal/memory/provider"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/schedule"
@@ -72,20 +73,21 @@ type gatewayAssetLoader interface {
 
 // Resolver orchestrates chat with the agent gateway.
 type Resolver struct {
-	modelsService   *models.Service
-	queries         *sqlc.Queries
-	memoryService   *memory.Service
-	conversationSvc ConversationSettingsReader
-	messageService  messagepkg.Service
-	settingsService *settings.Service
-	inboxService    *inbox.Service
-	skillLoader     SkillLoader
-	assetLoader     gatewayAssetLoader
-	gatewayBaseURL  string
-	timeout         time.Duration
-	logger          *slog.Logger
-	httpClient      *http.Client
-	streamingClient *http.Client
+	modelsService    *models.Service
+	queries          *sqlc.Queries
+	memoryService    *memory.Service
+	memoryRegistry   *memprovider.Registry
+	conversationSvc  ConversationSettingsReader
+	messageService   messagepkg.Service
+	settingsService  *settings.Service
+	inboxService     *inbox.Service
+	skillLoader      SkillLoader
+	assetLoader      gatewayAssetLoader
+	gatewayBaseURL   string
+	timeout          time.Duration
+	logger           *slog.Logger
+	httpClient       *http.Client
+	streamingClient  *http.Client
 }
 
 // NewResolver creates a Resolver that communicates with the agent gateway.
@@ -120,6 +122,11 @@ func NewResolver(
 		httpClient:      &http.Client{Timeout: timeout},
 		streamingClient: &http.Client{},
 	}
+}
+
+// SetMemoryRegistry sets the provider registry for memory operations.
+func (r *Resolver) SetMemoryRegistry(registry *memprovider.Registry) {
+	r.memoryRegistry = registry
 }
 
 // SetSkillLoader sets the skill loader used to populate usable skills in gateway requests.
@@ -1273,12 +1280,57 @@ func trimMessagesByTokens(messages []messageWithUsage, maxTokens int) []conversa
 	return result
 }
 
+func (r *Resolver) resolveMemoryProvider(ctx context.Context, botID string) memprovider.Provider {
+	if r.memoryRegistry == nil {
+		return nil
+	}
+	if r.settingsService == nil {
+		return nil
+	}
+	botSettings, err := r.settingsService.GetBot(ctx, botID)
+	if err != nil {
+		return nil
+	}
+	providerID := strings.TrimSpace(botSettings.MemoryProviderID)
+	if providerID == "" {
+		return nil
+	}
+	p, err := r.memoryRegistry.Get(providerID)
+	if err != nil {
+		r.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", err))
+		return nil
+	}
+	return p
+}
+
 type memoryContextItem struct {
 	Namespace string
 	Item      memory.MemoryItem
 }
 
 func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversation.ChatRequest) *conversation.ModelMessage {
+	// Try provider-based path first.
+	if p := r.resolveMemoryProvider(ctx, req.BotID); p != nil {
+		result, err := p.OnBeforeChat(ctx, memprovider.BeforeChatRequest{
+			Query:  req.Query,
+			BotID:  req.BotID,
+			ChatID: req.ChatID,
+		})
+		if err != nil {
+			r.logger.Warn("memory provider OnBeforeChat failed", slog.Any("error", err))
+			return nil
+		}
+		if result == nil || strings.TrimSpace(result.ContextText) == "" {
+			return nil
+		}
+		msg := conversation.ModelMessage{
+			Role:    "user",
+			Content: conversation.NewTextContent(result.ContextText),
+		}
+		return &msg
+	}
+
+	// Legacy fallback: direct memory service usage (for bots without a provider).
 	if r.memoryService == nil {
 		return nil
 	}
@@ -1665,9 +1717,6 @@ func (r *Resolver) resolveDisplayName(ctx context.Context, req conversation.Chat
 }
 
 func (r *Resolver) storeMemory(ctx context.Context, botID string, messages []conversation.ModelMessage) {
-	if r.memoryService == nil {
-		return
-	}
 	if strings.TrimSpace(botID) == "" {
 		return
 	}
@@ -1684,6 +1733,22 @@ func (r *Resolver) storeMemory(ctx context.Context, botID string, messages []con
 		memMsgs = append(memMsgs, memory.Message{Role: role, Content: text})
 	}
 	if len(memMsgs) == 0 {
+		return
+	}
+
+	// Try provider-based path first.
+	if p := r.resolveMemoryProvider(ctx, botID); p != nil {
+		if err := p.OnAfterChat(ctx, memprovider.AfterChatRequest{
+			BotID:    botID,
+			Messages: memMsgs,
+		}); err != nil {
+			r.logger.Warn("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
+		}
+		return
+	}
+
+	// Legacy fallback.
+	if r.memoryService == nil {
 		return
 	}
 	r.addMemory(ctx, botID, memMsgs, sharedMemoryNamespace, botID)

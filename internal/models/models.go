@@ -455,39 +455,11 @@ func SelectMemoryModel(ctx context.Context, modelsService *Service, queries *sql
 	return selected, provider, nil
 }
 
-// SelectMemoryModelForBot selects memory model by bot settings first, then falls back to SelectMemoryModel.
-func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, queries *sqlc.Queries, botID string) (GetResponse, sqlc.LlmProvider, error) {
-	botID = strings.TrimSpace(botID)
-	if botID == "" {
-		return SelectMemoryModel(ctx, modelsService, queries)
-	}
-	if queries == nil {
-		return SelectMemoryModel(ctx, modelsService, queries)
-	}
-	pgBotID, err := db.ParseUUID(botID)
-	if err != nil {
-		return SelectMemoryModel(ctx, modelsService, queries)
-	}
-	bot, err := queries.GetBotByID(ctx, pgBotID)
-	if err != nil {
-		return SelectMemoryModel(ctx, modelsService, queries)
-	}
-	if !bot.MemoryModelID.Valid {
-		return SelectMemoryModel(ctx, modelsService, queries)
-	}
-	dbModel, err := queries.GetModelByID(ctx, bot.MemoryModelID)
-	if err != nil {
-		return SelectMemoryModel(ctx, modelsService, queries)
-	}
-	selected := convertToGetResponse(dbModel)
-	if selected.Type != ModelTypeChat {
-		return SelectMemoryModel(ctx, modelsService, queries)
-	}
-	provider, err := FetchProviderByID(ctx, queries, selected.LlmProviderID)
-	if err != nil {
-		return GetResponse{}, sqlc.LlmProvider{}, err
-	}
-	return selected, provider, nil
+// SelectMemoryModelForBot selects memory model for a bot.
+// Since memory model configuration has moved to the memory provider config,
+// this now delegates directly to SelectMemoryModel.
+func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, queries *sqlc.Queries, _ string) (GetResponse, sqlc.LlmProvider, error) {
+	return SelectMemoryModel(ctx, modelsService, queries)
 }
 
 // FetchProviderByID fetches a provider by ID.

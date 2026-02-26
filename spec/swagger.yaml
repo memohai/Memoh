@@ -1243,6 +1243,76 @@ definitions:
       total_text_bytes:
         type: integer
     type: object
+  memoryproviders.CreateRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      provider:
+        $ref: '#/definitions/memoryproviders.ProviderType'
+    type: object
+  memoryproviders.GetResponse:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      is_default:
+        type: boolean
+      name:
+        type: string
+      provider:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  memoryproviders.ProviderConfigSchema:
+    properties:
+      fields:
+        additionalProperties:
+          $ref: '#/definitions/memoryproviders.ProviderFieldSchema'
+        type: object
+    type: object
+  memoryproviders.ProviderFieldSchema:
+    properties:
+      description:
+        type: string
+      example: {}
+      required:
+        type: boolean
+      title:
+        type: string
+      type:
+        type: string
+    type: object
+  memoryproviders.ProviderMeta:
+    properties:
+      config_schema:
+        $ref: '#/definitions/memoryproviders.ProviderConfigSchema'
+      display_name:
+        type: string
+      provider:
+        type: string
+    type: object
+  memoryproviders.ProviderType:
+    enum:
+    - builtin
+    type: string
+    x-enum-varnames:
+    - ProviderBuiltin
+  memoryproviders.UpdateRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+    type: object
   message.Message:
     properties:
       assets:
@@ -1639,8 +1709,6 @@ definitions:
         type: boolean
       chat_model_id:
         type: string
-      embedding_model_id:
-        type: string
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -1655,7 +1723,7 @@ definitions:
         type: integer
       max_inbox_items:
         type: integer
-      memory_model_id:
+      memory_provider_id:
         type: string
       reasoning_effort:
         type: string
@@ -1670,8 +1738,6 @@ definitions:
         type: boolean
       chat_model_id:
         type: string
-      embedding_model_id:
-        type: string
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -1686,7 +1752,7 @@ definitions:
         type: integer
       max_inbox_items:
         type: integer
-      memory_model_id:
+      memory_provider_id:
         type: string
       reasoning_effort:
         type: string
@@ -4787,6 +4853,150 @@ paths:
       summary: Create embeddings
       tags:
       - embeddings
+  /memory-providers:
+    get:
+      description: List configured memory providers
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/memoryproviders.GetResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List memory providers
+      tags:
+      - memory-providers
+    post:
+      consumes:
+      - application/json
+      description: Create a memory provider configuration
+      parameters:
+      - description: Memory provider configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/memoryproviders.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/memoryproviders.GetResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a memory provider
+      tags:
+      - memory-providers
+  /memory-providers/{id}:
+    delete:
+      description: Delete memory provider by ID
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a memory provider
+      tags:
+      - memory-providers
+    get:
+      description: Get memory provider by ID
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/memoryproviders.GetResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a memory provider
+      tags:
+      - memory-providers
+    put:
+      consumes:
+      - application/json
+      description: Update memory provider by ID
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/memoryproviders.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/memoryproviders.GetResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a memory provider
+      tags:
+      - memory-providers
+  /memory-providers/meta:
+    get:
+      description: List available memory provider types and config schemas
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/memoryproviders.ProviderMeta'
+            type: array
+      summary: List memory provider metadata
+      tags:
+      - memory-providers
   /models:
     get:
       description: Get a list of all configured models, optionally filtered by type

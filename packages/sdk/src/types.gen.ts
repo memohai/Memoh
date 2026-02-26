@@ -772,6 +772,55 @@ export type MemoryUsageResponse = {
     total_text_bytes?: number;
 };
 
+export type MemoryprovidersCreateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    provider?: MemoryprovidersProviderType;
+};
+
+export type MemoryprovidersGetResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    is_default?: boolean;
+    name?: string;
+    provider?: string;
+    updated_at?: string;
+};
+
+export type MemoryprovidersProviderConfigSchema = {
+    fields?: {
+        [key: string]: MemoryprovidersProviderFieldSchema;
+    };
+};
+
+export type MemoryprovidersProviderFieldSchema = {
+    description?: string;
+    example?: unknown;
+    required?: boolean;
+    title?: string;
+    type?: string;
+};
+
+export type MemoryprovidersProviderMeta = {
+    config_schema?: MemoryprovidersProviderConfigSchema;
+    display_name?: string;
+    provider?: string;
+};
+
+export type MemoryprovidersProviderType = 'builtin';
+
+export type MemoryprovidersUpdateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+};
+
 export type MessageMessage = {
     assets?: Array<MessageMessageAsset>;
     bot_id?: string;
@@ -998,7 +1047,6 @@ export type SearchprovidersUpdateRequest = {
 export type SettingsSettings = {
     allow_guest?: boolean;
     chat_model_id?: string;
-    embedding_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -1006,7 +1054,7 @@ export type SettingsSettings = {
     max_context_load_time?: number;
     max_context_tokens?: number;
     max_inbox_items?: number;
-    memory_model_id?: string;
+    memory_provider_id?: string;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
@@ -1015,7 +1063,6 @@ export type SettingsSettings = {
 export type SettingsUpsertRequest = {
     allow_guest?: boolean;
     chat_model_id?: string;
-    embedding_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -1023,7 +1070,7 @@ export type SettingsUpsertRequest = {
     max_context_load_time?: number;
     max_context_tokens?: number;
     max_inbox_items?: number;
-    memory_model_id?: string;
+    memory_provider_id?: string;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
@@ -4759,6 +4806,182 @@ export type PostEmbeddingsResponses = {
 };
 
 export type PostEmbeddingsResponse = PostEmbeddingsResponses[keyof PostEmbeddingsResponses];
+
+export type GetMemoryProvidersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/memory-providers';
+};
+
+export type GetMemoryProvidersErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetMemoryProvidersError = GetMemoryProvidersErrors[keyof GetMemoryProvidersErrors];
+
+export type GetMemoryProvidersResponses = {
+    /**
+     * OK
+     */
+    200: Array<MemoryprovidersGetResponse>;
+};
+
+export type GetMemoryProvidersResponse = GetMemoryProvidersResponses[keyof GetMemoryProvidersResponses];
+
+export type PostMemoryProvidersData = {
+    /**
+     * Memory provider configuration
+     */
+    body: MemoryprovidersCreateRequest;
+    path?: never;
+    query?: never;
+    url: '/memory-providers';
+};
+
+export type PostMemoryProvidersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostMemoryProvidersError = PostMemoryProvidersErrors[keyof PostMemoryProvidersErrors];
+
+export type PostMemoryProvidersResponses = {
+    /**
+     * Created
+     */
+    201: MemoryprovidersGetResponse;
+};
+
+export type PostMemoryProvidersResponse = PostMemoryProvidersResponses[keyof PostMemoryProvidersResponses];
+
+export type GetMemoryProvidersMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/memory-providers/meta';
+};
+
+export type GetMemoryProvidersMetaResponses = {
+    /**
+     * OK
+     */
+    200: Array<MemoryprovidersProviderMeta>;
+};
+
+export type GetMemoryProvidersMetaResponse = GetMemoryProvidersMetaResponses[keyof GetMemoryProvidersMetaResponses];
+
+export type DeleteMemoryProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/memory-providers/{id}';
+};
+
+export type DeleteMemoryProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteMemoryProvidersByIdError = DeleteMemoryProvidersByIdErrors[keyof DeleteMemoryProvidersByIdErrors];
+
+export type DeleteMemoryProvidersByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetMemoryProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/memory-providers/{id}';
+};
+
+export type GetMemoryProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetMemoryProvidersByIdError = GetMemoryProvidersByIdErrors[keyof GetMemoryProvidersByIdErrors];
+
+export type GetMemoryProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: MemoryprovidersGetResponse;
+};
+
+export type GetMemoryProvidersByIdResponse = GetMemoryProvidersByIdResponses[keyof GetMemoryProvidersByIdResponses];
+
+export type PutMemoryProvidersByIdData = {
+    /**
+     * Updated configuration
+     */
+    body: MemoryprovidersUpdateRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/memory-providers/{id}';
+};
+
+export type PutMemoryProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutMemoryProvidersByIdError = PutMemoryProvidersByIdErrors[keyof PutMemoryProvidersByIdErrors];
+
+export type PutMemoryProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: MemoryprovidersGetResponse;
+};
+
+export type PutMemoryProvidersByIdResponse = PutMemoryProvidersByIdResponses[keyof PutMemoryProvidersByIdResponses];
 
 export type GetModelsData = {
     body?: never;

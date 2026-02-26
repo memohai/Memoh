@@ -24,9 +24,8 @@ type Bot struct {
 	ReasoningEffort    string             `json:"reasoning_effort"`
 	MaxInboxItems      int32              `json:"max_inbox_items"`
 	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
-	MemoryModelID      pgtype.UUID        `json:"memory_model_id"`
-	EmbeddingModelID   pgtype.UUID        `json:"embedding_model_id"`
 	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
+	MemoryProviderID   pgtype.UUID        `json:"memory_provider_id"`
 	HeartbeatEnabled   bool               `json:"heartbeat_enabled"`
 	HeartbeatInterval  int32              `json:"heartbeat_interval"`
 	HeartbeatPrompt    string             `json:"heartbeat_prompt"`
@@ -231,6 +230,16 @@ type MediaAsset struct {
 	DurationMs        pgtype.Int8        `json:"duration_ms"`
 	Metadata          []byte             `json:"metadata"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type MemoryProvider struct {
+	ID        pgtype.UUID        `json:"id"`
+	Name      string             `json:"name"`
+	Provider  string             `json:"provider"`
+	Config    []byte             `json:"config"`
+	IsDefault bool               `json:"is_default"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Model struct {

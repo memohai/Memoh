@@ -54,6 +54,7 @@
     "bots": "Bots",
     "models": "Models",
     "searchProvider": "Search Providers",
+    "memoryProvider": "Memory",
     "settings": "Settings",
     "home": "Home",
     "mcp": "MCP",
@@ -202,6 +203,28 @@
       "bing": "Bing",
       "google": "Google",
       "tavily": "Tavily"
+    }
+  },
+  "memoryProvider": {
+    "title": "Memory Providers",
+    "add": "Add Memory Provider",
+    "empty": "No memory providers",
+    "provider": "Provider Type",
+    "searchPlaceholder": "Search providers...",
+    "emptyTitle": "No Memory Providers",
+    "emptyDescription": "Add a memory provider to enable long-term memory for your bots",
+    "saveSuccess": "Memory provider saved",
+    "deleteSuccess": "Memory provider deleted",
+    "deleteFailed": "Failed to delete memory provider",
+    "deleteConfirm": "Are you sure you want to delete this memory provider? Bots using it will lose memory access.",
+    "name": "Name",
+    "namePlaceholder": "Enter provider name",
+    "memoryModel": "Memory Model",
+    "memoryModelDescription": "LLM model for memory extraction and decision",
+    "embeddingModel": "Embedding Model",
+    "embeddingModelDescription": "Embedding model for dense vector search",
+    "providerNames": {
+      "builtin": "Built-in"
     }
   },
   "mcp": {
@@ -373,6 +396,8 @@
       "embeddingModel": "Embedding Model",
       "searchProvider": "Search Provider",
       "searchProviderPlaceholder": "Select search provider",
+      "memoryProvider": "Memory Provider",
+      "memoryProviderPlaceholder": "Select memory provider (disabled if empty)",
       "maxContextLoadTime": "Max Context Load Time",
       "maxContextTokens": "Max Context Tokens",
       "language": "Language",
