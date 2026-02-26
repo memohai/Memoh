@@ -160,7 +160,12 @@
       "audio": "Audio",
       "video": "Video",
       "file": "File"
-    }
+    },
+    "testModel": "Test Model",
+    "testOk": "OK",
+    "testAuthError": "Auth Error",
+    "testError": "Error",
+    "testFailed": "Test failed"
   },
   "provider": {
     "add": "Add Provider",
@@ -176,11 +181,6 @@
     "testConnection": "Test Connection",
     "reachable": "Reachable",
     "unreachable": "Unreachable",
-    "supported": "Supported",
-    "authError": "Auth Error",
-    "unsupported": "Unsupported",
-    "error": "Error",
-    "embedding": "Embedding",
     "testFailed": "Test failed"
   },
   "searchProvider": {

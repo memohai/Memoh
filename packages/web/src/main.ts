@@ -52,6 +52,7 @@ import {
   faFile,
   faMusic,
   faVideo,
+  faBolt,
 } from '@fortawesome/free-solid-svg-icons'
 import {
   faRectangleList,
@@ -97,6 +98,7 @@ library.add(
   faFile,
   faMusic,
   faVideo,
+  faBolt,
   faRectangleList,
   faTrashCan,
   faComments,

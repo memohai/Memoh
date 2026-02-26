@@ -10,17 +10,17 @@ export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
   'openai-responses': {
     value: 'openai-responses',
     label: 'OpenAI Responses',
-    hint: '/v1/responses',
+    hint: 'Responses API (streaming, built-in tools)',
   },
   'openai-completions': {
     value: 'openai-completions',
     label: 'OpenAI Completions',
-    hint: '/v1/models',
+    hint: 'Chat Completions API (widely compatible)',
   },
   'anthropic-messages': {
     value: 'anthropic-messages',
     label: 'Anthropic Messages',
-    hint: '/v1/messages',
+    hint: 'Messages API (Claude models)',
   },
   'google-generative-ai': {
     value: 'google-generative-ai',

@@ -499,6 +499,12 @@ export type HandlersPingResponse = {
     status?: string;
 };
 
+export type HandlersRefreshResponse = {
+    access_token?: string;
+    expires_at?: string;
+    token_type?: string;
+};
+
 export type HandlersSkillItem = {
     content?: string;
     description?: string;
@@ -828,6 +834,15 @@ export type ModelsGetResponse = {
 
 export type ModelsModelType = 'chat' | 'embedding';
 
+export type ModelsTestResponse = {
+    latency_ms?: number;
+    message?: string;
+    reachable?: boolean;
+    status?: ModelsTestStatus;
+};
+
+export type ModelsTestStatus = 'ok' | 'auth_error' | 'error';
+
 export type ModelsUpdateRequest = {
     client_type?: ModelsClientType;
     dimensions?: number;
@@ -838,15 +853,6 @@ export type ModelsUpdateRequest = {
     supports_reasoning?: boolean;
     type?: ModelsModelType;
 };
-
-export type ProvidersCheckResult = {
-    latency_ms?: number;
-    message?: string;
-    status?: ProvidersCheckStatus;
-    status_code?: number;
-};
-
-export type ProvidersCheckStatus = 'supported' | 'auth_error' | 'unsupported' | 'error';
 
 export type ProvidersCountResponse = {
     count?: number;
@@ -877,9 +883,6 @@ export type ProvidersGetResponse = {
 };
 
 export type ProvidersTestResponse = {
-    checks?: {
-        [key: string]: ProvidersCheckResult;
-    };
     latency_ms?: number;
     message?: string;
     reachable?: boolean;
@@ -1129,6 +1132,35 @@ export type PostAuthLoginResponses = {
 };
 
 export type PostAuthLoginResponse = PostAuthLoginResponses[keyof PostAuthLoginResponses];
+
+export type PostAuthRefreshData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/refresh';
+};
+
+export type PostAuthRefreshErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostAuthRefreshError = PostAuthRefreshErrors[keyof PostAuthRefreshErrors];
+
+export type PostAuthRefreshResponses = {
+    /**
+     * OK
+     */
+    200: HandlersRefreshResponse;
+};
+
+export type PostAuthRefreshResponse = PostAuthRefreshResponses[keyof PostAuthRefreshResponses];
 
 export type GetBotsData = {
     body?: never;
@@ -5054,6 +5086,44 @@ export type PutModelsByIdResponses = {
 };
 
 export type PutModelsByIdResponse = PutModelsByIdResponses[keyof PutModelsByIdResponses];
+
+export type PostModelsByIdTestData = {
+    body?: never;
+    path: {
+        /**
+         * Model internal ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/models/{id}/test';
+};
+
+export type PostModelsByIdTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostModelsByIdTestError = PostModelsByIdTestErrors[keyof PostModelsByIdTestErrors];
+
+export type PostModelsByIdTestResponses = {
+    /**
+     * OK
+     */
+    200: ModelsTestResponse;
+};
+
+export type PostModelsByIdTestResponse = PostModelsByIdTestResponses[keyof PostModelsByIdTestResponses];
 
 export type GetPingData = {
     body?: never;

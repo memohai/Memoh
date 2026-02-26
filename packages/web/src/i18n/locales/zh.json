@@ -156,7 +156,12 @@
       "audio": "音频",
       "video": "视频",
       "file": "文件"
-    }
+    },
+    "testModel": "测试模型",
+    "testOk": "正常",
+    "testAuthError": "认证失败",
+    "testError": "异常",
+    "testFailed": "测试失败"
   },
   "provider": {
     "add": "添加服务商",
@@ -172,11 +177,6 @@
     "testConnection": "测试连接",
     "reachable": "可连接",
     "unreachable": "不可连接",
-    "supported": "支持",
-    "authError": "认证失败",
-    "unsupported": "不支持",
-    "error": "错误",
-    "embedding": "Embedding",
     "testFailed": "测试失败"
   },
   "searchProvider": {

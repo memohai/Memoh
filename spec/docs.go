@@ -61,6 +61,40 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/refresh": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Issue a new JWT using the existing claims with updated expiration",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Refresh Token",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RefreshResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots": {
             "get": {
                 "description": "List bots accessible to current user (admin can specify owner_id)",
@@ -4834,6 +4868,56 @@ const docTemplate = `{
                 }
             }
         },
+        "/models/{id}/test": {
+            "post": {
+                "description": "Probe a model's provider endpoint using the model's real model_id and client_type to verify configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "Test model connectivity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model internal ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.TestResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/ping": {
             "get": {
                 "tags": [
@@ -7213,6 +7297,20 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.RefreshResponse": {
+            "type": "object",
+            "properties": {
+                "access_token": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "token_type": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.SkillItem": {
             "type": "object",
             "properties": {
@@ -8022,6 +8120,36 @@ const docTemplate = `{
                 "ModelTypeEmbedding"
             ]
         },
+        "models.TestResponse": {
+            "type": "object",
+            "properties": {
+                "latency_ms": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "reachable": {
+                    "type": "boolean"
+                },
+                "status": {
+                    "$ref": "#/definitions/models.TestStatus"
+                }
+            }
+        },
+        "models.TestStatus": {
+            "type": "string",
+            "enum": [
+                "ok",
+                "auth_error",
+                "error"
+            ],
+            "x-enum-varnames": [
+                "TestStatusOK",
+                "TestStatusAuthError",
+                "TestStatusError"
+            ]
+        },
         "models.UpdateRequest": {
             "type": "object",
             "properties": {
@@ -8053,38 +8181,6 @@ const docTemplate = `{
                     "$ref": "#/definitions/models.ModelType"
                 }
             }
-        },
-        "providers.CheckResult": {
-            "type": "object",
-            "properties": {
-                "latency_ms": {
-                    "type": "integer"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "status": {
-                    "$ref": "#/definitions/providers.CheckStatus"
-                },
-                "status_code": {
-                    "type": "integer"
-                }
-            }
-        },
-        "providers.CheckStatus": {
-            "type": "string",
-            "enum": [
-                "supported",
-                "auth_error",
-                "unsupported",
-                "error"
-            ],
-            "x-enum-varnames": [
-                "CheckStatusSupported",
-                "CheckStatusAuthError",
-                "CheckStatusUnsupported",
-                "CheckStatusError"
-            ]
         },
         "providers.CountResponse": {
             "type": "object",
@@ -8147,12 +8243,6 @@ const docTemplate = `{
         "providers.TestResponse": {
             "type": "object",
             "properties": {
-                "checks": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/providers.CheckResult"
-                    }
-                },
                 "latency_ms": {
                     "type": "integer"
                 },
