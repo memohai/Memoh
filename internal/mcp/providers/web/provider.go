@@ -311,7 +311,7 @@ func (p *Executor) callGoogleSearch(ctx context.Context, configJSON []byte, quer
 
 func (p *Executor) callSogouSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
-	host := firstNonEmpty(stringValue(cfg["base_url"]), "tms.tencentcloudapi.com")
+	host := firstNonEmpty(stringValue(cfg["base_url"]), "wsa.tencentcloudapi.com")
 	secretID := stringValue(cfg["secret_id"])
 	secretKey := stringValue(cfg["secret_key"])
 	if secretID == "" || secretKey == "" {
@@ -319,11 +319,11 @@ func (p *Executor) callSogouSearch(ctx context.Context, configJSON []byte, query
 	}
 
 	action := "SearchPro"
-	version := "2020-12-29"
-	service := "tms"
+	version := "2025-05-08"
+	service := "wsa"
 	payload, _ := json.Marshal(map[string]any{
 		"Query": query,
-		"Cnt":   20,
+		"Mode":  0,
 	})
 
 	now := time.Now().UTC()
@@ -331,9 +331,9 @@ func (p *Executor) callSogouSearch(ctx context.Context, configJSON []byte, query
 	date := now.Format("2006-01-02")
 
 	hashedPayload := sha256Hex(payload)
-	canonicalHeaders := fmt.Sprintf("content-type:%s\nhost:%s\nx-tc-action:%s\n",
-		"application/json; charset=utf-8", host, strings.ToLower(action))
-	signedHeaders := "content-type;host;x-tc-action"
+	canonicalHeaders := fmt.Sprintf("content-type:%s\nhost:%s\n",
+		"application/json", host)
+	signedHeaders := "content-type;host"
 	canonicalRequest := fmt.Sprintf("%s\n%s\n%s\n%s\n%s\n%s",
 		"POST", "/", "", canonicalHeaders, signedHeaders, hashedPayload)
 
@@ -355,8 +355,9 @@ func (p *Executor) callSogouSearch(ctx context.Context, configJSON []byte, query
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", authorization)
+	req.Header.Set("Host", host)
 	req.Header.Set("X-TC-Action", action)
 	req.Header.Set("X-TC-Version", version)
 	req.Header.Set("X-TC-Timestamp", timestamp)

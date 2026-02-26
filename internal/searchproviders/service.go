@@ -137,7 +137,7 @@ func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
 						Title:       "Base URL",
 						Description: "Tencent Cloud TMS API host",
 						Required:    false,
-						Example:     "tms.tencentcloudapi.com",
+						Example:     "wsa.tencentcloudapi.com",
 					},
 					"timeout_seconds": {
 						Type:        "number",

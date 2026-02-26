@@ -24,7 +24,7 @@
         id="sogou-base-url"
         v-model="localConfig.base_url"
         aria-label="Base URL"
-        placeholder="tms.tencentcloudapi.com"
+        placeholder="wsa.tencentcloudapi.com"
       />
     </div>
     <div class="space-y-2">
@@ -55,7 +55,7 @@ const emit = defineEmits<{
 const localConfig = reactive({
   secret_id: '',
   secret_key: '',
-  base_url: 'tms.tencentcloudapi.com',
+  base_url: 'wsa.tencentcloudapi.com',
   timeout_seconds: 15,
 })
 
@@ -64,7 +64,7 @@ watch(
   (val) => {
     localConfig.secret_id = String(val?.secret_id ?? '')
     localConfig.secret_key = String(val?.secret_key ?? '')
-    localConfig.base_url = String(val?.base_url ?? 'tms.tencentcloudapi.com')
+    localConfig.base_url = String(val?.base_url ?? 'wsa.tencentcloudapi.com')
     const timeout = Number(val?.timeout_seconds ?? 15)
     localConfig.timeout_seconds = Number.isFinite(timeout) && timeout > 0 ? timeout : 15
   },
