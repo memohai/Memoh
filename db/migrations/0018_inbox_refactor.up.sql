@@ -5,15 +5,14 @@
 ALTER TABLE bot_inbox ADD COLUMN IF NOT EXISTS header JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE bot_inbox ADD COLUMN IF NOT EXISTS action TEXT NOT NULL DEFAULT 'notify';
 
--- 2. Migrate existing data: extract "text" into a temporary text holder,
---    move remaining keys into header.
+-- 2. Migrate existing data: extract "text" into header, keep remaining keys.
 UPDATE bot_inbox
 SET header  = content - 'text',
     action  = 'notify'
-WHERE content IS NOT NULL AND content != '{}'::jsonb;
+WHERE content IS NOT NULL AND content::text <> '{}';
 
 -- 3. Convert content column from JSONB to TEXT.
---    We extract the "text" key as the new plain-text content.
+--    Extract the "text" key as the new plain-text content.
 ALTER TABLE bot_inbox ALTER COLUMN content DROP DEFAULT;
 ALTER TABLE bot_inbox ALTER COLUMN content TYPE TEXT USING COALESCE(content ->> 'text', '');
 ALTER TABLE bot_inbox ALTER COLUMN content SET DEFAULT '';
