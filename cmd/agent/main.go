@@ -145,9 +145,7 @@ func runServe() {
 			provideEmbeddingsResolver,
 			provideEmbeddingSetup,
 			provideTextEmbedderForMemory,
-			provideQdrantStore,
-			memory.NewBM25Indexer,
-			provideMemoryService,
+			provideQdrantStoreFactory,
 			memoryproviders.NewService,
 			provideMemoryProviderRegistry,
 
@@ -221,7 +219,6 @@ func runServe() {
 		),
 		fx.Invoke(
 			startMemoryProviderBootstrap,
-			startMemoryWarmup,
 			startScheduleService,
 			startHeartbeatService,
 			startChannelManager,
@@ -347,31 +344,27 @@ func provideTextEmbedderForMemory(resolver *embeddings.Resolver, setup embedding
 	return buildTextEmbedder(resolver, setup.TextModel, setup.HasEmbeddingModels, log)
 }
 
-func provideQdrantStore(log *slog.Logger, cfg config.Config, setup embeddingSetup) (*memory.QdrantStore, error) {
+func provideQdrantStoreFactory(log *slog.Logger, cfg config.Config, setup embeddingSetup) *memory.QdrantStoreFactory {
 	qcfg := cfg.Qdrant
 	timeout := time.Duration(qcfg.TimeoutSeconds) * time.Second
-	if setup.HasEmbeddingModels && len(setup.Vectors) > 0 {
-		store, err := memory.NewQdrantStoreWithVectors(log, qcfg.BaseURL, qcfg.APIKey, qcfg.Collection, setup.Vectors, "sparse_hash", timeout)
-		if err != nil {
-			return nil, fmt.Errorf("qdrant named vectors init: %w", err)
-		}
-		return store, nil
-	}
-	store, err := memory.NewQdrantStore(log, qcfg.BaseURL, qcfg.APIKey, qcfg.Collection, setup.TextModel.Dimensions, "sparse_hash", timeout)
-	if err != nil {
-		return nil, fmt.Errorf("qdrant init: %w", err)
-	}
-	return store, nil
+	return memory.NewQdrantStoreFactory(log, qcfg.BaseURL, qcfg.APIKey, timeout, setup.Vectors, setup.TextModel.Dimensions, "sparse_hash")
 }
 
-func provideMemoryService(log *slog.Logger, llm memory.LLM, embedder embeddings.Embedder, store *memory.QdrantStore, resolver *embeddings.Resolver, bm25 *memory.BM25Indexer, setup embeddingSetup) *memory.Service {
-	return memory.NewService(log, llm, embedder, store, resolver, bm25, setup.TextModel.ModelID, setup.MultimodalModel.ModelID)
-}
-
-func provideMemoryProviderRegistry(log *slog.Logger, memoryService *memory.Service, chatService *conversation.Service, accountService *accounts.Service) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, storeFactory *memory.QdrantStoreFactory, llm memory.LLM, embedder embeddings.Embedder, resolver *embeddings.Resolver, setup embeddingSetup, chatService *conversation.Service, accountService *accounts.Service) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	registry.RegisterFactory(memprovider.BuiltinType, func(id string, config map[string]any) (memprovider.Provider, error) {
-		return memprovider.NewBuiltinProvider(log, memoryService, chatService, accountService), nil
+		store, err := storeFactory.NewStore(id)
+		if err != nil {
+			return nil, fmt.Errorf("create qdrant store for provider %s: %w", id, err)
+		}
+		bm25 := memory.NewBM25Indexer(log)
+		svc := memory.NewService(log, llm, embedder, store, resolver, bm25, setup.TextModel.ModelID, setup.MultimodalModel.ModelID)
+		go func() {
+			if err := svc.WarmupBM25(context.Background(), 200); err != nil {
+				log.Warn("bm25 warmup failed for provider", slog.String("provider_id", id), slog.Any("error", err))
+			}
+		}()
+		return memprovider.NewBuiltinProvider(log, svc, chatService, accountService), nil
 	})
 	return registry
 }
@@ -400,8 +393,8 @@ func provideHeartbeatTriggerer(resolver *flow.Resolver) heartbeat.Triggerer {
 // conversation flow
 // ---------------------------------------------------------------------------
 
-func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, memoryService *memory.Service, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *flow.Resolver {
-	resolver := flow.NewResolver(log, modelsService, queries, memoryService, chatService, msgService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
+func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *flow.Resolver {
+	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
@@ -475,7 +468,7 @@ func provideContainerdHandler(log *slog.Logger, service ctr.Service, manager *mc
 	return handlers.NewContainerdHandler(log, service, manager, cfg.MCP, cfg.Containerd.Namespace, rc.ContainerBackend, botService, accountService, policyService, queries)
 }
 
-func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, memoryService *memory.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *mcp.ToolGatewayService {
 	var assetResolver mcpmessage.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -504,8 +497,8 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 // handler providers (interface adaptation / config extraction)
 // ---------------------------------------------------------------------------
 
-func provideMemoryHandler(log *slog.Logger, service *memory.Service, chatService *conversation.Service, accountService *accounts.Service, cfg config.Config, manager *mcp.Manager, memoryRegistry *memprovider.Registry, settingsService *settings.Service) *handlers.MemoryHandler {
-	h := handlers.NewMemoryHandler(log, service, chatService, accountService)
+func provideMemoryHandler(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, cfg config.Config, manager *mcp.Manager, memoryRegistry *memprovider.Registry, settingsService *settings.Service) *handlers.MemoryHandler {
+	h := handlers.NewMemoryHandler(log, chatService, accountService)
 	h.SetMemoryRegistry(memoryRegistry)
 	h.SetSettingsService(settingsService)
 	if manager != nil {
@@ -587,19 +580,6 @@ func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *
 			} else {
 				log.Info("default memory provider ready", slog.String("id", resp.ID), slog.String("provider", resp.Provider))
 			}
-			return nil
-		},
-	})
-}
-
-func startMemoryWarmup(lc fx.Lifecycle, memoryService *memory.Service, logger *slog.Logger) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			go func() {
-				if err := memoryService.WarmupBM25(context.Background(), 200); err != nil {
-					logger.Warn("bm25 warmup failed", slog.Any("error", err))
-				}
-			}()
 			return nil
 		},
 	})

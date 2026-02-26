@@ -93,6 +93,42 @@ func (s *QdrantStore) NewSibling(collection string, dimension int) (*QdrantStore
 	return NewQdrantStore(s.logger, s.baseURL, s.apiKey, collection, dimension, s.sparseVectorName, s.timeout)
 }
 
+// QdrantStoreFactory holds connection parameters and can create QdrantStore
+// instances for different collections. Each builtin memory provider uses its
+// own collection (named after the provider UUID).
+type QdrantStoreFactory struct {
+	log              *slog.Logger
+	baseURL          string
+	apiKey           string
+	timeout          time.Duration
+	vectors          map[string]int // named vectors (model -> dimension); nil for single-vector mode
+	dimension        int            // single-vector dimension (ignored when vectors is non-empty)
+	sparseVectorName string
+}
+
+func NewQdrantStoreFactory(log *slog.Logger, baseURL, apiKey string, timeout time.Duration, vectors map[string]int, dimension int, sparseVectorName string) *QdrantStoreFactory {
+	if strings.TrimSpace(sparseVectorName) == "" {
+		sparseVectorName = sparseHashVectorName
+	}
+	return &QdrantStoreFactory{
+		log:              log,
+		baseURL:          baseURL,
+		apiKey:           apiKey,
+		timeout:          timeoutOrDefault(timeout),
+		vectors:          vectors,
+		dimension:        dimension,
+		sparseVectorName: sparseVectorName,
+	}
+}
+
+// NewStore creates a QdrantStore for the given collection name.
+func (f *QdrantStoreFactory) NewStore(collection string) (*QdrantStore, error) {
+	if len(f.vectors) > 0 {
+		return NewQdrantStoreWithVectors(f.log, f.baseURL, f.apiKey, collection, f.vectors, f.sparseVectorName, f.timeout)
+	}
+	return NewQdrantStore(f.log, f.baseURL, f.apiKey, collection, f.dimension, f.sparseVectorName, f.timeout)
+}
+
 func NewQdrantStoreWithVectors(log *slog.Logger, baseURL, apiKey, collection string, vectors map[string]int, sparseVectorName string, timeout time.Duration) (*QdrantStore, error) {
 	host, port, useTLS, err := parseQdrantEndpoint(baseURL)
 	if err != nil {
