@@ -399,12 +399,14 @@ CREATE TABLE IF NOT EXISTS bot_history_message_assets (
 
 CREATE INDEX IF NOT EXISTS idx_message_assets_message_id ON bot_history_message_assets(message_id);
 
--- bot_inbox: per-bot message inbox for non-mentioned group messages, emails, etc.
+-- bot_inbox: per-bot message inbox for channel messages, notifications, etc.
 CREATE TABLE IF NOT EXISTS bot_inbox (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   source TEXT NOT NULL DEFAULT '',
-  content JSONB NOT NULL DEFAULT '{}'::jsonb,
+  header JSONB NOT NULL DEFAULT '{}'::jsonb,
+  content TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL DEFAULT 'notify',
   is_read BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   read_at TIMESTAMPTZ

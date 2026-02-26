@@ -29,13 +29,20 @@ ${skill.content}
 
 const formatInbox = (items: InboxItem[]): string => {
   if (!items || items.length === 0) return ''
+  const formatted = items.map((item) => ({
+    id: item.id,
+    source: item.source,
+    header: item.header,
+    content: item.content,
+    createdAt: item.createdAt,
+  }))
   return `
 ## Inbox (${items.length} unread)
 
 These are messages from other channels — NOT from the current conversation. Use ${quote('send')} or ${quote('react')} if you want to respond to any of them.
 
 <inbox>
-${JSON.stringify(items)}
+${JSON.stringify(formatted)}
 </inbox>
 
 Use ${quote('search_inbox')} to find older messages by keyword.

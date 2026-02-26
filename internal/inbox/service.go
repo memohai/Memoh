@@ -28,11 +28,18 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	}
 }
 
+const (
+	ActionTrigger = "trigger"
+	ActionNotify  = "notify"
+)
+
 type Item struct {
 	ID        string         `json:"id"`
 	BotID     string         `json:"bot_id"`
 	Source    string         `json:"source"`
-	Content   map[string]any `json:"content"`
+	Header    map[string]any `json:"header"`
+	Content   string         `json:"content"`
+	Action    string         `json:"action"`
 	IsRead    bool           `json:"is_read"`
 	CreatedAt time.Time      `json:"created_at"`
 	ReadAt    time.Time      `json:"read_at,omitempty"`
@@ -41,7 +48,9 @@ type Item struct {
 type CreateRequest struct {
 	BotID   string         `json:"bot_id"`
 	Source  string         `json:"source"`
-	Content map[string]any `json:"content"`
+	Header  map[string]any `json:"header"`
+	Content string         `json:"content"`
+	Action  string         `json:"action"`
 }
 
 type ListFilter struct {
@@ -69,15 +78,21 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Item, error) {
 	if err != nil {
 		return Item{}, err
 	}
-	content, err := json.Marshal(req.Content)
+	header, err := json.Marshal(req.Header)
 	if err != nil {
 		return Item{}, err
+	}
+	action := req.Action
+	if action != ActionTrigger && action != ActionNotify {
+		action = ActionNotify
 	}
 
 	row, err := s.queries.CreateInboxItem(ctx, sqlc.CreateInboxItemParams{
 		BotID:   botUUID,
 		Source:  req.Source,
-		Content: content,
+		Header:  header,
+		Content: req.Content,
+		Action:  action,
 	})
 	if err != nil {
 		return Item{}, err
@@ -236,18 +251,20 @@ func (s *Service) Delete(ctx context.Context, botID, itemID string) error {
 // --- conversion helpers ---
 
 func rowToItem(row sqlc.BotInbox) Item {
-	var content map[string]any
-	if len(row.Content) > 0 {
-		_ = json.Unmarshal(row.Content, &content)
+	var header map[string]any
+	if len(row.Header) > 0 {
+		_ = json.Unmarshal(row.Header, &header)
 	}
-	if content == nil {
-		content = map[string]any{}
+	if header == nil {
+		header = map[string]any{}
 	}
 	return Item{
 		ID:        pgUUIDToString(row.ID),
 		BotID:     pgUUIDToString(row.BotID),
 		Source:    row.Source,
-		Content:   content,
+		Header:    header,
+		Content:   row.Content,
+		Action:    row.Action,
 		IsRead:    row.IsRead,
 		CreatedAt: db.TimeFromPg(row.CreatedAt),
 		ReadAt:    db.TimeFromPg(row.ReadAt),

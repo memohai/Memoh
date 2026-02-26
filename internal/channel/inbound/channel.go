@@ -211,7 +211,16 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if activeChatID == "" {
 		activeChatID = strings.TrimSpace(resolved.ChatID)
 	}
-	if !shouldTriggerAssistantResponse(msg) && !identity.ForceReply {
+	// Determine inbox action: trigger (immediate response) or notify (passive).
+	inboxAction := inbox.ActionNotify
+	if shouldTriggerAssistantResponse(msg) || identity.ForceReply {
+		inboxAction = inbox.ActionTrigger
+	}
+
+	// All messages go through inbox first.
+	inboxItem := p.createInboxItem(ctx, identity, msg, text, attachments, resolved.RouteID, inboxAction)
+
+	if inboxAction != inbox.ActionTrigger {
 		if p.logger != nil {
 			p.logger.Info(
 				"inbound not triggering assistant (group trigger condition not met)",
@@ -228,9 +237,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		if !strings.EqualFold(identity.BotType, "personal") {
 			p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, attachments, "passive_sync")
 		}
-		p.createInboxItem(ctx, identity, msg, text, attachments, resolved.RouteID)
 		return nil
 	}
+
+	// Mark the trigger inbox item as read immediately.
+	if inboxItem.ID != "" {
+		p.markInboxItemRead(ctx, inboxItem)
+	}
+
 	userMessagePersisted := p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, attachments, "active_chat")
 
 	// Issue chat token for reply routing.
@@ -717,17 +731,18 @@ func (p *ChannelInboundProcessor) createInboxItem(
 	text string,
 	attachments []conversation.ChatAttachment,
 	routeID string,
-) {
+	action string,
+) inbox.Item {
 	if p.inboxService == nil {
-		return
+		return inbox.Item{}
 	}
 	botID := strings.TrimSpace(ident.BotID)
 	if botID == "" {
-		return
+		return inbox.Item{}
 	}
 	trimmedText := strings.TrimSpace(text)
 	if trimmedText == "" && len(attachments) == 0 {
-		return
+		return inbox.Item{}
 	}
 	displayName := strings.TrimSpace(ident.DisplayName)
 	if displayName == "" {
@@ -750,16 +765,28 @@ func (p *ChannelInboundProcessor) createInboxItem(
 		strings.TrimSpace(msg.Conversation.Name),
 		attachmentPaths,
 	)
-	content := meta.ToMap()
-	content["text"] = trimmedText
-	content["route_id"] = strings.TrimSpace(routeID)
+	header := meta.ToMap()
+	header["route_id"] = strings.TrimSpace(routeID)
 
-	if _, err := p.inboxService.Create(ctx, inbox.CreateRequest{
+	item, err := p.inboxService.Create(ctx, inbox.CreateRequest{
 		BotID:   botID,
 		Source:  msg.Channel.String(),
-		Content: content,
-	}); err != nil && p.logger != nil {
+		Header:  header,
+		Content: trimmedText,
+		Action:  action,
+	})
+	if err != nil && p.logger != nil {
 		p.logger.Warn("create inbox item failed", slog.Any("error", err), slog.String("bot_id", botID))
+	}
+	return item
+}
+
+func (p *ChannelInboundProcessor) markInboxItemRead(ctx context.Context, item inbox.Item) {
+	if p.inboxService == nil || item.ID == "" {
+		return
+	}
+	if err := p.inboxService.MarkRead(ctx, item.BotID, []string{item.ID}); err != nil && p.logger != nil {
+		p.logger.Warn("mark inbox item read failed", slog.Any("error", err), slog.String("item_id", item.ID))
 	}
 }
 

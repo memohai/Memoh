@@ -825,6 +825,15 @@ definitions:
       status:
         type: string
     type: object
+  handlers.RefreshResponse:
+    properties:
+      access_token:
+        type: string
+      expires_at:
+        type: string
+      token_type:
+        type: string
+    type: object
   handlers.SkillItem:
     properties:
       content:
@@ -1022,9 +1031,13 @@ definitions:
     type: object
   inbox.CreateRequest:
     properties:
+      action:
+        type: string
       bot_id:
         type: string
       content:
+        type: string
+      header:
         additionalProperties: {}
         type: object
       source:
@@ -1032,13 +1045,17 @@ definitions:
     type: object
   inbox.Item:
     properties:
+      action:
+        type: string
       bot_id:
         type: string
       content:
-        additionalProperties: {}
-        type: object
+        type: string
       created_at:
         type: string
+      header:
+        additionalProperties: {}
+        type: object
       id:
         type: string
       is_read:
@@ -1599,11 +1616,13 @@ definitions:
     - brave
     - bing
     - google
+    - tavily
     type: string
     x-enum-varnames:
     - ProviderBrave
     - ProviderBing
     - ProviderGoogle
+    - ProviderTavily
   searchproviders.UpdateRequest:
     properties:
       config:
@@ -1822,6 +1841,27 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Login
+      tags:
+      - auth
+  /auth/refresh:
+    post:
+      description: Issue a new JWT using the existing claims with updated expiration
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.RefreshResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Refresh Token
       tags:
       - auth
   /bots:

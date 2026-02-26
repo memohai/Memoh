@@ -105,7 +105,9 @@ type BotInbox struct {
 	ID        pgtype.UUID        `json:"id"`
 	BotID     pgtype.UUID        `json:"bot_id"`
 	Source    string             `json:"source"`
-	Content   []byte             `json:"content"`
+	Header    []byte             `json:"header"`
+	Content   string             `json:"content"`
+	Action    string             `json:"action"`
 	IsRead    bool               `json:"is_read"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	ReadAt    pgtype.Timestamptz `json:"read_at"`

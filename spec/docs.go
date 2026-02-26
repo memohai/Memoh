@@ -61,6 +61,40 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/refresh": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Issue a new JWT using the existing claims with updated expiration",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Refresh Token",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RefreshResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots": {
             "get": {
                 "description": "List bots accessible to current user (admin can specify owner_id)",
@@ -7213,6 +7247,20 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.RefreshResponse": {
+            "type": "object",
+            "properties": {
+                "access_token": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "token_type": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.SkillItem": {
             "type": "object",
             "properties": {
@@ -7514,10 +7562,16 @@ const docTemplate = `{
         "inbox.CreateRequest": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string"
+                },
                 "bot_id": {
                     "type": "string"
                 },
                 "content": {
+                    "type": "string"
+                },
+                "header": {
                     "type": "object",
                     "additionalProperties": {}
                 },
@@ -7529,15 +7583,21 @@ const docTemplate = `{
         "inbox.Item": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string"
+                },
                 "bot_id": {
                     "type": "string"
                 },
                 "content": {
-                    "type": "object",
-                    "additionalProperties": {}
+                    "type": "string"
                 },
                 "created_at": {
                     "type": "string"
+                },
+                "header": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "id": {
                     "type": "string"
@@ -8381,12 +8441,14 @@ const docTemplate = `{
             "enum": [
                 "brave",
                 "bing",
-                "google"
+                "google",
+                "tavily"
             ],
             "x-enum-varnames": [
                 "ProviderBrave",
                 "ProviderBing",
-                "ProviderGoogle"
+                "ProviderGoogle",
+                "ProviderTavily"
             ]
         },
         "searchproviders.UpdateRequest": {

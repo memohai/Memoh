@@ -175,7 +175,8 @@ type gatewaySkill struct {
 type gatewayInboxItem struct {
 	ID        string         `json:"id"`
 	Source    string         `json:"source"`
-	Content   map[string]any `json:"content"`
+	Header    map[string]any `json:"header"`
+	Content   string         `json:"content"`
 	CreatedAt string         `json:"createdAt"`
 }
 
@@ -408,6 +409,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 				inboxGatewayItems = append(inboxGatewayItems, gatewayInboxItem{
 					ID:        item.ID,
 					Source:    item.Source,
+					Header:    item.Header,
 					Content:   item.Content,
 					CreatedAt: item.CreatedAt.Format(time.RFC3339),
 				})

@@ -499,6 +499,12 @@ export type HandlersPingResponse = {
     status?: string;
 };
 
+export type HandlersRefreshResponse = {
+    access_token?: string;
+    expires_at?: string;
+    token_type?: string;
+};
+
 export type HandlersSkillItem = {
     content?: string;
     description?: string;
@@ -623,19 +629,23 @@ export type InboxCountResult = {
 };
 
 export type InboxCreateRequest = {
+    action?: string;
     bot_id?: string;
-    content?: {
+    content?: string;
+    header?: {
         [key: string]: unknown;
     };
     source?: string;
 };
 
 export type InboxItem = {
+    action?: string;
     bot_id?: string;
-    content?: {
+    content?: string;
+    created_at?: string;
+    header?: {
         [key: string]: unknown;
     };
-    created_at?: string;
     id?: string;
     is_read?: boolean;
     read_at?: string;
@@ -975,7 +985,7 @@ export type SearchprovidersProviderMeta = {
     provider?: string;
 };
 
-export type SearchprovidersProviderName = 'brave' | 'bing' | 'google';
+export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily';
 
 export type SearchprovidersUpdateRequest = {
     config?: {
@@ -1129,6 +1139,35 @@ export type PostAuthLoginResponses = {
 };
 
 export type PostAuthLoginResponse = PostAuthLoginResponses[keyof PostAuthLoginResponses];
+
+export type PostAuthRefreshData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/refresh';
+};
+
+export type PostAuthRefreshErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostAuthRefreshError = PostAuthRefreshErrors[keyof PostAuthRefreshErrors];
+
+export type PostAuthRefreshResponses = {
+    /**
+     * OK
+     */
+    200: HandlersRefreshResponse;
+};
+
+export type PostAuthRefreshResponse = PostAuthRefreshResponses[keyof PostAuthRefreshResponses];
 
 export type GetBotsData = {
     body?: never;
