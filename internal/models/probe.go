@@ -12,7 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 )
 
-const probeTimeout = 5 * time.Second
+const probeTimeout = 15 * time.Second
 
 // Test probes a model's provider endpoint using the model's real model_id
 // and client_type to verify that the configuration is valid.
