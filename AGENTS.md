@@ -74,11 +74,11 @@ Memoh/
 ├── db/                         # Database
 │   ├── migrations/             #   SQL migration files
 │   └── queries/                #   SQL query files (sqlc input)
-├── conf/                       # Configuration templates (app.example.toml, app.dev.toml, app.docker.toml)
-├── devenv/                     # Development environment (docker-compose for local infra)
-├── docker/                     # Docker build & runtime (Dockerfiles, entrypoints, nginx.conf)
+├── conf/                       # Configuration templates (app.example.toml, app.docker.toml)
+├── devenv/                     # Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, mcp-build.sh)
+├── docker/                     # Production Docker build & runtime (Dockerfiles, entrypoints, nginx.conf)
 ├── docs/                       # Documentation site
-├── scripts/                    # Utility scripts
+├── scripts/                    # Utility scripts (db, release, install)
 ├── docker-compose.yml          # Docker Compose orchestration (production)
 ├── mise.toml                   # mise tasks and tool version definitions
 └── sqlc.yaml                   # sqlc code generation config
@@ -182,7 +182,7 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 
 ## Configuration
 
-The main configuration file is `config.toml` (copied from `conf/app.example.toml` or `conf/app.dev.toml` for development), containing:
+The main configuration file is `config.toml` (copied from `conf/app.example.toml` or `devenv/app.dev.toml` for development), containing:
 
 - `[server]` — HTTP listen address
 - `[admin]` — Admin account credentials

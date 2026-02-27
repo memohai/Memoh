@@ -1,6 +1,6 @@
 # Memoh configuration template
 # Copy to config.toml and adjust values for your environment.
-# For local development, use: cp conf/app.dev.toml config.toml
+# For local development, use: cp devenv/app.dev.toml config.toml
 
 [log]
 level = "info"

@@ -53,7 +53,7 @@ description = "Start development environment"
 run = """
 #!/bin/bash
 set -e
-cp conf/app.dev.toml config.toml
+cp devenv/app.dev.toml config.toml
 docker compose -f devenv/docker-compose.yml up --build
 """
 
@@ -68,6 +68,15 @@ run = "docker compose -f devenv/docker-compose.yml logs -f"
 [tasks."dev:restart"]
 description = "Restart a service (usage: mise run dev:restart -- server)"
 run = "docker compose -f devenv/docker-compose.yml restart $@"
+
+[tasks."mcp:build"]
+description = "Manually build MCP dev binary (normally auto-triggered by air)"
+run = """
+#!/bin/bash
+set -e
+docker compose -f devenv/docker-compose.yml exec server \
+  sh -c 'cd /workspace && sh devenv/mcp-build.sh'
+"""
 
 [tasks.db-up]
 description = "Initialize and Migrate Database"
@@ -116,6 +125,6 @@ depends = [
 run = """
 #!/bin/bash
 set -e
-cp conf/app.dev.toml config.toml
+cp devenv/app.dev.toml config.toml
 echo '✓ Setup complete! Run: mise run dev'
 """
