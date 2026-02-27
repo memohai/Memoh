@@ -17,6 +17,7 @@ import {
   Heartbeat,
   MCPConnection,
   Schedule,
+  SystemFile,
 } from './types'
 import { ClientType, ModelConfig, ModelInput, hasInputModality } from './types/model'
 import { system, schedule, heartbeat, subagentSystem } from './prompts'
@@ -113,22 +114,31 @@ export const createAgent = (
     return enabledSkills.map((skill) => skill.name)
   }
 
-  const loadSystemFiles = async () => {
+  const loadSystemFiles = async (): Promise<SystemFile[]> => {
     const home = '/data'
-    const [identityContent, soulContent, toolsContent] = await Promise.all([
-      fs.readText(`${home}/IDENTITY.md`),
-      fs.readText(`${home}/SOUL.md`),
-      fs.readText(`${home}/TOOLS.md`),
-    ]).catch((error) => {
-      console.error(error)
-      return ['', '', '']
-    })
-    return { identityContent, soulContent, toolsContent }
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    const getDateString = (date: Date) =>
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    const _today = getDateString(new Date())
+    const _yesterday = getDateString(new Date(Date.now() - 24 * 60 * 60 * 1000))
+    const files = [
+      'IDENTITY.md',
+      'SOUL.md',
+      'TOOLS.md',
+      'MEMORY.md',
+      'PROFILES.md',
+      `memory/${_today}.md`,
+      `memory/${_yesterday}.md`,      
+    ]
+    const promises = files.map((file) => (async () => ({
+      filename: file,
+      content: await fs.readText(`${home}/${file}`).catch(() => ''),
+    }))())
+    return await Promise.all(promises) as SystemFile[]
   }
 
   const generateSystemPrompt = async () => {
-    const { identityContent, soulContent, toolsContent } =
-      await loadSystemFiles()
+    const files = await loadSystemFiles()
     return system({
       date: new Date(),
       language,
@@ -137,10 +147,8 @@ export const createAgent = (
       currentChannel,
       skills,
       enabledSkills,
-      identityContent,
-      soulContent,
-      toolsContent,
       inbox,
+      files,
     })
   }
 

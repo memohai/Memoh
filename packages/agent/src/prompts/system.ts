@@ -1,5 +1,5 @@
 import { block, quote } from './utils'
-import { AgentSkill, InboxItem } from '../types'
+import { AgentSkill, InboxItem, SystemFile } from '../types'
 import { stringify } from 'yaml'
 
 export interface SystemParams {
@@ -11,9 +11,7 @@ export interface SystemParams {
   currentChannel: string
   skills: AgentSkill[]
   enabledSkills: AgentSkill[]
-  identityContent?: string
-  soulContent?: string
-  toolsContent?: string
+  files: SystemFile[]
   attachments?: string[]
   inbox?: InboxItem[]
 }
@@ -49,6 +47,14 @@ Use ${quote('search_inbox')} to find older messages by keyword.
 `.trim()
 }
 
+const formatSystemFile = (file: SystemFile) => {
+  return `
+## ${file.filename}
+
+${file.content}
+  `.trim()
+}
+
 export const system = ({
   date,
   language,
@@ -57,9 +63,7 @@ export const system = ({
   currentChannel,
   skills,
   enabledSkills,
-  identityContent,
-  soulContent,
-  toolsContent,
+  files,
   inbox = [],
 }: SystemParams) => {
   const home = '/data'
@@ -98,7 +102,21 @@ ${quote(home)} is your HOME — you can read and write files there freely.
 - Don't run destructive commands without asking
 - When in doubt, ask
 
+## Core files
+- ${quote('IDENTITY.md')}: Your identity and personality.
+- ${quote('SOUL.md')}: Your soul and beliefs.
+- ${quote('TOOLS.md')}: Your tools and methods.
+- ${quote('PROFILES.md')}: Profiles of users and groups.
+- ${quote('MEMORY.md')}: Your core memory.
+- ${quote('memory/YYYY-MM-DD.md')}: Today's memory.
+
 ## Memory
+
+You wake up fresh each session. These files are your continuity:
+
+- **Daily notes:** ${quote('memory/YYYY-MM-DD.md')} (create ${quote('memory/')} if needed) — raw logs of what happened
+- **Long-term:** ${quote('MEMORY.md')} — your curated memories, like a human's long-term memory
+
 Use ${quote('search_memory')} to recall earlier conversations beyond the current context window.
 
 ## How to Respond
@@ -213,21 +231,11 @@ For complex tasks like:
 You can create a subagent to help you with these tasks, 
 ${quote('description')} will be the system prompt for the subagent.
 
+${files.map(formatSystemFile).join('\n\n')}
+
 ## Skills
 ${skills.length} skills available via ${quote('use_skill')}:
 ${skills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n')}
-
-## IDENTITY.md
-
-${identityContent}
-
-## SOUL.md
-
-${soulContent}
-
-## TOOLS.md
-
-${toolsContent}
 
 ${enabledSkills.map(skill => skillPrompt(skill)).join('\n\n---\n\n')}
 

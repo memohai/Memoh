@@ -65,3 +65,8 @@ export interface AgentSkill {
   content: string
   metadata?: Record<string, unknown>
 }
+
+export interface SystemFile {
+  filename: string
+  content: string
+}
