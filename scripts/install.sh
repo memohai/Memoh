@@ -168,6 +168,10 @@ if [ "$USE_CN_MIRROR" = true ]; then
   echo "${GREEN}✓ Using China mainland mirror (memoh.cn)${NC}"
 fi
 
+echo POSTGRES_PASSWORD="${PG_PASS}" >> .env
+echo MEMOH_CONFIG=./config.toml >> .env
+echo MEMOH_DATA_DIR="{$MEMOH_DATA_DIR}" >> .env
+
 echo ""
 echo "${GREEN}Pulling latest Docker images...${NC}"
 $DOCKER compose $COMPOSE_FILES pull
