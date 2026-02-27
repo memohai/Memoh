@@ -1,7 +1,7 @@
 <template>
   <form @submit="editProvider">
-    <div class="**:[input]:mt-3 **:[input]:mb-4">
-      <section>
+    <div class="space-y-4">
+      <section class="space-y-2">
         <h4 class="scroll-m-20 font-semibold tracking-tight">
           {{ $t('common.name') }}
         </h4>
@@ -22,7 +22,7 @@
         </FormField>
       </section>
 
-      <section>
+      <section class="space-y-2">
         <h4 class="scroll-m-20 font-semibold tracking-tight">
           {{ $t('provider.apiKey') }}
         </h4>
@@ -43,7 +43,7 @@
         </FormField>
       </section>
 
-      <section>
+      <section class="space-y-2">
         <h4 class="scroll-m-20 font-semibold tracking-tight">
           {{ $t('provider.url') }}
         </h4>
@@ -66,15 +66,15 @@
     </div>
 
     <section class="flex justify-between items-center mt-4">
-      <Button
+      <LoadingButton
         type="button"
         variant="outline"
-        :disabled="testLoading || !props.provider?.id"
+        :loading="testLoading"
+        :disabled="!props.provider?.id"
         @click="runTest"
       >
-        <Spinner v-if="testLoading" />
         {{ $t('provider.testConnection') }}
-      </Button>
+      </LoadingButton>
 
       <div class="flex gap-4">
         <ConfirmPopover
@@ -93,13 +93,13 @@
           </template>
         </ConfirmPopover>
 
-        <Button
+        <LoadingButton
           type="submit"
+          :loading="editLoading"
           :disabled="!hasChanges || !form.meta.value.valid"
         >
-          <Spinner v-if="editLoading" />
           {{ $t('provider.saveChanges') }}
-        </Button>
+        </LoadingButton>
       </div>
     </section>
 
@@ -108,10 +108,7 @@
       class="mt-4 rounded-lg border p-4 space-y-3 text-sm"
     >
       <div class="flex items-center gap-2">
-        <span
-          class="inline-block size-2 rounded-full"
-          :class="testResult.reachable ? 'bg-green-500' : 'bg-red-500'"
-        />
+        <StatusDot :status="testResult.reachable ? 'success' : 'error'" />
         <span class="font-medium">
           {{ testResult.reachable ? $t('provider.reachable') : $t('provider.unreachable') }}
         </span>
@@ -164,6 +161,8 @@ import {
   Spinner,
 } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import StatusDot from '@/components/status-dot/index.vue'
+import LoadingButton from '@/components/loading-button/index.vue'
 import { computed, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'

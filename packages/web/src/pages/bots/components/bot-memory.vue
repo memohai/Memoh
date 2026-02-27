@@ -414,8 +414,8 @@
                   >
                     {{ msg.role }}
                   </Badge>
-                  <p class="text-xs text-foreground break-words line-clamp-3">
-                    {{ msg.content?.text || (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)) }}
+                  <p class="text-xs text-foreground wrap-break-word line-clamp-3">
+                    {{ extractMessageText(msg.content) }}
                   </p>
                 </div>
               </button>
@@ -578,6 +578,7 @@ import {
   postBotsByBotIdMemoryCompact,
   getBotsByBotIdMessages,
 } from '@memoh/sdk'
+import type { MemoryCdfPoint, MemoryTopKBucket } from '@memoh/sdk'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
@@ -593,10 +594,24 @@ interface MemoryItem {
   score?: number
 }
 
+type MessageContentBlock = { type: string; text?: string }
+type MessageContent = string | MessageContentBlock[] | unknown
+
 interface Message {
   role: string
-  content: any
+  content: MessageContent
   created_at?: string
+}
+
+function extractMessageText(content: MessageContent): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .filter((b): b is MessageContentBlock => typeof b === 'object' && b !== null)
+      .map(b => b.text ?? '')
+      .join('')
+  }
+  return JSON.stringify(content)
 }
 
 const props = defineProps<{
@@ -627,7 +642,7 @@ const compactRatio = ref('0.5')
 const compactDecayDate = ref('')
 
 // Hover state for CDF chart
-const hoveredCdfPoint = ref<any>(null)
+const hoveredCdfPoint = ref<MemoryCdfPoint | null>(null)
 const hoveredCdfIdx = ref<number>(-1)
 const hoveredCdfX = computed(() => {
   if (!hoveredCdfPoint.value || !selectedMemory.value) return 0
@@ -640,13 +655,13 @@ const hoveredCdfY = computed(() => {
 })
 
 const selectedTopKBuckets = computed(() => selectedMemory.value?.top_k_buckets ?? [])
-const topKBucketValues = computed(() => selectedTopKBuckets.value.map((bucket: any) => bucket.value))
+const topKBucketValues = computed(() => selectedTopKBuckets.value.map((bucket: MemoryTopKBucket) => bucket.value ?? 0))
 const topKMinValue = computed(() => Math.min(...topKBucketValues.value))
 const topKMaxValue = computed(() => Math.max(...topKBucketValues.value))
 const topKRange = computed(() => (topKMaxValue.value - topKMinValue.value) || 1)
 const topKBarHeights = computed(() =>
   selectedTopKBuckets.value.map(
-    (bucket: any) => (((bucket.value - topKMinValue.value) / topKRange.value) * 80) + 20,
+    (bucket: MemoryTopKBucket) => ((((bucket.value ?? 0) - topKMinValue.value) / topKRange.value) * 80) + 20,
   ),
 )
 
@@ -846,7 +861,7 @@ async function handleCompact() {
       body: {
         ratio: parseFloat(compactRatio.value),
         decay_days: compactDecayDays.value || undefined,
-      } as any,
+      },
       throwOnError: true,
     })
     toast.success(t('bots.memory.compactSuccess'))
@@ -887,7 +902,7 @@ watch(() => props.botId, () => {
 })
 
 // Chart Helper: Generate smooth SVG path
-function generateSmoothPath(data: any[], closePath: boolean = false) {
+function generateSmoothPath(data: MemoryCdfPoint[], closePath: boolean = false) {
   if (!data || data.length < 2) return ''
   
   // Use a small margin (2%) to prevent clipping at boundaries
@@ -895,7 +910,7 @@ function generateSmoothPath(data: any[], closePath: boolean = false) {
   const height = 100 - (margin * 2)
   const points = data.map((p, idx) => ({
     x: (idx / (data.length - 1)) * 100,
-    y: (100 - margin) - (p.cumulative * height)
+    y: (100 - margin) - ((p.cumulative ?? 0) * height)
   }))
 
   let d = `M ${points[0].x},${points[0].y}`

@@ -1,5 +1,5 @@
 import { client } from '@memoh/sdk/client'
-import { postBotsByBotIdWebMessages } from '@memoh/sdk'
+import { getBotsByBotIdMessages, postBotsByBotIdWebMessages } from '@memoh/sdk'
 import type { ChannelAttachment, ChannelMessage } from '@memoh/sdk'
 import type {
   ChatAttachment,
@@ -19,20 +19,16 @@ export async function fetchMessages(
     throw new Error('chat id must match bot id')
   }
 
-  const query: Record<string, string> = {}
-  query.limit = String(options?.limit ?? 30)
-  if (options?.before?.trim()) {
-    query.before = options.before.trim()
-  }
-
-  const { data } = await client.get({
-    url: '/bots/{bot_id}/messages',
+  const { data } = await getBotsByBotIdMessages({
     path: { bot_id: botId },
-    query,
+    query: {
+      limit: options?.limit ?? 30,
+      ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
+    },
     throwOnError: true,
-  }) as { data: { items?: Message[] } }
+  })
 
-  return data?.items ?? []
+  return (data as unknown as { items?: Message[] })?.items ?? []
 }
 
 export async function sendLocalChannelMessage(
@@ -68,13 +64,14 @@ export async function streamLocalChannel(
   const id = botId.trim()
   if (!id) throw new Error('bot id is required')
 
-  const { data: body } = await client.get({
+  const response = await client.get({
     url: '/bots/{bot_id}/web/stream',
     path: { bot_id: id },
     parseAs: 'stream',
     signal,
     throwOnError: true,
-  }) as { data: ReadableStream<Uint8Array> }
+  })
+  const body = response.data as ReadableStream<Uint8Array> | null
 
   if (!body) throw new Error('No response body')
 
@@ -96,14 +93,15 @@ export async function streamMessageEvents(
   const query: Record<string, string> = {}
   if (since?.trim()) query.since = since.trim()
 
-  const { data: body } = await client.get({
+  const response = await client.get({
     url: '/bots/{bot_id}/messages/events',
     path: { bot_id: id },
     query,
     parseAs: 'stream',
     signal,
     throwOnError: true,
-  }) as { data: ReadableStream<Uint8Array> }
+  })
+  const body = response.data as ReadableStream<Uint8Array> | null
 
   if (!body) throw new Error('No response body')
 
@@ -111,6 +109,6 @@ export async function streamMessageEvents(
     const parsed = parseStreamPayload(payload)
     if (!parsed || typeof parsed !== 'object' || !('type' in parsed)) return
     if (typeof parsed.type !== 'string' || !parsed.type.trim()) return
-    onEvent(parsed as unknown as MessageStreamEvent)
+    onEvent(parsed as MessageStreamEvent)
   })
 }

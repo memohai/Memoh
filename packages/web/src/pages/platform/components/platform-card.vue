@@ -1,50 +1,45 @@
 <template>
-  <li>
-    <Card>
-      <CardHeader>
-        <CardTitle class="text-muted-foreground flex justify-between">
-          <span>{{ $t('platform.platformLabel') }}: {{ platform.name }}</span>
-          <Badge
-            v-if="platform.active"
-            variant="outline"
-          >
-            {{ $t('platform.running') }}
-          </Badge>
-        </CardTitle>
-        <CardContent class="mt-4 p-0">
-          <ol
-            class="[&>li]:mt-2"
-            type="1"
-          >
-            <li
-              v-for="(value, key) in platform.config"
-              :key="key"
-            >
-              {{ key }}: {{ value }}
-            </li>
-          </ol>
-        </CardContent>
-      </CardHeader>
-      <CardFooter class="flex gap-4">
-        <Switch
-          :model-value="platform.active"
-          :aria-label="`Toggle ${platform.name}`"
-        />
-        <Button
-          class="ml-auto"
-          @click="$emit('edit', platform)"
+  <Card class="h-full flex flex-col">
+    <CardHeader>
+      <CardTitle class="text-muted-foreground flex justify-between">
+        <span>{{ $t('platform.platformLabel') }}: {{ platform.name }}</span>
+        <Badge
+          v-if="platform.active"
+          variant="outline"
         >
-          {{ $t('common.edit') }}
-        </Button>
-        <Button
-          variant="destructive"
-          @click="$emit('delete', platform)"
-        >
-          {{ $t('common.delete') }}
-        </Button>
-      </CardFooter>
-    </Card>
-  </li>
+          {{ $t('platform.running') }}
+        </Badge>
+      </CardTitle>
+      <CardContent class="px-0 pb-0">
+        <ol class="space-y-2 text-sm">
+          <li
+            v-for="(value, key) in platform.config"
+            :key="key"
+          >
+            {{ key }}: {{ value }}
+          </li>
+        </ol>
+      </CardContent>
+    </CardHeader>
+    <CardFooter class="flex gap-4 mt-auto">
+      <Switch
+        :model-value="platform.active"
+        :aria-label="`Toggle ${platform.name}`"
+      />
+      <Button
+        class="ml-auto"
+        @click="$emit('edit', platform)"
+      >
+        {{ $t('common.edit') }}
+      </Button>
+      <Button
+        variant="destructive"
+        @click="$emit('delete', platform)"
+      >
+        {{ $t('common.delete') }}
+      </Button>
+    </CardFooter>
+  </Card>
 </template>
 
 <script setup lang="ts">

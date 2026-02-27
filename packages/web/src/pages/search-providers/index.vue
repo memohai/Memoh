@@ -28,7 +28,7 @@ import ProviderSetting from './components/provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
-const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily'] as const
+const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
 
 const filterProvider = ref('')
 const { data: providerData } = useQuery({
@@ -66,7 +66,7 @@ const curFilterProvider = computed(() => {
   }
   const keyword = searchText.value.toLowerCase()
   return providerData.value.filter((p: SearchprovidersGetResponse) => {
-    return (p.name as string).toLowerCase().includes(keyword)
+    return (p.name ?? '').toLowerCase().includes(keyword)
   })
 })
 

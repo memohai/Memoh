@@ -109,7 +109,7 @@ import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
-const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily'] as const
+const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
 
 const open = defineModel<boolean>('open')
 const { t } = useI18n()

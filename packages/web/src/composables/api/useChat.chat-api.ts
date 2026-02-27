@@ -1,5 +1,4 @@
-import { client } from '@memoh/sdk/client'
-import { getBots } from '@memoh/sdk'
+import { getBots, deleteBotsByBotIdMessages } from '@memoh/sdk'
 import type { Bot, ChatSummary } from './useChat.types'
 
 export async function fetchBots(): Promise<Bot[]> {
@@ -23,8 +22,7 @@ export async function deleteChat(botId: string, chatId: string): Promise<void> {
   if (botId.trim() !== chatId.trim()) {
     throw new Error('chat id must match bot id')
   }
-  await client.delete({
-    url: '/bots/{bot_id}/messages',
+  await deleteBotsByBotIdMessages({
     path: { bot_id: botId },
     throwOnError: true,
   })

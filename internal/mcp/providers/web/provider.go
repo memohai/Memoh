@@ -3,12 +3,20 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -111,6 +119,22 @@ func (p *Executor) callWebSearch(ctx context.Context, providerName string, confi
 		return p.callGoogleSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderTavily):
 		return p.callTavilySearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderSogou):
+		return p.callSogouSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderSerper):
+		return p.callSerperSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderSearXNG):
+		return p.callSearXNGSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderJina):
+		return p.callJinaSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderExa):
+		return p.callExaSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderBocha):
+		return p.callBochaSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderDuckDuckGo):
+		return p.callDuckDuckGoSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderYandex):
+		return p.callYandexSearch(ctx, configJSON, query, count)
 	default:
 		return mcpgw.BuildToolErrorResult("unsupported search provider"), nil
 	}
@@ -359,6 +383,679 @@ func (p *Executor) callTavilySearch(ctx context.Context, configJSON []byte, quer
 		"query":   query,
 		"results": results,
 	}), nil
+}
+
+func (p *Executor) callSogouSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	host := firstNonEmpty(stringValue(cfg["base_url"]), "wsa.tencentcloudapi.com")
+	secretID := stringValue(cfg["secret_id"])
+	secretKey := stringValue(cfg["secret_key"])
+	if secretID == "" || secretKey == "" {
+		return mcpgw.BuildToolErrorResult("Sogou search requires Tencent Cloud SecretId and SecretKey"), nil
+	}
+
+	action := "SearchPro"
+	version := "2025-05-08"
+	service := "wsa"
+	payload, _ := json.Marshal(map[string]any{
+		"Query": query,
+		"Mode":  0,
+	})
+
+	now := time.Now().UTC()
+	timestamp := fmt.Sprintf("%d", now.Unix())
+	date := now.Format("2006-01-02")
+
+	hashedPayload := sha256Hex(payload)
+	canonicalHeaders := fmt.Sprintf("content-type:%s\nhost:%s\n",
+		"application/json", host)
+	signedHeaders := "content-type;host"
+	canonicalRequest := fmt.Sprintf("%s\n%s\n%s\n%s\n%s\n%s",
+		"POST", "/", "", canonicalHeaders, signedHeaders, hashedPayload)
+
+	credentialScope := fmt.Sprintf("%s/%s/tc3_request", date, service)
+	stringToSign := fmt.Sprintf("TC3-HMAC-SHA256\n%s\n%s\n%s",
+		timestamp, credentialScope, sha256Hex([]byte(canonicalRequest)))
+
+	secretDate := hmacSHA256([]byte("TC3"+secretKey), []byte(date))
+	secretService := hmacSHA256(secretDate, []byte(service))
+	secretSigning := hmacSHA256(secretService, []byte("tc3_request"))
+	signature := hex.EncodeToString(hmacSHA256(secretSigning, []byte(stringToSign)))
+
+	authorization := fmt.Sprintf("TC3-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
+		secretID, credentialScope, signedHeaders, signature)
+
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+host+"/", bytes.NewReader(payload))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authorization)
+	req.Header.Set("Host", host)
+	req.Header.Set("X-TC-Action", action)
+	req.Header.Set("X-TC-Version", version)
+	req.Header.Set("X-TC-Timestamp", timestamp)
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return buildSearchHTTPError(resp.StatusCode, body), nil
+	}
+	var rawResp struct {
+		Response struct {
+			Error *struct {
+				Code    string `json:"Code"`
+				Message string `json:"Message"`
+			} `json:"Error,omitempty"`
+			Pages []json.RawMessage `json:"Pages"`
+		} `json:"Response"`
+	}
+	if err := json.Unmarshal(body, &rawResp); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	if rawResp.Response.Error != nil {
+		return mcpgw.BuildToolErrorResult("Sogou search failed: " + rawResp.Response.Error.Message), nil
+	}
+
+	type sogouPage struct {
+		Title   string  `json:"title"`
+		URL     string  `json:"url"`
+		Passage string  `json:"passage"`
+		Score   float64 `json:"scour"`
+	}
+	var pages []sogouPage
+	for _, raw := range rawResp.Response.Pages {
+		var rawStr string
+		if err := json.Unmarshal(raw, &rawStr); err == nil {
+			var page sogouPage
+			if err := json.Unmarshal([]byte(rawStr), &page); err == nil {
+				pages = append(pages, page)
+			}
+		} else {
+			var page sogouPage
+			if err := json.Unmarshal(raw, &page); err == nil {
+				pages = append(pages, page)
+			}
+		}
+	}
+	sort.Slice(pages, func(i, j int) bool {
+		return pages[i].Score > pages[j].Score
+	})
+	results := make([]map[string]any, 0, len(pages))
+	for i, page := range pages {
+		if i >= count {
+			break
+		}
+		results = append(results, map[string]any{
+			"title":       page.Title,
+			"url":         page.URL,
+			"description": page.Passage,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+func sha256Hex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+func hmacSHA256(key, data []byte) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+func (p *Executor) callSerperSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://google.serper.dev/search")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return mcpgw.BuildToolErrorResult("Serper API key is required"), nil
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"q": query,
+	})
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-API-KEY", apiKey)
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return buildSearchHTTPError(resp.StatusCode, body), nil
+	}
+	var raw struct {
+		Organic []struct {
+			Title       string `json:"title"`
+			Link        string `json:"link"`
+			Description string `json:"description"`
+			Position    int    `json:"position"`
+		} `json:"organic"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	sort.Slice(raw.Organic, func(i, j int) bool {
+		return raw.Organic[i].Position < raw.Organic[j].Position
+	})
+	results := make([]map[string]any, 0, len(raw.Organic))
+	for i, item := range raw.Organic {
+		if i >= count {
+			break
+		}
+		results = append(results, map[string]any{
+			"title":       item.Title,
+			"url":         item.Link,
+			"description": item.Description,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+func (p *Executor) callSearXNGSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	baseURL := stringValue(cfg["base_url"])
+	if baseURL == "" {
+		return mcpgw.BuildToolErrorResult("SearXNG base URL is required"), nil
+	}
+	reqURL, err := url.Parse(strings.TrimRight(baseURL, "/"))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult("invalid SearXNG base_url"), nil
+	}
+	params := reqURL.Query()
+	params.Set("q", query)
+	params.Set("format", "json")
+	params.Set("pageno", "1")
+	if lang := stringValue(cfg["language"]); lang != "" {
+		params.Set("language", lang)
+	}
+	if ss := stringValue(cfg["safesearch"]); ss != "" {
+		params.Set("safesearch", ss)
+	}
+	if cats := stringValue(cfg["categories"]); cats != "" {
+		params.Set("categories", cats)
+	}
+	reqURL.RawQuery = params.Encode()
+
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return buildSearchHTTPError(resp.StatusCode, body), nil
+	}
+	var raw struct {
+		Results []struct {
+			Title   string  `json:"title"`
+			URL     string  `json:"url"`
+			Content string  `json:"content"`
+			Score   float64 `json:"score"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	sort.Slice(raw.Results, func(i, j int) bool {
+		return raw.Results[i].Score > raw.Results[j].Score
+	})
+	results := make([]map[string]any, 0, len(raw.Results))
+	for i, item := range raw.Results {
+		if i >= count {
+			break
+		}
+		results = append(results, map[string]any{
+			"title":       item.Title,
+			"url":         item.URL,
+			"description": item.Content,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+func (p *Executor) callJinaSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://s.jina.ai/")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return mcpgw.BuildToolErrorResult("Jina API key is required"), nil
+	}
+	if count > 10 {
+		count = 10
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"q":     query,
+		"count": count,
+	})
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Retain-Images", "none")
+	req.Header.Set("Authorization", apiKey)
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return buildSearchHTTPError(resp.StatusCode, body), nil
+	}
+	var raw struct {
+		Data []struct {
+			Title   string `json:"title"`
+			URL     string `json:"url"`
+			Content string `json:"content"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	results := make([]map[string]any, 0, len(raw.Data))
+	for _, item := range raw.Data {
+		results = append(results, map[string]any{
+			"title":       item.Title,
+			"url":         item.URL,
+			"description": item.Content,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+func (p *Executor) callExaSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.exa.ai/search")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return mcpgw.BuildToolErrorResult("Exa API key is required"), nil
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"query":      query,
+		"numResults": count,
+		"contents": map[string]any{
+			"text":       true,
+			"highlights": true,
+		},
+		"type": "auto",
+	})
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return buildSearchHTTPError(resp.StatusCode, body), nil
+	}
+	var raw struct {
+		Results []struct {
+			Title string `json:"title"`
+			URL   string `json:"url"`
+			Text  string `json:"text"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	results := make([]map[string]any, 0, len(raw.Results))
+	for _, item := range raw.Results {
+		results = append(results, map[string]any{
+			"title":       item.Title,
+			"url":         item.URL,
+			"description": item.Text,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+func (p *Executor) callBochaSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.bochaai.com/v1/web-search")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return mcpgw.BuildToolErrorResult("Bocha API key is required"), nil
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"query":     query,
+		"summary":   true,
+		"freshness": "noLimit",
+		"count":     count,
+	})
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return buildSearchHTTPError(resp.StatusCode, body), nil
+	}
+	var raw struct {
+		Data struct {
+			WebPages struct {
+				Value []struct {
+					Name    string `json:"name"`
+					URL     string `json:"url"`
+					Summary string `json:"summary"`
+				} `json:"value"`
+			} `json:"webPages"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	results := make([]map[string]any, 0, len(raw.Data.WebPages.Value))
+	for _, item := range raw.Data.WebPages.Value {
+		results = append(results, map[string]any{
+			"title":       item.Name,
+			"url":         item.URL,
+			"description": item.Summary,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+func (p *Executor) callDuckDuckGoSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://html.duckduckgo.com/html/")
+
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	form := url.Values{}
+	form.Set("q", query)
+	form.Set("b", "")
+	form.Set("kl", "")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return buildSearchHTTPError(resp.StatusCode, body), nil
+	}
+
+	htmlStr := string(body)
+	links := ddgResultLinkRe.FindAllStringSubmatch(htmlStr, -1)
+	titles := ddgResultTitleRe.FindAllStringSubmatch(htmlStr, -1)
+	snippets := ddgResultSnippetRe.FindAllStringSubmatch(htmlStr, -1)
+
+	n := len(links)
+	if len(titles) < n {
+		n = len(titles)
+	}
+	if count < n {
+		n = count
+	}
+
+	results := make([]map[string]any, 0, n)
+	for i := 0; i < n; i++ {
+		rawURL := html.UnescapeString(links[i][1])
+		realURL := extractDDGURL(rawURL)
+		title := html.UnescapeString(strings.TrimSpace(titles[i][1]))
+		snippet := ""
+		if i < len(snippets) {
+			snippet = html.UnescapeString(strings.TrimSpace(ddgHTMLTagRe.ReplaceAllString(snippets[i][1], "")))
+		}
+		if realURL == "" {
+			continue
+		}
+		results = append(results, map[string]any{
+			"title":       title,
+			"url":         realURL,
+			"description": snippet,
+		})
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+var (
+	ddgResultLinkRe    = regexp.MustCompile(`class="result__a"[^>]*href="([^"]+)"`)
+	ddgResultTitleRe   = regexp.MustCompile(`class="result__a"[^>]*>([^<]+)<`)
+	ddgResultSnippetRe = regexp.MustCompile(`class="result__snippet"[^>]*>([\s\S]*?)</a>`)
+	ddgHTMLTagRe       = regexp.MustCompile(`<[^>]*>`)
+)
+
+func extractDDGURL(rawURL string) string {
+	if strings.Contains(rawURL, "uddg=") {
+		parsed, err := url.Parse(rawURL)
+		if err == nil {
+			if uddg := parsed.Query().Get("uddg"); uddg != "" {
+				return uddg
+			}
+		}
+	}
+	if strings.HasPrefix(rawURL, "//") {
+		return "https:" + rawURL
+	}
+	return rawURL
+}
+
+func (p *Executor) callYandexSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+	cfg := parseConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://searchapi.api.cloud.yandex.net/v2/web/search")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return mcpgw.BuildToolErrorResult("Yandex API key is required"), nil
+	}
+	searchType := firstNonEmpty(stringValue(cfg["search_type"]), "SEARCH_TYPE_RU")
+	payload, _ := json.Marshal(map[string]any{
+		"query": map[string]any{
+			"queryText":  query,
+			"searchType": searchType,
+		},
+		"groupSpec": map[string]any{
+			"groupMode":    "GROUP_MODE_DEEP",
+			"groupsOnPage": count,
+			"docsInGroup":  1,
+		},
+	})
+	timeout := parseTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Api-Key "+apiKey)
+	resp, err := client.Do(req)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return buildSearchHTTPError(resp.StatusCode, body), nil
+	}
+	var rawResp struct {
+		RawData string `json:"rawData"`
+	}
+	if err := json.Unmarshal(body, &rawResp); err != nil {
+		return mcpgw.BuildToolErrorResult("invalid search response"), nil
+	}
+	xmlData, err := base64.StdEncoding.DecodeString(rawResp.RawData)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult("failed to decode Yandex response"), nil
+	}
+	results, err := parseYandexXML(xmlData)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult("failed to parse Yandex XML response"), nil
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"query":   query,
+		"results": results,
+	}), nil
+}
+
+type xmlInnerText string
+
+func (t *xmlInnerText) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var buf strings.Builder
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			break
+		}
+		switch v := tok.(type) {
+		case xml.CharData:
+			buf.Write(v)
+		case xml.StartElement:
+			var inner xmlInnerText
+			if err := d.DecodeElement(&inner, &v); err != nil {
+				return err
+			}
+			buf.WriteString(string(inner))
+		case xml.EndElement:
+			*t = xmlInnerText(buf.String())
+			return nil
+		}
+	}
+	*t = xmlInnerText(buf.String())
+	return nil
+}
+
+type yandexResponse struct {
+	XMLName xml.Name      `xml:"response"`
+	Results yandexResults `xml:"results"`
+}
+
+type yandexResults struct {
+	Grouping yandexGrouping `xml:"grouping"`
+}
+
+type yandexGrouping struct {
+	Groups []yandexGroup `xml:"group"`
+}
+
+type yandexGroup struct {
+	Doc yandexDoc `xml:"doc"`
+}
+
+type yandexDoc struct {
+	URL      xmlInnerText   `xml:"url"`
+	Title    xmlInnerText   `xml:"title"`
+	Passages yandexPassages `xml:"passages"`
+}
+
+type yandexPassages struct {
+	Passage []xmlInnerText `xml:"passage"`
+}
+
+func parseYandexXML(data []byte) ([]map[string]any, error) {
+	var resp yandexResponse
+	if err := xml.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	results := make([]map[string]any, 0, len(resp.Results.Grouping.Groups))
+	for _, group := range resp.Results.Grouping.Groups {
+		snippet := ""
+		if len(group.Doc.Passages.Passage) > 0 {
+			snippet = string(group.Doc.Passages.Passage[0])
+		}
+		results = append(results, map[string]any{
+			"title":       string(group.Doc.Title),
+			"url":         string(group.Doc.URL),
+			"description": snippet,
+		})
+	}
+	return results, nil
 }
 
 // buildSearchHTTPError builds an error result for non-2xx search API responses.

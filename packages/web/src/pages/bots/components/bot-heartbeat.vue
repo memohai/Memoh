@@ -191,7 +191,7 @@
 
       <!-- Expanded detail -->
       <div
-        v-for="log in filteredLogs.filter(l => expandedIds.has(l.id))"
+        v-for="log in filteredLogs.filter(l => l.id && expandedIds.has(l.id))"
         :key="'detail-' + log.id"
         class="rounded-md border bg-muted/20 p-4 text-sm whitespace-pre-wrap wrap-break-word"
       >
@@ -243,8 +243,12 @@ import {
 } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ModelSelect from './model-select.vue'
-import { client } from '@memoh/sdk/client'
-import { getBotsByBotIdSettings, putBotsByBotIdSettings, getModels, getProviders } from '@memoh/sdk'
+import {
+  getBotsByBotIdSettings, putBotsByBotIdSettings,
+  getBotsByBotIdHeartbeatLogs, deleteBotsByBotIdHeartbeatLogs,
+  getModels, getProviders,
+} from '@memoh/sdk'
+import type { SettingsSettings, SettingsUpsertRequest, HeartbeatLog } from '@memoh/sdk'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
@@ -294,24 +298,24 @@ const settingsForm = reactive({
   heartbeat_model_id: '',
 })
 
-watch(settings, (val) => {
+watch(settings, (val: SettingsSettings | undefined) => {
   if (val) {
-    settingsForm.heartbeat_enabled = (val as any).heartbeat_enabled ?? false
-    settingsForm.heartbeat_interval = (val as any).heartbeat_interval ?? 30
-    settingsForm.heartbeat_model_id = (val as any).heartbeat_model_id ?? ''
+    settingsForm.heartbeat_enabled = val.heartbeat_enabled ?? false
+    settingsForm.heartbeat_interval = val.heartbeat_interval ?? 30
+    settingsForm.heartbeat_model_id = val.heartbeat_model_id ?? ''
   }
 }, { immediate: true })
 
 const settingsChanged = computed(() => {
   if (!settings.value) return false
-  const s = settings.value as any
+  const s: SettingsSettings = settings.value
   return settingsForm.heartbeat_enabled !== (s.heartbeat_enabled ?? false)
     || settingsForm.heartbeat_interval !== (s.heartbeat_interval ?? 30)
     || settingsForm.heartbeat_model_id !== (s.heartbeat_model_id ?? '')
 })
 
 const { mutateAsync: updateSettings, isLoading: isSaving } = useMutation({
-  mutation: async (body: Record<string, unknown>) => {
+  mutation: async (body: SettingsUpsertRequest) => {
     const { data } = await putBotsByBotIdSettings({
       path: { bot_id: botIdRef.value },
       body,
@@ -331,17 +335,6 @@ async function handleSaveSettings() {
   }
 }
 
-interface HeartbeatLog {
-  id: string
-  bot_id: string
-  status: 'ok' | 'alert' | 'error'
-  result_text: string
-  error_message: string
-  usage: any
-  started_at: string
-  completed_at: string | null
-}
-
 const isLoading = ref(false)
 const isClearing = ref(false)
 const logs = ref<HeartbeatLog[]>([])
@@ -356,32 +349,33 @@ const filteredLogs = computed(() => {
   return logs.value.filter(l => l.status === statusFilter.value)
 })
 
-function statusVariant(status: string) {
+function statusVariant(status: string | undefined) {
   if (status === 'ok') return 'secondary' as const
   if (status === 'alert') return 'default' as const
   return 'destructive' as const
 }
 
-function statusLabel(status: string) {
+function statusLabel(status: string | undefined) {
   if (status === 'ok') return t('bots.heartbeat.statusOk')
   if (status === 'alert') return t('bots.heartbeat.statusAlert')
   return t('bots.heartbeat.statusError')
 }
 
-function formatDuration(startedAt: string, completedAt: string | null) {
-  if (!completedAt) return '—'
+function formatDuration(startedAt: string | undefined, completedAt: string | null | undefined) {
+  if (!startedAt || !completedAt) return '—'
   const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime()
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`
 }
 
-function truncateText(text: string, maxLen = 80) {
+function truncateText(text: string | undefined, maxLen = 80) {
   if (!text) return ''
   if (text === 'HEARTBEAT_OK') return 'HEARTBEAT_OK'
   return text.length > maxLen ? text.slice(0, maxLen) + '…' : text
 }
 
-function toggleExpand(id: string) {
+function toggleExpand(id: string | undefined) {
+  if (!id) return
   if (expandedIds.value.has(id)) {
     expandedIds.value.delete(id)
   } else {
@@ -393,14 +387,12 @@ async function fetchLogs(before?: string) {
   if (!props.botId) return
   isLoading.value = true
   try {
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE) })
-    if (before) params.set('before', before)
-    const { data, error } = await client.get({
-      url: `/bots/${props.botId}/heartbeat/logs`,
+    const { data } = await getBotsByBotIdHeartbeatLogs({
+      path: { bot_id: props.botId },
       query: { limit: PAGE_SIZE, ...(before ? { before } : {}) },
+      throwOnError: true,
     })
-    if (error) throw error
-    const items = (data as any)?.items ?? []
+    const items = data?.items ?? []
     if (!before) {
       logs.value = items
     } else {
@@ -417,7 +409,7 @@ async function fetchLogs(before?: string) {
 async function loadMore() {
   if (logs.value.length === 0) return
   const lastLog = logs.value[logs.value.length - 1]
-  await fetchLogs(lastLog.started_at)
+  await fetchLogs(lastLog?.started_at)
 }
 
 async function handleRefresh() {
@@ -428,10 +420,10 @@ async function handleRefresh() {
 async function handleClear() {
   isClearing.value = true
   try {
-    const { error } = await client.delete({
-      url: `/bots/${props.botId}/heartbeat/logs`,
+    await deleteBotsByBotIdHeartbeatLogs({
+      path: { bot_id: props.botId },
+      throwOnError: true,
     })
-    if (error) throw error
     logs.value = []
     expandedIds.value.clear()
     toast.success(t('bots.heartbeat.clearSuccess'))

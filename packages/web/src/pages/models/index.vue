@@ -52,7 +52,7 @@ const curFilterProvider = computed(() => {
   }
   const keyword = searchText.value.toLowerCase()
   return providerData.value.filter((provider: ProvidersGetResponse) => {
-    return (provider.name as string).toLowerCase().includes(keyword)
+    return (provider.name ?? '').toLowerCase().includes(keyword)
   })
 })
 
@@ -107,8 +107,8 @@ const openStatus = reactive({
             class="justify-start py-5! px-4"
           >
             <Toggle
-              :class="`py-4 border border-transparent ${curProvider?.name === providerItem.name ? 'border-inherit' : ''}`"
-              :model-value="selectProvider(providerItem.name as string).value"
+              :class="['py-4 border', curProvider?.name === providerItem.name ? 'border-border' : 'border-transparent']"
+              :model-value="selectProvider(providerItem.name ?? '').value"
               @update:model-value="(isSelect) => {
                 if (isSelect) {
                   curProvider = providerItem

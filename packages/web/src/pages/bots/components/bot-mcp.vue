@@ -93,7 +93,7 @@
 
     <!-- Add dialog: tabs (single | import). Edit dialog: two columns (form | json) with sync -->
     <Dialog v-model:open="formDialogOpen">
-      <DialogContent :class="editingItem ? 'sm:max-w-4xl max-h-[90vh] flex flex-col w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] sm:w-auto sm:max-w-full' : 'sm:max-w-[28rem] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] sm:w-auto'">
+      <DialogContent :class="editingItem ? 'sm:max-w-4xl max-h-[90vh] flex flex-col w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] sm:w-auto' : 'sm:max-w-md w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] sm:w-auto'">
         <DialogHeader>
           <DialogTitle>{{ editingItem ? $t('common.edit') : $t('common.add') }} MCP Server</DialogTitle>
         </DialogHeader>
@@ -260,7 +260,7 @@
               />
             </div>
           </div>
-          <DialogFooter class="mt-4 flex-shrink-0 flex-row flex-wrap items-center gap-2 sm:justify-between">
+          <DialogFooter class="mt-4 shrink-0 flex-row flex-wrap items-center gap-2 sm:justify-between">
             <div class="flex items-center gap-2">
               <Label class="text-sm font-normal">{{ $t('mcp.active') }}</Label>
               <Switch
@@ -589,6 +589,7 @@ import {
   deleteBotsByBotIdMcpById,
   postBotsByBotIdMcpOpsBatchDelete,
 } from '@memoh/sdk'
+import type { McpUpsertRequest, McpImportRequest } from '@memoh/sdk'
 import { client } from '@memoh/sdk/client'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -955,8 +956,8 @@ function syncEditJsonToForm() {
   editSyncFromJson = false
 }
 
-function buildRequestBody() {
-  const body: Record<string, unknown> = {
+function buildRequestBody(): McpUpsertRequest {
+  const body: McpUpsertRequest = {
     name: formData.value.name.trim(),
     is_active: formData.value.active,
   }
@@ -982,13 +983,13 @@ async function handleSubmit() {
     if (editingItem.value) {
       await putBotsByBotIdMcpById({
         path: { bot_id: props.botId, id: editingItem.value.id },
-        body: body as any,
+        body,
         throwOnError: true,
       })
     } else {
       await postBotsByBotIdMcp({
         path: { bot_id: props.botId },
-        body: body as any,
+        body,
         throwOnError: true,
       })
     }
@@ -1046,12 +1047,13 @@ function handleBatchExport() {
 async function handleImport() {
   importSubmitting.value = true
   try {
-    let parsed = JSON.parse(importJson.value)
+    let parsed: McpImportRequest = JSON.parse(importJson.value)
     if (!parsed.mcpServers && typeof parsed === 'object') {
-      parsed = { mcpServers: parsed }
+      parsed = { mcpServers: parsed as McpImportRequest['mcpServers'] }
     }
     await client.put({
-      url: `/bots/${props.botId}/mcp-ops/import`,
+      url: '/bots/{bot_id}/mcp-ops/import',
+      path: { bot_id: props.botId },
       body: parsed,
       throwOnError: true,
     })

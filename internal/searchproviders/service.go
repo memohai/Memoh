@@ -143,6 +143,253 @@ func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
 				},
 			},
 		},
+		{
+			Provider:    string(ProviderSogou),
+			DisplayName: "Sogou",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"secret_id": {
+						Type:        "secret",
+						Title:       "Secret ID",
+						Description: "Tencent Cloud SecretId for Sogou search",
+						Required:    true,
+					},
+					"secret_key": {
+						Type:        "secret",
+						Title:       "Secret Key",
+						Description: "Tencent Cloud SecretKey for Sogou search",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Tencent Cloud TMS API host",
+						Required:    false,
+						Example:     "wsa.tencentcloudapi.com",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
+		{
+			Provider:    string(ProviderSerper),
+			DisplayName: "Serper",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "Serper API key",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Serper API base URL",
+						Required:    false,
+						Example:     "https://google.serper.dev/search",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
+		{
+			Provider:    string(ProviderSearXNG),
+			DisplayName: "SearXNG",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "SearXNG instance URL (self-hosted)",
+						Required:    true,
+						Example:     "http://localhost:8080/search",
+					},
+					"language": {
+						Type:        "string",
+						Title:       "Language",
+						Description: "Search language (e.g. all, en, zh)",
+						Required:    false,
+						Example:     "all",
+					},
+					"safesearch": {
+						Type:        "string",
+						Title:       "Safe Search",
+						Description: "Safe search level: 0 (off), 1 (moderate), 2 (strict)",
+						Required:    false,
+						Enum:        []string{"0", "1", "2"},
+						Example:     "1",
+					},
+					"categories": {
+						Type:        "string",
+						Title:       "Categories",
+						Description: "Search categories (comma-separated, e.g. general,news)",
+						Required:    false,
+						Example:     "general",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
+		{
+			Provider:    string(ProviderJina),
+			DisplayName: "Jina",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "Jina Search API key",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Jina Search API base URL",
+						Required:    false,
+						Example:     "https://s.jina.ai/",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
+		{
+			Provider:    string(ProviderExa),
+			DisplayName: "Exa",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "Exa Search API key",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Exa API base URL",
+						Required:    false,
+						Example:     "https://api.exa.ai/search",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
+		{
+			Provider:    string(ProviderBocha),
+			DisplayName: "Bocha",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "Bocha Search API key",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Bocha API base URL",
+						Required:    false,
+						Example:     "https://api.bochaai.com/v1/web-search",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
+		{
+			Provider:    string(ProviderDuckDuckGo),
+			DisplayName: "DuckDuckGo",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "DuckDuckGo HTML search URL",
+						Required:    false,
+						Example:     "https://html.duckduckgo.com/html/",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
+		{
+			Provider:    string(ProviderYandex),
+			DisplayName: "Yandex",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "Yandex Search API key",
+						Required:    true,
+					},
+					"search_type": {
+						Type:        "string",
+						Title:       "Search Type",
+						Description: "Yandex search type (e.g. SEARCH_TYPE_RU, SEARCH_TYPE_TR, SEARCH_TYPE_COM)",
+						Required:    false,
+						Example:     "SEARCH_TYPE_RU",
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Yandex Search API base URL",
+						Required:    false,
+						Example:     "https://searchapi.api.cloud.yandex.net/v2/web/search",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -274,7 +521,15 @@ func (s *Service) toGetResponse(row sqlc.SearchProvider) GetResponse {
 func isValidProviderName(name ProviderName) bool {
 	switch name {
 	case ProviderBrave, ProviderBing, ProviderGoogle,
-		ProviderTavily:
+		ProviderTavily,
+		ProviderSogou,
+		ProviderSerper,
+		ProviderSearXNG,
+		ProviderJina,
+		ProviderExa,
+		ProviderBocha,
+		ProviderDuckDuckGo,
+		ProviderYandex:
 		return true
 	default:
 		return false

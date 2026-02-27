@@ -202,7 +202,15 @@
       "brave": "Brave",
       "bing": "Bing",
       "google": "Google",
-      "tavily": "Tavily"
+      "tavily": "Tavily",
+      "sogou": "Sogou",
+      "serper": "Serper",
+      "searxng": "SearXNG",
+      "jina": "Jina",
+      "exa": "Exa",
+      "bocha": "Bocha",
+      "duckduckgo": "DuckDuckGo",
+      "yandex": "Yandex"
     }
   },
   "memoryProvider": {

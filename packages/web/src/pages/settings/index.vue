@@ -413,14 +413,14 @@ async function onGenerateBindCode() {
   generatingBindCode.value = true
   try {
     const ttl = Number.isFinite(bindForm.ttlSeconds) ? Math.max(60, Number(bindForm.ttlSeconds)) : 3600
-    const { data } = await client.post({
+    const { data } = await client.post<IssueBindCodeResponse>({
       url: '/users/me/bind_codes',
       body: {
         platform: bindForm.platform || undefined,
         ttl_seconds: ttl,
       },
       throwOnError: true,
-    }) as { data: IssueBindCodeResponse }
+    })
     bindCode.value = data
     toast.success(t('settings.bindCodeGenerated'))
   } catch (error) {

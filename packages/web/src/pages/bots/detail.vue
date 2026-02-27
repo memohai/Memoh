@@ -40,17 +40,14 @@
               @keydown.enter.prevent="handleConfirmBotName"
               @keydown.esc.prevent="handleCancelBotName"
             />
-            <Button
+            <LoadingButton
               size="sm"
-              :disabled="isSavingBotName || !canConfirmBotName"
+              :loading="isSavingBotName"
+              :disabled="!canConfirmBotName"
               @click="handleConfirmBotName"
             >
-              <Spinner
-                v-if="isSavingBotName"
-                class="mr-1.5"
-              />
               {{ $t('common.confirm') }}
-            </Button>
+            </LoadingButton>
             <Button
               variant="ghost"
               size="sm"
@@ -154,18 +151,14 @@
                   {{ $t('bots.checks.subtitle') }}
                 </p>
               </div>
-              <Button
+              <LoadingButton
                 variant="outline"
                 size="sm"
-                :disabled="checksLoading"
+                :loading="checksLoading"
                 @click="handleRefreshChecks"
               >
-                <Spinner
-                  v-if="checksLoading"
-                  class="mr-1.5"
-                />
                 {{ $t('common.refresh') }}
-              </Button>
+              </LoadingButton>
             </div>
             <div class="mt-3 flex items-center gap-2 text-sm">
               <Badge
@@ -319,12 +312,9 @@
             </div>
           </div>
 
-          <div
-            v-if="botLifecyclePending"
-            class="rounded-md border border-yellow-300/50 bg-yellow-50/70 p-3 text-sm text-yellow-800 dark:border-yellow-800/50 dark:bg-yellow-900/10 dark:text-yellow-200"
-          >
+          <WarningBanner v-if="botLifecyclePending">
             {{ $t('bots.container.botNotReady') }}
-          </div>
+          </WarningBanner>
 
           <div
             v-if="containerLoading && !containerInfo && !containerMissing"
@@ -632,6 +622,8 @@ import type {
 } from '@memoh/sdk'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import WarningBanner from '@/components/warning-banner/index.vue'
+import LoadingButton from '@/components/loading-button/index.vue'
 import BotSettings from './components/bot-settings.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
