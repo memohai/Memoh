@@ -37,7 +37,7 @@ func ParseUUID(id string) (pgtype.UUID, error) {
 	return pgID, nil
 }
 
-// ParseUUIDOrEmpty converts a string UUID to pgtype.UUID, returning an invalid UUID if the string is empty or unparseable.
+// ParseUUIDOrEmpty converts a string UUID to pgtype.UUID, returning an invalid UUID if the string is empty or unparsable.
 func ParseUUIDOrEmpty(id string) pgtype.UUID {
 	id = strings.TrimSpace(id)
 	if id == "" {
