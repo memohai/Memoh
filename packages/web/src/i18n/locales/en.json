@@ -54,6 +54,7 @@
     "bots": "Bots",
     "models": "Models",
     "searchProvider": "Search Providers",
+    "emailProvider": "Email Providers",
     "settings": "Settings",
     "home": "Home",
     "mcp": "MCP",
@@ -212,6 +213,31 @@
       "yandex": "Yandex"
     }
   },
+  "emailProvider": {
+    "title": "Email Providers",
+    "add": "Add Email Provider",
+    "providerType": "Provider Type",
+    "searchPlaceholder": "Search email providers...",
+    "emptyTitle": "No Email Providers",
+    "emptyDescription": "Add an email provider to enable email for your bots",
+    "deleteConfirm": "Are you sure you want to delete this email provider? This action cannot be undone.",
+    "fields": {
+      "username": "Username",
+      "password": "Password",
+      "smtp_host": "SMTP Host",
+      "smtp_port": "SMTP Port",
+      "smtp_security": "SMTP Security",
+      "imap_host": "IMAP Host",
+      "imap_port": "IMAP Port",
+      "imap_security": "IMAP Security",
+      "poll_interval_seconds": "Poll Interval (seconds)",
+      "domain": "Domain",
+      "api_key": "API Key",
+      "region": "Region",
+      "inbound_mode": "Inbound Mode",
+      "webhook_signing_key": "Webhook Signing Key"
+    }
+  },
   "mcp": {
     "addTitle": "Add MCP",
     "addDescription": "Configure MCP server connection",
@@ -324,7 +350,33 @@
       "heartbeat": "Heartbeat",
       "history": "History",
       "skills": "Skills",
+      "email": "Email",
       "settings": "Settings"
+    },
+    "email": {
+      "title": "Email",
+      "subtitle": "Manage email provider bindings and view inbox / outbox.",
+      "bindings": "Bindings",
+      "addBinding": "Add Binding",
+      "inbox": "Inbox",
+      "outbox": "Outbox",
+      "emailAddress": "Email Address",
+      "emailPlaceholder": "user@example.com",
+      "noBindings": "No email bindings configured",
+      "noEmails": "No emails",
+      "canRead": "Read",
+      "canWrite": "Write",
+      "canDelete": "Delete",
+      "unbind": "Unbind",
+      "unbindConfirm": "Are you sure you want to remove this email binding?",
+      "bindSuccess": "Email binding added",
+      "unbindSuccess": "Email binding removed",
+      "from": "From",
+      "to": "To",
+      "subject": "Subject",
+      "status": "Status",
+      "receivedAt": "Received",
+      "sentAt": "Sent"
     },
     "container": {
       "title": "Container Management",

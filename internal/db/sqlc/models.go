@@ -65,6 +65,19 @@ type BotChannelRoute struct {
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
+type BotEmailBinding struct {
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
+	EmailAddress    string             `json:"email_address"`
+	CanRead         bool               `json:"can_read"`
+	CanWrite        bool               `json:"can_write"`
+	CanDelete       bool               `json:"can_delete"`
+	Config          []byte             `json:"config"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotHeartbeatLog struct {
 	ID           pgtype.UUID        `json:"id"`
 	BotID        pgtype.UUID        `json:"bot_id"`
@@ -185,6 +198,32 @@ type ContainerVersion struct {
 	SnapshotID  pgtype.UUID        `json:"snapshot_id"`
 	Version     int32              `json:"version"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type EmailOutbox struct {
+	ID          pgtype.UUID        `json:"id"`
+	ProviderID  pgtype.UUID        `json:"provider_id"`
+	BotID       pgtype.UUID        `json:"bot_id"`
+	MessageID   string             `json:"message_id"`
+	FromAddress string             `json:"from_address"`
+	ToAddresses []byte             `json:"to_addresses"`
+	Subject     string             `json:"subject"`
+	BodyText    string             `json:"body_text"`
+	BodyHtml    string             `json:"body_html"`
+	Attachments []byte             `json:"attachments"`
+	Status      string             `json:"status"`
+	Error       string             `json:"error"`
+	SentAt      pgtype.Timestamptz `json:"sent_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type EmailProvider struct {
+	ID        pgtype.UUID        `json:"id"`
+	Name      string             `json:"name"`
+	Provider  string             `json:"provider"`
+	Config    []byte             `json:"config"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type LifecycleEvent struct {

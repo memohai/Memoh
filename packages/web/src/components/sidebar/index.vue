@@ -139,6 +139,11 @@ const sidebarInfo = computed(() => [
     icon: ['fas', 'globe'],
   },
   {
+    title: t('sidebar.emailProvider'),
+    name: 'email-providers',
+    icon: ['fas', 'envelope'],
+  },
+  {
     title: t('sidebar.settings'),
     name: 'settings',
     icon: ['fas', 'gear'],

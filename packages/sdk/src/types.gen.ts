@@ -313,6 +313,107 @@ export type ChannelUpsertConfigRequest = {
     verified_at?: string;
 };
 
+export type EmailBindingResponse = {
+    bot_id?: string;
+    can_delete?: boolean;
+    can_read?: boolean;
+    can_write?: boolean;
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    email_address?: string;
+    email_provider_id?: string;
+    id?: string;
+    updated_at?: string;
+};
+
+export type EmailConfigSchema = {
+    fields?: Array<EmailFieldSchema>;
+};
+
+export type EmailCreateBindingRequest = {
+    can_delete?: boolean;
+    can_read?: boolean;
+    can_write?: boolean;
+    config?: {
+        [key: string]: unknown;
+    };
+    email_address?: string;
+    email_provider_id?: string;
+};
+
+export type EmailCreateProviderRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    provider?: string;
+};
+
+export type EmailFieldSchema = {
+    description?: string;
+    enum?: Array<string>;
+    example?: unknown;
+    key?: string;
+    order?: number;
+    required?: boolean;
+    title?: string;
+    type?: string;
+};
+
+export type EmailOutboxItemResponse = {
+    attachments?: Array<unknown>;
+    body_html?: string;
+    body_text?: string;
+    bot_id?: string;
+    created_at?: string;
+    error?: string;
+    from?: string;
+    id?: string;
+    message_id?: string;
+    provider_id?: string;
+    sent_at?: string;
+    status?: string;
+    subject?: string;
+    to?: Array<string>;
+};
+
+export type EmailProviderMeta = {
+    config_schema?: EmailConfigSchema;
+    display_name?: string;
+    provider?: string;
+};
+
+export type EmailProviderResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    name?: string;
+    provider?: string;
+    updated_at?: string;
+};
+
+export type EmailUpdateBindingRequest = {
+    can_delete?: boolean;
+    can_read?: boolean;
+    can_write?: boolean;
+    config?: {
+        [key: string]: unknown;
+    };
+    email_address?: string;
+};
+
+export type EmailUpdateProviderRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    provider?: string;
+};
+
 export type GithubComMemohaiMemohInternalMcpConnection = {
     bot_id?: string;
     config?: {
@@ -985,7 +1086,7 @@ export type SearchprovidersProviderMeta = {
     provider?: string;
 };
 
-export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily';
+export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily' | 'sogou' | 'serper' | 'searxng' | 'jina' | 'exa' | 'bocha' | 'duckduckgo' | 'yandex';
 
 export type SearchprovidersUpdateRequest = {
     config?: {
@@ -2087,6 +2188,221 @@ export type PostBotsByBotIdContainerStopResponses = {
 };
 
 export type PostBotsByBotIdContainerStopResponse = PostBotsByBotIdContainerStopResponses[keyof PostBotsByBotIdContainerStopResponses];
+
+export type GetBotsByBotIdEmailBindingsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/email-bindings';
+};
+
+export type GetBotsByBotIdEmailBindingsErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdEmailBindingsError = GetBotsByBotIdEmailBindingsErrors[keyof GetBotsByBotIdEmailBindingsErrors];
+
+export type GetBotsByBotIdEmailBindingsResponses = {
+    /**
+     * OK
+     */
+    200: Array<EmailBindingResponse>;
+};
+
+export type GetBotsByBotIdEmailBindingsResponse = GetBotsByBotIdEmailBindingsResponses[keyof GetBotsByBotIdEmailBindingsResponses];
+
+export type PostBotsByBotIdEmailBindingsData = {
+    /**
+     * Binding configuration
+     */
+    body: EmailCreateBindingRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/email-bindings';
+};
+
+export type PostBotsByBotIdEmailBindingsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdEmailBindingsError = PostBotsByBotIdEmailBindingsErrors[keyof PostBotsByBotIdEmailBindingsErrors];
+
+export type PostBotsByBotIdEmailBindingsResponses = {
+    /**
+     * Created
+     */
+    201: EmailBindingResponse;
+};
+
+export type PostBotsByBotIdEmailBindingsResponse = PostBotsByBotIdEmailBindingsResponses[keyof PostBotsByBotIdEmailBindingsResponses];
+
+export type DeleteBotsByBotIdEmailBindingsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Binding ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/email-bindings/{id}';
+};
+
+export type DeleteBotsByBotIdEmailBindingsByIdErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdEmailBindingsByIdError = DeleteBotsByBotIdEmailBindingsByIdErrors[keyof DeleteBotsByBotIdEmailBindingsByIdErrors];
+
+export type DeleteBotsByBotIdEmailBindingsByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PutBotsByBotIdEmailBindingsByIdData = {
+    /**
+     * Updated binding
+     */
+    body: EmailUpdateBindingRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Binding ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/email-bindings/{id}';
+};
+
+export type PutBotsByBotIdEmailBindingsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdEmailBindingsByIdError = PutBotsByBotIdEmailBindingsByIdErrors[keyof PutBotsByBotIdEmailBindingsByIdErrors];
+
+export type PutBotsByBotIdEmailBindingsByIdResponses = {
+    /**
+     * OK
+     */
+    200: EmailBindingResponse;
+};
+
+export type PutBotsByBotIdEmailBindingsByIdResponse = PutBotsByBotIdEmailBindingsByIdResponses[keyof PutBotsByBotIdEmailBindingsByIdResponses];
+
+export type GetBotsByBotIdEmailOutboxData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/bots/{bot_id}/email-outbox';
+};
+
+export type GetBotsByBotIdEmailOutboxErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdEmailOutboxError = GetBotsByBotIdEmailOutboxErrors[keyof GetBotsByBotIdEmailOutboxErrors];
+
+export type GetBotsByBotIdEmailOutboxResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type GetBotsByBotIdEmailOutboxResponse = GetBotsByBotIdEmailOutboxResponses[keyof GetBotsByBotIdEmailOutboxResponses];
+
+export type GetBotsByBotIdEmailOutboxByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Email ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/email-outbox/{id}';
+};
+
+export type GetBotsByBotIdEmailOutboxByIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdEmailOutboxByIdError = GetBotsByBotIdEmailOutboxByIdErrors[keyof GetBotsByBotIdEmailOutboxByIdErrors];
+
+export type GetBotsByBotIdEmailOutboxByIdResponses = {
+    /**
+     * OK
+     */
+    200: EmailOutboxItemResponse;
+};
+
+export type GetBotsByBotIdEmailOutboxByIdResponse = GetBotsByBotIdEmailOutboxByIdResponses[keyof GetBotsByBotIdEmailOutboxByIdResponses];
 
 export type DeleteBotsByBotIdHeartbeatLogsData = {
     body?: never;
@@ -4723,6 +5039,219 @@ export type GetChannelsByPlatformResponses = {
 };
 
 export type GetChannelsByPlatformResponse = GetChannelsByPlatformResponses[keyof GetChannelsByPlatformResponses];
+
+export type GetEmailProvidersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Provider type filter
+         */
+        provider?: string;
+    };
+    url: '/email-providers';
+};
+
+export type GetEmailProvidersErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetEmailProvidersError = GetEmailProvidersErrors[keyof GetEmailProvidersErrors];
+
+export type GetEmailProvidersResponses = {
+    /**
+     * OK
+     */
+    200: Array<EmailProviderResponse>;
+};
+
+export type GetEmailProvidersResponse = GetEmailProvidersResponses[keyof GetEmailProvidersResponses];
+
+export type PostEmailProvidersData = {
+    /**
+     * Email provider configuration
+     */
+    body: EmailCreateProviderRequest;
+    path?: never;
+    query?: never;
+    url: '/email-providers';
+};
+
+export type PostEmailProvidersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostEmailProvidersError = PostEmailProvidersErrors[keyof PostEmailProvidersErrors];
+
+export type PostEmailProvidersResponses = {
+    /**
+     * Created
+     */
+    201: EmailProviderResponse;
+};
+
+export type PostEmailProvidersResponse = PostEmailProvidersResponses[keyof PostEmailProvidersResponses];
+
+export type GetEmailProvidersMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/email-providers/meta';
+};
+
+export type GetEmailProvidersMetaResponses = {
+    /**
+     * OK
+     */
+    200: Array<EmailProviderMeta>;
+};
+
+export type GetEmailProvidersMetaResponse = GetEmailProvidersMetaResponses[keyof GetEmailProvidersMetaResponses];
+
+export type DeleteEmailProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/email-providers/{id}';
+};
+
+export type DeleteEmailProvidersByIdErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteEmailProvidersByIdError = DeleteEmailProvidersByIdErrors[keyof DeleteEmailProvidersByIdErrors];
+
+export type DeleteEmailProvidersByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetEmailProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/email-providers/{id}';
+};
+
+export type GetEmailProvidersByIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetEmailProvidersByIdError = GetEmailProvidersByIdErrors[keyof GetEmailProvidersByIdErrors];
+
+export type GetEmailProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: EmailProviderResponse;
+};
+
+export type GetEmailProvidersByIdResponse = GetEmailProvidersByIdResponses[keyof GetEmailProvidersByIdResponses];
+
+export type PutEmailProvidersByIdData = {
+    /**
+     * Updated configuration
+     */
+    body: EmailUpdateProviderRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/email-providers/{id}';
+};
+
+export type PutEmailProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutEmailProvidersByIdError = PutEmailProvidersByIdErrors[keyof PutEmailProvidersByIdErrors];
+
+export type PutEmailProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: EmailProviderResponse;
+};
+
+export type PutEmailProvidersByIdResponse = PutEmailProvidersByIdResponses[keyof PutEmailProvidersByIdResponses];
+
+export type PostEmailMailgunWebhookByConfigIdData = {
+    body?: never;
+    path: {
+        /**
+         * Email provider config ID
+         */
+        config_id: string;
+    };
+    query?: never;
+    url: '/email/mailgun/webhook/{config_id}';
+};
+
+export type PostEmailMailgunWebhookByConfigIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostEmailMailgunWebhookByConfigIdError = PostEmailMailgunWebhookByConfigIdErrors[keyof PostEmailMailgunWebhookByConfigIdErrors];
+
+export type PostEmailMailgunWebhookByConfigIdResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type PostEmailMailgunWebhookByConfigIdResponse = PostEmailMailgunWebhookByConfigIdResponses[keyof PostEmailMailgunWebhookByConfigIdResponses];
 
 export type PostEmbeddingsData = {
     /**

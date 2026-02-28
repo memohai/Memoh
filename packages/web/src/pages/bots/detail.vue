@@ -113,6 +113,9 @@
         <TabsTrigger value="channels">
           {{ $t('bots.tabs.channels') }}
         </TabsTrigger>
+        <TabsTrigger value="email">
+          {{ $t('bots.tabs.email') }}
+        </TabsTrigger>
         <TabsTrigger value="container">
           {{ $t('bots.tabs.container') }}
         </TabsTrigger>
@@ -237,6 +240,12 @@
         class="mt-6"
       >
         <BotChannels :bot-id="botId" />
+      </TabsContent>
+      <TabsContent
+        value="email"
+        class="mt-6"
+      >
+        <BotEmail :bot-id="botId" />
       </TabsContent>
       <TabsContent
         value="container"
@@ -631,6 +640,7 @@ import BotMemory from './components/bot-memory.vue'
 import BotSkills from './components/bot-skills.vue'
 import BotHistory from './components/bot-history.vue'
 import BotHeartbeat from './components/bot-heartbeat.vue'
+import BotEmail from './components/bot-email.vue'
 import BotSubagents from './components/bot-subagents.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'

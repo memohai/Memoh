@@ -68,6 +68,14 @@ const routes = [
         },
       },
       {
+        name: 'email-providers',
+        path: '/email-providers',
+        component: () => import('@/pages/email-providers/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.emailProvider'),
+        },
+      },
+      {
         name: 'settings',
         path: '/settings',
         component: () => import('@/pages/settings/index.vue'),
