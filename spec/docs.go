@@ -8260,6 +8260,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "raw": {
+                    "type": "string"
                 }
             }
         },
@@ -8291,7 +8294,7 @@ const docTemplate = `{
                 "skills": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/handlers.SkillItem"
+                        "type": "string"
                     }
                 }
             }

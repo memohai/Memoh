@@ -1005,6 +1005,8 @@ definitions:
         type: object
       name:
         type: string
+      raw:
+        type: string
     type: object
   handlers.SkillsDeleteRequest:
     properties:
@@ -1024,7 +1026,7 @@ definitions:
     properties:
       skills:
         items:
-          $ref: '#/definitions/handlers.SkillItem'
+          type: string
         type: array
     type: object
   handlers.SnapshotInfo:

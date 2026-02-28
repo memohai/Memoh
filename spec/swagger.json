@@ -8251,6 +8251,9 @@
                 },
                 "name": {
                     "type": "string"
+                },
+                "raw": {
+                    "type": "string"
                 }
             }
         },
@@ -8282,7 +8285,7 @@
                 "skills": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/handlers.SkillItem"
+                        "type": "string"
                     }
                 }
             }

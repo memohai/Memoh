@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
+import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import {
   Button,
   Input,
@@ -32,10 +34,29 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-const currentPath = ref('/data')
+const route = useRoute()
+const router = useRouter()
+
+const currentPath = useSyncedQueryParam('path', '/data')
 const entries = ref<HandlersFsFileInfo[]>([])
 const listLoading = ref(false)
 const openFile = ref<HandlersFsFileInfo | null>(null)
+
+function syncFileToUrl(filePath: string | null) {
+  const current = route.query.file as string | undefined
+  const next = filePath || undefined
+  if (current !== next) {
+    void router.push({ query: { ...route.query, file: next } })
+  }
+}
+
+function restoreFileFromUrl() {
+  const filePath = route.query.file as string | undefined
+  if (filePath && !openFile.value) {
+    const name = filePath.split('/').pop() ?? ''
+    openFile.value = { path: filePath, name, isDir: false }
+  }
+}
 
 const mkdirDialogOpen = ref(false)
 const mkdirName = ref('')
@@ -71,15 +92,18 @@ async function loadDirectory(path: string) {
 
 function handleNavigate(path: string) {
   openFile.value = null
+  syncFileToUrl(null)
   void loadDirectory(path)
 }
 
 function handleOpenFile(entry: HandlersFsFileInfo) {
   openFile.value = entry
+  syncFileToUrl(entry.path ?? null)
 }
 
 function handleCloseViewer() {
   openFile.value = null
+  syncFileToUrl(null)
 }
 
 function handleFileSaved() {
@@ -164,6 +188,7 @@ async function handleRename() {
     renameDialogOpen.value = false
     if (openFile.value?.path === target.path) {
       openFile.value = null
+      syncFileToUrl(null)
     }
     toast.success(t('bots.files.renameSuccess'))
     void loadDirectory(currentPath.value)
@@ -194,6 +219,7 @@ async function handleDelete() {
     deleteDialogOpen.value = false
     if (openFile.value?.path === target.path) {
       openFile.value = null
+      syncFileToUrl(null)
     }
     toast.success(t('bots.files.deleteSuccess'))
     void loadDirectory(currentPath.value)
@@ -215,9 +241,13 @@ function handleDownload(entry: HandlersFsFileInfo) {
 
 watch(() => props.botId, () => {
   openFile.value = null
-  currentPath.value = '/data'
-  void loadDirectory('/data')
+  syncFileToUrl(null)
+  void loadDirectory(currentPath.value)
 }, { immediate: true })
+
+onMounted(() => {
+  restoreFileFromUrl()
+})
 </script>
 
 <template>

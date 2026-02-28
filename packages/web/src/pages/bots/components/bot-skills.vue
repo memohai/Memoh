@@ -92,7 +92,7 @@
                     :title="$t('common.delete')"
                   >
                     <FontAwesomeIcon
-                      :icon="['fas', 'trash']"
+                      :icon="['far', 'trash-can']"
                       class="size-3.5"
                     />
                   </Button>
@@ -107,46 +107,21 @@
             {{ skill.description || '-' }}
           </CardDescription>
         </CardHeader>
-        <CardContent class="pb-4 grow">
-          <div class="rounded-md bg-muted p-2 text-xs font-mono text-muted-foreground line-clamp-4 break-all">
-            {{ skill.content }}
-          </div>
-        </CardContent>
       </Card>
     </div>
 
     <!-- Edit Dialog -->
     <Dialog v-model:open="isDialogOpen">
-      <DialogContent class="sm:max-w-xl">
+      <DialogContent class="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{{ isEditing ? $t('common.edit') : $t('bots.skills.addSkill') }}</DialogTitle>
         </DialogHeader>
-        <div class="space-y-4 py-4">
-          <div class="space-y-2">
-            <Label>{{ $t('common.name') }}</Label>
-            <Input
-              v-model="draftSkill.name"
-              :placeholder="$t('common.namePlaceholder')"
-              :disabled="isEditing || isSaving"
-            />
-          </div>
-          <div class="space-y-2">
-            <Label>{{ $t('bots.skills.description') }}</Label>
-            <Input
-              v-model="draftSkill.description"
-              :placeholder="$t('bots.skills.descriptionPlaceholder')"
-              :disabled="isSaving"
-            />
-          </div>
-          <div class="space-y-2">
-            <Label>{{ $t('bots.skills.content') }}</Label>
-            <Textarea
-              v-model="draftSkill.content"
-              :placeholder="$t('bots.skills.contentPlaceholder')"
-              :disabled="isSaving"
-              class="min-h-[150px] font-mono text-sm"
-            />
-          </div>
+        <div class="py-4 h-[400px]">
+          <MonacoEditor
+            v-model="draftRaw"
+            language="markdown"
+            :readonly="isSaving"
+          />
         </div>
         <DialogFooter>
           <DialogClose as-child>
@@ -178,11 +153,12 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import {
-  Button, Card, CardHeader, CardTitle, CardDescription, CardContent,
+  Button, Card, CardHeader, CardTitle, CardDescription,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Input, Textarea, Label, Spinner,
+  Spinner,
 } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import MonacoEditor from '@/components/monaco-editor/index.vue'
 import {
   getBotsByBotIdContainerSkills,
   postBotsByBotIdContainerSkills,
@@ -205,14 +181,18 @@ const skills = ref<HandlersSkillItem[]>([])
 
 const isDialogOpen = ref(false)
 const isEditing = ref(false)
-const draftSkill = ref<HandlersSkillItem>({
-  name: '',
-  description: '',
-  content: '',
-})
+const draftRaw = ref('')
+
+const SKILL_TEMPLATE = `---
+name: my-skill
+description: Brief description
+---
+
+# My Skill
+`
 
 const canSave = computed(() => {
-  return (draftSkill.value.name || '').trim() && (draftSkill.value.content || '').trim()
+  return draftRaw.value.trim().length > 0
 })
 
 async function fetchSkills() {
@@ -233,22 +213,13 @@ async function fetchSkills() {
 
 function handleCreate() {
   isEditing.value = false
-  draftSkill.value = {
-    name: '',
-    description: '',
-    content: '',
-  }
+  draftRaw.value = SKILL_TEMPLATE
   isDialogOpen.value = true
 }
 
 function handleEdit(skill: HandlersSkillItem) {
   isEditing.value = true
-  draftSkill.value = {
-    name: skill.name || '',
-    description: skill.description || '',
-    content: skill.content || '',
-    metadata: skill.metadata,
-  }
+  draftRaw.value = skill.raw || ''
   isDialogOpen.value = true
 }
 
@@ -259,12 +230,7 @@ async function handleSave() {
     await postBotsByBotIdContainerSkills({
       path: { bot_id: props.botId },
       body: {
-        skills: [{
-          name: draftSkill.value.name?.trim(),
-          description: draftSkill.value.description?.trim(),
-          content: draftSkill.value.content?.trim(),
-          metadata: draftSkill.value.metadata,
-        }],
+        skills: [draftRaw.value],
       },
       throwOnError: true,
     })

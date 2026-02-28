@@ -613,6 +613,7 @@ export type HandlersSkillItem = {
         [key: string]: unknown;
     };
     name?: string;
+    raw?: string;
 };
 
 export type HandlersSkillsDeleteRequest = {
@@ -624,7 +625,7 @@ export type HandlersSkillsResponse = {
 };
 
 export type HandlersSkillsUpsertRequest = {
-    skills?: Array<HandlersSkillItem>;
+    skills?: Array<string>;
 };
 
 export type HandlersSnapshotInfo = {
