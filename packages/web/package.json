@@ -27,6 +27,7 @@
     "markstream-vue": "0.0.7-beta.2",
     "mermaid": "^11.12.2",
     "modern-css-reset": "^1.4.0",
+    "monaco-editor": "^0.52.2",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
     "shiki": "^3.21.0",

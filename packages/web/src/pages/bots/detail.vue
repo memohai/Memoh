@@ -127,7 +127,20 @@
         <template #sidebar-footer />
 
         <template #detail>
-          <ScrollArea class="max-h-full h-full">
+          <template v-if="activeTab === 'files'">
+            <div class="h-full">
+              <KeepAlive>
+                <BotFiles
+                  :bot-id="botId"
+                  :bot-type="bot?.type"
+                />
+              </KeepAlive>
+            </div>
+          </template>
+          <ScrollArea
+            v-else
+            class="max-h-full h-full"
+          >
             <section class="p-4">
               <KeepAlive>
                 <component
@@ -246,6 +259,7 @@ import BotEmail from './components/bot-email.vue'
 import BotSubagents from './components/bot-subagents.vue'
 import BotOverview from './components/bot-overview.vue'
 import BotContainer from './components/bot-container.vue'
+import BotFiles from './components/bot-files.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
@@ -266,6 +280,7 @@ const tabList = [
   { value: 'channels', label: 'bots.tabs.channels', component: BotChannels },
   { value: 'email', label: 'bots.tabs.email', component: BotEmail },
   { value: 'container', label: 'bots.tabs.container', component: BotContainer },
+  { value: 'files', label: 'bots.tabs.files', component: BotFiles },
   { value: 'mcp', label: 'bots.tabs.mcp' ,component: BotMcp },
   { value: 'subagents', label: 'bots.tabs.subagents',component: BotSubagents },
   { value: 'heartbeat', label: 'bots.tabs.heartbeat',component: BotHeartbeat },
