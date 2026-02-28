@@ -1,22 +1,10 @@
 # Memoh 文档
 
-Memoh 是一个多成员、长记忆、容器化的 AI Agent 系统。
+Memoh(/ˈmemoʊ/) 是一个多成员、结构化长记忆、容器化的 AI Agent 系统。创建你自己的 AI Bot，通过 Telegram、飞书、Web 或 CLI 与它们聊天。每个 Bot 运行在独立的容器中，拥有自己的记忆系统——能够编辑文件、执行命令和访问网络。
 
 ## 文档章节
 
-- [快速开始](/getting-started.md)
-- [核心概念](/zh/concepts/index.md)
-
-## 面向文档贡献者
-
-- [术语规范](/zh/style/terminology.md)
-
-## 当前维护范围
-
-当前文档先聚焦账号语义与访问控制：
-
-- 区分系统账号与平台账号
-- 解释为什么账号绑定是账号作用域
-- 说明账号绑定与 bot 访问控制之间的关系
-
-说明：“平台账号”指用户在外部平台上的真实账号（例如飞书账号），不是 Memoh 系统账号。
+- **[关于 Memoh](/zh/getting-started)** — Memoh 是什么、核心功能与安装链接。
+- **[安装](/zh/installation/docker)** — [Docker](/zh/installation/docker)（推荐）和 [config.toml](/zh/installation/config-toml) 配置参考。
+- **[快速开始](/zh/getting-started/provider-and-model)** — 配置 Provider 和模型。
+- **[核心概念](/zh/concepts/)** — 了解 Memoh 的设计原理与各组件。
