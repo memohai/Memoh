@@ -10,7 +10,8 @@ INSERT INTO bot_history_messages (
   role,
   content,
   metadata,
-  usage
+  usage,
+  model_id
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -23,7 +24,8 @@ VALUES (
   sqlc.arg(role),
   sqlc.arg(content),
   sqlc.arg(metadata),
-  sqlc.arg(usage)
+  sqlc.arg(usage),
+  sqlc.narg(model_id)::uuid
 )
 RETURNING
   id,

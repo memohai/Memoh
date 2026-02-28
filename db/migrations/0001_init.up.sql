@@ -253,6 +253,7 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   content JSONB NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   usage JSONB,
+  model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -423,6 +424,7 @@ CREATE TABLE IF NOT EXISTS bot_heartbeat_logs (
   result_text TEXT NOT NULL DEFAULT '',
   error_message TEXT NOT NULL DEFAULT '',
   usage JSONB,
+  model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at TIMESTAMPTZ
 );

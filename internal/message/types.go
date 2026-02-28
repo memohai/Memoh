@@ -62,6 +62,7 @@ type PersistInput struct {
 	Metadata                map[string]any
 	Usage                   json.RawMessage
 	Assets                  []AssetRef
+	ModelID                 string
 }
 
 // Writer defines write behavior needed by the inbound router.

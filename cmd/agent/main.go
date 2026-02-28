@@ -225,6 +225,7 @@ func runServe() {
 			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewInboxHandler),
+			provideServerHandler(handlers.NewTokenUsageHandler),
 			provideServerHandler(provideCLIHandler),
 			provideServerHandler(provideWebHandler),
 

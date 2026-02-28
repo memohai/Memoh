@@ -9,9 +9,10 @@ SET status = $2,
     result_text = $3,
     error_message = $4,
     usage = $5,
+    model_id = $6,
     completed_at = now()
 WHERE id = $1
-RETURNING id, bot_id, status, result_text, error_message, usage, started_at, completed_at;
+RETURNING id, bot_id, status, result_text, error_message, usage, model_id, started_at, completed_at;
 
 -- name: ListHeartbeatLogsByBot :many
 SELECT id, bot_id, status, result_text, error_message, usage, started_at, completed_at

@@ -17,9 +17,10 @@ SET status = $2,
     result_text = $3,
     error_message = $4,
     usage = $5,
+    model_id = $6,
     completed_at = now()
 WHERE id = $1
-RETURNING id, bot_id, status, result_text, error_message, usage, started_at, completed_at
+RETURNING id, bot_id, status, result_text, error_message, usage, model_id, started_at, completed_at
 `
 
 type CompleteHeartbeatLogParams struct {
@@ -28,6 +29,7 @@ type CompleteHeartbeatLogParams struct {
 	ResultText   string      `json:"result_text"`
 	ErrorMessage string      `json:"error_message"`
 	Usage        []byte      `json:"usage"`
+	ModelID      pgtype.UUID `json:"model_id"`
 }
 
 func (q *Queries) CompleteHeartbeatLog(ctx context.Context, arg CompleteHeartbeatLogParams) (BotHeartbeatLog, error) {
@@ -37,6 +39,7 @@ func (q *Queries) CompleteHeartbeatLog(ctx context.Context, arg CompleteHeartbea
 		arg.ResultText,
 		arg.ErrorMessage,
 		arg.Usage,
+		arg.ModelID,
 	)
 	var i BotHeartbeatLog
 	err := row.Scan(
@@ -46,6 +49,7 @@ func (q *Queries) CompleteHeartbeatLog(ctx context.Context, arg CompleteHeartbea
 		&i.ResultText,
 		&i.ErrorMessage,
 		&i.Usage,
+		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
 	)
@@ -58,9 +62,20 @@ VALUES ($1, now())
 RETURNING id, bot_id, status, result_text, error_message, usage, started_at, completed_at
 `
 
-func (q *Queries) CreateHeartbeatLog(ctx context.Context, botID pgtype.UUID) (BotHeartbeatLog, error) {
+type CreateHeartbeatLogRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	BotID        pgtype.UUID        `json:"bot_id"`
+	Status       string             `json:"status"`
+	ResultText   string             `json:"result_text"`
+	ErrorMessage string             `json:"error_message"`
+	Usage        []byte             `json:"usage"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+}
+
+func (q *Queries) CreateHeartbeatLog(ctx context.Context, botID pgtype.UUID) (CreateHeartbeatLogRow, error) {
 	row := q.db.QueryRow(ctx, createHeartbeatLog, botID)
-	var i BotHeartbeatLog
+	var i CreateHeartbeatLogRow
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
@@ -98,15 +113,26 @@ type ListHeartbeatLogsByBotParams struct {
 	Limit   int32              `json:"limit"`
 }
 
-func (q *Queries) ListHeartbeatLogsByBot(ctx context.Context, arg ListHeartbeatLogsByBotParams) ([]BotHeartbeatLog, error) {
+type ListHeartbeatLogsByBotRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	BotID        pgtype.UUID        `json:"bot_id"`
+	Status       string             `json:"status"`
+	ResultText   string             `json:"result_text"`
+	ErrorMessage string             `json:"error_message"`
+	Usage        []byte             `json:"usage"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+}
+
+func (q *Queries) ListHeartbeatLogsByBot(ctx context.Context, arg ListHeartbeatLogsByBotParams) ([]ListHeartbeatLogsByBotRow, error) {
 	rows, err := q.db.Query(ctx, listHeartbeatLogsByBot, arg.BotID, arg.Column2, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BotHeartbeatLog
+	var items []ListHeartbeatLogsByBotRow
 	for rows.Next() {
-		var i BotHeartbeatLog
+		var i ListHeartbeatLogsByBotRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,

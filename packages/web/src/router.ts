@@ -76,6 +76,14 @@ const routes = [
         },
       },
       {
+        name: 'usage',
+        path: '/usage',
+        component: () => import('@/pages/usage/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.usage'),
+        },
+      },
+      {
         name: 'settings',
         path: '/settings',
         component: () => import('@/pages/settings/index.vue'),

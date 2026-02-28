@@ -145,6 +145,11 @@ const sidebarInfo = computed(() => [
     icon: ['fas', 'envelope'],
   },
   {
+    title: t('sidebar.usage'),
+    name: 'usage',
+    icon: ['fas', 'chart-line'],
+  },
+  {
     title: t('sidebar.settings'),
     name: 'settings',
     icon: ['fas', 'gear'],

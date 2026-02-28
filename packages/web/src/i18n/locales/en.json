@@ -58,7 +58,8 @@
     "settings": "Settings",
     "home": "Home",
     "mcp": "MCP",
-    "platform": "Platform"
+    "platform": "Platform",
+    "usage": "Usage"
   },
   "breadcrumb": {
     "main": "Home"
@@ -634,5 +635,39 @@
       "usage": "Usage",
       "skills": "Skills"
     }
+  },
+  "usage": {
+    "title": "Token Usage",
+    "selectBot": "Select Bot",
+    "selectBotPlaceholder": "Choose a bot to view usage",
+    "timeRange": "Time Range",
+    "last7Days": "Last 7 Days",
+    "last30Days": "Last 30 Days",
+    "last90Days": "Last 90 Days",
+    "noData": "No usage data for the selected period",
+    "loadFailed": "Failed to load token usage",
+    "totalInputTokens": "Total Input Tokens",
+    "totalOutputTokens": "Total Output Tokens",
+    "avgCacheHitRate": "Avg Cache Hit Rate",
+    "totalReasoningTokens": "Total Reasoning Tokens",
+    "dailyTokens": "Daily Token Usage",
+    "cacheBreakdown": "Cache Breakdown",
+    "cacheHitRate": "Cache Hit Rate",
+    "chatInput": "Chat Input",
+    "chatOutput": "Chat Output",
+    "heartbeatInput": "Heartbeat Input",
+    "heartbeatOutput": "Heartbeat Output",
+    "cacheRead": "Cache Read",
+    "cacheWrite": "Cache Write",
+    "noCache": "No Cache",
+    "tokens": "Tokens",
+    "date": "Date",
+    "modelDistribution": "Model Usage Distribution",
+    "filterByModel": "Filter by Model",
+    "allModels": "All Models",
+    "dateFrom": "From",
+    "dateTo": "To",
+    "chartPie": "Pie",
+    "chartBar": "Bar"
   }
 }

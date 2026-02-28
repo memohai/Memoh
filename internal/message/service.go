@@ -57,6 +57,10 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	if err != nil {
 		return Message{}, fmt.Errorf("invalid sender user id: %w", err)
 	}
+	pgModelID, err := parseOptionalUUID(input.ModelID)
+	if err != nil {
+		return Message{}, fmt.Errorf("invalid model id: %w", err)
+	}
 
 	metaBytes, err := json.Marshal(nonNilMap(input.Metadata))
 	if err != nil {
@@ -80,6 +84,7 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		Content:                 content,
 		Metadata:                metaBytes,
 		Usage:                   input.Usage,
+		ModelID:                 pgModelID,
 	})
 	if err != nil {
 		return Message{}, err

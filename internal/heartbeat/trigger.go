@@ -13,6 +13,7 @@ type TriggerResult struct {
 	Text       string
 	Usage      any
 	UsageBytes []byte
+	ModelID    string
 }
 
 type Triggerer interface {

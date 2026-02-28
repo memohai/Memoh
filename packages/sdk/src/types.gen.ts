@@ -464,6 +464,15 @@ export type HandlersCreateSnapshotResponse = {
     version?: number;
 };
 
+export type HandlersDailyTokenUsage = {
+    cache_read_tokens?: number;
+    cache_write_tokens?: number;
+    day?: string;
+    input_tokens?: number;
+    output_tokens?: number;
+    reasoning_tokens?: number;
+};
+
 export type HandlersEmbeddingsInput = {
     image_url?: string;
     text?: string;
@@ -594,6 +603,15 @@ export type HandlersMcpStdioResponse = {
     url?: string;
 };
 
+export type HandlersModelTokenUsage = {
+    input_tokens?: number;
+    model_id?: string;
+    model_name?: string;
+    model_slug?: string;
+    output_tokens?: number;
+    provider_name?: string;
+};
+
 export type HandlersPingResponse = {
     container_backend?: string;
     snapshot_supported?: boolean;
@@ -641,6 +659,12 @@ export type HandlersSnapshotInfo = {
     source?: string;
     updated_at?: string;
     version?: number;
+};
+
+export type HandlersTokenUsageResponse = {
+    by_model?: Array<HandlersModelTokenUsage>;
+    chat?: Array<HandlersDailyTokenUsage>;
+    heartbeat?: Array<HandlersDailyTokenUsage>;
 };
 
 export type HandlersFsOpResponse = {
@@ -4220,6 +4244,57 @@ export type PutBotsByBotIdSubagentsByIdSkillsResponses = {
 };
 
 export type PutBotsByBotIdSubagentsByIdSkillsResponse = PutBotsByBotIdSubagentsByIdSkillsResponses[keyof PutBotsByBotIdSubagentsByIdSkillsResponses];
+
+export type GetBotsByBotIdTokenUsageData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query: {
+        /**
+         * Start date (YYYY-MM-DD)
+         */
+        from: string;
+        /**
+         * End date exclusive (YYYY-MM-DD)
+         */
+        to: string;
+        /**
+         * Optional model UUID to filter by
+         */
+        model_id?: string;
+    };
+    url: '/bots/{bot_id}/token-usage';
+};
+
+export type GetBotsByBotIdTokenUsageErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdTokenUsageError = GetBotsByBotIdTokenUsageErrors[keyof GetBotsByBotIdTokenUsageErrors];
+
+export type GetBotsByBotIdTokenUsageResponses = {
+    /**
+     * OK
+     */
+    200: HandlersTokenUsageResponse;
+};
+
+export type GetBotsByBotIdTokenUsageResponse = GetBotsByBotIdTokenUsageResponses[keyof GetBotsByBotIdTokenUsageResponses];
 
 export type PostBotsByBotIdToolsData = {
     /**

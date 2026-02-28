@@ -85,6 +85,7 @@ type BotHeartbeatLog struct {
 	ResultText   string             `json:"result_text"`
 	ErrorMessage string             `json:"error_message"`
 	Usage        []byte             `json:"usage"`
+	ModelID      pgtype.UUID        `json:"model_id"`
 	StartedAt    pgtype.Timestamptz `json:"started_at"`
 	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
 }
@@ -102,6 +103,7 @@ type BotHistoryMessage struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	ModelID                 pgtype.UUID        `json:"model_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
