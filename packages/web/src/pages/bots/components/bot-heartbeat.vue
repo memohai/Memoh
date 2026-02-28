@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <!-- Settings -->
-    <div class="space-y-4 max-w-2xl mx-auto">
+    <div class="space-y-4 mx-auto">
       <div class="flex items-center justify-between">
         <div>
           <Label>{{ $t('bots.settings.heartbeatEnabled') }}</Label>

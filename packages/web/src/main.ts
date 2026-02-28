@@ -60,7 +60,8 @@ import {
   faComments,
   faComment,
 } from '@fortawesome/free-regular-svg-icons'
-import { faSlack, faBrave, faGoogle, faMicrosoft } from '@fortawesome/free-brands-svg-icons'
+import { faSlack, faBrave, faGoogle, faMicrosoft, faYandex } from '@fortawesome/free-brands-svg-icons'
+import { customSearchIcons } from './components/search-provider-logo/custom-icons'
 
 library.add(
   faGear,
@@ -107,6 +108,8 @@ library.add(
   faGoogle,
   faMicrosoft,
   faEnvelope,
+  faYandex,
+  ...customSearchIcons,
 )
 
 createApp(App)

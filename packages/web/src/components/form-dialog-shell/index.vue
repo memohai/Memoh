@@ -1,22 +1,28 @@
 <template>
-  <Dialog v-model:open="open">
+  <Dialog
+    v-model:open="open"
+  >
     <DialogTrigger as-child>
       <slot name="trigger" />
     </DialogTrigger>
-    <DialogContent :class="maxWidthClass">
-      <form @submit="handleSubmit">
+    <DialogContent         
+      :class="maxWidthClass"
+    >
+      <form        
+        @submit.prevent="handleSubmit"
+      >
         <DialogHeader>
           <DialogTitle>{{ title }}</DialogTitle>
-          <DialogDescription v-if="description">
+          <DialogDescription v-show="description">
             {{ description }}
           </DialogDescription>
         </DialogHeader>
-
         <slot name="body" />
-
         <DialogFooter class="mt-4">
           <DialogClose as-child>
-            <Button variant="outline">
+            <Button
+              variant="outline"
+            >
               {{ cancelText }}
             </Button>
           </DialogClose>
@@ -47,8 +53,9 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  Spinner,
+  Spinner
 } from '@memoh/ui'
+import { Form, Field } from 'vee-validate'
 
 withDefaults(defineProps<{
   title: string
@@ -68,10 +75,10 @@ withDefaults(defineProps<{
 const open = defineModel<boolean>('open', { default: false })
 
 const emit = defineEmits<{
-  submit: [event: Event]
+  submit: []
 }>()
 
-function handleSubmit(event: Event) {
-  emit('submit', event)
+function handleSubmit() {
+  emit('submit')
 }
 </script>

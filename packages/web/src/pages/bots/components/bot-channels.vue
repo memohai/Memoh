@@ -1,5 +1,5 @@
 <template>
-  <div class="flex gap-6 min-h-[400px] max-w-4xl mx-auto">
+  <div class="flex gap-6 min-h-[400px]  mx-auto">
     <!-- Left: Channel list -->
     <div class="w-60 shrink-0 flex flex-col border rounded-lg">
       <div class="flex-1 overflow-y-auto">
