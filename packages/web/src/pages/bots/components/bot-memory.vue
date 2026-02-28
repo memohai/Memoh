@@ -1,7 +1,7 @@
 <template>
-  <div class="flex gap-6 min-h-[500px] h-[calc(100vh-300px)] max-w-6xl mx-auto">
+  <div class="flex gap-6 min-h-125 h-[calc(100vh-300px)] mx-auto">
     <!-- Left: File list -->
-    <div class="w-64 shrink-0 flex flex-col border rounded-lg overflow-hidden bg-card max-h-full">
+    <div class="w-64 shrink-0 flex flex-col border rounded-lg overflow-hidden max-h-full">
       <div class="p-3 border-b space-y-3 shrink-0">
         <div class="flex items-center justify-between">
           <h4 class="text-sm font-medium">
@@ -107,7 +107,7 @@
     </div>
 
     <!-- Right: Editor/Preview -->
-    <div class="flex-1 flex flex-col border rounded-lg overflow-hidden bg-card">
+    <div class="flex-1 flex flex-col border rounded-lg overflow-hidden ">
       <template v-if="selectedMemory">
         <div class="flex-1 flex flex-col min-h-0">
           <div class="p-3 border-b flex items-center justify-between bg-muted/30 shrink-0">

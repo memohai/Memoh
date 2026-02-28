@@ -17,33 +17,7 @@
 
     <template v-else>
       <!-- Bot info header -->
-      <div
-        v-if="currentBot"
-        class="flex items-center gap-3 px-4 py-2.5 border-b"
-      >
-        <Avatar class="size-8 shrink-0">
-          <AvatarImage
-            v-if="currentBot.avatar_url"
-            :src="currentBot.avatar_url"
-            :alt="currentBot.display_name"
-          />
-          <AvatarFallback class="text-xs">
-            {{ (currentBot.display_name || currentBot.id || '').slice(0, 2).toUpperCase() }}
-          </AvatarFallback>
-        </Avatar>
-        <div class="min-w-0">
-          <span class="font-medium text-sm truncate">
-            {{ currentBot.display_name || currentBot.id }}
-          </span>
-        </div>
-        <Badge
-          v-if="activeChatReadOnly"
-          variant="secondary"
-          class="ml-auto text-xs"
-        >
-          {{ $t('chat.readonly') }}
-        </Badge>
-      </div>
+    
 
       <!-- Messages -->
       <div
@@ -110,7 +84,7 @@
                 :icon="['fas', file.type.startsWith('image/') ? 'image' : 'file']"
                 class="size-3 text-muted-foreground"
               />
-              <span class="truncate max-w-[120px]">{{ file.name }}</span>
+              <span class="truncate max-w-30">{{ file.name }}</span>
               <button
                 type="button"
                 class="ml-1 text-muted-foreground hover:text-foreground"
@@ -124,67 +98,64 @@
               </button>
             </div>
           </div>
-          <div class="relative">
-            <Textarea
-              v-model="inputText"
-              class="pr-24 min-h-[60px] max-h-[200px] resize-none"
-              :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
-              :disabled="!currentBotId || activeChatReadOnly"
-              @keydown.enter.exact="handleKeydown"
-              @paste="handlePaste"
-            />
-            <input
-              ref="fileInput"
-              type="file"
-              class="hidden"
-              aria-label="Attach files"
-              multiple
-              accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
-              @change="handleFileSelect"
-            >
-            <div class="absolute right-2 bottom-2 flex items-center gap-1">
-              <Button
-                v-if="!streaming"
-                type="button"
-                size="sm"
-                variant="ghost"
+
+          <section>
+            <InputGroup>
+              <InputGroupTextarea
+                v-model="inputText"
+                class="pr-24 max-h-15 resize-none"
+                :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
                 :disabled="!currentBotId || activeChatReadOnly"
-                aria-label="Attach files"
-                @click="fileInput?.click()"
+                @keydown.enter.exact="handleKeydown"
+                @paste="handlePaste"
+              />
+              <InputGroupAddon
+                align="block-end"
+                class="justify-end"
               >
-                <FontAwesomeIcon
-                  :icon="['fas', 'paperclip']"
-                  class="size-3.5"
-                />
-              </Button>
-              <Button
-                v-if="!streaming"
-                type="button"
-                size="sm"
-                :disabled="(!inputText.trim() && !pendingFiles.length) || !currentBotId || activeChatReadOnly"
-                aria-label="Send message"
-                @click="handleSend"
-              >
-                <FontAwesomeIcon
-                  :icon="['fas', 'paper-plane']"
-                  class="size-3.5"
-                />
-              </Button>
-              <Button
-                v-else
-                type="button"
-                size="sm"
-                variant="destructive"
-                aria-label="Stop generating response"
-                @click="chatStore.abort()"
-              >
-                <FontAwesomeIcon
-                  :icon="['fas', 'spinner']"
-                  class="size-3.5 animate-spin"
-                />
-              </Button>
-            </div>
-          </div>
+                <Button
+                  v-if="!streaming"                
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  :disabled="!currentBotId || activeChatReadOnly"
+                  aria-label="Attach files"
+                  @click="fileInput?.click()"
+                >
+                  <FontAwesomeIcon
+                    :icon="['fas', 'paperclip']"
+                    class="size-3.5"
+                  />
+                </Button>
+                <Button
+                  v-if="!streaming"
+                  type="button"
+                  size="sm"
+                  :disabled="(!inputText.trim() && !pendingFiles.length) || !currentBotId || activeChatReadOnly"
+                  aria-label="Send message"
+                  @click="handleSend"
+                >
+                  <FontAwesomeIcon
+                    :icon="['fas', 'paper-plane']"
+                    class="size-3.5"
+                  />
+                </Button>
+                <Button
+                  v-else
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  aria-label="Stop generating response"
+                  @click="chatStore.abort()"
+                >
+                  <FontAwesomeIcon
+                    :icon="['fas', 'spinner']"
+                    class="size-3.5 animate-spin"
+                  />
+                </Button>
+              </InputGroupAddon>
+            </InputGroup>
+          </section>
         </div>
       </div>
     </template>
@@ -193,7 +164,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import { Textarea, Button, Avatar, AvatarImage, AvatarFallback, Badge } from '@memoh/ui'
+import { Textarea, Button, Avatar, AvatarImage, AvatarFallback, Badge, InputGroup, InputGroupAddon, InputGroupButton, InputGroupText, InputGroupTextarea } from '@memoh/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import MessageItem from './message-item.vue'

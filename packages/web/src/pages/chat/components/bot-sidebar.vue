@@ -1,32 +1,16 @@
 <template>
-  <div class="w-56 shrink-0 border-r flex flex-col h-full">
-    <div class="p-4 border-b">
-      <p class="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-        {{ $t('sidebar.bots') }}
-      </p>
-    </div>
-
-    <ScrollArea class="flex-1">
-      <div class="p-1">
-        <!-- Loading -->
-        <div
-          v-if="isLoading"
-          class="flex justify-center py-4"
-        >
-          <FontAwesomeIcon
-            :icon="['fas', 'spinner']"
-            class="size-4 animate-spin text-muted-foreground"
-          />
-        </div>
-
-        <!-- Bot list -->
-        <button
-          v-for="bot in bots"
-          :key="bot.id"
-          type="button"
-          :aria-pressed="currentBotId === bot.id"
-          class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors hover:bg-accent"
-          :class="{ 'bg-accent': currentBotId === bot.id }"
+  <SidebarMenu
+    v-for="bot in bots"
+    :key="bot.id"
+  >
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        as-child
+        class="justify-start py-5! px-4"
+      >
+        <Toggle
+          :class="`p-2! border border-transparent h-[initial]! ${currentBotId === bot.id ? 'border-inherit' : ''}`"
+          :model-value="isActive(bot.id as string).value"
           @click="handleSelect(bot)"
         >
           <Avatar class="size-8 shrink-0">
@@ -50,29 +34,47 @@
               {{ botTypeLabel(bot.type) }}
             </div>
           </div>
-        </button>
+        </Toggle>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  </SidebarMenu>
+  <SidebarMenu>
+    <div
+      v-if="isLoading"
+      class="flex justify-center py-4"
+    >
+      <FontAwesomeIcon
+        :icon="['fas', 'spinner']"
+        class="size-4 animate-spin text-muted-foreground"
+      />
+    </div>
 
-        <!-- Empty -->
-        <div
-          v-if="!isLoading && bots.length === 0"
-          class="px-3 py-6 text-center text-sm text-muted-foreground"
-        >
-          {{ $t('bots.emptyTitle') }}
-        </div>
-      </div>
-    </ScrollArea>
-  </div>
+    <div
+      v-if="!isLoading && bots.length === 0"
+      class="px-3 py-6 text-center text-sm text-muted-foreground"
+    >
+      {{ $t('bots.emptyTitle') }}
+    </div>
+  </SidebarMenu>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Avatar, AvatarImage, AvatarFallback, ScrollArea } from '@memoh/ui'
+import { Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
 import { useQuery } from '@pinia/colada'
 import { getBotsQuery } from '@memoh/sdk/colada'
 import type { BotsBot } from '@memoh/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
+import {
+  Toggle,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarHeader
+ } from '@memoh/ui'
+
 
 const { t } = useI18n()
 const chatStore = useChatStore()
@@ -80,6 +82,10 @@ const { currentBotId } = storeToRefs(chatStore)
 
 const { data: botData, isLoading } = useQuery(getBotsQuery())
 const bots = computed<BotsBot[]>(() => botData.value?.items ?? [])
+
+const isActive = (id: string) => computed(() => {
+  return currentBotId.value === id
+})
 
 function botTypeLabel(type: string): string {
   if (!type) return ''

@@ -36,9 +36,9 @@
                 >
                   <Toggle
                     class="border border-transparent w-full flex justify-start"
-                    :class="{ 'border-inherit': isActive(sidebarItem.name as string) }"
-                    :model-value="isActive(sidebarItem.name as string)"
-                    :aria-current="isActive(sidebarItem.name as string) ? 'page' : undefined"
+                    :class="{ 'border-inherit': isActive(sidebarItem.name as string).value }"
+                    :model-value="isActive(sidebarItem.name as string).value"
+                    :aria-current="isActive(sidebarItem.name as string).value ? 'page' : undefined"
                     @click="router.push({ name: sidebarItem.name })"
                   >
                     <FontAwesomeIcon :icon="sidebarItem.icon" />
@@ -113,9 +113,10 @@ const displayTitle = computed(() =>
 )
 const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
 
-function isActive(name: string) {
-  return route.name === name || route.path === `/${name}`
-}
+
+const isActive = (cur: string) => computed(() => {
+  return new RegExp(`^/${cur}(\\b|/)`).test(route.path)
+})
 
 const sidebarInfo = computed(() => [
   {

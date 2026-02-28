@@ -1,5 +1,5 @@
 <template>
-  <section class="p-4 max-w-7xl mx-auto">
+  <section class="p-4  mx-auto">
     <!-- Header: search + create -->
     <div class="flex items-center justify-between mb-6">
       <h2 class="text-xl font-semibold tracking-tight">
@@ -24,7 +24,8 @@
     <!-- Bot grid -->
     <div
       v-if="filteredBots.length > 0"
-      class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+      class="grid gap-4"
+      style="grid-template-columns:repeat(auto-fill,minmax(300px,calc(25% - 1em)))!important"
     >
       <BotCard
         v-for="bot in filteredBots"
@@ -81,7 +82,7 @@ const filteredBots = computed(() => {
   if (!keyword) return allBots.value
   return allBots.value.filter((bot) =>
     bot.display_name?.toLowerCase().includes(keyword)
-    || bot.id.toLowerCase().includes(keyword)
+    || bot.id?.toLowerCase().includes(keyword)
     || bot.type?.toLowerCase().includes(keyword),
   )
 })

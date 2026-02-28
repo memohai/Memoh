@@ -1,10 +1,8 @@
 <template>
-  <section class="p-4 max-w-7xl mx-auto">
+  <section class=" mx-auto absolute inset-0  flex flex-col">
     <!-- Header -->
-    <div class="flex items-center gap-4 mb-8">
-      <div
-        class="group/avatar relative size-16 shrink-0 rounded-full overflow-hidden"
-      >
+    <div class="flex p-4 items-center gap-4">
+      <div class="group/avatar relative size-16 shrink-0 rounded-full overflow-hidden">
         <Avatar class="size-16 rounded-full">
           <AvatarImage
             v-if="bot?.avatar_url"
@@ -97,437 +95,80 @@
         </div>
       </div>
     </div>
-
-    <!-- Tabs -->
-    <Tabs
-      v-model="activeTab"
-      class="w-full"
-    >
-      <TabsList class="w-full justify-start">
-        <TabsTrigger value="overview">
-          {{ $t('bots.tabs.overview') }}
-        </TabsTrigger>
-        <TabsTrigger value="memory">
-          {{ $t('bots.tabs.memory') }}
-        </TabsTrigger>
-        <TabsTrigger value="channels">
-          {{ $t('bots.tabs.channels') }}
-        </TabsTrigger>
-        <TabsTrigger value="container">
-          {{ $t('bots.tabs.container') }}
-        </TabsTrigger>
-        <TabsTrigger value="mcp">
-          {{ $t('bots.tabs.mcp') }}
-        </TabsTrigger>
-        <TabsTrigger value="subagents">
-          {{ $t('bots.tabs.subagents') }}
-        </TabsTrigger>
-        <TabsTrigger value="heartbeat">
-          {{ $t('bots.tabs.heartbeat') }}
-        </TabsTrigger>
-        <TabsTrigger value="history">
-          {{ $t('bots.tabs.history') }}
-        </TabsTrigger>
-        <TabsTrigger value="skills">
-          {{ $t('bots.tabs.skills') }}
-        </TabsTrigger>
-        <TabsTrigger value="settings">
-          {{ $t('bots.tabs.settings') }}
-        </TabsTrigger>
-      </TabsList>
-
-      <TabsContent
-        value="overview"
-        class="mt-6"
-      >
-        <div class="max-w-4xl mx-auto">
-          <div class="rounded-md border p-4">
-            <div class="flex items-center justify-between gap-2">
-              <div>
-                <p class="text-sm font-medium">
-                  {{ $t('bots.checks.title') }}
-                </p>
-                <p class="text-sm text-muted-foreground">
-                  {{ $t('bots.checks.subtitle') }}
-                </p>
-              </div>
-              <LoadingButton
-                variant="outline"
-                size="sm"
-                :loading="checksLoading"
-                @click="handleRefreshChecks"
+    <Separator />
+    <div class="flex-1  relative">
+      <MasterDetailSidebarLayout class="[&_td:last-child]:w-45">
+        <template #sidebar-content>
+          <SidebarMenu
+            v-for="tab in tabList"
+            :key="tab.value"
+          >
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                as-child
+                class="justify-start py-5! px-4"
               >
-                {{ $t('common.refresh') }}
-              </LoadingButton>
-            </div>
-            <div class="mt-3 flex items-center gap-2 text-sm">
-              <Badge
-                :variant="hasIssue ? 'destructive' : 'default'"
-                class="text-xs"
-              >
-                {{ checksSummaryText }}
-              </Badge>
-            </div>
-
-            <div
-              v-if="checksLoading && checks.length === 0"
-              class="mt-4 flex items-center gap-2 text-sm text-muted-foreground"
-            >
-              <Spinner />
-              <span>{{ $t('common.loading') }}</span>
-            </div>
-
-            <p
-              v-else-if="checks.length === 0"
-              class="mt-4 text-sm text-muted-foreground"
-            >
-              {{ $t('bots.checks.empty') }}
-            </p>
-
-            <ul
-              v-else
-              class="mt-4 divide-y"
-            >
-              <li
-                v-for="item in checks"
-                :key="item.id"
-                class="py-3 first:pt-0 last:pb-0"
-              >
-                <div class="flex items-center justify-between gap-2">
-                  <div class="min-w-0">
-                    <p class="font-mono text-xs">
-                      {{ checkTitleLabel(item) }}
-                    </p>
-                    <p
-                      v-if="item.subtitle"
-                      class="mt-0.5 text-xs text-muted-foreground"
-                    >
-                      {{ item.subtitle }}
-                    </p>
-                  </div>
-                  <Badge
-                    :variant="checkStatusVariant(item.status)"
-                    class="text-[10px]"
-                  >
-                    {{ checkStatusLabel(item.status) }}
-                  </Badge>
-                </div>
-                <p class="mt-2 text-sm">
-                  {{ item.summary }}
-                </p>
-                <p
-                  v-if="item.detail"
-                  class="mt-1 text-xs text-muted-foreground break-all"
+                <Toggle
+                  :class="`py-4 border border-transparent ${activeTab === tab.value ? 'border-inherit' : ''}`"
+                  :model-value="isActive(tab.value as string).value"
+                  @update:model-value="(isSelect:boolean) => {
+                    if (isSelect) {
+                      activeTab=tab.value
+                    }
+                  }"
                 >
-                  {{ item.detail }}
-                </p>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </TabsContent>
-      <TabsContent
-        value="memory"
-        class="mt-6"
-      >
-        <BotMemory :bot-id="botId" />
-      </TabsContent>
-      <TabsContent
-        value="channels"
-        class="mt-6"
-      >
-        <BotChannels :bot-id="botId" />
-      </TabsContent>
-      <TabsContent
-        value="container"
-        class="mt-6"
-      >
-        <div class="max-w-4xl mx-auto space-y-5">
-          <div class="flex items-start justify-between gap-3">
-            <div class="space-y-1 min-w-0">
-              <h3 class="text-lg font-semibold">
-                {{ $t('bots.container.title') }}
-              </h3>
-              <p class="text-sm text-muted-foreground">
-                {{ $t('bots.container.subtitle') }}
-              </p>
-            </div>
-            <div class="flex flex-wrap gap-2 shrink-0 justify-end">
+                  {{ $t(tab.label) }}
+                </Toggle>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </template>
+
+        <template #sidebar-footer>
+          <!-- <AddProvider v-model:open="openStatus.provideOpen" /> -->
+        </template>
+
+        <template #detail>
+          <ScrollArea class="max-h-full h-full">
+            <section class="p-4">
+              <KeepAlive>
+                <component
+                  :is="activeComponent?.component"                 
+                  :bot-id="botId"
+                  :bot-type="bot?.type"
+                />
+              </KeepAlive>
+            </section>
+          </ScrollArea>
+          <!-- <ScrollArea
+            v-if="curProvider?.id"
+            class="max-h-full h-full"
+          >
+            <model-setting />
+          </ScrollArea>
+          <Empty
+            v-else
+            class="h-full flex justify-center items-center"
+          >
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FontAwesomeIcon :icon="['far', 'rectangle-list']" />
+              </EmptyMedia>
+            </EmptyHeader>
+            <EmptyTitle>{{ $t('provider.emptyTitle') }}</EmptyTitle>
+            <EmptyDescription>{{ $t('provider.emptyDescription') }}</EmptyDescription>
+            <EmptyContent>
               <Button
                 variant="outline"
-                size="sm"
-                :disabled="containerBusy"
-                @click="handleRefreshContainer"
+                @click="openStatus.provideOpen = true"
               >
-                <Spinner
-                  v-if="containerLoading || containerAction === 'refresh'"
-                  class="mr-1.5"
-                />
-                {{ $t('common.refresh') }}
+                {{ $t('provider.addBtn') }}
               </Button>
-              <Button
-                v-if="containerMissing"
-                :disabled="containerBusy || botLifecyclePending"
-                @click="handleCreateContainer"
-              >
-                <Spinner
-                  v-if="containerAction === 'create'"
-                  class="mr-1.5"
-                />
-                {{ $t('bots.container.actions.create') }}
-              </Button>
-              <template v-if="containerInfo">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  :disabled="containerBusy || botLifecyclePending"
-                  @click="isContainerTaskRunning ? handleStopContainer() : handleStartContainer()"
-                >
-                  <Spinner
-                    v-if="containerAction === 'start' || containerAction === 'stop'"
-                    class="mr-1.5"
-                  />
-                  {{ isContainerTaskRunning ? $t('bots.container.actions.stop') : $t('bots.container.actions.start') }}
-                </Button>
-                <ConfirmPopover
-                  :message="$t('bots.container.deleteConfirm')"
-                  :loading="containerAction === 'delete'"
-                  @confirm="handleDeleteContainer"
-                >
-                  <template #trigger>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      :disabled="containerBusy || botLifecyclePending"
-                    >
-                      <Spinner
-                        v-if="containerAction === 'delete'"
-                        class="mr-1.5"
-                      />
-                      {{ $t('bots.container.actions.delete') }}
-                    </Button>
-                  </template>
-                </ConfirmPopover>
-              </template>
-            </div>
-          </div>
-
-          <WarningBanner v-if="botLifecyclePending">
-            {{ $t('bots.container.botNotReady') }}
-          </WarningBanner>
-
-          <div
-            v-if="containerLoading && !containerInfo && !containerMissing"
-            class="flex items-center gap-2 text-sm text-muted-foreground"
-          >
-            <Spinner />
-            <span>{{ $t('common.loading') }}</span>
-          </div>
-
-          <div
-            v-else-if="containerMissing"
-            class="rounded-md border p-4"
-          >
-            <p class="text-sm text-muted-foreground">
-              {{ $t('bots.container.empty') }}
-            </p>
-          </div>
-
-          <div
-            v-else-if="containerInfo"
-            class="space-y-5"
-          >
-            <div class="rounded-md border p-4">
-              <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                <div class="space-y-1">
-                  <dt class="text-muted-foreground">
-                    {{ $t('bots.container.fields.id') }}
-                  </dt>
-                  <dd class="font-mono break-all">
-                    {{ containerInfo.container_id }}
-                  </dd>
-                </div>
-                <div class="space-y-1">
-                  <dt class="text-muted-foreground">
-                    {{ $t('bots.container.fields.status') }}
-                  </dt>
-                  <dd>{{ containerStatusText }}</dd>
-                </div>
-                <div class="space-y-1">
-                  <dt class="text-muted-foreground">
-                    {{ $t('bots.container.fields.task') }}
-                  </dt>
-                  <dd>{{ containerTaskText }}</dd>
-                </div>
-                <div class="space-y-1">
-                  <dt class="text-muted-foreground">
-                    {{ $t('bots.container.fields.namespace') }}
-                  </dt>
-                  <dd>{{ containerInfo.namespace }}</dd>
-                </div>
-                <div class="space-y-1 sm:col-span-2">
-                  <dt class="text-muted-foreground">
-                    {{ $t('bots.container.fields.image') }}
-                  </dt>
-                  <dd class="break-all">
-                    {{ containerInfo.image }}
-                  </dd>
-                </div>
-                <div class="space-y-1 sm:col-span-2">
-                  <dt class="text-muted-foreground">
-                    {{ $t('bots.container.fields.hostPath') }}
-                  </dt>
-                  <dd class="break-all">
-                    {{ containerInfo.host_path || '-' }}
-                  </dd>
-                </div>
-                <div class="space-y-1 sm:col-span-2">
-                  <dt class="text-muted-foreground">
-                    {{ $t('bots.container.fields.containerPath') }}
-                  </dt>
-                  <dd class="break-all">
-                    {{ containerInfo.container_path }}
-                  </dd>
-                </div>
-                <div class="space-y-1">
-                  <dt class="text-muted-foreground">
-                    {{ $t('bots.container.fields.createdAt') }}
-                  </dt>
-                  <dd>{{ formatDate(containerInfo.created_at) }}</dd>
-                </div>
-                <div class="space-y-1">
-                  <dt class="text-muted-foreground">
-                    {{ $t('bots.container.fields.updatedAt') }}
-                  </dt>
-                  <dd>{{ formatDate(containerInfo.updated_at) }}</dd>
-                </div>
-              </dl>
-            </div>
-
-            <Separator v-if="capabilitiesStore.snapshotSupported" />
-
-            <div
-              v-if="capabilitiesStore.snapshotSupported"
-              class="space-y-3"
-            >
-              <div class="flex flex-col gap-2 sm:flex-row">
-                <Input
-                  v-model="newSnapshotName"
-                  :placeholder="$t('bots.container.snapshotNamePlaceholder')"
-                  :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
-                />
-                <Button
-                  :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
-                  @click="handleCreateSnapshot"
-                >
-                  <Spinner
-                    v-if="containerAction === 'snapshot'"
-                    class="mr-1.5"
-                  />
-                  {{ $t('bots.container.actions.snapshot') }}
-                </Button>
-              </div>
-
-              <div
-                v-if="snapshotsLoading"
-                class="flex items-center gap-2 text-sm text-muted-foreground"
-              >
-                <Spinner />
-                <span>{{ $t('common.loading') }}</span>
-              </div>
-              <div
-                v-else-if="sortedSnapshots.length === 0"
-                class="text-sm text-muted-foreground"
-              >
-                {{ $t('bots.container.snapshotEmpty') }}
-              </div>
-              <div
-                v-else
-                class="overflow-x-auto rounded-md border"
-              >
-                <table class="w-full text-sm">
-                  <thead class="bg-muted/50 text-left">
-                    <tr>
-                      <th class="px-3 py-2 font-medium">
-                        {{ $t('bots.container.snapshotColumns.name') }}
-                      </th>
-                      <th class="px-3 py-2 font-medium">
-                        {{ $t('bots.container.snapshotColumns.kind') }}
-                      </th>
-                      <th class="px-3 py-2 font-medium">
-                        {{ $t('bots.container.snapshotColumns.parent') }}
-                      </th>
-                      <th class="px-3 py-2 font-medium">
-                        {{ $t('bots.container.snapshotColumns.createdAt') }}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr
-                      v-for="item in sortedSnapshots"
-                      :key="`${item.snapshotter}:${item.name}`"
-                      class="border-t"
-                    >
-                      <td class="px-3 py-2 font-mono text-xs break-all">
-                        {{ item.name }}
-                      </td>
-                      <td class="px-3 py-2">
-                        {{ item.kind }}
-                      </td>
-                      <td class="px-3 py-2 break-all">
-                        {{ item.parent || '-' }}
-                      </td>
-                      <td class="px-3 py-2">
-                        {{ formatDate(item.created_at) }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      </TabsContent>
-      <TabsContent
-        value="mcp"
-        class="mt-6"
-      >
-        <BotMcp :bot-id="botId" />
-      </TabsContent>
-      <TabsContent
-        value="subagents"
-        class="mt-6"
-      >
-        <BotSubagents :bot-id="botId" />
-      </TabsContent>
-      <TabsContent
-        value="history"
-        class="mt-6"
-      >
-        <BotHistory :bot-id="botId" />
-      </TabsContent>
-      <TabsContent
-        value="heartbeat"
-        class="mt-6"
-      >
-        <BotHeartbeat :bot-id="botId" />
-      </TabsContent>
-      <TabsContent
-        value="skills"
-        class="mt-6"
-      >
-        <BotSkills :bot-id="botId" />
-      </TabsContent>
-      <TabsContent
-        value="settings"
-        class="mt-6"
-      >
-        <BotSettings
-          :bot-id="botId"
-          :bot-type="bot?.type"
-        />
-      </TabsContent>
-    </Tabs>
+            </EmptyContent>
+          </Empty> -->
+        </template>
+      </MasterDetailSidebarLayout>
+    </div>
 
     <!-- Edit avatar dialog -->
     <Dialog v-model:open="avatarDialogOpen">
@@ -599,10 +240,11 @@ import {
   Input,
   Separator,
   Spinner,
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
+  ScrollArea,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  Toggle
 } from '@memoh/ui'
 import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
@@ -612,17 +254,14 @@ import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
   getBotsById, putBotsById,
   getBotsByIdChecks,
-  getBotsByBotIdContainer, postBotsByBotIdContainer, deleteBotsByBotIdContainer,
-  postBotsByBotIdContainerStart, postBotsByBotIdContainerStop,
-  getBotsByBotIdContainerSnapshots, postBotsByBotIdContainerSnapshots,
+  getBotsByBotIdContainer,
+  getBotsByBotIdContainerSnapshots, 
 } from '@memoh/sdk'
 import type {
   BotsBotCheck, HandlersGetContainerResponse,
   HandlersListSnapshotsResponse,
 } from '@memoh/sdk'
 import { useCapabilitiesStore } from '@/store/capabilities'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import WarningBanner from '@/components/warning-banner/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import BotSettings from './components/bot-settings.vue'
 import BotChannels from './components/bot-channels.vue'
@@ -632,11 +271,13 @@ import BotSkills from './components/bot-skills.vue'
 import BotHistory from './components/bot-history.vue'
 import BotHeartbeat from './components/bot-heartbeat.vue'
 import BotSubagents from './components/bot-subagents.vue'
+import BotOverview from './components/bot-overview.vue'
+import BotContainer from './components/bot-container.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { formatDateTime } from '@/utils/date-time'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
+import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
@@ -645,6 +286,27 @@ type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: 
 const route = useRoute()
 const { t } = useI18n()
 const botId = computed(() => route.params.botId as string)
+
+const tabList = [
+  { value: 'overview', label: 'bots.tabs.overview',component: BotOverview },
+  { value: 'memory', label: 'bots.tabs.memory',component:BotMemory },
+  { value: 'channels', label: 'bots.tabs.channels',component: BotChannels },
+  { value: 'container', label: 'bots.tabs.container' , component: BotContainer },
+  { value: 'mcp', label: 'bots.tabs.mcp' ,component: BotMcp },
+  { value: 'subagents', label: 'bots.tabs.subagents',component: BotSubagents },
+  { value: 'heartbeat', label: 'bots.tabs.heartbeat',component: BotHeartbeat },
+  { value: 'history', label: 'bots.tabs.history',component: BotHistory },
+  { value: 'skills', label: 'bots.tabs.skills',component: BotSkills },
+  { value: 'settings', label: 'bots.tabs.settings',component: BotSettings }
+]
+
+const isActive = (name: string) => computed(() => {
+  return activeTab.value===name
+})
+
+const activeComponent = computed(() => {
+  return tabList.find(tab=>tab.value===activeTab.value)
+})
 
 const capabilitiesStore = useCapabilitiesStore()
 onMounted(() => {
@@ -663,7 +325,7 @@ const { data: bot } = useQuery({
 const queryCache = useQueryCache()
 const { mutateAsync: updateBot, isLoading: updateBotLoading } = useMutation({
   mutation: async ({ id, ...body }: Record<string, unknown> & { id: string }) => {
-    const { data } = await putBotsById({ path: { id }, body: body as any, throwOnError: true })
+    const { data } = await putBotsById({ path: { id }, body, throwOnError: true })
     return data
   },
   onSettled: () => {
@@ -695,7 +357,6 @@ watch(bot, (val) => {
 const activeTab = useSyncedQueryParam('tab', 'overview')
 const avatarDialogOpen = ref(false)
 const avatarUrlDraft = ref('')
-
 const avatarFallback = useAvatarInitials(() => bot.value?.display_name || botId.value || '')
 const isSavingBotName = computed(() => updateBotLoading.value)
 const avatarSaving = computed(() => updateBotLoading.value)
@@ -727,66 +388,12 @@ const botTypeLabel = computed(() => {
 
 const checks = ref<BotCheck[]>([])
 const checksLoading = ref(false)
-const checksSummaryText = computed(() => {
-  const issueCount = checks.value.filter((item) => item.status === 'warn' || item.status === 'error').length
-  if (issueCount > 0) {
-    return t('bots.checks.issueCount', { count: issueCount })
-  }
-  if (checks.value.length === 0) {
-    return t('bots.checks.empty')
-  }
-  return t('bots.checks.ok')
-})
 
 const containerInfo = ref<BotContainerInfo | null>(null)
 const containerMissing = ref(false)
 const containerLoading = ref(false)
 const snapshotsLoading = ref(false)
-const containerAction = ref<'refresh' | 'create' | 'start' | 'stop' | 'delete' | 'snapshot' | ''>('')
-const newSnapshotName = ref('')
 const snapshots = ref<BotContainerSnapshot[]>([])
-
-const containerBusy = computed(() => containerLoading.value || containerAction.value !== '')
-const sortedSnapshots = computed(() => {
-  const copied = [...snapshots.value]
-  copied.sort((a, b) => {
-    const left = Date.parse(a.created_at ?? '')
-    const right = Date.parse(b.created_at ?? '')
-    if (Number.isNaN(left) && Number.isNaN(right)) {
-      return (a.name ?? '').localeCompare(b.name ?? '')
-    }
-    if (Number.isNaN(left)) return 1
-    if (Number.isNaN(right)) return -1
-    return right - left
-  })
-  return copied
-})
-
-const statusKeyMap: Record<string, string> = {
-  created: 'statusCreated',
-  running: 'statusRunning',
-  stopped: 'statusStopped',
-  exited: 'statusExited',
-}
-const containerStatusText = computed(() => {
-  const s = (containerInfo.value?.status ?? '').trim().toLowerCase()
-  const key = statusKeyMap[s] ?? 'statusUnknown'
-  return t(`bots.container.${key}`)
-})
-const isContainerTaskRunning = computed(() => {
-  const info = containerInfo.value
-  if (!info) return false
-  const status = (info.status ?? '').trim().toLowerCase()
-  if (status === 'stopped' || status === 'exited') return false
-  return info.task_running
-})
-const containerTaskText = computed(() => {
-  const info = containerInfo.value
-  if (!info) return '-'
-  const status = (info.status ?? '').trim().toLowerCase()
-  if (status === 'exited') return t('bots.container.taskCompleted')
-  return info.task_running ? t('bots.container.taskRunning') : t('bots.container.taskStopped')
-})
 
 watch(botId, () => {
   isEditingBotName.value = false
@@ -806,9 +413,7 @@ watch([activeTab, botId], ([tab]) => {
   }
 }, { immediate: true })
 
-function formatDate(value: string | undefined): string {
-  return formatDateTime(value, { fallback: '-' })
-}
+
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
   return resolveApiErrorMessage(error, fallback)
@@ -825,7 +430,7 @@ async function handleConfirmAvatar() {
   const nextUrl = avatarUrlDraft.value.trim()
   try {
     await updateBot({
-      id: bot.value.id,
+      id: bot.value.id as string,
       avatar_url: nextUrl || undefined,
     })
     avatarDialogOpen.value = false
@@ -854,7 +459,7 @@ async function handleConfirmBotName() {
   const nextName = botNameDraft.value.trim()
   try {
     await updateBot({
-      id: bot.value.id,
+      id: bot.value.id as string,
       display_name: nextName,
     })
     route.meta.breadcrumb = () => nextName
@@ -865,30 +470,6 @@ async function handleConfirmBotName() {
   }
 }
 
-function checkStatusVariant(status: BotCheck['status']): 'default' | 'secondary' | 'destructive' {
-  if (status === 'error') return 'destructive'
-  if (status === 'warn') return 'secondary'
-  if (status === 'unknown') return 'secondary'
-  return 'default'
-}
-
-function checkStatusLabel(status: BotCheck['status']): string {
-  if (status === 'error') return t('bots.checks.status.error')
-  if (status === 'warn') return t('bots.checks.status.warn')
-  if (status === 'unknown') return t('bots.checks.status.unknown')
-  return t('bots.checks.status.ok')
-}
-
-function checkTitleLabel(item: BotCheck): string {
-  const titleKey = (item.title_key ?? '').trim()
-  if (titleKey) {
-    const translated = t(titleKey)
-    if (translated !== titleKey) {
-      return translated
-    }
-  }
-  return (item.type ?? '').trim() || (item.id ?? '').trim() || '-'
-}
 
 async function loadChecks(showToast: boolean) {
   checksLoading.value = true
@@ -902,10 +483,6 @@ async function loadChecks(showToast: boolean) {
   } finally {
     checksLoading.value = false
   }
-}
-
-async function handleRefreshChecks() {
-  await loadChecks(true)
 }
 
 async function loadContainerData(showLoadingToast: boolean) {
@@ -953,98 +530,4 @@ async function loadSnapshots() {
   }
 }
 
-async function runContainerAction(
-  action: 'refresh' | 'create' | 'start' | 'stop' | 'delete' | 'snapshot',
-  operation: () => Promise<void>,
-  successMessage: string,
-) {
-  containerAction.value = action
-  try {
-    await operation()
-    if (successMessage) {
-      toast.success(successMessage)
-    }
-  } catch (error) {
-    toast.error(resolveErrorMessage(error, t('bots.container.actionFailed')))
-  } finally {
-    containerAction.value = ''
-  }
-}
-
-async function handleRefreshContainer() {
-  await runContainerAction(
-    'refresh',
-    async () => {
-      await loadContainerData(false)
-    },
-    '',
-  )
-}
-
-async function handleCreateContainer() {
-  if (botLifecyclePending.value) return
-  await runContainerAction(
-    'create',
-    async () => {
-      await postBotsByBotIdContainer({ path: { bot_id: botId.value }, body: {}, throwOnError: true })
-      await loadContainerData(false)
-    },
-    t('bots.container.createSuccess'),
-  )
-}
-
-async function handleStartContainer() {
-  if (botLifecyclePending.value || !containerInfo.value) return
-  await runContainerAction(
-    'start',
-    async () => {
-      await postBotsByBotIdContainerStart({ path: { bot_id: botId.value }, throwOnError: true })
-      await loadContainerData(false)
-    },
-    t('bots.container.startSuccess'),
-  )
-}
-
-async function handleStopContainer() {
-  if (botLifecyclePending.value || !containerInfo.value) return
-  await runContainerAction(
-    'stop',
-    async () => {
-      await postBotsByBotIdContainerStop({ path: { bot_id: botId.value }, throwOnError: true })
-      await loadContainerData(false)
-    },
-    t('bots.container.stopSuccess'),
-  )
-}
-
-async function handleDeleteContainer() {
-  if (botLifecyclePending.value || !containerInfo.value) return
-  await runContainerAction(
-    'delete',
-    async () => {
-      await deleteBotsByBotIdContainer({ path: { bot_id: botId.value }, throwOnError: true })
-      containerInfo.value = null
-      containerMissing.value = true
-      snapshots.value = []
-    },
-    t('bots.container.deleteSuccess'),
-  )
-}
-
-async function handleCreateSnapshot() {
-  if (botLifecyclePending.value || !containerInfo.value || !capabilitiesStore.snapshotSupported) return
-  await runContainerAction(
-    'snapshot',
-    async () => {
-      await postBotsByBotIdContainerSnapshots({
-        path: { bot_id: botId.value },
-        body: { snapshot_name: newSnapshotName.value.trim() },
-        throwOnError: true,
-      })
-      newSnapshotName.value = ''
-      await loadSnapshots()
-    },
-    t('bots.container.snapshotSuccess'),
-  )
-}
 </script>

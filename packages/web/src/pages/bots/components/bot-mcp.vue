@@ -1,5 +1,5 @@
 <template>
-  <div class="max-w-4xl mx-auto space-y-5">
+  <div class="mx-auto space-y-5">
     <div class="flex items-start justify-between gap-3">
       <div class="space-y-1 min-w-0">
         <h3 class="text-lg font-semibold">

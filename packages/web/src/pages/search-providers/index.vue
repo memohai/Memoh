@@ -20,6 +20,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  Button
 } from '@memoh/ui'
 import { getSearchProviders } from '@memoh/sdk'
 import type { SearchprovidersGetResponse } from '@memoh/sdk'
@@ -182,7 +183,15 @@ const openStatus = reactive({
         <EmptyTitle>{{ $t('searchProvider.emptyTitle') }}</EmptyTitle>
         <EmptyDescription>{{ $t('searchProvider.emptyDescription') }}</EmptyDescription>
         <EmptyContent>
-          <AddSearchProvider v-model:open="openStatus.addOpen" />
+          <Button            
+            variant="outline"
+            @click="openStatus.addOpen=true"
+          >
+            <FontAwesomeIcon
+              :icon="['fas', 'plus']"
+              class="mr-1"
+            /> {{ $t('searchProvider.add') }}
+          </Button>
         </EmptyContent>
       </Empty>
     </template>
