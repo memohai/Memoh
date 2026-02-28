@@ -172,6 +172,7 @@ func runServe() {
 			provideEmailRegistry,
 			emailpkg.NewService,
 			emailpkg.NewOutboxService,
+			provideEmailChatGateway,
 			provideEmailTrigger,
 			emailpkg.NewManager,
 
@@ -561,8 +562,11 @@ func provideEmailRegistry(log *slog.Logger) *emailpkg.Registry {
 	return reg
 }
 
-func provideEmailTrigger(log *slog.Logger, service *emailpkg.Service, botInbox *inbox.Service) *emailpkg.Trigger {
-	return emailpkg.NewTrigger(log, service, botInbox)
+func provideEmailChatGateway(resolver *flow.Resolver, queries *dbsqlc.Queries, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
+	return flow.NewEmailChatGateway(resolver, queries, cfg.Auth.JWTSecret, log)
+}
+func provideEmailTrigger(log *slog.Logger, service *emailpkg.Service, botInbox *inbox.Service, chatTriggerer emailpkg.ChatTriggerer) *emailpkg.Trigger {
+	return emailpkg.NewTrigger(log, service, botInbox, chatTriggerer)
 }
 
 func startEmailManager(lc fx.Lifecycle, emailManager *emailpkg.Manager) {
