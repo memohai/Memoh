@@ -12,8 +12,9 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/memory"
+	fsops "github.com/memohai/memoh/internal/fs"
 	memprovider "github.com/memohai/memoh/internal/memory/provider"
+	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -23,19 +24,19 @@ type MemoryHandler struct {
 	accountService  *accounts.Service
 	settingsService *settings.Service
 	memoryRegistry  *memprovider.Registry
-	memoryFS        *memory.MemoryFS
+	memoryStore     *storefs.Service
 	logger          *slog.Logger
 }
 
 type memoryAddPayload struct {
-	Message          string           `json:"message,omitempty"`
-	Messages         []memory.Message `json:"messages,omitempty"`
-	Namespace        string           `json:"namespace,omitempty"`
-	RunID            string           `json:"run_id,omitempty"`
-	Metadata         map[string]any   `json:"metadata,omitempty"`
-	Filters          map[string]any   `json:"filters,omitempty"`
-	Infer            *bool            `json:"infer,omitempty"`
-	EmbeddingEnabled *bool            `json:"embedding_enabled,omitempty"`
+	Message          string                `json:"message,omitempty"`
+	Messages         []memprovider.Message `json:"messages,omitempty"`
+	Namespace        string                `json:"namespace,omitempty"`
+	RunID            string                `json:"run_id,omitempty"`
+	Metadata         map[string]any        `json:"metadata,omitempty"`
+	Filters          map[string]any        `json:"filters,omitempty"`
+	Infer            *bool                 `json:"infer,omitempty"`
+	EmbeddingEnabled *bool                 `json:"embedding_enabled,omitempty"`
 }
 
 type memorySearchPayload struct {
@@ -105,9 +106,13 @@ func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) mempr
 	return p
 }
 
-// SetMemoryFS sets the optional filesystem persistence layer.
-func (h *MemoryHandler) SetMemoryFS(fs *memory.MemoryFS) {
-	h.memoryFS = fs
+// SetFSService sets the optional filesystem persistence layer.
+func (h *MemoryHandler) SetFSService(fs *fsops.Service) {
+	if fs == nil {
+		h.memoryStore = nil
+		return
+	}
+	h.memoryStore = storefs.New(fs)
 }
 
 // Register registers chat-level memory routes.
@@ -140,7 +145,7 @@ func (h *MemoryHandler) checkService(ctx context.Context, botID string) (memprov
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryAddPayload true "Memory add payload"
-// @Success 200 {object} memory.SearchResponse
+// @Success 200 {object} provider.SearchResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -175,7 +180,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 	}
 
 	filters := buildNamespaceFilters(namespace, scopeID, payload.Filters)
-	req := memory.AddRequest{
+	req := memprovider.AddRequest{
 		Message:          payload.Message,
 		Messages:         payload.Messages,
 		BotID:            botID,
@@ -195,16 +200,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	if h.memoryFS != nil && len(resp.Results) > 0 {
-		items := resp.Results
-		go func() {
-			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := h.memoryFS.PersistMemories(bgCtx, botID, items, filters); err != nil {
-				h.logger.Warn("async memory persist failed", slog.Any("error", err))
-			}
-		}()
-	}
+	h.persistAddedMemoriesAsync(botID, resp.Results, filters)
 
 	return c.JSON(http.StatusOK, resp)
 }
@@ -217,7 +213,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memorySearchPayload true "Memory search payload"
-// @Success 200 {object} memory.SearchResponse
+// @Success 200 {object} provider.SearchResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -257,13 +253,13 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 		return checkErr
 	}
 
-	var allResults []memory.MemoryItem
+	var allResults []memprovider.MemoryItem
 	for _, scope := range scopes {
 		filters := buildNamespaceFilters(scope.Namespace, scope.ScopeID, payload.Filters)
 		if botID != "" {
 			filters["bot_id"] = botID
 		}
-		req := memory.SearchRequest{
+		req := memprovider.SearchRequest{
 			Query:            payload.Query,
 			BotID:            botID,
 			RunID:            payload.RunID,
@@ -290,7 +286,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 		allResults = allResults[:payload.Limit]
 	}
 
-	return c.JSON(http.StatusOK, memory.SearchResponse{Results: allResults})
+	return c.JSON(http.StatusOK, memprovider.SearchResponse{Results: allResults})
 }
 
 // ChatGetAll godoc
@@ -299,8 +295,8 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 // @Tags memory
 // @Produce json
 // @Param bot_id path string true "Bot ID"
-// @Param no_stats query bool false "Skip sparse vector stats (top_k_buckets, cdf_curve) to reduce overhead"
-// @Success 200 {object} memory.SearchResponse
+// @Param no_stats query bool false "Skip optional stats in memory search response"
+// @Success 200 {object} provider.SearchResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -335,9 +331,9 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 		return checkErr
 	}
 
-	var allResults []memory.MemoryItem
+	var allResults []memprovider.MemoryItem
 	for _, scope := range scopes {
-		req := memory.GetAllRequest{
+		req := memprovider.GetAllRequest{
 			Filters: buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil),
 			NoStats: noStats,
 		}
@@ -350,7 +346,7 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 	}
 	allResults = deduplicateMemoryItems(allResults)
 
-	return c.JSON(http.StatusOK, memory.SearchResponse{Results: allResults})
+	return c.JSON(http.StatusOK, memprovider.SearchResponse{Results: allResults})
 }
 
 // ChatDelete godoc
@@ -361,7 +357,7 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryDeletePayload false "Optional: specify memory_ids to delete; if omitted, deletes all"
-// @Success 200 {object} memory.DeleteResponse
+// @Success 200 {object} provider.DeleteResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -398,11 +394,7 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 		if delErr != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, delErr.Error())
 		}
-		if h.memoryFS != nil {
-			if err := h.memoryFS.RemoveMemories(c.Request().Context(), containerID, payload.MemoryIDs); err != nil {
-				h.logger.Warn("delete memory fs remove failed", slog.Any("error", err))
-			}
-		}
+		h.deleteMemoryFiles(c.Request().Context(), containerID, payload.MemoryIDs)
 		return c.JSON(http.StatusOK, resp)
 	}
 
@@ -411,19 +403,15 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 		return err
 	}
 	for _, scope := range scopes {
-		req := memory.DeleteAllRequest{
+		req := memprovider.DeleteAllRequest{
 			Filters: buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil),
 		}
 		if _, delErr := provider.DeleteAll(c.Request().Context(), req); delErr != nil {
 			h.logger.Warn("deleteall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", delErr))
 		}
 	}
-	if h.memoryFS != nil {
-		if err := h.memoryFS.RemoveAllMemories(c.Request().Context(), containerID); err != nil {
-			h.logger.Warn("deleteall memory fs remove failed", slog.Any("error", err))
-		}
-	}
-	return c.JSON(http.StatusOK, memory.DeleteResponse{Message: "All memories deleted successfully!"})
+	h.deleteAllMemoryFiles(c.Request().Context(), containerID)
+	return c.JSON(http.StatusOK, memprovider.DeleteResponse{Message: "All memories deleted successfully!"})
 }
 
 // ChatDeleteOne godoc
@@ -433,7 +421,7 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Memory ID"
-// @Success 200 {object} memory.DeleteResponse
+// @Success 200 {object} provider.DeleteResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -470,11 +458,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	if h.memoryFS != nil {
-		if err := h.memoryFS.RemoveMemories(c.Request().Context(), containerID, []string{memoryID}); err != nil {
-			h.logger.Warn("delete one memory fs remove failed", slog.Any("error", err))
-		}
-	}
+	h.deleteMemoryFiles(c.Request().Context(), containerID, []string{memoryID})
 	return c.JSON(http.StatusOK, resp)
 }
 
@@ -493,7 +477,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryCompactPayload true "ratio (0,1] required; decay_days optional"
-// @Success 200 {object} memory.CompactResult
+// @Success 200 {object} provider.CompactResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -550,8 +534,8 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	if h.memoryFS != nil {
-		if err := h.memoryFS.RebuildFiles(c.Request().Context(), containerID, result.Results, filters); err != nil {
+	if h.memoryStore != nil {
+		if err := h.memoryStore.RebuildFiles(c.Request().Context(), containerID, result.Results, filters); err != nil {
 			h.logger.Warn("compact memory fs rebuild failed", slog.Any("error", err))
 		}
 	}
@@ -565,7 +549,7 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 // @Tags memory
 // @Produce json
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} memory.UsageResponse
+// @Success 200 {object} provider.UsageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -599,7 +583,7 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 		return err
 	}
 
-	var totalUsage memory.UsageResponse
+	var totalUsage memprovider.UsageResponse
 	for _, scope := range scopes {
 		filters := buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil)
 		usage, usageErr := provider.Usage(c.Request().Context(), filters)
@@ -619,18 +603,18 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 
 // ChatRebuild godoc
 // @Summary Rebuild memories from filesystem
-// @Description Read memory files from the container filesystem (source of truth) and restore missing entries to Qdrant
+// @Description Read memory files from the container filesystem (source of truth) and restore missing entries to memory storage
 // @Tags memory
 // @Produce json
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} memory.RebuildResult
+// @Success 200 {object} provider.RebuildResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory/rebuild [post]
 func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
-	if h.memoryFS == nil {
+	if h.memoryStore == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "memory filesystem not configured")
 	}
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -651,12 +635,12 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 		return checkErr
 	}
 
-	fsItems, err := h.memoryFS.ReadAllMemoryFiles(c.Request().Context(), containerID)
+	fsItems, err := h.memoryStore.ReadAllMemoryFiles(c.Request().Context(), containerID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "read memory files failed: "+err.Error())
 	}
 
-	manifest, _ := h.memoryFS.ReadManifest(c.Request().Context(), containerID)
+	manifest, _ := h.memoryStore.ReadManifest(c.Request().Context(), containerID)
 
 	scopes, err := h.resolveEnabledScopes(c.Request().Context(), containerID)
 	if err != nil {
@@ -665,7 +649,7 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 
 	existingIDs := map[string]struct{}{}
 	for _, scope := range scopes {
-		req := memory.GetAllRequest{
+		req := memprovider.GetAllRequest{
 			Filters: buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil),
 		}
 		resp, getAllErr := provider.GetAll(c.Request().Context(), req)
@@ -694,7 +678,7 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 			filters = buildNamespaceFilters(scopes[0].Namespace, scopes[0].ScopeID, nil)
 		}
 
-		if _, addErr := provider.Add(c.Request().Context(), memory.AddRequest{
+		if _, addErr := provider.Add(c.Request().Context(), memprovider.AddRequest{
 			Message: fsItem.Memory,
 			BotID:   botID,
 			Filters: filters,
@@ -706,7 +690,7 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 		restoredCount++
 	}
 
-	return c.JSON(http.StatusOK, memory.RebuildResult{
+	return c.JSON(http.StatusOK, memprovider.RebuildResult{
 		FsCount:       len(fsItems),
 		QdrantCount:   len(existingIDs),
 		MissingCount:  len(fsItems) - len(existingIDs),
@@ -781,12 +765,12 @@ func buildNamespaceFilters(namespace, scopeID string, extra map[string]any) map[
 	return filters
 }
 
-func deduplicateMemoryItems(items []memory.MemoryItem) []memory.MemoryItem {
+func deduplicateMemoryItems(items []memprovider.MemoryItem) []memprovider.MemoryItem {
 	if len(items) == 0 {
 		return items
 	}
 	seen := make(map[string]struct{}, len(items))
-	result := make([]memory.MemoryItem, 0, len(items))
+	result := make([]memprovider.MemoryItem, 0, len(items))
 	for _, item := range items {
 		if _, ok := seen[item.ID]; ok {
 			continue
@@ -822,4 +806,35 @@ func (h *MemoryHandler) requireChatParticipant(ctx context.Context, chatID, chan
 
 func (h *MemoryHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
+}
+
+func (h *MemoryHandler) persistAddedMemoriesAsync(botID string, items []memprovider.MemoryItem, filters map[string]any) {
+	if h.memoryStore == nil || len(items) == 0 {
+		return
+	}
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := h.memoryStore.PersistMemories(bgCtx, botID, items, filters); err != nil {
+			h.logger.Warn("async memory persist failed", slog.Any("error", err))
+		}
+	}()
+}
+
+func (h *MemoryHandler) deleteMemoryFiles(ctx context.Context, botID string, ids []string) {
+	if h.memoryStore == nil || len(ids) == 0 {
+		return
+	}
+	if err := h.memoryStore.RemoveMemories(ctx, botID, ids); err != nil {
+		h.logger.Warn("memory fs remove failed", slog.Any("error", err))
+	}
+}
+
+func (h *MemoryHandler) deleteAllMemoryFiles(ctx context.Context, botID string) {
+	if h.memoryStore == nil {
+		return
+	}
+	if err := h.memoryStore.RemoveAllMemories(ctx, botID); err != nil {
+		h.logger.Warn("memory fs delete all failed", slog.Any("error", err))
+	}
 }

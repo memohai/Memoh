@@ -1,4 +1,4 @@
-package memoryproviders
+package provider
 
 import (
 	"context"
@@ -48,13 +48,13 @@ func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
 	}
 }
 
-func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
+func (s *Service) Create(ctx context.Context, req ProviderCreateRequest) (ProviderGetResponse, error) {
 	if !isValidProviderType(req.Provider) {
-		return GetResponse{}, fmt.Errorf("invalid provider type: %s", req.Provider)
+		return ProviderGetResponse{}, fmt.Errorf("invalid provider type: %s", req.Provider)
 	}
 	configJSON, err := json.Marshal(req.Config)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
+		return ProviderGetResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
 	row, err := s.queries.CreateMemoryProvider(ctx, sqlc.CreateMemoryProviderParams{
 		Name:      strings.TrimSpace(req.Name),
@@ -63,43 +63,43 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		IsDefault: false,
 	})
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("create memory provider: %w", err)
+		return ProviderGetResponse{}, fmt.Errorf("create memory provider: %w", err)
 	}
 	return s.toGetResponse(row), nil
 }
 
-func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
+func (s *Service) Get(ctx context.Context, id string) (ProviderGetResponse, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
-		return GetResponse{}, err
+		return ProviderGetResponse{}, err
 	}
 	row, err := s.queries.GetMemoryProviderByID(ctx, pgID)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("get memory provider: %w", err)
+		return ProviderGetResponse{}, fmt.Errorf("get memory provider: %w", err)
 	}
 	return s.toGetResponse(row), nil
 }
 
-func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
+func (s *Service) List(ctx context.Context) ([]ProviderGetResponse, error) {
 	rows, err := s.queries.ListMemoryProviders(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list memory providers: %w", err)
 	}
-	items := make([]GetResponse, 0, len(rows))
+	items := make([]ProviderGetResponse, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, s.toGetResponse(row))
 	}
 	return items, nil
 }
 
-func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (GetResponse, error) {
+func (s *Service) Update(ctx context.Context, id string, req ProviderUpdateRequest) (ProviderGetResponse, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
-		return GetResponse{}, err
+		return ProviderGetResponse{}, err
 	}
 	current, err := s.queries.GetMemoryProviderByID(ctx, pgID)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("get memory provider: %w", err)
+		return ProviderGetResponse{}, fmt.Errorf("get memory provider: %w", err)
 	}
 	name := current.Name
 	if req.Name != nil {
@@ -109,7 +109,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	if req.Config != nil {
 		configJSON, marshalErr := json.Marshal(req.Config)
 		if marshalErr != nil {
-			return GetResponse{}, fmt.Errorf("marshal config: %w", marshalErr)
+			return ProviderGetResponse{}, fmt.Errorf("marshal config: %w", marshalErr)
 		}
 		config = configJSON
 	}
@@ -119,7 +119,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		Config: config,
 	})
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("update memory provider: %w", err)
+		return ProviderGetResponse{}, fmt.Errorf("update memory provider: %w", err)
 	}
 	return s.toGetResponse(updated), nil
 }
@@ -133,7 +133,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 }
 
 // EnsureDefault creates a default builtin provider if none exists.
-func (s *Service) EnsureDefault(ctx context.Context) (GetResponse, error) {
+func (s *Service) EnsureDefault(ctx context.Context) (ProviderGetResponse, error) {
 	row, err := s.queries.GetDefaultMemoryProvider(ctx)
 	if err == nil {
 		return s.toGetResponse(row), nil
@@ -146,19 +146,19 @@ func (s *Service) EnsureDefault(ctx context.Context) (GetResponse, error) {
 		IsDefault: true,
 	})
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("create default memory provider: %w", err)
+		return ProviderGetResponse{}, fmt.Errorf("create default memory provider: %w", err)
 	}
 	return s.toGetResponse(created), nil
 }
 
-func (s *Service) toGetResponse(row sqlc.MemoryProvider) GetResponse {
+func (s *Service) toGetResponse(row sqlc.MemoryProvider) ProviderGetResponse {
 	var cfg map[string]any
 	if len(row.Config) > 0 {
 		if err := json.Unmarshal(row.Config, &cfg); err != nil {
 			s.logger.Warn("memory provider config unmarshal failed", slog.String("id", row.ID.String()), slog.Any("error", err))
 		}
 	}
-	return GetResponse{
+	return ProviderGetResponse{
 		ID:        row.ID.String(),
 		Name:      row.Name,
 		Provider:  row.Provider,

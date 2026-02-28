@@ -165,8 +165,8 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 
 const probeTimeout = 5 * time.Second
 
-// Test probes the provider's base URL to check connectivity, supported
-// client types, and embedding support. All probes run concurrently.
+// Test probes the provider's base URL to check connectivity and supported
+// client types. All probes run concurrently.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -181,7 +181,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 	apiKey := provider.ApiKey
 
-	resp := TestResponse{Checks: make(map[string]CheckResult, 5)}
+	resp := TestResponse{Checks: make(map[string]CheckResult, 4)}
 
 	// Connectivity check
 	start := time.Now()
@@ -213,9 +213,6 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		}},
 		{"google-generative-ai", func() CheckResult {
 			return probeGoogleGenerativeAI(ctx, baseURL, apiKey)
-		}},
-		{"embedding", func() CheckResult {
-			return probeEmbedding(ctx, baseURL, apiKey)
 		}},
 	}
 
@@ -284,15 +281,6 @@ func probeGoogleGenerativeAI(ctx context.Context, baseURL, apiKey string) CheckR
 		map[string]string{
 			"x-goog-api-key": apiKey,
 		}, "")
-}
-
-func probeEmbedding(ctx context.Context, baseURL, apiKey string) CheckResult {
-	body := `{"model":"probe-test","input":"hello"}`
-	return probeEndpoint(ctx, http.MethodPost, baseURL+"/embeddings",
-		map[string]string{
-			"Authorization": "Bearer " + apiKey,
-			"Content-Type":  "application/json",
-		}, body)
 }
 
 func probeEndpoint(ctx context.Context, method, url string, headers map[string]string, body string) CheckResult {

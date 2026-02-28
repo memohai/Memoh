@@ -9,7 +9,6 @@ import (
 
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/memory"
 )
 
 const (
@@ -25,12 +24,27 @@ const (
 	toolSearchMemory       = "search_memory"
 )
 
-// BuiltinProvider wraps the existing memory.Service as a Provider.
+// BuiltinProvider wraps the existing Service as a Provider.
 type BuiltinProvider struct {
-	service      *memory.Service
+	service      memoryRuntime
 	chatAccessor conversation.Accessor
 	adminChecker AdminChecker
 	logger       *slog.Logger
+}
+
+// memoryRuntime is the runtime memory backend required by the builtin provider.
+// It is intentionally defined as an interface to decouple provider wiring from
+// concrete service structs in the memory package.
+type memoryRuntime interface {
+	Add(ctx context.Context, req AddRequest) (SearchResponse, error)
+	Search(ctx context.Context, req SearchRequest) (SearchResponse, error)
+	GetAll(ctx context.Context, req GetAllRequest) (SearchResponse, error)
+	Update(ctx context.Context, req UpdateRequest) (MemoryItem, error)
+	Delete(ctx context.Context, memoryID string) (DeleteResponse, error)
+	DeleteBatch(ctx context.Context, memoryIDs []string) (DeleteResponse, error)
+	DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteResponse, error)
+	Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (CompactResult, error)
+	Usage(ctx context.Context, filters map[string]any) (UsageResponse, error)
 }
 
 // AdminChecker checks whether a channel identity has admin privileges.
@@ -38,12 +52,13 @@ type AdminChecker interface {
 	IsAdmin(ctx context.Context, channelIdentityID string) (bool, error)
 }
 
-func NewBuiltinProvider(log *slog.Logger, service *memory.Service, chatAccessor conversation.Accessor, adminChecker AdminChecker) *BuiltinProvider {
+func NewBuiltinProvider(log *slog.Logger, service any, chatAccessor conversation.Accessor, adminChecker AdminChecker) *BuiltinProvider {
 	if log == nil {
 		log = slog.Default()
 	}
+	runtimeService, _ := service.(memoryRuntime)
 	return &BuiltinProvider{
-		service:      service,
+		service:      runtimeService,
 		chatAccessor: chatAccessor,
 		adminChecker: adminChecker,
 		logger:       log.With(slog.String("provider", BuiltinType)),
@@ -62,7 +77,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req BeforeChatReques
 		return nil, nil
 	}
 
-	resp, err := p.service.Search(ctx, memory.SearchRequest{
+	resp, err := p.service.Search(ctx, SearchRequest{
 		Query: req.Query,
 		BotID: req.BotID,
 		Limit: memoryContextLimitPerScope,
@@ -81,7 +96,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req BeforeChatReques
 	seen := map[string]struct{}{}
 	type contextItem struct {
 		namespace string
-		item      memory.MemoryItem
+		item      MemoryItem
 	}
 	results := make([]contextItem, 0, memoryContextLimitPerScope)
 	for _, item := range resp.Results {
@@ -145,7 +160,7 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req AfterChatRequest)
 		"scopeId":   botID,
 		"bot_id":    botID,
 	}
-	if _, err := p.service.Add(ctx, memory.AddRequest{
+	if _, err := p.service.Add(ctx, AddRequest{
 		Messages: req.Messages,
 		BotID:    botID,
 		Filters:  filters,
@@ -240,7 +255,7 @@ func (p *BuiltinProvider) CallTool(ctx context.Context, session mcp.ToolSessionC
 		}
 	}
 
-	resp, err := p.service.Search(ctx, memory.SearchRequest{
+	resp, err := p.service.Search(ctx, SearchRequest{
 		Query: query,
 		BotID: botID,
 		Limit: limit,
@@ -298,38 +313,65 @@ func (p *BuiltinProvider) canAccessChat(ctx context.Context, chatID, channelIden
 // --- CRUD ---
 
 func (p *BuiltinProvider) Add(ctx context.Context, req AddRequest) (SearchResponse, error) {
+	if p.service == nil {
+		return SearchResponse{}, fmt.Errorf("memory runtime not configured")
+	}
 	return p.service.Add(ctx, req)
 }
 
 func (p *BuiltinProvider) Search(ctx context.Context, req SearchRequest) (SearchResponse, error) {
+	if p.service == nil {
+		return SearchResponse{}, fmt.Errorf("memory runtime not configured")
+	}
 	return p.service.Search(ctx, req)
 }
 
 func (p *BuiltinProvider) GetAll(ctx context.Context, req GetAllRequest) (SearchResponse, error) {
+	if p.service == nil {
+		return SearchResponse{}, fmt.Errorf("memory runtime not configured")
+	}
 	return p.service.GetAll(ctx, req)
 }
 
 func (p *BuiltinProvider) Update(ctx context.Context, req UpdateRequest) (MemoryItem, error) {
+	if p.service == nil {
+		return MemoryItem{}, fmt.Errorf("memory runtime not configured")
+	}
 	return p.service.Update(ctx, req)
 }
 
 func (p *BuiltinProvider) Delete(ctx context.Context, memoryID string) (DeleteResponse, error) {
+	if p.service == nil {
+		return DeleteResponse{}, fmt.Errorf("memory runtime not configured")
+	}
 	return p.service.Delete(ctx, memoryID)
 }
 
 func (p *BuiltinProvider) DeleteBatch(ctx context.Context, memoryIDs []string) (DeleteResponse, error) {
+	if p.service == nil {
+		return DeleteResponse{}, fmt.Errorf("memory runtime not configured")
+	}
 	return p.service.DeleteBatch(ctx, memoryIDs)
 }
 
 func (p *BuiltinProvider) DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteResponse, error) {
+	if p.service == nil {
+		return DeleteResponse{}, fmt.Errorf("memory runtime not configured")
+	}
 	return p.service.DeleteAll(ctx, req)
 }
 
 func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (CompactResult, error) {
+	if p.service == nil {
+		return CompactResult{}, fmt.Errorf("memory runtime not configured")
+	}
 	return p.service.Compact(ctx, filters, ratio, decayDays)
 }
 
 func (p *BuiltinProvider) Usage(ctx context.Context, filters map[string]any) (UsageResponse, error) {
+	if p.service == nil {
+		return UsageResponse{}, fmt.Errorf("memory runtime not configured")
+	}
 	return p.service.Usage(ctx, filters)
 }
 
@@ -343,12 +385,12 @@ func truncateSnippet(s string, n int) string {
 	return strings.TrimSpace(trimmed[:n]) + "..."
 }
 
-func deduplicateItems(items []memory.MemoryItem) []memory.MemoryItem {
+func deduplicateItems(items []MemoryItem) []MemoryItem {
 	if len(items) == 0 {
 		return items
 	}
 	seen := make(map[string]struct{}, len(items))
-	result := make([]memory.MemoryItem, 0, len(items))
+	result := make([]MemoryItem, 0, len(items))
 	for _, item := range items {
 		id := strings.TrimSpace(item.ID)
 		if id == "" {

@@ -23,7 +23,6 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/inbox"
-	"github.com/memohai/memoh/internal/memory"
 	memprovider "github.com/memohai/memoh/internal/memory/provider"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
@@ -68,20 +67,20 @@ type gatewayAssetLoader interface {
 
 // Resolver orchestrates chat with the agent gateway.
 type Resolver struct {
-	modelsService    *models.Service
-	queries          *sqlc.Queries
-	memoryRegistry   *memprovider.Registry
-	conversationSvc  ConversationSettingsReader
-	messageService   messagepkg.Service
-	settingsService  *settings.Service
-	inboxService     *inbox.Service
-	skillLoader      SkillLoader
-	assetLoader      gatewayAssetLoader
-	gatewayBaseURL   string
-	timeout          time.Duration
-	logger           *slog.Logger
-	httpClient       *http.Client
-	streamingClient  *http.Client
+	modelsService   *models.Service
+	queries         *sqlc.Queries
+	memoryRegistry  *memprovider.Registry
+	conversationSvc ConversationSettingsReader
+	messageService  messagepkg.Service
+	settingsService *settings.Service
+	inboxService    *inbox.Service
+	skillLoader     SkillLoader
+	assetLoader     gatewayAssetLoader
+	gatewayBaseURL  string
+	timeout         time.Duration
+	logger          *slog.Logger
+	httpClient      *http.Client
+	streamingClient *http.Client
 }
 
 // NewResolver creates a Resolver that communicates with the agent gateway.
@@ -1631,18 +1630,7 @@ func (r *Resolver) storeMemory(ctx context.Context, botID string, messages []con
 	if strings.TrimSpace(botID) == "" {
 		return
 	}
-	memMsgs := make([]memory.Message, 0, len(messages))
-	for _, msg := range messages {
-		text := strings.TrimSpace(msg.TextContent())
-		if text == "" {
-			continue
-		}
-		role := msg.Role
-		if strings.TrimSpace(role) == "" {
-			role = "assistant"
-		}
-		memMsgs = append(memMsgs, memory.Message{Role: role, Content: text})
-	}
+	memMsgs := toProviderMessages(messages)
 	if len(memMsgs) == 0 {
 		return
 	}
@@ -1657,6 +1645,22 @@ func (r *Resolver) storeMemory(ctx context.Context, botID string, messages []con
 	}); err != nil {
 		r.logger.Warn("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
 	}
+}
+
+func toProviderMessages(messages []conversation.ModelMessage) []memprovider.Message {
+	out := make([]memprovider.Message, 0, len(messages))
+	for _, msg := range messages {
+		text := strings.TrimSpace(msg.TextContent())
+		if text == "" {
+			continue
+		}
+		role := strings.TrimSpace(msg.Role)
+		if role == "" {
+			role = "assistant"
+		}
+		out = append(out, memprovider.Message{Role: role, Content: text})
+	}
+	return out
 }
 
 // --- model selection ---

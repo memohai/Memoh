@@ -226,8 +226,8 @@
     "namePlaceholder": "输入提供方名称",
     "memoryModel": "记忆模型",
     "memoryModelDescription": "用于记忆提取和决策的 LLM 模型",
-    "embeddingModel": "嵌入模型",
-    "embeddingModelDescription": "用于稠密向量搜索的嵌入模型",
+    "embeddingModel": "向量化模型",
+    "embeddingModelDescription": "用于稠密向量搜索的embedding模型",
     "providerNames": {
       "builtin": "内置"
     }

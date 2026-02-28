@@ -24,7 +24,6 @@ const (
 	DefaultPGUser           = "postgres"
 	DefaultPGDatabase       = "memoh"
 	DefaultPGSSLMode        = "disable"
-	DefaultQdrantURL = "http://127.0.0.1:6334"
 )
 
 type Config struct {
@@ -172,9 +171,6 @@ func Load(path string) (Config, error) {
 			User:     DefaultPGUser,
 			Database: DefaultPGDatabase,
 			SSLMode:  DefaultPGSSLMode,
-		},
-		Qdrant: QdrantConfig{
-			BaseURL: DefaultQdrantURL,
 		},
 		AgentGateway: AgentGatewayConfig{
 			Host: "127.0.0.1",

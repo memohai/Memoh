@@ -119,6 +119,26 @@ You wake up fresh each session. These files are your continuity:
 
 Use ${quote('search_memory')} to recall earlier conversations beyond the current context window.
 
+### Memory Write Rules (IMPORTANT)
+
+For ${quote('memory/YYYY-MM-DD.md')}, use ${quote('write')} with structured JSON:
+
+${block([
+  '[',
+  '  {',
+  '    "topic": "like Events, Notes, etc.",',
+  '    "memory": "What happened / what to remember",',
+  '  }',
+  ']',
+].join('\n'))}
+
+Rules:
+- Only send NEW memory items (do not re-write old content).
+- Do not invent markdown format for daily memory files.
+- Do not provide ${quote('hash')} (backend generates it).
+- If plain text is unavoidable, write concise factual notes only.
+- ${quote('MEMORY.md')} stays human-readable markdown (not JSON).
+
 ## How to Respond
 
 **Direct reply (default):** When someone sends you a message in the current session, just write your response as plain text. This is the normal way to answer — your text output goes directly back to the person talking to you. Do NOT use ${quote('send')} for this.

@@ -6,16 +6,15 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
-
-	"github.com/memohai/memoh/internal/memoryproviders"
+	memprovider "github.com/memohai/memoh/internal/memory/provider"
 )
 
 type MemoryProvidersHandler struct {
-	service *memoryproviders.Service
+	service *memprovider.Service
 	logger  *slog.Logger
 }
 
-func NewMemoryProvidersHandler(log *slog.Logger, service *memoryproviders.Service) *MemoryProvidersHandler {
+func NewMemoryProvidersHandler(log *slog.Logger, service *memprovider.Service) *MemoryProvidersHandler {
 	return &MemoryProvidersHandler{
 		service: service,
 		logger:  log.With(slog.String("handler", "memory_providers")),
@@ -36,7 +35,7 @@ func (h *MemoryProvidersHandler) Register(e *echo.Echo) {
 // @Summary List memory provider metadata
 // @Description List available memory provider types and config schemas
 // @Tags memory-providers
-// @Success 200 {array} memoryproviders.ProviderMeta
+// @Success 200 {array} provider.ProviderMeta
 // @Router /memory-providers/meta [get]
 func (h *MemoryProvidersHandler) ListMeta(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.service.ListMeta(c.Request().Context()))
@@ -48,13 +47,13 @@ func (h *MemoryProvidersHandler) ListMeta(c echo.Context) error {
 // @Tags memory-providers
 // @Accept json
 // @Produce json
-// @Param request body memoryproviders.CreateRequest true "Memory provider configuration"
-// @Success 201 {object} memoryproviders.GetResponse
+// @Param request body provider.ProviderCreateRequest true "Memory provider configuration"
+// @Success 201 {object} provider.ProviderGetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /memory-providers [post]
 func (h *MemoryProvidersHandler) Create(c echo.Context) error {
-	var req memoryproviders.CreateRequest
+	var req memprovider.ProviderCreateRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -76,7 +75,7 @@ func (h *MemoryProvidersHandler) Create(c echo.Context) error {
 // @Description List configured memory providers
 // @Tags memory-providers
 // @Produce json
-// @Success 200 {array} memoryproviders.GetResponse
+// @Success 200 {array} provider.ProviderGetResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /memory-providers [get]
 func (h *MemoryProvidersHandler) List(c echo.Context) error {
@@ -93,7 +92,7 @@ func (h *MemoryProvidersHandler) List(c echo.Context) error {
 // @Tags memory-providers
 // @Produce json
 // @Param id path string true "Provider ID"
-// @Success 200 {object} memoryproviders.GetResponse
+// @Success 200 {object} provider.ProviderGetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Router /memory-providers/{id} [get]
@@ -116,8 +115,8 @@ func (h *MemoryProvidersHandler) Get(c echo.Context) error {
 // @Accept json
 // @Produce json
 // @Param id path string true "Provider ID"
-// @Param request body memoryproviders.UpdateRequest true "Updated configuration"
-// @Success 200 {object} memoryproviders.GetResponse
+// @Param request body provider.ProviderUpdateRequest true "Updated configuration"
+// @Success 200 {object} provider.ProviderGetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /memory-providers/{id} [put]
@@ -126,7 +125,7 @@ func (h *MemoryProvidersHandler) Update(c echo.Context) error {
 	if id == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
-	var req memoryproviders.UpdateRequest
+	var req memprovider.ProviderUpdateRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}

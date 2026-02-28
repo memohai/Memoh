@@ -37,7 +37,6 @@ import (
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
-	"github.com/memohai/memoh/internal/embeddings"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/healthcheck"
 	channelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/channel"
@@ -55,9 +54,7 @@ import (
 	mcpweb "github.com/memohai/memoh/internal/mcp/providers/web"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
 	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/memory"
 	memprovider "github.com/memohai/memoh/internal/memory/provider"
-	"github.com/memohai/memoh/internal/memoryproviders"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
@@ -146,11 +143,7 @@ func runServe() {
 
 			// memory pipeline
 			provideMemoryLLM,
-			provideEmbeddingsResolver,
-			provideEmbeddingSetup,
-			provideTextEmbedderForMemory,
-			provideQdrantStoreFactory,
-			memoryproviders.NewService,
+			memprovider.NewService,
 			provideMemoryProviderRegistry,
 
 			// domain services (auto-wired)
@@ -206,7 +199,6 @@ func runServe() {
 			provideServerHandler(handlers.NewPingHandler),
 			provideServerHandler(provideAuthHandler),
 			provideServerHandler(provideMemoryHandler),
-			provideServerHandler(handlers.NewEmbeddingsHandler),
 			provideServerHandler(provideMessageHandler),
 			provideServerHandler(handlers.NewSwaggerHandler),
 			provideServerHandler(handlers.NewProvidersHandler),
@@ -318,7 +310,7 @@ func provideMCPManager(log *slog.Logger, service ctr.Service, cfg config.Config,
 // memory providers
 // ---------------------------------------------------------------------------
 
-func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, log *slog.Logger) memory.LLM {
+func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, log *slog.Logger) memprovider.LLM {
 	return &lazyLLMClient{
 		modelsService: modelsService,
 		queries:       queries,
@@ -327,61 +319,10 @@ func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, lo
 	}
 }
 
-func provideEmbeddingsResolver(log *slog.Logger, modelsService *models.Service, queries *dbsqlc.Queries) *embeddings.Resolver {
-	return embeddings.NewResolver(log, modelsService, queries, 10*time.Second)
-}
-
-type embeddingSetup struct {
-	Vectors            map[string]int
-	TextModel          models.GetResponse
-	MultimodalModel    models.GetResponse
-	HasEmbeddingModels bool
-}
-
-func provideEmbeddingSetup(log *slog.Logger, modelsService *models.Service) (embeddingSetup, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	vectors, textModel, multimodalModel, hasEmbeddingModels, err := embeddings.CollectEmbeddingVectors(ctx, modelsService)
-	if err != nil {
-		return embeddingSetup{}, fmt.Errorf("embedding models: %w", err)
-	}
-	if hasEmbeddingModels && multimodalModel.ModelID == "" {
-		log.Warn("No multimodal embedding model configured. Multimodal embedding features will be limited.")
-	}
-	return embeddingSetup{
-		Vectors:            vectors,
-		TextModel:          textModel,
-		MultimodalModel:    multimodalModel,
-		HasEmbeddingModels: hasEmbeddingModels,
-	}, nil
-}
-
-func provideTextEmbedderForMemory(resolver *embeddings.Resolver, setup embeddingSetup, log *slog.Logger) embeddings.Embedder {
-	return buildTextEmbedder(resolver, setup.TextModel, setup.HasEmbeddingModels, log)
-}
-
-func provideQdrantStoreFactory(log *slog.Logger, cfg config.Config, setup embeddingSetup) *memory.QdrantStoreFactory {
-	qcfg := cfg.Qdrant
-	timeout := time.Duration(qcfg.TimeoutSeconds) * time.Second
-	return memory.NewQdrantStoreFactory(log, qcfg.BaseURL, qcfg.APIKey, timeout, setup.Vectors, setup.TextModel.Dimensions, "sparse_hash")
-}
-
-func provideMemoryProviderRegistry(log *slog.Logger, storeFactory *memory.QdrantStoreFactory, llm memory.LLM, embedder embeddings.Embedder, resolver *embeddings.Resolver, setup embeddingSetup, chatService *conversation.Service, accountService *accounts.Service) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	registry.RegisterFactory(memprovider.BuiltinType, func(id string, config map[string]any) (memprovider.Provider, error) {
-		store, err := storeFactory.NewStore(id)
-		if err != nil {
-			return nil, fmt.Errorf("create qdrant store for provider %s: %w", id, err)
-		}
-		bm25 := memory.NewBM25Indexer(log)
-		svc := memory.NewService(log, llm, embedder, store, resolver, bm25, setup.TextModel.ModelID, setup.MultimodalModel.ModelID)
-		go func() {
-			if err := svc.WarmupBM25(context.Background(), 200); err != nil {
-				log.Warn("bm25 warmup failed for provider", slog.String("provider_id", id), slog.Any("error", err))
-			}
-		}()
-		return memprovider.NewBuiltinProvider(log, svc, chatService, accountService), nil
+		return memprovider.NewBuiltinProvider(log, nil, chatService, accountService), nil
 	})
 	return registry
 }
@@ -520,10 +461,6 @@ func provideMemoryHandler(log *slog.Logger, chatService *conversation.Service, a
 	h := handlers.NewMemoryHandler(log, chatService, accountService)
 	h.SetMemoryRegistry(memoryRegistry)
 	h.SetSettingsService(settingsService)
-	if manager != nil {
-		execWorkDir := config.DefaultDataMount
-		h.SetMemoryFS(memory.NewMemoryFS(log, manager, execWorkDir))
-	}
 	return h
 }
 
@@ -623,7 +560,7 @@ func provideServer(params serverParams) *server.Server {
 // lifecycle hooks
 // ---------------------------------------------------------------------------
 
-func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *memoryproviders.Service, registry *memprovider.Registry) {
+func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *memprovider.Service, registry *memprovider.Registry) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			resp, err := mpService.EnsureDefault(ctx)
@@ -717,21 +654,6 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 // helpers
 // ---------------------------------------------------------------------------
 
-func buildTextEmbedder(resolver *embeddings.Resolver, textModel models.GetResponse, hasModels bool, log *slog.Logger) embeddings.Embedder {
-	if !hasModels {
-		return nil
-	}
-	if textModel.ModelID == "" || textModel.Dimensions <= 0 {
-		log.Warn("No text embedding model configured. Text embedding features will be limited.")
-		return nil
-	}
-	return &embeddings.ResolverTextEmbedder{
-		Resolver: resolver,
-		ModelID:  textModel.ModelID,
-		Dims:     textModel.Dimensions,
-	}
-}
-
 func ensureAdminUser(ctx context.Context, log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) error {
 	if queries == nil {
 		return fmt.Errorf("db queries not configured")
@@ -803,26 +725,26 @@ type lazyLLMClient struct {
 	logger        *slog.Logger
 }
 
-func (c *lazyLLMClient) Extract(ctx context.Context, req memory.ExtractRequest) (memory.ExtractResponse, error) {
+func (c *lazyLLMClient) Extract(ctx context.Context, req memprovider.ExtractRequest) (memprovider.ExtractResponse, error) {
 	client, err := c.resolve(ctx)
 	if err != nil {
-		return memory.ExtractResponse{}, err
+		return memprovider.ExtractResponse{}, err
 	}
 	return client.Extract(ctx, req)
 }
 
-func (c *lazyLLMClient) Decide(ctx context.Context, req memory.DecideRequest) (memory.DecideResponse, error) {
+func (c *lazyLLMClient) Decide(ctx context.Context, req memprovider.DecideRequest) (memprovider.DecideResponse, error) {
 	client, err := c.resolve(ctx)
 	if err != nil {
-		return memory.DecideResponse{}, err
+		return memprovider.DecideResponse{}, err
 	}
 	return client.Decide(ctx, req)
 }
 
-func (c *lazyLLMClient) Compact(ctx context.Context, req memory.CompactRequest) (memory.CompactResponse, error) {
+func (c *lazyLLMClient) Compact(ctx context.Context, req memprovider.CompactRequest) (memprovider.CompactResponse, error) {
 	client, err := c.resolve(ctx)
 	if err != nil {
-		return memory.CompactResponse{}, err
+		return memprovider.CompactResponse{}, err
 	}
 	return client.Compact(ctx, req)
 }
@@ -835,11 +757,11 @@ func (c *lazyLLMClient) DetectLanguage(ctx context.Context, text string) (string
 	return client.DetectLanguage(ctx, text)
 }
 
-func (c *lazyLLMClient) resolve(ctx context.Context) (memory.LLM, error) {
+func (c *lazyLLMClient) resolve(ctx context.Context) (memprovider.LLM, error) {
 	if c.modelsService == nil || c.queries == nil {
 		return nil, fmt.Errorf("models service not configured")
 	}
-	botID := memory.BotIDFromContext(ctx)
+	botID := ""
 	memoryModel, memoryProvider, err := models.SelectMemoryModelForBot(ctx, c.modelsService, c.queries, botID)
 	if err != nil {
 		return nil, err
@@ -850,7 +772,9 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memory.LLM, error) {
 	default:
 		return nil, fmt.Errorf("memory model client type not supported: %s", clientType)
 	}
-	return memory.NewLLMClient(c.logger, memoryProvider.BaseUrl, memoryProvider.ApiKey, memoryModel.ModelID, c.timeout)
+	_ = memoryProvider
+	_ = memoryModel
+	return nil, fmt.Errorf("memory llm runtime is not available")
 }
 
 // skillLoaderAdapter bridges handlers.ContainerdHandler to flow.SkillLoader.
