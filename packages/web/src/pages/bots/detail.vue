@@ -137,6 +137,16 @@
               </KeepAlive>
             </div>
           </template>
+          <template v-else-if="activeTab === 'mcp'">
+            <div class="h-full relative">
+              <KeepAlive>
+                <BotMcp
+                  :bot-id="botId"
+                  :bot-type="bot?.type"
+                />
+              </KeepAlive>
+            </div>
+          </template>
           <ScrollArea
             v-else
             class="max-h-full h-full"

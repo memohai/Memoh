@@ -260,10 +260,13 @@
   "mcp": {
     "addTitle": "添加 MCP",
     "addDescription": "配置 MCP 服务器连接",
+    "searchPlaceholder": "搜索 MCP 服务器...",
+    "emptyTitle": "暂无 MCP 服务器",
+    "emptyDescription": "添加 MCP 服务器以扩展 Bot 的能力",
     "command": "命令",
     "commandPlaceholder": "输入启动命令",
     "arguments": "参数",
-    "argumentsPlaceholder": "输入启动参数",
+    "argumentsPlaceholder": "输入后按 Enter 添加",
     "cwd": "工作目录",
     "cwdPlaceholder": "输入工作目录路径",
     "env": "环境变量",
@@ -279,6 +282,7 @@
       "arguments": "参数",
       "env": "环境变量"
     },
+    "draft": "草稿",
     "empty": "暂未配置 MCP 服务器。",
     "deleteConfirm": "确定要删除这个 MCP 服务器吗？",
     "loadFailed": "加载 MCP 服务器列表失败",

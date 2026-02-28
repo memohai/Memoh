@@ -264,10 +264,13 @@
   "mcp": {
     "addTitle": "Add MCP",
     "addDescription": "Configure MCP server connection",
+    "searchPlaceholder": "Search MCP servers...",
+    "emptyTitle": "No MCP Servers",
+    "emptyDescription": "Add an MCP server to extend your bot's capabilities",
     "command": "Command",
     "commandPlaceholder": "Enter start command",
     "arguments": "Arguments",
-    "argumentsPlaceholder": "Enter arguments",
+    "argumentsPlaceholder": "Type and press Enter to add",
     "cwd": "Working Directory",
     "cwdPlaceholder": "Enter working directory path",
     "env": "Environment",
@@ -283,6 +286,7 @@
       "arguments": "Arguments",
       "env": "Environment"
     },
+    "draft": "Draft",
     "empty": "No MCP servers configured yet.",
     "deleteConfirm": "Are you sure you want to delete this MCP server?",
     "loadFailed": "Failed to load MCP servers",
