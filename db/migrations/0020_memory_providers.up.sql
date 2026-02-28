@@ -1,4 +1,4 @@
--- 0019_memory_providers
+-- 0020_memory_providers
 -- Add memory_providers table, migrate bot memory/embedding model into provider config,
 -- and drop the now-redundant columns from bots.
 
