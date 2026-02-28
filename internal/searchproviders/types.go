@@ -5,10 +5,10 @@ import "time"
 type ProviderName string
 
 const (
-	ProviderBrave  ProviderName = "brave"
-	ProviderBing   ProviderName = "bing"
-	ProviderGoogle ProviderName = "google"
-	ProviderTavily ProviderName = "tavily"
+	ProviderBrave      ProviderName = "brave"
+	ProviderBing       ProviderName = "bing"
+	ProviderGoogle     ProviderName = "google"
+	ProviderTavily     ProviderName = "tavily"
 	ProviderSogou      ProviderName = "sogou"
 	ProviderSerper     ProviderName = "serper"
 	ProviderSearXNG    ProviderName = "searxng"
