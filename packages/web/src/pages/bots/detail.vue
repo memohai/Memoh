@@ -96,7 +96,7 @@
       </div>
     </div>
     <Separator />
-    <div class="flex-1  relative">
+    <div class="flex-1 relative">
       <MasterDetailSidebarLayout class="[&_td:last-child]:w-45">
         <template #sidebar-content>
           <SidebarMenu
@@ -124,48 +124,20 @@
           </SidebarMenu>
         </template>
 
-        <template #sidebar-footer>
-          <!-- <AddProvider v-model:open="openStatus.provideOpen" /> -->
-        </template>
+        <template #sidebar-footer />
 
         <template #detail>
           <ScrollArea class="max-h-full h-full">
             <section class="p-4">
               <KeepAlive>
                 <component
-                  :is="activeComponent?.component"                 
+                  :is="activeComponent?.component"
                   :bot-id="botId"
                   :bot-type="bot?.type"
                 />
               </KeepAlive>
             </section>
           </ScrollArea>
-          <!-- <ScrollArea
-            v-if="curProvider?.id"
-            class="max-h-full h-full"
-          >
-            <model-setting />
-          </ScrollArea>
-          <Empty
-            v-else
-            class="h-full flex justify-center items-center"
-          >
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <FontAwesomeIcon :icon="['far', 'rectangle-list']" />
-              </EmptyMedia>
-            </EmptyHeader>
-            <EmptyTitle>{{ $t('provider.emptyTitle') }}</EmptyTitle>
-            <EmptyDescription>{{ $t('provider.emptyDescription') }}</EmptyDescription>
-            <EmptyContent>
-              <Button
-                variant="outline"
-                @click="openStatus.provideOpen = true"
-              >
-                {{ $t('provider.addBtn') }}
-              </Button>
-            </EmptyContent>
-          </Empty> -->
         </template>
       </MasterDetailSidebarLayout>
     </div>
@@ -270,6 +242,7 @@ import BotMemory from './components/bot-memory.vue'
 import BotSkills from './components/bot-skills.vue'
 import BotHistory from './components/bot-history.vue'
 import BotHeartbeat from './components/bot-heartbeat.vue'
+import BotEmail from './components/bot-email.vue'
 import BotSubagents from './components/bot-subagents.vue'
 import BotOverview from './components/bot-overview.vue'
 import BotContainer from './components/bot-container.vue'
@@ -290,8 +263,9 @@ const botId = computed(() => route.params.botId as string)
 const tabList = [
   { value: 'overview', label: 'bots.tabs.overview',component: BotOverview },
   { value: 'memory', label: 'bots.tabs.memory',component:BotMemory },
-  { value: 'channels', label: 'bots.tabs.channels',component: BotChannels },
-  { value: 'container', label: 'bots.tabs.container' , component: BotContainer },
+  { value: 'channels', label: 'bots.tabs.channels', component: BotChannels },
+  { value: 'email', label: 'bots.tabs.email', component: BotEmail },
+  { value: 'container', label: 'bots.tabs.container', component: BotContainer },
   { value: 'mcp', label: 'bots.tabs.mcp' ,component: BotMcp },
   { value: 'subagents', label: 'bots.tabs.subagents',component: BotSubagents },
   { value: 'heartbeat', label: 'bots.tabs.heartbeat',component: BotHeartbeat },

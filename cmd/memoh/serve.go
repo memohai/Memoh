@@ -53,6 +53,7 @@ import (
 	mcpmemory "github.com/memohai/memoh/internal/mcp/providers/memory"
 	mcpmessage "github.com/memohai/memoh/internal/mcp/providers/message"
 	mcpschedule "github.com/memohai/memoh/internal/mcp/providers/schedule"
+	mcpemail "github.com/memohai/memoh/internal/mcp/providers/email"
 	mcpweb "github.com/memohai/memoh/internal/mcp/providers/web"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
 	"github.com/memohai/memoh/internal/media"
@@ -66,6 +67,9 @@ import (
 	"github.com/memohai/memoh/internal/preauth"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/schedule"
+	emailpkg "github.com/memohai/memoh/internal/email"
+	emailgeneric "github.com/memohai/memoh/internal/email/adapters/generic"
+	emailmailgun "github.com/memohai/memoh/internal/email/adapters/mailgun"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/server"
 	"github.com/memohai/memoh/internal/settings"
@@ -107,6 +111,12 @@ func runServe() {
 			bind.NewService,
 			event.NewHub,
 			inbox.NewService,
+			provideEmailRegistry,
+			emailpkg.NewService,
+			emailpkg.NewOutboxService,
+			provideEmailChatGateway,
+			provideEmailTrigger,
+			emailpkg.NewManager,
 			provideRouteService,
 			provideMessageService,
 			provideMediaService,
@@ -139,6 +149,10 @@ func runServe() {
 			provideServerHandler(feishu.NewWebhookServerHandler),
 			provideServerHandler(provideUsersHandler),
 			provideServerHandler(handlers.NewMemoryProvidersHandler),
+			provideServerHandler(handlers.NewEmailProvidersHandler),
+			provideServerHandler(handlers.NewEmailBindingsHandler),
+			provideServerHandler(handlers.NewEmailOutboxHandler),
+			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewInboxHandler),
 			provideServerHandler(provideCLIHandler),
@@ -150,6 +164,7 @@ func runServe() {
 			startMemoryProviderBootstrap,
 			startScheduleService,
 			startChannelManager,
+			startEmailManager,
 			startContainerReconciliation,
 			startAgentRuntime,
 			startServer,
@@ -327,7 +342,7 @@ func provideChannelLifecycleService(channelStore *channel.Store, channelManager 
 func provideContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *handlers.ContainerdHandler {
 	return handlers.NewContainerdHandler(log, service, manager, cfg.MCP, cfg.Containerd.Namespace, rc.ContainerBackend, botService, accountService, policyService, queries)
 }
-func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager) *mcp.ToolGatewayService {
 	var assetResolver mcpmessage.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -341,7 +356,8 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	fsExec := mcpcontainer.NewExecutor(log, manager, config.DefaultDataMount)
 	fedGateway := handlers.NewMCPFederationGateway(log, containerdHandler)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService)
-	svc := mcp.NewToolGatewayService(log, []mcp.ToolExecutor{messageExec, contactsExec, scheduleExec, memoryExec, webExec, fsExec, inboxExec}, []mcp.ToolSource{fedSource})
+	emailExec := mcpemail.NewExecutor(log, emailService, emailManager)
+	svc := mcp.NewToolGatewayService(log, []mcp.ToolExecutor{messageExec, contactsExec, scheduleExec, memoryExec, webExec, fsExec, inboxExec, emailExec}, []mcp.ToolSource{fedSource})
 	containerdHandler.SetToolGatewayService(svc)
 	return svc
 }
@@ -423,6 +439,7 @@ var (
 		"/assets/",
 		"/api/docs",
 		"/channels/feishu/webhook/",
+		"/email/mailgun/webhook/",
 	}
 	memohSPABackendPrefixes = []string{
 		"/api",
@@ -435,6 +452,8 @@ var (
 		"/models",
 		"/providers",
 		"/search_providers",
+		"/email-providers",
+		"/email",
 		"/settings",
 		"/memory",
 		"/message",
@@ -600,6 +619,32 @@ func hasAnyPrefix(path string, prefixes []string) bool {
 		}
 	}
 	return false
+}
+func provideEmailRegistry(log *slog.Logger) *emailpkg.Registry {
+	reg := emailpkg.NewRegistry()
+	reg.Register(emailgeneric.New(log))
+	reg.Register(emailmailgun.New(log))
+	return reg
+}
+func provideEmailChatGateway(resolver *flow.Resolver, queries *dbsqlc.Queries, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
+	return flow.NewEmailChatGateway(resolver, queries, cfg.Auth.JWTSecret, log)
+}
+func provideEmailTrigger(log *slog.Logger, service *emailpkg.Service, botInbox *inbox.Service, chatTriggerer emailpkg.ChatTriggerer) *emailpkg.Trigger {
+	return emailpkg.NewTrigger(log, service, botInbox, chatTriggerer)
+}
+func startEmailManager(lc fx.Lifecycle, emailManager *emailpkg.Manager) {
+	ctx, cancel := context.WithCancel(context.Background())
+	lc.Append(fx.Hook{
+		OnStart: func(_ context.Context) error {
+			go func() {
+				if err := emailManager.Start(ctx); err != nil {
+					slog.Default().Error("email manager start failed", slog.Any("error", err))
+				}
+			}()
+			return nil
+		},
+		OnStop: func(_ context.Context) error { cancel(); emailManager.Stop(); return nil },
+	})
 }
 func buildTextEmbedder(resolver *embeddings.Resolver, textModel models.GetResponse, hasModels bool, log *slog.Logger) embeddings.Embedder {
 	if !hasModels {
