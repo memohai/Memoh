@@ -61,6 +61,10 @@ export const en = [
         link: '/getting-started/heartbeat.md'
       },
       {
+        text: 'Scheduled Tasks',
+        link: '/getting-started/schedule.md'
+      },
+      {
         text: 'Search Providers',
         link: '/getting-started/search-provider.md'
       },
