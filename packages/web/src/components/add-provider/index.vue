@@ -21,7 +21,9 @@
         </Button>
       </template>
       <template #body>
-        <div class="flex-col gap-3 flex mt-4">
+        <div
+          class="flex-col gap-3 flex mt-4"
+        >
           <FormField
             v-slot="{ componentField }"
             name="name"
@@ -29,13 +31,13 @@
             <FormItem>
               <Label
                 class="mb-2"
-                :for="componentField.id || 'provider-create-name'"
+                for="provider-create-name"
               >
                 {{ $t('common.name') }}
               </Label>
               <FormControl>
                 <Input
-                  :id="componentField.id || 'provider-create-name'"
+                  id="provider-create-name"
                   type="text"
                   :placeholder="$t('common.namePlaceholder')"
                   v-bind="componentField"
@@ -51,13 +53,13 @@
             <FormItem>
               <Label
                 class="mb-2"
-                :for="componentField.id || 'provider-create-api-key'"
+                for="provider-create-api-key"
               >
                 {{ $t('provider.apiKey') }}
               </Label>
               <FormControl>
                 <Input
-                  :id="componentField.id || 'provider-create-api-key'"
+                  id="provider-create-api-key"
                   type="text"
                   :placeholder="$t('provider.apiKeyPlaceholder')"
                   v-bind="componentField"
@@ -73,13 +75,13 @@
             <FormItem>
               <Label
                 class="mb-2"
-                :for="componentField.id || 'provider-create-base-url'"
+                for="provider-create-base-url"
               >
                 {{ $t('provider.url') }}
               </Label>
               <FormControl>
                 <Input
-                  :id="componentField.id || 'provider-create-base-url'"
+                  id="provider-create-base-url"
                   type="text"
                   :placeholder="$t('provider.urlPlaceholder')"
                   v-bind="componentField"
@@ -104,7 +106,7 @@ import {
 } from '@memoh/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
-import { useForm } from 'vee-validate'
+import { useForm,Form,Field } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postProviders } from '@memoh/sdk'
 import { useI18n } from 'vue-i18n'
@@ -114,6 +116,8 @@ import { useDialogMutation } from '@/composables/useDialogMutation'
 const open = defineModel<boolean>('open')
 const { t } = useI18n()
 const { run } = useDialogMutation()
+
+
 
 const queryCache = useQueryCache()
 const { mutateAsync: createProviderMutation, isLoading } = useMutation({
@@ -142,7 +146,7 @@ const createProvider = form.handleSubmit(async (value) => {
     () => createProviderMutation(value),
     {
       fallbackMessage: t('common.saveFailed'),
-      onSuccess: () => {
+      onSuccess: () => {      
         open.value = false
       },
     },

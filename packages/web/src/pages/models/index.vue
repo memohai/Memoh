@@ -15,6 +15,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  Button
 } from '@memoh/ui'
 import { getProviders } from '@memoh/sdk'
 import type { ProvidersGetResponse } from '@memoh/sdk'
@@ -96,7 +97,9 @@ const openStatus = reactive({
       </InputGroup>
     </template>
 
-    <template #sidebar-content>
+    <template
+      #sidebar-content
+    >
       <SidebarMenu
         v-for="providerItem in curFilterProvider"
         :key="providerItem.name"
@@ -123,7 +126,9 @@ const openStatus = reactive({
     </template>
 
     <template #sidebar-footer>
-      <AddProvider v-model:open="openStatus.provideOpen" />
+      <AddProvider
+        v-model:open="openStatus.provideOpen"
+      />
     </template>
 
     <template #detail>
@@ -145,7 +150,12 @@ const openStatus = reactive({
         <EmptyTitle>{{ $t('provider.emptyTitle') }}</EmptyTitle>
         <EmptyDescription>{{ $t('provider.emptyDescription') }}</EmptyDescription>
         <EmptyContent>
-          <AddProvider v-model:open="openStatus.provideOpen" />
+          <Button
+            variant="outline"
+            @click="openStatus.provideOpen=true"
+          >
+            {{ $t('provider.addBtn') }}
+          </Button>          
         </EmptyContent>
       </Empty>
     </template>

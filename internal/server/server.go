@@ -84,5 +84,8 @@ func shouldSkipJWT(path string) bool {
 	if strings.HasPrefix(path, "/channels/feishu/webhook/") {
 		return true
 	}
+	if strings.HasPrefix(path, "/email/mailgun/webhook/") {
+		return true
+	}
 	return false
 }

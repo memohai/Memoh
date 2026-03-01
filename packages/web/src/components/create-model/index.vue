@@ -317,10 +317,9 @@ const { mutateAsync: updateModelByLegacyModelID, isLoading: updateLegacyLoading 
 })
 const isLoading = computed(() => createLoading.value || updateLoading.value || updateLegacyLoading.value)
 
-async function addModel(e: Event) {
-  e.preventDefault()
-
-  const isEdit = title.value === 'edit' && !!editInfo?.value
+async function addModel() {
+  
+  const isEdit = title.value === 'edit' && !!editInfo?.value 
   const fallback = editInfo?.value
 
   const type = form.values.type || (isEdit ? fallback!.type : 'chat')
