@@ -354,6 +354,7 @@
       "mcp": "MCP",
       "subagents": "Subagents",
       "heartbeat": "Heartbeat",
+      "schedule": "Schedule",
       "history": "History",
       "skills": "Skills",
       "email": "Email",
@@ -593,6 +594,20 @@
       "statusError": "Error",
       "filterAll": "All",
       "noResult": "—"
+    },
+    "schedule": {
+      "title": "Scheduled Tasks",
+      "loadFailed": "Failed to load schedules",
+      "empty": "No scheduled tasks",
+      "name": "Name",
+      "pattern": "Pattern",
+      "enabled": "Enabled",
+      "calls": "Calls",
+      "createdAt": "Created",
+      "updatedAt": "Updated",
+      "statusEnabled": "Enabled",
+      "statusDisabled": "Disabled",
+      "unlimited": "∞"
     },
     "history": {
       "title": "History",

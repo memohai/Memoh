@@ -350,6 +350,7 @@
       "mcp": "MCP",
       "subagents": "子智能体",
       "heartbeat": "心跳",
+      "schedule": "定时任务",
       "history": "对话历史",
       "skills": "技能",
       "email": "邮件",
@@ -589,6 +590,20 @@
       "statusError": "错误",
       "filterAll": "全部",
       "noResult": "—"
+    },
+    "schedule": {
+      "title": "定时任务",
+      "loadFailed": "加载定时任务失败",
+      "empty": "暂无定时任务",
+      "name": "名称",
+      "pattern": "表达式",
+      "enabled": "启用",
+      "calls": "调用次数",
+      "createdAt": "创建时间",
+      "updatedAt": "更新时间",
+      "statusEnabled": "已启用",
+      "statusDisabled": "已禁用",
+      "unlimited": "无限制"
     },
     "history": {
       "title": "对话历史",

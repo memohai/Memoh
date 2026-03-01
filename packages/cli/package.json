@@ -1,6 +1,6 @@
 {
   "name": "@memoh/cli",
-  "version": "0.1.2",
+  "version": "0.2.0-beta.1",
   "description": "Command line interface and core API for Memoh",
   "exports": {
     ".": "./src/index.ts",

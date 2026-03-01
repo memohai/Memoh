@@ -268,6 +268,7 @@ import BotHeartbeat from './components/bot-heartbeat.vue'
 import BotEmail from './components/bot-email.vue'
 import BotSubagents from './components/bot-subagents.vue'
 import BotOverview from './components/bot-overview.vue'
+import BotSchedule from './components/bot-schedule.vue'
 import BotContainer from './components/bot-container.vue'
 import BotFiles from './components/bot-files.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -294,6 +295,7 @@ const tabList = [
   { value: 'mcp', label: 'bots.tabs.mcp' ,component: BotMcp },
   { value: 'subagents', label: 'bots.tabs.subagents',component: BotSubagents },
   { value: 'heartbeat', label: 'bots.tabs.heartbeat',component: BotHeartbeat },
+  { value: 'schedule', label: 'bots.tabs.schedule', component: BotSchedule },
   { value: 'history', label: 'bots.tabs.history',component: BotHistory },
   { value: 'skills', label: 'bots.tabs.skills',component: BotSkills },
   { value: 'settings', label: 'bots.tabs.settings',component: BotSettings }
