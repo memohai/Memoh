@@ -134,7 +134,6 @@
       <Separator />
     </template>
 
-    <Separator />
 
     <!-- Loop Detection -->
     <div class="flex items-center justify-between">
