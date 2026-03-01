@@ -86,6 +86,12 @@
             :on-open-media="onOpenMedia"
           />
         </div>
+        <p
+          class="text-xs text-muted-foreground/80 mt-1"
+          :title="fullTimestamp"
+        >
+          {{ relativeTimestamp }}
+        </p>
       </div>
 
       <!-- Assistant message blocks -->
@@ -148,6 +154,12 @@
           />
           {{ $t('chat.thinking') }}
         </div>
+        <p
+          class="text-xs text-muted-foreground/80 mt-1"
+          :title="fullTimestamp"
+        >
+          {{ relativeTimestamp }}
+        </p>
       </div>
     </div>
 
@@ -176,6 +188,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import ThinkingBlock from './thinking-block.vue'
@@ -253,4 +266,11 @@ const contentClass = computed(() => {
   if (props.message.role === 'user') return 'max-w-[80%]'
   return 'flex-1 max-w-full'
 })
+
+const relativeTimestamp = computed(() =>
+  formatRelativeTime(props.message.timestamp),
+)
+const fullTimestamp = computed(() =>
+  formatDateTime(props.message.timestamp.toISOString()),
+)
 </script>
