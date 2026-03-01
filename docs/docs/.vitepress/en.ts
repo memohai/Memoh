@@ -1,4 +1,3 @@
-import { text } from "node:stream/consumers";
 
 export const en = [
   {
