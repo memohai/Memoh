@@ -49,3 +49,9 @@ A Model is a specific AI instance (like `gpt-4o` or `text-embedding-3-small`) th
 
 - **Edit**: Click the edit icon next to a model in the list.
 - **Delete**: Click the trash icon next to a model to remove it.
+
+---
+
+## Next Steps
+
+Now that you have configured your models, you can proceed to [Create and Configure a Bot](/getting-started/bot).

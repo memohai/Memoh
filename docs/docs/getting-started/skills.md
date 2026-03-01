@@ -39,16 +39,6 @@ Manage your bot's skill set from the **Skills** tab in the Bot Detail page.
 
 ---
 
-## Special Skills
-
-Certain skill files have predefined roles in Memoh:
-
-- **IDENTITY.md**: Defines the bot's core identity, persona, and tone of voice.
-- **SOUL.md**: Contains deeper behavioral guidelines or long-term objectives.
-- **Other Skill Files**: Any additional Markdown file in the skills directory becomes a modular capability the bot can leverage.
-
----
-
 ## How Bots Use Skills
 
 - Skills are injected into the bot's system prompt during conversation.

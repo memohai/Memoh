@@ -28,9 +28,24 @@ The **Overview** tab provides a quick health check of the bot's services. It mon
 
 If any check shows a warning or error, follow the provided details to troubleshoot.
 
-### Settings Tab
+## Configuring the Bot's Brain (Models)
 
-The **Settings** tab is where you configure the bot's "brain" and runtime parameters.
+After creating a bot, the most important step is assigning its LLM models. These define how the bot thinks, remembers, and processes information.
+
+1.  Navigate to your bot's **Detail Page**.
+2.  Go to the **Settings** tab.
+3.  In the **Model Selection** section, you will find three dropdowns:
+    -   **Chat Model**: Used for standard conversations with users. Select a high-quality chat model (e.g., GPT-4o).
+    -   **Memory Model**: Used for summarizing context and extracting key facts into the bot's long-term memory.
+    -   **Embedding Model**: Used to convert text into vector embeddings for semantic search within the memory system. This must be an `embedding` type model.
+4.  Select the models you previously configured in the [Models](/getting-started/provider-and-model) page.
+5.  Click **Save** at the bottom of the form.
+
+---
+
+## Settings Tab Reference
+
+The **Settings** tab contains all the core parameters that define your bot's behavior and runtime configuration.
 
 | Field | Description |
 |-------|-------------|
