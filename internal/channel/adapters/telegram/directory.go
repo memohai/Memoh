@@ -36,13 +36,13 @@ func (a *TelegramAdapter) ListGroups(ctx context.Context, cfg channel.ChannelCon
 	return nil, nil
 }
 
-// ListGroupMembers returns administrators of the given group (Telegram only exposes admin list, not full members).
+// ListGroupMembers returns group managers for the given group (Telegram only exposes this list, not all members).
 func (a *TelegramAdapter) ListGroupMembers(ctx context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return nil, err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
+	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (a *TelegramAdapter) ListGroupMembers(ctx context.Context, cfg channel.Chan
 	}
 	members, err := bot.GetChatAdministrators(config)
 	if err != nil {
-		return nil, fmt.Errorf("telegram get chat administrators: %w", err)
+		return nil, fmt.Errorf("telegram get chat managers: %w", err)
 	}
 	limit := directoryLimit(query.Limit)
 	entries := make([]channel.DirectoryEntry, 0, limit)
@@ -66,7 +66,7 @@ func (a *TelegramAdapter) ListGroupMembers(ctx context.Context, cfg channel.Chan
 		if m.User == nil {
 			continue
 		}
-		e := telegramUserToEntry(m.User)
+		e := a.telegramUserToEntryWithAvatar(bot, m.User)
 		if query.Query != "" && !strings.Contains(strings.ToLower(e.Name+e.Handle), strings.ToLower(query.Query)) {
 			continue
 		}
@@ -81,7 +81,7 @@ func (a *TelegramAdapter) ResolveEntry(ctx context.Context, cfg channel.ChannelC
 	if err != nil {
 		return channel.DirectoryEntry{}, err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
+	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
 	if err != nil {
 		return channel.DirectoryEntry{}, err
 	}
@@ -116,7 +116,7 @@ func (a *TelegramAdapter) resolveTelegramUser(ctx context.Context, bot *tgbotapi
 		if member.User == nil {
 			return channel.DirectoryEntry{}, fmt.Errorf("telegram get chat member: empty user")
 		}
-		return telegramUserToEntry(member.User), nil
+		return a.telegramUserToEntryWithAvatar(bot, member.User), nil
 	}
 	chatConfig := tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}}
 	chat, err := bot.GetChat(chatConfig)
@@ -136,10 +136,11 @@ func (a *TelegramAdapter) resolveTelegramUser(ctx context.Context, bot *tgbotapi
 	}
 	idStr := strconv.FormatInt(chat.ID, 10)
 	return channel.DirectoryEntry{
-		Kind:   channel.DirectoryEntryUser,
-		ID:     idStr,
-		Name:   name,
-		Handle: handle,
+		Kind:      channel.DirectoryEntryUser,
+		ID:        idStr,
+		Name:      name,
+		Handle:    handle,
+		AvatarURL: a.resolveUserAvatarURL(bot, chat.ID),
 		Metadata: map[string]any{
 			"chat_id":  idStr,
 			"username": chat.UserName,
@@ -168,13 +169,34 @@ func (a *TelegramAdapter) resolveTelegramGroup(ctx context.Context, bot *tgbotap
 	if handle != "" && !strings.HasPrefix(handle, "@") {
 		handle = "@" + handle
 	}
+	avatarURL := a.resolveChatPhotoURL(bot, chat.Photo)
 	return channel.DirectoryEntry{
 		Kind:      channel.DirectoryEntryGroup,
 		ID:        idStr,
 		Name:      name,
 		Handle:    handle,
+		AvatarURL: avatarURL,
 		Metadata:  map[string]any{"chat_id": idStr, "type": chat.Type},
 	}, nil
+}
+
+// resolveChatPhotoURL resolves a Telegram ChatPhoto to a direct URL.
+func (a *TelegramAdapter) resolveChatPhotoURL(bot *tgbotapi.BotAPI, photo *tgbotapi.ChatPhoto) string {
+	if photo == nil {
+		return ""
+	}
+	fileID := photo.BigFileID
+	if fileID == "" {
+		fileID = photo.SmallFileID
+	}
+	if fileID == "" {
+		return ""
+	}
+	url, err := a.getFileDirectURL(bot, fileID)
+	if err != nil {
+		return ""
+	}
+	return url
 }
 
 // parseTelegramChatInput parses input as chat_id (numeric) or @channel_username. Returns (chatID, superGroupUsername).
@@ -213,6 +235,14 @@ func parseTelegramUserInput(input string) (chatID, userID int64) {
 		return 0, 0
 	}
 	return id, 0
+}
+
+func (a *TelegramAdapter) telegramUserToEntryWithAvatar(bot *tgbotapi.BotAPI, u *tgbotapi.User) channel.DirectoryEntry {
+	entry := telegramUserToEntry(u)
+	if bot != nil && u != nil {
+		entry.AvatarURL = a.resolveUserAvatarURL(bot, u.ID)
+	}
+	return entry
 }
 
 func telegramUserToEntry(u *tgbotapi.User) channel.DirectoryEntry {
