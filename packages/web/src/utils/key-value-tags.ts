@@ -1,7 +1,11 @@
 export function tagsToRecord(tags: string[]): Record<string, string> {
   const out: Record<string, string> = {}
   for (const tag of tags) {
-    const [key, value] = tag.split(':')
+    // Use indexOf so that values containing ':' (e.g. URLs) are preserved intact.
+    const sep = tag.indexOf(':')
+    if (sep <= 0) continue
+    const key = tag.slice(0, sep)
+    const value = tag.slice(sep + 1)
     if (key && value) {
       out[key] = value
     }
