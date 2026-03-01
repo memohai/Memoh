@@ -10,6 +10,7 @@ import {
   type ChatSummary,
   type Message,
   type StreamEvent,
+  type MessageStreamEvent,
   fetchBots,
   fetchMessages,
   fetchChats,
@@ -45,9 +46,18 @@ export interface ToolCallBlock {
   done: boolean
 }
 
+export interface AttachmentItem {
+  type: string
+  content_hash: string
+  bot_id: string
+  mime: string
+  size: number
+  storage_key: string
+}
+
 export interface AttachmentBlock {
   type: 'attachment'
-  attachments: Array<Record<string, unknown>>
+  attachments: AttachmentItem[]
 }
 
 export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock
@@ -389,24 +399,24 @@ export const useChatStore = defineStore('chat', () => {
   function handleLocalStreamEvent(event: StreamEvent) {
     // Cross-channel events arrive without a pending session. Detect them via
     // source_channel metadata injected by the RouteHubBroadcaster.
-    const meta = (event as Record<string, unknown>).metadata as Record<string, unknown> | undefined
+    const meta = event.metadata as Record<string, unknown> | undefined
     const sourceChannel = meta?.source_channel as string | undefined
     const isCrossChannel = !!sourceChannel
 
     // Cross-channel user message (the inbound message from Telegram/Feishu user).
     if (isCrossChannel && (event.type ?? '').toLowerCase() === 'final' && meta?.role === 'user') {
-      const finalPayload = (event as Record<string, unknown>).final as Record<string, unknown> | undefined
+      const finalPayload = event.final as Record<string, unknown> | undefined
       const msg = finalPayload?.message as Record<string, unknown> | undefined
       if (msg) {
         const text = String(msg.text ?? '').trim()
-        const msgMeta = (msg.metadata as Record<string, unknown> | undefined)
-        const senderName = (msgMeta?.sender_display_name as string) ?? sourceChannel
+        const msgMeta = msg.metadata as Record<string, unknown> | undefined
+        const senderName = (msgMeta?.sender_display_name as string | undefined) ?? sourceChannel
         const senderUserId = String(meta?.sender_user_id ?? '').trim()
         const blocks: ContentBlock[] = []
         if (text) blocks.push({ type: 'text', content: text })
         const rawAtts = (msg.attachments ?? msg.Attachments) as Array<Record<string, unknown>> | undefined
         if (Array.isArray(rawAtts) && rawAtts.length > 0) {
-          const items = rawAtts.map((a) => ({
+          const items: AttachmentItem[] = rawAtts.map((a) => ({
             type: mediaTypeFromMime(String(a.mime ?? '')),
             content_hash: String(a.content_hash ?? ''),
             bot_id: currentBotId.value ?? '',
@@ -633,14 +643,13 @@ export const useChatStore = defineStore('chat', () => {
     if (chatId.value) touchChat(chatId.value)
   }
 
-  function handleStreamEvent(targetBotId: string, event: Record<string, unknown>) {
-    if (String(event.type ?? '').toLowerCase() !== 'message_created') return
-    const eBotId = String(event.bot_id ?? '').trim()
+  function handleStreamEvent(targetBotId: string, event: MessageStreamEvent) {
+    if ((event.type ?? '').toLowerCase() !== 'message_created') return
+    const eBotId = (event.bot_id ?? '').trim()
     if (eBotId && eBotId !== targetBotId) return
-    const payload = event.message
-    if (!payload || typeof payload !== 'object') return
-    const raw = payload as Message
-    const pBotId = String(raw.bot_id ?? '').trim()
+    const raw = event.message
+    if (!raw) return
+    const pBotId = (raw.bot_id ?? '').trim()
     if (pBotId && pBotId !== targetBotId) return
     appendRealtimeMessage(raw)
   }
@@ -654,7 +663,7 @@ export const useChatStore = defineStore('chat', () => {
       await streamMessageEvents(
         bid,
         signal,
-        (e) => handleStreamEvent(bid, e as unknown as Record<string, unknown>),
+        (e) => handleStreamEvent(bid, e),
         messageEventsSince || undefined,
       )
     })

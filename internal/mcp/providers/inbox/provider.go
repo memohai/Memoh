@@ -137,6 +137,7 @@ func (e *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 		entry := map[string]any{
 			"id":         item.ID,
 			"source":     item.Source,
+			"header":     item.Header,
 			"content":    item.Content,
 			"is_read":    item.IsRead,
 			"created_at": item.CreatedAt.Format(time.RFC3339),

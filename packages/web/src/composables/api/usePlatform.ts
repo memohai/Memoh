@@ -21,10 +21,10 @@ export function usePlatformList() {
   return useQuery({
     key: ['platform'],
     query: async () => {
-      const { data } = await client.get({
+      const { data } = await client.get<PlatformItem[]>({
         url: '/platform/',
         throwOnError: true,
-      }) as { data: PlatformItem[] }
+      })
       return data
     },
   })
@@ -36,7 +36,7 @@ export function useCreatePlatform() {
   const queryCache = useQueryCache()
   return useMutation({
     mutation: (data: CreatePlatformRequest) =>
-      client.post({ url: '/platform/', body: data, throwOnError: true }),
+      client.post<void>({ url: '/platform/', body: data, throwOnError: true }),
     onSettled: () => queryCache.invalidateQueries({ key: ['platform'] }),
   })
 }

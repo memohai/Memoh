@@ -34,8 +34,125 @@ services:
       retries: 5
     restart: unless-stopped
 
+  deps:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web.dev
+    container_name: memoh-dev-deps
+    working_dir: /workspace
+    command: ["pnpm", "install"]
+    volumes:
+      - ..:/workspace
+      - node_modules:/workspace/node_modules
+      - pnpm_store:/root/.local/share/pnpm/store
+    restart: "no"
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server.dev
+    container_name: memoh-dev-migrate
+    working_dir: /workspace
+    entrypoint: []
+    command: ["go", "run", "./cmd/agent/main.go", "migrate", "up"]
+    environment:
+      CONFIG_PATH: /workspace/conf/app.dev.toml
+    volumes:
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    restart: "no"
+
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server.dev
+    container_name: memoh-dev-server
+    working_dir: /workspace
+    privileged: true
+    pid: host
+    command: ["air", "-c", ".air.toml"]
+    environment:
+      CONFIG_PATH: /workspace/conf/app.dev.toml
+    volumes:
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - containerd_data:/var/lib/containerd
+      - server_cni_state:/var/lib/cni
+      - memoh_data:/opt/memoh/data
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  agent:
+    image: oven/bun:1-alpine
+    container_name: memoh-dev-agent
+    working_dir: /workspace/agent
+    command: ["bun", "run", "--watch", "src/index.ts"]
+    volumes:
+      - ..:/workspace
+      - node_modules:/workspace/node_modules
+    ports:
+      - "8081:8081"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web.dev
+    container_name: memoh-dev-web
+    working_dir: /workspace/packages/web
+    command: ["pnpm", "dev"]
+    volumes:
+      - ..:/workspace
+      - node_modules:/workspace/node_modules
+    ports:
+      - "8082:8082"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     driver: local
   qdrant_data:
+    driver: local
+  go_mod_cache:
+    driver: local
+  go_build_cache:
+    driver: local
+  containerd_data:
+    driver: local
+  memoh_data:
+    driver: local
+  server_cni_state:
+    driver: local
+  node_modules:
+    driver: local
+  pnpm_store:
     driver: local

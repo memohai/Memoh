@@ -48,17 +48,26 @@ depends = [
 description = "Generate SQL code"
 run = "sqlc generate"
 
-[tasks.infra]
-description = "Start dev infrastructure (postgres + qdrant)"
-run = "docker compose -f devenv/docker-compose.yml up -d"
+[tasks.dev]
+description = "Start development environment"
+run = """
+#!/bin/bash
+set -e
+cp conf/app.dev.toml config.toml
+docker compose -f devenv/docker-compose.yml up --build
+"""
 
-[tasks.infra-down]
-description = "Stop dev infrastructure"
-run = "docker compose -f devenv/docker-compose.yml down"
+[tasks."dev:down"]
+description = "Stop development environment"
+run = "docker compose -f devenv/docker-compose.yml down --remove-orphans"
 
-[tasks.infra-logs]
-description = "View dev infrastructure logs"
+[tasks."dev:logs"]
+description = "View development logs"
 run = "docker compose -f devenv/docker-compose.yml logs -f"
+
+[tasks."dev:restart"]
+description = "Restart a service (usage: mise run dev:restart -- server)"
+run = "docker compose -f devenv/docker-compose.yml restart $@"
 
 [tasks.db-up]
 description = "Initialize and Migrate Database"
@@ -92,19 +101,9 @@ description = "Install CLI"
 depends = ["//:pnpm-install"]
 run = "cd packages/cli && npm install -g"
 
-[task.install-socktainer]
+[tasks.install-socktainer]
 description = "Install socktainer"
 run = "brew tap socktainer/tap && brew install socktainer"
-
-[tasks.dev]
-description = "Start development environment"
-depends = [
-  "//:swagger-generate",
-  "//:sdk-generate",
-  "//agent:dev",
-  "//cmd/agent:start",
-  "//packages/web:dev",
-]
 
 [tasks.setup]
 description = "Setup development environment"
@@ -117,26 +116,6 @@ depends = [
 run = """
 #!/bin/bash
 set -e
-
-# Auto-copy dev config if config.toml doesn't exist
-if [ ! -f config.toml ]; then
-  cp conf/app.dev.toml config.toml
-  echo '✓ Copied conf/app.dev.toml → config.toml'
-fi
-
-# Start dev infrastructure
-docker compose -f devenv/docker-compose.yml up -d
-
-# Wait for postgres to be healthy
-echo 'Waiting for postgres...'
-until docker compose -f devenv/docker-compose.yml exec -T postgres pg_isready -U memoh >/dev/null 2>&1; do
-  sleep 1
-done
-echo '✓ Postgres ready'
-
-# Run migrations
-scripts/db-up.sh
-
+cp conf/app.dev.toml config.toml
 echo '✓ Setup complete! Run: mise run dev'
 """
-

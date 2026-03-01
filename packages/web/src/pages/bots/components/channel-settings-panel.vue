@@ -240,9 +240,8 @@ import { reactive, watch, computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { putBotsByIdChannelByPlatform } from '@memoh/sdk'
-import { client } from '@memoh/sdk/client'
-import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema } from '@memoh/sdk'
+import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus } from '@memoh/sdk'
+import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memoh/sdk'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 
 interface BotChannelItem {
@@ -264,10 +263,10 @@ const { t } = useI18n()
 const botIdRef = computed(() => props.botId)
 const queryCache = useQueryCache()
 const { mutateAsync: upsertChannel, isLoading } = useMutation({
-  mutation: async ({ platform, data }: { platform: string; data: Record<string, unknown> }) => {
+  mutation: async ({ platform, data }: { platform: string; data: ChannelUpsertConfigRequest }) => {
     const { data: result } = await putBotsByIdChannelByPlatform({
       path: { id: botIdRef.value, platform },
-      body: data as any,
+      body: data,
       throwOnError: true,
     })
     return result
@@ -276,12 +275,12 @@ const { mutateAsync: upsertChannel, isLoading } = useMutation({
 })
 const { mutateAsync: updateChannelStatus, isLoading: isStatusLoading } = useMutation({
   mutation: async ({ platform, disabled }: { platform: string; disabled: boolean }) => {
-    const { data } = await client.patch({
-      url: `/bots/${botIdRef.value}/channel/${platform}/status`,
+    const { data } = await patchBotsByIdChannelByPlatformStatus({
+      path: { id: botIdRef.value, platform },
       body: { disabled },
       throwOnError: true,
     })
-    return data as ChannelChannelConfig
+    return data
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['bot-channels', botIdRef.value] }),
 })
@@ -434,8 +433,8 @@ async function handleToggleDisabled() {
 async function handleDelete() {
   action.value = 'delete'
   try {
-    await client.delete({
-      url: `/bots/${botIdRef.value}/channel/${props.channelItem.meta.type}`,
+    await deleteBotsByIdChannelByPlatform({
+      path: { id: botIdRef.value, platform: props.channelItem.meta.type },
       throwOnError: true,
     })
     lastSavedConfigId.value = ''

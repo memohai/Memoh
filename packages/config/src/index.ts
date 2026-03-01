@@ -8,7 +8,7 @@ export const loadConfig = (path: string = './config.toml'): Config => {
 }
 
 export const getBaseUrl = (config: Config) => {
-  const rawAddr = typeof config.server.addr === 'string' ? config.server.addr.trim() : ''
+  const rawAddr = (config.agent_gateway?.server_addr || config.server?.addr || '').trim()
 
   if (!rawAddr) {
     return 'http://127.0.0.1'

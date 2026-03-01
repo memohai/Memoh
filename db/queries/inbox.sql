@@ -1,6 +1,6 @@
 -- name: CreateInboxItem :one
-INSERT INTO bot_inbox (bot_id, source, content)
-VALUES (sqlc.arg(bot_id), sqlc.arg(source), sqlc.arg(content))
+INSERT INTO bot_inbox (bot_id, source, header, content, action)
+VALUES (sqlc.arg(bot_id), sqlc.arg(source), sqlc.arg(header), sqlc.arg(content), sqlc.arg(action))
 RETURNING *;
 
 -- name: GetInboxItemByID :one
@@ -35,7 +35,7 @@ WHERE bot_id = sqlc.arg(bot_id)
 -- name: SearchInboxItems :many
 SELECT * FROM bot_inbox
 WHERE bot_id = sqlc.arg(bot_id)
-  AND content::text ILIKE '%' || sqlc.arg(query) || '%'
+  AND content ILIKE '%' || sqlc.arg(query) || '%'
   AND (sqlc.narg(start_time)::timestamptz IS NULL OR created_at >= sqlc.narg(start_time)::timestamptz)
   AND (sqlc.narg(end_time)::timestamptz IS NULL OR created_at <= sqlc.narg(end_time)::timestamptz)
   AND (sqlc.narg(include_read)::boolean IS NULL OR sqlc.narg(include_read)::boolean = TRUE OR is_read = FALSE)

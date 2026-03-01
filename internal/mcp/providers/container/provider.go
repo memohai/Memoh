@@ -62,11 +62,27 @@ func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 	return []mcpgw.ToolDescriptor{
 		{
 			Name:        toolRead,
-			Description: "Read file content inside the bot container.",
+			Description: fmt.Sprintf("Read file content inside the bot container. Supports pagination for large files. Max %d lines / %d bytes per call.", readMaxLines, readMaxBytes),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path": map[string]any{"type": "string", "description": fmt.Sprintf("file path (relative to %s or absolute inside container)", wd)},
+					"path": map[string]any{
+						"type":        "string",
+						"description": fmt.Sprintf("File path (relative to %s or absolute inside container)", wd),
+					},
+					"line_offset": map[string]any{
+						"type":        "integer",
+						"description": "Line number to start reading from (1-indexed). Default: 1.",
+						"minimum":     1,
+						"default":     1,
+					},
+					"n_lines": map[string]any{
+						"type":        "integer",
+						"description": fmt.Sprintf("Number of lines to read per call. Default: %d (the per-call maximum). Use a smaller value with line_offset for finer pagination. Max: %d.", readMaxLines, readMaxLines),
+						"minimum":     1,
+						"maximum":     readMaxLines,
+						"default":     readMaxLines,
+					},
 				},
 				"required": []string{"path"},
 			},
@@ -77,8 +93,8 @@ func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":    map[string]any{"type": "string", "description": fmt.Sprintf("file path (relative to %s or absolute inside container)", wd)},
-					"content": map[string]any{"type": "string", "description": "file content"},
+					"path":    map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute inside container)", wd)},
+					"content": map[string]any{"type": "string", "description": "File content"},
 				},
 				"required": []string{"path", "content"},
 			},
@@ -89,8 +105,8 @@ func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("directory path (relative to %s or absolute inside container)", wd)},
-					"recursive": map[string]any{"type": "boolean", "description": "list recursively"},
+					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("Directory path (relative to %s or absolute inside container)", wd)},
+					"recursive": map[string]any{"type": "boolean", "description": "List recursively"},
 				},
 				"required": []string{"path"},
 			},
@@ -101,9 +117,9 @@ func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":     map[string]any{"type": "string", "description": fmt.Sprintf("file path (relative to %s or absolute inside container)", wd)},
-					"old_text": map[string]any{"type": "string", "description": "exact text to find"},
-					"new_text": map[string]any{"type": "string", "description": "replacement text"},
+					"path":     map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute inside container)", wd)},
+					"old_text": map[string]any{"type": "string", "description": "Exact text to find"},
+					"new_text": map[string]any{"type": "string", "description": "Replacement text"},
 				},
 				"required": []string{"path", "old_text", "new_text"},
 			},
@@ -162,12 +178,44 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 		if filePath == "" {
 			return mcpgw.BuildToolErrorResult("path is required"), nil
 		}
-		content, err := ExecRead(ctx, p.execRunner, botID, p.execWorkDir, filePath)
+
+		// Parse optional pagination params.
+		lineOffset := 1
+		offset, ok, err := mcpgw.IntArg(arguments, "line_offset")
+		if err != nil {
+			return mcpgw.BuildToolErrorResult(fmt.Sprintf("invalid line_offset: %v", err)), nil
+		}
+		if ok {
+			if offset < 1 {
+				return mcpgw.BuildToolErrorResult("line_offset must be >= 1"), nil
+			}
+			lineOffset = offset
+		}
+
+		nLines := readMaxLines
+		n, ok, err := mcpgw.IntArg(arguments, "n_lines")
+		if err != nil {
+			return mcpgw.BuildToolErrorResult(fmt.Sprintf("invalid n_lines: %v", err)), nil
+		}
+		if ok {
+			if n < 1 {
+				return mcpgw.BuildToolErrorResult("n_lines must be >= 1"), nil
+			}
+			if n > readMaxLines {
+				n = readMaxLines
+			}
+			nLines = n
+		}
+
+		result, err := ReadFile(ctx, p.execRunner, botID, p.execWorkDir, filePath, lineOffset, nLines)
 		if err != nil {
 			return mcpgw.BuildToolErrorResult(err.Error()), nil
 		}
+
+		output := FormatReadResult(result)
+
 		return mcpgw.BuildToolSuccessResult(map[string]any{
-			"content": pruneToolOutputText(content, "tool result (read content)"),
+			"content": output,
 		}), nil
 
 	case toolWrite:

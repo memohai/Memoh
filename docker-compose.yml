@@ -43,7 +43,7 @@ services:
     container_name: memoh-migrate
     entrypoint: ["/app/memoh-server", "migrate", "up"]
     volumes:
-      - ${MEMOH_CONFIG:-./conf/app.docker.toml}:/app/config.toml:ro
+      - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,7 +57,7 @@ services:
     privileged: true
     pid: host
     volumes:
-      - ${MEMOH_CONFIG:-./conf/app.docker.toml}:/app/config.toml:ro
+      - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
       - containerd_data:/var/lib/containerd
       - server_cni_state:/var/lib/cni
       - memoh_data:/opt/memoh/data
@@ -77,7 +77,7 @@ services:
     image: memohai/agent:latest
     container_name: memoh-agent
     volumes:
-      - ${MEMOH_CONFIG:-./conf/app.docker.toml}:/config.toml:ro
+      - ${MEMOH_CONFIG:-./config.toml}:/config.toml:ro
       - /etc/localtime:/etc/localtime:ro
     ports:
       - "8081:8081"

@@ -37,25 +37,35 @@ func (q *Queries) CountUnreadInboxItems(ctx context.Context, botID pgtype.UUID) 
 }
 
 const createInboxItem = `-- name: CreateInboxItem :one
-INSERT INTO bot_inbox (bot_id, source, content)
-VALUES ($1, $2, $3)
-RETURNING id, bot_id, source, content, is_read, created_at, read_at
+INSERT INTO bot_inbox (bot_id, source, header, content, action)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, bot_id, source, header, content, action, is_read, created_at, read_at
 `
 
 type CreateInboxItemParams struct {
 	BotID   pgtype.UUID `json:"bot_id"`
 	Source  string      `json:"source"`
-	Content []byte      `json:"content"`
+	Header  []byte      `json:"header"`
+	Content string      `json:"content"`
+	Action  string      `json:"action"`
 }
 
 func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (BotInbox, error) {
-	row := q.db.QueryRow(ctx, createInboxItem, arg.BotID, arg.Source, arg.Content)
+	row := q.db.QueryRow(ctx, createInboxItem,
+		arg.BotID,
+		arg.Source,
+		arg.Header,
+		arg.Content,
+		arg.Action,
+	)
 	var i BotInbox
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
 		&i.Source,
+		&i.Header,
 		&i.Content,
+		&i.Action,
 		&i.IsRead,
 		&i.CreatedAt,
 		&i.ReadAt,
@@ -90,7 +100,7 @@ func (q *Queries) DeleteInboxItemsByBot(ctx context.Context, botID pgtype.UUID) 
 }
 
 const getInboxItemByID = `-- name: GetInboxItemByID :one
-SELECT id, bot_id, source, content, is_read, created_at, read_at FROM bot_inbox
+SELECT id, bot_id, source, header, content, action, is_read, created_at, read_at FROM bot_inbox
 WHERE id = $1
   AND bot_id = $2
 `
@@ -107,7 +117,9 @@ func (q *Queries) GetInboxItemByID(ctx context.Context, arg GetInboxItemByIDPara
 		&i.ID,
 		&i.BotID,
 		&i.Source,
+		&i.Header,
 		&i.Content,
+		&i.Action,
 		&i.IsRead,
 		&i.CreatedAt,
 		&i.ReadAt,
@@ -116,7 +128,7 @@ func (q *Queries) GetInboxItemByID(ctx context.Context, arg GetInboxItemByIDPara
 }
 
 const listInboxItems = `-- name: ListInboxItems :many
-SELECT id, bot_id, source, content, is_read, created_at, read_at FROM bot_inbox
+SELECT id, bot_id, source, header, content, action, is_read, created_at, read_at FROM bot_inbox
 WHERE bot_id = $1
   AND ($2::boolean IS NULL OR is_read = $2::boolean)
   AND ($3::text IS NULL OR source = $3::text)
@@ -152,7 +164,9 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.ID,
 			&i.BotID,
 			&i.Source,
+			&i.Header,
 			&i.Content,
+			&i.Action,
 			&i.IsRead,
 			&i.CreatedAt,
 			&i.ReadAt,
@@ -168,7 +182,7 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 }
 
 const listUnreadInboxItems = `-- name: ListUnreadInboxItems :many
-SELECT id, bot_id, source, content, is_read, created_at, read_at FROM bot_inbox
+SELECT id, bot_id, source, header, content, action, is_read, created_at, read_at FROM bot_inbox
 WHERE bot_id = $1
   AND is_read = FALSE
 ORDER BY created_at ASC
@@ -193,7 +207,9 @@ func (q *Queries) ListUnreadInboxItems(ctx context.Context, arg ListUnreadInboxI
 			&i.ID,
 			&i.BotID,
 			&i.Source,
+			&i.Header,
 			&i.Content,
+			&i.Action,
 			&i.IsRead,
 			&i.CreatedAt,
 			&i.ReadAt,
@@ -228,9 +244,9 @@ func (q *Queries) MarkInboxItemsRead(ctx context.Context, arg MarkInboxItemsRead
 }
 
 const searchInboxItems = `-- name: SearchInboxItems :many
-SELECT id, bot_id, source, content, is_read, created_at, read_at FROM bot_inbox
+SELECT id, bot_id, source, header, content, action, is_read, created_at, read_at FROM bot_inbox
 WHERE bot_id = $1
-  AND content::text ILIKE '%' || $2 || '%'
+  AND content ILIKE '%' || $2 || '%'
   AND ($3::timestamptz IS NULL OR created_at >= $3::timestamptz)
   AND ($4::timestamptz IS NULL OR created_at <= $4::timestamptz)
   AND ($5::boolean IS NULL OR $5::boolean = TRUE OR is_read = FALSE)
@@ -267,7 +283,9 @@ func (q *Queries) SearchInboxItems(ctx context.Context, arg SearchInboxItemsPara
 			&i.ID,
 			&i.BotID,
 			&i.Source,
+			&i.Header,
 			&i.Content,
+			&i.Action,
 			&i.IsRead,
 			&i.CreatedAt,
 			&i.ReadAt,

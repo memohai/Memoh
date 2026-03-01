@@ -338,10 +338,7 @@ func (m *Manager) dataMount() string {
 }
 
 func (m *Manager) imageRef() string {
-	if m.cfg.Image != "" {
-		return m.cfg.Image
-	}
-	return config.DefaultMCPImage
+	return m.cfg.ImageRef()
 }
 
 func validateBotID(botID string) error {

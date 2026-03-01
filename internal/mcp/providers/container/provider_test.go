@@ -50,8 +50,25 @@ func TestExecutor_ListTools(t *testing.T) {
 }
 
 func TestExecutor_CallTool_Read(t *testing.T) {
+	callCount := 0
 	runner := &fakeExecRunner{
-		result: &mcpgw.ExecWithCaptureResult{Stdout: "hello world", ExitCode: 0},
+		handler: func(req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error) {
+			callCount++
+			cmd := strings.Join(req.Command, " ")
+			switch callCount {
+			case 1:
+				if !strings.Contains(cmd, "head -c 8192") {
+					t.Errorf("expected bounded binary probe, got %q", cmd)
+				}
+			case 2:
+				if !strings.Contains(cmd, "sed -n") {
+					t.Errorf("expected sed command, got %q", cmd)
+				}
+			default:
+				t.Errorf("unexpected extra call #%d: %q", callCount, cmd)
+			}
+			return &mcpgw.ExecWithCaptureResult{Stdout: "hello world", ExitCode: 0}, nil
+		},
 	}
 	exec := NewExecutor(nil, runner, "/data")
 	ctx := context.Background()
@@ -65,13 +82,69 @@ func TestExecutor_CallTool_Read(t *testing.T) {
 		t.Fatal(err)
 	}
 	content, _ := result["structuredContent"].(map[string]any)
-	if content["content"] != "hello world" {
-		t.Errorf("content = %v", content["content"])
+	if content["content"] == "" {
+		t.Errorf("content should not be empty, got %v", content["content"])
 	}
-	// Verify the exec command contains cat.
-	cmd := strings.Join(runner.lastReq.Command, " ")
-	if !strings.Contains(cmd, "cat") {
-		t.Errorf("expected cat command, got %q", cmd)
+	if callCount != 2 {
+		t.Errorf("expected 2 exec calls, got %d", callCount)
+	}
+}
+
+func TestExecutor_CallTool_Read_InvalidPaginationArgs(t *testing.T) {
+	runner := &fakeExecRunner{
+		handler: func(req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error) {
+			t.Fatalf("unexpected exec call: %v", req.Command)
+			return nil, nil
+		},
+	}
+	exec := NewExecutor(nil, runner, "/data")
+	ctx := context.Background()
+	session := mcpgw.ToolSessionContext{BotID: "bot1"}
+
+	tests := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			name: "invalid line_offset type",
+			args: map[string]any{"path": "test.txt", "line_offset": "abc"},
+			want: "invalid line_offset",
+		},
+		{
+			name: "invalid n_lines type",
+			args: map[string]any{"path": "test.txt", "n_lines": "abc"},
+			want: "invalid n_lines",
+		},
+		{
+			name: "line_offset below minimum",
+			args: map[string]any{"path": "test.txt", "line_offset": 0},
+			want: "line_offset must be >= 1",
+		},
+		{
+			name: "n_lines below minimum",
+			args: map[string]any{"path": "test.txt", "n_lines": 0},
+			want: "n_lines must be >= 1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := exec.CallTool(ctx, session, "read", tt.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if isErr, _ := result["isError"].(bool); !isErr {
+				t.Fatalf("expected tool error containing %q", tt.want)
+			}
+			msg := ""
+			if content, ok := result["content"].([]map[string]any); ok && len(content) > 0 {
+				msg, _ = content[0]["text"].(string)
+			}
+			if !strings.Contains(msg, tt.want) {
+				t.Fatalf("error = %q, want substring %q", msg, tt.want)
+			}
+		})
 	}
 }
 

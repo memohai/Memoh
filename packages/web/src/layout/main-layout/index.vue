@@ -1,6 +1,9 @@
 <template>
   <section class="flex">
-    <sidebar-provider class="**:data-[sidebar=sidebar]:bg-transparent">
+    <sidebar-provider
+      :default-open="sidebarDefaultOpen"
+      class="**:data-[sidebar=sidebar]:bg-transparent"
+    >
       <slot name="sidebar" />
       <slot name="main" />
     </sidebar-provider>
@@ -9,4 +12,5 @@
 <script setup lang="ts">
 import { SidebarProvider } from '@memoh/ui'
 
+const sidebarDefaultOpen = document.cookie.includes('sidebar_state=true')
 </script>

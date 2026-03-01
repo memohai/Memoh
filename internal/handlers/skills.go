@@ -17,6 +17,7 @@ type SkillItem struct {
 	Description string         `json:"description"`
 	Content     string         `json:"content"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
+	Raw         string         `json:"raw"`
 }
 
 type SkillsResponse struct {
@@ -24,7 +25,7 @@ type SkillsResponse struct {
 }
 
 type SkillsUpsertRequest struct {
-	Skills []SkillItem `json:"skills"`
+	Skills []string `json:"skills"`
 }
 
 type SkillsDeleteRequest struct {
@@ -74,6 +75,7 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 			Description: parsed.Description,
 			Content:     parsed.Content,
 			Metadata:    parsed.Metadata,
+			Raw:         raw,
 		})
 	}
 
@@ -107,21 +109,17 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	for _, skill := range req.Skills {
-		name := strings.TrimSpace(skill.Name)
-		if !isValidSkillName(name) {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid skill name")
+	for _, raw := range req.Skills {
+		parsed := parseSkillFile(raw, "")
+		if !isValidSkillName(parsed.Name) {
+			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
 		}
-		content := strings.TrimSpace(skill.Content)
-		if content == "" {
-			content = buildSkillContent(name, strings.TrimSpace(skill.Description))
-		}
-		dirPath := filepath.Join(skillsDir, name)
+		dirPath := filepath.Join(skillsDir, parsed.Name)
 		if err := os.MkdirAll(dirPath, 0o755); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		filePath := filepath.Join(dirPath, "SKILL.md")
-		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(filePath, []byte(raw), 0o644); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 	}
@@ -372,13 +370,6 @@ func normalizeParsedSkill(skill parsedSkill) parsedSkill {
 	}
 
 	return skill
-}
-
-func buildSkillContent(name, description string) string {
-	if description == "" {
-		description = name
-	}
-	return "---\nname: " + name + "\ndescription: " + description + "\n---\n\n# " + name + "\n\n" + description
 }
 
 func isValidSkillName(name string) bool {

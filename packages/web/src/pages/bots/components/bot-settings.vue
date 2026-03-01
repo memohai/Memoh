@@ -148,9 +148,7 @@
     <Separator />
 
     <!-- Danger Zone -->
-    <div
-      class="rounded-lg border border-destructive/50 bg-destructive/5 p-4 space-y-3"
-    >
+    <div class="rounded-lg border border-destructive/50 bg-destructive/5 p-4 space-y-3">
       <h3 class="text-sm font-semibold text-destructive">
         {{ $t('bots.settings.dangerZone') }}
       </h3>
@@ -350,8 +348,8 @@ async function handleSave() {
 async function handleDeleteBot() {
   try {
     await deleteBot()
-    toast.success(t('bots.deleteSuccess'))
     await router.push({ name: 'bots' })
+    toast.success(t('bots.deleteSuccess'))    
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.lifecycle.deleteFailed')))
   }

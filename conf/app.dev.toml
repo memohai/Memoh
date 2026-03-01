@@ -17,19 +17,20 @@ email = "dev@memoh.local"
 jwt_secret = "memoh-dev-secret-do-not-use-in-production"
 jwt_expires_in = "168h"
 
-# Containerd is typically not available in local development.
-# Uncomment and configure if you have containerd running locally.
-# [containerd]
-# socket_path = "/run/containerd/containerd.sock"
-# namespace = "default"
+[containerd]
+socket_path = "/run/containerd/containerd.sock"
+namespace = "default"
 
-# [mcp]
-# image = "docker.io/library/memoh-mcp:dev"
-# snapshotter = "overlayfs"
-# data_root = "data"
+[mcp]
+# registry = "memoh.cn"  # Uncomment for China mainland mirror
+image = "memohai/mcp:latest"
+snapshotter = "overlayfs"
+data_root = "/opt/memoh/data"
+cni_bin_dir = "/opt/cni/bin"
+cni_conf_dir = "/etc/cni/net.d"
 
 [postgres]
-host = "127.0.0.1"
+host = "postgres"
 port = 5432
 user = "memoh"
 password = "memoh123"
@@ -37,16 +38,16 @@ database = "memoh"
 sslmode = "disable"
 
 [qdrant]
-base_url = "http://127.0.0.1:6334"
+base_url = "http://qdrant:6334"
 api_key = ""
 collection = "memory"
 timeout_seconds = 10
 
 [agent_gateway]
-host = "127.0.0.1"
+host = "agent"
 port = 8081
-server_addr = ":8080"
+server_addr = "server:8080"
 
 [web]
-host = "127.0.0.1"
+host = "0.0.0.0"
 port = 8082

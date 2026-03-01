@@ -61,6 +61,7 @@ export interface QdrantConfig {
 export interface AgentGatewayConfig {
   host: string;
   port: number;
+  server_addr?: string;
 }
 
 export interface WebConfig {

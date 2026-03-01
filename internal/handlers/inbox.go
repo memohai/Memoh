@@ -142,7 +142,7 @@ func (h *InboxHandler) Create(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	req.BotID = botID
-	if len(req.Content) == 0 {
+	if strings.TrimSpace(req.Content) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "content is required")
 	}
 	item, err := h.service.Create(c.Request().Context(), req)

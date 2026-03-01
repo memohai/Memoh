@@ -53,6 +53,8 @@ import {
   faMusic,
   faVideo,
   faBolt,
+  faEnvelope,
+  faChartLine,
 } from '@fortawesome/free-solid-svg-icons'
 import {
   faRectangleList,
@@ -60,7 +62,8 @@ import {
   faComments,
   faComment,
 } from '@fortawesome/free-regular-svg-icons'
-import { faSlack, faBrave, faGoogle, faMicrosoft } from '@fortawesome/free-brands-svg-icons'
+import { faSlack, faBrave, faGoogle, faMicrosoft, faYandex } from '@fortawesome/free-brands-svg-icons'
+import { customSearchIcons } from './components/search-provider-logo/custom-icons'
 
 library.add(
   faGear,
@@ -107,6 +110,10 @@ library.add(
   faBrave,
   faGoogle,
   faMicrosoft,
+  faEnvelope,
+  faChartLine,
+  faYandex,
+  ...customSearchIcons,
 )
 
 createApp(App)

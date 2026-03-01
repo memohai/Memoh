@@ -33,7 +33,8 @@ export const allActions = Object.values(AgentAction)
 export interface InboxItem {
   id: string
   source: string
-  content: Record<string, unknown>
+  header: Record<string, unknown>
+  content: string
   createdAt: string
 }
 

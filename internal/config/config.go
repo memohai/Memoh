@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -12,7 +13,7 @@ const (
 	DefaultHTTPAddr         = ":8080"
 	DefaultNamespace        = "default"
 	DefaultSocketPath       = "/run/containerd/containerd.sock"
-	DefaultMCPImage         = "docker.io/library/memoh-mcp:latest"
+	DefaultMCPImage         = "memohai/mcp:latest"
 	DefaultDataRoot         = "data"
 	DefaultDataMount        = "/data"
 	DefaultCNIBinaryDir     = "/opt/cni/bin"
@@ -71,11 +72,40 @@ type SocktainerConfig struct {
 }
 
 type MCPConfig struct {
+	Registry     string `toml:"registry"`
 	Image        string `toml:"image"`
 	Snapshotter  string `toml:"snapshotter"`
 	DataRoot     string `toml:"data_root"`
 	CNIBinaryDir string `toml:"cni_bin_dir"`
 	CNIConfigDir string `toml:"cni_conf_dir"`
+}
+
+// ImageRef returns the fully qualified image reference, prepending the
+// registry mirror when configured and normalizing for containerd compatibility.
+// Containerd requires a fully-qualified domain in image references — short
+// Docker Hub names like "memohai/mcp:latest" are misinterpreted as hosts.
+func (c MCPConfig) ImageRef() string {
+	img := c.Image
+	if img == "" {
+		img = DefaultMCPImage
+	}
+	if c.Registry != "" {
+		return c.Registry + "/" + img
+	}
+	return NormalizeImageRef(img)
+}
+
+// NormalizeImageRef ensures an image reference is fully qualified for containerd.
+func NormalizeImageRef(ref string) string {
+	firstSlash := strings.Index(ref, "/")
+	if firstSlash == -1 {
+		return "docker.io/library/" + ref
+	}
+	firstSegment := ref[:firstSlash]
+	if strings.Contains(firstSegment, ".") || strings.Contains(firstSegment, ":") || firstSegment == "localhost" {
+		return ref
+	}
+	return "docker.io/" + ref
 }
 
 type PostgresConfig struct {

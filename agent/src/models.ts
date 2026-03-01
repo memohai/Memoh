@@ -90,6 +90,7 @@ export const MCPConnectionModel = z.union([HTTPMCPConnectionModel, SSEMCPConnect
 export const InboxItemModel = z.object({
   id: z.string(),
   source: z.string(),
-  content: z.record(z.string(), z.unknown()).default({}),
+  header: z.record(z.string(), z.unknown()).default({}),
+  content: z.string().default(''),
   createdAt: z.string(),
 })

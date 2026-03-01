@@ -1,0 +1,22 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/memoh-server ./cmd/agent/main.go"
+bin = "./tmp/memoh-server"
+args_bin = ["serve"]
+include_ext = ["go", "toml"]
+include_dir = ["cmd", "internal", "conf"]
+exclude_dir = ["tmp", "vendor", "node_modules", "packages", "agent", "docs", "devenv", "docker", "scripts", "db/migrations"]
+exclude_regex = ["_test\\.go$"]
+delay = 1000
+stop_on_error = true
+send_interrupt = true
+kill_delay = 500
+
+[log]
+time = false
+main_only = true
+
+[misc]
+clean_on_exit = true

@@ -15,6 +15,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  Button
 } from '@memoh/ui'
 import { getProviders } from '@memoh/sdk'
 import type { ProvidersGetResponse } from '@memoh/sdk'
@@ -52,7 +53,7 @@ const curFilterProvider = computed(() => {
   }
   const keyword = searchText.value.toLowerCase()
   return providerData.value.filter((provider: ProvidersGetResponse) => {
-    return (provider.name as string).toLowerCase().includes(keyword)
+    return (provider.name ?? '').toLowerCase().includes(keyword)
   })
 })
 
@@ -96,7 +97,9 @@ const openStatus = reactive({
       </InputGroup>
     </template>
 
-    <template #sidebar-content>
+    <template
+      #sidebar-content
+    >
       <SidebarMenu
         v-for="providerItem in curFilterProvider"
         :key="providerItem.name"
@@ -107,8 +110,8 @@ const openStatus = reactive({
             class="justify-start py-5! px-4"
           >
             <Toggle
-              :class="`py-4 border border-transparent ${curProvider?.name === providerItem.name ? 'border-inherit' : ''}`"
-              :model-value="selectProvider(providerItem.name as string).value"
+              :class="['py-4 border', curProvider?.name === providerItem.name ? 'border-border' : 'border-transparent']"
+              :model-value="selectProvider(providerItem.name ?? '').value"
               @update:model-value="(isSelect) => {
                 if (isSelect) {
                   curProvider = providerItem
@@ -123,7 +126,9 @@ const openStatus = reactive({
     </template>
 
     <template #sidebar-footer>
-      <AddProvider v-model:open="openStatus.provideOpen" />
+      <AddProvider
+        v-model:open="openStatus.provideOpen"
+      />
     </template>
 
     <template #detail>
@@ -145,7 +150,12 @@ const openStatus = reactive({
         <EmptyTitle>{{ $t('provider.emptyTitle') }}</EmptyTitle>
         <EmptyDescription>{{ $t('provider.emptyDescription') }}</EmptyDescription>
         <EmptyContent>
-          <AddProvider v-model:open="openStatus.provideOpen" />
+          <Button
+            variant="outline"
+            @click="openStatus.provideOpen=true"
+          >
+            {{ $t('provider.addBtn') }}
+          </Button>          
         </EmptyContent>
       </Empty>
     </template>

@@ -499,6 +499,20 @@ export const createAgent = (
             break
           }
           case 'tool-call':
+            // Flush any remaining buffered content before ending the text stream.
+            const remainder = attachmentsExtractor.flushRemainder()
+            if (remainder.visibleText) {
+              yield {
+                type: 'text_delta',
+                delta: remainder.visibleText,
+              }
+            }
+            if (remainder.attachments.length) {
+              yield {
+                type: 'attachment_delta',
+                attachments: remainder.attachments,
+              }
+            }
             yield {
               type: 'tool_call_start',
               toolName: chunk.toolName,
