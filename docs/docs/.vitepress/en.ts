@@ -70,4 +70,25 @@ export const en = [
       },
     ]
   },
+  {
+    text: 'Channels',
+    items: [
+      {
+        text: 'Overview',
+        link: '/channels/index.md'
+      },
+      {
+        text: 'Telegram',
+        link: '/channels/telegram.md'
+      },
+      {
+        text: 'Feishu (Lark)',
+        link: '/channels/feishu.md'
+      },
+      {
+        text: 'Discord',
+        link: '/channels/discord.md'
+      },
+    ]
+  },
 ]

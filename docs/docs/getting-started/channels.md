@@ -14,11 +14,11 @@ Configure your bot's connections from the **Channels** tab in the Bot Detail pag
 
 ### Popular Platforms
 
-- **Telegram**: Supports full streaming, Markdown, attachments, and message replies.
-- **Discord**: Full integration for server and direct messages.
-- **Feishu (Lark)**: Comprehensive support for enterprise communication.
-- **Email**: Connect via inbound webhooks and outbound email providers.
-- **Web**: The built-in chat interface accessible directly from the sidebar.
+For detailed step-by-step guides on how to create and configure bots for each platform, see:
+
+- **[Telegram Configuration](/channels/telegram)**
+- **[Feishu (Lark) Configuration](/channels/feishu)**
+- **[Discord Configuration](/channels/discord)**
 
 ---
 
