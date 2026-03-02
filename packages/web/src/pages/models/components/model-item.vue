@@ -91,7 +91,7 @@ import {
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { postModelsByIdTest } from '@memoh/sdk'
 import type { ModelsGetResponse, ModelsTestResponse } from '@memoh/sdk'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 
 const props = defineProps<{
   model: ModelsGetResponse
@@ -132,7 +132,4 @@ async function runTest() {
   }
 }
 
-onMounted(() => {
-  runTest()
-})
 </script>

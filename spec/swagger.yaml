@@ -1664,6 +1664,22 @@ definitions:
       updated_at:
         type: string
     type: object
+  providers.ImportModelsRequest:
+    properties:
+      client_type:
+        type: string
+    type: object
+  providers.ImportModelsResponse:
+    properties:
+      created:
+        type: integer
+      models:
+        items:
+          type: string
+        type: array
+      skipped:
+        type: integer
+    type: object
   providers.TestResponse:
     properties:
       latency_ms:
@@ -5845,6 +5861,45 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update provider
+      tags:
+      - providers
+  /providers/{id}/import-models:
+    post:
+      consumes:
+      - application/json
+      description: Fetch models from provider's /v1/models endpoint and import them
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Import configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/providers.ImportModelsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/providers.ImportModelsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Import models from provider
       tags:
       - providers
   /providers/{id}/models:

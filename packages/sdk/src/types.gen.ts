@@ -1012,6 +1012,16 @@ export type ProvidersGetResponse = {
     updated_at?: string;
 };
 
+export type ProvidersImportModelsRequest = {
+    client_type?: string;
+};
+
+export type ProvidersImportModelsResponse = {
+    created?: number;
+    models?: Array<string>;
+    skipped?: number;
+};
+
 export type ProvidersTestResponse = {
     latency_ms?: number;
     message?: string;
@@ -5984,6 +5994,47 @@ export type PutProvidersByIdResponses = {
 };
 
 export type PutProvidersByIdResponse = PutProvidersByIdResponses[keyof PutProvidersByIdResponses];
+
+export type PostProvidersByIdImportModelsData = {
+    /**
+     * Import configuration
+     */
+    body: ProvidersImportModelsRequest;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/import-models';
+};
+
+export type PostProvidersByIdImportModelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostProvidersByIdImportModelsError = PostProvidersByIdImportModelsErrors[keyof PostProvidersByIdImportModelsErrors];
+
+export type PostProvidersByIdImportModelsResponses = {
+    /**
+     * OK
+     */
+    200: ProvidersImportModelsResponse;
+};
+
+export type PostProvidersByIdImportModelsResponse = PostProvidersByIdImportModelsResponses[keyof PostProvidersByIdImportModelsResponses];
 
 export type GetProvidersByIdModelsData = {
     body?: never;

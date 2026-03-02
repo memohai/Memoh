@@ -188,6 +188,52 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	}, nil
 }
 
+// FetchRemoteModels fetches models from the provider's /v1/models endpoint.
+func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteModel, error) {
+	providerID, err := db.ParseUUID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	provider, err := s.queries.GetLlmProviderByID(ctx, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("get provider: %w", err)
+	}
+
+	baseURL := strings.TrimRight(provider.BaseUrl, "/")
+	modelsURL := fmt.Sprintf("%s/models", baseURL)
+
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	if provider.ApiKey != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", provider.ApiKey))
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var fetchResp FetchModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&fetchResp); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return fetchResp.Data, nil
+}
+
 func probeReachable(ctx context.Context, baseURL string) (bool, string) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()

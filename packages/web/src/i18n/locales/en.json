@@ -168,7 +168,12 @@
     "testOk": "OK",
     "testAuthError": "Auth Error",
     "testError": "Error",
-    "testFailed": "Test failed"
+    "testFailed": "Test failed",
+    "importModels": "Import Models",
+    "importSuccess": "Successfully imported {created} models, skipped {skipped}",
+    "importFailed": "Failed to import models",
+    "importClientType": "Model Client Type",
+    "importClientTypeHint": "Set default client type for imported models"
   },
   "provider": {
     "add": "Add Provider",
@@ -184,7 +189,9 @@
     "testConnection": "Test Connection",
     "reachable": "Reachable",
     "unreachable": "Unreachable",
-    "testFailed": "Test failed"
+    "testFailed": "Test failed",
+    "autoImport": "Auto Import Models",
+    "autoImportHint": "Automatically fetch and import models from the provider after creation"
   },
   "searchProvider": {
     "title": "Search Providers",

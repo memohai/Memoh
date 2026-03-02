@@ -46,3 +46,29 @@ type TestResponse struct {
 	LatencyMs int64  `json:"latency_ms,omitempty"`
 	Message   string `json:"message,omitempty"`
 }
+
+// RemoteModel represents a model returned by the provider's /v1/models endpoint
+type RemoteModel struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
+// FetchModelsResponse represents the response from the provider's /v1/models endpoint
+type FetchModelsResponse struct {
+	Object string        `json:"object"`
+	Data   []RemoteModel `json:"data"`
+}
+
+// ImportModelsRequest represents a request to import models from a provider
+type ImportModelsRequest struct {
+	ClientType string `json:"client_type"`
+}
+
+// ImportModelsResponse represents the response for importing models
+type ImportModelsResponse struct {
+	Created int      `json:"created"`
+	Skipped int      `json:"skipped"`
+	Models  []string `json:"models"`
+}

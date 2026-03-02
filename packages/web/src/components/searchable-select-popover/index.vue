@@ -42,8 +42,8 @@
         >
       </div>
 
-      <ScrollArea
-        class="max-h-64"
+      <div
+        class="max-h-64 overflow-y-auto"
         role="listbox"
       >
         <div
@@ -112,7 +112,7 @@
             </slot>
           </button>
         </div>
-      </ScrollArea>
+      </div>
     </PopoverContent>
   </Popover>
 </template>
@@ -123,7 +123,6 @@ import {
   PopoverTrigger,
   PopoverContent,
   Button,
-  ScrollArea,
 } from '@memoh/ui'
 import { computed, ref, watch } from 'vue'
 

@@ -164,7 +164,12 @@
     "testOk": "正常",
     "testAuthError": "认证失败",
     "testError": "异常",
-    "testFailed": "测试失败"
+    "testFailed": "测试失败",
+    "importModels": "导入模型",
+    "importSuccess": "成功导入 {created} 个模型，跳过 {skipped} 个",
+    "importFailed": "导入模型失败",
+    "importClientType": "模型客户端类型",
+    "importClientTypeHint": "为导入的模型设置默认客户端类型"
   },
   "provider": {
     "add": "添加服务商",
@@ -180,7 +185,9 @@
     "testConnection": "测试连接",
     "reachable": "可连接",
     "unreachable": "不可连接",
-    "testFailed": "测试失败"
+    "testFailed": "测试失败",
+    "autoImport": "自动导入模型",
+    "autoImportHint": "创建后自动从服务商获取并导入模型"
   },
   "searchProvider": {
     "title": "搜索提供方",

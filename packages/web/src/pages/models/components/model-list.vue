@@ -4,10 +4,13 @@
       <h4 class="scroll-m-20 font-semibold tracking-tight">
         {{ $t('models.title') }}
       </h4>
-      <CreateModel
+      <div
         v-if="providerId"
-        :id="providerId"
-      />
+        class="flex items-center gap-2 ml-auto"
+      >
+        <ImportModelsDialog :provider-id="providerId" />
+        <CreateModel :id="providerId" />
+      </div>
     </section>
 
     <section
@@ -50,6 +53,7 @@ import {
   EmptyTitle,
 } from '@memoh/ui'
 import CreateModel from '@/components/create-model/index.vue'
+import ImportModelsDialog from '@/components/import-models-dialog/index.vue'
 import ModelItem from './model-item.vue'
 import type { ModelsGetResponse } from '@memoh/sdk'
 

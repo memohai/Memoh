@@ -73,9 +73,8 @@
         :disabled="!props.provider?.id"
         @click="runTest"
       >
-        <Spinner v-if="testLoading" />
         <FontAwesomeIcon
-          v-else
+          v-if="!testLoading"
           :icon="['fas', 'rotate']"
         />
         {{ $t('provider.testConnection') }}
@@ -197,9 +196,10 @@ async function runTest() {
   }
 }
 
-watch(() => props.provider?.id, (newId) => {
-  if (newId) runTest()
-}, { immediate: true })
+watch(() => props.provider?.id, () => {
+  testResult.value = null
+  testError.value = ''
+})
 
 const providerSchema = toTypedSchema(z.object({
   name: z.string().min(1),
