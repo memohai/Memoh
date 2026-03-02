@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -39,6 +40,19 @@ type SnapshotCreateInfo struct {
 	CreatedAt    time.Time
 }
 
+type ManagedSnapshotMeta struct {
+	Source  string
+	Version *int
+}
+
+type BotSnapshotData struct {
+	ContainerID      string
+	Info             ctr.ContainerInfo
+	Snapshotter      string
+	RuntimeSnapshots []ctr.SnapshotInfo
+	ManagedMeta      map[string]ManagedSnapshotMeta
+}
+
 func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, source string) (*SnapshotCreateInfo, error) {
 	if m.db == nil || m.queries == nil {
 		return nil, fmt.Errorf("db is not configured")
@@ -61,16 +75,30 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 
 	normalizedSnapshotName := strings.TrimSpace(snapshotName)
 	if normalizedSnapshotName == "" {
-		normalizedSnapshotName = fmt.Sprintf("%s-%s", containerID, time.Now().Format("20060102150405"))
+		normalizedSnapshotName = fmt.Sprintf("%s-%d", containerID, time.Now().UnixNano())
 	}
 	normalizedSource := normalizeSnapshotSource(source)
 
-	if err := m.service.CommitSnapshot(ctx, info.Snapshotter, normalizedSnapshotName, info.SnapshotKey); err != nil {
+	// The sequence below (stop → commit → replace → start) is atomic from the
+	// container's perspective: interrupting it mid-way leaves the container missing.
+	// Use a detached context so a cancelled HTTP request cannot break it.
+	dctx := context.WithoutCancel(ctx)
+
+	if err := m.safeStopTask(dctx, containerID); err != nil {
+		return nil, err
+	}
+
+	if err := m.service.CommitSnapshot(dctx, info.Snapshotter, normalizedSnapshotName, info.SnapshotKey); err != nil {
+		return nil, err
+	}
+
+	activeSnapshotName := fmt.Sprintf("%s-active-%d", containerID, time.Now().UnixNano())
+	if err := m.replaceContainerSnapshot(dctx, botID, containerID, info, activeSnapshotName, normalizedSnapshotName); err != nil {
 		return nil, err
 	}
 
 	_, versionNumber, createdAt, err := m.recordSnapshotVersion(
-		ctx,
+		dctx,
 		containerID,
 		normalizedSnapshotName,
 		info.SnapshotKey,
@@ -80,7 +108,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 	if err != nil {
 		return nil, err
 	}
-	if err := m.insertEvent(ctx, containerID, "snapshot_create", map[string]any{
+	if err := m.insertEvent(dctx, containerID, "snapshot_create", map[string]any{
 		"snapshot_name": normalizedSnapshotName,
 		"snapshotter":   info.Snapshotter,
 		"source":        normalizedSource,
@@ -119,43 +147,24 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		return nil, err
 	}
 
-	if err := m.safeStopTask(ctx, containerID); err != nil {
+	dctx := context.WithoutCancel(ctx)
+
+	if err := m.safeStopTask(dctx, containerID); err != nil {
 		return nil, err
 	}
 
 	versionSnapshotName := fmt.Sprintf("%s-v%d", containerID, time.Now().UnixNano())
-	if err := m.service.CommitSnapshot(ctx, info.Snapshotter, versionSnapshotName, info.SnapshotKey); err != nil {
+	if err := m.service.CommitSnapshot(dctx, info.Snapshotter, versionSnapshotName, info.SnapshotKey); err != nil {
 		return nil, err
 	}
 
 	activeSnapshotName := fmt.Sprintf("%s-active-%d", containerID, time.Now().UnixNano())
-	if err := m.service.PrepareSnapshot(ctx, info.Snapshotter, activeSnapshotName, versionSnapshotName); err != nil {
-		return nil, err
-	}
-
-	if err := m.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{CleanupSnapshot: false}); err != nil {
-		return nil, err
-	}
-
-	spec, err := m.buildVersionSpec(botID)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = m.service.CreateContainerFromSnapshot(ctx, ctr.CreateContainerRequest{
-		ID:          containerID,
-		ImageRef:    info.Image,
-		SnapshotID:  activeSnapshotName,
-		Snapshotter: info.Snapshotter,
-		Labels:      info.Labels,
-		Spec:        spec,
-	})
-	if err != nil {
+	if err := m.replaceContainerSnapshot(dctx, botID, containerID, info, activeSnapshotName, versionSnapshotName); err != nil {
 		return nil, err
 	}
 
 	versionID, versionNumber, createdAt, err := m.recordSnapshotVersion(
-		ctx,
+		dctx,
 		containerID,
 		versionSnapshotName,
 		info.SnapshotKey,
@@ -166,7 +175,7 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		return nil, err
 	}
 
-	if err := m.insertEvent(ctx, containerID, "version_create", map[string]any{
+	if err := m.insertEvent(dctx, containerID, "version_create", map[string]any{
 		"snapshot_name": versionSnapshotName,
 		"version":       versionNumber,
 		"version_id":    versionID,
@@ -179,6 +188,67 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		Version:      versionNumber,
 		SnapshotName: versionSnapshotName,
 		CreatedAt:    createdAt,
+	}, nil
+}
+
+// ListBotSnapshotData returns the raw snapshot data for a bot under the
+// per-container lock, so callers never observe transient state during
+// snapshot/version operations.
+func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSnapshotData, error) {
+	if err := validateBotID(botID); err != nil {
+		return nil, err
+	}
+
+	containerID := m.containerID(botID)
+	unlock := m.lockContainer(containerID)
+	defer unlock()
+
+	info, err := m.service.GetContainer(ctx, containerID)
+	if err != nil {
+		return nil, err
+	}
+
+	snapshotter := strings.TrimSpace(info.Snapshotter)
+	if snapshotter == "" {
+		snapshotter = m.cfg.Snapshotter
+	}
+	if snapshotter == "" {
+		snapshotter = "overlayfs"
+	}
+
+	runtimeSnapshots, err := m.service.ListSnapshots(ctx, snapshotter)
+	if err != nil {
+		return nil, err
+	}
+
+	managedMeta := make(map[string]ManagedSnapshotMeta)
+	if m.queries != nil {
+		rows, err := m.queries.ListSnapshotsWithVersionByContainerID(ctx, containerID)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			name := strings.TrimSpace(row.RuntimeSnapshotName)
+			if name == "" {
+				continue
+			}
+			meta := ManagedSnapshotMeta{
+				Source: strings.TrimSpace(row.Source),
+			}
+			if row.Version.Valid {
+				v := int(row.Version.Int32)
+				meta.Version = &v
+			}
+			managedMeta[name] = meta
+		}
+	}
+
+	return &BotSnapshotData{
+		ContainerID:      containerID,
+		Info:             info,
+		Snapshotter:      snapshotter,
+		RuntimeSnapshots: runtimeSnapshots,
+		ManagedMeta:      managedMeta,
 	}, nil
 }
 
@@ -237,37 +307,18 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 		return err
 	}
 
-	if err := m.safeStopTask(ctx, containerID); err != nil {
+	dctx := context.WithoutCancel(ctx)
+
+	if err := m.safeStopTask(dctx, containerID); err != nil {
 		return err
 	}
 
 	activeSnapshotName := fmt.Sprintf("%s-rollback-%d", containerID, time.Now().UnixNano())
-	if err := m.service.PrepareSnapshot(ctx, info.Snapshotter, activeSnapshotName, snapshotName); err != nil {
+	if err := m.replaceContainerSnapshot(dctx, botID, containerID, info, activeSnapshotName, snapshotName); err != nil {
 		return err
 	}
 
-	if err := m.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{CleanupSnapshot: false}); err != nil {
-		return err
-	}
-
-	spec, err := m.buildVersionSpec(botID)
-	if err != nil {
-		return err
-	}
-
-	_, err = m.service.CreateContainerFromSnapshot(ctx, ctr.CreateContainerRequest{
-		ID:          containerID,
-		ImageRef:    info.Image,
-		SnapshotID:  activeSnapshotName,
-		Snapshotter: info.Snapshotter,
-		Labels:      info.Labels,
-		Spec:        spec,
-	})
-	if err != nil {
-		return err
-	}
-
-	return m.insertEvent(ctx, containerID, "version_rollback", map[string]any{
+	return m.insertEvent(dctx, containerID, "version_rollback", map[string]any{
 		"snapshot_name": snapshotName,
 		"version":       version,
 		"source":        SnapshotSourceRollback,
@@ -287,6 +338,44 @@ func (m *Manager) VersionSnapshotName(ctx context.Context, botID string, version
 		ContainerID: containerID,
 		Version:     int32(version),
 	})
+}
+
+// replaceContainerSnapshot prepares a new active snapshot from parentSnapshot,
+// deletes the old container, recreates it on the new snapshot, and restarts the task.
+// Caller must pass a detached context (context.WithoutCancel) to guarantee atomicity.
+func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, containerID string, info ctr.ContainerInfo, activeSnapshotName, parentSnapshot string) error {
+	if err := m.service.PrepareSnapshot(ctx, info.Snapshotter, activeSnapshotName, parentSnapshot); err != nil {
+		return err
+	}
+	if err := m.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{CleanupSnapshot: false}); err != nil {
+		return err
+	}
+	spec, err := m.buildVersionSpec(botID)
+	if err != nil {
+		return err
+	}
+	if _, err := m.service.CreateContainerFromSnapshot(ctx, ctr.CreateContainerRequest{
+		ID:          containerID,
+		ImageRef:    info.Image,
+		SnapshotID:  activeSnapshotName,
+		Snapshotter: info.Snapshotter,
+		Labels:      info.Labels,
+		Spec:        spec,
+	}); err != nil {
+		return err
+	}
+	if err := m.service.StartContainer(ctx, containerID, &ctr.StartTaskOptions{UseStdio: false}); err != nil {
+		return err
+	}
+	if err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+		ContainerID: containerID,
+		CNIBinDir:   m.cfg.CNIBinaryDir,
+		CNIConfDir:  m.cfg.CNIConfigDir,
+	}); err != nil {
+		m.logger.Warn("network setup failed after snapshot replace",
+			slog.String("container_id", containerID), slog.Any("error", err))
+	}
+	return nil
 }
 
 func (m *Manager) buildVersionSpec(botID string) (ctr.ContainerSpec, error) {

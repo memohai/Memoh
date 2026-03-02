@@ -407,6 +407,16 @@ func (s *DefaultService) DeleteContainer(ctx context.Context, id string, opts *D
 		return err
 	}
 
+	// A stopped task still holds an entry in containerd; container.Delete fails
+	// with FAILED_PRECONDITION if any task entry exists. Delete it first.
+	if task, err := container.Task(ctx, nil); err == nil {
+		if _, err := task.Delete(ctx, containerd.WithProcessKill); err != nil && !errdefs.IsNotFound(err) {
+			return err
+		}
+	} else if !errdefs.IsNotFound(err) {
+		return err
+	}
+
 	deleteOpts := []containerd.DeleteOpts{}
 	cleanupSnapshot := true
 	if opts != nil {

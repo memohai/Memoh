@@ -575,12 +575,11 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	containerID, err := h.botContainerID(ctx, botID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
+	if h.manager == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "snapshot manager not configured")
 	}
-	containerInfo, err := h.service.GetContainer(ctx, containerID)
+
+	data, err := h.manager.ListBotSnapshotData(c.Request().Context(), botID)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "container not found")
@@ -588,80 +587,48 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	requestedSnapshotter := strings.TrimSpace(c.QueryParam("snapshotter"))
-	snapshotter := strings.TrimSpace(containerInfo.Snapshotter)
-	if requestedSnapshotter != "" {
-		if snapshotter != "" && requestedSnapshotter != snapshotter {
-			return echo.NewHTTPError(http.StatusBadRequest, "snapshotter does not match container snapshotter")
-		}
-		snapshotter = requestedSnapshotter
+	if req := strings.TrimSpace(c.QueryParam("snapshotter")); req != "" && req != data.Snapshotter {
+		return echo.NewHTTPError(http.StatusBadRequest, "snapshotter does not match container snapshotter")
 	}
-	if snapshotter == "" {
-		snapshotter = strings.TrimSpace(h.cfg.Snapshotter)
-	}
-	if snapshotter == "" {
-		snapshotter = "overlayfs"
-	}
-	snapshotKey := strings.TrimSpace(containerInfo.SnapshotKey)
+
+	snapshotKey := strings.TrimSpace(data.Info.SnapshotKey)
 	if snapshotKey == "" {
 		return echo.NewHTTPError(http.StatusInternalServerError, "container snapshot key is empty")
 	}
 
-	allSnapshots, err := h.service.ListSnapshots(ctx, snapshotter)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	runtimeByName := make(map[string]ctr.SnapshotInfo, len(allSnapshots))
-	for _, info := range allSnapshots {
+	runtimeByName := make(map[string]ctr.SnapshotInfo, len(data.RuntimeSnapshots))
+	for _, info := range data.RuntimeSnapshots {
 		name := strings.TrimSpace(info.Name)
 		if name == "" {
 			continue
 		}
 		runtimeByName[name] = info
 	}
-	lineage, ok := snapshotLineage(snapshotKey, allSnapshots)
+	lineage, ok := snapshotLineage(snapshotKey, data.RuntimeSnapshots)
 	if !ok {
 		h.logger.Warn("container snapshot chain root not found",
-			slog.String("container_id", containerID),
-			slog.String("snapshotter", snapshotter),
+			slog.String("container_id", data.ContainerID),
+			slog.String("snapshotter", data.Snapshotter),
 			slog.String("snapshot_key", snapshotKey),
 		)
 		return echo.NewHTTPError(http.StatusInternalServerError, "container snapshot chain not found")
 	}
 
-	metadataByName := map[string]dbsqlc.ListSnapshotsWithVersionByContainerIDRow{}
-	if h.queries != nil {
-		managedRows, dbErr := h.queries.ListSnapshotsWithVersionByContainerID(ctx, containerID)
-		if dbErr != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, dbErr.Error())
-		}
-		for _, row := range managedRows {
-			name := strings.TrimSpace(row.RuntimeSnapshotName)
-			if name == "" {
-				continue
-			}
-			metadataByName[name] = row
-		}
-	}
-
-	items := make([]SnapshotInfo, 0, len(lineage)+len(metadataByName))
-	seen := make(map[string]struct{}, len(lineage)+len(metadataByName))
-	appendRuntime := func(runtimeInfo ctr.SnapshotInfo, fallbackSource string, meta *dbsqlc.ListSnapshotsWithVersionByContainerIDRow) {
+	items := make([]SnapshotInfo, 0, len(lineage)+len(data.ManagedMeta))
+	seen := make(map[string]struct{}, len(lineage)+len(data.ManagedMeta))
+	appendRuntime := func(runtimeInfo ctr.SnapshotInfo, fallbackSource string, meta *mcp.ManagedSnapshotMeta) {
 		source := fallbackSource
 		managed := false
 		var version *int
 		if meta != nil {
-			if strings.TrimSpace(meta.Source) != "" {
-				source = strings.TrimSpace(meta.Source)
+			if meta.Source != "" {
+				source = meta.Source
 			}
 			managed = true
-			if meta.Version.Valid {
-				v := int(meta.Version.Int32)
-				version = &v
-			}
+			version = meta.Version
 		}
 		items = append(items, SnapshotInfo{
-			Snapshotter: snapshotter,
+			Snapshotter: data.Snapshotter,
 			Name:        runtimeInfo.Name,
 			Parent:      runtimeInfo.Parent,
 			Kind:        runtimeInfo.Kind,
@@ -677,28 +644,27 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 
 	for _, runtimeInfo := range lineage {
 		name := strings.TrimSpace(runtimeInfo.Name)
-		row, hasMeta := metadataByName[name]
-		if hasMeta {
-			appendRuntime(runtimeInfo, "image_layer", &row)
+		if meta, hasMeta := data.ManagedMeta[name]; hasMeta {
+			appendRuntime(runtimeInfo, "image_layer", &meta)
 			continue
 		}
 		appendRuntime(runtimeInfo, "image_layer", nil)
 	}
 
-	for name, row := range metadataByName {
+	for name, meta := range data.ManagedMeta {
 		if _, exists := seen[name]; exists {
 			continue
 		}
 		runtimeInfo, exists := runtimeByName[name]
 		if !exists {
 			h.logger.Warn("managed snapshot not found in runtime",
-				slog.String("container_id", containerID),
+				slog.String("container_id", data.ContainerID),
 				slog.String("snapshot_name", name),
-				slog.String("snapshotter", snapshotter),
+				slog.String("snapshotter", data.Snapshotter),
 			)
 			continue
 		}
-		appendRuntime(runtimeInfo, "managed", &row)
+		appendRuntime(runtimeInfo, "managed", &meta)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
@@ -707,7 +673,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 		return items[i].CreatedAt.Before(items[j].CreatedAt)
 	})
 	return c.JSON(http.StatusOK, ListSnapshotsResponse{
-		Snapshotter: snapshotter,
+		Snapshotter: data.Snapshotter,
 		Snapshots:   items,
 	})
 }
