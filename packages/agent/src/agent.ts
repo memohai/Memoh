@@ -1,5 +1,6 @@
 import {
   generateText,
+  type ImagePart,
   LanguageModelUsage,
   ModelMessage,
   stepCountIs,
@@ -77,14 +78,14 @@ const buildStepUsages = (
   return usages
 }
 
-export const buildNativeImageParts = (attachments: GatewayInputAttachment[]) => {
+export const buildNativeImageParts = (attachments: GatewayInputAttachment[]): ImagePart[] => {
   return attachments
     .filter((attachment) =>
       attachment.type === 'image' &&
       (attachment.transport === 'inline_data_url' || attachment.transport === 'public_url') &&
       Boolean(attachment.payload),
     )
-    .map((attachment) => ({ type: 'image', image: attachment.payload }))
+    .map((attachment): ImagePart => ({ type: 'image', image: attachment.payload }))
 }
 
 export const createAgent = (
