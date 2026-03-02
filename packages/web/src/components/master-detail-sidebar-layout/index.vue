@@ -16,7 +16,7 @@
             <slot name="sidebar-footer" />
           </SidebarFooter>
         </Sidebar>
-        <section class="flex-1 h-full">
+        <section class="flex-1 min-w-0 h-full">
           <slot name="detail" />
         </section>
       </SidebarProvider>

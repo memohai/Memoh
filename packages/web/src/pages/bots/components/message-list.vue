@@ -51,7 +51,7 @@
             :class="{ 'font-mono text-xs': msg.role === 'tool' || msg.role === 'system' }"
           >
             <div
-              class="whitespace-pre-wrap wrap-break-word"
+              class="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
               :class="{ 'line-clamp-4': !expandedIds.includes(msgKey(msg, idx)) }"
             >
               {{ formatContent(msg.content) }}

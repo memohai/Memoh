@@ -82,9 +82,9 @@
       <!-- Pagination -->
       <div
         v-if="totalPages > 1"
-        class="flex items-center justify-between pt-4"
+        class="flex items-center justify-between gap-3 pt-4"
       >
-        <span class="text-sm text-muted-foreground">
+        <span class="shrink-0 whitespace-nowrap text-sm text-muted-foreground">
           {{ paginationSummary }}
         </span>
         <Pagination
@@ -92,6 +92,7 @@
           :items-per-page="PAGE_SIZE"
           :sibling-count="1"
           :page="currentPage"
+          class="w-auto shrink-0"
           show-edges
           @update:page="currentPage = $event"
         >
