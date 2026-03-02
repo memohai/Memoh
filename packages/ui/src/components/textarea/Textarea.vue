@@ -24,8 +24,8 @@ const modelValue = useVModel(props, 'modelValue', emits, {
     v-model="modelValue"
     data-slot="textarea"
     :class="cn(
-      'flex field-sizing-content min-h-16 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100',
-      'placeholder:text-gray-400 dark:placeholder:text-gray-500',
+      'flex field-sizing-content min-h-16 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground',
+      'placeholder:text-muted-foreground',
       'shadow-sm transition-all outline-none resize-none',
       'focus:border-primary focus:ring-2 focus:ring-primary/20',
       'disabled:cursor-not-allowed disabled:opacity-50',

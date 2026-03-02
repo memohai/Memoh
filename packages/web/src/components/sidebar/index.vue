@@ -1,21 +1,18 @@
 <template>
-  <aside
-    aria-label="Primary"
-    class="[&_[data-state=collapsed]_:is(.title-container,.exist-btn)]:hidden"
-  >
+  <aside aria-label="Primary">
     <Sidebar
       collapsible="icon"
       role="navigation"
       aria-label="Primary"
     >
-      <SidebarHeader class="group-data-[state=collapsed]:hidden">
-        <div class="flex items-center gap-2 px-3 py-2">
+      <SidebarHeader>
+        <div class="flex items-center gap-2 px-1 py-1 group-data-[collapsible=icon]:justify-center">
           <img
             src="/logo.png"
-            class="size-8"
+            class="size-6 shrink-0"
             alt="Memoh logo"
           >
-          <span class="text-xl font-bold text-gray-500 dark:text-gray-400">
+          <span class="text-lg font-bold text-muted-foreground truncate group-data-[collapsible=icon]:hidden">
             Memoh
           </span>
         </div>
@@ -23,27 +20,20 @@
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupContent class="[&_ul+ul]:mt-2!">
-            <SidebarMenu
-              v-for="sidebarItem in sidebarInfo"
-              :key="sidebarItem.title"
-            >
-              <SidebarMenuItem class="[&_[aria-pressed=true]]:bg-accent!">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem
+                v-for="sidebarItem in sidebarInfo"
+                :key="sidebarItem.title"
+              >
                 <SidebarMenuButton
-                  as-child
-                  class="justify-start py-5! px-4"
                   :tooltip="sidebarItem.title"
+                  :is-active="isItemActive(sidebarItem.name)"
+                  :aria-current="isItemActive(sidebarItem.name) ? 'page' : undefined"
+                  @click="router.push({ name: sidebarItem.name })"
                 >
-                  <Toggle
-                    class="border border-transparent w-full flex justify-start"
-                    :class="{ 'border-inherit': isActive(sidebarItem.name as string).value }"
-                    :model-value="isActive(sidebarItem.name as string).value"
-                    :aria-current="isActive(sidebarItem.name as string).value ? 'page' : undefined"
-                    @click="router.push({ name: sidebarItem.name })"
-                  >
-                    <FontAwesomeIcon :icon="sidebarItem.icon" />
-                    <span>{{ sidebarItem.title }}</span>
-                  </Toggle>
+                  <FontAwesomeIcon :icon="sidebarItem.icon" />
+                  <span>{{ sidebarItem.title }}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -55,17 +45,16 @@
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              class="justify-start px-2 py-2"
               :tooltip="displayTitle"
               @click="router.push({ name: 'settings' })"
             >
-              <Avatar class="size-7 shrink-0">
+              <Avatar class="size-4 shrink-0">
                 <AvatarImage
                   v-if="userInfo.avatarUrl"
                   :src="userInfo.avatarUrl"
                   :alt="displayTitle"
                 />
-                <AvatarFallback class="text-[10px] text-gray-600 dark:text-gray-300">
+                <AvatarFallback class="text-[7px] text-muted-foreground">
                   {{ avatarFallback }}
                 </AvatarFallback>
               </Avatar>
@@ -92,7 +81,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  Toggle,
 } from '@memoh/ui'
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -113,10 +101,9 @@ const displayTitle = computed(() =>
 )
 const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
 
-
-const isActive = (cur: string) => computed(() => {
-  return new RegExp(`^/${cur}(\\b|/)`).test(route.path)
-})
+function isItemActive(name: string): boolean {
+  return new RegExp(`^/${name}(\\b|/)`).test(route.path)
+}
 
 const sidebarInfo = computed(() => [
   {
@@ -150,10 +137,14 @@ const sidebarInfo = computed(() => [
     icon: ['fas', 'envelope'],
   },
   {
+    title: t('sidebar.usage'),
+    name: 'usage',
+    icon: ['fas', 'chart-line'],
+  },
+  {
     title: t('sidebar.settings'),
     name: 'settings',
     icon: ['fas', 'gear'],
   },
 ])
-
 </script>

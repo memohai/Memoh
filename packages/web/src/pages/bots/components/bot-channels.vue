@@ -224,6 +224,6 @@ function channelBadgeClass(type: string): string {
     telegram: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
     feishu: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300',
   }
-  return classes[type] ?? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+  return classes[type] ?? 'bg-secondary text-secondary-foreground'
 }
 </script>

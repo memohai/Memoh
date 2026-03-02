@@ -124,25 +124,49 @@ CSS-based configuration in `style.css` (no `tailwind.config.*` file):
 @import "tailwindcss";
 ```
 
-Design tokens are CSS custom properties in `:root` / `.dark` using OKLCH color space:
+Design tokens are CSS custom properties in `:root` / `.dark` using OKLCH color space with a unified subtle purple hue (285):
 - Colors: `--background`, `--foreground`, `--primary`, `--secondary`, `--muted`, `--accent`, `--destructive`, `--border`, `--input`, `--ring`
-- Sidebar: `--sidebar-background`, `--sidebar-foreground`, `--sidebar-primary`, etc.
-- Radius: `--radius` with size variants
+- Sidebar: `--sidebar`, `--sidebar-foreground`, `--sidebar-primary`, etc.
+- Radius: `--radius` with size variants (`--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-xl`)
 - Chart: `--chart-1` through `--chart-5`
 
 Tokens are mapped to Tailwind via `@theme inline` block in `style.css`.
+
+### Color Design Principles
+
+The color system avoids extreme black/white to reduce visual strain and create a layered, warm feel:
+
+- **No pure black or pure white**: Light mode foreground is dark charcoal (L=25%), not black. Dark mode background is dark gray (L=20.5%), not black. Dark mode foreground is soft off-white (L=88%), not pure white.
+- **Subtle color temperature**: All neutral grays carry a tiny chroma (0.004–0.006) at hue 285 (purple), preventing a sterile "dead gray" feel.
+- **Text hierarchy through lightness**: Three distinct levels — `text-foreground` (primary text), `text-secondary-foreground` (emphasis text on secondary surfaces), `text-muted-foreground` (secondary/helper text).
+- **Surface layering**: `background` < `card`/`popover` — card surfaces are slightly lighter than the page background for visual depth.
 
 ### Dark Mode
 
 - CSS: `@custom-variant dark (&:is(.dark *))` in `style.css`
 - Runtime: `useColorMode` from `@vueuse/core` in `store/settings.ts`
 - Storage: theme preference persisted via `useStorage`
-- Usage: `dark:` variant classes (e.g., `dark:bg-gray-900`)
+- Toggle: Available in Settings page and login page
+- Usage: semantic tokens auto-switch; no `dark:` prefix needed for themed colors
 
 ### Styling Convention
 
 - **Utility-first**: Tailwind classes as primary styling method. Minimal `<style>` blocks.
-- **Semantic tokens**: Use theme variables (`text-foreground`, `bg-background`, `text-muted-foreground`) instead of raw colors.
+- **Semantic tokens only**: Always use theme variables (`text-foreground`, `bg-background`, `bg-card`, `text-muted-foreground`, `border-border`, `bg-accent`, etc.) instead of raw Tailwind colors like `gray-*`, `bg-white`, or `text-black`. This ensures dark mode works automatically without `dark:` overrides.
+- **No hardcoded gray colors**: Never use `gray-100`, `gray-700`, `bg-white dark:bg-gray-800`, etc. in components. Use the semantic mapping instead:
+
+| Instead of | Use |
+|------------|-----|
+| `border-gray-200 dark:border-gray-700` | `border-border` |
+| `bg-white dark:bg-gray-800` | `bg-card` or `bg-popover` |
+| `text-gray-900 dark:text-gray-100` | `text-foreground` |
+| `bg-gray-100 dark:bg-gray-700` | `bg-muted` or `bg-secondary` |
+| `hover:bg-gray-50 dark:hover:bg-gray-700` | `hover:bg-accent` |
+| `text-gray-500` / `text-gray-400` | `text-muted-foreground` |
+| `text-gray-600 dark:text-gray-400` | `text-muted-foreground` |
+| `bg-gray-200 dark:bg-gray-700` (separators) | `bg-border` |
+
+- **Exception**: Physical UI knobs (Switch thumb, Slider thumb) may keep `bg-white` as they need to contrast against colored tracks regardless of theme.
 - **No scoped CSS modules**: Styling is done inline via utility classes.
 
 ### CSS Imports (main.ts)
@@ -301,7 +325,7 @@ Chat responses are streamed via Server-Sent Events:
 
 - Use Vue 3 Composition API with `<script setup>` exclusively.
 - Style with Tailwind utility classes; avoid `<style>` blocks.
-- Use semantic color tokens (`text-foreground`, `bg-background`) instead of raw colors.
+- **Always use semantic color tokens** (`text-foreground`, `bg-card`, `border-border`, `text-muted-foreground`, `bg-accent`, etc.) instead of raw colors (`gray-*`, `bg-white`, `text-black`). Never introduce hardcoded Tailwind color classes for themed elements — this breaks dark mode consistency.
 - Use `@memoh/ui` components for all UI primitives; do not import Reka UI directly.
 - Use Pinia Colada (`useQuery`/`useMutation`) for server state; use Pinia stores for client state only.
 - API calls must go through `@memoh/sdk`; never call `fetch()` directly.

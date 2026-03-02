@@ -3,7 +3,7 @@ import z from 'zod'
 import { createAgent, ModelConfig, allActions } from '@memoh/agent'
 import { createAuthFetcher, getBaseUrl } from '../index'
 import { bearerMiddleware } from '../middlewares/bearer'
-import { AgentSkillModel, AllowedActionModel, AttachmentModel, HeartbeatModel, IdentityContextModel, InboxItemModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
+import { AgentSkillModel, AllowedActionModel, AttachmentModel, HeartbeatModel, IdentityContextModel, InboxItemModel, LoopDetectionModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
 import { sseChunked } from '../utils/sse'
 
 const AgentModel = z.object({
@@ -19,6 +19,7 @@ const AgentModel = z.object({
   attachments: z.array(AttachmentModel).optional().default([]),
   mcpConnections: z.array(MCPConnectionModel).optional().default([]),
   inbox: z.array(InboxItemModel).optional().default([]),
+  loopDetection: LoopDetectionModel,
 })
 
 export const chatModule = new Elysia({ prefix: '/chat' })
@@ -41,6 +42,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       skills: body.usableSkills,
       mcpConnections: body.mcpConnections,
       inbox: body.inbox,
+      loopDetection: body.loopDetection,
     }, authFetcher)
     return ask({
       query: body.query,
@@ -72,6 +74,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
         skills: body.usableSkills,
         mcpConnections: body.mcpConnections,
         inbox: body.inbox,
+        loopDetection: body.loopDetection,
       }, authFetcher)
       for await (const action of stream({
         query: body.query,
@@ -113,6 +116,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       skills: body.usableSkills,
       mcpConnections: body.mcpConnections,
       inbox: body.inbox,
+      loopDetection: body.loopDetection,
     }, authFetcher)
     return triggerSchedule({
       schedule: body.schedule,
@@ -126,20 +130,22 @@ export const chatModule = new Elysia({ prefix: '/chat' })
   })
   .post('/trigger-heartbeat', async ({ body, bearer }) => {
     console.log('trigger-heartbeat', body)
-    const authFetcher = createAuthFetcher(bearer)
+    const auth = {
+      bearer: bearer!,
+      baseUrl: getBaseUrl(),
+    }
+    const authFetcher = createAuthFetcher(auth)
     const { triggerHeartbeat } = createAgent({
       model: body.model as ModelConfig,
       activeContextTime: body.activeContextTime,
       channels: body.channels,
       currentChannel: body.currentChannel,
       identity: body.identity,
-      auth: {
-        bearer: bearer!,
-        baseUrl: getBaseUrl(),
-      },
+      auth,
       skills: body.usableSkills,
       mcpConnections: body.mcpConnections,
       inbox: body.inbox,
+      loopDetection: body.loopDetection,
     }, authFetcher)
     return triggerHeartbeat({
       heartbeat: body.heartbeat,

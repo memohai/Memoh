@@ -59,9 +59,9 @@ mise run dev:restart -- server  # Restart a specific service
 ## Project Layout
 
 ```
-conf/       — Configuration templates (app.example.toml, app.dev.toml, app.docker.toml)
-devenv/     — Containerized development environment (docker-compose)
-docker/     — Docker build & runtime (Dockerfiles, entrypoints)
+conf/       — Configuration templates (app.example.toml, app.docker.toml)
+devenv/     — Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, mcp-build.sh)
+docker/     — Production Docker build & runtime (Dockerfiles, entrypoints)
 cmd/        — Go application entry points
 internal/   — Go backend core code
 agent/      — Agent Gateway (Bun/Elysia)

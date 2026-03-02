@@ -25,7 +25,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
   >
     <SliderTrack
       data-slot="slider-track"
-      class="relative grow overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700 data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
+      class="relative grow overflow-hidden rounded-full bg-secondary data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
     >
       <SliderRange
         data-slot="slider-range"

@@ -91,6 +91,10 @@ func (m *Manager) lockContainer(containerID string) func() {
 func (m *Manager) Init(ctx context.Context) error {
 	image := m.imageRef()
 
+	if _, err := m.service.GetImage(ctx, image); err == nil {
+		return nil
+	}
+
 	_, err := m.service.PullImage(ctx, image, &ctr.PullImageOptions{
 		Unpack:      true,
 		Snapshotter: m.cfg.Snapshotter,

@@ -10,7 +10,7 @@ const props = defineProps<{
 <template>
   <span
     data-slot="context-menu-shortcut"
-    :class="cn('text-gray-500 dark:text-gray-400 ml-auto text-xs tracking-widest', props.class)"
+    :class="cn('text-muted-foreground ml-auto text-xs tracking-widest', props.class)"
   >
     <slot />
   </span>

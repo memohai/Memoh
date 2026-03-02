@@ -473,6 +473,15 @@ export type HandlersCreateSnapshotResponse = {
     version?: number;
 };
 
+export type HandlersDailyTokenUsage = {
+    cache_read_tokens?: number;
+    cache_write_tokens?: number;
+    day?: string;
+    input_tokens?: number;
+    output_tokens?: number;
+    reasoning_tokens?: number;
+};
+
 export type HandlersErrorResponse = {
     message?: string;
 };
@@ -573,6 +582,15 @@ export type HandlersMcpStdioResponse = {
     url?: string;
 };
 
+export type HandlersModelTokenUsage = {
+    input_tokens?: number;
+    model_id?: string;
+    model_name?: string;
+    model_slug?: string;
+    output_tokens?: number;
+    provider_name?: string;
+};
+
 export type HandlersPingResponse = {
     container_backend?: string;
     snapshot_supported?: boolean;
@@ -620,6 +638,12 @@ export type HandlersSnapshotInfo = {
     source?: string;
     updated_at?: string;
     version?: number;
+};
+
+export type HandlersTokenUsageResponse = {
+    by_model?: Array<HandlersModelTokenUsage>;
+    chat?: Array<HandlersDailyTokenUsage>;
+    heartbeat?: Array<HandlersDailyTokenUsage>;
 };
 
 export type HandlersFsOpResponse = {
@@ -845,6 +869,15 @@ export type ModelsGetResponse = {
 
 export type ModelsModelType = 'chat' | 'embedding';
 
+export type ModelsTestResponse = {
+    latency_ms?: number;
+    message?: string;
+    reachable?: boolean;
+    status?: ModelsTestStatus;
+};
+
+export type ModelsTestStatus = 'ok' | 'auth_error' | 'error';
+
 export type ModelsUpdateRequest = {
     client_type?: ModelsClientType;
     dimensions?: number;
@@ -979,15 +1012,6 @@ export type ProviderUsageResponse = {
     total_text_bytes?: number;
 };
 
-export type ProvidersCheckResult = {
-    latency_ms?: number;
-    message?: string;
-    status?: ProvidersCheckStatus;
-    status_code?: number;
-};
-
-export type ProvidersCheckStatus = 'supported' | 'auth_error' | 'unsupported' | 'error';
-
 export type ProvidersCountResponse = {
     count?: number;
 };
@@ -1017,9 +1041,6 @@ export type ProvidersGetResponse = {
 };
 
 export type ProvidersTestResponse = {
-    checks?: {
-        [key: string]: ProvidersCheckResult;
-    };
     latency_ms?: number;
     message?: string;
     reachable?: boolean;
@@ -4247,6 +4268,57 @@ export type PutBotsByBotIdSubagentsByIdSkillsResponses = {
 
 export type PutBotsByBotIdSubagentsByIdSkillsResponse = PutBotsByBotIdSubagentsByIdSkillsResponses[keyof PutBotsByBotIdSubagentsByIdSkillsResponses];
 
+export type GetBotsByBotIdTokenUsageData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query: {
+        /**
+         * Start date (YYYY-MM-DD)
+         */
+        from: string;
+        /**
+         * End date exclusive (YYYY-MM-DD)
+         */
+        to: string;
+        /**
+         * Optional model UUID to filter by
+         */
+        model_id?: string;
+    };
+    url: '/bots/{bot_id}/token-usage';
+};
+
+export type GetBotsByBotIdTokenUsageErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdTokenUsageError = GetBotsByBotIdTokenUsageErrors[keyof GetBotsByBotIdTokenUsageErrors];
+
+export type GetBotsByBotIdTokenUsageResponses = {
+    /**
+     * OK
+     */
+    200: HandlersTokenUsageResponse;
+};
+
+export type GetBotsByBotIdTokenUsageResponse = GetBotsByBotIdTokenUsageResponses[keyof GetBotsByBotIdTokenUsageResponses];
+
 export type PostBotsByBotIdToolsData = {
     /**
      * JSON-RPC request
@@ -5789,6 +5861,44 @@ export type PutModelsByIdResponses = {
 };
 
 export type PutModelsByIdResponse = PutModelsByIdResponses[keyof PutModelsByIdResponses];
+
+export type PostModelsByIdTestData = {
+    body?: never;
+    path: {
+        /**
+         * Model internal ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/models/{id}/test';
+};
+
+export type PostModelsByIdTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostModelsByIdTestError = PostModelsByIdTestErrors[keyof PostModelsByIdTestErrors];
+
+export type PostModelsByIdTestResponses = {
+    /**
+     * OK
+     */
+    200: ModelsTestResponse;
+};
+
+export type PostModelsByIdTestResponse = PostModelsByIdTestResponses[keyof PostModelsByIdTestResponses];
 
 export type GetPingData = {
     body?: never;

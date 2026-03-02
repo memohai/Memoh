@@ -21,11 +21,11 @@ const forwardedProps = useForwardProps(delegatedProps)
     :data-size="size"
     v-bind="forwardedProps"
     :class="cn(
-      'flex w-fit items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm whitespace-nowrap shadow-sm transition-all outline-none',
-      'data-[placeholder]:text-gray-500 dark:data-[placeholder]:text-gray-400',
-      '[&_svg:not([class*=\'text-\'])]:text-gray-500 dark:[&_svg:not([class*=\'text-\'])]:text-gray-400',
+      'flex w-fit items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm whitespace-nowrap shadow-sm transition-all outline-none',
+      'data-[placeholder]:text-muted-foreground',
+      '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
       'focus:border-primary focus:ring-2 focus:ring-primary/20',
-      'hover:bg-gray-50 dark:hover:bg-gray-700',
+      'hover:bg-accent',
       'disabled:cursor-not-allowed disabled:opacity-50',
       'data-[size=default]:h-9 data-[size=sm]:h-8',
       '*:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2',

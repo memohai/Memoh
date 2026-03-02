@@ -40,40 +40,6 @@
           </FormField>
         </section>
 
-        <section>
-          <Label
-            for="search-provider-type"
-            class="scroll-m-20 font-semibold tracking-tight"
-          >
-            {{ $t('searchProvider.provider') }}
-          </Label>
-          <div class="mt-3 mb-4">
-            <Select
-              :model-value="form.values.provider"
-              @update:model-value="(val) => form.setFieldValue('provider', val)"
-            >
-              <SelectTrigger
-                id="search-provider-type"
-                class="w-full"
-                :aria-label="$t('searchProvider.provider')"
-              >
-                <SelectValue :placeholder="$t('common.typePlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem
-                    v-for="type in PROVIDER_TYPES"
-                    :key="type"
-                    :value="type"
-                  >
-                    {{ $t(`searchProvider.providerNames.${type}`, type) }}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-        </section>
-
         <Separator class="my-4" />
 
         <template v-if="form.values.provider === 'brave'">
@@ -156,12 +122,6 @@ import {
   FormField,
   FormItem,
   Separator,
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
   Label,
 } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
@@ -186,8 +146,6 @@ import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { putSearchProvidersById, deleteSearchProvidersById } from '@memoh/sdk'
 import type { SearchprovidersGetResponse, SearchprovidersUpdateRequest } from '@memoh/sdk'
-
-const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
 
 const curProvider = inject('curSearchProvider', ref<SearchprovidersGetResponse>())
 const curProviderId = computed(() => curProvider.value?.id)

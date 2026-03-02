@@ -153,28 +153,64 @@
                     class="size-3.5 animate-spin"
                   />
                 </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  :disabled="!currentBotId"
+                  :aria-label="$t('chat.files')"
+                  @click="fileManagerOpen = true"
+                >
+                  <FontAwesomeIcon
+                    :icon="['fas', 'folder-open']"
+                    class="size-3.5"
+                  />
+                </Button>
               </InputGroupAddon>
             </InputGroup>
           </section>
         </div>
       </div>
     </template>
+
+    <!-- File manager sheet -->
+    <Sheet v-model:open="fileManagerOpen">
+      <SheetContent
+        side="right"
+        class="sm:max-w-2xl w-full p-0 flex flex-col"
+      >
+        <SheetHeader class="px-4 pt-4 pb-0">
+          <SheetTitle>{{ $t('chat.files') }}</SheetTitle>
+          <SheetDescription class="sr-only">
+            {{ $t('chat.files') }}
+          </SheetDescription>
+        </SheetHeader>
+        <FileManager
+          v-if="currentBotId"
+          :bot-id="currentBotId"
+          :sync-url="false"
+          class="flex-1 min-h-0"
+        />
+      </SheetContent>
+    </Sheet>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import { Textarea, Button, Avatar, AvatarImage, AvatarFallback, Badge, InputGroup, InputGroupAddon, InputGroupButton, InputGroupText, InputGroupTextarea } from '@memoh/ui'
+import { Textarea, Button, Avatar, AvatarImage, AvatarFallback, Badge, InputGroup, InputGroupAddon, InputGroupButton, InputGroupText, InputGroupTextarea, Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@memoh/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import MessageItem from './message-item.vue'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
+import FileManager from '@/components/file-manager/index.vue'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment } from '@/composables/api/useChat'
 
 const chatStore = useChatStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
+const fileManagerOpen = ref(false)
 const {
   messages,
   streaming,

@@ -28,7 +28,7 @@
   <hr>
 </div>
 
-Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), or the built-in Web/CLI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
+Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), Email, or the built-in Web/CLI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
 
 ## Quick Start
 
@@ -73,16 +73,44 @@ Memoh Bot can distinguish and remember requests from multiple humans and bots, w
 - 👥 **Multi-User & Identity Recognition**: Bots can distinguish individual users in group chats, remember each person's context separately, and send direct messages to specific users. Cross-platform identity binding unifies the same person across Telegram, Discord, Lark, and Web.
 - 📦 **Containerized**: Each bot runs in its own isolated containerd container. Bots can freely execute commands, edit files, and access the network within their containers — like having their own computer. Supports container snapshots for save/restore.
 - 🧠 **Memory Engineering**: Hybrid retrieval (dense vector search + BM25 keyword search) with LLM-driven fact extraction. Last 24 hours of context loaded by default, with memory compaction and rebuild capabilities.
-- 💬 **Multi-Platform**: Supports Telegram, Discord, Lark (Feishu), and built-in Web/CLI. Unified message format with rich text, media attachments, reactions, and streaming across all platforms. Cross-platform identity binding.
+- 💬 **Multi-Platform**: Supports Telegram, Discord, Lark (Feishu), Email, and built-in Web/CLI. Unified message format with rich text, media attachments, reactions, and streaming across all platforms. Cross-platform identity binding.
+- 📧 **Email**: Multi-adapter email service (Mailgun, generic SMTP) with per-bot binding and outbound audit log. Bots can send and receive emails as a channel.
 - 🔧 **MCP (Model Context Protocol)**: Full MCP support (HTTP / SSE / Stdio). Built-in tools for container operations, memory search, web search, scheduling, messaging, and more. Connect external MCP servers for extensibility.
 - 🧩 **Subagents**: Create specialized sub-agents per bot with independent context and skills, enabling multi-agent collaboration.
 - 🎭 **Skills & Identity**: Define bot personality via IDENTITY.md, SOUL.md, and modular skill files that bots can enable/disable at runtime.
-- 🔍 **Web Search**: Configurable search providers (Brave Search, etc.) for web search and URL content fetching.
+- 🔍 **Web Search**: 12 built-in search providers — Brave, Bing, Google, Tavily, DuckDuckGo, SearXNG, Serper, Sogou, Jina, Exa, Bocha, and Yandex — for web search and URL content fetching.
 - ⏰ **Scheduled Tasks**: Cron-based scheduling with max-call limits. Bots can autonomously run commands or tools at specified intervals.
+- 💓 **Heartbeat**: Periodic autonomous tasks — bots can perform routine operations (e.g., check-ins, summaries, monitoring) at configurable intervals with execution logging.
 - 📥 **Inbox**: Cross-channel inbox — messages from other channels are queued and surfaced in the system prompt so the bot never misses context.
+- 📊 **Token Usage Tracking**: Monitor token consumption per bot with usage statistics and visualization.
 - 🧪 **Multi-Model**: Works with any OpenAI-compatible, Anthropic, or Google Generative AI provider. Per-bot model assignment for chat, memory, and embedding.
-- 🖥️ **Web UI**: Modern dashboard (Vue 3 + Tailwind CSS) with real-time streaming chat, tool call visualization, container filesystem browser, and visual configuration for all settings. Dark/light theme, i18n.
+- 🖥️ **Web UI**: Modern dashboard (Vue 3 + Tailwind CSS) with real-time streaming chat, tool call visualization, in-chat file manager, container filesystem browser, and visual configuration for all settings. Dark/light theme, i18n.
 - 🚀 **One-Click Deploy**: Docker Compose with automatic migration, containerd setup, and CNI networking. Interactive install script included.
+
+## Gallery
+
+<table>
+  <tr>
+    <td><img src="./assets/gallery/01.png" alt="Gallery 1" width="100%"></td>
+    <td><img src="./assets/gallery/02.png" alt="Gallery 2" width="100%"></td>
+    <td><img src="./assets/gallery/03.png" alt="Gallery 3" width="100%"></td>
+  </tr>
+  <tr>
+    <td><strong text-align="center">Chat with Bots</strong></td>
+    <td><strong text-align="center">Container & Bot Management</strong></td>
+    <td><strong text-align="center">Provider & Model Configuration</strong></td>
+  </tr>
+  <tr>
+    <td><img src="./assets/gallery/04.png" alt="Gallery 4" width="100%"></td>
+    <td><img src="./assets/gallery/05.png" alt="Gallery 5" width="100%"></td>
+    <td><img src="./assets/gallery/06.png" alt="Gallery 6" width="100%"></td>
+  </tr>
+  <tr>
+    <td><strong text-align="center">Container File Manager</strong></td>
+    <td><strong text-align="center">Scheduled Tasks</strong></td>
+    <td><strong text-align="center">Token Usage Tracking</strong></td>
+  </tr>
+</table>
 
 ## Tech Stack
 
@@ -98,12 +126,12 @@ Memoh Bot can distinguish and remember requests from multiple humans and bots, w
 ## Architecture
 
 ```
-┌─────────────┐    ┌─────────────────┐    ┌──────────────┐
-│   Channels   │    │    Web UI        │    │   CLI        │
-│  (TG/DC/FS)  │    │  (Vue 3 :8082)  │    │              │
-└──────┬───────┘    └────────┬────────┘    └──────┬───────┘
-       │                     │                     │
-       ▼                     ▼                     ▼
+┌──────────────────┐  ┌─────────────────┐  ┌──────────────┐
+│     Channels     │  │      Web UI     │  │   CLI        │
+│ (TG/DC/FS/Email) │  │  (Vue 3 :8082)  │  │              │
+└────────┬─────────┘  └────────┬────────┘  └──────┬───────┘
+         │                     │                  │
+         ▼                     ▼                  ▼
 ┌──────────────────────────────────────────────────────────┐
 │                   Server (Go :8080)                       │
 │  Auth · Bots · Channels · Memory · Containers · MCP      │

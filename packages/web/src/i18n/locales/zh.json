@@ -59,7 +59,8 @@
     "settings": "设置",
     "home": "首页",
     "mcp": "MCP",
-    "platform": "接入平台"
+    "platform": "接入平台",
+    "usage": "用量统计"
   },
   "breadcrumb": {
     "main": "主页"
@@ -131,7 +132,8 @@
     "toolRunning": "运行中",
     "toolInput": "输入",
     "toolResult": "结果",
-    "unknownUser": "{platform}用户"
+    "unknownUser": "{platform}用户",
+    "files": "文件管理"
   },
   "models": {
     "title": "模型",
@@ -158,7 +160,12 @@
       "audio": "音频",
       "video": "视频",
       "file": "文件"
-    }
+    },
+    "testModel": "测试模型",
+    "testOk": "正常",
+    "testAuthError": "认证失败",
+    "testError": "异常",
+    "testFailed": "测试失败"
   },
   "provider": {
     "add": "添加服务商",
@@ -174,11 +181,6 @@
     "testConnection": "测试连接",
     "reachable": "可连接",
     "unreachable": "不可连接",
-    "supported": "支持",
-    "authError": "认证失败",
-    "unsupported": "不支持",
-    "error": "错误",
-    "embedding": "Embedding",
     "testFailed": "测试失败"
   },
   "searchProvider": {
@@ -371,6 +373,7 @@
       "mcp": "MCP",
       "subagents": "子智能体",
       "heartbeat": "心跳",
+      "schedule": "定时任务",
       "history": "对话历史",
       "skills": "技能",
       "email": "邮件",
@@ -505,6 +508,7 @@
       "heartbeatModelPlaceholder": "使用聊天模型（默认）",
       "allowGuest": "允许游客访问",
       "allowGuestPersonalHint": "个人 Bot 不支持游客访问，请使用公开 Bot。",
+      "loopDetectionTitle": "自动检测并阻止模型循环输出",
       "searchModel": "搜索模型…",
       "noModel": "暂无可选模型",
       "saveSuccess": "设置已保存",
@@ -613,6 +617,20 @@
       "filterAll": "全部",
       "noResult": "—"
     },
+    "schedule": {
+      "title": "定时任务",
+      "loadFailed": "加载定时任务失败",
+      "empty": "暂无定时任务",
+      "name": "名称",
+      "pattern": "表达式",
+      "enabled": "启用",
+      "calls": "调用次数",
+      "createdAt": "创建时间",
+      "updatedAt": "更新时间",
+      "statusEnabled": "已启用",
+      "statusDisabled": "已禁用",
+      "unlimited": "无限制"
+    },
     "history": {
       "title": "对话历史",
       "loadFailed": "加载历史消息失败",
@@ -655,5 +673,39 @@
       "usage": "用量",
       "skills": "技能"
     }
+  },
+  "usage": {
+    "title": "Token 用量",
+    "selectBot": "选择 Bot",
+    "selectBotPlaceholder": "选择一个 Bot 查看用量",
+    "timeRange": "时间范围",
+    "last7Days": "最近 7 天",
+    "last30Days": "最近 30 天",
+    "last90Days": "最近 90 天",
+    "noData": "所选时间段内无用量数据",
+    "loadFailed": "加载 Token 用量失败",
+    "totalInputTokens": "总输入 Tokens",
+    "totalOutputTokens": "总输出 Tokens",
+    "avgCacheHitRate": "平均缓存命中率",
+    "totalReasoningTokens": "总推理 Tokens",
+    "dailyTokens": "每日 Token 用量",
+    "cacheBreakdown": "缓存分布",
+    "cacheHitRate": "缓存命中率",
+    "chatInput": "对话输入",
+    "chatOutput": "对话输出",
+    "heartbeatInput": "心跳输入",
+    "heartbeatOutput": "心跳输出",
+    "cacheRead": "缓存读取",
+    "cacheWrite": "缓存写入",
+    "noCache": "无缓存",
+    "tokens": "Tokens",
+    "date": "日期",
+    "modelDistribution": "模型用量分布",
+    "filterByModel": "按模型筛选",
+    "allModels": "全部模型",
+    "dateFrom": "开始日期",
+    "dateTo": "结束日期",
+    "chartPie": "饼图",
+    "chartBar": "柱状图"
   }
 }

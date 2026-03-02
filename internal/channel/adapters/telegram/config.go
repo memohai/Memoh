@@ -7,9 +7,30 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 )
 
+const defaultAPIBaseURL = "https://api.telegram.org"
+
 // Config holds the Telegram bot credentials extracted from a channel configuration.
 type Config struct {
-	BotToken string
+	BotToken   string
+	APIBaseURL string // Reverse proxy base URL for regions where Telegram is blocked (e.g. China mainland)
+}
+
+// apiEndpoint returns the Sprintf-formatted API endpoint derived from the base URL.
+func (c Config) apiEndpoint() string {
+	base := c.APIBaseURL
+	if base == "" {
+		base = defaultAPIBaseURL
+	}
+	return strings.TrimRight(base, "/") + "/bot%s/%s"
+}
+
+// fileEndpoint returns the Sprintf-formatted file download endpoint derived from the base URL.
+func (c Config) fileEndpoint() string {
+	base := c.APIBaseURL
+	if base == "" {
+		base = defaultAPIBaseURL
+	}
+	return strings.TrimRight(base, "/") + "/file/bot%s/%s"
 }
 
 // UserConfig holds the identifiers used to target a Telegram user or group.
@@ -24,9 +45,13 @@ func normalizeConfig(raw map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	out := map[string]any{
 		"botToken": cfg.BotToken,
-	}, nil
+	}
+	if cfg.APIBaseURL != "" {
+		out["apiBaseURL"] = cfg.APIBaseURL
+	}
+	return out, nil
 }
 
 func normalizeUserConfig(raw map[string]any) (map[string]any, error) {
@@ -109,7 +134,8 @@ func parseConfig(raw map[string]any) (Config, error) {
 	if token == "" {
 		return Config{}, fmt.Errorf("telegram botToken is required")
 	}
-	return Config{BotToken: token}, nil
+	apiBaseURL := strings.TrimSpace(channel.ReadString(raw, "apiBaseURL", "api_base_url"))
+	return Config{BotToken: token, APIBaseURL: apiBaseURL}, nil
 }
 
 func parseUserConfig(raw map[string]any) (UserConfig, error) {
@@ -156,9 +182,7 @@ func normalizeTarget(raw string) string {
 // which may be negative (e.g. supergroup IDs like -1002280927535).
 func isTelegramChatID(s string) bool {
 	digits := s
-	if strings.HasPrefix(digits, "-") {
-		digits = digits[1:]
-	}
+	digits = strings.TrimPrefix(digits, "-")
 	if len(digits) == 0 {
 		return false
 	}

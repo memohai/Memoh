@@ -40,7 +40,7 @@ func (s *telegramOutboundStream) getBot(ctx context.Context) (bot *tgbotapi.BotA
 	if err != nil {
 		return nil, err
 	}
-	bot, err = s.adapter.getOrCreateBot(telegramCfg.BotToken, s.cfg.ID)
+	bot, err = s.adapter.getOrCreateBot(telegramCfg, s.cfg.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,11 @@ func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context) error 
 
 func (s *telegramOutboundStream) ensureStreamMessage(ctx context.Context, text string) error {
 	s.mu.Lock()
-	go s.refreshTypingAction(ctx)
+	go func() {
+		if err := s.refreshTypingAction(ctx); err != nil {
+			slog.Debug("refresh typing action failed", slog.Any("err", err))
+		}
+	}()
 	if s.streamMsgID != 0 {
 		s.mu.Unlock()
 		return nil
@@ -259,7 +263,20 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 			}
 		}
 		return nil
-	case channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd:
+	case channel.StreamEventPhaseStart:
+		return nil
+	case channel.StreamEventPhaseEnd:
+		if event.Phase == channel.StreamPhaseText {
+			s.mu.Lock()
+			finalText := strings.TrimSpace(s.buf.String())
+			s.mu.Unlock()
+			if finalText != "" {
+				if err := s.ensureStreamMessage(ctx, finalText); err != nil {
+					return err
+				}
+				return s.editStreamMessageFinal(ctx, finalText)
+			}
+		}
 		return nil
 	case channel.StreamEventProcessingFailed, channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
 		return nil
@@ -318,7 +335,7 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 			if err != nil {
 				return err
 			}
-			bot, err := s.adapter.getOrCreateBot(telegramCfg.BotToken, s.cfg.ID)
+			bot, err := s.adapter.getOrCreateBot(telegramCfg, s.cfg.ID)
 			if err != nil {
 				return err
 			}

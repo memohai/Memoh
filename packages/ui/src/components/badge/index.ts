@@ -11,11 +11,11 @@ export const badgeVariants = cva(
         default:
           'border-transparent bg-primary text-primary-foreground shadow-sm [a&]:hover:bg-primary/90',
         secondary:
-          'border-transparent bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm [a&]:hover:bg-gray-200 dark:[a&]:hover:bg-gray-600',
+          'border-transparent bg-secondary text-secondary-foreground shadow-sm [a&]:hover:bg-secondary/80',
         destructive:
-         'border-transparent bg-destructive text-white shadow-sm [a&]:hover:bg-destructive/90',
+         'border-transparent bg-destructive text-destructive-foreground shadow-sm [a&]:hover:bg-destructive/90',
         outline:
-          'text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-700 [a&]:hover:bg-gray-100 dark:[a&]:hover:bg-gray-700',
+          'text-foreground border-border [a&]:hover:bg-accent',
       },
     },
     defaultVariants: {

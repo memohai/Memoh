@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, provide, watch, reactive } from 'vue'
-import { useQueryCache, useQuery } from '@pinia/colada'
+import { useQuery } from '@pinia/colada'
 import {
   ScrollArea,
   SidebarMenu,
@@ -8,12 +8,6 @@ import {
   SidebarMenuItem,
   InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput,
   Toggle,
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -29,24 +23,15 @@ import ProviderSetting from './components/provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
-const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
-
-const filterProvider = ref('')
 const { data: providerData } = useQuery({
-  key: () => ['search-providers', filterProvider.value],
+  key: () => ['search-providers'],
   query: async () => {
     const { data } = await getSearchProviders({
-      query: filterProvider.value ? { provider: filterProvider.value } : undefined,
       throwOnError: true,
     })
     return data
   },
 })
-const queryCache = useQueryCache()
-
-watch(filterProvider, () => {
-  queryCache.invalidateQueries({ key: ['search-providers'] })
-}, { immediate: true })
 
 const curProvider = ref<SearchprovidersGetResponse>()
 provide('curSearchProvider', curProvider)
@@ -142,25 +127,6 @@ const openStatus = reactive({
     </template>
 
     <template #sidebar-footer>
-      <Select v-model:model-value="filterProvider">
-        <SelectTrigger
-          class="w-full"
-          :aria-label="$t('searchProvider.provider')"
-        >
-          <SelectValue :placeholder="$t('common.typePlaceholder')" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            <SelectItem
-              v-for="type in PROVIDER_TYPES"
-              :key="type"
-              :value="type"
-            >
-              {{ $t(`searchProvider.providerNames.${type}`, type) }}
-            </SelectItem>
-          </SelectGroup>
-        </SelectContent>
-      </Select>
       <AddSearchProvider v-model:open="openStatus.addOpen" />
     </template>
 

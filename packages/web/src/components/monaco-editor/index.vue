@@ -39,7 +39,7 @@ function resolveLanguage(): string {
 }
 
 function resolveTheme(): string {
-  return settings.theme === 'dark' ? 'vs-dark' : 'vs'
+  return settings.theme === 'dark' ? 'vitesse-dark' : 'vitesse-light'
 }
 
 onMounted(() => {

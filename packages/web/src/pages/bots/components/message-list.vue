@@ -142,7 +142,7 @@ function roleIconClass(role?: string): string {
     case 'assistant': return 'bg-emerald-500'
     case 'tool': return 'bg-amber-500'
     case 'system': return 'bg-slate-500'
-    default: return 'bg-gray-400'
+    default: return 'bg-muted-foreground'
   }
 }
 

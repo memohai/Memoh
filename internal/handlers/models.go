@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
@@ -35,6 +36,7 @@ func (h *ModelsHandler) Register(e *echo.Echo) {
 	group.DELETE("/:id", h.DeleteByID)
 	group.DELETE("/model/:modelId", h.DeleteByModelID)
 	group.GET("/count", h.Count)
+	group.POST("/:id/test", h.Test)
 }
 
 // Create godoc
@@ -278,6 +280,35 @@ func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// Test godoc
+// @Summary Test model connectivity
+// @Description Probe a model's provider endpoint using the model's real model_id and client_type to verify configuration
+// @Tags models
+// @Accept json
+// @Produce json
+// @Param id path string true "Model internal ID (UUID)"
+// @Success 200 {object} models.TestResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /models/{id}/test [post]
+func (h *ModelsHandler) Test(c echo.Context) error {
+	id := c.Param("id")
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	}
+
+	resp, err := h.service.Test(c.Request().Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "invalid") {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+
+	return c.JSON(http.StatusOK, resp)
 }
 
 // Count godoc

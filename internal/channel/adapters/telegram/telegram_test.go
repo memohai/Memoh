@@ -205,7 +205,7 @@ func TestBuildTelegramMediaGroupInboundMessageAggregatesAttachments(t *testing.T
 		Token: "test",
 		Self:  tgbotapi.User{ID: 1001, UserName: "memohbot"},
 	}
-	cfg := channel.ChannelConfig{BotID: "bot-1"}
+	cfg := channel.ChannelConfig{}
 	first := &tgbotapi.Message{
 		MessageID:    101,
 		MediaGroupID: "group-1",
@@ -409,6 +409,96 @@ func TestTelegramAdapter_NormalizeAndResolve(t *testing.T) {
 	if target != "123" {
 		t.Fatalf("ResolveTarget: %s", target)
 	}
+}
+
+func TestConfig_Endpoints(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		baseURL  string
+		wantAPI  string
+		wantFile string
+	}{
+		{"default", "", "https://api.telegram.org/bot%s/%s", "https://api.telegram.org/file/bot%s/%s"},
+		{"custom", "https://tg.example.com", "https://tg.example.com/bot%s/%s", "https://tg.example.com/file/bot%s/%s"},
+		{"trailing slash", "https://tg.example.com/", "https://tg.example.com/bot%s/%s", "https://tg.example.com/file/bot%s/%s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := Config{BotToken: "tok", APIBaseURL: tt.baseURL}
+			if got := cfg.apiEndpoint(); got != tt.wantAPI {
+				t.Fatalf("apiEndpoint() = %q, want %q", got, tt.wantAPI)
+			}
+			if got := cfg.fileEndpoint(); got != tt.wantFile {
+				t.Fatalf("fileEndpoint() = %q, want %q", got, tt.wantFile)
+			}
+		})
+	}
+}
+
+func TestParseConfig_APIBaseURL(t *testing.T) {
+	t.Parallel()
+
+	t.Run("camelCase key", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig(map[string]any{"botToken": "t1", "apiBaseURL": "https://proxy.example.com"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.APIBaseURL != "https://proxy.example.com" {
+			t.Fatalf("unexpected APIBaseURL: %q", cfg.APIBaseURL)
+		}
+	})
+
+	t.Run("snake_case key", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig(map[string]any{"bot_token": "t2", "api_base_url": "https://proxy2.example.com"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.APIBaseURL != "https://proxy2.example.com" {
+			t.Fatalf("unexpected APIBaseURL: %q", cfg.APIBaseURL)
+		}
+	})
+
+	t.Run("empty base URL", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseConfig(map[string]any{"botToken": "t3"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.APIBaseURL != "" {
+			t.Fatalf("expected empty APIBaseURL, got %q", cfg.APIBaseURL)
+		}
+	})
+}
+
+func TestNormalizeConfig_APIBaseURL(t *testing.T) {
+	t.Parallel()
+
+	t.Run("present", func(t *testing.T) {
+		t.Parallel()
+		norm, err := normalizeConfig(map[string]any{"botToken": "t1", "apiBaseURL": "https://proxy.example.com"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if norm["apiBaseURL"] != "https://proxy.example.com" {
+			t.Fatalf("expected apiBaseURL in output: %#v", norm)
+		}
+	})
+
+	t.Run("omitted when empty", func(t *testing.T) {
+		t.Parallel()
+		norm, err := normalizeConfig(map[string]any{"botToken": "t2"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := norm["apiBaseURL"]; exists {
+			t.Fatalf("empty apiBaseURL should be omitted: %#v", norm)
+		}
+	})
 }
 
 func TestIsTelegramMessageNotModified(t *testing.T) {

@@ -10,13 +10,13 @@ export const buttonVariants = cva(
       variant: {
         default:
           'bg-primary text-primary-foreground shadow hover:bg-primary/90',
-        destructive: 'bg-destructive text-white shadow hover:bg-destructive/90',
+        destructive: 'bg-destructive text-destructive-foreground shadow hover:bg-destructive/90',
         outline:
-          'border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700',
+          'border border-border bg-card shadow-sm hover:bg-accent',
         secondary:
-          'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm hover:bg-gray-200 dark:hover:bg-gray-600',
+          'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
         ghost:
-          'hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100',
+          'hover:bg-accent hover:text-accent-foreground',
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {

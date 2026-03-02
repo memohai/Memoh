@@ -1,4 +1,3 @@
-import { text } from "node:stream/consumers";
 
 export const en = [
   {
@@ -7,7 +6,7 @@ export const en = [
   },
   {
     text: 'About Memoh',
-    link: '/getting-started.md'
+    link: '/about.md'
   },
   {
     text: 'Installation',
@@ -16,117 +15,84 @@ export const en = [
         text: 'Docker',
         link: '/installation/docker.md'
       },
-      {
-        text: 'config.toml',
-        link: '/installation/config-toml.md'
-      }
     ]
   },
   {
     text: 'Getting Started',
     items: [
       {
-        text: 'Provider and Model',
+        text: 'LLM Provider and Model',
         link: '/getting-started/provider-and-model.md'
       },
       {
-        text: 'Create Bot',
-        link: '/getting-started/create-bot.md'
+        text: 'Bot Management',
+        link: '/getting-started/bot.md'
       },
       {
-        text: 'telegram platform',
-        link: '/getting-started/platform-telegram.md'
-      }
-    ]
-  },
-  {
-    text: 'Concepts',
-    items: [
-      {
-        text: 'Overview',
-        link: '/concepts/index.md'
+        text: 'Container Management',
+        link: '/getting-started/container.md'
       },
       {
-        text: 'Bot',
-        link: '/concepts/bot.md'
+        text: 'Files Management',
+        link: '/getting-started/files.md'
       },
       {
-        text: 'Provider and Model',
-        link: '/concepts/provider-and-model.md'
+        text: 'Bot Skills',
+        link: '/getting-started/skills.md'
       },
       {
-        text: 'Schedule',
-        link: '/concepts/schedule.md'
+        text: 'MCP Connections',
+        link: '/getting-started/mcp.md'
       },
       {
-        text: 'Memory',
-        link: '/concepts/memory.md'
+        text: 'Bot Channels',
+        link: '/getting-started/channels.md'
       },
       {
-        text: 'Channel',
-        link: '/concepts/channel.md'
-      },
-      {
-        text: 'Container',
-        link: '/concepts/container.md'
-      },
-      {
-        text: 'MCP',
-        link: '/concepts/mcp.md'
+        text: 'Memory Management',
+        link: '/getting-started/memory.md'
       },
       {
         text: 'Subagents',
-        link: '/concepts/subagents.md'
+        link: '/getting-started/subagents.md'
       },
       {
-        text: 'Skills',
-        link: '/concepts/skills.md'
+        text: 'Heartbeat',
+        link: '/getting-started/heartbeat.md'
       },
       {
-        text: 'Conversation and History',
-        link: '/concepts/conversation-and-history.md'
-      }
+        text: 'Scheduled Tasks',
+        link: '/getting-started/schedule.md'
+      },
+      {
+        text: 'Search Providers',
+        link: '/getting-started/search-provider.md'
+      },
+      {
+        text: 'Email Providers',
+        link: '/getting-started/email.md'
+      },
     ]
   },
-  // {
-  //   text: 'CLI',
-  //   items: [
-  //     {
-  //       text: 'Overview',
-  //       link: '/cli/index.md'
-  //     },
-  //     {
-  //       text: 'authentication',
-  //       link: '/cli/auth.md'
-  //     },
-  //     {
-  //       text: 'config',
-  //       link: '/cli/config.md'
-  //     },
-  //     {
-  //       text: 'provider',
-  //       link: '/cli/provider.md'
-  //     },
-  //     {
-  //       text: 'model',
-  //       link: '/cli/model.md'
-  //     },
-  //     {
-  //       text: 'bot',
-  //       link: '/cli/bot.md'
-  //     },
-  //     {
-  //       text: 'channel',
-  //       link: '/cli/channel.md'
-  //     },
-  //     {
-  //       text: 'schedule',
-  //       link: '/cli/schedule.md'
-  //     },
-  //     {
-  //       text: 'chat',
-  //       link: '/cli/chat.md'
-  //     }
-  //   ]
-  // }
+  {
+    text: 'Channels',
+    items: [
+      {
+        text: 'Overview',
+        link: '/channels/index.md'
+      },
+      {
+        text: 'Telegram',
+        link: '/channels/telegram.md'
+      },
+      {
+        text: 'Feishu (Lark)',
+        link: '/channels/feishu.md'
+      },
+      {
+        text: 'Discord',
+        link: '/channels/discord.md'
+      },
+    ]
+  },
 ]

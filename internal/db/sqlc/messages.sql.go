@@ -23,7 +23,8 @@ INSERT INTO bot_history_messages (
   role,
   content,
   metadata,
-  usage
+  usage,
+  model_id
 )
 VALUES (
   $1,
@@ -36,7 +37,8 @@ VALUES (
   $8,
   $9,
   $10,
-  $11
+  $11,
+  $12::uuid
 )
 RETURNING
   id,
@@ -66,6 +68,7 @@ type CreateMessageParams struct {
 	Content                 []byte      `json:"content"`
 	Metadata                []byte      `json:"metadata"`
 	Usage                   []byte      `json:"usage"`
+	ModelID                 pgtype.UUID `json:"model_id"`
 }
 
 type CreateMessageRow struct {
@@ -97,6 +100,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		arg.Content,
 		arg.Metadata,
 		arg.Usage,
+		arg.ModelID,
 	)
 	var i CreateMessageRow
 	err := row.Scan(

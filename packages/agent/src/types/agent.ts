@@ -38,6 +38,10 @@ export interface InboxItem {
   createdAt: string
 }
 
+export interface LoopDetectionConfig {
+  enabled?: boolean
+}
+
 export interface AgentParams {
   model: ModelConfig
   language?: string
@@ -50,6 +54,7 @@ export interface AgentParams {
   auth: AgentAuthContext
   skills?: AgentSkill[]
   inbox?: InboxItem[]
+  loopDetection?: LoopDetectionConfig
 }
 
 export interface AgentInput {

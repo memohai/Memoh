@@ -178,6 +178,10 @@ type gatewayInboxItem struct {
 	CreatedAt string         `json:"createdAt"`
 }
 
+type gatewayLoopDetectionConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 type gatewayRequest struct {
 	Model             gatewayModelConfig          `json:"model"`
 	ActiveContextTime int                         `json:"activeContextTime"`
@@ -191,6 +195,7 @@ type gatewayRequest struct {
 	Identity          gatewayIdentity             `json:"identity"`
 	Attachments       []any                       `json:"attachments"`
 	Inbox             []gatewayInboxItem          `json:"inbox,omitempty"`
+	LoopDetection     *gatewayLoopDetectionConfig `json:"loopDetection,omitempty"`
 }
 
 type gatewayResponse struct {
@@ -296,6 +301,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if err != nil {
 		return resolvedContext{}, err
 	}
+	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, req.BotID)
 
 	// Check chat-level model override.
 	var chatSettings conversation.Settings
@@ -464,8 +470,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			ConversationType:  strings.TrimSpace(req.ConversationType),
 			SessionToken:      req.ChatToken,
 		},
-		Attachments: attachments,
-		Inbox:       inboxGatewayItems,
+		Attachments:   attachments,
+		Inbox:         inboxGatewayItems,
+		LoopDetection: &gatewayLoopDetectionConfig{Enabled: loopDetectionEnabled},
 	}
 
 	return resolvedContext{payload: payload, model: chatModel, provider: provider, inboxItemIDs: inboxItemIDs}, nil
@@ -484,7 +491,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
-	if err := r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages); err != nil {
+	if err := r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages, rc.model.ID); err != nil {
 		return conversation.ChatResponse{}, err
 	}
 	r.markInboxRead(ctx, req.BotID, rc.inboxItemIDs)
@@ -539,7 +546,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 	if err != nil {
 		return err
 	}
-	return r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages)
+	return r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages, rc.model.ID)
 }
 
 // --- TriggerHeartbeat ---
@@ -603,6 +610,7 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 		Text:       text,
 		Usage:      resp.Usage,
 		UsageBytes: usageBytes,
+		ModelID:    rc.model.ID,
 	}, nil
 }
 
@@ -650,7 +658,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			}
 			streamReq.UserMessagePersisted = true
 		}
-		if err := r.streamChat(ctx, rc.payload, streamReq, chunkCh); err != nil {
+		if err := r.streamChat(ctx, rc.payload, streamReq, chunkCh, rc.model.ID); err != nil {
 			r.logger.Error("gateway stream request failed",
 				slog.String("bot_id", streamReq.BotID),
 				slog.String("chat_id", streamReq.ChatID),
@@ -778,7 +786,7 @@ func (r *Resolver) postTriggerHeartbeat(ctx context.Context, payload triggerHear
 	return parsed, nil
 }
 
-func (r *Resolver) streamChat(ctx context.Context, payload gatewayRequest, req conversation.ChatRequest, chunkCh chan<- conversation.StreamChunk) error {
+func (r *Resolver) streamChat(ctx context.Context, payload gatewayRequest, req conversation.ChatRequest, chunkCh chan<- conversation.StreamChunk, modelID string) error {
 	url := r.gatewayBaseURL + "/chat/stream"
 	r.logger.Info(
 		"gateway stream request",
@@ -823,7 +831,7 @@ func (r *Resolver) streamChat(ctx context.Context, payload gatewayRequest, req c
 		// Persist final messages before forwarding the "done"/"agent_end" event so the
 		// next user turn can immediately see the assistant output in history.
 		if !stored {
-			if handled, storeErr := r.tryStoreStream(ctx, req, out); storeErr != nil {
+			if handled, storeErr := r.tryStoreStream(ctx, req, out, modelID); storeErr != nil {
 				return storeErr
 			} else if handled {
 				stored = true
@@ -886,7 +894,7 @@ func newJSONRequestWithContext(ctx context.Context, method, url string, payload 
 }
 
 // tryStoreStream attempts to extract final messages from a stream event and persist them.
-func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequest, data []byte) (bool, error) {
+func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequest, data []byte, modelID string) (bool, error) {
 	// data: {"type":"text_delta"|"agent_end"|"done", ...}
 	var envelope struct {
 		Type     string                      `json:"type"`
@@ -897,12 +905,12 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	}
 	if err := json.Unmarshal(data, &envelope); err == nil {
 		if (envelope.Type == "agent_end" || envelope.Type == "done") && len(envelope.Messages) > 0 {
-			return true, r.storeRound(ctx, req, envelope.Messages, envelope.Usage, envelope.Usages)
+			return true, r.storeRound(ctx, req, envelope.Messages, envelope.Usage, envelope.Usages, modelID)
 		}
 		if envelope.Type == "done" && len(envelope.Data) > 0 {
 			var resp gatewayResponse
 			if err := json.Unmarshal(envelope.Data, &resp); err == nil && len(resp.Messages) > 0 {
-				return true, r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages)
+				return true, r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages, modelID)
 			}
 		}
 	}
@@ -910,7 +918,7 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	// fallback: data: {messages: [...]}
 	var resp gatewayResponse
 	if err := json.Unmarshal(data, &resp); err == nil && len(resp.Messages) > 0 {
-		return true, r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages)
+		return true, r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages, modelID)
 	}
 	return false, nil
 }
@@ -1355,7 +1363,7 @@ func (r *Resolver) persistUserMessage(ctx context.Context, req conversation.Chat
 	return err
 }
 
-func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage, usages []json.RawMessage) error {
+func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage, usages []json.RawMessage, modelID string) error {
 	fullRound := make([]conversation.ModelMessage, 0, len(messages))
 	roundUsages := make([]json.RawMessage, 0, len(usages))
 	for i, m := range messages {
@@ -1371,12 +1379,12 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 		return nil
 	}
 
-	r.storeMessages(ctx, req, fullRound, usage, roundUsages)
+	r.storeMessages(ctx, req, fullRound, usage, roundUsages, modelID)
 	go r.storeMemory(context.WithoutCancel(ctx), req.BotID, fullRound)
 	return nil
 }
 
-func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage, usages []json.RawMessage) {
+func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage, usages []json.RawMessage, modelID string) {
 	if r.messageService == nil {
 		return
 	}
@@ -1444,6 +1452,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			Metadata:                meta,
 			Usage:                   msgUsage,
 			Assets:                  assets,
+			ModelID:                 modelID,
 		}); err != nil {
 			r.logger.Warn("persist message failed", slog.Any("error", err))
 		}
@@ -1786,6 +1795,48 @@ func (r *Resolver) loadBotSettings(ctx context.Context, botID string) (settings.
 		return settings.Settings{}, fmt.Errorf("settings service not configured")
 	}
 	return r.settingsService.GetBot(ctx, botID)
+}
+
+func (r *Resolver) loadBotLoopDetectionEnabled(ctx context.Context, botID string) bool {
+	if r.queries == nil {
+		return false
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return false
+	}
+	row, err := r.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		r.logger.Debug("failed to load bot metadata for loop detection",
+			slog.String("bot_id", botID),
+			slog.Any("error", err),
+		)
+		return false
+	}
+	return parseLoopDetectionEnabledFromMetadata(row.Metadata)
+}
+
+func parseLoopDetectionEnabledFromMetadata(payload []byte) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(payload, &metadata); err != nil || metadata == nil {
+		return false
+	}
+	features, ok := metadata["features"].(map[string]any)
+	if !ok {
+		return false
+	}
+	loopDetection, ok := features["loop_detection"].(map[string]any)
+	if !ok {
+		return false
+	}
+	enabled, ok := loopDetection["enabled"].(bool)
+	if !ok {
+		return false
+	}
+	return enabled
 }
 
 // --- utility ---

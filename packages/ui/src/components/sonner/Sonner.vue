@@ -11,9 +11,9 @@ const props = defineProps<ToasterProps>()
   <Sonner
     :class="cn('toaster group', props.class)"
     :style="{
-      '--normal-bg': 'oklch(1 0 0)',
-      '--normal-text': 'oklch(0.224 0 0)',
-      '--normal-border': 'oklch(0.922 0 0)',
+      '--normal-bg': 'var(--card)',
+      '--normal-text': 'var(--foreground)',
+      '--normal-border': 'var(--border)',
       '--border-radius': '1rem',
     }"
     v-bind="props"

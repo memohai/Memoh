@@ -28,21 +28,25 @@ import { pathSegments, joinPath } from './utils'
 import FileList from './file-list.vue'
 import FileViewer from './file-viewer.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   botId: string
-}>()
+  syncUrl?: boolean
+}>(), {
+  syncUrl: true,
+})
 
 const { t } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
 
-const currentPath = useSyncedQueryParam('path', '/data')
+const currentPath = props.syncUrl ? useSyncedQueryParam('path', '/data') : ref('/data')
 const entries = ref<HandlersFsFileInfo[]>([])
 const listLoading = ref(false)
 const openFile = ref<HandlersFsFileInfo | null>(null)
 
 function syncFileToUrl(filePath: string | null) {
+  if (!props.syncUrl) return
   const current = route.query.file as string | undefined
   const next = filePath || undefined
   if (current !== next) {
@@ -51,6 +55,7 @@ function syncFileToUrl(filePath: string | null) {
 }
 
 function restoreFileFromUrl() {
+  if (!props.syncUrl) return
   const filePath = route.query.file as string | undefined
   if (filePath && !openFile.value) {
     const name = filePath.split('/').pop() ?? ''
@@ -330,7 +335,7 @@ onMounted(() => {
     <div class="flex flex-1 min-h-0 overflow-hidden">
       <!-- File list -->
       <div
-        class="overflow-auto border-border transition-all"
+        class="overflow-auto border-border transition-colors"
         :class="openFile ? 'w-80 shrink-0 border-r' : 'w-full'"
       >
         <FileList

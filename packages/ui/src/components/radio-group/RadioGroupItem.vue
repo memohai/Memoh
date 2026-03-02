@@ -23,7 +23,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     v-bind="forwardedProps"
     :class="
       cn(
-        'aspect-square size-4 shrink-0 rounded-full border border-gray-300 dark:border-gray-600 shadow-sm transition-all outline-none text-primary',
+        'aspect-square size-4 shrink-0 rounded-full border border-border shadow-sm transition-all outline-none text-primary',
         'focus-visible:ring-2 focus-visible:ring-primary/20',
         'disabled:cursor-not-allowed disabled:opacity-50',
         props.class,

@@ -114,7 +114,7 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 
 	token, err := s.generateTriggerToken(cfg.OwnerUserID)
 	if err != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", err.Error(), nil)
+		s.completeLog(ctx, logRow.ID, "error", "", err.Error(), nil, pgtype.UUID{})
 		s.logger.Error("generate trigger token failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
 		return
 	}
@@ -125,22 +125,24 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 		OwnerUserID: cfg.OwnerUserID,
 	}, token)
 	if err != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", err.Error(), nil)
+		s.completeLog(ctx, logRow.ID, "error", "", err.Error(), nil, pgtype.UUID{})
 		s.logger.Error("heartbeat trigger failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
 		return
 	}
 
-	s.completeLog(ctx, logRow.ID, result.Status, result.Text, "", result.UsageBytes)
+	modelID := db.ParseUUIDOrEmpty(result.ModelID)
+	s.completeLog(ctx, logRow.ID, result.Status, result.Text, "", result.UsageBytes, modelID)
 	s.logger.Info("heartbeat completed", slog.String("bot_id", cfg.BotID), slog.String("status", result.Status))
 }
 
-func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, resultText, errorMessage string, usageBytes []byte) {
+func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, resultText, errorMessage string, usageBytes []byte, modelID pgtype.UUID) {
 	_, err := s.queries.CompleteHeartbeatLog(ctx, sqlc.CompleteHeartbeatLogParams{
 		ID:           logID,
 		Status:       status,
 		ResultText:   resultText,
 		ErrorMessage: errorMessage,
 		Usage:        usageBytes,
+		ModelID:      modelID,
 	})
 	if err != nil {
 		s.logger.Error("complete heartbeat log failed", slog.Any("error", err))
@@ -222,7 +224,7 @@ func (s *Service) removeJob(botID string) {
 	}
 }
 
-func toLog(row sqlc.BotHeartbeatLog) Log {
+func toLog(row sqlc.ListHeartbeatLogsByBotRow) Log {
 	l := Log{
 		ID:           row.ID.String(),
 		BotID:        row.BotID.String(),

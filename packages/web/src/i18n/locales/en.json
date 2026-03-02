@@ -59,7 +59,8 @@
     "settings": "Settings",
     "home": "Home",
     "mcp": "MCP",
-    "platform": "Platform"
+    "platform": "Platform",
+    "usage": "Usage"
   },
   "breadcrumb": {
     "main": "Home"
@@ -135,7 +136,8 @@
     "toolRunning": "Running",
     "toolInput": "Input",
     "toolResult": "Result",
-    "unknownUser": "{platform} User"
+    "unknownUser": "{platform} User",
+    "files": "Files"
   },
   "models": {
     "title": "Models",
@@ -162,7 +164,12 @@
       "audio": "Audio",
       "video": "Video",
       "file": "File"
-    }
+    },
+    "testModel": "Test Model",
+    "testOk": "OK",
+    "testAuthError": "Auth Error",
+    "testError": "Error",
+    "testFailed": "Test failed"
   },
   "provider": {
     "add": "Add Provider",
@@ -178,11 +185,6 @@
     "testConnection": "Test Connection",
     "reachable": "Reachable",
     "unreachable": "Unreachable",
-    "supported": "Supported",
-    "authError": "Auth Error",
-    "unsupported": "Unsupported",
-    "error": "Error",
-    "embedding": "Embedding",
     "testFailed": "Test failed"
   },
   "searchProvider": {
@@ -375,6 +377,7 @@
       "mcp": "MCP",
       "subagents": "Subagents",
       "heartbeat": "Heartbeat",
+      "schedule": "Schedule",
       "history": "History",
       "skills": "Skills",
       "email": "Email",
@@ -509,6 +512,7 @@
       "heartbeatModelPlaceholder": "Use chat model (default)",
       "allowGuest": "Allow Guest Access",
       "allowGuestPersonalHint": "Personal bots do not support guest access. Use a public bot instead.",
+      "loopDetectionTitle": "Detect and auto-block output loops",
       "searchModel": "Search models…",
       "noModel": "No models available",
       "saveSuccess": "Settings saved",
@@ -617,6 +621,20 @@
       "filterAll": "All",
       "noResult": "—"
     },
+    "schedule": {
+      "title": "Scheduled Tasks",
+      "loadFailed": "Failed to load schedules",
+      "empty": "No scheduled tasks",
+      "name": "Name",
+      "pattern": "Pattern",
+      "enabled": "Enabled",
+      "calls": "Calls",
+      "createdAt": "Created",
+      "updatedAt": "Updated",
+      "statusEnabled": "Enabled",
+      "statusDisabled": "Disabled",
+      "unlimited": "∞"
+    },
     "history": {
       "title": "History",
       "loadFailed": "Failed to load history",
@@ -659,5 +677,39 @@
       "usage": "Usage",
       "skills": "Skills"
     }
+  },
+  "usage": {
+    "title": "Token Usage",
+    "selectBot": "Select Bot",
+    "selectBotPlaceholder": "Choose a bot to view usage",
+    "timeRange": "Time Range",
+    "last7Days": "Last 7 Days",
+    "last30Days": "Last 30 Days",
+    "last90Days": "Last 90 Days",
+    "noData": "No usage data for the selected period",
+    "loadFailed": "Failed to load token usage",
+    "totalInputTokens": "Total Input Tokens",
+    "totalOutputTokens": "Total Output Tokens",
+    "avgCacheHitRate": "Avg Cache Hit Rate",
+    "totalReasoningTokens": "Total Reasoning Tokens",
+    "dailyTokens": "Daily Token Usage",
+    "cacheBreakdown": "Cache Breakdown",
+    "cacheHitRate": "Cache Hit Rate",
+    "chatInput": "Chat Input",
+    "chatOutput": "Chat Output",
+    "heartbeatInput": "Heartbeat Input",
+    "heartbeatOutput": "Heartbeat Output",
+    "cacheRead": "Cache Read",
+    "cacheWrite": "Cache Write",
+    "noCache": "No Cache",
+    "tokens": "Tokens",
+    "date": "Date",
+    "modelDistribution": "Model Usage Distribution",
+    "filterByModel": "Filter by Model",
+    "allModels": "All Models",
+    "dateFrom": "From",
+    "dateTo": "To",
+    "chartPie": "Pie",
+    "chartBar": "Bar"
   }
 }
