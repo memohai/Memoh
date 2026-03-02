@@ -499,8 +499,13 @@ const dailyTokensOption = computed(() => {
   const hbMap = buildDayMap(usageData.value?.heartbeat)
   return {
     tooltip: { trigger: 'axis' as const },
-    legend: { data: [t('usage.chatInput'), t('usage.chatOutput'), t('usage.heartbeatInput'), t('usage.heartbeatOutput')] },
-    grid: { left: 60, right: 20, bottom: 30, top: 40 },
+    legend: { 
+      data: [t('usage.chatInput'), t('usage.chatOutput'), t('usage.heartbeatInput'), t('usage.heartbeatOutput')],
+      bottom: 0,
+      left: 'center',
+      itemGap: 16,
+    },
+    grid: { left: 60, right: 20, bottom: 50, top: 20 },
     xAxis: { type: 'category' as const, data: days },
     yAxis: { type: 'value' as const },
     series: [
@@ -542,8 +547,13 @@ const cacheBreakdownOption = computed(() => {
   const hbMap = buildDayMap(usageData.value?.heartbeat)
   return {
     tooltip: { trigger: 'axis' as const },
-    legend: { data: [t('usage.cacheRead'), t('usage.cacheWrite'), t('usage.noCache')] },
-    grid: { left: 60, right: 20, bottom: 30, top: 40 },
+    legend: { 
+      data: [t('usage.cacheRead'), t('usage.cacheWrite'), t('usage.noCache')],
+      bottom: 0,
+      left: 'center',
+      itemGap: 16,
+    },
+    grid: { left: 60, right: 20, bottom: 50, top: 20 },
     xAxis: { type: 'category' as const, data: days },
     yAxis: { type: 'value' as const },
     series: [
