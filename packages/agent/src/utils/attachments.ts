@@ -1,5 +1,8 @@
 import type { AssistantModelMessage, ModelMessage, TextPart } from 'ai'
-import type { AgentAttachment, ContainerFileAttachment } from '../types/attachment'
+import type {
+  AgentAttachment,
+  ContainerFileAttachment,
+} from '../types/attachment'
 
 const ATTACHMENTS_START = '<attachments>'
 const ATTACHMENTS_END = '</attachments>'
@@ -196,4 +199,3 @@ export class AttachmentsStreamExtractor {
     return { visibleText: out, attachments: [] }
   }
 }
-
