@@ -1,6 +1,11 @@
 #!/bin/sh
 set -e
 
+# Ensure IP forwarding and subnet MASQUERADE for CNI.
+sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
+iptables -t nat -C POSTROUTING -s 10.88.0.0/16 ! -o cni0 -j MASQUERADE 2>/dev/null || \
+  iptables -t nat -A POSTROUTING -s 10.88.0.0/16 ! -o cni0 -j MASQUERADE 2>/dev/null || true
+
 # Setup cgroup v2 delegation for nested containerd.
 if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
   mkdir -p /sys/fs/cgroup/init

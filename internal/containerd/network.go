@@ -53,9 +53,10 @@ func setupCNINetwork(ctx context.Context, task client.Task, containerID string, 
 		if !isDuplicateAllocationError(err) {
 			return err
 		}
-		if rmErr := cni.Remove(ctx, containerID, netnsPath); rmErr != nil {
-			return rmErr
-		}
+		// Stale IPAM allocation (e.g. after container restart with persisted
+		// /var/lib/cni). Remove may fail if the previous iptables/veth state
+		// is already gone; ignore the error so the retry Setup still runs.
+		_ = cni.Remove(ctx, containerID, netnsPath)
 		_, err = cni.Setup(ctx, containerID, netnsPath)
 		if err != nil {
 			return err
