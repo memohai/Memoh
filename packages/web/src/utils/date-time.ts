@@ -72,15 +72,8 @@ export function formatRelativeTime(
   options: FormatDateOptions = {},
 ): string {
   if (!value) return options.fallback ?? ''
-
   const date = value instanceof Date ? value : parseDate(value)
   if (!date) return resolveInvalid(value as string, options)
-
-  const diffMs = date.getTime() - Date.now()
-  const absDiffSec = Math.abs(diffMs) / 1000
-
-  const date = value instanceof Date ? value : parseDate(value)
-  if (!date) return options.fallback ?? ''
 
   const diffMs = date.getTime() - Date.now()
   const absDiffSec = Math.abs(diffMs) / 1000
