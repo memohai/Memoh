@@ -79,6 +79,11 @@ export function formatRelativeTime(
   const diffMs = date.getTime() - Date.now()
   const absDiffSec = Math.abs(diffMs) / 1000
 
+  const date = value instanceof Date ? value : parseDate(value)
+  if (!date) return options.fallback ?? ''
+
+  const diffMs = date.getTime() - Date.now()
+  const absDiffSec = Math.abs(diffMs) / 1000
   const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 
   if (absDiffSec < 60) return rtf.format(Math.round(diffMs / 1000), 'second')

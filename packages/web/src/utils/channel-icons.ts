@@ -15,6 +15,7 @@ const CHANNEL_ICONS: Record<string, [string, string]> = {
   web: ['fas', 'globe'],
   slack: ['fab', 'slack'],
   discord: ['fab', 'discord'],
+  email: ['fas', 'envelope'],
 }
 
 const DEFAULT_ICON: [string, string] = ['far', 'comment']

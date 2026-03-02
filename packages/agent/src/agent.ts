@@ -33,9 +33,20 @@ import { getMCPTools } from './tools/mcp'
 import { getTools } from './tools'
 import { buildIdentityHeaders } from './utils/headers'
 import { createFS } from './utils'
+import { createTextLoopGuard, createTextLoopProbeBuffer } from './sential'
+import { createToolLoopGuardedTools } from './tool-loop'
 
 const ANTHROPIC_BUDGET: Record<string, number> = { low: 5000, medium: 16000, high: 50000 }
 const GOOGLE_BUDGET: Record<string, number> = { low: 5000, medium: 16000, high: 50000 }
+const LOOP_DETECTED_ABORT_MESSAGE = 'loop detected, stream aborted'
+const LOOP_DETECTED_STREAK_THRESHOLD = 3
+const LOOP_DETECTED_MIN_NEW_GRAMS_PER_CHUNK = 8
+const LOOP_DETECTED_PROBE_CHARS = 256
+const TOOL_LOOP_DETECTED_ABORT_MESSAGE = 'tool loop detected, stream aborted'
+const TOOL_LOOP_REPEAT_THRESHOLD = 5
+const TOOL_LOOP_WARNINGS_BEFORE_ABORT = 1
+const TOOL_LOOP_WARNING_KEY = '__memoh_tool_loop_warning'
+const TOOL_LOOP_WARNING_TEXT = '[MEMOH_TOOL_LOOP_WARNING] Repeated identical tool invocation (same tool + arguments) was detected more than 5 times. Stop looping this tool and either summarize current results or change strategy.'
 
 const buildProviderOptions = (config: ModelConfig): Record<string, Record<string, unknown>> | undefined => {
   if (!config.reasoning?.enabled) return undefined
@@ -93,12 +104,14 @@ export const createAgent = (
     },
     auth,
     inbox = [],
+    loopDetection = { enabled: false },
   }: AgentParams,
   fetch: AuthFetcher,
 ) => {
   const model = createModel(modelConfig)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const providerOptions = buildProviderOptions(modelConfig) as any
+  const loopDetectionEnabled = loopDetection?.enabled === true
   const enabledSkills: AgentSkill[] = []
   const fs = createFS({ fetch, botId: identity.botId })
 
@@ -194,27 +207,102 @@ export const createAgent = (
     return userMessage
   }
 
+  const createNonStreamTextLoopInspector = () => {
+    if (!loopDetectionEnabled) {
+      return null
+    }
+    const textLoopGuard = createTextLoopGuard({
+      consecutiveHitsToAbort: LOOP_DETECTED_STREAK_THRESHOLD,
+      minNewGramsPerChunk: LOOP_DETECTED_MIN_NEW_GRAMS_PER_CHUNK,
+    })
+    return (text: string) => {
+      const result = textLoopGuard.inspect(text)
+      if (result.abort) {
+        throw new Error(LOOP_DETECTED_ABORT_MESSAGE)
+      }
+    }
+  }
+
+  const buildGuardedTools = (
+    tools: ToolSet,
+    onAbortToolCall: (toolCallId: string) => void = () => {},
+  ): ToolSet => {
+    if (!loopDetectionEnabled) {
+      return tools
+    }
+    return createToolLoopGuardedTools(tools, {
+      repeatThreshold: TOOL_LOOP_REPEAT_THRESHOLD,
+      warningsBeforeAbort: TOOL_LOOP_WARNINGS_BEFORE_ABORT,
+      onAbortToolCall,
+      warningKey: TOOL_LOOP_WARNING_KEY,
+      warningText: TOOL_LOOP_WARNING_TEXT,
+    })
+  }
+
+  const runTextGeneration = async ({
+    messages,
+    systemPrompt,
+    prepareStep,
+  }: {
+    messages: ModelMessage[]
+    systemPrompt: string
+    prepareStep?: () => { system: string }
+  }) => {
+    const { tools, close } = await getAgentTools()
+    let shouldAbortForToolLoop = false
+    const guardedTools = buildGuardedTools(tools, () => {
+      shouldAbortForToolLoop = true
+    })
+    const inspectTextLoop = createNonStreamTextLoopInspector()
+    let runError: unknown = null
+    try {
+      return await generateText({
+        model,
+        messages,
+        system: systemPrompt,
+        ...(providerOptions && { providerOptions }),
+        stopWhen: stepCountIs(Infinity),
+        ...(prepareStep && { prepareStep }),
+        ...(loopDetectionEnabled && {
+          onStepFinish: ({ text }: { text: string }) => {
+            if (shouldAbortForToolLoop) {
+              throw new Error(TOOL_LOOP_DETECTED_ABORT_MESSAGE)
+            }
+            if (inspectTextLoop) {
+              inspectTextLoop(text)
+            }
+          },
+        }),
+        tools: guardedTools,
+      })
+    } catch (error) {
+      runError = error
+      throw error
+    } finally {
+      try {
+        await close()
+      } catch (closeError) {
+        if (runError == null) {
+          throw closeError
+        }
+        console.error(closeError)
+      }
+    }
+  }
+
   const ask = async (input: AgentInput) => {
     const userPrompt = generateUserPrompt(input)
     const messages = [...input.messages, userPrompt]
     input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
-    const { tools, close } = await getAgentTools()
-    const { response, reasoning, text, usage, steps } = await generateText({
-      model,
+    const { response, reasoning, text, usage, steps } = await runTextGeneration({
       messages,
-      system: systemPrompt,
-      ...(providerOptions && { providerOptions }),
-      stopWhen: stepCountIs(Infinity),
+      systemPrompt,
       prepareStep: () => {
         return {
           system: systemPrompt,
         }
       },
-      onFinish: async () => {
-        await close()
-      },
-      tools,
     })
     const stepUsages = buildStepUsages(steps)
     const { cleanedText, attachments: textAttachments } =
@@ -257,22 +345,14 @@ export const createAgent = (
       })
     }
     const messages = [...params.messages, userPrompt]
-    const { tools, close } = await getAgentTools()
-    const { response, reasoning, text, usage, steps } = await generateText({
-      model,
+    const { response, reasoning, text, usage, steps } = await runTextGeneration({
       messages,
-      system: generateSubagentSystemPrompt(),
-      ...(providerOptions && { providerOptions }),
-      stopWhen: stepCountIs(Infinity),
+      systemPrompt: generateSubagentSystemPrompt(),
       prepareStep: () => {
         return {
           system: generateSubagentSystemPrompt(),
         }
       },
-      onFinish: async () => {
-        await close()
-      },
-      tools,
     })
     const stepUsages = buildStepUsages(steps)
     return {
@@ -301,17 +381,9 @@ export const createAgent = (
     }
     const messages = [...params.messages, scheduleMessage]
     params.skills.forEach((skill) => enableSkill(skill))
-    const { tools, close } = await getAgentTools()
-    const { response, reasoning, text, usage, steps } = await generateText({
-      model,
+    const { response, reasoning, text, usage, steps } = await runTextGeneration({
       messages,
-      system: await generateSystemPrompt(),
-      ...(providerOptions && { providerOptions }),
-      stopWhen: stepCountIs(Infinity),
-      onFinish: async () => {
-        await close()
-      },
-      tools,
+      systemPrompt: await generateSystemPrompt(),
     })
     const stepUsages = buildStepUsages(steps)
     return {
@@ -341,17 +413,9 @@ export const createAgent = (
     }
     const messages = [...params.messages, heartbeatMessage]
     params.skills.forEach((skill) => enableSkill(skill))
-    const { tools, close } = await getAgentTools()
-    const { response, reasoning, text, usage, steps } = await generateText({
-      model,
+    const { response, reasoning, text, usage, steps } = await runTextGeneration({
       messages,
-      system: await generateSystemPrompt(),
-      ...(providerOptions && { providerOptions }),
-      stopWhen: stepCountIs(Infinity),
-      onFinish: async () => {
-        await close()
-      },
-      tools,
+      systemPrompt: await generateSystemPrompt(),
     })
     const stepUsages = buildStepUsages(steps)
     return {
@@ -392,6 +456,27 @@ export const createAgent = (
     input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
     const attachmentsExtractor = new AttachmentsStreamExtractor()
+    const textLoopGuard = loopDetectionEnabled
+      ? createTextLoopGuard({
+        consecutiveHitsToAbort: LOOP_DETECTED_STREAK_THRESHOLD,
+        minNewGramsPerChunk: LOOP_DETECTED_MIN_NEW_GRAMS_PER_CHUNK,
+      })
+      : null
+    const guardLoopOutput = (text: string) => {
+      if (!textLoopGuard) {
+        return
+      }
+      const result = textLoopGuard.inspect(text)
+      if (result.abort) {
+        throw new Error(LOOP_DETECTED_ABORT_MESSAGE)
+      }
+    }
+    const textLoopProbeBuffer = textLoopGuard
+      ? createTextLoopProbeBuffer(
+        LOOP_DETECTED_PROBE_CHARS,
+        guardLoopOutput,
+      )
+      : null
     const result: {
       messages: ModelMessage[];
       reasoning: string[];
@@ -403,7 +488,20 @@ export const createAgent = (
       usage: null,
       usages: [],
     }
+    const toolLoopAbortCallIds = new Set<string>()
     const { tools, close } = await getAgentTools()
+    // Stream path needs deferred abort to keep tool_call_start/tool_call_end event pairing.
+    const guardedTools = buildGuardedTools(tools, (toolCallId) => {
+      toolLoopAbortCallIds.add(toolCallId)
+    })
+    let closePromise: Promise<void> | null = null
+    const closeTools = async () => {
+      if (!closePromise) {
+        closePromise = Promise.resolve().then(() => close())
+      }
+      await closePromise
+    }
+    let streamError: unknown = null
     try {
       const { fullStream } = streamText({
         model,
@@ -416,9 +514,9 @@ export const createAgent = (
             system: systemPrompt,
           }
         },
-        tools,
+        tools: guardedTools,
         onFinish: async ({ usage, reasoning, response, steps }) => {
-          await close()
+          await closeTools()
           result.usage = usage as never
           result.reasoning = reasoning.map((part) => part.text)
           result.messages = response.messages
@@ -464,6 +562,9 @@ export const createAgent = (
               chunk.text,
             )
             if (visibleText) {
+              if (textLoopProbeBuffer) {
+                textLoopProbeBuffer.push(visibleText)
+              }
               yield {
                 type: 'text_delta',
                 delta: visibleText,
@@ -481,10 +582,16 @@ export const createAgent = (
             // Flush any remaining buffered content before ending the text stream.
             const remainder = attachmentsExtractor.flushRemainder()
             if (remainder.visibleText) {
+              if (textLoopProbeBuffer) {
+                textLoopProbeBuffer.push(remainder.visibleText)
+              }
               yield {
                 type: 'text_delta',
                 delta: remainder.visibleText,
               }
+            }
+            if (textLoopProbeBuffer) {
+              textLoopProbeBuffer.flush()
             }
             if (remainder.attachments.length) {
               yield {
@@ -502,10 +609,16 @@ export const createAgent = (
             // Flush any remaining buffered content before ending the text stream.
             const remainder = attachmentsExtractor.flushRemainder()
             if (remainder.visibleText) {
+              if (textLoopProbeBuffer) {
+                textLoopProbeBuffer.push(remainder.visibleText)
+              }
               yield {
                 type: 'text_delta',
                 delta: remainder.visibleText,
               }
+            }
+            if (textLoopProbeBuffer) {
+              textLoopProbeBuffer.flush()
             }
             if (remainder.attachments.length) {
               yield {
@@ -522,6 +635,9 @@ export const createAgent = (
             }
             break
           case 'tool-result':
+            // Always emit the terminal tool event first so downstream reducers
+            // can close the in-flight tool block before the stream aborts.
+            const shouldAbortForToolLoop = toolLoopAbortCallIds.delete(chunk.toolCallId)
             yield {
               type: 'tool_call_end',
               toolName: chunk.toolName,
@@ -529,6 +645,9 @@ export const createAgent = (
               input: chunk.input,
               result: chunk.output,
               metadata: chunk,
+            }
+            if (shouldAbortForToolLoop) {
+              throw new Error(TOOL_LOOP_DETECTED_ABORT_MESSAGE)
             }
             break
           case 'file':
@@ -543,6 +662,9 @@ export const createAgent = (
               ],
             }
         }
+      }
+      if (textLoopProbeBuffer) {
+        textLoopProbeBuffer.flush()
       }
   
       const { messages: strippedMessages } = stripAttachmentsFromMessages(
@@ -560,8 +682,18 @@ export const createAgent = (
         skills: getEnabledSkills(),
       }
     } catch (error) {
+      streamError = error
       console.error(error)
       throw error
+    } finally {
+      try {
+        await closeTools()
+      } catch (closeError) {
+        if (streamError == null) {
+          throw closeError
+        }
+        console.error(closeError)
+      }
     }
   }
 

@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/memohai/memoh/internal/db"
@@ -165,8 +163,7 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 
 const probeTimeout = 5 * time.Second
 
-// Test probes the provider's base URL to check connectivity, supported
-// client types, and embedding support. All probes run concurrently.
+// Test probes the provider's base URL to check reachability.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -179,61 +176,16 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	}
 
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
-	apiKey := provider.ApiKey
 
-	resp := TestResponse{Checks: make(map[string]CheckResult, 5)}
-
-	// Connectivity check
 	start := time.Now()
-	reachable, reachMsg := probeReachable(ctx, baseURL)
-	resp.Reachable = reachable
-	resp.LatencyMs = time.Since(start).Milliseconds()
-	if !reachable {
-		resp.Message = reachMsg
-		return resp, nil
-	}
+	reachable, msg := probeReachable(ctx, baseURL)
+	latency := time.Since(start).Milliseconds()
 
-	type namedResult struct {
-		name   string
-		result CheckResult
-	}
-
-	probes := []struct {
-		name string
-		fn   func() CheckResult
-	}{
-		{"openai-completions", func() CheckResult {
-			return probeOpenAICompletions(ctx, baseURL, apiKey)
-		}},
-		{"openai-responses", func() CheckResult {
-			return probeOpenAIResponses(ctx, baseURL, apiKey)
-		}},
-		{"anthropic-messages", func() CheckResult {
-			return probeAnthropicMessages(ctx, baseURL, apiKey)
-		}},
-		{"google-generative-ai", func() CheckResult {
-			return probeGoogleGenerativeAI(ctx, baseURL, apiKey)
-		}},
-		{"embedding", func() CheckResult {
-			return probeEmbedding(ctx, baseURL, apiKey)
-		}},
-	}
-
-	results := make([]namedResult, len(probes))
-	var wg sync.WaitGroup
-	for i, p := range probes {
-		wg.Add(1)
-		go func(idx int, name string, fn func() CheckResult) {
-			defer wg.Done()
-			results[idx] = namedResult{name: name, result: fn()}
-		}(i, p.name, p.fn)
-	}
-	wg.Wait()
-
-	for _, nr := range results {
-		resp.Checks[nr.name] = nr.result
-	}
-	return resp, nil
+	return TestResponse{
+		Reachable: reachable,
+		LatencyMs: latency,
+		Message:   msg,
+	}, nil
 }
 
 func probeReachable(ctx context.Context, baseURL string) (bool, string) {
@@ -244,101 +196,13 @@ func probeReachable(ctx context.Context, baseURL string) (bool, string) {
 	if err != nil {
 		return false, err.Error()
 	}
-	httpResp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return false, err.Error()
 	}
-	io.Copy(io.Discard, httpResp.Body)
-	httpResp.Body.Close()
-	return true, ""
-}
-
-func probeOpenAICompletions(ctx context.Context, baseURL, apiKey string) CheckResult {
-	return probeEndpoint(ctx, http.MethodGet, baseURL+"/models",
-		map[string]string{
-			"Authorization": "Bearer " + apiKey,
-		}, "")
-}
-
-func probeOpenAIResponses(ctx context.Context, baseURL, apiKey string) CheckResult {
-	body := `{"model":"probe-test","input":"hi","max_output_tokens":1}`
-	return probeEndpoint(ctx, http.MethodPost, baseURL+"/responses",
-		map[string]string{
-			"Authorization": "Bearer " + apiKey,
-			"Content-Type":  "application/json",
-		}, body)
-}
-
-func probeAnthropicMessages(ctx context.Context, baseURL, apiKey string) CheckResult {
-	body := `{"model":"probe-test","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`
-	return probeEndpoint(ctx, http.MethodPost, baseURL+"/messages",
-		map[string]string{
-			"x-api-key":         apiKey,
-			"anthropic-version": "2023-06-01",
-			"Content-Type":      "application/json",
-		}, body)
-}
-
-func probeGoogleGenerativeAI(ctx context.Context, baseURL, apiKey string) CheckResult {
-	return probeEndpoint(ctx, http.MethodGet, baseURL+"/models",
-		map[string]string{
-			"x-goog-api-key": apiKey,
-		}, "")
-}
-
-func probeEmbedding(ctx context.Context, baseURL, apiKey string) CheckResult {
-	body := `{"model":"probe-test","input":"hello"}`
-	return probeEndpoint(ctx, http.MethodPost, baseURL+"/embeddings",
-		map[string]string{
-			"Authorization": "Bearer " + apiKey,
-			"Content-Type":  "application/json",
-		}, body)
-}
-
-func probeEndpoint(ctx context.Context, method, url string, headers map[string]string, body string) CheckResult {
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
-	defer cancel()
-
-	var bodyReader io.Reader
-	if body != "" {
-		bodyReader = bytes.NewBufferString(body)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
-	if err != nil {
-		return CheckResult{Status: CheckStatusError, Message: err.Error()}
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	start := time.Now()
-	resp, err := http.DefaultClient.Do(req)
-	latency := time.Since(start).Milliseconds()
-	if err != nil {
-		return CheckResult{Status: CheckStatusError, LatencyMs: latency, Message: err.Error()}
-	}
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-
-	return classifyResponse(resp.StatusCode, latency)
-}
-
-func classifyResponse(statusCode int, latencyMs int64) CheckResult {
-	r := CheckResult{StatusCode: statusCode, LatencyMs: latencyMs}
-	switch {
-	case statusCode >= 200 && statusCode <= 299,
-		statusCode == 400, statusCode == 422, statusCode == 429:
-		r.Status = CheckStatusSupported
-	case statusCode == 401 || statusCode == 403:
-		r.Status = CheckStatusAuthError
-	case statusCode == 404 || statusCode == 405:
-		r.Status = CheckStatusUnsupported
-	default:
-		r.Status = CheckStatusError
-		r.Message = fmt.Sprintf("unexpected status %d", statusCode)
-	}
-	return r
+	return true, ""
 }
 
 // toGetResponse converts a database provider to a response

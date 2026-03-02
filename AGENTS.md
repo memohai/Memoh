@@ -125,18 +125,11 @@ Memoh/
 ├── db/                         # Database
 │   ├── migrations/             #   SQL migration files
 │   └── queries/                #   SQL query files (sqlc input)
-├── conf/                       # Configuration templates
-│   ├── app.example.toml        #   Default configuration template
-│   ├── app.dev.toml            #   Development configuration
-│   ├── app.docker.toml         #   Docker deployment configuration
-│   ├── app.apple.toml          #   macOS (Apple Virtualization) configuration
-│   └── app.windows.toml        #   Windows configuration
-├── devenv/                     # Development environment (docker-compose for local infra)
-├── docker/                     # Docker build & runtime (Dockerfiles, entrypoints, nginx)
+├── conf/                       # Configuration templates (app.example.toml, app.docker.toml)
+├── devenv/                     # Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, mcp-build.sh)
+├── docker/                     # Production Docker build & runtime (Dockerfiles, entrypoints, nginx.conf)
 ├── docs/                       # Documentation site
-├── scripts/                    # Utility scripts
-├── assets/                     # Static assets (images, etc.)
-├── data/                       # Runtime data directory
+├── scripts/                    # Utility scripts (db, release, install)
 ├── docker-compose.yml          # Docker Compose orchestration (production)
 ├── mise.toml                   # mise tasks and tool version definitions
 ├── sqlc.yaml                   # sqlc code generation config

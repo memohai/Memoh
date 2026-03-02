@@ -28,8 +28,14 @@ if ! ctr version >/dev/null 2>&1; then
   echo "ERROR: containerd not responsive after 30s"
   exit 1
 fi
+echo "containerd is running (pid $CONTAINERD_PID)"
 
-echo "containerd is ready, starting server command..."
+# Build MCP binary and import as containerd image
+echo "Building MCP image..."
+(cd /workspace && sh devenv/mcp-build.sh)
+echo "MCP image ready."
+
+echo "Starting server..."
 
 trap 'kill ${SERVER_PID:-0} 2>/dev/null || true; kill ${CONTAINERD_PID:-0} 2>/dev/null || true; wait' TERM INT
 

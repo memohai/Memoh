@@ -21,19 +21,18 @@ const telegramStreamPendingSuffix = "\n……"
 var testEditFunc func(bot *tgbotapi.BotAPI, chatID int64, msgID int, text string, parseMode string) error
 
 type telegramOutboundStream struct {
-	adapter            *TelegramAdapter
-	cfg                channel.ChannelConfig
-	target             string
-	reply              *channel.ReplyRef
-	parseMode          string
-	closed             atomic.Bool
-	mu                 sync.Mutex
-	buf                strings.Builder
-	streamChatID       int64
-	streamMsgID        int
-	lastEdited         string
-	lastEditedAt       time.Time
-	lastTypingActionAt time.Time
+	adapter      *TelegramAdapter
+	cfg          channel.ChannelConfig
+	target       string
+	reply        *channel.ReplyRef
+	parseMode    string
+	closed       atomic.Bool
+	mu           sync.Mutex
+	buf          strings.Builder
+	streamChatID int64
+	streamMsgID  int
+	lastEdited   string
+	lastEditedAt time.Time
 }
 
 func (s *telegramOutboundStream) getBot(ctx context.Context) (bot *tgbotapi.BotAPI, err error) {
@@ -41,7 +40,7 @@ func (s *telegramOutboundStream) getBot(ctx context.Context) (bot *tgbotapi.BotA
 	if err != nil {
 		return nil, err
 	}
-	bot, err = s.adapter.getOrCreateBot(telegramCfg.BotToken, s.cfg.ID)
+	bot, err = s.adapter.getOrCreateBot(telegramCfg, s.cfg.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -57,30 +56,25 @@ func (s *telegramOutboundStream) getBotAndReply(ctx context.Context) (bot *tgbot
 	return bot, replyTo, nil
 }
 
-func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context) {
+func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context) error {
 	// When ensureStreamMessage is called, always means that the message has not been completely generated
 	// so always refresh the "typing" action to improve the user experience
-	s.mu.Lock()
-	if time.Since(s.lastTypingActionAt) < telegramStreamEditThrottle {
-		// typing action lasts for 5 seconds
-		s.mu.Unlock()
-		return
+	bot, err := s.getBot(ctx)
+	if err != nil {
+		return err
 	}
-	s.lastTypingActionAt = time.Now()
-	chatID := s.streamChatID
-	s.mu.Unlock()
-	go func() {
-		bot, err := s.getBot(ctx)
-		if err != nil {
-			return
-		}
-		action := tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping)
-		_, _ = bot.Request(action)
-	}()
+	action := tgbotapi.NewChatAction(s.streamChatID, tgbotapi.ChatTyping)
+	_, err = bot.Request(action)
+	return err
 }
 
 func (s *telegramOutboundStream) ensureStreamMessage(ctx context.Context, text string) error {
 	s.mu.Lock()
+	go func() {
+		if err := s.refreshTypingAction(ctx); err != nil {
+			slog.Debug("refresh typing action failed", slog.Any("err", err))
+		}
+	}()
 	if s.streamMsgID != 0 {
 		s.mu.Unlock()
 		return nil
@@ -227,7 +221,6 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 	case channel.StreamEventStatus:
 		return nil
 	case channel.StreamEventToolCallStart:
-		s.refreshTypingAction(ctx)
 		s.mu.Lock()
 		bufText := strings.TrimSpace(s.buf.String())
 		hasMsg := s.streamMsgID != 0
@@ -270,12 +263,24 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 			}
 		}
 		return nil
-	case channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd:
+	case channel.StreamEventPhaseStart:
+		return nil
+	case channel.StreamEventPhaseEnd:
+		if event.Phase == channel.StreamPhaseText {
+			s.mu.Lock()
+			finalText := strings.TrimSpace(s.buf.String())
+			s.mu.Unlock()
+			if finalText != "" {
+				if err := s.ensureStreamMessage(ctx, finalText); err != nil {
+					return err
+				}
+				return s.editStreamMessageFinal(ctx, finalText)
+			}
+		}
 		return nil
 	case channel.StreamEventProcessingFailed, channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventDelta:
-		s.refreshTypingAction(ctx)
 		if event.Delta == "" || event.Phase == channel.StreamPhaseReasoning {
 			return nil
 		}
@@ -330,7 +335,7 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 			if err != nil {
 				return err
 			}
-			bot, err := s.adapter.getOrCreateBot(telegramCfg.BotToken, s.cfg.ID)
+			bot, err := s.adapter.getOrCreateBot(telegramCfg, s.cfg.ID)
 			if err != nil {
 				return err
 			}

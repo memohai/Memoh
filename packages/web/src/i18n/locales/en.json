@@ -163,7 +163,12 @@
       "audio": "Audio",
       "video": "Video",
       "file": "File"
-    }
+    },
+    "testModel": "Test Model",
+    "testOk": "OK",
+    "testAuthError": "Auth Error",
+    "testError": "Error",
+    "testFailed": "Test failed"
   },
   "provider": {
     "add": "Add Provider",
@@ -179,11 +184,6 @@
     "testConnection": "Test Connection",
     "reachable": "Reachable",
     "unreachable": "Unreachable",
-    "supported": "Supported",
-    "authError": "Auth Error",
-    "unsupported": "Unsupported",
-    "error": "Error",
-    "embedding": "Embedding",
     "testFailed": "Test failed"
   },
   "searchProvider": {
@@ -487,6 +487,7 @@
       "heartbeatModelPlaceholder": "Use chat model (default)",
       "allowGuest": "Allow Guest Access",
       "allowGuestPersonalHint": "Personal bots do not support guest access. Use a public bot instead.",
+      "loopDetectionTitle": "Detect and auto-block output loops",
       "searchModel": "Search models…",
       "noModel": "No models available",
       "saveSuccess": "Settings saved",

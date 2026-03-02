@@ -37,10 +37,11 @@ type assetOpener interface {
 
 // TelegramAdapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Telegram.
 type TelegramAdapter struct {
-	logger *slog.Logger
-	mu     sync.RWMutex
-	bots   map[string]*tgbotapi.BotAPI // keyed by bot token
-	assets assetOpener
+	logger        *slog.Logger
+	mu            sync.RWMutex
+	bots          map[string]*tgbotapi.BotAPI // keyed by bot token
+	fileEndpoints map[string]string           // token → file endpoint format string
+	assets        assetOpener
 }
 
 // NewTelegramAdapter creates a TelegramAdapter with the given logger.
@@ -49,8 +50,9 @@ func NewTelegramAdapter(log *slog.Logger) *TelegramAdapter {
 		log = slog.Default()
 	}
 	adapter := &TelegramAdapter{
-		logger: log.With(slog.String("adapter", "telegram")),
-		bots:   make(map[string]*tgbotapi.BotAPI),
+		logger:        log.With(slog.String("adapter", "telegram")),
+		bots:          make(map[string]*tgbotapi.BotAPI),
+		fileEndpoints: make(map[string]string),
 	}
 	_ = tgbotapi.SetLogger(&slogBotLogger{log: adapter.logger})
 	return adapter
@@ -63,30 +65,47 @@ func (a *TelegramAdapter) SetAssetOpener(opener assetOpener) {
 
 var getOrCreateBotForTest func(a *TelegramAdapter, token, configID string) (*tgbotapi.BotAPI, error)
 
-func (a *TelegramAdapter) getOrCreateBot(token, configID string) (*tgbotapi.BotAPI, error) {
+func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tgbotapi.BotAPI, error) {
 	if getOrCreateBotForTest != nil {
-		return getOrCreateBotForTest(a, token, configID)
+		return getOrCreateBotForTest(a, cfg.BotToken, configID)
 	}
 	a.mu.RLock()
-	bot, ok := a.bots[token]
+	bot, ok := a.bots[cfg.BotToken]
 	a.mu.RUnlock()
 	if ok {
 		return bot, nil
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if bot, ok := a.bots[token]; ok {
+	if bot, ok := a.bots[cfg.BotToken]; ok {
 		return bot, nil
 	}
-	bot, err := tgbotapi.NewBotAPI(token)
+	bot, err := tgbotapi.NewBotAPIWithAPIEndpoint(cfg.BotToken, cfg.apiEndpoint())
 	if err != nil {
 		if a.logger != nil {
 			a.logger.Error("create bot failed", slog.String("config_id", configID), slog.Any("error", err))
 		}
 		return nil, err
 	}
-	a.bots[token] = bot
+	a.bots[cfg.BotToken] = bot
+	a.fileEndpoints[cfg.BotToken] = cfg.fileEndpoint()
 	return bot, nil
+}
+
+// getFileDirectURL resolves a file ID to a direct download URL,
+// respecting the custom file endpoint for reverse proxy setups.
+func (a *TelegramAdapter) getFileDirectURL(bot *tgbotapi.BotAPI, fileID string) (string, error) {
+	file, err := bot.GetFile(tgbotapi.FileConfig{FileID: fileID})
+	if err != nil {
+		return "", err
+	}
+	a.mu.RLock()
+	endpoint := a.fileEndpoints[bot.Token]
+	a.mu.RUnlock()
+	if endpoint == "" {
+		endpoint = tgbotapi.FileEndpoint
+	}
+	return fmt.Sprintf(endpoint, bot.Token, file.FilePath), nil
 }
 
 // Type returns the Telegram channel type.
@@ -115,6 +134,12 @@ func (a *TelegramAdapter) Descriptor() channel.Descriptor {
 					Type:     channel.FieldSecret,
 					Required: true,
 					Title:    "Bot Token",
+				},
+				"apiBaseURL": {
+					Type:        channel.FieldString,
+					Required:    false,
+					Title:       "API Base URL",
+					Description: "Reverse proxy base URL for the Telegram Bot API. Required in regions where Telegram is blocked (e.g. China mainland). Default: https://api.telegram.org",
 				},
 			},
 		},
@@ -178,13 +203,16 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 		}
 		return nil, err
 	}
-	bot, err := tgbotapi.NewBotAPI(telegramCfg.BotToken)
+	bot, err := tgbotapi.NewBotAPIWithAPIEndpoint(telegramCfg.BotToken, telegramCfg.apiEndpoint())
 	if err != nil {
 		if a.logger != nil {
 			a.logger.Error("create bot failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 		return nil, err
 	}
+	a.mu.Lock()
+	a.fileEndpoints[telegramCfg.BotToken] = telegramCfg.fileEndpoint()
+	a.mu.Unlock()
 	updateConfig := tgbotapi.NewUpdate(0)
 	updateConfig.Timeout = 30
 	updates := bot.GetUpdatesChan(updateConfig)
@@ -461,16 +489,18 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	for key, value := range metadata {
 		meta[key] = value
 	}
+	mentionParts := extractTelegramMentionParts(raw)
+
 	return channel.InboundMessage{
 		Channel: Type,
 		Message: channel.Message{
 			ID:          strconv.Itoa(raw.MessageID),
 			Format:      channel.MessageFormatPlain,
 			Text:        text,
+			Parts:       mentionParts,
 			Attachments: attachments,
 			Reply:       replyRef,
 		},
-		BotID:       cfg.BotID,
 		ReplyTarget: chatID,
 		Sender: channel.Identity{
 			SubjectID:   subjectID,
@@ -517,7 +547,7 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	if to == "" {
 		return fmt.Errorf("telegram target is required")
 	}
-	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
+	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -870,7 +900,7 @@ func resolveTelegramFile(urlRef, keyRef, base64Ref, sourcePlatform string, att c
 	if keyRef != "" && (sourcePlatform == "" || strings.EqualFold(sourcePlatform, Type.String())) {
 		return tgbotapi.FileID(keyRef), nil
 	}
-	if assetID != "" && botID != "" && opener != nil {
+	if assetID != "" && opener != nil {
 		reader, asset, err := opener.Open(context.Background(), botID, assetID)
 		if err == nil {
 			data, readErr := io.ReadAll(io.LimitReader(reader, media.MaxAssetBytes+1))
@@ -1017,6 +1047,55 @@ func resolveTelegramParseMode(format channel.MessageFormat) string {
 	}
 }
 
+// extractTelegramMentionParts extracts structured mention parts from Telegram message entities.
+func extractTelegramMentionParts(msg *tgbotapi.Message) []channel.MessagePart {
+	if msg == nil {
+		return nil
+	}
+	text := msg.Text
+	if text == "" {
+		text = msg.Caption
+	}
+	entities := make([]tgbotapi.MessageEntity, 0, len(msg.Entities)+len(msg.CaptionEntities))
+	entities = append(entities, msg.Entities...)
+	entities = append(entities, msg.CaptionEntities...)
+
+	var parts []channel.MessagePart
+	for _, entity := range entities {
+		switch entity.Type {
+		case "mention":
+			if text != "" && entity.Offset >= 0 && entity.Offset+entity.Length <= len([]rune(text)) {
+				runes := []rune(text)
+				mentionText := string(runes[entity.Offset : entity.Offset+entity.Length])
+				parts = append(parts, channel.MessagePart{
+					Type: channel.MessagePartMention,
+					Text: mentionText,
+				})
+			}
+		case "text_mention":
+			if entity.User != nil {
+				name := strings.TrimSpace(entity.User.FirstName + " " + entity.User.LastName)
+				if name == "" {
+					name = entity.User.UserName
+				}
+				displayText := "@" + name
+				meta := map[string]any{
+					"user_id": strconv.FormatInt(entity.User.ID, 10),
+				}
+				if entity.User.UserName != "" {
+					meta["username"] = entity.User.UserName
+				}
+				parts = append(parts, channel.MessagePart{
+					Type:     channel.MessagePartMention,
+					Text:     displayText,
+					Metadata: meta,
+				})
+			}
+		}
+	}
+	return parts
+}
+
 func isTelegramBotMentioned(msg *tgbotapi.Message, botUsername string) bool {
 	if msg == nil {
 		return false
@@ -1102,7 +1181,7 @@ func (a *TelegramAdapter) collectTelegramAttachments(bot *tgbotapi.BotAPI, msg *
 func (a *TelegramAdapter) buildTelegramAttachment(bot *tgbotapi.BotAPI, attType channel.AttachmentType, fileID, name, mime string, size int64) channel.Attachment {
 	url := ""
 	if bot != nil && strings.TrimSpace(fileID) != "" {
-		value, err := bot.GetFileDirectURL(fileID)
+		value, err := a.getFileDirectURL(bot, fileID)
 		if err != nil {
 			if a.logger != nil {
 				a.logger.Warn("resolve file url failed", slog.Any("error", err))
@@ -1138,13 +1217,13 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 	if err != nil {
 		return channel.AttachmentPayload{}, err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
+	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
 	if err != nil {
 		return channel.AttachmentPayload{}, err
 	}
 	downloadURL := strings.TrimSpace(attachment.URL)
 	if downloadURL == "" {
-		downloadURL, err = bot.GetFileDirectURL(fileID)
+		downloadURL, err = a.getFileDirectURL(bot, fileID)
 		if err != nil {
 			return channel.AttachmentPayload{}, fmt.Errorf("resolve telegram file url: %w", err)
 		}
@@ -1190,6 +1269,51 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 		Name:   strings.TrimSpace(attachment.Name),
 		Size:   size,
 	}, nil
+}
+
+// DiscoverSelf retrieves the bot's own identity from the Telegram platform.
+func (a *TelegramAdapter) DiscoverSelf(ctx context.Context, credentials map[string]any) (map[string]any, string, error) {
+	cfg, err := parseConfig(credentials)
+	if err != nil {
+		return nil, "", err
+	}
+	bot, err := a.getOrCreateBot(cfg, "discover")
+	if err != nil {
+		return nil, "", fmt.Errorf("telegram discover self: %w", err)
+	}
+	identity := map[string]any{
+		"user_id":  strconv.FormatInt(bot.Self.ID, 10),
+		"username": bot.Self.UserName,
+	}
+	name := strings.TrimSpace(bot.Self.FirstName + " " + bot.Self.LastName)
+	if name != "" {
+		identity["name"] = name
+	}
+	avatarURL := a.resolveUserAvatarURL(bot, bot.Self.ID)
+	if avatarURL != "" {
+		identity["avatar_url"] = avatarURL
+	}
+	return identity, strconv.FormatInt(bot.Self.ID, 10), nil
+}
+
+// resolveUserAvatarURL fetches the first profile photo for a Telegram user and returns a direct URL.
+func (a *TelegramAdapter) resolveUserAvatarURL(bot *tgbotapi.BotAPI, userID int64) string {
+	photos, err := bot.GetUserProfilePhotos(tgbotapi.UserProfilePhotosConfig{
+		UserID: userID,
+		Limit:  1,
+	})
+	if err != nil || photos.TotalCount == 0 || len(photos.Photos) == 0 {
+		return ""
+	}
+	best := pickTelegramPhoto(photos.Photos[0])
+	if best.FileID == "" {
+		return ""
+	}
+	url, err := a.getFileDirectURL(bot, best.FileID)
+	if err != nil {
+		return ""
+	}
+	return url
 }
 
 func pickTelegramPhoto(items []tgbotapi.PhotoSize) tgbotapi.PhotoSize {
@@ -1244,7 +1368,7 @@ func (a *TelegramAdapter) ProcessingStarted(ctx context.Context, cfg channel.Cha
 	if err != nil {
 		return channel.ProcessingStatusHandle{}, err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
+	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
 	if err != nil {
 		return channel.ProcessingStatusHandle{}, err
 	}
@@ -1298,7 +1422,7 @@ func (a *TelegramAdapter) React(ctx context.Context, cfg channel.ChannelConfig, 
 	if err != nil {
 		return err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
+	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -1312,7 +1436,7 @@ func (a *TelegramAdapter) Unreact(ctx context.Context, cfg channel.ChannelConfig
 	if err != nil {
 		return err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg.BotToken, cfg.ID)
+	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
 	if err != nil {
 		return err
 	}

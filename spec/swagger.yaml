@@ -1583,6 +1583,27 @@ definitions:
     x-enum-varnames:
     - ModelTypeChat
     - ModelTypeEmbedding
+  models.TestResponse:
+    properties:
+      latency_ms:
+        type: integer
+      message:
+        type: string
+      reachable:
+        type: boolean
+      status:
+        $ref: '#/definitions/models.TestStatus'
+    type: object
+  models.TestStatus:
+    enum:
+    - ok
+    - auth_error
+    - error
+    type: string
+    x-enum-varnames:
+    - TestStatusOK
+    - TestStatusAuthError
+    - TestStatusError
   models.UpdateRequest:
     properties:
       client_type:
@@ -1604,29 +1625,6 @@ definitions:
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
-  providers.CheckResult:
-    properties:
-      latency_ms:
-        type: integer
-      message:
-        type: string
-      status:
-        $ref: '#/definitions/providers.CheckStatus'
-      status_code:
-        type: integer
-    type: object
-  providers.CheckStatus:
-    enum:
-    - supported
-    - auth_error
-    - unsupported
-    - error
-    type: string
-    x-enum-varnames:
-    - CheckStatusSupported
-    - CheckStatusAuthError
-    - CheckStatusUnsupported
-    - CheckStatusError
   providers.CountResponse:
     properties:
       count:
@@ -1668,10 +1666,6 @@ definitions:
     type: object
   providers.TestResponse:
     properties:
-      checks:
-        additionalProperties:
-          $ref: '#/definitions/providers.CheckResult'
-        type: object
       latency_ms:
         type: integer
       message:
@@ -5543,6 +5537,40 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update model by internal ID
+      tags:
+      - models
+  /models/{id}/test:
+    post:
+      consumes:
+      - application/json
+      description: Probe a model's provider endpoint using the model's real model_id
+        and client_type to verify configuration
+      parameters:
+      - description: Model internal ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.TestResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Test model connectivity
       tags:
       - models
   /models/count:

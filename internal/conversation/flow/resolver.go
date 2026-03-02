@@ -180,6 +180,10 @@ type gatewayInboxItem struct {
 	CreatedAt string         `json:"createdAt"`
 }
 
+type gatewayLoopDetectionConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 type gatewayRequest struct {
 	Model             gatewayModelConfig          `json:"model"`
 	ActiveContextTime int                         `json:"activeContextTime"`
@@ -193,6 +197,7 @@ type gatewayRequest struct {
 	Identity          gatewayIdentity             `json:"identity"`
 	Attachments       []any                       `json:"attachments"`
 	Inbox             []gatewayInboxItem          `json:"inbox,omitempty"`
+	LoopDetection     *gatewayLoopDetectionConfig `json:"loopDetection,omitempty"`
 }
 
 type gatewayResponse struct {
@@ -298,6 +303,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if err != nil {
 		return resolvedContext{}, err
 	}
+	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, req.BotID)
 
 	// Check chat-level model override.
 	var chatSettings conversation.Settings
@@ -466,8 +472,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			ConversationType:  strings.TrimSpace(req.ConversationType),
 			SessionToken:      req.ChatToken,
 		},
-		Attachments: attachments,
-		Inbox:       inboxGatewayItems,
+		Attachments:   attachments,
+		Inbox:         inboxGatewayItems,
+		LoopDetection: &gatewayLoopDetectionConfig{Enabled: loopDetectionEnabled},
 	}
 
 	return resolvedContext{payload: payload, model: chatModel, provider: provider, inboxItemIDs: inboxItemIDs}, nil
@@ -1833,6 +1840,48 @@ func (r *Resolver) loadBotSettings(ctx context.Context, botID string) (settings.
 		return settings.Settings{}, fmt.Errorf("settings service not configured")
 	}
 	return r.settingsService.GetBot(ctx, botID)
+}
+
+func (r *Resolver) loadBotLoopDetectionEnabled(ctx context.Context, botID string) bool {
+	if r.queries == nil {
+		return false
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return false
+	}
+	row, err := r.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		r.logger.Debug("failed to load bot metadata for loop detection",
+			slog.String("bot_id", botID),
+			slog.Any("error", err),
+		)
+		return false
+	}
+	return parseLoopDetectionEnabledFromMetadata(row.Metadata)
+}
+
+func parseLoopDetectionEnabledFromMetadata(payload []byte) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(payload, &metadata); err != nil || metadata == nil {
+		return false
+	}
+	features, ok := metadata["features"].(map[string]any)
+	if !ok {
+		return false
+	}
+	loopDetection, ok := features["loop_detection"].(map[string]any)
+	if !ok {
+		return false
+	}
+	enabled, ok := loopDetection["enabled"].(bool)
+	if !ok {
+		return false
+	}
+	return enabled
 }
 
 // --- utility ---

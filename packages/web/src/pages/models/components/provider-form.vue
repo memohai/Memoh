@@ -73,6 +73,11 @@
         :disabled="!props.provider?.id"
         @click="runTest"
       >
+        <Spinner v-if="testLoading" />
+        <FontAwesomeIcon
+          v-else
+          :icon="['fas', 'rotate']"
+        />
         {{ $t('provider.testConnection') }}
       </LoadingButton>
 
@@ -120,25 +125,12 @@
         </span>
       </div>
 
-      <template v-if="testResult.reachable && testResult.checks">
-        <div
-          v-for="key in clientTypeKeys"
-          :key="key"
-          class="flex items-center justify-between"
-        >
-          <span>{{ clientTypeLabel(key) }}</span>
-          <Badge :variant="statusVariant(testResult.checks[key]?.status)">
-            {{ statusText(testResult.checks[key]?.status) }}
-          </Badge>
-        </div>
-
-        <div class="flex items-center justify-between">
-          <span>{{ $t('provider.embedding') }}</span>
-          <Badge :variant="statusVariant(testResult.checks['embedding']?.status)">
-            {{ statusText(testResult.checks['embedding']?.status) }}
-          </Badge>
-        </div>
-      </template>
+      <div
+        v-if="testResult.message"
+        class="text-muted-foreground text-xs"
+      >
+        {{ testResult.message }}
+      </div>
 
       <div
         v-if="testError"
@@ -154,7 +146,6 @@
 import {
   Input,
   Button,
-  Badge,
   FormControl,
   FormField,
   FormItem,
@@ -168,9 +159,8 @@ import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { postProvidersByIdTest } from '@memoh/sdk'
-import type { ProvidersGetResponse, ProvidersTestResponse, ProvidersCheckStatus } from '@memoh/sdk'
+import type { ProvidersGetResponse, ProvidersTestResponse } from '@memoh/sdk'
 import { useI18n } from 'vue-i18n'
-import { CLIENT_TYPE_META } from '@/constants/client-types'
 
 const { t } = useI18n()
 
@@ -189,32 +179,6 @@ const testLoading = ref(false)
 const testResult = ref<ProvidersTestResponse | null>(null)
 const testError = ref('')
 
-const clientTypeKeys = ['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai']
-
-function clientTypeLabel(key: string): string {
-  return CLIENT_TYPE_META[key]?.label ?? key
-}
-
-function statusVariant(status?: ProvidersCheckStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
-  switch (status) {
-    case 'supported': return 'default'
-    case 'auth_error': return 'secondary'
-    case 'unsupported': return 'outline'
-    case 'error': return 'destructive'
-    default: return 'outline'
-  }
-}
-
-function statusText(status?: ProvidersCheckStatus): string {
-  switch (status) {
-    case 'supported': return t('provider.supported')
-    case 'auth_error': return t('provider.authError')
-    case 'unsupported': return t('provider.unsupported')
-    case 'error': return t('provider.error')
-    default: return '-'
-  }
-}
-
 async function runTest() {
   if (!props.provider?.id) return
   testLoading.value = true
@@ -232,6 +196,10 @@ async function runTest() {
     testLoading.value = false
   }
 }
+
+watch(() => props.provider?.id, (newId) => {
+  if (newId) runTest()
+}, { immediate: true })
 
 const providerSchema = toTypedSchema(z.object({
   name: z.string().min(1),

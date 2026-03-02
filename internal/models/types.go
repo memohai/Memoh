@@ -138,3 +138,20 @@ type DeleteResponse struct {
 type CountResponse struct {
 	Count int64 `json:"count"`
 }
+
+// TestStatus represents the outcome of probing a model.
+type TestStatus string
+
+const (
+	TestStatusOK        TestStatus = "ok"
+	TestStatusAuthError TestStatus = "auth_error"
+	TestStatusError     TestStatus = "error"
+)
+
+// TestResponse is returned by POST /models/:id/test.
+type TestResponse struct {
+	Status    TestStatus `json:"status"`
+	Reachable bool       `json:"reachable"`
+	LatencyMs int64      `json:"latency_ms,omitempty"`
+	Message   string     `json:"message,omitempty"`
+}
