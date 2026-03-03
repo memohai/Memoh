@@ -45,7 +45,6 @@ func TestRefreshTokenFromContext(t *testing.T) {
 	originalClaims, ok := token.Claims.(jwt.MapClaims)
 	assert.True(t, ok)
 	origIat := int64(originalClaims["iat"].(float64))
-	origExp := int64(originalClaims["exp"].(float64))
 
 	// Parse the new token
 	newToken, err := jwt.Parse(newTokenStr, func(token *jwt.Token) (interface{}, error) {

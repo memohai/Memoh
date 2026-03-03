@@ -41,7 +41,6 @@ sslmode = "disable"
 [qdrant]
 base_url = "http://qdrant:6334"
 api_key = ""
-collection = "memory"
 timeout_seconds = 10
 
 ## Agent Gateway

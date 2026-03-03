@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -24,7 +23,7 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/inbox"
-	"github.com/memohai/memoh/internal/memory"
+	memprovider "github.com/memohai/memoh/internal/memory/provider"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/schedule"
@@ -32,11 +31,7 @@ import (
 )
 
 const (
-	defaultMaxContextMinutes   = 24 * 60
-	memoryContextLimitPerScope = 4
-	memoryContextMaxItems      = 8
-	memoryContextItemMaxChars  = 220
-	sharedMemoryNamespace      = "bot"
+	defaultMaxContextMinutes = 24 * 60
 	// Keep gateway payload bounded when inlining binary attachments as data URLs.
 	gatewayInlineAttachmentMaxBytes int64 = 20 * 1024 * 1024
 	// SSE payloads (especially attachment/tool results) can be very large.
@@ -74,7 +69,7 @@ type gatewayAssetLoader interface {
 type Resolver struct {
 	modelsService   *models.Service
 	queries         *sqlc.Queries
-	memoryService   *memory.Service
+	memoryRegistry  *memprovider.Registry
 	conversationSvc ConversationSettingsReader
 	messageService  messagepkg.Service
 	settingsService *settings.Service
@@ -93,7 +88,6 @@ func NewResolver(
 	log *slog.Logger,
 	modelsService *models.Service,
 	queries *sqlc.Queries,
-	memoryService *memory.Service,
 	conversationSvc ConversationSettingsReader,
 	messageService messagepkg.Service,
 	settingsService *settings.Service,
@@ -110,7 +104,6 @@ func NewResolver(
 	return &Resolver{
 		modelsService:   modelsService,
 		queries:         queries,
-		memoryService:   memoryService,
 		conversationSvc: conversationSvc,
 		messageService:  messageService,
 		settingsService: settingsService,
@@ -120,6 +113,11 @@ func NewResolver(
 		httpClient:      &http.Client{Timeout: timeout},
 		streamingClient: &http.Client{},
 	}
+}
+
+// SetMemoryRegistry sets the provider registry for memory operations.
+func (r *Resolver) SetMemoryRegistry(registry *memprovider.Registry) {
+	r.memoryRegistry = registry
 }
 
 // SetSkillLoader sets the skill loader used to populate usable skills in gateway requests.
@@ -1281,86 +1279,50 @@ func trimMessagesByTokens(messages []messageWithUsage, maxTokens int) []conversa
 	return result
 }
 
-type memoryContextItem struct {
-	Namespace string
-	Item      memory.MemoryItem
+func (r *Resolver) resolveMemoryProvider(ctx context.Context, botID string) memprovider.Provider {
+	if r.memoryRegistry == nil {
+		return nil
+	}
+	if r.settingsService == nil {
+		return nil
+	}
+	botSettings, err := r.settingsService.GetBot(ctx, botID)
+	if err != nil {
+		return nil
+	}
+	providerID := strings.TrimSpace(botSettings.MemoryProviderID)
+	if providerID == "" {
+		return nil
+	}
+	p, err := r.memoryRegistry.Get(providerID)
+	if err != nil {
+		r.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", err))
+		return nil
+	}
+	return p
 }
 
 func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversation.ChatRequest) *conversation.ModelMessage {
-	if r.memoryService == nil {
+	p := r.resolveMemoryProvider(ctx, req.BotID)
+	if p == nil {
 		return nil
 	}
-	if strings.TrimSpace(req.Query) == "" || strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.ChatID) == "" {
-		return nil
-	}
-
-	results := make([]memoryContextItem, 0, memoryContextLimitPerScope)
-	seen := map[string]struct{}{}
-	resp, err := r.memoryService.Search(ctx, memory.SearchRequest{
-		Query: req.Query,
-		BotID: req.BotID,
-		Limit: memoryContextLimitPerScope,
-		Filters: map[string]any{
-			"namespace": sharedMemoryNamespace,
-			"scopeId":   req.BotID,
-			"bot_id":    req.BotID,
-		},
-		NoStats: true,
+	result, err := p.OnBeforeChat(ctx, memprovider.BeforeChatRequest{
+		Query:  req.Query,
+		BotID:  req.BotID,
+		ChatID: req.ChatID,
 	})
 	if err != nil {
-		r.logger.Warn("memory search for context failed",
-			slog.String("namespace", sharedMemoryNamespace),
-			slog.Any("error", err),
-		)
+		r.logger.Warn("memory provider OnBeforeChat failed", slog.Any("error", err))
 		return nil
 	}
-	for _, item := range resp.Results {
-		key := strings.TrimSpace(item.ID)
-		if key == "" {
-			key = sharedMemoryNamespace + ":" + strings.TrimSpace(item.Memory)
-		}
-		if key == "" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		results = append(results, memoryContextItem{Namespace: sharedMemoryNamespace, Item: item})
-	}
-	if len(results) == 0 {
+	if result == nil || strings.TrimSpace(result.ContextText) == "" {
 		return nil
 	}
-
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Item.Score > results[j].Item.Score
-	})
-	if len(results) > memoryContextMaxItems {
-		results = results[:memoryContextMaxItems]
-	}
-
-	var sb strings.Builder
-	sb.WriteString("Relevant memory context (use when helpful):\n")
-	for _, entry := range results {
-		text := strings.TrimSpace(entry.Item.Memory)
-		if text == "" {
-			continue
-		}
-		sb.WriteString("- [")
-		sb.WriteString(entry.Namespace)
-		sb.WriteString("] ")
-		sb.WriteString(truncateMemorySnippet(text, memoryContextItemMaxChars))
-		sb.WriteString("\n")
-	}
-	payload := strings.TrimSpace(sb.String())
-	if payload == "" {
-		return nil
-	}
-	msg := conversation.ModelMessage{
+	return &conversation.ModelMessage{
 		Role:    "user",
-		Content: conversation.NewTextContent(payload),
+		Content: conversation.NewTextContent(result.ContextText),
 	}
-	return &msg
 }
 
 // --- store helpers ---
@@ -1674,47 +1636,40 @@ func (r *Resolver) resolveDisplayName(ctx context.Context, req conversation.Chat
 }
 
 func (r *Resolver) storeMemory(ctx context.Context, botID string, messages []conversation.ModelMessage) {
-	if r.memoryService == nil {
-		return
-	}
 	if strings.TrimSpace(botID) == "" {
 		return
 	}
-	memMsgs := make([]memory.Message, 0, len(messages))
+	memMsgs := toProviderMessages(messages)
+	if len(memMsgs) == 0 {
+		return
+	}
+
+	p := r.resolveMemoryProvider(ctx, botID)
+	if p == nil {
+		return
+	}
+	if err := p.OnAfterChat(ctx, memprovider.AfterChatRequest{
+		BotID:    botID,
+		Messages: memMsgs,
+	}); err != nil {
+		r.logger.Warn("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
+	}
+}
+
+func toProviderMessages(messages []conversation.ModelMessage) []memprovider.Message {
+	out := make([]memprovider.Message, 0, len(messages))
 	for _, msg := range messages {
 		text := strings.TrimSpace(msg.TextContent())
 		if text == "" {
 			continue
 		}
-		role := msg.Role
-		if strings.TrimSpace(role) == "" {
+		role := strings.TrimSpace(msg.Role)
+		if role == "" {
 			role = "assistant"
 		}
-		memMsgs = append(memMsgs, memory.Message{Role: role, Content: text})
+		out = append(out, memprovider.Message{Role: role, Content: text})
 	}
-	if len(memMsgs) == 0 {
-		return
-	}
-	r.addMemory(ctx, botID, memMsgs, sharedMemoryNamespace, botID)
-}
-
-func (r *Resolver) addMemory(ctx context.Context, botID string, msgs []memory.Message, namespace, scopeID string) {
-	filters := map[string]any{
-		"namespace": namespace,
-		"scopeId":   scopeID,
-		"bot_id":    botID,
-	}
-	if _, err := r.memoryService.Add(ctx, memory.AddRequest{
-		Messages: msgs,
-		BotID:    botID,
-		Filters:  filters,
-	}); err != nil {
-		r.logger.Warn("store memory failed",
-			slog.String("namespace", namespace),
-			slog.String("scope_id", scopeID),
-			slog.Any("error", err),
-		)
-	}
+	return out
 }
 
 // --- model selection ---
@@ -1985,14 +1940,6 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
-}
-
-func truncateMemorySnippet(s string, n int) string {
-	trimmed := strings.TrimSpace(s)
-	if len(trimmed) <= n {
-		return trimmed
-	}
-	return strings.TrimSpace(trimmed[:n]) + "..."
 }
 
 func parseResolverUUID(id string) (pgtype.UUID, error) {

@@ -24,8 +24,6 @@ const (
 	DefaultPGUser           = "postgres"
 	DefaultPGDatabase       = "memoh"
 	DefaultPGSSLMode        = "disable"
-	DefaultQdrantURL        = "http://127.0.0.1:6334"
-	DefaultQdrantCollection = "memory"
 )
 
 type Config struct {
@@ -120,7 +118,6 @@ type PostgresConfig struct {
 type QdrantConfig struct {
 	BaseURL        string `toml:"base_url"`
 	APIKey         string `toml:"api_key"`
-	Collection     string `toml:"collection"`
 	TimeoutSeconds int    `toml:"timeout_seconds"`
 }
 
@@ -174,10 +171,6 @@ func Load(path string) (Config, error) {
 			User:     DefaultPGUser,
 			Database: DefaultPGDatabase,
 			SSLMode:  DefaultPGSSLMode,
-		},
-		Qdrant: QdrantConfig{
-			BaseURL:    DefaultQdrantURL,
-			Collection: DefaultQdrantCollection,
 		},
 		AgentGateway: AgentGatewayConfig{
 			Host: "127.0.0.1",

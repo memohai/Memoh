@@ -414,6 +414,15 @@ export type EmailUpdateProviderRequest = {
     provider?: string;
 };
 
+export type GithubComMemohaiMemohInternalFsFileInfo = {
+    isDir?: boolean;
+    modTime?: string;
+    mode?: string;
+    name?: string;
+    path?: string;
+    size?: number;
+};
+
 export type GithubComMemohaiMemohInternalMcpConnection = {
     bot_id?: string;
     config?: {
@@ -473,36 +482,6 @@ export type HandlersDailyTokenUsage = {
     reasoning_tokens?: number;
 };
 
-export type HandlersEmbeddingsInput = {
-    image_url?: string;
-    text?: string;
-    video_url?: string;
-};
-
-export type HandlersEmbeddingsRequest = {
-    dimensions?: number;
-    input?: HandlersEmbeddingsInput;
-    model?: string;
-    provider?: string;
-    type?: string;
-};
-
-export type HandlersEmbeddingsResponse = {
-    dimensions?: number;
-    embedding?: Array<number>;
-    message?: string;
-    model?: string;
-    provider?: string;
-    type?: string;
-    usage?: HandlersEmbeddingsUsage;
-};
-
-export type HandlersEmbeddingsUsage = {
-    duration?: number;
-    image_tokens?: number;
-    input_tokens?: number;
-};
-
 export type HandlersErrorResponse = {
     message?: string;
 };
@@ -522,7 +501,7 @@ export type HandlersFsFileInfo = {
 };
 
 export type HandlersFsListResponse = {
-    entries?: Array<HandlersFsFileInfo>;
+    entries?: Array<GithubComMemohaiMemohInternalFsFileInfo>;
     path?: string;
 };
 
@@ -687,7 +666,7 @@ export type HandlersMemoryAddPayload = {
     };
     infer?: boolean;
     message?: string;
-    messages?: Array<MemoryMessage>;
+    messages?: Array<ProviderMessage>;
     metadata?: {
         [key: string]: unknown;
     };
@@ -824,80 +803,6 @@ export type McpUpsertRequest = {
     url?: string;
 };
 
-export type MemoryCdfPoint = {
-    /**
-     * cumulative weight fraction [0.0, 1.0]
-     */
-    cumulative?: number;
-    /**
-     * rank position (1-based, sorted by value desc)
-     */
-    k?: number;
-};
-
-export type MemoryCompactResult = {
-    after_count?: number;
-    before_count?: number;
-    ratio?: number;
-    results?: Array<MemoryMemoryItem>;
-};
-
-export type MemoryDeleteResponse = {
-    message?: string;
-};
-
-export type MemoryMemoryItem = {
-    agent_id?: string;
-    bot_id?: string;
-    cdf_curve?: Array<MemoryCdfPoint>;
-    created_at?: string;
-    hash?: string;
-    id?: string;
-    memory?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    run_id?: string;
-    score?: number;
-    top_k_buckets?: Array<MemoryTopKBucket>;
-    updated_at?: string;
-};
-
-export type MemoryMessage = {
-    content?: string;
-    role?: string;
-};
-
-export type MemoryRebuildResult = {
-    fs_count?: number;
-    missing_count?: number;
-    qdrant_count?: number;
-    restored_count?: number;
-};
-
-export type MemorySearchResponse = {
-    relations?: Array<unknown>;
-    results?: Array<MemoryMemoryItem>;
-};
-
-export type MemoryTopKBucket = {
-    /**
-     * sparse dimension index (term hash)
-     */
-    index?: number;
-    /**
-     * weight (term frequency)
-     */
-    value?: number;
-};
-
-export type MemoryUsageResponse = {
-    avg_text_bytes?: number;
-    count?: number;
-    estimated_storage_bytes?: number;
-    total_text_bytes?: number;
-};
-
 export type MessageMessage = {
     assets?: Array<MessageMessageAsset>;
     bot_id?: string;
@@ -982,6 +887,129 @@ export type ModelsUpdateRequest = {
     name?: string;
     supports_reasoning?: boolean;
     type?: ModelsModelType;
+};
+
+export type ProviderCdfPoint = {
+    /**
+     * cumulative weight fraction [0.0, 1.0]
+     */
+    cumulative?: number;
+    /**
+     * rank position (1-based, sorted by value desc)
+     */
+    k?: number;
+};
+
+export type ProviderCompactResult = {
+    after_count?: number;
+    before_count?: number;
+    ratio?: number;
+    results?: Array<ProviderMemoryItem>;
+};
+
+export type ProviderDeleteResponse = {
+    message?: string;
+};
+
+export type ProviderMemoryItem = {
+    agent_id?: string;
+    bot_id?: string;
+    cdf_curve?: Array<ProviderCdfPoint>;
+    created_at?: string;
+    hash?: string;
+    id?: string;
+    memory?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    run_id?: string;
+    score?: number;
+    top_k_buckets?: Array<ProviderTopKBucket>;
+    updated_at?: string;
+};
+
+export type ProviderMessage = {
+    content?: string;
+    role?: string;
+};
+
+export type ProviderProviderConfigSchema = {
+    fields?: {
+        [key: string]: ProviderProviderFieldSchema;
+    };
+};
+
+export type ProviderProviderCreateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    provider?: ProviderProviderType;
+};
+
+export type ProviderProviderFieldSchema = {
+    description?: string;
+    example?: unknown;
+    required?: boolean;
+    title?: string;
+    type?: string;
+};
+
+export type ProviderProviderGetResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    is_default?: boolean;
+    name?: string;
+    provider?: string;
+    updated_at?: string;
+};
+
+export type ProviderProviderMeta = {
+    config_schema?: ProviderProviderConfigSchema;
+    display_name?: string;
+    provider?: string;
+};
+
+export type ProviderProviderType = 'builtin';
+
+export type ProviderProviderUpdateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+};
+
+export type ProviderRebuildResult = {
+    fs_count?: number;
+    missing_count?: number;
+    qdrant_count?: number;
+    restored_count?: number;
+};
+
+export type ProviderSearchResponse = {
+    relations?: Array<unknown>;
+    results?: Array<ProviderMemoryItem>;
+};
+
+export type ProviderTopKBucket = {
+    /**
+     * sparse dimension index (term hash)
+     */
+    index?: number;
+    /**
+     * weight (term frequency)
+     */
+    value?: number;
+};
+
+export type ProviderUsageResponse = {
+    avg_text_bytes?: number;
+    count?: number;
+    estimated_storage_bytes?: number;
+    total_text_bytes?: number;
 };
 
 export type ProvidersCountResponse = {
@@ -1131,7 +1159,6 @@ export type SearchprovidersUpdateRequest = {
 export type SettingsSettings = {
     allow_guest?: boolean;
     chat_model_id?: string;
-    embedding_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -1139,7 +1166,7 @@ export type SettingsSettings = {
     max_context_load_time?: number;
     max_context_tokens?: number;
     max_inbox_items?: number;
-    memory_model_id?: string;
+    memory_provider_id?: string;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
@@ -1148,7 +1175,6 @@ export type SettingsSettings = {
 export type SettingsUpsertRequest = {
     allow_guest?: boolean;
     chat_model_id?: string;
-    embedding_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -1156,7 +1182,7 @@ export type SettingsUpsertRequest = {
     max_context_load_time?: number;
     max_context_tokens?: number;
     max_inbox_items?: number;
-    memory_model_id?: string;
+    memory_provider_id?: string;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
@@ -3183,7 +3209,7 @@ export type DeleteBotsByBotIdMemoryResponses = {
     /**
      * OK
      */
-    200: MemoryDeleteResponse;
+    200: ProviderDeleteResponse;
 };
 
 export type DeleteBotsByBotIdMemoryResponse = DeleteBotsByBotIdMemoryResponses[keyof DeleteBotsByBotIdMemoryResponses];
@@ -3198,7 +3224,7 @@ export type GetBotsByBotIdMemoryData = {
     };
     query?: {
         /**
-         * Skip sparse vector stats (top_k_buckets, cdf_curve) to reduce overhead
+         * Skip optional stats in memory search response
          */
         no_stats?: boolean;
     };
@@ -3230,7 +3256,7 @@ export type GetBotsByBotIdMemoryResponses = {
     /**
      * OK
      */
-    200: MemorySearchResponse;
+    200: ProviderSearchResponse;
 };
 
 export type GetBotsByBotIdMemoryResponse = GetBotsByBotIdMemoryResponses[keyof GetBotsByBotIdMemoryResponses];
@@ -3275,7 +3301,7 @@ export type PostBotsByBotIdMemoryResponses = {
     /**
      * OK
      */
-    200: MemorySearchResponse;
+    200: ProviderSearchResponse;
 };
 
 export type PostBotsByBotIdMemoryResponse = PostBotsByBotIdMemoryResponses[keyof PostBotsByBotIdMemoryResponses];
@@ -3320,7 +3346,7 @@ export type PostBotsByBotIdMemoryCompactResponses = {
     /**
      * OK
      */
-    200: MemoryCompactResult;
+    200: ProviderCompactResult;
 };
 
 export type PostBotsByBotIdMemoryCompactResponse = PostBotsByBotIdMemoryCompactResponses[keyof PostBotsByBotIdMemoryCompactResponses];
@@ -3362,7 +3388,7 @@ export type PostBotsByBotIdMemoryRebuildResponses = {
     /**
      * OK
      */
-    200: MemoryRebuildResult;
+    200: ProviderRebuildResult;
 };
 
 export type PostBotsByBotIdMemoryRebuildResponse = PostBotsByBotIdMemoryRebuildResponses[keyof PostBotsByBotIdMemoryRebuildResponses];
@@ -3411,7 +3437,7 @@ export type PostBotsByBotIdMemorySearchResponses = {
     /**
      * OK
      */
-    200: MemorySearchResponse;
+    200: ProviderSearchResponse;
 };
 
 export type PostBotsByBotIdMemorySearchResponse = PostBotsByBotIdMemorySearchResponses[keyof PostBotsByBotIdMemorySearchResponses];
@@ -3453,7 +3479,7 @@ export type GetBotsByBotIdMemoryUsageResponses = {
     /**
      * OK
      */
-    200: MemoryUsageResponse;
+    200: ProviderUsageResponse;
 };
 
 export type GetBotsByBotIdMemoryUsageResponse = GetBotsByBotIdMemoryUsageResponses[keyof GetBotsByBotIdMemoryUsageResponses];
@@ -3499,7 +3525,7 @@ export type DeleteBotsByBotIdMemoryByIdResponses = {
     /**
      * OK
      */
-    200: MemoryDeleteResponse;
+    200: ProviderDeleteResponse;
 };
 
 export type DeleteBotsByBotIdMemoryByIdResponse = DeleteBotsByBotIdMemoryByIdResponses[keyof DeleteBotsByBotIdMemoryByIdResponses];
@@ -5336,17 +5362,42 @@ export type PostEmailMailgunWebhookByConfigIdResponses = {
 
 export type PostEmailMailgunWebhookByConfigIdResponse = PostEmailMailgunWebhookByConfigIdResponses[keyof PostEmailMailgunWebhookByConfigIdResponses];
 
-export type PostEmbeddingsData = {
-    /**
-     * Embeddings request
-     */
-    body: HandlersEmbeddingsRequest;
+export type GetMemoryProvidersData = {
+    body?: never;
     path?: never;
     query?: never;
-    url: '/embeddings';
+    url: '/memory-providers';
 };
 
-export type PostEmbeddingsErrors = {
+export type GetMemoryProvidersErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetMemoryProvidersError = GetMemoryProvidersErrors[keyof GetMemoryProvidersErrors];
+
+export type GetMemoryProvidersResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProviderProviderGetResponse>;
+};
+
+export type GetMemoryProvidersResponse = GetMemoryProvidersResponses[keyof GetMemoryProvidersResponses];
+
+export type PostMemoryProvidersData = {
+    /**
+     * Memory provider configuration
+     */
+    body: ProviderProviderCreateRequest;
+    path?: never;
+    query?: never;
+    url: '/memory-providers';
+};
+
+export type PostMemoryProvidersErrors = {
     /**
      * Bad Request
      */
@@ -5355,22 +5406,137 @@ export type PostEmbeddingsErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
-    /**
-     * Not Implemented
-     */
-    501: HandlersEmbeddingsResponse;
 };
 
-export type PostEmbeddingsError = PostEmbeddingsErrors[keyof PostEmbeddingsErrors];
+export type PostMemoryProvidersError = PostMemoryProvidersErrors[keyof PostMemoryProvidersErrors];
 
-export type PostEmbeddingsResponses = {
+export type PostMemoryProvidersResponses = {
+    /**
+     * Created
+     */
+    201: ProviderProviderGetResponse;
+};
+
+export type PostMemoryProvidersResponse = PostMemoryProvidersResponses[keyof PostMemoryProvidersResponses];
+
+export type GetMemoryProvidersMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/memory-providers/meta';
+};
+
+export type GetMemoryProvidersMetaResponses = {
     /**
      * OK
      */
-    200: HandlersEmbeddingsResponse;
+    200: Array<ProviderProviderMeta>;
 };
 
-export type PostEmbeddingsResponse = PostEmbeddingsResponses[keyof PostEmbeddingsResponses];
+export type GetMemoryProvidersMetaResponse = GetMemoryProvidersMetaResponses[keyof GetMemoryProvidersMetaResponses];
+
+export type DeleteMemoryProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/memory-providers/{id}';
+};
+
+export type DeleteMemoryProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteMemoryProvidersByIdError = DeleteMemoryProvidersByIdErrors[keyof DeleteMemoryProvidersByIdErrors];
+
+export type DeleteMemoryProvidersByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetMemoryProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/memory-providers/{id}';
+};
+
+export type GetMemoryProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetMemoryProvidersByIdError = GetMemoryProvidersByIdErrors[keyof GetMemoryProvidersByIdErrors];
+
+export type GetMemoryProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: ProviderProviderGetResponse;
+};
+
+export type GetMemoryProvidersByIdResponse = GetMemoryProvidersByIdResponses[keyof GetMemoryProvidersByIdResponses];
+
+export type PutMemoryProvidersByIdData = {
+    /**
+     * Updated configuration
+     */
+    body: ProviderProviderUpdateRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/memory-providers/{id}';
+};
+
+export type PutMemoryProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutMemoryProvidersByIdError = PutMemoryProvidersByIdErrors[keyof PutMemoryProvidersByIdErrors];
+
+export type PutMemoryProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: ProviderProviderGetResponse;
+};
+
+export type PutMemoryProvidersByIdResponse = PutMemoryProvidersByIdResponses[keyof PutMemoryProvidersByIdResponses];
 
 export type GetModelsData = {
     body?: never;

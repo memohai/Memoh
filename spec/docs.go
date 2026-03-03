@@ -2344,7 +2344,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "boolean",
-                        "description": "Skip sparse vector stats (top_k_buckets, cdf_curve) to reduce overhead",
+                        "description": "Skip optional stats in memory search response",
                         "name": "no_stats",
                         "in": "query"
                     }
@@ -2353,7 +2353,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/memory.SearchResponse"
+                            "$ref": "#/definitions/provider.SearchResponse"
                         }
                     },
                     "400": {
@@ -2416,7 +2416,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/memory.SearchResponse"
+                            "$ref": "#/definitions/provider.SearchResponse"
                         }
                     },
                     "400": {
@@ -2478,7 +2478,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/memory.DeleteResponse"
+                            "$ref": "#/definitions/provider.DeleteResponse"
                         }
                     },
                     "400": {
@@ -2543,7 +2543,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/memory.CompactResult"
+                            "$ref": "#/definitions/provider.CompactResult"
                         }
                     },
                     "400": {
@@ -2575,7 +2575,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/memory/rebuild": {
             "post": {
-                "description": "Read memory files from the container filesystem (source of truth) and restore missing entries to Qdrant",
+                "description": "Read memory files from the container filesystem (source of truth) and restore missing entries to memory storage",
                 "produces": [
                     "application/json"
                 ],
@@ -2596,7 +2596,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/memory.RebuildResult"
+                            "$ref": "#/definitions/provider.RebuildResult"
                         }
                     },
                     "400": {
@@ -2661,7 +2661,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/memory.SearchResponse"
+                            "$ref": "#/definitions/provider.SearchResponse"
                         }
                     },
                     "400": {
@@ -2720,7 +2720,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/memory.UsageResponse"
+                            "$ref": "#/definitions/provider.UsageResponse"
                         }
                     },
                     "400": {
@@ -2780,7 +2780,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/memory.DeleteResponse"
+                            "$ref": "#/definitions/provider.DeleteResponse"
                         }
                     },
                     "400": {
@@ -5022,29 +5022,62 @@ const docTemplate = `{
                 }
             }
         },
-        "/embeddings": {
-            "post": {
-                "description": "Create text or multimodal embeddings",
+        "/memory-providers": {
+            "get": {
+                "description": "List configured memory providers",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
-                    "embeddings"
+                    "memory-providers"
                 ],
-                "summary": "Create embeddings",
-                "parameters": [
-                    {
-                        "description": "Embeddings request",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.EmbeddingsRequest"
-                        }
-                    }
-                ],
+                "summary": "List memory providers",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.EmbeddingsResponse"
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/provider.ProviderGetResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a memory provider configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "Create a memory provider",
+                "parameters": [
+                    {
+                        "description": "Memory provider configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/provider.ProviderCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/provider.ProviderGetResponse"
                         }
                     },
                     "400": {
@@ -5058,11 +5091,150 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
-                    },
-                    "501": {
-                        "description": "Not Implemented",
+                    }
+                }
+            }
+        },
+        "/memory-providers/meta": {
+            "get": {
+                "description": "List available memory provider types and config schemas",
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "List memory provider metadata",
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.EmbeddingsResponse"
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/provider.ProviderMeta"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/memory-providers/{id}": {
+            "get": {
+                "description": "Get memory provider by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "Get a memory provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/provider.ProviderGetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update memory provider by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "Update a memory provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/provider.ProviderUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/provider.ProviderGetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete memory provider by ID",
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "Delete a memory provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -7730,6 +7902,29 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_memohai_memoh_internal_fs.FileInfo": {
+            "type": "object",
+            "properties": {
+                "isDir": {
+                    "type": "boolean"
+                },
+                "modTime": {
+                    "type": "string"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_memohai_memoh_internal_mcp.Connection": {
             "type": "object",
             "properties": {
@@ -7873,83 +8068,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.EmbeddingsInput": {
-            "type": "object",
-            "properties": {
-                "image_url": {
-                    "type": "string"
-                },
-                "text": {
-                    "type": "string"
-                },
-                "video_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.EmbeddingsRequest": {
-            "type": "object",
-            "properties": {
-                "dimensions": {
-                    "type": "integer"
-                },
-                "input": {
-                    "$ref": "#/definitions/handlers.EmbeddingsInput"
-                },
-                "model": {
-                    "type": "string"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.EmbeddingsResponse": {
-            "type": "object",
-            "properties": {
-                "dimensions": {
-                    "type": "integer"
-                },
-                "embedding": {
-                    "type": "array",
-                    "items": {
-                        "type": "number"
-                    }
-                },
-                "message": {
-                    "type": "string"
-                },
-                "model": {
-                    "type": "string"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                },
-                "usage": {
-                    "$ref": "#/definitions/handlers.EmbeddingsUsage"
-                }
-            }
-        },
-        "handlers.EmbeddingsUsage": {
-            "type": "object",
-            "properties": {
-                "duration": {
-                    "type": "integer"
-                },
-                "image_tokens": {
-                    "type": "integer"
-                },
-                "input_tokens": {
-                    "type": "integer"
-                }
-            }
-        },
         "handlers.ErrorResponse": {
             "type": "object",
             "properties": {
@@ -7998,7 +8116,7 @@ const docTemplate = `{
                 "entries": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/handlers.FSFileInfo"
+                        "$ref": "#/definitions/github_com_memohai_memoh_internal_fs.FileInfo"
                     }
                 },
                 "path": {
@@ -8413,7 +8531,7 @@ const docTemplate = `{
                 "messages": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/memory.Message"
+                        "$ref": "#/definitions/provider.Message"
                     }
                 },
                 "metadata": {
@@ -8733,168 +8851,6 @@ const docTemplate = `{
                 }
             }
         },
-        "memory.CDFPoint": {
-            "type": "object",
-            "properties": {
-                "cumulative": {
-                    "description": "cumulative weight fraction [0.0, 1.0]",
-                    "type": "number"
-                },
-                "k": {
-                    "description": "rank position (1-based, sorted by value desc)",
-                    "type": "integer"
-                }
-            }
-        },
-        "memory.CompactResult": {
-            "type": "object",
-            "properties": {
-                "after_count": {
-                    "type": "integer"
-                },
-                "before_count": {
-                    "type": "integer"
-                },
-                "ratio": {
-                    "type": "number"
-                },
-                "results": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/memory.MemoryItem"
-                    }
-                }
-            }
-        },
-        "memory.DeleteResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "memory.MemoryItem": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string"
-                },
-                "bot_id": {
-                    "type": "string"
-                },
-                "cdf_curve": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/memory.CDFPoint"
-                    }
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "hash": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "memory": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "run_id": {
-                    "type": "string"
-                },
-                "score": {
-                    "type": "number"
-                },
-                "top_k_buckets": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/memory.TopKBucket"
-                    }
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "memory.Message": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "role": {
-                    "type": "string"
-                }
-            }
-        },
-        "memory.RebuildResult": {
-            "type": "object",
-            "properties": {
-                "fs_count": {
-                    "type": "integer"
-                },
-                "missing_count": {
-                    "type": "integer"
-                },
-                "qdrant_count": {
-                    "type": "integer"
-                },
-                "restored_count": {
-                    "type": "integer"
-                }
-            }
-        },
-        "memory.SearchResponse": {
-            "type": "object",
-            "properties": {
-                "relations": {
-                    "type": "array",
-                    "items": {}
-                },
-                "results": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/memory.MemoryItem"
-                    }
-                }
-            }
-        },
-        "memory.TopKBucket": {
-            "type": "object",
-            "properties": {
-                "index": {
-                    "description": "sparse dimension index (term hash)",
-                    "type": "integer"
-                },
-                "value": {
-                    "description": "weight (term frequency)",
-                    "type": "number"
-                }
-            }
-        },
-        "memory.UsageResponse": {
-            "type": "object",
-            "properties": {
-                "avg_text_bytes": {
-                    "type": "integer"
-                },
-                "count": {
-                    "type": "integer"
-                },
-                "estimated_storage_bytes": {
-                    "type": "integer"
-                },
-                "total_text_bytes": {
-                    "type": "integer"
-                }
-            }
-        },
         "message.Message": {
             "type": "object",
             "properties": {
@@ -9152,6 +9108,274 @@ const docTemplate = `{
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
+                }
+            }
+        },
+        "provider.CDFPoint": {
+            "type": "object",
+            "properties": {
+                "cumulative": {
+                    "description": "cumulative weight fraction [0.0, 1.0]",
+                    "type": "number"
+                },
+                "k": {
+                    "description": "rank position (1-based, sorted by value desc)",
+                    "type": "integer"
+                }
+            }
+        },
+        "provider.CompactResult": {
+            "type": "object",
+            "properties": {
+                "after_count": {
+                    "type": "integer"
+                },
+                "before_count": {
+                    "type": "integer"
+                },
+                "ratio": {
+                    "type": "number"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/provider.MemoryItem"
+                    }
+                }
+            }
+        },
+        "provider.DeleteResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "provider.MemoryItem": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "bot_id": {
+                    "type": "string"
+                },
+                "cdf_curve": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/provider.CDFPoint"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "hash": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "memory": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "number"
+                },
+                "top_k_buckets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/provider.TopKBucket"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "provider.Message": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "provider.ProviderConfigSchema": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/provider.ProviderFieldSchema"
+                    }
+                }
+            }
+        },
+        "provider.ProviderCreateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "$ref": "#/definitions/provider.ProviderType"
+                }
+            }
+        },
+        "provider.ProviderFieldSchema": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "example": {},
+                "required": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "provider.ProviderGetResponse": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_default": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "provider.ProviderMeta": {
+            "type": "object",
+            "properties": {
+                "config_schema": {
+                    "$ref": "#/definitions/provider.ProviderConfigSchema"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "provider.ProviderType": {
+            "type": "string",
+            "enum": [
+                "builtin"
+            ],
+            "x-enum-varnames": [
+                "ProviderBuiltin"
+            ]
+        },
+        "provider.ProviderUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "provider.RebuildResult": {
+            "type": "object",
+            "properties": {
+                "fs_count": {
+                    "type": "integer"
+                },
+                "missing_count": {
+                    "type": "integer"
+                },
+                "qdrant_count": {
+                    "type": "integer"
+                },
+                "restored_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "provider.SearchResponse": {
+            "type": "object",
+            "properties": {
+                "relations": {
+                    "type": "array",
+                    "items": {}
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/provider.MemoryItem"
+                    }
+                }
+            }
+        },
+        "provider.TopKBucket": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "description": "sparse dimension index (term hash)",
+                    "type": "integer"
+                },
+                "value": {
+                    "description": "weight (term frequency)",
+                    "type": "number"
+                }
+            }
+        },
+        "provider.UsageResponse": {
+            "type": "object",
+            "properties": {
+                "avg_text_bytes": {
+                    "type": "integer"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "estimated_storage_bytes": {
+                    "type": "integer"
+                },
+                "total_text_bytes": {
+                    "type": "integer"
                 }
             }
         },
@@ -9519,9 +9743,6 @@ const docTemplate = `{
                 "chat_model_id": {
                     "type": "string"
                 },
-                "embedding_model_id": {
-                    "type": "string"
-                },
                 "heartbeat_enabled": {
                     "type": "boolean"
                 },
@@ -9543,7 +9764,7 @@ const docTemplate = `{
                 "max_inbox_items": {
                     "type": "integer"
                 },
-                "memory_model_id": {
+                "memory_provider_id": {
                     "type": "string"
                 },
                 "reasoning_effort": {
@@ -9566,9 +9787,6 @@ const docTemplate = `{
                 "chat_model_id": {
                     "type": "string"
                 },
-                "embedding_model_id": {
-                    "type": "string"
-                },
                 "heartbeat_enabled": {
                     "type": "boolean"
                 },
@@ -9590,7 +9808,7 @@ const docTemplate = `{
                 "max_inbox_items": {
                     "type": "integer"
                 },
-                "memory_model_id": {
+                "memory_provider_id": {
                     "type": "string"
                 },
                 "reasoning_effort": {

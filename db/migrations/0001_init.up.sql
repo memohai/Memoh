@@ -109,6 +109,17 @@ CREATE TABLE IF NOT EXISTS model_variants (
 CREATE INDEX IF NOT EXISTS idx_model_variants_model_uuid ON model_variants(model_uuid);
 CREATE INDEX IF NOT EXISTS idx_model_variants_variant_id ON model_variants(variant_id);
 
+CREATE TABLE IF NOT EXISTS memory_providers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  is_default BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT memory_providers_name_unique UNIQUE (name)
+);
+
 CREATE TABLE IF NOT EXISTS bots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -125,9 +136,8 @@ CREATE TABLE IF NOT EXISTS bots (
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   max_inbox_items INTEGER NOT NULL DEFAULT 50,
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-  memory_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-  embedding_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   search_provider_id UUID REFERENCES search_providers(id) ON DELETE SET NULL,
+  memory_provider_id UUID REFERENCES memory_providers(id) ON DELETE SET NULL,
   heartbeat_enabled BOOLEAN NOT NULL DEFAULT false,
   heartbeat_interval INTEGER NOT NULL DEFAULT 30,
   heartbeat_prompt TEXT NOT NULL DEFAULT '',

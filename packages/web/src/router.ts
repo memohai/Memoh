@@ -68,6 +68,14 @@ const routes = [
         },
       },
       {
+        name: 'memory-providers',
+        path: '/memory-providers',
+        component: () => import('@/pages/memory-providers/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.memoryProvider'),
+        },
+      },
+      {
         name: 'email-providers',
         path: '/email-providers',
         component: () => import('@/pages/email-providers/index.vue'),

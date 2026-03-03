@@ -25,6 +25,7 @@ import (
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	fsops "github.com/memohai/memoh/internal/fs"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
 )
@@ -45,6 +46,7 @@ type ContainerdHandler struct {
 	accountService   *accounts.Service
 	policyService    *policy.Service
 	queries          *dbsqlc.Queries
+	fsService        *fsops.Service
 }
 
 type CreateContainerRequest struct {
@@ -101,7 +103,7 @@ type ListSnapshotsResponse struct {
 }
 
 func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.MCPConfig, namespace string, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *ContainerdHandler {
-	return &ContainerdHandler{
+	h := &ContainerdHandler{
 		service:          service,
 		manager:          manager,
 		cfg:              cfg,
@@ -115,6 +117,8 @@ func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Ma
 		policyService:    policyService,
 		queries:          queries,
 	}
+	h.fsService = fsops.NewService(service, queries, namespace, h.ensureBotDataRoot)
+	return h
 }
 
 func (h *ContainerdHandler) Register(e *echo.Echo) {
@@ -143,6 +147,10 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	root.POST("/mcp-stdio", h.CreateMCPStdio)
 	root.POST("/mcp-stdio/:connection_id", h.HandleMCPStdio)
 	root.POST("/tools", h.HandleMCPTools)
+}
+
+func (h *ContainerdHandler) FSService() *fsops.Service {
+	return h.fsService
 }
 
 // CreateContainer godoc

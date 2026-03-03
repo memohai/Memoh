@@ -19,7 +19,7 @@ func NewQueriesLookup(queries *sqlc.Queries) *QueriesLookup {
 	return &QueriesLookup{queries: queries}
 }
 
-// GetBotModelIDs fetches the chat, memory, and embedding model IDs for a bot.
+// GetBotModelIDs fetches model IDs configured directly on the bot.
 func (l *QueriesLookup) GetBotModelIDs(ctx context.Context, botID string) (BotModels, error) {
 	if strings.TrimSpace(botID) == "" {
 		return BotModels{}, fmt.Errorf("bot id is required")
@@ -37,12 +37,6 @@ func (l *QueriesLookup) GetBotModelIDs(ctx context.Context, botID string) (BotMo
 	var m BotModels
 	if bot.ChatModelID.Valid {
 		m.ChatModelID = bot.ChatModelID.String()
-	}
-	if bot.MemoryModelID.Valid {
-		m.MemoryModelID = bot.MemoryModelID.String()
-	}
-	if bot.EmbeddingModelID.Valid {
-		m.EmbeddingModelID = bot.EmbeddingModelID.String()
 	}
 	return m, nil
 }

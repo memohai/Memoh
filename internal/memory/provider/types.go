@@ -1,6 +1,27 @@
-package memory
+package provider
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+// BeforeChatRequest is passed to OnBeforeChat before sending to the agent gateway.
+type BeforeChatRequest struct {
+	Query  string
+	BotID  string
+	ChatID string
+}
+
+// BeforeChatResult contains memory context to inject into the conversation.
+type BeforeChatResult struct {
+	ContextText string // formatted text to inject as a user message
+}
+
+// AfterChatRequest is passed to OnAfterChat after receiving the gateway response.
+type AfterChatRequest struct {
+	BotID    string
+	Messages []Message
+}
 
 // LLM is the interface for LLM operations needed by memory service
 type LLM interface {
@@ -187,4 +208,50 @@ type RebuildResult struct {
 	QdrantCount   int `json:"qdrant_count"`
 	MissingCount  int `json:"missing_count"`
 	RestoredCount int `json:"restored_count"`
+}
+
+// Memory provider admin types.
+type ProviderType string
+
+const (
+	ProviderBuiltin ProviderType = "builtin"
+)
+
+type ProviderCreateRequest struct {
+	Name     string         `json:"name"`
+	Provider ProviderType   `json:"provider"`
+	Config   map[string]any `json:"config,omitempty"`
+}
+
+type ProviderUpdateRequest struct {
+	Name   *string        `json:"name,omitempty"`
+	Config map[string]any `json:"config,omitempty"`
+}
+
+type ProviderGetResponse struct {
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Provider  string         `json:"provider"`
+	Config    map[string]any `json:"config,omitempty"`
+	IsDefault bool           `json:"is_default"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+type ProviderConfigSchema struct {
+	Fields map[string]ProviderFieldSchema `json:"fields"`
+}
+
+type ProviderFieldSchema struct {
+	Type        string `json:"type"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+	Example     any    `json:"example,omitempty"`
+}
+
+type ProviderMeta struct {
+	Provider     string               `json:"provider"`
+	DisplayName  string               `json:"display_name"`
+	ConfigSchema ProviderConfigSchema `json:"config_schema"`
 }

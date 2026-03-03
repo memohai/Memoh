@@ -12,27 +12,13 @@
       />
     </div>
 
-    <!-- Memory Model -->
+    <!-- Memory Provider -->
     <div class="space-y-2">
-      <Label>{{ $t('bots.settings.memoryModel') }}</Label>
-      <ModelSelect
-        v-model="form.memory_model_id"
-        :models="models"
-        :providers="providers"
-        model-type="chat"
-        :placeholder="$t('bots.settings.memoryModel')"
-      />
-    </div>
-
-    <!-- Embedding Model -->
-    <div class="space-y-2">
-      <Label>{{ $t('bots.settings.embeddingModel') }}</Label>
-      <ModelSelect
-        v-model="form.embedding_model_id"
-        :models="models"
-        :providers="providers"
-        model-type="embedding"
-        :placeholder="$t('bots.settings.embeddingModel')"
+      <Label>{{ $t('bots.settings.memoryProvider') }}</Label>
+      <MemoryProviderSelect
+        v-model="form.memory_provider_id"
+        :providers="memoryProviders"
+        :placeholder="$t('bots.settings.memoryProviderPlaceholder')"
       />
     </div>
 
@@ -134,17 +120,6 @@
       <Separator />
     </template>
 
-
-    <!-- Loop Detection -->
-    <div class="flex items-center justify-between">
-      <Label>{{ $t('bots.settings.loopDetectionTitle') }}</Label>
-      <Switch
-        :model-value="loopDetectionEnabled"
-        :disabled="isLoopDetectionToggleDisabled"
-        @update:model-value="handleLoopDetectionToggle"
-      />
-    </div>
-
     <!-- Save -->
     <div class="flex justify-end">
       <Button
@@ -206,15 +181,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@memoh/ui'
-import { reactive, computed, watch, ref } from 'vue'
+import { reactive, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ModelSelect from './model-select.vue'
 import SearchProviderSelect from './search-provider-select.vue'
+import MemoryProviderSelect from './memory-provider-select.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getBotsById, putBotsById } from '@memoh/sdk'
+import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders } from '@memoh/sdk'
 import type { SettingsSettings } from '@memoh/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -238,15 +214,6 @@ const { data: settings } = useQuery({
   key: () => ['bot-settings', botIdRef.value],
   query: async () => {
     const { data } = await getBotsByBotIdSettings({ path: { bot_id: botIdRef.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!botIdRef.value,
-})
-
-const { data: botProfile, isLoading: isBotProfileLoading } = useQuery({
-  key: () => ['bot', botIdRef.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: botIdRef.value }, throwOnError: true })
     return data
   },
   enabled: () => !!botIdRef.value,
@@ -276,6 +243,14 @@ const { data: searchProviderData } = useQuery({
   },
 })
 
+const { data: memoryProviderData } = useQuery({
+  key: ['all-memory-providers'],
+  query: async () => {
+    const { data } = await getMemoryProviders({ throwOnError: true })
+    return data
+  },
+})
+
 const { mutateAsync: updateSettings, isLoading } = useMutation({
   mutation: async (body: Partial<SettingsSettings>) => {
     const { data } = await putBotsByBotIdSettings({
@@ -298,24 +273,10 @@ const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
   },
 })
 
-const { mutateAsync: updateBotProfile, isLoading: updateBotProfileLoading } = useMutation({
-  mutation: async (metadata: Record<string, unknown>) => {
-    const { data } = await putBotsById({
-      path: { id: botIdRef.value },
-      body: { metadata },
-      throwOnError: true,
-    })
-    return data
-  },
-  onSettled: () => {
-    queryCache.invalidateQueries({ key: ['bots'] })
-    queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
-  },
-})
-
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 const searchProviders = computed(() => searchProviderData.value ?? [])
+const memoryProviders = computed(() => memoryProviderData.value ?? [])
 
 const chatModelSupportsReasoning = computed(() => {
   if (!form.chat_model_id) return false
@@ -326,9 +287,8 @@ const chatModelSupportsReasoning = computed(() => {
 // ---- Form ----
 const form = reactive({
   chat_model_id: '',
-  memory_model_id: '',
-  embedding_model_id: '',
   search_provider_id: '',
+  memory_provider_id: '',
   max_context_load_time: 0,
   max_context_tokens: 0,
   language: '',
@@ -337,29 +297,11 @@ const form = reactive({
   reasoning_effort: 'medium',
 })
 
-const loopDetectionEnabled = ref(false)
-const loopDetectionMetadata = ref<Record<string, unknown> | null>(null)
-
-const asRecord = (value: unknown): Record<string, unknown> => {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>
-  }
-  return {}
-}
-
-const readLoopDetectionEnabled = (metadata: unknown): boolean => {
-  const metadataRecord = asRecord(metadata)
-  const featuresRecord = asRecord(metadataRecord.features)
-  const loopDetectionRecord = asRecord(featuresRecord.loop_detection)
-  return loopDetectionRecord.enabled === true
-}
-
 watch(settings, (val) => {
   if (val) {
     form.chat_model_id = val.chat_model_id ?? ''
-    form.memory_model_id = val.memory_model_id ?? ''
-    form.embedding_model_id = val.embedding_model_id ?? ''
     form.search_provider_id = val.search_provider_id ?? ''
+    form.memory_provider_id = (val as any).memory_provider_id ?? ''
     form.max_context_load_time = val.max_context_load_time ?? 0
     form.max_context_tokens = val.max_context_tokens ?? 0
     form.language = val.language ?? ''
@@ -369,21 +311,13 @@ watch(settings, (val) => {
   }
 }, { immediate: true })
 
-watch(botProfile, (val) => {
-  if (val === undefined) return
-  const metadata = asRecord(val?.metadata)
-  loopDetectionMetadata.value = metadata
-  loopDetectionEnabled.value = readLoopDetectionEnabled(metadata)
-}, { immediate: true })
-
 const hasChanges = computed(() => {
   if (!settings.value) return true
-  const s = settings.value
+  const s = settings.value as any
   let changed =
     form.chat_model_id !== (s.chat_model_id ?? '')
-    || form.memory_model_id !== (s.memory_model_id ?? '')
-    || form.embedding_model_id !== (s.embedding_model_id ?? '')
     || form.search_provider_id !== (s.search_provider_id ?? '')
+    || form.memory_provider_id !== (s.memory_provider_id ?? '')
     || form.max_context_load_time !== (s.max_context_load_time ?? 0)
     || form.max_context_tokens !== (s.max_context_tokens ?? 0)
     || form.language !== (s.language ?? '')
@@ -394,40 +328,6 @@ const hasChanges = computed(() => {
   }
   return changed
 })
-
-const isLoopDetectionToggleDisabled = computed(() =>
-  updateBotProfileLoading.value || isBotProfileLoading.value || loopDetectionMetadata.value === null,
-)
-
-async function handleLoopDetectionToggle(value: boolean) {
-  if (isLoopDetectionToggleDisabled.value || loopDetectionMetadata.value === null) return
-  const nextEnabled = value === true
-  const prevEnabled = loopDetectionEnabled.value
-  if (nextEnabled === prevEnabled) return
-
-  loopDetectionEnabled.value = nextEnabled
-  const currentMetadata = loopDetectionMetadata.value
-  const currentFeatures = asRecord(currentMetadata.features)
-  const currentLoopDetection = asRecord(currentFeatures.loop_detection)
-  const nextMetadata = {
-    ...currentMetadata,
-    features: {
-      ...currentFeatures,
-      loop_detection: {
-        ...currentLoopDetection,
-        enabled: nextEnabled,
-      },
-    },
-  }
-
-  try {
-    await updateBotProfile(nextMetadata)
-    loopDetectionMetadata.value = nextMetadata
-  } catch (error) {
-    loopDetectionEnabled.value = prevEnabled
-    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
-  }
-}
 
 async function handleSave() {
   try {
