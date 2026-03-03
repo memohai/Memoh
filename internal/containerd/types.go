@@ -2,7 +2,6 @@ package containerd
 
 import (
 	"errors"
-	"io"
 	"time"
 )
 
@@ -102,26 +101,7 @@ type NetworkSetupRequest struct {
 	CNIConfDir  string
 }
 
-type ExecTaskRequest struct {
-	Args     []string
-	Env      []string
-	WorkDir  string
-	Terminal bool
-	UseStdio bool
-	FIFODir  string
-	Stdin    io.Reader
-	Stdout   io.Writer
-	Stderr   io.Writer
+type NetworkResult struct {
+	IP string
 }
 
-type ExecTaskSession struct {
-	Stdin  io.WriteCloser
-	Stdout io.ReadCloser
-	Stderr io.ReadCloser
-	Wait   func() (ExecTaskResult, error)
-	Close  func() error
-}
-
-type ExecTaskResult struct {
-	ExitCode uint32
-}

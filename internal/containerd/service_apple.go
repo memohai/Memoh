@@ -3,7 +3,6 @@ package containerd
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -352,58 +351,13 @@ func (s *AppleService) ListTasks(ctx context.Context, opts *ListTasksOptions) ([
 	return out, nil
 }
 
-// ExecTask executes a command inside the container.
-//
-// Limitations compared to the containerd backend:
-//   - WorkDir: the Apple Container exec API (ExecCreateRequest) has no working-directory
-//     field; req.WorkDir is silently ignored.
-//   - Env: similarly, environment variables cannot be injected at exec time via this
-//     API; req.Env is silently ignored.
-//   - Stdin: the acgo exec interface does not expose a write channel, so req.Stdin
-//     is not connected and the process receives no stdin input.
-//   - Stderr: the Apple Container API returns stdout and stderr as a single combined
-//     stream; they cannot be routed to separate writers. The combined output is sent
-//     to req.Stdout when set, otherwise to req.Stderr when set, otherwise discarded.
-//   - FIFODir: a containerd-specific concept; not applicable here.
-func (s *AppleService) ExecTask(ctx context.Context, containerID string, req ExecTaskRequest) (ExecTaskResult, error) {
-	if containerID == "" || len(req.Args) == 0 {
-		return ExecTaskResult{}, ErrInvalidArgument
-	}
-	if err := s.ensureHealthy(ctx); err != nil {
-		return ExecTaskResult{}, err
-	}
-	ctr, err := s.client.LoadContainer(ctx, containerID)
-	if err != nil {
-		return ExecTaskResult{}, err
-	}
-	var execOpts []acgo.ExecOpt
-	if req.Terminal {
-		execOpts = append(execOpts, acgo.WithExecTTY())
-	}
-	result, err := ctr.Exec(ctx, req.Args, execOpts...)
-	if err != nil {
-		return ExecTaskResult{}, err
-	}
-	if result.Output != nil {
-		dest := req.Stdout
-		if dest == nil {
-			dest = req.Stderr
-		}
-		_, _ = io.Copy(dest, result.Output)
-		_ = result.Output.Close()
-	}
-	return ExecTaskResult{ExitCode: 0}, nil
-}
-
-func (s *AppleService) ExecTaskStreaming(context.Context, string, ExecTaskRequest) (*ExecTaskSession, error) {
-	return nil, ErrNotSupported
-}
-
 // ---------------------------------------------------------------------------
 // Network (no-op — Apple Container handles networking natively)
 // ---------------------------------------------------------------------------
 
-func (s *AppleService) SetupNetwork(context.Context, NetworkSetupRequest) error  { return nil }
+func (s *AppleService) SetupNetwork(context.Context, NetworkSetupRequest) (NetworkResult, error) {
+	return NetworkResult{}, nil
+}
 func (s *AppleService) RemoveNetwork(context.Context, NetworkSetupRequest) error { return nil }
 
 // ---------------------------------------------------------------------------

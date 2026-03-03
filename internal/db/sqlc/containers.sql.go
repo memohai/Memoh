@@ -21,7 +21,7 @@ func (q *Queries) DeleteContainerByBotID(ctx context.Context, botID pgtype.UUID)
 }
 
 const getContainerByBotID = `-- name: GetContainerByBotID :one
-SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, host_path, container_path, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE bot_id = $1 ORDER BY updated_at DESC LIMIT 1
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE bot_id = $1 ORDER BY updated_at DESC LIMIT 1
 `
 
 func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (Container, error) {
@@ -36,7 +36,6 @@ func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (C
 		&i.Status,
 		&i.Namespace,
 		&i.AutoStart,
-		&i.HostPath,
 		&i.ContainerPath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -47,7 +46,7 @@ func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (C
 }
 
 const listAutoStartContainers = `-- name: ListAutoStartContainers :many
-SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, host_path, container_path, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE auto_start = true ORDER BY updated_at DESC
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE auto_start = true ORDER BY updated_at DESC
 `
 
 func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, error) {
@@ -68,7 +67,6 @@ func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, err
 			&i.Status,
 			&i.Namespace,
 			&i.AutoStart,
-			&i.HostPath,
 			&i.ContainerPath,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -126,7 +124,7 @@ func (q *Queries) UpdateContainerStopped(ctx context.Context, botID pgtype.UUID)
 const upsertContainer = `-- name: UpsertContainer :exec
 INSERT INTO containers (
   bot_id, container_id, container_name, image, status, namespace, auto_start,
-  host_path, container_path, last_started_at, last_stopped_at
+  container_path, last_started_at, last_stopped_at
 )
 VALUES (
   $1,
@@ -138,8 +136,7 @@ VALUES (
   $7,
   $8,
   $9,
-  $10,
-  $11
+  $10
 )
 ON CONFLICT (container_id) DO UPDATE SET
   bot_id = EXCLUDED.bot_id,
@@ -148,7 +145,6 @@ ON CONFLICT (container_id) DO UPDATE SET
   status = EXCLUDED.status,
   namespace = EXCLUDED.namespace,
   auto_start = EXCLUDED.auto_start,
-  host_path = EXCLUDED.host_path,
   container_path = EXCLUDED.container_path,
   last_started_at = EXCLUDED.last_started_at,
   last_stopped_at = EXCLUDED.last_stopped_at,
@@ -163,7 +159,6 @@ type UpsertContainerParams struct {
 	Status        string             `json:"status"`
 	Namespace     string             `json:"namespace"`
 	AutoStart     bool               `json:"auto_start"`
-	HostPath      pgtype.Text        `json:"host_path"`
 	ContainerPath string             `json:"container_path"`
 	LastStartedAt pgtype.Timestamptz `json:"last_started_at"`
 	LastStoppedAt pgtype.Timestamptz `json:"last_stopped_at"`
@@ -178,7 +173,6 @@ func (q *Queries) UpsertContainer(ctx context.Context, arg UpsertContainerParams
 		arg.Status,
 		arg.Namespace,
 		arg.AutoStart,
-		arg.HostPath,
 		arg.ContainerPath,
 		arg.LastStartedAt,
 		arg.LastStoppedAt,

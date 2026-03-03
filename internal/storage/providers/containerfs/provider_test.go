@@ -1,50 +1,34 @@
 package containerfs
 
-import (
-	"bytes"
-	"context"
-	"io"
-	"os"
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
-func TestProvider_HostPath(t *testing.T) {
+func TestParseRoutingKey(t *testing.T) {
 	t.Parallel()
-	p := &Provider{dataRoot: "/srv/data"}
 
 	tests := []struct {
 		key     string
-		want    string
 		wantErr bool
 	}{
-		{key: "bot-1/image/ab12/ab12cd.png", want: "/srv/data/bots/bot-1/media/image/ab12/ab12cd.png"},
+		{key: "bot-1/image/ab12/ab12cd.png", wantErr: false},
 		{key: "/absolute/path", wantErr: true},
 		{key: "../escape", wantErr: true},
 		{key: "nosubpath", wantErr: true},
 		{key: "", wantErr: true},
 	}
 	for _, tt := range tests {
-		got, err := p.hostPath(tt.key)
-		if tt.wantErr {
-			if err == nil {
-				t.Errorf("hostPath(%q) expected error", tt.key)
-			}
-			continue
+		_, _, err := parseRoutingKey(tt.key)
+		if tt.wantErr && err == nil {
+			t.Errorf("parseRoutingKey(%q) expected error", tt.key)
 		}
-		if err != nil {
-			t.Errorf("hostPath(%q) unexpected error: %v", tt.key, err)
-			continue
-		}
-		if got != tt.want {
-			t.Errorf("hostPath(%q) = %q, want %q", tt.key, got, tt.want)
+		if !tt.wantErr && err != nil {
+			t.Errorf("parseRoutingKey(%q) unexpected error: %v", tt.key, err)
 		}
 	}
 }
 
 func TestProvider_AccessPath(t *testing.T) {
 	t.Parallel()
-	p := &Provider{dataRoot: "/srv/data"}
+	p := &Provider{}
 
 	tests := []struct {
 		key  string
@@ -61,47 +45,8 @@ func TestProvider_AccessPath(t *testing.T) {
 	}
 }
 
-func TestProvider_PutOpenDelete(t *testing.T) {
+func TestParseRoutingKey_PathTraversal(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	p, err := New(tmpDir)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
-
-	key := "bot-1/image/ab/test.png"
-	data := []byte("hello media content")
-
-	if err := p.Put(context.Background(), key, bytes.NewReader(data)); err != nil {
-		t.Fatalf("Put failed: %v", err)
-	}
-
-	hostFile := filepath.Join(tmpDir, "bots", "bot-1", "media", "image", "ab", "test.png")
-	if _, err := os.Stat(hostFile); err != nil {
-		t.Fatalf("file not found on host: %v", err)
-	}
-
-	reader, err := p.Open(context.Background(), key)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	got, _ := io.ReadAll(reader)
-	reader.Close()
-	if !bytes.Equal(got, data) {
-		t.Errorf("Open returned %q, want %q", got, data)
-	}
-
-	if err := p.Delete(context.Background(), key); err != nil {
-		t.Fatalf("Delete failed: %v", err)
-	}
-	if _, err := os.Stat(hostFile); !os.IsNotExist(err) {
-		t.Fatalf("file should be deleted: %v", err)
-	}
-}
-
-func TestProvider_PathTraversal(t *testing.T) {
-	t.Parallel()
-	p := &Provider{dataRoot: "/srv/data"}
 
 	bad := []string{
 		"../etc/passwd",
@@ -109,8 +54,22 @@ func TestProvider_PathTraversal(t *testing.T) {
 		"bot-1/../../escape",
 	}
 	for _, key := range bad {
-		if _, err := p.hostPath(key); err == nil {
-			t.Errorf("hostPath(%q) should reject traversal", key)
+		if _, _, err := parseRoutingKey(key); err == nil {
+			t.Errorf("parseRoutingKey(%q) should reject traversal", key)
 		}
+	}
+}
+
+func TestSplitRoutingKey(t *testing.T) {
+	t.Parallel()
+
+	botID, sub := splitRoutingKey("bot-1/image/test.png")
+	if botID != "bot-1" || sub != "image/test.png" {
+		t.Errorf("splitRoutingKey: got (%q, %q)", botID, sub)
+	}
+
+	botID2, sub2 := splitRoutingKey("nosubpath")
+	if botID2 != "" || sub2 != "nosubpath" {
+		t.Errorf("splitRoutingKey single: got (%q, %q)", botID2, sub2)
 	}
 }

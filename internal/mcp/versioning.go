@@ -364,37 +364,32 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	}); err != nil {
 		return err
 	}
-	if err := m.service.StartContainer(ctx, containerID, &ctr.StartTaskOptions{UseStdio: false}); err != nil {
+	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
 		return err
 	}
-	if err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+	// Container process was recreated — evict the stale gRPC connection
+	// unconditionally so the next call dials fresh to the new process.
+	m.grpcPool.Remove(botID)
+
+	if netResult, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
 		ContainerID: containerID,
 		CNIBinDir:   m.cfg.CNIBinaryDir,
 		CNIConfDir:  m.cfg.CNIConfigDir,
 	}); err != nil {
 		m.logger.Warn("network setup failed after snapshot replace",
 			slog.String("container_id", containerID), slog.Any("error", err))
+	} else {
+		m.SetContainerIP(botID, netResult.IP)
 	}
 	return nil
 }
 
-func (m *Manager) buildVersionSpec(botID string) (ctr.ContainerSpec, error) {
-	dataDir, err := m.ensureBotDir(botID)
-	if err != nil {
-		return ctr.ContainerSpec{}, err
-	}
-	dataMount := config.DefaultDataMount
-	resolvPath, err := ctr.ResolveConfSource(dataDir)
+func (m *Manager) buildVersionSpec(_ string) (ctr.ContainerSpec, error) {
+	resolvPath, err := ctr.ResolveConfSource(m.dataRoot())
 	if err != nil {
 		return ctr.ContainerSpec{}, err
 	}
 	mounts := []ctr.MountSpec{
-		{
-			Destination: dataMount,
-			Type:        "bind",
-			Source:      dataDir,
-			Options:     []string{"rbind", "rw"},
-		},
 		{
 			Destination: "/etc/resolv.conf",
 			Type:        "bind",
@@ -425,10 +420,6 @@ func (m *Manager) safeStopTask(ctx context.Context, containerID string) error {
 }
 
 func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, runtime, imageRef string) (pgtype.UUID, error) {
-	hostPath, err := m.DataDir(botID)
-	if err != nil {
-		return pgtype.UUID{}, err
-	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return pgtype.UUID{}, err
@@ -446,7 +437,6 @@ func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, runti
 		Status:        "created",
 		Namespace:     "default",
 		AutoStart:     true,
-		HostPath:      pgtype.Text{String: hostPath, Valid: hostPath != ""},
 		ContainerPath: containerPath,
 		LastStartedAt: pgtype.Timestamptz{},
 		LastStoppedAt: pgtype.Timestamptz{},

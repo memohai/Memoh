@@ -1,7 +1,7 @@
 -- name: UpsertContainer :exec
 INSERT INTO containers (
   bot_id, container_id, container_name, image, status, namespace, auto_start,
-  host_path, container_path, last_started_at, last_stopped_at
+  container_path, last_started_at, last_stopped_at
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -11,7 +11,6 @@ VALUES (
   sqlc.arg(status),
   sqlc.arg(namespace),
   sqlc.arg(auto_start),
-  sqlc.arg(host_path),
   sqlc.arg(container_path),
   sqlc.arg(last_started_at),
   sqlc.arg(last_stopped_at)
@@ -23,7 +22,6 @@ ON CONFLICT (container_id) DO UPDATE SET
   status = EXCLUDED.status,
   namespace = EXCLUDED.namespace,
   auto_start = EXCLUDED.auto_start,
-  host_path = EXCLUDED.host_path,
   container_path = EXCLUDED.container_path,
   last_started_at = EXCLUDED.last_started_at,
   last_stopped_at = EXCLUDED.last_stopped_at,

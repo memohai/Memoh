@@ -1,147 +1,10 @@
 package container
 
 import (
-	"context"
-	"encoding/base64"
 	"fmt"
-	"path"
-	"strconv"
 	"strings"
-	"time"
 	"unicode"
-
-	mcpgw "github.com/memohai/memoh/internal/mcp"
 )
-
-// FileEntry represents a filesystem entry returned by ExecList.
-type FileEntry struct {
-	Path    string
-	IsDir   bool
-	Size    int64
-	Mode    uint32
-	ModTime time.Time
-}
-
-func wrapWithCd(workDir, script string) string {
-	if workDir == "" {
-		return script
-	}
-	return "cd " + ShellQuote(workDir) + " && " + script
-}
-
-// ExecRead reads a file inside the container via cat.
-func ExecRead(ctx context.Context, runner ExecRunner, botID, workDir, filePath string) (string, error) {
-	result, err := runner.ExecWithCapture(ctx, mcpgw.ExecRequest{
-		BotID:   botID,
-		Command: []string{"/bin/sh", "-c", wrapWithCd(workDir, "cat "+ShellQuote(filePath))},
-		WorkDir: workDir,
-	})
-	if err != nil {
-		return "", err
-	}
-	if result.ExitCode != 0 {
-		return "", fmt.Errorf("%s", strings.TrimSpace(result.Stderr))
-	}
-	return result.Stdout, nil
-}
-
-// ExecWrite writes content to a file inside the container using base64 encoding
-// to avoid shell escaping issues.
-func ExecWrite(ctx context.Context, runner ExecRunner, botID, workDir, filePath, content string) error {
-	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	dir := path.Dir(filePath)
-	script := fmt.Sprintf("mkdir -p %s && echo %s | base64 -d > %s",
-		ShellQuote(dir), ShellQuote(encoded), ShellQuote(filePath))
-	result, err := runner.ExecWithCapture(ctx, mcpgw.ExecRequest{
-		BotID:   botID,
-		Command: []string{"/bin/sh", "-c", wrapWithCd(workDir, script)},
-		WorkDir: workDir,
-	})
-	if err != nil {
-		return err
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("%s", strings.TrimSpace(result.Stderr))
-	}
-	return nil
-}
-
-// ExecList lists directory entries inside the container via find + stat.
-// Output format per line: <name>|<type>|<size>|<mode>|<mtime_epoch>
-func ExecList(ctx context.Context, runner ExecRunner, botID, workDir, dirPath string, recursive bool) ([]FileEntry, error) {
-	depthFlag := "-maxdepth 1"
-	if recursive {
-		depthFlag = ""
-	}
-	// Use find to get entries, skip the root dir itself, then stat each entry.
-	// busybox stat -c format: %n=name, %F=type, %s=size, %a=octal mode, %Y=mtime epoch
-	script := fmt.Sprintf(
-		`find %s %s ! -path %s -exec stat -c '%%n|%%F|%%s|%%a|%%Y' {} \;`,
-		ShellQuote(dirPath), depthFlag, ShellQuote(dirPath),
-	)
-	result, err := runner.ExecWithCapture(ctx, mcpgw.ExecRequest{
-		BotID:   botID,
-		Command: []string{"/bin/sh", "-c", wrapWithCd(workDir, script)},
-		WorkDir: workDir,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if result.ExitCode != 0 {
-		return nil, fmt.Errorf("%s", strings.TrimSpace(result.Stderr))
-	}
-	return parseStatOutput(result.Stdout, dirPath), nil
-}
-
-// parseStatOutput parses lines of "fullpath|type|size|mode|mtime" into FileEntry slices.
-func parseStatOutput(output, basePath string) []FileEntry {
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	entries := make([]FileEntry, 0, len(lines))
-	// Normalize base path for computing relative paths.
-	base := strings.TrimSuffix(basePath, "/")
-	if base == "" || base == "." {
-		base = ""
-	}
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "|", 5)
-		if len(parts) < 5 {
-			continue
-		}
-		fullPath := parts[0]
-		fileType := parts[1]
-		sizeStr := parts[2]
-		modeStr := parts[3]
-		mtimeStr := parts[4]
-
-		// Compute relative path from base.
-		rel := fullPath
-		if base != "" {
-			rel = strings.TrimPrefix(fullPath, base+"/")
-		}
-		if rel == "" || rel == "." {
-			continue
-		}
-
-		isDir := strings.Contains(fileType, "directory")
-		size, _ := strconv.ParseInt(sizeStr, 10, 64)
-		mode64, _ := strconv.ParseUint(modeStr, 8, 32)
-		mtimeEpoch, _ := strconv.ParseInt(mtimeStr, 10, 64)
-		modTime := time.Unix(mtimeEpoch, 0)
-
-		entries = append(entries, FileEntry{
-			Path:    rel,
-			IsDir:   isDir,
-			Size:    size,
-			Mode:    uint32(mode64),
-			ModTime: modTime,
-		})
-	}
-	return entries
-}
 
 // applyEdit performs the fuzzy text replacement logic on raw file content.
 // Returns the updated content or an error.
@@ -200,7 +63,7 @@ func ShellQuote(s string) string {
 	return b.String()
 }
 
-// ---------- fuzzy matching helpers (pure string processing, unchanged) ----------
+// ---------- fuzzy matching helpers ----------
 
 type fuzzyMatchResult struct {
 	Found                 bool

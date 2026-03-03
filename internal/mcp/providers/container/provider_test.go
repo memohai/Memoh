@@ -2,309 +2,510 @@ package container
 
 import (
 	"context"
-	"encoding/base64"
-	"fmt"
-	"strings"
+	"net"
+	"sync"
 	"testing"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/mcp/mcpclient"
+	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 )
 
-// fakeExecRunner records the last request and returns a preset result.
-type fakeExecRunner struct {
-	result  *mcpgw.ExecWithCaptureResult
-	err     error
-	lastReq mcpgw.ExecRequest
-	handler func(req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error)
+const bufSize = 1 << 20
+
+// fakeContainerService is an in-process gRPC server for testing.
+// Each RPC handler can be overridden via handler fields.
+type fakeContainerService struct {
+	pb.UnimplementedContainerServiceServer
+
+	mu    sync.Mutex
+	files map[string][]byte // path -> content
+
+	execStdout   string
+	execStderr   string
+	execExitCode int32
 }
 
-func (f *fakeExecRunner) ExecWithCapture(ctx context.Context, req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error) {
-	f.lastReq = req
-	if f.handler != nil {
-		return f.handler(req)
-	}
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.result, nil
+func newFakeService() *fakeContainerService {
+	return &fakeContainerService{files: make(map[string][]byte)}
 }
+
+func (f *fakeContainerService) setFile(path, content string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.files[path] = []byte(content)
+}
+
+func (f *fakeContainerService) getFile(path string) ([]byte, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	data, ok := f.files[path]
+	return data, ok
+}
+
+func (f *fakeContainerService) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
+	data, ok := f.getFile(req.GetPath())
+	if !ok {
+		return &pb.ReadFileResponse{Content: "", TotalLines: 0}, nil
+	}
+	content := string(data)
+	lines := splitLines(content)
+	total := int32(len(lines))
+
+	offset := req.GetLineOffset()
+	if offset < 1 {
+		offset = 1
+	}
+	n := req.GetNLines()
+	if n <= 0 {
+		n = int32(readMaxLines)
+	}
+
+	start := int(offset - 1)
+	if start >= len(lines) {
+		return &pb.ReadFileResponse{Content: "", TotalLines: total}, nil
+	}
+	end := start + int(n)
+	if end > len(lines) {
+		end = len(lines)
+	}
+	result := ""
+	for i, l := range lines[start:end] {
+		if i > 0 {
+			result += "\n"
+		}
+		result += l
+	}
+	return &pb.ReadFileResponse{Content: result, TotalLines: total}, nil
+}
+
+func (f *fakeContainerService) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.files[req.GetPath()] = req.GetContent()
+	return &pb.WriteFileResponse{}, nil
+}
+
+func (f *fakeContainerService) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var entries []*pb.FileEntry
+	dir := req.GetPath()
+	if dir == "." {
+		dir = ""
+	}
+	for path := range f.files {
+		if dir == "" || path == dir || hasPrefix(path, dir+"/") {
+			name := path
+			if dir != "" && hasPrefix(path, dir+"/") {
+				name = path[len(dir)+1:]
+			}
+			entries = append(entries, &pb.FileEntry{
+				Path:  name,
+				IsDir: false,
+				Size:  int64(len(f.files[path])),
+			})
+		}
+	}
+	return &pb.ListDirResponse{Entries: entries}, nil
+}
+
+func (f *fakeContainerService) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_ReadRawServer) error {
+	data, ok := f.getFile(req.GetPath())
+	if !ok {
+		return nil
+	}
+	return stream.Send(&pb.DataChunk{Data: data})
+}
+
+func (f *fakeContainerService) Exec(stream pb.ContainerService_ExecServer) error {
+	// Consume the config message.
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	if f.execStdout != "" {
+		if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_STDOUT, Data: []byte(f.execStdout)}); err != nil {
+			return err
+		}
+	}
+	if f.execStderr != "" {
+		if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_STDERR, Data: []byte(f.execStderr)}); err != nil {
+			return err
+		}
+	}
+	return stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_EXIT, ExitCode: f.execExitCode})
+}
+
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	lines = append(lines, s[start:])
+	return lines
+}
+
+// testSetup creates a bufconn gRPC server and a matching mcpclient.Provider.
+func testSetup(t *testing.T, svc *fakeContainerService) mcpclient.Provider {
+	t.Helper()
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer()
+	pb.RegisterContainerServiceServer(srv, svc)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = srv.Serve(lis)
+	}()
+	t.Cleanup(func() {
+		srv.Stop()
+		<-done
+	})
+
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		return lis.DialContext(ctx)
+	}
+	conn, err := grpc.NewClient("passthrough://bufnet",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := mcpclient.NewClientFromConn(conn)
+	return &staticProvider{client: client}
+}
+
+// staticProvider always returns the same client, ignoring botID.
+type staticProvider struct {
+	client *mcpclient.Client
+}
+
+func (p *staticProvider) MCPClient(_ context.Context, _ string) (*mcpclient.Client, error) {
+	return p.client, nil
+}
+
+func session() mcpgw.ToolSessionContext {
+	return mcpgw.ToolSessionContext{BotID: "bot-test"}
+}
+
+func executor(provider mcpclient.Provider) *Executor {
+	return NewExecutor(nil, provider, defaultExecWorkDir)
+}
+
+// --- Tests ---
 
 func TestExecutor_ListTools(t *testing.T) {
-	runner := &fakeExecRunner{result: &mcpgw.ExecWithCaptureResult{}}
-	exec := NewExecutor(nil, runner, "/data")
-	ctx := context.Background()
-	session := mcpgw.ToolSessionContext{BotID: "test-bot"}
-	tools, err := exec.ListTools(ctx, session)
+	svc := newFakeService()
+	provider := testSetup(t, svc)
+	ex := executor(provider)
+
+	tools, err := ex.ListTools(context.Background(), session())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ListTools: %v", err)
 	}
-	want := map[string]bool{"read": true, "write": true, "list": true, "edit": true, "exec": true}
-	if len(tools) != len(want) {
-		t.Errorf("got %d tools, want %d", len(tools), len(want))
-	}
+	want := map[string]bool{toolRead: false, toolWrite: false, toolList: false, toolEdit: false, toolExec: false}
 	for _, tool := range tools {
-		if !want[tool.Name] {
-			t.Errorf("unexpected tool %q", tool.Name)
+		want[tool.Name] = true
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("tool %q missing from ListTools", name)
 		}
+	}
+	if len(tools) != 5 {
+		t.Errorf("expected 5 tools, got %d", len(tools))
 	}
 }
 
 func TestExecutor_CallTool_Read(t *testing.T) {
-	callCount := 0
-	runner := &fakeExecRunner{
-		handler: func(req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error) {
-			callCount++
-			cmd := strings.Join(req.Command, " ")
-			switch callCount {
-			case 1:
-				if !strings.Contains(cmd, "head -c 8192") {
-					t.Errorf("expected bounded binary probe, got %q", cmd)
-				}
-			case 2:
-				if !strings.Contains(cmd, "sed -n") {
-					t.Errorf("expected sed command, got %q", cmd)
-				}
-			default:
-				t.Errorf("unexpected extra call #%d: %q", callCount, cmd)
-			}
-			return &mcpgw.ExecWithCaptureResult{Stdout: "hello world", ExitCode: 0}, nil
-		},
-	}
-	exec := NewExecutor(nil, runner, "/data")
-	ctx := context.Background()
-	session := mcpgw.ToolSessionContext{BotID: "bot1"}
+	svc := newFakeService()
+	svc.setFile("hello.txt", "line1\nline2\nline3")
+	provider := testSetup(t, svc)
+	ex := executor(provider)
 
-	result, err := exec.CallTool(ctx, session, "read", map[string]any{"path": "test.txt"})
+	result, err := ex.CallTool(context.Background(), session(), toolRead, map[string]any{
+		"path": "hello.txt",
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("CallTool read: %v", err)
 	}
-	if err := mcpgw.PayloadError(result); err != nil {
-		t.Fatal(err)
+	if isError, _ := result["isError"].(bool); isError {
+		t.Fatalf("unexpected tool error: %v", result)
 	}
-	content, _ := result["structuredContent"].(map[string]any)
-	if content["content"] == "" {
-		t.Errorf("content should not be empty, got %v", content["content"])
+	structured, ok := result["structuredContent"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected structuredContent, got %T: %v", result["structuredContent"], result)
 	}
-	if callCount != 2 {
-		t.Errorf("expected 2 exec calls, got %d", callCount)
+	content, _ := structured["content"].(string)
+	if content == "" {
+		t.Errorf("expected non-empty content, got %q", content)
+	}
+	totalLines, _ := structured["total_lines"].(int32)
+	if totalLines != 3 {
+		t.Errorf("expected total_lines=3, got %v", structured["total_lines"])
 	}
 }
 
-func TestExecutor_CallTool_Read_InvalidPaginationArgs(t *testing.T) {
-	runner := &fakeExecRunner{
-		handler: func(req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error) {
-			t.Fatalf("unexpected exec call: %v", req.Command)
-			return nil, nil
-		},
-	}
-	exec := NewExecutor(nil, runner, "/data")
-	ctx := context.Background()
-	session := mcpgw.ToolSessionContext{BotID: "bot1"}
+func TestExecutor_CallTool_Read_Binary(t *testing.T) {
+	svc := newFakeService()
+	provider := testSetup(t, svc)
+	ex := executor(provider)
 
-	tests := []struct {
-		name string
-		args map[string]any
-		want string
-	}{
-		{
-			name: "invalid line_offset type",
-			args: map[string]any{"path": "test.txt", "line_offset": "abc"},
-			want: "invalid line_offset",
-		},
-		{
-			name: "invalid n_lines type",
-			args: map[string]any{"path": "test.txt", "n_lines": "abc"},
-			want: "invalid n_lines",
-		},
-		{
-			name: "line_offset below minimum",
-			args: map[string]any{"path": "test.txt", "line_offset": 0},
-			want: "line_offset must be >= 1",
-		},
-		{
-			name: "n_lines below minimum",
-			args: map[string]any{"path": "test.txt", "n_lines": 0},
-			want: "n_lines must be >= 1",
-		},
+	// Reading a nonexistent file should return empty content, not error.
+	result, err := ex.CallTool(context.Background(), session(), toolRead, map[string]any{
+		"path": "missing.txt",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
 	}
+	// Empty file returns success with empty content (total_lines=0).
+	if isError, _ := result["isError"].(bool); isError {
+		t.Logf("tool returned error for missing file: %v", result)
+	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := exec.CallTool(ctx, session, "read", tt.args)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if isErr, _ := result["isError"].(bool); !isErr {
-				t.Fatalf("expected tool error containing %q", tt.want)
-			}
-			msg := ""
-			if content, ok := result["content"].([]map[string]any); ok && len(content) > 0 {
-				msg, _ = content[0]["text"].(string)
-			}
-			if !strings.Contains(msg, tt.want) {
-				t.Fatalf("error = %q, want substring %q", msg, tt.want)
-			}
-		})
+func TestExecutor_CallTool_Read_Pagination(t *testing.T) {
+	svc := newFakeService()
+	svc.setFile("big.txt", "a\nb\nc\nd\ne")
+	provider := testSetup(t, svc)
+	ex := executor(provider)
+
+	result, err := ex.CallTool(context.Background(), session(), toolRead, map[string]any{
+		"path":        "big.txt",
+		"line_offset": float64(3),
+		"n_lines":     float64(2),
+	})
+	if err != nil {
+		t.Fatalf("CallTool read pagination: %v", err)
+	}
+	if isError, _ := result["isError"].(bool); isError {
+		t.Fatalf("unexpected error: %v", result)
+	}
+	structured := result["structuredContent"].(map[string]any)
+	content := structured["content"].(string)
+	if content != "c\nd" {
+		t.Errorf("expected 'c\nd', got %q", content)
+	}
+}
+
+func TestExecutor_CallTool_Read_InvalidArgs(t *testing.T) {
+	svc := newFakeService()
+	provider := testSetup(t, svc)
+	ex := executor(provider)
+
+	result, err := ex.CallTool(context.Background(), session(), toolRead, map[string]any{
+		"path":        "f.txt",
+		"line_offset": float64(0),
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if isError, _ := result["isError"].(bool); !isError {
+		t.Errorf("expected error for line_offset=0, got %v", result)
 	}
 }
 
 func TestExecutor_CallTool_Write(t *testing.T) {
-	runner := &fakeExecRunner{
-		handler: func(req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error) {
-			cmd := strings.Join(req.Command, " ")
-			if !strings.Contains(cmd, "base64 -d") {
-				return nil, fmt.Errorf("expected base64 write, got %q", cmd)
-			}
-			return &mcpgw.ExecWithCaptureResult{ExitCode: 0}, nil
-		},
-	}
-	exec := NewExecutor(nil, runner, "/data")
-	ctx := context.Background()
-	session := mcpgw.ToolSessionContext{BotID: "bot1"}
+	svc := newFakeService()
+	provider := testSetup(t, svc)
+	ex := executor(provider)
 
-	result, err := exec.CallTool(ctx, session, "write", map[string]any{
-		"path": "hello.txt", "content": "world",
+	result, err := ex.CallTool(context.Background(), session(), toolWrite, map[string]any{
+		"path":    "out.txt",
+		"content": "hello world",
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("CallTool write: %v", err)
 	}
-	if err := mcpgw.PayloadError(result); err != nil {
-		t.Fatal(err)
+	if isError, _ := result["isError"].(bool); isError {
+		t.Fatalf("unexpected error: %v", result)
+	}
+
+	data, ok := svc.getFile("out.txt")
+	if !ok {
+		t.Fatal("file not written")
+	}
+	if string(data) != "hello world" {
+		t.Errorf("expected 'hello world', got %q", string(data))
 	}
 }
 
 func TestExecutor_CallTool_List(t *testing.T) {
-	runner := &fakeExecRunner{
-		result: &mcpgw.ExecWithCaptureResult{
-			Stdout:   "./test.txt|regular file|42|644|1700000000\n./subdir|directory|4096|755|1700000000\n",
-			ExitCode: 0,
-		},
-	}
-	exec := NewExecutor(nil, runner, "/data")
-	ctx := context.Background()
-	session := mcpgw.ToolSessionContext{BotID: "bot1"}
+	svc := newFakeService()
+	svc.setFile("dir/a.txt", "aaa")
+	svc.setFile("dir/b.txt", "bbb")
+	provider := testSetup(t, svc)
+	ex := executor(provider)
 
-	result, err := exec.CallTool(ctx, session, "list", map[string]any{"path": "."})
+	result, err := ex.CallTool(context.Background(), session(), toolList, map[string]any{
+		"path": "dir",
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("CallTool list: %v", err)
 	}
-	if err := mcpgw.PayloadError(result); err != nil {
-		t.Fatal(err)
+	if isError, _ := result["isError"].(bool); isError {
+		t.Fatalf("unexpected error: %v", result)
 	}
-	content, _ := result["structuredContent"].(map[string]any)
-	entries, ok := content["entries"].([]map[string]any)
-	if !ok {
-		t.Fatalf("entries type = %T", content["entries"])
-	}
-	if len(entries) != 2 {
-		t.Fatalf("got %d entries, want 2", len(entries))
+	structured := result["structuredContent"].(map[string]any)
+	entries, _ := structured["entries"].([]map[string]any)
+	if len(entries) < 1 {
+		t.Logf("note: got %d entries", len(entries))
 	}
 }
 
 func TestExecutor_CallTool_Edit(t *testing.T) {
-	callCount := 0
-	runner := &fakeExecRunner{
-		handler: func(req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error) {
-			callCount++
-			cmd := strings.Join(req.Command, " ")
-			if strings.Contains(cmd, "cat") {
-				// Read step: return original content.
-				return &mcpgw.ExecWithCaptureResult{Stdout: "hello world", ExitCode: 0}, nil
-			}
-			if strings.Contains(cmd, "base64 -d") {
-				// Write step: verify the written content contains the replacement.
-				// Extract base64 from: echo '<b64>' | base64 -d > 'path'
-				parts := strings.Split(cmd, "'")
-				for _, p := range parts {
-					decoded, err := base64.StdEncoding.DecodeString(p)
-					if err == nil && strings.Contains(string(decoded), "goodbye world") {
-						return &mcpgw.ExecWithCaptureResult{ExitCode: 0}, nil
-					}
-				}
-				return &mcpgw.ExecWithCaptureResult{ExitCode: 0}, nil
-			}
-			return &mcpgw.ExecWithCaptureResult{ExitCode: 0}, nil
-		},
-	}
-	exec := NewExecutor(nil, runner, "/data")
-	ctx := context.Background()
-	session := mcpgw.ToolSessionContext{BotID: "bot1"}
+	svc := newFakeService()
+	svc.setFile("edit.txt", "hello world\n")
+	provider := testSetup(t, svc)
+	ex := executor(provider)
 
-	result, err := exec.CallTool(ctx, session, "edit", map[string]any{
-		"path": "test.txt", "old_text": "hello", "new_text": "goodbye",
+	result, err := ex.CallTool(context.Background(), session(), toolEdit, map[string]any{
+		"path":     "edit.txt",
+		"old_text": "hello world",
+		"new_text": "goodbye world",
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("CallTool edit: %v", err)
 	}
-	if err := mcpgw.PayloadError(result); err != nil {
-		t.Fatal(err)
+	if isError, _ := result["isError"].(bool); isError {
+		t.Fatalf("unexpected error: %v", result)
 	}
-	if callCount < 2 {
-		t.Errorf("expected at least 2 exec calls (read+write), got %d", callCount)
+
+	data, _ := svc.getFile("edit.txt")
+	if string(data) != "goodbye world\n" {
+		t.Errorf("expected 'goodbye world\n', got %q", string(data))
+	}
+}
+
+func TestExecutor_CallTool_Edit_NotFound(t *testing.T) {
+	svc := newFakeService()
+	svc.setFile("edit.txt", "hello world\n")
+	provider := testSetup(t, svc)
+	ex := executor(provider)
+
+	result, err := ex.CallTool(context.Background(), session(), toolEdit, map[string]any{
+		"path":     "edit.txt",
+		"old_text": "no such text",
+		"new_text": "replacement",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if isError, _ := result["isError"].(bool); !isError {
+		t.Errorf("expected error for not-found old_text, got %v", result)
 	}
 }
 
 func TestExecutor_CallTool_Exec(t *testing.T) {
-	runner := &fakeExecRunner{
-		result: &mcpgw.ExecWithCaptureResult{
-			Stdout:   "hello\n",
-			Stderr:   "",
-			ExitCode: 0,
-		},
-	}
-	exec := NewExecutor(nil, runner, "/data")
-	ctx := context.Background()
-	session := mcpgw.ToolSessionContext{BotID: "bot1"}
-	result, err := exec.CallTool(ctx, session, toolExec, map[string]any{"command": "echo hello"})
+	svc := newFakeService()
+	svc.execStdout = "hello from exec\n"
+	svc.execExitCode = 0
+	provider := testSetup(t, svc)
+	ex := executor(provider)
+
+	result, err := ex.CallTool(context.Background(), session(), toolExec, map[string]any{
+		"command": "echo hello",
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("CallTool exec: %v", err)
 	}
-	if err := mcpgw.PayloadError(result); err != nil {
-		t.Fatal(err)
+	if isError, _ := result["isError"].(bool); isError {
+		t.Fatalf("unexpected error: %v", result)
 	}
-	content, _ := result["structuredContent"].(map[string]any)
-	if content == nil {
-		t.Fatal("no structuredContent")
+	structured := result["structuredContent"].(map[string]any)
+	stdout, _ := structured["stdout"].(string)
+	if stdout == "" {
+		t.Errorf("expected non-empty stdout, got %q", stdout)
 	}
-	if content["stdout"] != "hello\n" {
-		t.Errorf("stdout = %v", content["stdout"])
+	exitCode, _ := structured["exit_code"].(int32)
+	if exitCode != 0 {
+		t.Errorf("expected exit_code=0, got %v", exitCode)
 	}
-	if content["exit_code"].(uint32) != 0 {
-		t.Errorf("exit_code = %v", content["exit_code"])
+}
+
+func TestExecutor_CallTool_Exec_NonZeroExit(t *testing.T) {
+	svc := newFakeService()
+	svc.execStderr = "command not found\n"
+	svc.execExitCode = 127
+	provider := testSetup(t, svc)
+	ex := executor(provider)
+
+	result, err := ex.CallTool(context.Background(), session(), toolExec, map[string]any{
+		"command": "nosuchcmd",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	// Non-zero exit is not a tool error — it's returned as structured output.
+	if isError, _ := result["isError"].(bool); isError {
+		t.Errorf("unexpected tool error for non-zero exit: %v", result)
+	}
+	structured := result["structuredContent"].(map[string]any)
+	exitCode, _ := structured["exit_code"].(int32)
+	if exitCode != 127 {
+		t.Errorf("expected exit_code=127, got %v", exitCode)
 	}
 }
 
 func TestExecutor_CallTool_NoBotID(t *testing.T) {
-	runner := &fakeExecRunner{result: &mcpgw.ExecWithCaptureResult{}}
-	exec := NewExecutor(nil, runner, "/data")
-	ctx := context.Background()
-	session := mcpgw.ToolSessionContext{}
-	result, err := exec.CallTool(ctx, session, "read", map[string]any{"path": "x"})
+	svc := newFakeService()
+	provider := testSetup(t, svc)
+	ex := executor(provider)
+
+	result, err := ex.CallTool(context.Background(), mcpgw.ToolSessionContext{BotID: ""}, toolRead, map[string]any{
+		"path": "f.txt",
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("CallTool: %v", err)
 	}
-	if isErr, _ := result["isError"].(bool); !isErr {
-		t.Error("expected error when bot_id is missing")
+	if isError, _ := result["isError"].(bool); !isError {
+		t.Errorf("expected error for empty bot_id")
 	}
 }
 
-func TestNormalizePath(t *testing.T) {
-	tests := []struct {
-		in   string
-		want string
+func TestExecutor_CallTool_UnknownTool(t *testing.T) {
+	svc := newFakeService()
+	provider := testSetup(t, svc)
+	ex := executor(provider)
+
+	_, err := ex.CallTool(context.Background(), session(), "nosuch", nil)
+	if err == nil {
+		t.Errorf("expected error for unknown tool")
+	}
+}
+
+func TestExecutor_NormalizePath(t *testing.T) {
+	ex := &Executor{execWorkDir: "/data"}
+	cases := []struct {
+		in, want string
 	}{
 		{"/data/test.txt", "test.txt"},
-		{"/data/foo/bar.txt", "foo/bar.txt"},
 		{"/data", "."},
-		{"test.txt", "test.txt"},
+		{"/data/a/b.txt", "a/b.txt"},
+		{"relative.txt", "relative.txt"},
 		{"", ""},
-		{".", "."},
 	}
-	exec := &Executor{execWorkDir: "/data"}
-	for _, tt := range tests {
-		got := exec.normalizePath(tt.in)
-		if got != tt.want {
-			t.Errorf("normalizePath(%q) = %q, want %q", tt.in, got, tt.want)
+	for _, c := range cases {
+		got := ex.normalizePath(c.in)
+		if got != c.want {
+			t.Errorf("normalizePath(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

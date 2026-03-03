@@ -3,10 +3,12 @@ package container
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/mcp/mcpclient"
 )
 
 const (
@@ -17,28 +19,19 @@ const (
 	toolExec  = "exec"
 
 	defaultExecWorkDir = "/data"
-	shellCommandName   = "/bin/sh"
-	shellCommandFlag   = "-c"
 )
 
-// ExecRunner runs a command in the bot container and returns stdout, stderr and exit code.
-type ExecRunner interface {
-	ExecWithCapture(ctx context.Context, req mcpgw.ExecRequest) (*mcpgw.ExecWithCaptureResult, error)
-}
-
 // Executor provides filesystem and exec tools (read, write, list, edit, exec) that
-// operate inside the bot container via ExecRunner. All I/O goes through the container
+// operate inside the bot container via gRPC. All I/O goes through the container
 // sandbox — no direct host filesystem access.
 type Executor struct {
-	execRunner  ExecRunner
+	clients     mcpclient.Provider
 	execWorkDir string
 	logger      *slog.Logger
 }
 
-// NewExecutor returns a tool executor. execRunner is required — all tools delegate
-// to it for container-side I/O. execWorkDir is the default working directory inside
-// the container (e.g. /data).
-func NewExecutor(log *slog.Logger, execRunner ExecRunner, execWorkDir string) *Executor {
+// NewExecutor returns a tool executor backed by gRPC container clients.
+func NewExecutor(log *slog.Logger, clients mcpclient.Provider, execWorkDir string) *Executor {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -47,7 +40,7 @@ func NewExecutor(log *slog.Logger, execRunner ExecRunner, execWorkDir string) *E
 		wd = defaultExecWorkDir
 	}
 	return &Executor{
-		execRunner:  execRunner,
+		clients:     clients,
 		execWorkDir: wd,
 		logger:      log.With(slog.String("provider", "container_tool")),
 	}
@@ -165,150 +158,163 @@ func (p *Executor) normalizePath(path string) string {
 	return path
 }
 
-// CallTool dispatches to the appropriate container-exec backed implementation.
+// CallTool dispatches to the appropriate gRPC-backed implementation.
 func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
 		return mcpgw.BuildToolErrorResult("bot_id is required"), nil
 	}
 
+	client, err := p.clients.MCPClient(ctx, botID)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(fmt.Sprintf("container not reachable: %v", err)), nil
+	}
+
 	switch toolName {
 	case toolRead:
-		filePath := p.normalizePath(mcpgw.StringArg(arguments, "path"))
-		if filePath == "" {
-			return mcpgw.BuildToolErrorResult("path is required"), nil
-		}
-
-		// Parse optional pagination params.
-		lineOffset := 1
-		offset, ok, err := mcpgw.IntArg(arguments, "line_offset")
-		if err != nil {
-			return mcpgw.BuildToolErrorResult(fmt.Sprintf("invalid line_offset: %v", err)), nil
-		}
-		if ok {
-			if offset < 1 {
-				return mcpgw.BuildToolErrorResult("line_offset must be >= 1"), nil
-			}
-			lineOffset = offset
-		}
-
-		nLines := readMaxLines
-		n, ok, err := mcpgw.IntArg(arguments, "n_lines")
-		if err != nil {
-			return mcpgw.BuildToolErrorResult(fmt.Sprintf("invalid n_lines: %v", err)), nil
-		}
-		if ok {
-			if n < 1 {
-				return mcpgw.BuildToolErrorResult("n_lines must be >= 1"), nil
-			}
-			if n > readMaxLines {
-				n = readMaxLines
-			}
-			nLines = n
-		}
-
-		result, err := ReadFile(ctx, p.execRunner, botID, p.execWorkDir, filePath, lineOffset, nLines)
-		if err != nil {
-			return mcpgw.BuildToolErrorResult(err.Error()), nil
-		}
-
-		output := FormatReadResult(result)
-
-		return mcpgw.BuildToolSuccessResult(map[string]any{
-			"content": output,
-		}), nil
-
+		return p.callRead(ctx, client, arguments)
 	case toolWrite:
-		filePath := p.normalizePath(mcpgw.StringArg(arguments, "path"))
-		content := mcpgw.StringArg(arguments, "content")
-		if filePath == "" {
-			return mcpgw.BuildToolErrorResult("path is required"), nil
-		}
-		if err := ExecWrite(ctx, p.execRunner, botID, p.execWorkDir, filePath, content); err != nil {
-			return mcpgw.BuildToolErrorResult(err.Error()), nil
-		}
-		return mcpgw.BuildToolSuccessResult(map[string]any{"ok": true}), nil
-
+		return p.callWrite(ctx, client, arguments)
 	case toolList:
-		dirPath := p.normalizePath(mcpgw.StringArg(arguments, "path"))
-		if dirPath == "" {
-			dirPath = "."
-		}
-		recursive, _, _ := mcpgw.BoolArg(arguments, "recursive")
-		entries, err := ExecList(ctx, p.execRunner, botID, p.execWorkDir, dirPath, recursive)
-		if err != nil {
-			return mcpgw.BuildToolErrorResult(err.Error()), nil
-		}
-		entriesMaps := make([]map[string]any, len(entries))
-		for i, e := range entries {
-			entriesMaps[i] = map[string]any{
-				"path":     e.Path,
-				"is_dir":   e.IsDir,
-				"size":     e.Size,
-				"mode":     e.Mode,
-				"mod_time": e.ModTime,
-			}
-		}
-		return mcpgw.BuildToolSuccessResult(map[string]any{"path": dirPath, "entries": entriesMaps}), nil
-
+		return p.callList(ctx, client, arguments)
 	case toolEdit:
-		filePath := p.normalizePath(mcpgw.StringArg(arguments, "path"))
-		oldText := mcpgw.StringArg(arguments, "old_text")
-		newText := mcpgw.StringArg(arguments, "new_text")
-		if filePath == "" || oldText == "" {
-			return mcpgw.BuildToolErrorResult("path, old_text and new_text are required"), nil
-		}
-		// Step 1: read via exec
-		raw, err := ExecRead(ctx, p.execRunner, botID, p.execWorkDir, filePath)
-		if err != nil {
-			return mcpgw.BuildToolErrorResult(err.Error()), nil
-		}
-		// Step 2: fuzzy match in Go
-		updated, err := applyEdit(raw, filePath, oldText, newText)
-		if err != nil {
-			return mcpgw.BuildToolErrorResult(err.Error()), nil
-		}
-		// Step 3: write back via exec
-		if err := ExecWrite(ctx, p.execRunner, botID, p.execWorkDir, filePath, updated); err != nil {
-			return mcpgw.BuildToolErrorResult(err.Error()), nil
-		}
-		return mcpgw.BuildToolSuccessResult(map[string]any{"ok": true}), nil
-
+		return p.callEdit(ctx, client, arguments)
 	case toolExec:
-		command := strings.TrimSpace(mcpgw.StringArg(arguments, "command"))
-		if command == "" {
-			return mcpgw.BuildToolErrorResult("command is required"), nil
-		}
-		workDir := strings.TrimSpace(mcpgw.StringArg(arguments, "work_dir"))
-		if workDir == "" {
-			workDir = p.execWorkDir
-		}
-		wrappedCmd := command
-		if workDir != "" {
-			wrappedCmd = "cd " + ShellQuote(workDir) + " && " + command
-		}
-		result, err := p.execRunner.ExecWithCapture(ctx, mcpgw.ExecRequest{
-			BotID:   botID,
-			Command: []string{shellCommandName, shellCommandFlag, wrappedCmd},
-			WorkDir: workDir,
-		})
-		if err != nil {
-			p.logger.Warn("exec failed", slog.String("bot_id", botID), slog.String("command", command), slog.Any("error", err))
-			return mcpgw.BuildToolErrorResult(err.Error()), nil
-		}
-		stderr := result.Stderr
-		if result.ExitCode != 0 && strings.Contains(stderr, "no running task") {
-			stderr = strings.TrimSpace(stderr) + "\n\nHint: Container exists but has no running task (main process exited). Start it first: POST /bots/" + botID + "/container/start or use the container start action in the UI."
-		}
-		stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
-		stderr = pruneToolOutputText(stderr, "tool result (exec stderr)")
-		return mcpgw.BuildToolSuccessResult(map[string]any{
-			"stdout":    stdout,
-			"stderr":    stderr,
-			"exit_code": result.ExitCode,
-		}), nil
-
+		return p.callExec(ctx, client, botID, arguments)
 	default:
 		return nil, mcpgw.ErrToolNotFound
 	}
+}
+
+func (p *Executor) callRead(ctx context.Context, client *mcpclient.Client, args map[string]any) (map[string]any, error) {
+	filePath := p.normalizePath(mcpgw.StringArg(args, "path"))
+	if filePath == "" {
+		return mcpgw.BuildToolErrorResult("path is required"), nil
+	}
+
+	lineOffset := int32(1)
+	if offset, ok, err := mcpgw.IntArg(args, "line_offset"); err != nil {
+		return mcpgw.BuildToolErrorResult(fmt.Sprintf("invalid line_offset: %v", err)), nil
+	} else if ok {
+		if offset < 1 {
+			return mcpgw.BuildToolErrorResult("line_offset must be >= 1"), nil
+		}
+		lineOffset = int32(offset)
+	}
+
+	nLines := int32(readMaxLines)
+	if n, ok, err := mcpgw.IntArg(args, "n_lines"); err != nil {
+		return mcpgw.BuildToolErrorResult(fmt.Sprintf("invalid n_lines: %v", err)), nil
+	} else if ok {
+		if n < 1 {
+			return mcpgw.BuildToolErrorResult("n_lines must be >= 1"), nil
+		}
+		if n > readMaxLines {
+			n = readMaxLines
+		}
+		nLines = int32(n)
+	}
+
+	resp, err := client.ReadFile(ctx, filePath, lineOffset, nLines)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	if resp.GetBinary() {
+		return mcpgw.BuildToolErrorResult("file appears to be binary. Read tool only supports text files"), nil
+	}
+
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"content":     resp.GetContent(),
+		"total_lines": resp.GetTotalLines(),
+	}), nil
+}
+
+func (p *Executor) callWrite(ctx context.Context, client *mcpclient.Client, args map[string]any) (map[string]any, error) {
+	filePath := p.normalizePath(mcpgw.StringArg(args, "path"))
+	content := mcpgw.StringArg(args, "content")
+	if filePath == "" {
+		return mcpgw.BuildToolErrorResult("path is required"), nil
+	}
+	if err := client.WriteFile(ctx, filePath, []byte(content)); err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{"ok": true}), nil
+}
+
+func (p *Executor) callList(ctx context.Context, client *mcpclient.Client, args map[string]any) (map[string]any, error) {
+	dirPath := p.normalizePath(mcpgw.StringArg(args, "path"))
+	if dirPath == "" {
+		dirPath = "."
+	}
+	recursive, _, _ := mcpgw.BoolArg(args, "recursive")
+
+	entries, err := client.ListDir(ctx, dirPath, recursive)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	entriesMaps := make([]map[string]any, len(entries))
+	for i, e := range entries {
+		entriesMaps[i] = map[string]any{
+			"path":     e.GetPath(),
+			"is_dir":   e.GetIsDir(),
+			"size":     e.GetSize(),
+			"mode":     e.GetMode(),
+			"mod_time": e.GetModTime(),
+		}
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{"path": dirPath, "entries": entriesMaps}), nil
+}
+
+func (p *Executor) callEdit(ctx context.Context, client *mcpclient.Client, args map[string]any) (map[string]any, error) {
+	filePath := p.normalizePath(mcpgw.StringArg(args, "path"))
+	oldText := mcpgw.StringArg(args, "old_text")
+	newText := mcpgw.StringArg(args, "new_text")
+	if filePath == "" || oldText == "" {
+		return mcpgw.BuildToolErrorResult("path, old_text and new_text are required"), nil
+	}
+
+	reader, err := client.ReadRaw(ctx, filePath)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	defer reader.Close()
+	raw, err := io.ReadAll(reader)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+
+	updated, err := applyEdit(string(raw), filePath, oldText, newText)
+	if err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+
+	if err := client.WriteFile(ctx, filePath, []byte(updated)); err != nil {
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+	return mcpgw.BuildToolSuccessResult(map[string]any{"ok": true}), nil
+}
+
+func (p *Executor) callExec(ctx context.Context, client *mcpclient.Client, botID string, args map[string]any) (map[string]any, error) {
+	command := strings.TrimSpace(mcpgw.StringArg(args, "command"))
+	if command == "" {
+		return mcpgw.BuildToolErrorResult("command is required"), nil
+	}
+	workDir := strings.TrimSpace(mcpgw.StringArg(args, "work_dir"))
+	if workDir == "" {
+		workDir = p.execWorkDir
+	}
+
+	result, err := client.Exec(ctx, command, workDir, 30)
+	if err != nil {
+		p.logger.Warn("exec failed", slog.String("bot_id", botID), slog.String("command", command), slog.Any("error", err))
+		return mcpgw.BuildToolErrorResult(err.Error()), nil
+	}
+
+	stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
+	stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
+	return mcpgw.BuildToolSuccessResult(map[string]any{
+		"stdout":    stdout,
+		"stderr":    stderr,
+		"exit_code": result.ExitCode,
+	}), nil
 }

@@ -314,7 +314,6 @@ CREATE TABLE IF NOT EXISTS containers (
   status TEXT NOT NULL DEFAULT 'created',
   namespace TEXT NOT NULL DEFAULT 'default',
   auto_start BOOLEAN NOT NULL DEFAULT true,
-  host_path TEXT,
   container_path TEXT NOT NULL DEFAULT '/data',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

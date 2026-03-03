@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"os"
 	"runtime"
 	"strings"
 	"syscall"
@@ -54,9 +52,7 @@ type DeleteContainerOptions struct {
 }
 
 type StartTaskOptions struct {
-	UseStdio bool
 	Terminal bool
-	FIFODir  string
 }
 
 type StopTaskOptions struct {
@@ -95,10 +91,7 @@ type Service interface {
 	DeleteTask(ctx context.Context, containerID string, opts *DeleteTaskOptions) error
 	GetTaskInfo(ctx context.Context, containerID string) (TaskInfo, error)
 	ListTasks(ctx context.Context, opts *ListTasksOptions) ([]TaskInfo, error)
-	ExecTask(ctx context.Context, containerID string, req ExecTaskRequest) (ExecTaskResult, error)
-	ExecTaskStreaming(ctx context.Context, containerID string, req ExecTaskRequest) (*ExecTaskSession, error)
-
-	SetupNetwork(ctx context.Context, req NetworkSetupRequest) error
+	SetupNetwork(ctx context.Context, req NetworkSetupRequest) (NetworkResult, error)
 	RemoveNetwork(ctx context.Context, req NetworkSetupRequest) error
 
 	CommitSnapshot(ctx context.Context, snapshotter, name, key string) error
@@ -440,21 +433,7 @@ func (s *DefaultService) StartContainer(ctx context.Context, containerID string,
 		return err
 	}
 
-	var ioCreator cio.Creator
-	if opts == nil || !opts.UseStdio {
-		ioCreator = cio.NullIO
-	} else {
-		cioOpts := []cio.Opt{cio.WithStdio}
-		if opts.Terminal {
-			cioOpts = append(cioOpts, cio.WithTerminal)
-		}
-		if opts.FIFODir != "" {
-			cioOpts = append(cioOpts, cio.WithFIFODir(opts.FIFODir))
-		}
-		ioCreator = cio.NewCreator(cioOpts...)
-	}
-
-	task, err := container.NewTask(ctx, ioCreator)
+	task, err := container.NewTask(ctx, cio.NullIO)
 	if err != nil {
 		return err
 	}
@@ -581,229 +560,21 @@ func (s *DefaultService) DeleteTask(ctx context.Context, containerID string, opt
 	}
 
 	if opts != nil && opts.Force {
+		// Kill and wait for exit before deleting; containerd rejects Delete on a
+		// still-running process even when force is requested.
 		_ = task.Kill(ctx, syscall.SIGKILL)
+		if statusC, waitErr := task.Wait(ctx); waitErr == nil {
+			waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			select {
+			case <-statusC:
+			case <-waitCtx.Done():
+			}
+		}
 	}
 
 	_, err = task.Delete(ctx)
 	return err
-}
-
-func (s *DefaultService) ExecTask(ctx context.Context, containerID string, req ExecTaskRequest) (ExecTaskResult, error) {
-	if containerID == "" || len(req.Args) == 0 {
-		return ExecTaskResult{}, ErrInvalidArgument
-	}
-
-	ctx = s.withNamespace(ctx)
-	container, err := s.client.LoadContainer(ctx, containerID)
-	if err != nil {
-		return ExecTaskResult{}, err
-	}
-
-	spec, err := container.Spec(ctx)
-	if err != nil {
-		return ExecTaskResult{}, err
-	}
-	if spec.Process == nil {
-		spec.Process = &specs.Process{}
-	}
-
-	if len(req.Env) > 0 {
-		if err := oci.WithEnv(req.Env)(ctx, nil, nil, spec); err != nil {
-			return ExecTaskResult{}, err
-		}
-	}
-
-	spec.Process.Args = req.Args
-	if req.WorkDir != "" {
-		spec.Process.Cwd = req.WorkDir
-	}
-	if req.Terminal {
-		spec.Process.Terminal = true
-	}
-
-	task, err := s.getTask(ctx, containerID)
-	if err != nil {
-		return ExecTaskResult{}, err
-	}
-
-	ioOpts := []cio.Opt{}
-	if req.Stdin != nil || req.Stdout != nil || req.Stderr != nil {
-		ioOpts = append(ioOpts, cio.WithStreams(req.Stdin, req.Stdout, req.Stderr))
-	} else if req.UseStdio {
-		ioOpts = append(ioOpts, cio.WithStdio)
-	}
-	if req.Terminal {
-		ioOpts = append(ioOpts, cio.WithTerminal)
-	}
-	if strings.TrimSpace(req.FIFODir) != "" {
-		if err := os.MkdirAll(req.FIFODir, 0o755); err != nil {
-			return ExecTaskResult{}, err
-		}
-		ioOpts = append(ioOpts, cio.WithFIFODir(req.FIFODir))
-	}
-	ioCreator := cio.NewCreator(ioOpts...)
-
-	execID := fmt.Sprintf("exec-%d", time.Now().UnixNano())
-	process, err := task.Exec(ctx, execID, spec.Process, ioCreator)
-	if err != nil {
-		return ExecTaskResult{}, err
-	}
-	defer process.Delete(ctx)
-
-	statusC, err := process.Wait(ctx)
-	if err != nil {
-		return ExecTaskResult{}, err
-	}
-	if err := process.Start(ctx); err != nil {
-		return ExecTaskResult{}, err
-	}
-
-	status := <-statusC
-	code, _, err := status.Result()
-	if err != nil {
-		return ExecTaskResult{}, err
-	}
-
-	return ExecTaskResult{ExitCode: code}, nil
-}
-
-func (s *DefaultService) ExecTaskStreaming(ctx context.Context, containerID string, req ExecTaskRequest) (*ExecTaskSession, error) {
-	if containerID == "" || len(req.Args) == 0 {
-		return nil, ErrInvalidArgument
-	}
-
-	ctx = s.withNamespace(ctx)
-	container, err := s.client.LoadContainer(ctx, containerID)
-	if err != nil {
-		return nil, err
-	}
-
-	spec, err := container.Spec(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if spec.Process == nil {
-		spec.Process = &specs.Process{}
-	}
-	if len(req.Env) > 0 {
-		if err := oci.WithEnv(req.Env)(ctx, nil, nil, spec); err != nil {
-			return nil, err
-		}
-	}
-	spec.Process.Args = req.Args
-	if req.WorkDir != "" {
-		spec.Process.Cwd = req.WorkDir
-	}
-	if req.Terminal {
-		spec.Process.Terminal = true
-	}
-
-	task, err := s.getTask(ctx, containerID)
-	if err != nil {
-		return nil, err
-	}
-
-	stdinR, stdinW := io.Pipe()
-	stdoutR, stdoutW := io.Pipe()
-	stderrR, stderrW := io.Pipe()
-
-	ioOpts := []cio.Opt{
-		cio.WithStreams(stdinR, stdoutW, stderrW),
-	}
-	if req.Terminal {
-		ioOpts = append(ioOpts, cio.WithTerminal)
-	}
-	fifoDir, err := resolveExecFIFODir(req.FIFODir)
-	if err != nil {
-		_ = stdinR.Close()
-		_ = stdinW.Close()
-		_ = stdoutR.Close()
-		_ = stdoutW.Close()
-		_ = stderrR.Close()
-		_ = stderrW.Close()
-		return nil, err
-	}
-	ioOpts = append(ioOpts, cio.WithFIFODir(fifoDir))
-	ioCreator := cio.NewCreator(ioOpts...)
-
-	execID := fmt.Sprintf("exec-%d", time.Now().UnixNano())
-	process, err := task.Exec(ctx, execID, spec.Process, ioCreator)
-	if err != nil {
-		_ = stdinR.Close()
-		_ = stdinW.Close()
-		_ = stdoutR.Close()
-		_ = stdoutW.Close()
-		_ = stderrR.Close()
-		_ = stderrW.Close()
-		return nil, err
-	}
-
-	if err := process.Start(ctx); err != nil {
-		_, _ = process.Delete(ctx)
-		_ = stdinR.Close()
-		_ = stdinW.Close()
-		_ = stdoutR.Close()
-		_ = stdoutW.Close()
-		_ = stderrR.Close()
-		_ = stderrW.Close()
-		return nil, err
-	}
-
-	wait := func() (ExecTaskResult, error) {
-		statusC, err := process.Wait(ctx)
-		if err != nil {
-			return ExecTaskResult{}, err
-		}
-		status := <-statusC
-		code, _, err := status.Result()
-		if err != nil {
-			return ExecTaskResult{}, err
-		}
-		_, _ = process.Delete(ctx)
-		_ = stdoutW.Close()
-		_ = stderrW.Close()
-		return ExecTaskResult{ExitCode: code}, nil
-	}
-
-	closeFn := func() error {
-		_ = stdinW.Close()
-		_ = stdoutR.Close()
-		_ = stderrR.Close()
-		_ = stdinR.Close()
-		_ = stdoutW.Close()
-		_ = stderrW.Close()
-		_, err := process.Delete(ctx)
-		return err
-	}
-
-	return &ExecTaskSession{
-		Stdin:  stdinW,
-		Stdout: stdoutR,
-		Stderr: stderrR,
-		Wait:   wait,
-		Close:  closeFn,
-	}, nil
-}
-
-func resolveExecFIFODir(preferred string) (string, error) {
-	candidates := make([]string, 0, 3)
-	if p := strings.TrimSpace(preferred); p != "" {
-		candidates = append(candidates, p)
-	}
-	candidates = append(candidates, "/var/lib/containerd/memoh-fifo", "/tmp/memoh-containerd-fifo")
-
-	var lastErr error
-	for _, dir := range candidates {
-		if err := os.MkdirAll(dir, 0o755); err == nil {
-			return dir, nil
-		} else {
-			lastErr = err
-		}
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no fifo directory candidate available")
-	}
-	return "", lastErr
 }
 
 func (s *DefaultService) ListContainersByLabel(ctx context.Context, key, value string) ([]ContainerInfo, error) {
@@ -946,13 +717,17 @@ func (s *DefaultService) SnapshotMounts(ctx context.Context, snapshotter, key st
 	return result, nil
 }
 
-func (s *DefaultService) SetupNetwork(ctx context.Context, req NetworkSetupRequest) error {
+func (s *DefaultService) SetupNetwork(ctx context.Context, req NetworkSetupRequest) (NetworkResult, error) {
 	ctx = s.withNamespace(ctx)
 	task, err := s.getTask(ctx, req.ContainerID)
 	if err != nil {
-		return err
+		return NetworkResult{}, err
 	}
-	return setupCNINetwork(ctx, task, req.ContainerID, req.CNIBinDir, req.CNIConfDir)
+	ip, err := setupCNINetwork(ctx, task, req.ContainerID, req.CNIBinDir, req.CNIConfDir)
+	if err != nil {
+		return NetworkResult{}, err
+	}
+	return NetworkResult{IP: ip}, nil
 }
 
 func (s *DefaultService) RemoveNetwork(ctx context.Context, req NetworkSetupRequest) error {

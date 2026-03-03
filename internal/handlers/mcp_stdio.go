@@ -1,13 +1,17 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,10 +19,11 @@ import (
 	sdkjsonrpc "github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
 	mcptools "github.com/memohai/memoh/internal/mcp"
+	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
 )
 
+// MCPStdioRequest represents a request to create an MCP stdio session.
 type MCPStdioRequest struct {
 	Name    string            `json:"name"`
 	Command string            `json:"command"`
@@ -27,11 +32,526 @@ type MCPStdioRequest struct {
 	Cwd     string            `json:"cwd"`
 }
 
+// MCPStdioResponse represents the response from creating an MCP stdio session.
 type MCPStdioResponse struct {
 	ConnectionID string   `json:"connection_id"`
 	URL          string   `json:"url"`
 	Tools        []string `json:"tools,omitempty"`
 }
+
+// mcpSession represents an MCP session over stdio.
+type mcpSession struct {
+	stdin      io.WriteCloser
+	stdout     io.ReadCloser
+	stderr     io.ReadCloser
+	readCtx    context.Context
+	cancelRead context.CancelFunc
+	initMu     sync.Mutex
+	initState  mcpSessionInitState
+	initWait   chan struct{}
+	pendingMu  sync.Mutex
+	pending    map[string]chan *sdkjsonrpc.Response
+	conn       sdkmcp.Connection
+	closed     chan struct{}
+	closeOnce  sync.Once
+	closeErr   error
+	onClose    func()
+}
+
+type mcpSessionInitState uint8
+
+const (
+	mcpSessionInitStateNone mcpSessionInitState = iota
+	mcpSessionInitStateInitializing
+	mcpSessionInitStateInitialized
+	mcpSessionInitStateReady
+)
+
+func (s *mcpSession) closeWithError(err error) {
+	s.closeOnce.Do(func() {
+		s.closeErr = err
+		close(s.closed)
+		if s.cancelRead != nil {
+			s.cancelRead()
+		}
+		s.pendingMu.Lock()
+		for _, ch := range s.pending {
+			close(ch)
+		}
+		s.pending = map[string]chan *sdkjsonrpc.Response{}
+		s.pendingMu.Unlock()
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+		if s.stdin != nil {
+			_ = s.stdin.Close()
+		}
+		if s.stdout != nil {
+			_ = s.stdout.Close()
+		}
+		if s.stderr != nil {
+			_ = s.stderr.Close()
+		}
+		if s.onClose != nil {
+			s.onClose()
+		}
+	})
+}
+
+func (s *mcpSession) readLoop() {
+	if s.conn == nil {
+		s.closeWithError(io.EOF)
+		return
+	}
+	for {
+		msg, err := s.conn.Read(s.readCtx)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				s.closeWithError(io.EOF)
+				return
+			}
+			s.closeWithError(err)
+			return
+		}
+		resp, ok := msg.(*sdkjsonrpc.Response)
+		if !ok || !resp.ID.IsValid() {
+			continue
+		}
+		id := sdkIDKey(resp.ID)
+		if id == "" {
+			continue
+		}
+		s.pendingMu.Lock()
+		ch, ok := s.pending[id]
+		if ok {
+			delete(s.pending, id)
+		}
+		s.pendingMu.Unlock()
+		if ok {
+			ch <- resp
+			close(ch)
+		}
+	}
+}
+
+func (s *mcpSession) call(ctx context.Context, req mcptools.JSONRPCRequest) (map[string]any, error) {
+	method := strings.TrimSpace(req.Method)
+	if method == "initialize" {
+		payload, err := s.callRaw(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		// If the server accepted our initialize, advance state so
+		// ensureInitialized will only send notifications/initialized next time.
+		if _, hasError := payload["error"]; !hasError {
+			s.initMu.Lock()
+			if s.initState < mcpSessionInitStateInitialized {
+				s.initState = mcpSessionInitStateInitialized
+			}
+			s.initMu.Unlock()
+		}
+		return payload, nil
+	}
+	if method != "notifications/initialized" {
+		if err := s.ensureInitialized(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return s.callRaw(ctx, req)
+}
+
+func (s *mcpSession) callRaw(ctx context.Context, req mcptools.JSONRPCRequest) (map[string]any, error) {
+	targetID, err := parseRawJSONRPCID(req.ID)
+	if err != nil {
+		return nil, err
+	}
+	target := sdkIDKey(targetID)
+	if target == "" {
+		return nil, fmt.Errorf("missing request id")
+	}
+
+	respCh := make(chan *sdkjsonrpc.Response, 1)
+	s.pendingMu.Lock()
+	s.pending[target] = respCh
+	s.pendingMu.Unlock()
+
+	callReq := &sdkjsonrpc.Request{
+		ID:     targetID,
+		Method: req.Method,
+		Params: req.Params,
+	}
+	if err := s.conn.Write(ctx, callReq); err != nil {
+		s.pendingMu.Lock()
+		delete(s.pending, target)
+		s.pendingMu.Unlock()
+		return nil, err
+	}
+
+	select {
+	case resp, ok := <-respCh:
+		if !ok {
+			if s.closeErr != nil {
+				return nil, s.closeErr
+			}
+			return nil, io.EOF
+		}
+		return sdkResponsePayload(resp)
+	case <-s.closed:
+		if s.closeErr != nil {
+			return nil, s.closeErr
+		}
+		return nil, io.EOF
+	case <-ctx.Done():
+		s.pendingMu.Lock()
+		delete(s.pending, target)
+		s.pendingMu.Unlock()
+		return nil, ctx.Err()
+	}
+}
+
+// sdkResponsePayload wraps an SDK JSON-RPC response into a standard JSON-RPC
+// envelope ({"jsonrpc":"2.0","id":...,"result":...} or "error":...).
+func sdkResponsePayload(resp *sdkjsonrpc.Response) (map[string]any, error) {
+	if resp == nil {
+		return nil, io.EOF
+	}
+	if resp.Error != nil {
+		code := int64(-32603)
+		message := strings.TrimSpace(resp.Error.Error())
+		if wireErr, ok := resp.Error.(*sdkjsonrpc.Error); ok {
+			code = wireErr.Code
+			message = strings.TrimSpace(wireErr.Message)
+		}
+		if message == "" {
+			message = "internal error"
+		}
+		return map[string]any{
+			"jsonrpc": "2.0",
+			"id":      sdkIDRaw(resp.ID),
+			"error": map[string]any{
+				"code":    code,
+				"message": message,
+			},
+		}, nil
+	}
+	var result any
+	if len(resp.Result) > 0 {
+		if err := json.Unmarshal(resp.Result, &result); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{
+		"jsonrpc": "2.0",
+		"id":      sdkIDRaw(resp.ID),
+		"result":  result,
+	}, nil
+}
+
+func sdkIDRaw(id sdkjsonrpc.ID) any {
+	if !id.IsValid() {
+		return nil
+	}
+	return id.Raw()
+}
+
+func (s *mcpSession) notify(ctx context.Context, req mcptools.JSONRPCRequest) error {
+	if s.conn == nil {
+		return io.EOF
+	}
+	return s.conn.Write(ctx, &sdkjsonrpc.Request{
+		Method: req.Method,
+		Params: req.Params,
+	})
+}
+
+func (s *mcpSession) ensureInitialized(ctx context.Context) error {
+	for {
+		s.initMu.Lock()
+		state := s.initState
+
+		switch state {
+		case mcpSessionInitStateReady:
+			s.initMu.Unlock()
+			return nil
+		case mcpSessionInitStateInitializing:
+			waitCh := s.initWait
+			s.initMu.Unlock()
+			if waitCh == nil {
+				continue
+			}
+			select {
+			case <-waitCh:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-s.closed:
+				if s.closeErr != nil {
+					return s.closeErr
+				}
+				return io.EOF
+			}
+		case mcpSessionInitStateInitialized:
+			waitCh := make(chan struct{})
+			s.initState = mcpSessionInitStateInitializing
+			s.initWait = waitCh
+			s.initMu.Unlock()
+
+			err := s.sendInitializedNotification(ctx)
+
+			s.initMu.Lock()
+			if err == nil {
+				s.initState = mcpSessionInitStateReady
+			} else {
+				s.initState = mcpSessionInitStateInitialized
+			}
+			s.initWait = nil
+			close(waitCh)
+			s.initMu.Unlock()
+
+			if err != nil {
+				return err
+			}
+			return nil
+		default:
+			waitCh := make(chan struct{})
+			s.initState = mcpSessionInitStateInitializing
+			s.initWait = waitCh
+			s.initMu.Unlock()
+
+			nextState, err := s.initializeHandshake(ctx)
+
+			s.initMu.Lock()
+			s.initState = nextState
+			s.initWait = nil
+			close(waitCh)
+			s.initMu.Unlock()
+
+			if err != nil {
+				return err
+			}
+			if nextState == mcpSessionInitStateReady {
+				return nil
+			}
+		}
+	}
+}
+
+func (s *mcpSession) initializeHandshake(ctx context.Context) (mcpSessionInitState, error) {
+	initID, _ := sdkjsonrpc.MakeID("init")
+	params, _ := json.Marshal(map[string]any{
+		"protocolVersion": "2025-06-18",
+		"capabilities":    map[string]any{},
+		"clientInfo": map[string]any{
+			"name":    "memoh",
+			"version": "1.0.0",
+		},
+	})
+	initResp, err := s.invokeCall(ctx, &sdkjsonrpc.Request{
+		ID:     initID,
+		Method: "initialize",
+		Params: params,
+	})
+	if err != nil {
+		return mcpSessionInitStateNone, err
+	}
+	if initResp.Error != nil {
+		return mcpSessionInitStateNone, initResp.Error
+	}
+	if err := s.sendInitializedNotification(ctx); err != nil {
+		return mcpSessionInitStateInitialized, err
+	}
+	return mcpSessionInitStateReady, nil
+}
+
+func (s *mcpSession) sendInitializedNotification(ctx context.Context) error {
+	if s.conn == nil {
+		return io.EOF
+	}
+	return s.conn.Write(ctx, &sdkjsonrpc.Request{
+		Method: "notifications/initialized",
+	})
+}
+
+func (s *mcpSession) invokeCall(ctx context.Context, req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
+	if s.conn == nil {
+		return nil, io.EOF
+	}
+	if req == nil || !req.ID.IsValid() {
+		return nil, fmt.Errorf("missing request id")
+	}
+	key := sdkIDKey(req.ID)
+	if key == "" {
+		return nil, fmt.Errorf("invalid request id")
+	}
+
+	respCh := make(chan *sdkjsonrpc.Response, 1)
+	s.pendingMu.Lock()
+	s.pending[key] = respCh
+	s.pendingMu.Unlock()
+
+	if err := s.conn.Write(ctx, req); err != nil {
+		s.removePending(key)
+		return nil, err
+	}
+
+	select {
+	case resp, ok := <-respCh:
+		if !ok {
+			if s.closeErr != nil {
+				return nil, s.closeErr
+			}
+			return nil, io.EOF
+		}
+		return resp, nil
+	case <-s.closed:
+		if s.closeErr != nil {
+			return nil, s.closeErr
+		}
+		return nil, io.EOF
+	case <-ctx.Done():
+		s.removePending(key)
+		return nil, ctx.Err()
+	}
+}
+
+func (s *mcpSession) removePending(key string) {
+	if strings.TrimSpace(key) == "" {
+		return
+	}
+	s.pendingMu.Lock()
+	delete(s.pending, key)
+	s.pendingMu.Unlock()
+}
+
+func parseRawJSONRPCID(raw json.RawMessage) (sdkjsonrpc.ID, error) {
+	if len(raw) == 0 {
+		return sdkjsonrpc.ID{}, fmt.Errorf("missing request id")
+	}
+	var idValue any
+	if err := json.Unmarshal(raw, &idValue); err != nil {
+		return sdkjsonrpc.ID{}, err
+	}
+	id, err := sdkjsonrpc.MakeID(idValue)
+	if err != nil {
+		return sdkjsonrpc.ID{}, err
+	}
+	if !id.IsValid() {
+		return sdkjsonrpc.ID{}, fmt.Errorf("missing request id")
+	}
+	return id, nil
+}
+
+func sdkIDKey(id sdkjsonrpc.ID) string {
+	if !id.IsValid() {
+		return ""
+	}
+	raw, _ := json.Marshal(id.Raw())
+	return string(raw)
+}
+
+func startMCPStderrLogger(stderr io.ReadCloser, containerID string, logger *slog.Logger) {
+	if stderr == nil {
+		return
+	}
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			logger.Warn("mcp stderr", slog.String("container_id", containerID), slog.String("message", line))
+		}
+		if err := scanner.Err(); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || strings.Contains(err.Error(), "closed pipe") {
+				return
+			}
+			logger.Error("mcp stderr read failed", slog.Any("error", err), slog.String("container_id", containerID))
+		}
+	}()
+}
+
+func extractToolNames(payload map[string]any) []string {
+	result, ok := payload["result"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	rawTools, ok := result["tools"].([]any)
+	if !ok {
+		return nil
+	}
+	names := make([]string, 0, len(rawTools))
+	for _, raw := range rawTools {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := item["name"].(string)
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func buildShellCommand(req MCPStdioRequest) string {
+	cmd := strings.TrimSpace(req.Command)
+	if cmd == "" {
+		return ""
+	}
+	parts := make([]string, 0, len(req.Args)+1)
+	parts = append(parts, escapeShellArg(cmd))
+	for _, arg := range req.Args {
+		parts = append(parts, escapeShellArg(arg))
+	}
+	command := strings.Join(parts, " ")
+
+	assignments := []string{}
+	for _, pair := range buildEnvPairs(req.Env) {
+		assignments = append(assignments, escapeShellArg(pair))
+	}
+	if len(assignments) > 0 {
+		command = strings.Join(assignments, " ") + " " + command
+	}
+	if strings.TrimSpace(req.Cwd) != "" {
+		command = "cd " + escapeShellArg(req.Cwd) + " && " + command
+	}
+	return command
+}
+
+func escapeShellArg(value string) string {
+	if value == "" {
+		return "''"
+	}
+	if !strings.ContainsAny(value, " \t\n'\"\\$&;|<>*?()[]{}!`") {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func buildEnvPairs(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		if strings.TrimSpace(k) != "" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, fmt.Sprintf("%s=%s", k, env[k]))
+	}
+	return out
+}
+
+// ---------- MCP Stdio Handlers ----------
 
 type mcpStdioSession struct {
 	id          string
@@ -70,9 +590,6 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	containerID, err := h.botContainerID(ctx, botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
-	}
-	if err := h.validateMCPContainer(ctx, containerID, botID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := h.ensureContainerAndTask(ctx, containerID, botID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -169,25 +686,82 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 }
 
 func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context, containerID string, req MCPStdioRequest) (*mcpSession, error) {
-	args := append([]string{strings.TrimSpace(req.Command)}, req.Args...)
-	env := buildEnvPairs(req.Env)
-	execSession, err := h.service.ExecTaskStreaming(ctx, containerID, ctr.ExecTaskRequest{
-		Args:    args,
-		Env:     env,
-		WorkDir: strings.TrimSpace(req.Cwd),
-		FIFODir: h.mcpFIFODir(),
-	})
+	// Extract bot_id from container_id (remove "mcp-" prefix)
+	botID := strings.TrimPrefix(containerID, "mcp-")
+	if botID == "" || botID == containerID {
+		return nil, fmt.Errorf("invalid container_id: %s", containerID)
+	}
+
+	// Get gRPC client for the bot container via manager
+	client, err := h.manager.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, fmt.Errorf("get container client: %w", err)
+	}
+
+	command := buildShellCommand(req)
+
+	// Create bidirectional exec stream
+	execStream, err := client.ExecStream(ctx, command, strings.TrimSpace(req.Cwd), 0)
 	if err != nil {
 		return nil, err
 	}
 
+	// Create pipes for stdin/stdout/stderr
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+	stderrR, stderrW := io.Pipe()
+
+	readCtx, cancelRead := context.WithCancel(context.Background())
 	sess := &mcpSession{
-		stdin:   execSession.Stdin,
-		stdout:  execSession.Stdout,
-		stderr:  execSession.Stderr,
-		pending: make(map[string]chan *sdkjsonrpc.Response),
-		closed:  make(chan struct{}),
+		stdin:      stdinW,
+		stdout:     stdoutR,
+		stderr:     stderrR,
+		readCtx:    readCtx,
+		cancelRead: cancelRead,
+		pending:    make(map[string]chan *sdkjsonrpc.Response),
+		closed:     make(chan struct{}),
 	}
+
+	// Forward stdin to gRPC stream
+	go func() {
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := stdinR.Read(buf)
+			if n > 0 {
+				_ = execStream.SendStdin(buf[:n])
+			}
+			if err != nil {
+				break
+			}
+		}
+		_ = stdinR.Close()
+	}()
+
+	// Forward gRPC stdout/stderr to pipes
+	go func() {
+		for {
+			output, err := execStream.Recv()
+			if err != nil {
+				if err != io.EOF {
+					h.logger.Debug("exec stream recv done", slog.Any("error", err))
+				}
+				_ = stdoutW.Close()
+				_ = stderrW.Close()
+				break
+			}
+			switch output.GetStream() {
+			case pb.ExecOutput_STDOUT:
+				_, _ = stdoutW.Write(output.GetData())
+			case pb.ExecOutput_STDERR:
+				_, _ = stderrW.Write(output.GetData())
+			case pb.ExecOutput_EXIT:
+				_ = stdoutW.Close()
+				_ = stderrW.Close()
+				return
+			}
+		}
+	}()
+
 	transport := &sdkmcp.IOTransport{
 		Reader: sess.stdout,
 		Writer: sess.stdin,
@@ -198,40 +772,13 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 		return nil, err
 	}
 	sess.conn = conn
-	h.startMCPStderrLogger(execSession.Stderr, containerID)
+	startMCPStderrLogger(sess.stderr, containerID, h.logger)
 	go sess.readLoop()
 	go func() {
-		_, err := execSession.Wait()
-		if err != nil {
-			if isBenignMCPSessionExit(err) {
-				sess.closeWithError(io.EOF)
-				return
-			}
-			h.logger.Error("mcp stdio session exited", slog.Any("error", err), slog.String("container_id", containerID))
-			sess.closeWithError(err)
-			return
-		}
-		sess.closeWithError(io.EOF)
+		<-sess.closed
+		_ = execStream.Close()
 	}()
 	return sess, nil
-}
-
-func buildEnvPairs(env map[string]string) []string {
-	if len(env) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		if strings.TrimSpace(k) != "" {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, fmt.Sprintf("%s=%s", k, env[k]))
-	}
-	return out
 }
 
 func (h *ContainerdHandler) probeMCPTools(ctx context.Context, sess *mcpSession, botID, name string) []string {
@@ -267,65 +814,4 @@ func (h *ContainerdHandler) probeMCPTools(ctx context.Context, sess *mcpSession,
 		)
 	}
 	return tools
-}
-
-func extractToolNames(payload map[string]any) []string {
-	result, ok := payload["result"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	rawTools, ok := result["tools"].([]any)
-	if !ok {
-		return nil
-	}
-	names := make([]string, 0, len(rawTools))
-	for _, raw := range rawTools {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		name, _ := item["name"].(string)
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func buildShellCommand(req MCPStdioRequest) string {
-	cmd := strings.TrimSpace(req.Command)
-	if cmd == "" {
-		return ""
-	}
-	parts := make([]string, 0, len(req.Args)+1)
-	parts = append(parts, escapeShellArg(cmd))
-	for _, arg := range req.Args {
-		parts = append(parts, escapeShellArg(arg))
-	}
-	command := strings.Join(parts, " ")
-
-	assignments := []string{}
-	for _, pair := range buildEnvPairs(req.Env) {
-		assignments = append(assignments, escapeShellArg(pair))
-	}
-	if len(assignments) > 0 {
-		command = strings.Join(assignments, " ") + " " + command
-	}
-	if strings.TrimSpace(req.Cwd) != "" {
-		command = "cd " + escapeShellArg(req.Cwd) + " && " + command
-	}
-	return command
-}
-
-func escapeShellArg(value string) string {
-	if value == "" {
-		return "''"
-	}
-	if !strings.ContainsAny(value, " \t\n'\"\\$&;|<>*?()[]{}!`") {
-		return value
-	}
-	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }

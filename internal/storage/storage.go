@@ -22,7 +22,7 @@ type Provider interface {
 // ContainerFileOpener is an optional interface that providers can implement
 // to open arbitrary files from a bot's container data directory.
 type ContainerFileOpener interface {
-	OpenContainerFile(botID, containerPath string) (io.ReadCloser, error)
+	OpenContainerFile(ctx context.Context, botID, containerPath string) (io.ReadCloser, error)
 }
 
 // PrefixLister is an optional interface for providers that can list keys

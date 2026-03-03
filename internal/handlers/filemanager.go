@@ -1,21 +1,46 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 
-	fsops "github.com/memohai/memoh/internal/fs"
+	"github.com/memohai/memoh/internal/mcp/mcpclient"
 )
 
 // ---------- request / response types ----------
 
-type FSFileInfo = fsops.FileInfo
-type FSListResponse = fsops.ListResult
-type FSReadResponse = fsops.ReadResult
-type FSUploadResponse = fsops.UploadResult
+type FSFileInfo struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Size    int64  `json:"size"`
+	Mode    string `json:"mode"`
+	ModTime string `json:"modTime"`
+	IsDir   bool   `json:"isDir"`
+}
+
+type FSListResponse struct {
+	Path    string       `json:"path"`
+	Entries []FSFileInfo `json:"entries"`
+}
+
+type FSReadResponse struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Size    int64  `json:"size"`
+}
+
+type FSUploadResponse struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
 
 // FSWriteRequest is the body for creating / overwriting a file.
 type FSWriteRequest struct {
@@ -44,6 +69,53 @@ type fsOpResponse struct {
 	OK bool `json:"ok"`
 }
 
+// ---------- helpers ----------
+
+// resolveContainerPath cleans and validates a container-relative path.
+func resolveContainerPath(rawPath string) (string, error) {
+	cleaned := filepath.Clean("/" + strings.TrimSpace(rawPath))
+	if cleaned == "" {
+		cleaned = "/"
+	}
+	if strings.HasPrefix(cleaned, "..") {
+		return "", fmt.Errorf("invalid path")
+	}
+	return cleaned, nil
+}
+
+// getGRPCClient returns the gRPC client for the bot's container.
+func (h *ContainerdHandler) getGRPCClient(ctx context.Context, botID string) (*mcpclient.Client, error) {
+	return h.manager.MCPClient(ctx, botID)
+}
+
+// fsFileInfoFromEntry converts a gRPC FileEntry to FSFileInfo.
+func fsFileInfoFromEntry(containerPath, name string, isDir bool, size int64, mode, modTime string) FSFileInfo {
+	return FSFileInfo{
+		Name:    name,
+		Path:    filepath.Join(containerPath, name),
+		Size:    size,
+		Mode:    mode,
+		ModTime: modTime,
+		IsDir:   isDir,
+	}
+}
+
+// fsHTTPError maps mcpclient domain errors to HTTP status codes.
+func fsHTTPError(err error) *echo.HTTPError {
+	switch {
+	case errors.Is(err, mcpclient.ErrNotFound):
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	case errors.Is(err, mcpclient.ErrBadRequest):
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	case errors.Is(err, mcpclient.ErrForbidden):
+		return echo.NewHTTPError(http.StatusForbidden, err.Error())
+	case errors.Is(err, mcpclient.ErrUnavailable):
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	default:
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+}
+
 // ---------- handlers ----------
 
 // FSStat godoc
@@ -63,11 +135,35 @@ func (h *ContainerdHandler) FSStat(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	fi, err := h.fsService.Stat(c.Request().Context(), botID, c.QueryParam("path"))
-	if err != nil {
-		return h.toFSHTTPError(err)
+	rawPath := c.QueryParam("path")
+	if strings.TrimSpace(rawPath) == "" {
+		rawPath = "/"
 	}
-	return c.JSON(http.StatusOK, fi)
+
+	containerPath, err := resolveContainerPath(rawPath)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+	}
+
+	entry, err := client.Stat(ctx, containerPath)
+	if err != nil {
+		return fsHTTPError(err)
+	}
+
+	return c.JSON(http.StatusOK, FSFileInfo{
+		Name:    filepath.Base(containerPath),
+		Path:    containerPath,
+		Size:    entry.GetSize(),
+		Mode:    entry.GetMode(),
+		ModTime: entry.GetModTime(),
+		IsDir:   entry.GetIsDir(),
+	})
 }
 
 // FSList godoc
@@ -86,11 +182,46 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	resp, err := h.fsService.List(c.Request().Context(), botID, c.QueryParam("path"))
-	if err != nil {
-		return h.toFSHTTPError(err)
+	rawPath := c.QueryParam("path")
+	if strings.TrimSpace(rawPath) == "" {
+		rawPath = "/"
 	}
-	return c.JSON(http.StatusOK, resp)
+
+	containerPath, err := resolveContainerPath(rawPath)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+	}
+
+	entries, err := client.ListDir(ctx, containerPath, false)
+	if err != nil {
+		return fsHTTPError(err)
+	}
+
+	fileInfos := make([]FSFileInfo, 0, len(entries))
+	for _, e := range entries {
+		if e.Path == containerPath {
+			continue
+		}
+		fileInfos = append(fileInfos, fsFileInfoFromEntry(
+			containerPath,
+			filepath.Base(e.Path),
+			e.IsDir,
+			e.Size,
+			e.Mode,
+			e.ModTime,
+		))
+	}
+
+	return c.JSON(http.StatusOK, FSListResponse{
+		Path:    containerPath,
+		Entries: fileInfos,
+	})
 }
 
 // FSRead godoc
@@ -109,11 +240,32 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	resp, err := h.fsService.Read(c.Request().Context(), botID, c.QueryParam("path"))
-	if err != nil {
-		return h.toFSHTTPError(err)
+	rawPath := c.QueryParam("path")
+	if strings.TrimSpace(rawPath) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
 	}
-	return c.JSON(http.StatusOK, resp)
+
+	containerPath, err := resolveContainerPath(rawPath)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+	}
+
+	resp, err := client.ReadFile(ctx, containerPath, 0, 0)
+	if err != nil {
+		return fsHTTPError(err)
+	}
+
+	return c.JSON(http.StatusOK, FSReadResponse{
+		Path:    containerPath,
+		Content: resp.GetContent(),
+		Size:    int64(len(resp.GetContent())),
+	})
 }
 
 // FSDownload godoc
@@ -133,15 +285,41 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	resp, err := h.fsService.Download(c.Request().Context(), botID, c.QueryParam("path"))
+	rawPath := c.QueryParam("path")
+	if strings.TrimSpace(rawPath) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+	}
+
+	containerPath, err := resolveContainerPath(rawPath)
 	if err != nil {
-		return h.toFSHTTPError(err)
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	c.Response().Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, resp.FileName))
-	if resp.FromHost {
-		return c.File(resp.HostPath)
+
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
 	}
-	return c.Blob(http.StatusOK, resp.ContentType, resp.Data)
+
+	rc, err := client.ReadRaw(ctx, containerPath)
+	if err != nil {
+		return fsHTTPError(err)
+	}
+	defer rc.Close()
+
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read file")
+	}
+
+	fileName := filepath.Base(containerPath)
+	contentType := mime.TypeByExtension(filepath.Ext(fileName))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	c.Response().Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
+	return c.Blob(http.StatusOK, contentType, data)
 }
 
 // FSWrite godoc
@@ -164,9 +342,25 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if err := h.fsService.Write(botID, req.Path, req.Content); err != nil {
-		return h.toFSHTTPError(err)
+	if strings.TrimSpace(req.Path) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
 	}
+
+	containerPath, err := resolveContainerPath(req.Path)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+	}
+
+	if err := client.WriteFile(ctx, containerPath, []byte(req.Content)); err != nil {
+		return fsHTTPError(err)
+	}
+
 	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
 }
 
@@ -192,6 +386,18 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	if destPath == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
 	}
+
+	containerPath, err := resolveContainerPath(destPath)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+	}
+
 	file, err := c.FormFile("file")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "file is required")
@@ -201,11 +407,16 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	defer src.Close()
-	resp, err := h.fsService.Upload(botID, destPath, src)
+
+	written, err := client.WriteRaw(ctx, containerPath, src)
 	if err != nil {
-		return h.toFSHTTPError(err)
+		return fsHTTPError(err)
 	}
-	return c.JSON(http.StatusOK, resp)
+
+	return c.JSON(http.StatusOK, FSUploadResponse{
+		Path: containerPath,
+		Size: written,
+	})
 }
 
 // FSMkdir godoc
@@ -228,9 +439,25 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if err := h.fsService.Mkdir(botID, req.Path); err != nil {
-		return h.toFSHTTPError(err)
+	if strings.TrimSpace(req.Path) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
 	}
+
+	containerPath, err := resolveContainerPath(req.Path)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+	}
+
+	if err := client.Mkdir(ctx, containerPath); err != nil {
+		return fsHTTPError(err)
+	}
+
 	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
 }
 
@@ -255,9 +482,29 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if err := h.fsService.Delete(botID, req.Path, req.Recursive); err != nil {
-		return h.toFSHTTPError(err)
+	if strings.TrimSpace(req.Path) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
 	}
+
+	containerPath, err := resolveContainerPath(req.Path)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	if containerPath == "/" {
+		return echo.NewHTTPError(http.StatusForbidden, "cannot delete root directory")
+	}
+
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+	}
+
+	if err := client.DeleteFile(ctx, containerPath, req.Recursive); err != nil {
+		return fsHTTPError(err)
+	}
+
 	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
 }
 
@@ -282,15 +529,28 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if err := h.fsService.Rename(botID, req.OldPath, req.NewPath); err != nil {
-		return h.toFSHTTPError(err)
+	if strings.TrimSpace(req.OldPath) == "" || strings.TrimSpace(req.NewPath) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "oldPath and newPath are required")
 	}
-	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
-}
 
-func (h *ContainerdHandler) toFSHTTPError(err error) error {
-	if fsErr, ok := fsops.AsError(err); ok {
-		return echo.NewHTTPError(fsErr.Code, fsErr.Message)
+	oldPath, err := resolveContainerPath(req.OldPath)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	newPath, err := resolveContainerPath(req.NewPath)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+	}
+
+	if err := client.Rename(ctx, oldPath, newPath); err != nil {
+		return fsHTTPError(err)
+	}
+
+	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
 }

@@ -185,7 +185,6 @@ type Container struct {
 	Status        string             `json:"status"`
 	Namespace     string             `json:"namespace"`
 	AutoStart     bool               `json:"auto_start"`
-	HostPath      pgtype.Text        `json:"host_path"`
 	ContainerPath string             `json:"container_path"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`

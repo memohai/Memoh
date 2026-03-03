@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -20,10 +19,11 @@ import (
 
 // Service provides bot CRUD and membership management.
 type Service struct {
-	queries            *sqlc.Queries
-	logger             *slog.Logger
-	containerLifecycle ContainerLifecycle
-	checkers           []RuntimeChecker
+	queries               *sqlc.Queries
+	logger                *slog.Logger
+	containerLifecycle    ContainerLifecycle
+	checkers              []RuntimeChecker
+	containerReachability func(ctx context.Context, botID string) error
 }
 
 const (
@@ -56,6 +56,12 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 // SetContainerLifecycle registers a container lifecycle handler for bot operations.
 func (s *Service) SetContainerLifecycle(lc ContainerLifecycle) {
 	s.containerLifecycle = lc
+}
+
+// SetContainerReachability registers a function that checks whether a bot's
+// container is reachable via gRPC. Returns nil on success, error otherwise.
+func (s *Service) SetContainerReachability(fn func(ctx context.Context, botID string) error) {
+	s.containerReachability = fn
 }
 
 // AddRuntimeChecker registers an additional runtime checker.
@@ -750,8 +756,8 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 			Type:     BotCheckTypeContainerData,
 			TitleKey: "bots.checks.titles.containerDataPath",
 			Status:   BotCheckStatusUnknown,
-			Summary:  "Container host path check is pending.",
-			Detail:   "Data path will be checked after initialization.",
+			Summary:  "Container reachability check is pending.",
+			Detail:   "Reachability will be checked after initialization.",
 		})
 		if includeDynamic {
 			checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
@@ -788,8 +794,8 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 			Type:     BotCheckTypeContainerData,
 			TitleKey: "bots.checks.titles.containerDataPath",
 			Status:   BotCheckStatusUnknown,
-			Summary:  "Container host path check is skipped.",
-			Detail:   "Bot is deleting and data path checks are paused.",
+			Summary:  "Container reachability check is skipped.",
+			Detail:   "Bot is deleting and reachability checks are paused.",
 		})
 		if includeDynamic {
 			checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
@@ -824,14 +830,14 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 				Summary:  "Container task state is unknown.",
 				Detail:   "Task state cannot be determined without a container record.",
 			})
-			checks = append(checks, BotCheck{
-				ID:       BotCheckTypeContainerData,
-				Type:     BotCheckTypeContainerData,
-				TitleKey: "bots.checks.titles.containerDataPath",
-				Status:   BotCheckStatusUnknown,
-				Summary:  "Container data path is unknown.",
-				Detail:   "Data path cannot be determined without a container record.",
-			})
+		checks = append(checks, BotCheck{
+			ID:       BotCheckTypeContainerData,
+			Type:     BotCheckTypeContainerData,
+			TitleKey: "bots.checks.titles.containerDataPath",
+			Status:   BotCheckStatusUnknown,
+			Summary:  "Container reachability is unknown.",
+			Detail:   "Reachability cannot be determined without a container record.",
+		})
 			if includeDynamic {
 				checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
 			}
@@ -875,44 +881,23 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 	taskCheck.Metadata = map[string]any{"status": taskStatus}
 	checks = append(checks, taskCheck)
 
-	hostPath := ""
-	if containerRow.HostPath.Valid {
-		hostPath = strings.TrimSpace(containerRow.HostPath.String)
-	}
 	dataCheck := BotCheck{
 		ID:       BotCheckTypeContainerData,
 		Type:     BotCheckTypeContainerData,
 		TitleKey: "bots.checks.titles.containerDataPath",
 		Status:   BotCheckStatusWarn,
-		Summary:  "Container host path needs attention.",
-		Metadata: map[string]any{"host_path": hostPath},
+		Summary:  "Container reachability needs attention.",
 	}
-	if hostPath == "" {
-		dataCheck.Detail = "host path is empty"
-		checks = append(checks, dataCheck)
-		if includeDynamic {
-			checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
-		}
-		return checks, nil
-	}
-	info, statErr := os.Stat(hostPath)
-	switch {
-	case statErr == nil && info != nil && info.IsDir():
+	if s.containerReachability == nil {
+		dataCheck.Status = BotCheckStatusUnknown
+		dataCheck.Summary = "Container reachability check not configured."
+	} else if err := s.containerReachability(ctx, row.ID.String()); err != nil {
+		dataCheck.Status = BotCheckStatusError
+		dataCheck.Summary = "Container is not reachable via gRPC."
+		dataCheck.Detail = err.Error()
+	} else {
 		dataCheck.Status = BotCheckStatusOK
-		dataCheck.Summary = "Container host path is accessible."
-		dataCheck.Detail = hostPath
-	case statErr == nil:
-		dataCheck.Status = BotCheckStatusError
-		dataCheck.Summary = "Container host path is invalid."
-		dataCheck.Detail = "host path is not a directory"
-	case errors.Is(statErr, os.ErrNotExist):
-		dataCheck.Status = BotCheckStatusError
-		dataCheck.Summary = "Container host path does not exist."
-		dataCheck.Detail = hostPath
-	default:
-		dataCheck.Status = BotCheckStatusWarn
-		dataCheck.Summary = "Container host path cannot be checked."
-		dataCheck.Detail = statErr.Error()
+		dataCheck.Summary = "Container is reachable via gRPC."
 	}
 	checks = append(checks, dataCheck)
 	if includeDynamic {

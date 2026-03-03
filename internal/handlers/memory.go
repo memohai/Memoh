@@ -16,7 +16,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
-	fsops "github.com/memohai/memoh/internal/fs"
+	"github.com/memohai/memoh/internal/mcp/mcpclient"
 	memprovider "github.com/memohai/memoh/internal/memory/provider"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/settings"
@@ -115,13 +115,13 @@ func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) mempr
 	return p
 }
 
-// SetFSService sets the optional filesystem persistence layer.
-func (h *MemoryHandler) SetFSService(fs *fsops.Service) {
-	if fs == nil {
+// SetMCPClientProvider sets the gRPC client provider for filesystem persistence.
+func (h *MemoryHandler) SetMCPClientProvider(p mcpclient.Provider) {
+	if p == nil {
 		h.memoryStore = nil
 		return
 	}
-	h.memoryStore = storefs.New(fs)
+	h.memoryStore = storefs.New(p)
 }
 
 // Register registers chat-level memory routes.
@@ -625,11 +625,11 @@ func (h *MemoryHandler) requireBotAccess(c echo.Context) (string, error) {
 }
 
 // NewBuiltinMemoryRuntime keeps provider architecture while using file memory backend.
-func NewBuiltinMemoryRuntime(fs *fsops.Service) any {
-	if fs == nil {
+func NewBuiltinMemoryRuntime(p mcpclient.Provider) any {
+	if p == nil {
 		return nil
 	}
-	return &fileMemoryRuntime{store: storefs.New(fs)}
+	return &fileMemoryRuntime{store: storefs.New(p)}
 }
 
 type fileMemoryRuntime struct {

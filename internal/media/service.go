@@ -155,7 +155,7 @@ func (s *Service) IngestContainerFile(ctx context.Context, botID, containerPath 
 	if !ok {
 		return Asset{}, fmt.Errorf("provider does not support container file reading")
 	}
-	f, err := opener.OpenContainerFile(botID, containerPath)
+	f, err := opener.OpenContainerFile(ctx, botID, containerPath)
 	if err != nil {
 		return Asset{}, fmt.Errorf("open container file: %w", err)
 	}

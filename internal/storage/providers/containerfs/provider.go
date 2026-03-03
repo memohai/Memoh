@@ -1,115 +1,84 @@
 // Package containerfs implements storage.Provider for bot containers
-// backed by host-side bind mounts. Writing to <dataRoot>/bots/<bot_id>/media/<subpath>
-// on the host makes the file available at /data/media/<subpath> inside the container.
+// backed by gRPC calls to the in-container MCP service. Files are stored
+// inside the container's writable layer at /data/media/<subpath>.
 package containerfs
 
 import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/memohai/memoh/internal/mcp/mcpclient"
 )
 
-const containerMediaRoot = "/data/media"
+const containerMediaRoot = "media"
 
-// Provider stores media assets via the host-side bind mount path
-// that maps to /data inside bot containers.
+// Provider stores media assets inside bot containers via gRPC.
 type Provider struct {
-	dataRoot  string
+	clients mcpclient.Provider
 }
 
 // New creates a container-based storage provider.
-// dataRoot is the host directory that contains per-bot data (e.g. "data").
-func New(dataRoot string) (*Provider, error) {
-	abs, err := filepath.Abs(dataRoot)
-	if err != nil {
-		return nil, fmt.Errorf("resolve data root: %w", err)
-	}
-	return &Provider{dataRoot: abs}, nil
+func New(clients mcpclient.Provider) *Provider {
+	return &Provider{clients: clients}
 }
 
-// Put writes data to the host bind mount path for the bot container.
-func (p *Provider) Put(_ context.Context, key string, reader io.Reader) error {
-	dest, err := p.hostPath(key)
+// Put writes data to the bot container via gRPC streaming.
+func (p *Provider) Put(ctx context.Context, key string, reader io.Reader) error {
+	botID, sub, err := parseRoutingKey(key)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return fmt.Errorf("create parent dir: %w", err)
-	}
-	f, err := os.Create(dest)
+	client, err := p.clients.MCPClient(ctx, botID)
 	if err != nil {
-		return fmt.Errorf("create file: %w", err)
+		return fmt.Errorf("get client: %w", err)
 	}
-	defer f.Close()
-	if _, err := io.Copy(f, reader); err != nil {
+	containerPath := filepath.Join(containerMediaRoot, sub)
+	if _, err := client.WriteRaw(ctx, containerPath, reader); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
 	return nil
 }
 
-// Open reads a file from the host bind mount path.
-func (p *Provider) Open(_ context.Context, key string) (io.ReadCloser, error) {
-	dest, err := p.hostPath(key)
+// Open reads a file from the bot container via gRPC streaming.
+func (p *Provider) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+	botID, sub, err := parseRoutingKey(key)
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(dest)
+	client, err := p.clients.MCPClient(ctx, botID)
 	if err != nil {
-		return nil, fmt.Errorf("open file: %w", err)
+		return nil, fmt.Errorf("get client: %w", err)
 	}
-	return f, nil
+	containerPath := filepath.Join(containerMediaRoot, sub)
+	return client.ReadRaw(ctx, containerPath)
 }
 
-// Delete removes a file from the host bind mount path.
-func (p *Provider) Delete(_ context.Context, key string) error {
-	dest, err := p.hostPath(key)
+// Delete removes a file from the bot container.
+func (p *Provider) Delete(ctx context.Context, key string) error {
+	botID, sub, err := parseRoutingKey(key)
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("delete file: %w", err)
+	client, err := p.clients.MCPClient(ctx, botID)
+	if err != nil {
+		return fmt.Errorf("get client: %w", err)
 	}
-	return nil
+	containerPath := filepath.Join(containerMediaRoot, sub)
+	return client.DeleteFile(ctx, containerPath, false)
 }
 
 // AccessPath returns the container-internal path for a storage key.
-// Routing key format: "<bot_id>/<storage_key>" → "/data/media/<storage_key>".
 func (p *Provider) AccessPath(key string) string {
 	_, sub := splitRoutingKey(key)
-	return filepath.Join("/data", "media", sub)
+	return filepath.Join("/data", containerMediaRoot, sub)
 }
 
-// hostPath converts a routing key into the host-side file path.
-// Routing key format: "<bot_id>/<storage_key>" → "<dataRoot>/bots/<bot_id>/media/<storage_key>".
-func (p *Provider) hostPath(key string) (string, error) {
-	clean := filepath.Clean(key)
-	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("absolute key is forbidden: %s", key)
-	}
-	if strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
-		return "", fmt.Errorf("path traversal is forbidden: %s", key)
-	}
-	botID, subPath := splitRoutingKey(clean)
-	if strings.TrimSpace(botID) == "" || strings.TrimSpace(subPath) == "" {
-		return "", fmt.Errorf("invalid storage key: %s", key)
-	}
-	joined := filepath.Join(p.dataRoot, "bots", botID, "media", subPath)
-	if !strings.HasPrefix(joined, p.dataRoot+string(filepath.Separator)) {
-		return "", fmt.Errorf("path escapes data root: %s", key)
-	}
-	return joined, nil
-}
-
-// OpenContainerFile opens a file from a bot's /data/ directory on the host.
-// containerPath must start with the data mount path.
-func (p *Provider) OpenContainerFile(botID, containerPath string) (io.ReadCloser, error) {
-	dataPrefix := "/data"
-	if !strings.HasSuffix(dataPrefix, "/") {
-		dataPrefix += "/"
-	}
+// OpenContainerFile opens a file from a bot's /data/ directory.
+func (p *Provider) OpenContainerFile(ctx context.Context, botID, containerPath string) (io.ReadCloser, error) {
+	dataPrefix := "/data/"
 	if !strings.HasPrefix(containerPath, dataPrefix) {
 		return nil, fmt.Errorf("path must start with %s", dataPrefix)
 	}
@@ -117,32 +86,35 @@ func (p *Provider) OpenContainerFile(botID, containerPath string) (io.ReadCloser
 	if subPath == "" || strings.Contains(subPath, "..") {
 		return nil, fmt.Errorf("invalid container path")
 	}
-	hostPath := filepath.Join(p.dataRoot, "bots", botID, subPath)
-	if !strings.HasPrefix(hostPath, p.dataRoot+string(filepath.Separator)) {
-		return nil, fmt.Errorf("path escapes data root")
+	client, err := p.clients.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, fmt.Errorf("get client: %w", err)
 	}
-	return os.Open(hostPath)
+	return client.ReadRaw(ctx, subPath)
 }
 
 // ListPrefix returns all keys under the given routing prefix.
-// prefix is expected to be of the form "<bot_id>/<hash_prefix>/<hash>" (without extension).
-func (p *Provider) ListPrefix(_ context.Context, prefix string) ([]string, error) {
+func (p *Provider) ListPrefix(ctx context.Context, prefix string) ([]string, error) {
 	botID, sub := splitRoutingKey(prefix)
 	if botID == "" || sub == "" {
 		return nil, nil
 	}
-	dir := filepath.Dir(filepath.Join(p.dataRoot, "bots", botID, "media", sub))
+	client, err := p.clients.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, nil
+	}
+	dir := filepath.Dir(filepath.Join(containerMediaRoot, sub))
 	base := filepath.Base(sub)
-	entries, err := os.ReadDir(dir)
+	entries, err := client.ListDir(ctx, dir, false)
 	if err != nil {
 		return nil, nil
 	}
 	var keys []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.GetIsDir() {
 			continue
 		}
-		name := e.Name()
+		name := e.GetPath()
 		if strings.HasPrefix(name, base) {
 			storageKey := filepath.Join(filepath.Dir(sub), name)
 			keys = append(keys, filepath.Join(botID, storageKey))
@@ -151,7 +123,21 @@ func (p *Provider) ListPrefix(_ context.Context, prefix string) ([]string, error
 	return keys, nil
 }
 
-// splitRoutingKey splits a routing key "<bot_id>/<storage_key>" into its parts.
+func parseRoutingKey(key string) (botID, storageKey string, err error) {
+	clean := filepath.Clean(key)
+	if filepath.IsAbs(clean) {
+		return "", "", fmt.Errorf("absolute key is forbidden: %s", key)
+	}
+	if strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
+		return "", "", fmt.Errorf("path traversal is forbidden: %s", key)
+	}
+	botID, sub := splitRoutingKey(clean)
+	if strings.TrimSpace(botID) == "" || strings.TrimSpace(sub) == "" {
+		return "", "", fmt.Errorf("invalid storage key: %s", key)
+	}
+	return botID, sub, nil
+}
+
 func splitRoutingKey(key string) (botID, storageKey string) {
 	idx := strings.IndexByte(key, filepath.Separator)
 	if idx <= 0 {

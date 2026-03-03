@@ -2,15 +2,19 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"gopkg.in/yaml.v3"
+
+	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/mcp/mcpclient"
 )
+
+const skillsDirPath = config.DefaultDataMount + "/.skills"
 
 type SkillItem struct {
 	Name        string         `json:"name"`
@@ -50,35 +54,13 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	skillsDir, err := h.ensureSkillsDirHost(botID)
+	skills, err := h.loadSkillsFromContainer(c.Request().Context(), botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	entries, err := listSkillEntries(skillsDir)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	for i := range skills {
+		skills[i].Raw = skills[i].Content
 	}
-
-	skills := make([]SkillItem, 0, len(entries))
-	for _, entry := range entries {
-		skillPath, name := skillPathForEntry(entry)
-		if skillPath == "" {
-			continue
-		}
-		raw, err := h.readSkillFile(skillsDir, skillPath)
-		if err != nil {
-			continue
-		}
-		parsed := parseSkillFile(raw, name)
-		skills = append(skills, SkillItem{
-			Name:        parsed.Name,
-			Description: parsed.Description,
-			Content:     parsed.Content,
-			Metadata:    parsed.Metadata,
-			Raw:         raw,
-		})
-	}
-
 	return c.JSON(http.StatusOK, SkillsResponse{Skills: skills})
 }
 
@@ -105,22 +87,24 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "skills is required")
 	}
 
-	skillsDir, err := h.ensureSkillsDirHost(botID)
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("container not reachable: %v", err))
 	}
+
 	for _, raw := range req.Skills {
 		parsed := parseSkillFile(raw, "")
 		if !isValidSkillName(parsed.Name) {
 			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
 		}
-		dirPath := filepath.Join(skillsDir, parsed.Name)
-		if err := os.MkdirAll(dirPath, 0o755); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		dirPath := path.Join(skillsDirPath, parsed.Name)
+		if err := client.Mkdir(ctx, dirPath); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("mkdir failed: %v", err))
 		}
-		filePath := filepath.Join(dirPath, "SKILL.md")
-		if err := os.WriteFile(filePath, []byte(raw), 0o644); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		filePath := path.Join(dirPath, "SKILL.md")
+		if err := client.WriteFile(ctx, filePath, []byte(raw)); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("write failed: %v", err))
 		}
 	}
 
@@ -150,9 +134,10 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "names is required")
 	}
 
-	skillsDir, err := h.ensureSkillsDirHost(botID)
+	ctx := c.Request().Context()
+	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("container not reachable: %v", err))
 	}
 
 	for _, name := range req.Names {
@@ -160,154 +145,85 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		if !isValidSkillName(skillName) {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid skill name")
 		}
-		deletePath := filepath.Join(skillsDir, skillName)
-		if err := os.RemoveAll(deletePath); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-		}
+		_ = client.DeleteFile(ctx, path.Join(skillsDirPath, skillName), true)
 	}
 
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
 }
 
 // LoadSkills loads all skills from the container for the given bot.
-// This implements chat.SkillLoader.
 func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]SkillItem, error) {
-	skillsDir, err := h.ensureSkillsDirHost(botID)
+	return h.loadSkillsFromContainer(ctx, botID)
+}
+
+func (h *ContainerdHandler) loadSkillsFromContainer(ctx context.Context, botID string) ([]SkillItem, error) {
+	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
 
-	entries, err := listSkillEntries(skillsDir)
+	entries, err := client.ListDir(ctx, skillsDirPath, false)
 	if err != nil {
-		return nil, err
+		return []SkillItem{}, nil
 	}
 
-	skills := make([]SkillItem, 0, len(entries))
+	var skills []SkillItem
 	for _, entry := range entries {
-		skillPath, name := skillPathForEntry(entry)
-		if skillPath == "" {
+		if !entry.GetIsDir() {
+			if path.Base(entry.GetPath()) == "SKILL.md" {
+				filePath := path.Join(skillsDirPath, "SKILL.md")
+				raw, readErr := readContainerSkillFile(ctx, client, filePath)
+				if readErr != nil {
+					continue
+				}
+				parsed := parseSkillFile(raw, "default")
+				skills = append(skills, skillItemFromParsed(parsed, raw))
+			}
 			continue
 		}
-		raw, err := h.readSkillFile(skillsDir, skillPath)
-		if err != nil {
+		name := path.Base(entry.GetPath())
+		if name == "" || name == "." {
+			continue
+		}
+		filePath := path.Join(skillsDirPath, name, "SKILL.md")
+		raw, readErr := readContainerSkillFile(ctx, client, filePath)
+		if readErr != nil {
 			continue
 		}
 		parsed := parseSkillFile(raw, name)
-		skills = append(skills, SkillItem{
-			Name:        parsed.Name,
-			Description: parsed.Description,
-			Content:     parsed.Content,
-			Metadata:    parsed.Metadata,
-		})
+		skills = append(skills, skillItemFromParsed(parsed, raw))
 	}
 	return skills, nil
 }
 
-func (h *ContainerdHandler) ensureSkillsDirHost(botID string) (string, error) {
-	root, err := h.ensureBotDataRoot(botID)
+func readContainerSkillFile(ctx context.Context, client *mcpclient.Client, filePath string) (string, error) {
+	resp, err := client.ReadFile(ctx, filePath, 0, 0)
 	if err != nil {
 		return "", err
 	}
-	skillsDir := filepath.Join(root, ".skills")
-	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
-		return "", err
-	}
-	return skillsDir, nil
+	return resp.GetContent(), nil
 }
 
-func (h *ContainerdHandler) readSkillFile(skillsDir, filePath string) (string, error) {
-	safeRel := strings.TrimPrefix(strings.TrimPrefix(filePath, ".skills/"), "./.skills/")
-	if safeRel == "" {
-		return "", os.ErrInvalid
+func skillItemFromParsed(parsed parsedSkill, raw string) SkillItem {
+	return SkillItem{
+		Name:        parsed.Name,
+		Description: parsed.Description,
+		Content:     parsed.Content,
+		Metadata:    parsed.Metadata,
+		Raw:         raw,
 	}
-	target := filepath.Join(skillsDir, filepath.FromSlash(safeRel))
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
 }
 
-func listSkillEntries(skillsDir string) ([]skillEntry, error) {
-	dirEntries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		return nil, err
-	}
-	entries := make([]skillEntry, 0, len(dirEntries))
-	for _, entry := range dirEntries {
-		name := entry.Name()
-		if name == "" {
-			continue
-		}
-		if entry.IsDir() {
-			entries = append(entries, skillEntry{
-				Path:  path.Join(".skills", name),
-				IsDir: true,
-			})
-			continue
-		}
-		if name == "SKILL.md" {
-			entries = append(entries, skillEntry{
-				Path:  path.Join(".skills", name),
-				IsDir: false,
-			})
-		}
-	}
-	return entries, nil
-}
+// --- parsing logic (unchanged) ---
 
-type skillEntry struct {
-	Path  string
-	IsDir bool
-}
-
-func skillNameFromPath(rel string) string {
-	if rel == "" || rel == "SKILL.md" {
-		return "default"
-	}
-	parent := path.Dir(rel)
-	if parent == "." {
-		return "default"
-	}
-	return path.Base(parent)
-}
-
-func skillPathForEntry(entry skillEntry) (string, string) {
-	rel := strings.TrimPrefix(entry.Path, ".skills/")
-	if rel == entry.Path {
-		rel = strings.TrimPrefix(entry.Path, "./.skills/")
-	}
-	if entry.IsDir {
-		name := path.Base(rel)
-		if name == "." || name == "" {
-			return "", ""
-		}
-		return path.Join(".skills", name, "SKILL.md"), name
-	}
-	if path.Base(rel) == "SKILL.md" {
-		return path.Join(".skills", "SKILL.md"), skillNameFromPath(rel)
-	}
-	return "", ""
-}
-
-// parsedSkill holds the result of parsing a SKILL.md file with YAML frontmatter.
 type parsedSkill struct {
 	Name        string
 	Description string
-	Content     string         // body after frontmatter
-	Metadata    map[string]any // "metadata" key from frontmatter
+	Content     string
+	Metadata    map[string]any
 }
 
 // parseSkillFile parses a SKILL.md file with YAML frontmatter delimited by "---".
-// Format:
-//
-//	---
-//	name: your-skill-name
-//	description: Brief description
-//	metadata:
-//	  key: value
-//	---
-//	# Body content ...
 func parseSkillFile(raw string, fallbackName string) parsedSkill {
 	trimmed := strings.TrimSpace(raw)
 	result := parsedSkill{
@@ -318,7 +234,6 @@ func parseSkillFile(raw string, fallbackName string) parsedSkill {
 		return normalizeParsedSkill(result)
 	}
 
-	// Find closing "---".
 	rest := trimmed[3:]
 	rest = strings.TrimLeft(rest, " \t")
 	if len(rest) > 0 && rest[0] == '\n' {

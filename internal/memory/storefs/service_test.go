@@ -62,4 +62,3 @@ legacy content`
 		t.Fatalf("unexpected memory body: %#v", item)
 	}
 }
-

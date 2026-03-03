@@ -28,10 +28,13 @@ LAYER1_SHA=$(sha256sum "$BASE_ROOTFS" | cut -d' ' -f1)
 mkdir -p "$WORK/$LAYER1_SHA"
 ln -s "$BASE_ROOTFS" "$WORK/$LAYER1_SHA/layer.tar"
 
-# Layer 2: compiled binary overlay
+# Layer 2: compiled binary + template + entrypoint overlay
 mkdir -p "$WORK/overlay/opt"
 cp "$MCP_BINARY" "$WORK/overlay/opt/mcp"
 chmod +x "$WORK/overlay/opt/mcp"
+cp -a /workspace/cmd/mcp/template "$WORK/overlay/opt/mcp-template"
+cp /workspace/cmd/mcp/entrypoint.sh "$WORK/overlay/opt/entrypoint.sh"
+chmod +x "$WORK/overlay/opt/entrypoint.sh"
 tar -cf "$WORK/layer2.tar" -C "$WORK/overlay" opt
 LAYER2_SHA=$(sha256sum "$WORK/layer2.tar" | cut -d' ' -f1)
 mkdir -p "$WORK/$LAYER2_SHA"

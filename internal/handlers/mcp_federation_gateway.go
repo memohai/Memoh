@@ -279,9 +279,6 @@ func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if err := g.handler.validateMCPContainer(ctx, containerID, botID); err != nil {
-		return nil, err
-	}
 	if err := g.handler.ensureContainerAndTask(ctx, containerID, botID); err != nil {
 		return nil, err
 	}

@@ -24,6 +24,9 @@ const (
 	DefaultPGUser           = "postgres"
 	DefaultPGDatabase       = "memoh"
 	DefaultPGSSLMode        = "disable"
+	DefaultQdrantURL        = "http://127.0.0.1:6334"
+	DefaultQdrantCollection = "memory"
+	MCPGRPCPort             = 9090
 )
 
 type Config struct {

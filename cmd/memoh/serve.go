@@ -220,9 +220,9 @@ func provideAgentRuntimeManager(log *slog.Logger, cfg config.Config) *agentrunti
 func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, log *slog.Logger) memprovider.LLM {
 	return &lazyLLMClient{modelsService: modelsService, queries: queries, timeout: 30 * time.Second, logger: log}
 }
-func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, containerdHandler *handlers.ContainerdHandler) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, manager *mcp.Manager) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
-	builtinRuntime := handlers.NewBuiltinMemoryRuntime(containerdHandler.FSService())
+	builtinRuntime := handlers.NewBuiltinMemoryRuntime(manager)
 	registry.RegisterFactory(memprovider.BuiltinType, func(id string, config map[string]any) (memprovider.Provider, error) {
 		return memprovider.NewBuiltinProvider(log, builtinRuntime, chatService, accountService), nil
 	})
@@ -335,7 +335,7 @@ func provideMemoryHandler(log *slog.Logger, botService *bots.Service, accountSer
 	h := handlers.NewMemoryHandler(log, botService, accountService)
 	h.SetMemoryRegistry(memoryRegistry)
 	h.SetSettingsService(settingsService)
-	h.SetFSService(containerdHandler.FSService())
+	h.SetMCPClientProvider(manager)
 	return h
 }
 func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *boot.RuntimeConfig) *handlers.AuthHandler {
@@ -356,16 +356,9 @@ func (h *memohAuthHandler) Register(e *echo.Echo) {
 	e.POST("/api/auth/login", h.inner.Login)
 	e.POST("/api/auth/refresh", h.inner.Refresh)
 }
-func provideMediaService(log *slog.Logger, cfg config.Config) (*media.Service, error) {
-	dataRoot := strings.TrimSpace(cfg.MCP.DataRoot)
-	if dataRoot == "" {
-		dataRoot = config.DefaultDataRoot
-	}
-	provider, err := containerfs.New(dataRoot)
-	if err != nil {
-		return nil, fmt.Errorf("init media provider: %w", err)
-	}
-	return media.NewService(log, provider), nil
+func provideMediaService(log *slog.Logger, manager *mcp.Manager) *media.Service {
+	provider := containerfs.New(manager)
+	return media.NewService(log, provider)
 }
 func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, identityService *identities.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry) *handlers.UsersHandler {
 	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelStore, channelLifecycle, channelManager, registry)
@@ -506,7 +499,7 @@ func startAgentRuntime(lc fx.Lifecycle, manager *agentruntime.Manager) {
 		OnStop:  func(ctx context.Context) error { return manager.Stop(ctx) },
 	})
 }
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *memohServer, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *memohServer, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, containerdHandler *handlers.ContainerdHandler, manager *mcp.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -514,6 +507,10 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *memohServer, shutdow
 				return err
 			}
 			botService.SetContainerLifecycle(containerdHandler)
+			botService.SetContainerReachability(func(ctx context.Context, botID string) error {
+				_, err := manager.MCPClient(ctx, botID)
+				return err
+			})
 			botService.AddRuntimeChecker(healthcheck.NewRuntimeCheckerAdapter(mcpchecker.NewChecker(logger, mcpConnService, toolGateway)))
 			botService.AddRuntimeChecker(healthcheck.NewRuntimeCheckerAdapter(channelchecker.NewChecker(logger, channelManager)))
 			go func() {
