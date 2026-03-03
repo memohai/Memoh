@@ -1,5 +1,5 @@
 import { ModelMessage } from 'ai'
-import { ModelConfig } from './model'
+import { ModelConfig, HeliconeConfig } from './model'
 import { GatewayInputAttachment } from './attachment'
 import { MCPConnection } from './mcp'
 
@@ -55,6 +55,7 @@ export interface AgentParams {
   skills?: AgentSkill[]
   inbox?: InboxItem[]
   loopDetection?: LoopDetectionConfig
+  helicone?: HeliconeConfig
 }
 
 export interface AgentInput {

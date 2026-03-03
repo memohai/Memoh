@@ -9,6 +9,7 @@ export interface Config {
   qdrant: QdrantConfig;
   agent_gateway: AgentGatewayConfig;
   web: WebConfig;
+  helicone?: HeliconeConfig;
 }
 
 export interface LogConfig {
@@ -67,5 +68,11 @@ export interface AgentGatewayConfig {
 export interface WebConfig {
   host: string;
   port: number;
+}
+
+export interface HeliconeConfig {
+  enabled: boolean;
+  api_key: string;
+  base_url: string;
 }
 

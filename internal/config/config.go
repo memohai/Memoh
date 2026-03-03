@@ -38,6 +38,7 @@ type Config struct {
 	Postgres     PostgresConfig     `toml:"postgres"`
 	Qdrant       QdrantConfig       `toml:"qdrant"`
 	AgentGateway AgentGatewayConfig `toml:"agent_gateway"`
+	Helicone     HeliconeConfig     `toml:"helicone"`
 }
 
 type LogConfig struct {
@@ -122,6 +123,12 @@ type QdrantConfig struct {
 	APIKey         string `toml:"api_key"`
 	Collection     string `toml:"collection"`
 	TimeoutSeconds int    `toml:"timeout_seconds"`
+}
+
+type HeliconeConfig struct {
+	Enabled bool   `toml:"enabled"`
+	APIKey  string `toml:"api_key"`
+	BaseURL string `toml:"base_url"`
 }
 
 type AgentGatewayConfig struct {

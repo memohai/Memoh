@@ -3,7 +3,7 @@ import { chatModule } from './modules/chat'
 import { corsMiddleware } from './middlewares/cors'
 import { errorMiddleware } from './middlewares/error'
 import { loadConfig, getBaseUrl as getBaseUrlByConfig } from '@memoh/config'
-import { AgentAuthContext, AuthFetcher } from '@memoh/agent'
+import { AgentAuthContext, AuthFetcher, HeliconeConfig } from '@memoh/agent'
 
 const configuredPath = process.env.MEMOH_CONFIG_PATH?.trim() || process.env.CONFIG_PATH?.trim()
 const configPath = configuredPath && configuredPath.length > 0 ? configuredPath : '../config.toml'
@@ -11,6 +11,16 @@ const config = loadConfig(configPath)
 
 export const getBaseUrl = () => {
   return getBaseUrlByConfig(config)
+}
+
+export const getHeliconeConfig = (): HeliconeConfig | undefined => {
+  const h = config.helicone
+  if (!h?.enabled) return undefined
+  return {
+    enabled: true,
+    apiKey: h.api_key ?? '',
+    baseUrl: h.base_url ?? '',
+  }
 }
 
 function parseJwtExp(token: string): number | null {

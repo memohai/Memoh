@@ -29,5 +29,11 @@ export interface ModelConfig {
   reasoning?: ReasoningConfig
 }
 
+export interface HeliconeConfig {
+  enabled: boolean
+  apiKey: string
+  baseUrl: string
+}
+
 export const hasInputModality = (config: ModelConfig, modality: ModelInput): boolean =>
   config.input.includes(modality)

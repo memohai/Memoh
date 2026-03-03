@@ -105,10 +105,14 @@ export const createAgent = (
     auth,
     inbox = [],
     loopDetection = { enabled: false },
+    helicone,
   }: AgentParams,
   fetch: AuthFetcher,
 ) => {
-  const model = createModel(modelConfig)
+  const model = createModel(modelConfig, helicone, {
+    botId: identity?.botId,
+    channel: currentChannel,
+  })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const providerOptions = buildProviderOptions(modelConfig) as any
   const loopDetectionEnabled = loopDetection?.enabled === true

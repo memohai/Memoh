@@ -1,7 +1,7 @@
 import { Elysia } from 'elysia'
 import z from 'zod'
 import { createAgent, ModelConfig, allActions } from '@memoh/agent'
-import { createAuthFetcher, getBaseUrl } from '../index'
+import { createAuthFetcher, getBaseUrl, getHeliconeConfig } from '../index'
 import { bearerMiddleware } from '../middlewares/bearer'
 import { AgentSkillModel, AllowedActionModel, AttachmentModel, HeartbeatModel, IdentityContextModel, InboxItemModel, LoopDetectionModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
 import { sseChunked } from '../utils/sse'
@@ -43,6 +43,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       mcpConnections: body.mcpConnections,
       inbox: body.inbox,
       loopDetection: body.loopDetection,
+      helicone: getHeliconeConfig(),
     }, authFetcher)
     return ask({
       query: body.query,
@@ -75,6 +76,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
         mcpConnections: body.mcpConnections,
         inbox: body.inbox,
         loopDetection: body.loopDetection,
+        helicone: getHeliconeConfig(),
       }, authFetcher)
       for await (const action of stream({
         query: body.query,
@@ -117,6 +119,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       mcpConnections: body.mcpConnections,
       inbox: body.inbox,
       loopDetection: body.loopDetection,
+      helicone: getHeliconeConfig(),
     }, authFetcher)
     return triggerSchedule({
       schedule: body.schedule,
@@ -146,6 +149,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       mcpConnections: body.mcpConnections,
       inbox: body.inbox,
       loopDetection: body.loopDetection,
+      helicone: getHeliconeConfig(),
     }, authFetcher)
     return triggerHeartbeat({
       heartbeat: body.heartbeat,

@@ -52,3 +52,12 @@ server_addr = ":8080"
 [web]
 host = "127.0.0.1"
 port = 8082
+
+# Helicone LLM observability (optional)
+# Proxies all LLM API calls through a Helicone gateway for usage analytics.
+# Cloud: leave base_url empty to use https://gateway.helicone.ai
+# Self-hosted: set base_url to your own Helicone instance.
+# [helicone]
+# enabled = false
+# api_key = ""
+# base_url = ""
