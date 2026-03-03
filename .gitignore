@@ -104,3 +104,5 @@ config.toml
 .workdocs/
 data
 _main-ref/
+
+.cursor/

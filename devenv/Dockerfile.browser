@@ -1,0 +1,13 @@
+FROM mcr.microsoft.com/playwright:v1.58.2-jammy
+
+WORKDIR /app
+
+COPY devenv/browser-server/package.json /app/package.json
+RUN npm install
+
+COPY devenv/browser-server/server.mjs /app/server.mjs
+
+ENV PORT=8090
+EXPOSE 8090
+
+CMD ["node", "server.mjs"]

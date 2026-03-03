@@ -429,6 +429,7 @@
       "memory": "记忆",
       "channels": "平台",
       "container": "容器",
+      "browser": "浏览器",
       "mcp": "MCP",
       "subagents": "子智能体",
       "heartbeat": "心跳",
@@ -542,6 +543,27 @@
         "delete": "删除",
         "snapshot": "创建快照"
       }
+    },
+    "browser": {
+      "title": "浏览器会话",
+      "subtitle": "管理浏览器会话并通过后端执行动作。",
+      "sessions": "会话列表",
+      "actions": "动作执行",
+      "empty": "暂无浏览器会话",
+      "createSession": "创建会话",
+      "closeSession": "关闭",
+      "selectedSession": "当前会话",
+      "selectSessionPlaceholder": "粘贴或选择会话 ID",
+      "actionName": "动作",
+      "execute": "执行动作",
+      "result": "执行结果",
+      "selectSession": "请先选择会话",
+      "loadFailed": "加载浏览器会话失败",
+      "createSuccess": "浏览器会话创建成功",
+      "createFailed": "创建浏览器会话失败",
+      "closeSuccess": "浏览器会话已关闭",
+      "closeFailed": "关闭浏览器会话失败",
+      "actionFailed": "浏览器动作执行失败"
     },
     "settings": {
       "chatModel": "对话模型",

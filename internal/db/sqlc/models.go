@@ -153,6 +153,25 @@ type BotStorageBinding struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
+type BrowserSession struct {
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	SessionID       string             `json:"session_id"`
+	Provider        string             `json:"provider"`
+	RemoteSessionID string             `json:"remote_session_id"`
+	WorkerID        string             `json:"worker_id"`
+	Status          string             `json:"status"`
+	CurrentUrl      string             `json:"current_url"`
+	ContextDir      string             `json:"context_dir"`
+	IdleTtlSeconds  int32              `json:"idle_ttl_seconds"`
+	ActionCount     int32              `json:"action_count"`
+	Metadata        []byte             `json:"metadata"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+}
+
 type ChannelIdentity struct {
 	ID               pgtype.UUID        `json:"id"`
 	UserID           pgtype.UUID        `json:"user_id"`

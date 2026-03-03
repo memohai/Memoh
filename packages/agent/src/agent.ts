@@ -112,6 +112,7 @@ export const createAgent = (
   }: AgentParams,
   fetch: AuthFetcher,
 ) => {
+  const normalizedAllowedActions = allowedActions.length > 0 ? allowedActions : allActions
   const model = createModel(modelConfig)
   const supportsImageInput = hasInputModality(modelConfig, ModelInput.Image)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -196,7 +197,7 @@ export const createAgent = (
         botId,
       },
     )
-    const tools = getTools(allowedActions, {
+    const tools = getTools(normalizedAllowedActions, {
       fetch,
       model: modelConfig,
       identity,

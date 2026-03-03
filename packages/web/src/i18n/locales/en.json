@@ -433,6 +433,7 @@
       "memory": "Memory",
       "channels": "Platforms",
       "container": "Container",
+      "browser": "Browser",
       "mcp": "MCP",
       "subagents": "Subagents",
       "heartbeat": "Heartbeat",
@@ -546,6 +547,27 @@
         "delete": "Delete",
         "snapshot": "Create Snapshot"
       }
+    },
+    "browser": {
+      "title": "Browser Sessions",
+      "subtitle": "Manage browser sessions and run actions via backend.",
+      "sessions": "Sessions",
+      "actions": "Actions",
+      "empty": "No browser sessions yet",
+      "createSession": "Create Session",
+      "closeSession": "Close",
+      "selectedSession": "Selected Session",
+      "selectSessionPlaceholder": "Paste or select a session id",
+      "actionName": "Action",
+      "execute": "Execute Action",
+      "result": "Action Result",
+      "selectSession": "Please select a session",
+      "loadFailed": "Failed to load browser sessions",
+      "createSuccess": "Browser session created",
+      "createFailed": "Failed to create browser session",
+      "closeSuccess": "Browser session closed",
+      "closeFailed": "Failed to close browser session",
+      "actionFailed": "Browser action failed"
     },
     "settings": {
       "chatModel": "Chat Model",

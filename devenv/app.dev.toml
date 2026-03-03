@@ -50,3 +50,12 @@ server_addr = "server:8080"
 [web]
 host = "0.0.0.0"
 port = 8082
+
+[browser]
+server_base_url = "http://browser-server:8090"
+server_api_key = "dev-browser-key"
+max_sessions_per_bot = 1
+idle_ttl_seconds = 600
+max_idle_ttl_seconds = 3600
+action_timeout_seconds = 20
+max_actions_per_session = 50

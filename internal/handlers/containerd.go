@@ -17,6 +17,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/browser"
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
@@ -40,6 +41,7 @@ type ContainerdHandler struct {
 	accountService   *accounts.Service
 	policyService    *policy.Service
 	queries          *dbsqlc.Queries
+	browserService   *browser.Service
 }
 
 type CreateContainerRequest struct {
@@ -94,7 +96,7 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.MCPConfig, namespace string, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.MCPConfig, namespace string, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries, browserService *browser.Service) *ContainerdHandler {
 	h := &ContainerdHandler{
 		service:          service,
 		manager:          manager,
@@ -108,6 +110,7 @@ func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Ma
 		accountService:   accountService,
 		policyService:    policyService,
 		queries:          queries,
+		browserService:   browserService,
 	}
 	return h
 }

@@ -4,6 +4,7 @@ import { ToolSet } from 'ai'
 import { getWebTools } from './web'
 import { getSubagentTools } from './subagent'
 import { getSkillTools } from './skill'
+import { getBrowserTools } from './browser'
 
 export interface ToolsParams {
   fetch: AuthFetcher
@@ -21,6 +22,8 @@ export const getTools = (
   if (actions.includes(AgentAction.Web)) {
     const webTools = getWebTools()
     Object.assign(tools, webTools)
+    const browserTools = getBrowserTools({ fetch, identity })
+    Object.assign(tools, browserTools)
   }
   if (actions.includes(AgentAction.Subagent)) {
     const subagentTools = getSubagentTools({ fetch, model, identity, auth })
@@ -37,3 +40,4 @@ export * from './web'
 export * from './subagent'
 export * from './skill'
 export * from './mcp'
+export * from './browser'

@@ -36,6 +36,7 @@ type Config struct {
 	Auth         AuthConfig         `toml:"auth"`
 	Containerd   ContainerdConfig   `toml:"containerd"`
 	MCP          MCPConfig          `toml:"mcp"`
+	Browser      BrowserConfig      `toml:"browser"`
 	Postgres     PostgresConfig     `toml:"postgres"`
 	Qdrant       QdrantConfig       `toml:"qdrant"`
 	AgentGateway AgentGatewayConfig `toml:"agent_gateway"`
@@ -79,6 +80,37 @@ type MCPConfig struct {
 	DataRoot     string `toml:"data_root"`
 	CNIBinaryDir string `toml:"cni_bin_dir"`
 	CNIConfigDir string `toml:"cni_conf_dir"`
+}
+
+type BrowserConfig struct {
+	ServerBaseURL        string `toml:"server_base_url"`
+	ServerAPIKey         string `toml:"server_api_key"`
+	MaxSessionsPerBot    int32  `toml:"max_sessions_per_bot"`
+	IdleTTLSeconds       int32  `toml:"idle_ttl_seconds"`
+	MaxIdleTTLSeconds    int32  `toml:"max_idle_ttl_seconds"`
+	ActionTimeoutSeconds int32  `toml:"action_timeout_seconds"`
+	MaxActionsPerSession int32  `toml:"max_actions_per_session"`
+}
+
+func (c *BrowserConfig) ApplyDefaults() {
+	if strings.TrimSpace(c.ServerBaseURL) == "" {
+		c.ServerBaseURL = "http://127.0.0.1:8090"
+	}
+	if c.MaxSessionsPerBot <= 0 {
+		c.MaxSessionsPerBot = 1
+	}
+	if c.IdleTTLSeconds <= 0 {
+		c.IdleTTLSeconds = 600
+	}
+	if c.MaxIdleTTLSeconds <= 0 {
+		c.MaxIdleTTLSeconds = 3600
+	}
+	if c.ActionTimeoutSeconds <= 0 {
+		c.ActionTimeoutSeconds = 20
+	}
+	if c.MaxActionsPerSession <= 0 {
+		c.MaxActionsPerSession = 50
+	}
 }
 
 // ImageRef returns the fully qualified image reference, prepending the
@@ -168,6 +200,14 @@ func Load(path string) (Config, error) {
 			CNIBinaryDir: DefaultCNIBinaryDir,
 			CNIConfigDir: DefaultCNIConfigDir,
 		},
+		Browser: BrowserConfig{
+			ServerBaseURL:        "http://127.0.0.1:8090",
+			MaxSessionsPerBot:    1,
+			IdleTTLSeconds:       600,
+			MaxIdleTTLSeconds:    3600,
+			ActionTimeoutSeconds: 20,
+			MaxActionsPerSession: 50,
+		},
 		Postgres: PostgresConfig{
 			Host:     DefaultPGHost,
 			Port:     DefaultPGPort,
@@ -195,6 +235,7 @@ func Load(path string) (Config, error) {
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return cfg, err
 	}
+	cfg.Browser.ApplyDefaults()
 
 	return cfg, nil
 }

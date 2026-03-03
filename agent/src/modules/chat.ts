@@ -1,6 +1,6 @@
 import { Elysia } from 'elysia'
 import z from 'zod'
-import { createAgent, ModelConfig, allActions } from '@memoh/agent'
+import { AgentAction, createAgent, ModelConfig, allActions } from '@memoh/agent'
 import { createAuthFetcher, getBaseUrl } from '../index'
 import { bearerMiddleware } from '../middlewares/bearer'
 import { AgentSkillModel, AllowedActionModel, AttachmentModel, HeartbeatModel, IdentityContextModel, InboxItemModel, LoopDetectionModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
@@ -22,6 +22,8 @@ const AgentModel = z.object({
   loopDetection: LoopDetectionModel,
 })
 
+const resolveAllowedActions = (actions: AgentAction[]): AgentAction[] => actions.length > 0 ? actions : allActions
+
 export const chatModule = new Elysia({ prefix: '/chat' })
   .use(bearerMiddleware)
   .post('/', async ({ body, bearer }) => {
@@ -36,7 +38,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       activeContextTime: body.activeContextTime,
       channels: body.channels,
       currentChannel: body.currentChannel,
-      allowedActions: body.allowedActions,
+      allowedActions: resolveAllowedActions(body.allowedActions),
       identity: body.identity,
       auth,
       skills: body.usableSkills,
@@ -68,7 +70,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
         activeContextTime: body.activeContextTime,
         channels: body.channels,
         currentChannel: body.currentChannel,
-        allowedActions: body.allowedActions,
+        allowedActions: resolveAllowedActions(body.allowedActions),
         identity: body.identity,
         auth,
         skills: body.usableSkills,
@@ -111,6 +113,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       activeContextTime: body.activeContextTime,
       channels: body.channels,
       currentChannel: body.currentChannel,
+      allowedActions: resolveAllowedActions(body.allowedActions),
       identity: body.identity,
       auth,
       skills: body.usableSkills,
@@ -140,6 +143,7 @@ export const chatModule = new Elysia({ prefix: '/chat' })
       activeContextTime: body.activeContextTime,
       channels: body.channels,
       currentChannel: body.currentChannel,
+      allowedActions: resolveAllowedActions(body.allowedActions),
       identity: body.identity,
       auth,
       skills: body.usableSkills,

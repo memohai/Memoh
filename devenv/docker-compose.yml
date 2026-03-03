@@ -118,6 +118,26 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  browser-server:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.browser
+    container_name: memoh-dev-browser-server
+    environment:
+      PORT: 8090
+      BROWSER_SERVER_API_KEY: ${BROWSER_SERVER_API_KEY:-dev-browser-key}
+      BROWSER_MAX_TEXT_LEN: 10000
+    expose:
+      - "8090"
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8090/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   web:
     build:
       context: ..
@@ -134,6 +154,8 @@ services:
       deps:
         condition: service_completed_successfully
       server:
+        condition: service_healthy
+      browser-server:
         condition: service_healthy
     restart: unless-stopped
 

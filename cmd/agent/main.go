@@ -23,6 +23,7 @@ import (
 	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/browser"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/discord"
 	"github.com/memohai/memoh/internal/channel/adapters/feishu"
@@ -133,6 +134,7 @@ func runServe() {
 	fx.New(
 		fx.Provide(
 			provideConfig,
+			provideBrowserConfig,
 			boot.ProvideRuntimeConfig,
 			provideLogger,
 			provideContainerService,
@@ -150,6 +152,7 @@ func runServe() {
 			// domain services (auto-wired)
 			models.NewService,
 			bots.NewService,
+			browser.NewService,
 			accounts.NewService,
 			settings.NewService,
 			providers.NewService,
@@ -222,6 +225,7 @@ func runServe() {
 			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
+			provideServerHandler(handlers.NewBrowserHandler),
 			provideOAuthService,
 			provideServerHandler(handlers.NewInboxHandler),
 			provideServerHandler(handlers.NewTokenUsageHandler),
@@ -268,6 +272,10 @@ func provideConfig() (config.Config, error) {
 		return config.Config{}, fmt.Errorf("load config: %w", err)
 	}
 	return cfg, nil
+}
+
+func provideBrowserConfig(cfg config.Config) config.BrowserConfig {
+	return cfg.Browser
 }
 
 func provideLogger(cfg config.Config) *slog.Logger {
@@ -429,8 +437,8 @@ func provideChannelLifecycleService(channelStore *channel.Store, channelManager 
 // containerd handler & tool gateway
 // ---------------------------------------------------------------------------
 
-func provideContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *handlers.ContainerdHandler {
-	return handlers.NewContainerdHandler(log, service, manager, cfg.MCP, cfg.Containerd.Namespace, rc.ContainerBackend, botService, accountService, policyService, queries)
+func provideContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries, browserService *browser.Service) *handlers.ContainerdHandler {
+	return handlers.NewContainerdHandler(log, service, manager, cfg.MCP, cfg.Containerd.Namespace, rc.ContainerBackend, botService, accountService, policyService, queries, browserService)
 }
 
 func provideFederationGateway(log *slog.Logger, containerdHandler *handlers.ContainerdHandler) *handlers.MCPFederationGateway {
