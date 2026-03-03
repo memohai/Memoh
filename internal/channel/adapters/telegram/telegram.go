@@ -695,9 +695,14 @@ func sendTelegramText(bot *tgbotapi.BotAPI, target string, text string, replyTo 
 	return err
 }
 
+var sendTextForTest func(bot *tgbotapi.BotAPI, target string, text string, replyTo int, parseMode string) (int64, int, error)
+
 // sendTelegramTextReturnMessage sends a text message and returns the chat ID and message ID for later editing.
 func sendTelegramTextReturnMessage(bot *tgbotapi.BotAPI, target string, text string, replyTo int, parseMode string) (chatID int64, messageID int, err error) {
 	text = truncateTelegramText(sanitizeTelegramText(text))
+	if sendTextForTest != nil {
+		return sendTextForTest(bot, target, text, replyTo, parseMode)
+	}
 	var sent tgbotapi.Message
 	if strings.HasPrefix(target, "@") {
 		message := tgbotapi.NewMessageToChannel(target, text)

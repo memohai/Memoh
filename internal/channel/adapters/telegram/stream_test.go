@@ -516,27 +516,32 @@ func TestDraftMode_ToolCallStartSendsPermanentMessage(t *testing.T) {
 
 	origGetBot := getOrCreateBotForTest
 	origSendEdit := sendEditForTest
+	origSendText := sendTextForTest
 	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
 		return &tgbotapi.BotAPI{Token: "fake"}, nil
 	}
 	var sentText string
+	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, text string, _ int, _ string) (int64, int, error) {
+		sentText = text
+		return 123, 1, nil
+	}
 	sendEditForTest = func(_ *tgbotapi.BotAPI, edit tgbotapi.EditMessageTextConfig) error {
-		// Should not be called in draft mode
 		t.Error("editMessage should not be called in draft mode")
 		return nil
 	}
 	defer func() {
 		getOrCreateBotForTest = origGetBot
 		sendEditForTest = origSendEdit
+		sendTextForTest = origSendText
 	}()
 
-	// We can't fully test sendTelegramText without a real bot,
-	// but we can verify the buffer is reset after the call.
-	// The sendPermanentMessage will fail because there's no real bot,
-	// but the error is logged and ignored for tool call transitions.
-	_ = s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventToolCallStart})
-
-	_ = sentText // suppress unused
+	err := s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventToolCallStart})
+	if err != nil {
+		t.Fatalf("Push ToolCallStart should succeed: %v", err)
+	}
+	if sentText != "partial text" {
+		t.Fatalf("expected sendPermanentMessage with 'partial text', got %q", sentText)
+	}
 
 	s.mu.Lock()
 	bufAfter := s.buf.String()
@@ -568,11 +573,17 @@ func TestDraftMode_FinalEmptyBufferSkipsDuplicate(t *testing.T) {
 	// Simulate: buffer was already committed during ToolCallStart, so it's empty.
 	// StreamEventFinal should NOT re-send the message via PlainText() fallback.
 	origGetBot := getOrCreateBotForTest
+	origSendText := sendTextForTest
 	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
 		return &tgbotapi.BotAPI{Token: "fake"}, nil
 	}
+	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, _ string, _ int, _ string) (int64, int, error) {
+		t.Error("sendTelegramText should not be called when buffer is empty in draft mode")
+		return 0, 0, nil
+	}
 	defer func() {
 		getOrCreateBotForTest = origGetBot
+		sendTextForTest = origSendText
 	}()
 
 	err := s.Push(ctx, channel.StreamEvent{
@@ -584,9 +595,6 @@ func TestDraftMode_FinalEmptyBufferSkipsDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamEventFinal with empty buffer in draft mode should succeed: %v", err)
 	}
-	// The key assertion: no permanent message should have been sent.
-	// Since sendTelegramText would fail with a nil bot.Send, any attempt
-	// to send would produce an error. Success means no send was attempted.
 }
 
 // TestDraftMode_MultipleFinalEventsOnlyOneSend verifies that when multiple
@@ -611,59 +619,35 @@ func TestDraftMode_MultipleFinalEventsOnlyOneSend(t *testing.T) {
 	s.buf.WriteString("final summary")
 
 	origGetBot := getOrCreateBotForTest
+	origSendText := sendTextForTest
 	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
 		return &tgbotapi.BotAPI{Token: "fake"}, nil
 	}
+	sendCount := 0
+	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, _ string, _ int, _ string) (int64, int, error) {
+		sendCount++
+		return 123, 1, nil
+	}
 	defer func() {
 		getOrCreateBotForTest = origGetBot
+		sendTextForTest = origSendText
 	}()
 
-	sendCount := 0
-	// Override sendTelegramText indirectly: sendPermanentMessage calls sendTelegramText
-	// which calls bot.Send. Since bot has no client, it would panic on real call.
-	// Instead, we test via the buffer state: first Final should reset the buffer,
-	// subsequent Finals should find it empty and skip.
-
-	// First StreamEventFinal: should read buffer and reset it
-	// (sendPermanentMessage will fail because bot has no HTTP client, but that's OK
-	// for testing the buffer reset; the error is returned, not just logged)
-	_ = s.Push(ctx, channel.StreamEvent{
-		Type: channel.StreamEventFinal,
-		Final: &channel.StreamFinalizePayload{
-			Message: channel.Message{Text: "intermediate tool call text"},
-		},
-	})
-	// Ignore error from first push (bot.Send fails without real HTTP client)
-
-	// Verify buffer was reset
-	s.mu.Lock()
-	bufAfterFirst := s.buf.String()
-	s.mu.Unlock()
-	if bufAfterFirst != "" {
-		t.Fatalf("buffer should be reset after first StreamEventFinal in draft mode: got %q", bufAfterFirst)
+	// Push 3 StreamEventFinal events (simulating 3 assistant outputs).
+	// Only the first should actually send a message.
+	for i, text := range []string{"intermediate 1", "intermediate 2", "final summary"} {
+		err := s.Push(ctx, channel.StreamEvent{
+			Type: channel.StreamEventFinal,
+			Final: &channel.StreamFinalizePayload{
+				Message: channel.Message{Text: text},
+			},
+		})
+		if err != nil {
+			t.Fatalf("StreamEventFinal #%d should succeed: %v", i+1, err)
+		}
 	}
 
-	// Second StreamEventFinal: should find empty buffer and skip text sending
-	err := s.Push(ctx, channel.StreamEvent{
-		Type: channel.StreamEventFinal,
-		Final: &channel.StreamFinalizePayload{
-			Message: channel.Message{Text: "another intermediate text"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("second StreamEventFinal with empty buffer should succeed (no send): %v", err)
+	if sendCount != 1 {
+		t.Fatalf("expected exactly 1 sendTelegramText call, got %d", sendCount)
 	}
-
-	// Third StreamEventFinal: should also find empty buffer
-	err = s.Push(ctx, channel.StreamEvent{
-		Type: channel.StreamEventFinal,
-		Final: &channel.StreamFinalizePayload{
-			Message: channel.Message{Text: "final summary"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("third StreamEventFinal with empty buffer should succeed (no send): %v", err)
-	}
-
-	_ = sendCount // suppress unused
 }
