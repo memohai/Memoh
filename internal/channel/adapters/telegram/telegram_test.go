@@ -25,7 +25,7 @@ func TestResolveTelegramSender(t *testing.T) {
 		From: &tgbotapi.User{ID: 123, UserName: "alice"},
 	}
 	externalID, displayName, attrs = resolveTelegramSender(msg)
-	if externalID != "123" || displayName != "alice" {
+	if externalID != "123" || displayName != "@alice" {
 		t.Fatalf("unexpected sender: %s %s", externalID, displayName)
 	}
 	if attrs["user_id"] != "123" || attrs["username"] != "alice" {

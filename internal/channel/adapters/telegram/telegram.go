@@ -462,6 +462,20 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	if text == "" && len(attachments) == 0 {
 		return channel.InboundMessage{}, false
 	}
+	// Prepend quoted message context so the AI can see what is being replied to,
+	// and include quoted attachments so the LLM can see the actual media.
+	if raw.ReplyToMessage != nil {
+		if quotedText := a.buildTelegramQuotedText(raw.ReplyToMessage); quotedText != "" {
+			text = quotedText + "\n" + text
+		}
+		if quotedAttachments := a.collectTelegramAttachments(bot, raw.ReplyToMessage); len(quotedAttachments) > 0 {
+			attachments = append(attachments, quotedAttachments...)
+		}
+	}
+	// Prepend forward origin so the AI knows where the message was forwarded from.
+	if forwardCtx := buildTelegramForwardContext(raw); forwardCtx != "" {
+		text = forwardCtx + "\n" + text
+	}
 	subjectID, displayName, attrs := resolveTelegramSender(raw)
 	chatID := ""
 	chatType := ""
@@ -638,10 +652,7 @@ func resolveTelegramSender(msg *tgbotapi.Message) (string, string, map[string]st
 		if username != "" {
 			attrs["username"] = username
 		}
-		displayName := strings.TrimSpace(msg.From.UserName)
-		if displayName == "" {
-			displayName = strings.TrimSpace(msg.From.FirstName + " " + msg.From.LastName)
-		}
+		displayName := resolveTelegramDisplayName(msg.From)
 		externalID := userID
 		if externalID == "" {
 			externalID = username
@@ -1025,6 +1036,98 @@ func buildTelegramReplyRef(msg *tgbotapi.Message, chatID string) *channel.ReplyR
 		MessageID: strconv.Itoa(msg.ReplyToMessage.MessageID),
 		Target:    strings.TrimSpace(chatID),
 	}
+}
+
+const telegramQuotedTextMaxLength = 200
+
+// buildTelegramQuotedText extracts a textual summary of the replied-to message
+// so the AI can see what message the user is replying to.
+// Returns an empty string when no useful context can be extracted.
+func (a *TelegramAdapter) buildTelegramQuotedText(replyTo *tgbotapi.Message) string {
+	if replyTo == nil {
+		return ""
+	}
+	senderName := resolveTelegramDisplayName(replyTo.From)
+	text := strings.TrimSpace(replyTo.Text)
+	if text == "" {
+		text = strings.TrimSpace(replyTo.Caption)
+	}
+	if text == "" {
+		// Reuse collectTelegramAttachments with nil bot to detect content
+		// types without making API calls to resolve file URLs.
+		attachments := a.collectTelegramAttachments(nil, replyTo)
+		if len(attachments) > 0 {
+			types := make([]string, 0, len(attachments))
+			for _, att := range attachments {
+				types = append(types, string(att.Type))
+			}
+			text = "[" + strings.Join(types, ", ") + "]"
+		}
+	}
+	if text == "" {
+		return ""
+	}
+	if len([]rune(text)) > telegramQuotedTextMaxLength {
+		text = string([]rune(text)[:telegramQuotedTextMaxLength]) + "..."
+	}
+	if senderName != "" {
+		return fmt.Sprintf("[Reply to %s: %s]", senderName, text)
+	}
+	return fmt.Sprintf("[Reply to: %s]", text)
+}
+
+// resolveTelegramDisplayName returns a display name for a Telegram user.
+// Format: "FirstName LastName (@username)" when both are available,
+// "FirstName LastName" when only name is set, "@username" when only username is set.
+func resolveTelegramDisplayName(user *tgbotapi.User) string {
+	if user == nil {
+		return ""
+	}
+	name := strings.TrimSpace(user.FirstName + " " + user.LastName)
+	username := strings.TrimSpace(user.UserName)
+	if name != "" && username != "" {
+		return name + " (@" + username + ")"
+	}
+	if name != "" {
+		return name
+	}
+	if username != "" {
+		return "@" + username
+	}
+	return ""
+}
+
+// buildTelegramForwardContext returns a text prefix describing the forward origin.
+// Handles three cases: forwarded from a user, from a channel, or from a hidden sender.
+// Returns an empty string when the message is not forwarded.
+func buildTelegramForwardContext(msg *tgbotapi.Message) string {
+	if msg == nil {
+		return ""
+	}
+	if msg.ForwardFrom != nil {
+		name := resolveTelegramDisplayName(msg.ForwardFrom)
+		if name != "" {
+			return fmt.Sprintf("[Forwarded from %s]", name)
+		}
+	}
+	if msg.ForwardFromChat != nil {
+		title := strings.TrimSpace(msg.ForwardFromChat.Title)
+		username := strings.TrimSpace(msg.ForwardFromChat.UserName)
+		if title != "" && username != "" {
+			return fmt.Sprintf("[Forwarded from %s (@%s)]", title, username)
+		}
+		if title != "" {
+			return fmt.Sprintf("[Forwarded from %s]", title)
+		}
+		if username != "" {
+			return fmt.Sprintf("[Forwarded from @%s]", username)
+		}
+	}
+	senderName := strings.TrimSpace(msg.ForwardSenderName)
+	if senderName != "" {
+		return fmt.Sprintf("[Forwarded from %s]", senderName)
+	}
+	return ""
 }
 
 func buildTelegramAudio(target string, file tgbotapi.RequestFileData) (tgbotapi.AudioConfig, error) {
