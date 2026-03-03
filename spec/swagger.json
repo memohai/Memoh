@@ -6,6 +6,45 @@
         "version": "1.0.0"
     },
     "paths": {
+        "/api/oauth/mcp/callback": {
+            "get": {
+                "description": "Handles the OAuth authorization callback, exchanges code for tokens",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "OAuth callback handler",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Authorization code",
+                        "name": "code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "State parameter",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "HTML page that closes the popup",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
                 "description": "Validate user credentials and issue a JWT",
@@ -2287,6 +2326,215 @@
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp/{id}/oauth/authorize": {
+            "post": {
+                "description": "Generate PKCE and return authorization URL for the user to authorize",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Start OAuth authorization flow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional client_id",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.oauthAuthorizeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcp.AuthorizeResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp/{id}/oauth/discover": {
+            "post": {
+                "description": "Probe MCP server URL for OAuth requirements and discover authorization server metadata",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Discover OAuth configuration for MCP server",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional URL override",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.oauthDiscoverRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcp.DiscoveryResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp/{id}/oauth/status": {
+            "get": {
+                "description": "Returns the current OAuth status including whether tokens are available",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Get OAuth status for MCP connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcp.OAuthStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp/{id}/oauth/token": {
+            "delete": {
+                "description": "Clears stored OAuth tokens",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Revoke OAuth tokens for MCP connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp/{id}/probe": {
+            "post": {
+                "description": "Probe a MCP connection to discover tools and verify connectivity",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Probe MCP connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ProbeResponse"
+                        }
                     },
                     "400": {
                         "description": "Bad Request",
@@ -7919,6 +8167,9 @@
         "github_com_memohai_memoh_internal_mcp.Connection": {
             "type": "object",
             "properties": {
+                "auth_type": {
+                    "type": "string"
+                },
                 "bot_id": {
                     "type": "string"
                 },
@@ -7935,8 +8186,23 @@
                 "is_active": {
                     "type": "boolean"
                 },
+                "last_probed_at": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "status_message": {
+                    "type": "string"
+                },
+                "tools_cache": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcp.ToolDescriptor"
+                    }
                 },
                 "type": {
                     "type": "string"
@@ -8341,6 +8607,26 @@
                 }
             }
         },
+        "handlers.ProbeResponse": {
+            "type": "object",
+            "properties": {
+                "auth_required": {
+                    "type": "boolean"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcp.ToolDescriptor"
+                    }
+                }
+            }
+        },
         "handlers.RefreshResponse": {
             "type": "object",
             "properties": {
@@ -8589,6 +8875,22 @@
                 }
             }
         },
+        "handlers.oauthAuthorizeRequest": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.oauthDiscoverRequest": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.skillsOpResponse": {
             "type": "object",
             "properties": {
@@ -8733,6 +9035,43 @@
                 }
             }
         },
+        "mcp.AuthorizeResult": {
+            "type": "object",
+            "properties": {
+                "authorization_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "mcp.DiscoveryResult": {
+            "type": "object",
+            "properties": {
+                "authorization_endpoint": {
+                    "type": "string"
+                },
+                "authorization_server_url": {
+                    "type": "string"
+                },
+                "registration_endpoint": {
+                    "type": "string"
+                },
+                "resource_metadata_url": {
+                    "type": "string"
+                },
+                "resource_uri": {
+                    "type": "string"
+                },
+                "scopes_supported": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "token_endpoint": {
+                    "type": "string"
+                }
+            }
+        },
         "mcp.ExportResponse": {
             "type": "object",
             "properties": {
@@ -8801,6 +9140,44 @@
                 }
             }
         },
+        "mcp.OAuthStatus": {
+            "type": "object",
+            "properties": {
+                "auth_server": {
+                    "type": "string"
+                },
+                "configured": {
+                    "type": "boolean"
+                },
+                "expired": {
+                    "type": "boolean"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "has_token": {
+                    "type": "boolean"
+                },
+                "scopes": {
+                    "type": "string"
+                }
+            }
+        },
+        "mcp.ToolDescriptor": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "inputSchema": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "mcp.UpsertRequest": {
             "type": "object",
             "properties": {
@@ -8809,6 +9186,9 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "auth_type": {
+                    "type": "string"
                 },
                 "command": {
                     "type": "string"

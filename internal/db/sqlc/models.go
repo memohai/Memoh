@@ -246,14 +246,42 @@ type LlmProvider struct {
 }
 
 type McpConnection struct {
-	ID        pgtype.UUID        `json:"id"`
-	BotID     pgtype.UUID        `json:"bot_id"`
-	Name      string             `json:"name"`
-	Type      string             `json:"type"`
-	Config    []byte             `json:"config"`
-	IsActive  bool               `json:"is_active"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID            pgtype.UUID        `json:"id"`
+	BotID         pgtype.UUID        `json:"bot_id"`
+	Name          string             `json:"name"`
+	Type          string             `json:"type"`
+	Config        []byte             `json:"config"`
+	IsActive      bool               `json:"is_active"`
+	Status        string             `json:"status"`
+	ToolsCache    []byte             `json:"tools_cache"`
+	LastProbedAt  pgtype.Timestamptz `json:"last_probed_at"`
+	StatusMessage string             `json:"status_message"`
+	AuthType      string             `json:"auth_type"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type McpOauthToken struct {
+	ID                     pgtype.UUID        `json:"id"`
+	ConnectionID           pgtype.UUID        `json:"connection_id"`
+	ResourceMetadataUrl    string             `json:"resource_metadata_url"`
+	AuthorizationServerUrl string             `json:"authorization_server_url"`
+	AuthorizationEndpoint  string             `json:"authorization_endpoint"`
+	TokenEndpoint          string             `json:"token_endpoint"`
+	RegistrationEndpoint   string             `json:"registration_endpoint"`
+	ScopesSupported        []string           `json:"scopes_supported"`
+	ClientID               string             `json:"client_id"`
+	ClientSecret           string             `json:"client_secret"`
+	AccessToken            string             `json:"access_token"`
+	RefreshToken           string             `json:"refresh_token"`
+	TokenType              string             `json:"token_type"`
+	ExpiresAt              pgtype.Timestamptz `json:"expires_at"`
+	Scope                  string             `json:"scope"`
+	PkceCodeVerifier       string             `json:"pkce_code_verifier"`
+	StateParam             string             `json:"state_param"`
+	ResourceUri            string             `json:"resource_uri"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
 type MediaAsset struct {

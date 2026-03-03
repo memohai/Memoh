@@ -707,6 +707,8 @@ definitions:
     type: object
   github_com_memohai_memoh_internal_mcp.Connection:
     properties:
+      auth_type:
+        type: string
       bot_id:
         type: string
       config:
@@ -718,8 +720,18 @@ definitions:
         type: string
       is_active:
         type: boolean
+      last_probed_at:
+        type: string
       name:
         type: string
+      status:
+        type: string
+      status_message:
+        type: string
+      tools_cache:
+        items:
+          $ref: '#/definitions/mcp.ToolDescriptor'
+        type: array
       type:
         type: string
       updated_at:
@@ -980,6 +992,19 @@ definitions:
       status:
         type: string
     type: object
+  handlers.ProbeResponse:
+    properties:
+      auth_required:
+        type: boolean
+      error:
+        type: string
+      status:
+        type: string
+      tools:
+        items:
+          $ref: '#/definitions/mcp.ToolDescriptor'
+        type: array
+    type: object
   handlers.RefreshResponse:
     properties:
       access_token:
@@ -1142,6 +1167,16 @@ definitions:
           type: string
         type: array
     type: object
+  handlers.oauthAuthorizeRequest:
+    properties:
+      client_id:
+        type: string
+    type: object
+  handlers.oauthDiscoverRequest:
+    properties:
+      url:
+        type: string
+    type: object
   handlers.skillsOpResponse:
     properties:
       ok:
@@ -1237,6 +1272,30 @@ definitions:
       source:
         type: string
     type: object
+  mcp.AuthorizeResult:
+    properties:
+      authorization_url:
+        type: string
+    type: object
+  mcp.DiscoveryResult:
+    properties:
+      authorization_endpoint:
+        type: string
+      authorization_server_url:
+        type: string
+      registration_endpoint:
+        type: string
+      resource_metadata_url:
+        type: string
+      resource_uri:
+        type: string
+      scopes_supported:
+        items:
+          type: string
+        type: array
+      token_endpoint:
+        type: string
+    type: object
   mcp.ExportResponse:
     properties:
       mcpServers:
@@ -1281,12 +1340,39 @@ definitions:
       url:
         type: string
     type: object
+  mcp.OAuthStatus:
+    properties:
+      auth_server:
+        type: string
+      configured:
+        type: boolean
+      expired:
+        type: boolean
+      expires_at:
+        type: string
+      has_token:
+        type: boolean
+      scopes:
+        type: string
+    type: object
+  mcp.ToolDescriptor:
+    properties:
+      description:
+        type: string
+      inputSchema:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+    type: object
   mcp.UpsertRequest:
     properties:
       args:
         items:
           type: string
         type: array
+      auth_type:
+        type: string
       command:
         type: string
       cwd:
@@ -2077,6 +2163,32 @@ info:
   title: Memoh API
   version: 1.0.0
 paths:
+  /api/oauth/mcp/callback:
+    get:
+      description: Handles the OAuth authorization callback, exchanges code for tokens
+      parameters:
+      - description: Authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: State parameter
+        in: query
+        name: state
+        required: true
+        type: string
+      responses:
+        "200":
+          description: HTML page that closes the popup
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: OAuth callback handler
+      tags:
+      - mcp
   /auth/login:
     post:
       description: Validate user credentials and issue a JWT
@@ -3551,6 +3663,144 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update MCP connection
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp/{id}/oauth/authorize:
+    post:
+      description: Generate PKCE and return authorization URL for the user to authorize
+      parameters:
+      - description: MCP connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Optional client_id
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.oauthAuthorizeRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.AuthorizeResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start OAuth authorization flow
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp/{id}/oauth/discover:
+    post:
+      description: Probe MCP server URL for OAuth requirements and discover authorization
+        server metadata
+      parameters:
+      - description: MCP connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Optional URL override
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.oauthDiscoverRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.DiscoveryResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Discover OAuth configuration for MCP server
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp/{id}/oauth/status:
+    get:
+      description: Returns the current OAuth status including whether tokens are available
+      parameters:
+      - description: MCP connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.OAuthStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get OAuth status for MCP connection
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp/{id}/oauth/token:
+    delete:
+      description: Clears stored OAuth tokens
+      parameters:
+      - description: MCP connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Revoke OAuth tokens for MCP connection
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp/{id}/probe:
+    post:
+      description: Probe a MCP connection to discover tools and verify connectivity
+      parameters:
+      - description: MCP connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProbeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Probe MCP connection
       tags:
       - mcp
   /bots/{bot_id}/mcp/export:

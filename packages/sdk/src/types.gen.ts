@@ -424,6 +424,7 @@ export type GithubComMemohaiMemohInternalFsFileInfo = {
 };
 
 export type GithubComMemohaiMemohInternalMcpConnection = {
+    auth_type?: string;
     bot_id?: string;
     config?: {
         [key: string]: unknown;
@@ -431,7 +432,11 @@ export type GithubComMemohaiMemohInternalMcpConnection = {
     created_at?: string;
     id?: string;
     is_active?: boolean;
+    last_probed_at?: string;
     name?: string;
+    status?: string;
+    status_message?: string;
+    tools_cache?: Array<McpToolDescriptor>;
     type?: string;
     updated_at?: string;
 };
@@ -597,6 +602,13 @@ export type HandlersPingResponse = {
     status?: string;
 };
 
+export type HandlersProbeResponse = {
+    auth_required?: boolean;
+    error?: string;
+    status?: string;
+    tools?: Array<McpToolDescriptor>;
+};
+
 export type HandlersRefreshResponse = {
     access_token?: string;
     expires_at?: string;
@@ -695,6 +707,14 @@ export type HandlersMemorySearchPayload = {
     sources?: Array<string>;
 };
 
+export type HandlersOauthAuthorizeRequest = {
+    client_id?: string;
+};
+
+export type HandlersOauthDiscoverRequest = {
+    url?: string;
+};
+
 export type HandlersSkillsOpResponse = {
     ok?: boolean;
 };
@@ -757,6 +777,20 @@ export type InboxItem = {
     source?: string;
 };
 
+export type McpAuthorizeResult = {
+    authorization_url?: string;
+};
+
+export type McpDiscoveryResult = {
+    authorization_endpoint?: string;
+    authorization_server_url?: string;
+    registration_endpoint?: string;
+    resource_metadata_url?: string;
+    resource_uri?: string;
+    scopes_supported?: Array<string>;
+    token_endpoint?: string;
+};
+
 export type McpExportResponse = {
     mcpServers?: {
         [key: string]: McpMcpServerEntry;
@@ -787,8 +821,26 @@ export type McpMcpServerEntry = {
     url?: string;
 };
 
+export type McpOAuthStatus = {
+    auth_server?: string;
+    configured?: boolean;
+    expired?: boolean;
+    expires_at?: string;
+    has_token?: boolean;
+    scopes?: string;
+};
+
+export type McpToolDescriptor = {
+    description?: string;
+    inputSchema?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+};
+
 export type McpUpsertRequest = {
     args?: Array<string>;
+    auth_type?: string;
     command?: string;
     cwd?: string;
     env?: {
@@ -1262,6 +1314,40 @@ export type SubagentUpdateRequest = {
 export type SubagentUpdateSkillsRequest = {
     skills?: Array<string>;
 };
+
+export type GetApiOauthMcpCallbackData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Authorization code
+         */
+        code: string;
+        /**
+         * State parameter
+         */
+        state: string;
+    };
+    url: '/api/oauth/mcp/callback';
+};
+
+export type GetApiOauthMcpCallbackErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+};
+
+export type GetApiOauthMcpCallbackError = GetApiOauthMcpCallbackErrors[keyof GetApiOauthMcpCallbackErrors];
+
+export type GetApiOauthMcpCallbackResponses = {
+    /**
+     * HTML page that closes the popup
+     */
+    200: string;
+};
+
+export type GetApiOauthMcpCallbackResponse = GetApiOauthMcpCallbackResponses[keyof GetApiOauthMcpCallbackResponses];
 
 export type PostAuthLoginData = {
     /**
@@ -3168,6 +3254,184 @@ export type PutBotsByBotIdMcpByIdResponses = {
 };
 
 export type PutBotsByBotIdMcpByIdResponse = PutBotsByBotIdMcpByIdResponses[keyof PutBotsByBotIdMcpByIdResponses];
+
+export type PostBotsByBotIdMcpByIdOauthAuthorizeData = {
+    /**
+     * Optional client_id
+     */
+    body?: HandlersOauthAuthorizeRequest;
+    path: {
+        /**
+         * MCP connection ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/mcp/{id}/oauth/authorize';
+};
+
+export type PostBotsByBotIdMcpByIdOauthAuthorizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdMcpByIdOauthAuthorizeError = PostBotsByBotIdMcpByIdOauthAuthorizeErrors[keyof PostBotsByBotIdMcpByIdOauthAuthorizeErrors];
+
+export type PostBotsByBotIdMcpByIdOauthAuthorizeResponses = {
+    /**
+     * OK
+     */
+    200: McpAuthorizeResult;
+};
+
+export type PostBotsByBotIdMcpByIdOauthAuthorizeResponse = PostBotsByBotIdMcpByIdOauthAuthorizeResponses[keyof PostBotsByBotIdMcpByIdOauthAuthorizeResponses];
+
+export type PostBotsByBotIdMcpByIdOauthDiscoverData = {
+    /**
+     * Optional URL override
+     */
+    body?: HandlersOauthDiscoverRequest;
+    path: {
+        /**
+         * MCP connection ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/mcp/{id}/oauth/discover';
+};
+
+export type PostBotsByBotIdMcpByIdOauthDiscoverErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdMcpByIdOauthDiscoverError = PostBotsByBotIdMcpByIdOauthDiscoverErrors[keyof PostBotsByBotIdMcpByIdOauthDiscoverErrors];
+
+export type PostBotsByBotIdMcpByIdOauthDiscoverResponses = {
+    /**
+     * OK
+     */
+    200: McpDiscoveryResult;
+};
+
+export type PostBotsByBotIdMcpByIdOauthDiscoverResponse = PostBotsByBotIdMcpByIdOauthDiscoverResponses[keyof PostBotsByBotIdMcpByIdOauthDiscoverResponses];
+
+export type GetBotsByBotIdMcpByIdOauthStatusData = {
+    body?: never;
+    path: {
+        /**
+         * MCP connection ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/mcp/{id}/oauth/status';
+};
+
+export type GetBotsByBotIdMcpByIdOauthStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdMcpByIdOauthStatusError = GetBotsByBotIdMcpByIdOauthStatusErrors[keyof GetBotsByBotIdMcpByIdOauthStatusErrors];
+
+export type GetBotsByBotIdMcpByIdOauthStatusResponses = {
+    /**
+     * OK
+     */
+    200: McpOAuthStatus;
+};
+
+export type GetBotsByBotIdMcpByIdOauthStatusResponse = GetBotsByBotIdMcpByIdOauthStatusResponses[keyof GetBotsByBotIdMcpByIdOauthStatusResponses];
+
+export type DeleteBotsByBotIdMcpByIdOauthTokenData = {
+    body?: never;
+    path: {
+        /**
+         * MCP connection ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/mcp/{id}/oauth/token';
+};
+
+export type DeleteBotsByBotIdMcpByIdOauthTokenErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdMcpByIdOauthTokenError = DeleteBotsByBotIdMcpByIdOauthTokenErrors[keyof DeleteBotsByBotIdMcpByIdOauthTokenErrors];
+
+export type DeleteBotsByBotIdMcpByIdOauthTokenResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PostBotsByBotIdMcpByIdProbeData = {
+    body?: never;
+    path: {
+        /**
+         * MCP connection ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/mcp/{id}/probe';
+};
+
+export type PostBotsByBotIdMcpByIdProbeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdMcpByIdProbeError = PostBotsByBotIdMcpByIdProbeErrors[keyof PostBotsByBotIdMcpByIdProbeErrors];
+
+export type PostBotsByBotIdMcpByIdProbeResponses = {
+    /**
+     * OK
+     */
+    200: HandlersProbeResponse;
+};
+
+export type PostBotsByBotIdMcpByIdProbeResponse = PostBotsByBotIdMcpByIdProbeResponses[keyof PostBotsByBotIdMcpByIdProbeResponses];
 
 export type DeleteBotsByBotIdMemoryData = {
     /**
