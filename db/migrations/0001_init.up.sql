@@ -202,6 +202,7 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
   pkce_code_verifier TEXT NOT NULL DEFAULT '',
   state_param TEXT NOT NULL DEFAULT '',
   resource_uri TEXT NOT NULL DEFAULT '',
+  redirect_uri TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

@@ -280,6 +280,7 @@ type McpOauthToken struct {
 	PkceCodeVerifier       string             `json:"pkce_code_verifier"`
 	StateParam             string             `json:"state_param"`
 	ResourceUri            string             `json:"resource_uri"`
+	RedirectUri            string             `json:"redirect_uri"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }

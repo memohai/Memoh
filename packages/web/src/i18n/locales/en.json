@@ -351,9 +351,12 @@
       "authServer": "Authorization Server",
       "clientId": "Client ID",
       "clientIdPlaceholder": "OAuth App Client ID",
+      "clientSecret": "Client Secret",
+      "clientSecretPlaceholder": "OAuth App Client Secret (if required)",
       "clientIdHint": "The authorization server does not support automatic registration. Please create an OAuth App and enter its Client ID.",
       "callbackUrl": "Callback URL",
-      "callbackUrlHint": "Set this as the callback/redirect URL in your OAuth App settings."
+      "callbackUrlHint": "Set this as the callback/redirect URL in your OAuth App settings.",
+      "callbackMissingParams": "Missing authorization code or state parameter"
     }
   },
   "home": {

@@ -35,6 +35,12 @@ SET status = $3,
     updated_at = now()
 WHERE bot_id = $1 AND id = $2;
 
+-- name: UpdateMCPConnectionAuthType :exec
+UPDATE mcp_connections
+SET auth_type = $2,
+    updated_at = now()
+WHERE id = $1;
+
 -- name: DeleteMCPConnection :exec
 DELETE FROM mcp_connections
 WHERE bot_id = $1 AND id = $2;

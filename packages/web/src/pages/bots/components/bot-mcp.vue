@@ -390,6 +390,17 @@
                     class="font-mono text-xs"
                   />
                 </div>
+                <div class="space-y-1.5">
+                  <Label class="text-xs">
+                    {{ $t('mcp.oauth.clientSecret') }}
+                  </Label>
+                  <Input
+                    v-model="oauthClientSecret"
+                    type="password"
+                    :placeholder="$t('mcp.oauth.clientSecretPlaceholder')"
+                    class="font-mono text-xs"
+                  />
+                </div>
                 <div
                   v-if="oauthCallbackUrl"
                   class="space-y-1"
@@ -760,6 +771,7 @@ interface OAuthStatusResponse {
   scopes?: string
   expires_at?: string
   auth_server?: string
+  callback_url?: string
 }
 
 interface OAuthDiscoveryResponse {
@@ -770,6 +782,7 @@ interface OAuthDiscoveryResponse {
 
 const oauthStatus = ref<OAuthStatusResponse | null>(null)
 const oauthClientId = ref('')
+const oauthClientSecret = ref('')
 const oauthNeedsClientId = ref(false)
 const oauthCallbackUrl = ref('')
 const oauthDiscovered = ref(false)
@@ -868,12 +881,12 @@ function selectItem(item: McpItem) {
   probeAuthRequired.value = false
   oauthStatus.value = null
   oauthClientId.value = ''
+  oauthClientSecret.value = ''
   oauthNeedsClientId.value = false
   oauthCallbackUrl.value = ''
   oauthDiscovered.value = false
   if (item.id && item.type !== 'stdio') {
     loadOAuthStatus(item)
-    loadCallbackUrl()
   }
   const cfg = item.config ?? {}
   connectionType.value = item.type === 'stdio' ? 'stdio' : 'remote'
@@ -1129,11 +1142,6 @@ function handleCopyExport() {
   toast.success(t('common.copied'))
 }
 
-function loadCallbackUrl() {
-  const baseUrl = (client.getConfig().baseUrl || window.location.origin).replace(/\/$/, '')
-  oauthCallbackUrl.value = `${baseUrl}/api/oauth/mcp/callback`
-}
-
 async function loadOAuthStatus(item: McpItem) {
   if (!item.id || item.type === 'stdio') {
     oauthStatus.value = null
@@ -1146,6 +1154,7 @@ async function loadOAuthStatus(item: McpItem) {
       throwOnError: true,
     })
     oauthStatus.value = data ?? null
+    oauthCallbackUrl.value = `${window.location.origin}/oauth/mcp/callback`
   } catch {
     oauthStatus.value = null
   }
@@ -1194,7 +1203,11 @@ async function handleOAuthFlow() {
     const { data } = await client.post<{ authorization_url: string }>({
       url: '/bots/{bot_id}/mcp/{id}/oauth/authorize',
       path: { bot_id: props.botId, id: item.id },
-      body: { client_id: oauthClientId.value.trim() || undefined },
+      body: {
+        client_id: oauthClientId.value.trim() || undefined,
+        client_secret: oauthClientSecret.value.trim() || undefined,
+        callback_url: `${window.location.origin}/oauth/mcp/callback`,
+      },
       throwOnError: true,
     })
     if (!data?.authorization_url) {
@@ -1246,6 +1259,7 @@ async function handleOAuthRevoke() {
     oauthDiscovered.value = false
     oauthNeedsClientId.value = false
     oauthClientId.value = ''
+    oauthClientSecret.value = ''
     await loadOAuthStatus(selectedItem.value)
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('mcp.oauth.revokeFailed')))

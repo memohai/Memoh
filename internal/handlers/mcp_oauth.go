@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -41,8 +40,7 @@ func (h *MCPOAuthHandler) Register(e *echo.Echo) {
 	group.POST("/authorize", h.Authorize)
 	group.GET("/status", h.Status)
 	group.DELETE("/token", h.RevokeToken)
-
-	e.GET("/api/oauth/mcp/callback", h.Callback)
+	group.POST("/exchange", h.Exchange)
 }
 
 type oauthDiscoverRequest struct {
@@ -108,7 +106,9 @@ func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 }
 
 type oauthAuthorizeRequest struct {
-	ClientID string `json:"client_id"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	CallbackURL  string `json:"callback_url"`
 }
 
 // Authorize godoc
@@ -138,7 +138,7 @@ func (h *MCPOAuthHandler) Authorize(c echo.Context) error {
 	var req oauthAuthorizeRequest
 	_ = c.Bind(&req)
 
-	result, err := h.oauthService.StartAuthorization(c.Request().Context(), connID, req.ClientID)
+	result, err := h.oauthService.StartAuthorization(c.Request().Context(), connID, req.ClientID, req.ClientSecret, req.CallbackURL)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -146,36 +146,38 @@ func (h *MCPOAuthHandler) Authorize(c echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
-// Callback godoc
-// @Summary OAuth callback handler
-// @Description Handles the OAuth authorization callback, exchanges code for tokens
-// @Tags mcp
-// @Param code query string true "Authorization code"
-// @Param state query string true "State parameter"
-// @Success 200 {string} string "HTML page that closes the popup"
-// @Failure 400 {object} ErrorResponse
-// @Router /api/oauth/mcp/callback [get]
-func (h *MCPOAuthHandler) Callback(c echo.Context) error {
-	code := strings.TrimSpace(c.QueryParam("code"))
-	state := strings.TrimSpace(c.QueryParam("state"))
-	errParam := strings.TrimSpace(c.QueryParam("error"))
+type oauthExchangeRequest struct {
+	Code  string `json:"code"`
+	State string `json:"state"`
+}
 
-	if errParam != "" {
-		errDesc := c.QueryParam("error_description")
-		return c.HTML(http.StatusOK, callbackHTML(false, fmt.Sprintf("Authorization failed: %s - %s", errParam, errDesc)))
+// Exchange godoc
+// @Summary Exchange OAuth authorization code for tokens
+// @Description Frontend callback page calls this to exchange the authorization code for access/refresh tokens
+// @Tags mcp
+// @Param payload body oauthExchangeRequest true "Authorization code and state"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} ErrorResponse
+// @Router /bots/{bot_id}/mcp/{id}/oauth/exchange [post]
+func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
+	var req oauthExchangeRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
+	code := strings.TrimSpace(req.Code)
+	state := strings.TrimSpace(req.State)
 	if code == "" || state == "" {
-		return c.HTML(http.StatusOK, callbackHTML(false, "Missing code or state parameter"))
+		return echo.NewHTTPError(http.StatusBadRequest, "code and state are required")
 	}
 
 	_, err := h.oauthService.HandleCallback(c.Request().Context(), state, code)
 	if err != nil {
-		h.logger.Warn("oauth callback failed", slog.Any("error", err))
-		return c.HTML(http.StatusOK, callbackHTML(false, err.Error()))
+		h.logger.Warn("oauth exchange failed", slog.Any("error", err))
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	return c.HTML(http.StatusOK, callbackHTML(true, ""))
+	return c.JSON(http.StatusOK, map[string]bool{"success": true})
 }
 
 // Status godoc
@@ -246,24 +248,3 @@ func (h *MCPOAuthHandler) authorizeBotAccess(ctx context.Context, channelIdentit
 	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
 }
 
-func callbackHTML(success bool, errMsg string) string {
-	status := "success"
-	message := "Authorization successful! You can close this window."
-	if !success {
-		status = "error"
-		message = "Authorization failed: " + errMsg
-	}
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head><title>MCP OAuth</title></head>
-<body>
-<p>%s</p>
-<script>
-  if (window.opener) {
-    window.opener.postMessage({ type: 'mcp-oauth-callback', status: '%s', error: '%s' }, '*');
-    setTimeout(function() { window.close(); }, 1000);
-  }
-</script>
-</body>
-</html>`, message, status, strings.ReplaceAll(errMsg, "'", "\\'"))
-}

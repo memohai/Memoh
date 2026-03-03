@@ -194,6 +194,23 @@ func (q *Queries) UpdateMCPConnection(ctx context.Context, arg UpdateMCPConnecti
 	return i, err
 }
 
+const updateMCPConnectionAuthType = `-- name: UpdateMCPConnectionAuthType :exec
+UPDATE mcp_connections
+SET auth_type = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type UpdateMCPConnectionAuthTypeParams struct {
+	ID       pgtype.UUID `json:"id"`
+	AuthType string      `json:"auth_type"`
+}
+
+func (q *Queries) UpdateMCPConnectionAuthType(ctx context.Context, arg UpdateMCPConnectionAuthTypeParams) error {
+	_, err := q.db.Exec(ctx, updateMCPConnectionAuthType, arg.ID, arg.AuthType)
+	return err
+}
+
 const updateMCPConnectionProbeResult = `-- name: UpdateMCPConnectionProbeResult :exec
 UPDATE mcp_connections
 SET status = $3,

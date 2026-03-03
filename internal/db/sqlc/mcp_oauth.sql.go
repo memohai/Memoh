@@ -19,6 +19,7 @@ SET access_token = '',
     scope = '',
     pkce_code_verifier = '',
     state_param = '',
+    redirect_uri = '',
     updated_at = now()
 WHERE connection_id = $1
 `
@@ -43,7 +44,7 @@ SELECT id, connection_id, resource_metadata_url, authorization_server_url,
        authorization_endpoint, token_endpoint, registration_endpoint,
        scopes_supported, client_id, client_secret, access_token, refresh_token,
        token_type, expires_at, scope, pkce_code_verifier, state_param,
-       resource_uri, created_at, updated_at
+       resource_uri, redirect_uri, created_at, updated_at
 FROM mcp_oauth_tokens
 WHERE connection_id = $1
 LIMIT 1
@@ -71,6 +72,7 @@ func (q *Queries) GetMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID
 		&i.PkceCodeVerifier,
 		&i.StateParam,
 		&i.ResourceUri,
+		&i.RedirectUri,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -82,7 +84,7 @@ SELECT id, connection_id, resource_metadata_url, authorization_server_url,
        authorization_endpoint, token_endpoint, registration_endpoint,
        scopes_supported, client_id, client_secret, access_token, refresh_token,
        token_type, expires_at, scope, pkce_code_verifier, state_param,
-       resource_uri, created_at, updated_at
+       resource_uri, redirect_uri, created_at, updated_at
 FROM mcp_oauth_tokens
 WHERE state_param = $1
 LIMIT 1
@@ -110,6 +112,7 @@ func (q *Queries) GetMCPOAuthTokenByState(ctx context.Context, stateParam string
 		&i.PkceCodeVerifier,
 		&i.StateParam,
 		&i.ResourceUri,
+		&i.RedirectUri,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -138,6 +141,7 @@ UPDATE mcp_oauth_tokens
 SET pkce_code_verifier = $2,
     state_param = $3,
     client_id = $4,
+    redirect_uri = $5,
     updated_at = now()
 WHERE connection_id = $1
 `
@@ -147,6 +151,7 @@ type UpdateMCPOAuthPKCEStateParams struct {
 	PkceCodeVerifier string      `json:"pkce_code_verifier"`
 	StateParam       string      `json:"state_param"`
 	ClientID         string      `json:"client_id"`
+	RedirectUri      string      `json:"redirect_uri"`
 }
 
 func (q *Queries) UpdateMCPOAuthPKCEState(ctx context.Context, arg UpdateMCPOAuthPKCEStateParams) error {
@@ -155,6 +160,7 @@ func (q *Queries) UpdateMCPOAuthPKCEState(ctx context.Context, arg UpdateMCPOAut
 		arg.PkceCodeVerifier,
 		arg.StateParam,
 		arg.ClientID,
+		arg.RedirectUri,
 	)
 	return err
 }
@@ -211,7 +217,7 @@ RETURNING id, connection_id, resource_metadata_url, authorization_server_url,
           authorization_endpoint, token_endpoint, registration_endpoint,
           scopes_supported, client_id, client_secret, access_token, refresh_token,
           token_type, expires_at, scope, pkce_code_verifier, state_param,
-          resource_uri, created_at, updated_at
+          resource_uri, redirect_uri, created_at, updated_at
 `
 
 type UpsertMCPOAuthDiscoveryParams struct {
@@ -256,6 +262,7 @@ func (q *Queries) UpsertMCPOAuthDiscovery(ctx context.Context, arg UpsertMCPOAut
 		&i.PkceCodeVerifier,
 		&i.StateParam,
 		&i.ResourceUri,
+		&i.RedirectUri,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

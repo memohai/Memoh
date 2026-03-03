@@ -90,6 +90,9 @@ Thumbs.db
 .cache/
 tmp/
 
+# compiled files
+memoh
+
 docs/docs/.vitepress/cache
 .pnpm-store
 
