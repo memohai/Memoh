@@ -149,6 +149,10 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	root.POST("/tools", h.HandleMCPTools)
 }
 
+func (h *ContainerdHandler) FSService() *fsops.Service {
+	return h.fsService
+}
+
 // CreateContainer godoc
 // @Summary Create and start MCP container for bot
 // @Tags containerd

@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/memohai/memoh/internal/config"
 	fsops "github.com/memohai/memoh/internal/fs"
-	"github.com/memohai/memoh/internal/memory/provider"
 )
 
 const manifestVersion = 1
@@ -46,11 +46,25 @@ type Service struct {
 	fs *fsops.Service
 }
 
+// MemoryItem is the storefs-facing memory record type.
+type MemoryItem struct {
+	ID        string         `json:"id"`
+	Memory    string         `json:"memory"`
+	Hash      string         `json:"hash,omitempty"`
+	CreatedAt string         `json:"created_at,omitempty"`
+	UpdatedAt string         `json:"updated_at,omitempty"`
+	Score     float64        `json:"score,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	BotID     string         `json:"bot_id,omitempty"`
+	AgentID   string         `json:"agent_id,omitempty"`
+	RunID     string         `json:"run_id,omitempty"`
+}
+
 func New(fs *fsops.Service) *Service {
 	return &Service{fs: fs}
 }
 
-func (s *Service) PersistMemories(ctx context.Context, botID string, items []provider.MemoryItem, filters map[string]any) error {
+func (s *Service) PersistMemories(ctx context.Context, botID string, items []MemoryItem, filters map[string]any) error {
 	if s.fs == nil {
 		return ErrNotConfigured
 	}
@@ -62,7 +76,7 @@ func (s *Service) PersistMemories(ctx context.Context, botID string, items []pro
 		return err
 	}
 	now := time.Now().UTC()
-	touched := make(map[string]map[string]provider.MemoryItem)
+	touched := make(map[string]map[string]MemoryItem)
 	toRemoveFromOld := make(map[string]map[string]struct{})
 	for _, item := range items {
 		item.ID = strings.TrimSpace(item.ID)
@@ -79,7 +93,7 @@ func (s *Service) PersistMemories(ctx context.Context, botID string, items []pro
 			toRemoveFromOld[current.FilePath][item.ID] = struct{}{}
 		}
 		if touched[filePath] == nil {
-			touched[filePath] = make(map[string]provider.MemoryItem)
+			touched[filePath] = make(map[string]MemoryItem)
 		}
 		touched[filePath][item.ID] = item
 		manifest.Entries[item.ID] = ManifestEntry{
@@ -108,10 +122,13 @@ func (s *Service) PersistMemories(ctx context.Context, botID string, items []pro
 	if err := s.removeIDsFromFiles(ctx, botID, toRemoveFromOld); err != nil {
 		return err
 	}
-	return s.writeManifest(ctx, botID, manifest)
+	if err := s.writeManifest(ctx, botID, manifest); err != nil {
+		return err
+	}
+	return s.SyncOverview(ctx, botID)
 }
 
-func (s *Service) RebuildFiles(ctx context.Context, botID string, items []provider.MemoryItem, filters map[string]any) error {
+func (s *Service) RebuildFiles(ctx context.Context, botID string, items []MemoryItem, filters map[string]any) error {
 	if s.fs == nil {
 		return ErrNotConfigured
 	}
@@ -126,7 +143,7 @@ func (s *Service) RebuildFiles(ctx context.Context, botID string, items []provid
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
 		Entries:   make(map[string]ManifestEntry, len(items)),
 	}
-	grouped := make(map[string][]provider.MemoryItem)
+	grouped := make(map[string][]MemoryItem)
 	now := time.Now().UTC()
 	for _, item := range items {
 		item.ID = strings.TrimSpace(item.ID)
@@ -151,7 +168,10 @@ func (s *Service) RebuildFiles(ctx context.Context, botID string, items []provid
 			return err
 		}
 	}
-	return s.writeManifest(ctx, botID, manifest)
+	if err := s.writeManifest(ctx, botID, manifest); err != nil {
+		return err
+	}
+	return s.SyncOverview(ctx, botID)
 }
 
 func (s *Service) RemoveMemories(ctx context.Context, botID string, ids []string) error {
@@ -190,7 +210,10 @@ func (s *Service) RemoveMemories(ctx context.Context, botID string, ids []string
 	if err := s.removeIDsFromFiles(ctx, botID, removals); err != nil {
 		return err
 	}
-	return s.writeManifest(ctx, botID, manifest)
+	if err := s.writeManifest(ctx, botID, manifest); err != nil {
+		return err
+	}
+	return s.SyncOverview(ctx, botID)
 }
 
 func (s *Service) RemoveAllMemories(ctx context.Context, botID string) error {
@@ -203,25 +226,28 @@ func (s *Service) RemoveAllMemories(ctx context.Context, botID string) error {
 			return delErr
 		}
 	}
-	return s.writeManifest(ctx, botID, &Manifest{
+	if err := s.writeManifest(ctx, botID, &Manifest{
 		Version:   manifestVersion,
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
 		Entries:   map[string]ManifestEntry{},
-	})
+	}); err != nil {
+		return err
+	}
+	return s.SyncOverview(ctx, botID)
 }
 
-func (s *Service) ReadAllMemoryFiles(ctx context.Context, botID string) ([]provider.MemoryItem, error) {
+func (s *Service) ReadAllMemoryFiles(ctx context.Context, botID string) ([]MemoryItem, error) {
 	if s.fs == nil {
 		return nil, ErrNotConfigured
 	}
 	list, err := s.fs.List(ctx, botID, memoryDirPath())
 	if err != nil {
 		if fsErr, ok := fsops.AsError(err); ok && fsErr.Code == http.StatusNotFound {
-			return []provider.MemoryItem{}, nil
+			return []MemoryItem{}, nil
 		}
 		return nil, err
 	}
-	items := make([]provider.MemoryItem, 0, len(list.Entries))
+	items := make([]MemoryItem, 0, len(list.Entries))
 	seen := map[string]struct{}{}
 	for _, entry := range list.Entries {
 		if entry.IsDir || !strings.HasSuffix(entry.Path, ".md") {
@@ -237,7 +263,7 @@ func (s *Service) ReadAllMemoryFiles(ctx context.Context, botID string) ([]provi
 			if legacyErr != nil {
 				continue
 			}
-			parsed = []provider.MemoryItem{legacy}
+			parsed = []MemoryItem{legacy}
 		}
 		for _, item := range parsed {
 			if strings.TrimSpace(item.ID) == "" {
@@ -254,6 +280,19 @@ func (s *Service) ReadAllMemoryFiles(ctx context.Context, botID string) ([]provi
 		return memoryTime(items[i]).Before(memoryTime(items[j]))
 	})
 	return items, nil
+}
+
+// SyncOverview rebuilds /data/MEMORY.md from memory day files.
+func (s *Service) SyncOverview(ctx context.Context, botID string) error {
+	if s.fs == nil {
+		return ErrNotConfigured
+	}
+	items, err := s.ReadAllMemoryFiles(ctx, botID)
+	if err != nil {
+		return err
+	}
+	overview := formatMemoryOverviewMD(items)
+	return s.fs.Write(botID, memoryOverviewPath(), overview)
 }
 
 func (s *Service) ReadManifest(ctx context.Context, botID string) (*Manifest, error) {
@@ -318,6 +357,10 @@ func memoryManifestPath() string {
 	return path.Join(config.DefaultDataMount, "index", "manifest.json")
 }
 
+func memoryOverviewPath() string {
+	return path.Join(config.DefaultDataMount, "MEMORY.md")
+}
+
 func memoryDirPath() string {
 	return path.Join(config.DefaultDataMount, "memory")
 }
@@ -330,7 +373,7 @@ func memoryLegacyItemPath(id string) string {
 	return path.Join(memoryDirPath(), strings.TrimSpace(id)+".md")
 }
 
-func formatMemoryDayMD(date string, items []provider.MemoryItem) string {
+func formatMemoryDayMD(date string, items []MemoryItem) string {
 	var b strings.Builder
 	b.WriteString("# Memory ")
 	b.WriteString(date)
@@ -373,13 +416,13 @@ func formatMemoryDayMD(date string, items []provider.MemoryItem) string {
 	return b.String()
 }
 
-func parseMemoryDayMD(content string) ([]provider.MemoryItem, error) {
+func parseMemoryDayMD(content string) ([]MemoryItem, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, fmt.Errorf("empty memory file")
 	}
 	lines := strings.Split(content, "\n")
-	items := make([]provider.MemoryItem, 0, 8)
+	items := make([]MemoryItem, 0, 8)
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
 		if !strings.HasPrefix(line, entryStartPrefix) || !strings.HasSuffix(line, entryStartSuffix) {
@@ -400,7 +443,7 @@ func parseMemoryDayMD(content string) ([]provider.MemoryItem, error) {
 		if end >= len(lines) {
 			break
 		}
-		item := provider.MemoryItem{
+		item := MemoryItem{
 			ID:        strings.TrimSpace(meta["id"]),
 			Hash:      strings.TrimSpace(meta["hash"]),
 			CreatedAt: strings.TrimSpace(meta["created_at"]),
@@ -418,19 +461,19 @@ func parseMemoryDayMD(content string) ([]provider.MemoryItem, error) {
 	return items, nil
 }
 
-func parseLegacyMemoryMD(content string) (provider.MemoryItem, error) {
+func parseLegacyMemoryMD(content string) (MemoryItem, error) {
 	content = strings.TrimSpace(content)
 	if !strings.HasPrefix(content, "---") {
-		return provider.MemoryItem{}, fmt.Errorf("missing frontmatter")
+		return MemoryItem{}, fmt.Errorf("missing frontmatter")
 	}
 	parts := strings.SplitN(content[3:], "---", 2)
 	if len(parts) < 2 {
-		return provider.MemoryItem{}, fmt.Errorf("incomplete frontmatter")
+		return MemoryItem{}, fmt.Errorf("incomplete frontmatter")
 	}
 	frontmatter := strings.TrimSpace(parts[0])
 	body := strings.TrimSpace(parts[1])
 
-	item := provider.MemoryItem{Memory: body}
+	item := MemoryItem{Memory: body}
 	for _, line := range strings.Split(frontmatter, "\n") {
 		key, value, found := strings.Cut(strings.TrimSpace(line), ":")
 		if !found {
@@ -448,16 +491,16 @@ func parseLegacyMemoryMD(content string) (provider.MemoryItem, error) {
 		}
 	}
 	if item.ID == "" {
-		return provider.MemoryItem{}, fmt.Errorf("missing id in frontmatter")
+		return MemoryItem{}, fmt.Errorf("missing id in frontmatter")
 	}
 	return item, nil
 }
 
-func (s *Service) readMemoryDay(ctx context.Context, botID, filePath string) ([]provider.MemoryItem, error) {
+func (s *Service) readMemoryDay(ctx context.Context, botID, filePath string) ([]MemoryItem, error) {
 	resp, err := s.fs.ReadRaw(ctx, botID, filePath)
 	if err != nil {
 		if fsErr, ok := fsops.AsError(err); ok && fsErr.Code == http.StatusNotFound {
-			return []provider.MemoryItem{}, nil
+			return []MemoryItem{}, nil
 		}
 		return nil, err
 	}
@@ -467,12 +510,12 @@ func (s *Service) readMemoryDay(ctx context.Context, botID, filePath string) ([]
 	}
 	legacy, legacyErr := parseLegacyMemoryMD(resp.Content)
 	if legacyErr != nil {
-		return []provider.MemoryItem{}, nil
+		return []MemoryItem{}, nil
 	}
-	return []provider.MemoryItem{legacy}, nil
+	return []MemoryItem{legacy}, nil
 }
 
-func (s *Service) writeMemoryDay(botID, filePath string, items []provider.MemoryItem) error {
+func (s *Service) writeMemoryDay(botID, filePath string, items []MemoryItem) error {
 	date := strings.TrimSuffix(path.Base(filePath), ".md")
 	return s.fs.Write(botID, filePath, formatMemoryDayMD(date, items))
 }
@@ -489,7 +532,7 @@ func (s *Service) removeIDsFromFiles(ctx context.Context, botID string, removals
 		if len(items) == 0 {
 			continue
 		}
-		filtered := make([]provider.MemoryItem, 0, len(items))
+		filtered := make([]MemoryItem, 0, len(items))
 		for _, item := range items {
 			if _, remove := ids[item.ID]; remove {
 				continue
@@ -512,8 +555,8 @@ func (s *Service) removeIDsFromFiles(ctx context.Context, botID string, removals
 	return nil
 }
 
-func toItemMap(items []provider.MemoryItem) map[string]provider.MemoryItem {
-	m := make(map[string]provider.MemoryItem, len(items))
+func toItemMap(items []MemoryItem) map[string]MemoryItem {
+	m := make(map[string]MemoryItem, len(items))
 	for _, item := range items {
 		if id := strings.TrimSpace(item.ID); id != "" {
 			m[id] = item
@@ -522,8 +565,8 @@ func toItemMap(items []provider.MemoryItem) map[string]provider.MemoryItem {
 	return m
 }
 
-func mapToItems(m map[string]provider.MemoryItem) []provider.MemoryItem {
-	items := make([]provider.MemoryItem, 0, len(m))
+func mapToItems(m map[string]MemoryItem) []MemoryItem {
+	items := make([]MemoryItem, 0, len(m))
 	for _, item := range m {
 		items = append(items, item)
 	}
@@ -541,7 +584,7 @@ func copyFilters(filters map[string]any) map[string]any {
 	return out
 }
 
-func memoryDateForItem(item provider.MemoryItem, now time.Time) string {
+func memoryDateForItem(item MemoryItem, now time.Time) string {
 	if d := memoryDateFromRaw(item.CreatedAt, now); d != "" {
 		return d
 	}
@@ -576,7 +619,7 @@ func memoryDateFromRaw(raw string, now time.Time) string {
 	return now.Format(memoryDateLayout)
 }
 
-func memoryTime(item provider.MemoryItem) time.Time {
+func memoryTime(item MemoryItem) time.Time {
 	parse := func(v string) (time.Time, bool) {
 		v = strings.TrimSpace(v)
 		if v == "" {
@@ -597,4 +640,56 @@ func memoryTime(item provider.MemoryItem) time.Time {
 		return t
 	}
 	return time.Time{}
+}
+
+func formatMemoryOverviewMD(items []MemoryItem) string {
+	var b strings.Builder
+	b.WriteString("# MEMORY\n\n")
+	if len(items) == 0 {
+		b.WriteString("> No memory entries yet.\n")
+		return b.String()
+	}
+	ordered := append([]MemoryItem(nil), items...)
+	sort.Slice(ordered, func(i, j int) bool {
+		ti, tj := memoryTime(ordered[i]), memoryTime(ordered[j])
+		if ti.Equal(tj) {
+			return ordered[i].ID > ordered[j].ID
+		}
+		return ti.After(tj)
+	})
+	for i, item := range ordered {
+		if i >= 500 {
+			break
+		}
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			id = "unknown"
+		}
+		created := strings.TrimSpace(item.CreatedAt)
+		if created == "" {
+			created = "unknown"
+		}
+		body := strings.TrimSpace(item.Memory)
+		if body == "" {
+			continue
+		}
+		lines := strings.Split(body, "\n")
+		for idx, line := range lines {
+			lines[idx] = strings.TrimSpace(line)
+		}
+		body = strings.Join(lines, " ")
+		body = strings.Join(strings.Fields(body), " ")
+		if len(body) > 400 {
+			body = strings.TrimSpace(body[:400]) + "..."
+		}
+		b.WriteString(strconv.Itoa(i + 1))
+		b.WriteString(". [")
+		b.WriteString(created)
+		b.WriteString("] (")
+		b.WriteString(id)
+		b.WriteString(") ")
+		b.WriteString(body)
+		b.WriteString("\n")
+	}
+	return b.String()
 }

@@ -241,13 +241,13 @@
                   
                   <!-- Area under curve -->
                   <path
-                    :d="generateSmoothPath(selectedMemory.cdf_curve, true)"
+                    :d="generateSmoothPath(selectedCdfCurve, true)"
                     fill="currentColor"
                     class="text-primary/10"
                   />
                   <!-- Curve -->
                   <path
-                    :d="generateSmoothPath(selectedMemory.cdf_curve)"
+                    :d="generateSmoothPath(selectedCdfCurve)"
                     fill="none"
                     stroke="currentColor"
                     class="text-primary"
@@ -268,9 +268,9 @@
                   />
                   <!-- Interaction vertical area (Hit area) -->
                   <rect
-                    v-for="(point, idx) in selectedMemory.cdf_curve"
+                    v-for="(point, idx) in selectedCdfCurve"
                     :key="'hit-' + idx"
-                    :x="(idx / (selectedMemory.cdf_curve.length - 1)) * 100 - 2"
+                    :x="(idx / (selectedCdfLength - 1)) * 100 - 2"
                     y="0"
                     width="4"
                     height="100"
@@ -284,12 +284,12 @@
                 <!-- Fixed aspect ratio markers overlay -->
                 <div class="absolute inset-0 pointer-events-none pt-2 pb-4">
                   <div
-                    v-for="(point, idx) in selectedMemory.cdf_curve"
+                    v-for="(point, idx) in selectedCdfCurve"
                     :key="'dot-' + idx"
                     class="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background transition-transform"
                     :class="hoveredCdfIdx === idx && hoveredCdfPoint ? 'bg-primary scale-125 z-10' : 'bg-primary/60 scale-100'"
                     :style="{ 
-                      left: `${(idx / (selectedMemory.cdf_curve.length - 1)) * 100}%`,
+                      left: `${(idx / (selectedCdfLength - 1)) * 100}%`,
                       top: `${(100 - 5) - (point.cumulative * 90)}%`
                     }"
                   />
@@ -320,7 +320,7 @@
                 </div>
                 <div class="absolute bottom-0 left-0 right-0 flex justify-between text-[8px] font-mono text-muted-foreground/40 px-1">
                   <span>k=1</span>
-                  <span>k={{ selectedMemory.cdf_curve.length }}</span>
+                  <span>k={{ selectedCdfLength }}</span>
                 </div>
               </div>
             </div>
@@ -558,7 +558,6 @@ import {
   Button,
   Input,
   ScrollArea,
-  Separator,
   Spinner,
   Textarea,
   Dialog,
@@ -592,6 +591,8 @@ interface MemoryItem {
   updated_at?: string
   hash?: string
   score?: number
+  cdf_curve?: MemoryCdfPoint[]
+  top_k_buckets?: MemoryTopKBucket[]
 }
 
 type MessageContentBlock = { type: string; text?: string }
@@ -646,7 +647,7 @@ const hoveredCdfPoint = ref<MemoryCdfPoint | null>(null)
 const hoveredCdfIdx = ref<number>(-1)
 const hoveredCdfX = computed(() => {
   if (!hoveredCdfPoint.value || !selectedMemory.value) return 0
-  const len = selectedMemory.value.cdf_curve?.length || 1
+  const len = selectedCdfLength.value
   return (hoveredCdfIdx.value / (len - 1)) * 100
 })
 const hoveredCdfY = computed(() => {
@@ -655,6 +656,8 @@ const hoveredCdfY = computed(() => {
 })
 
 const selectedTopKBuckets = computed(() => selectedMemory.value?.top_k_buckets ?? [])
+const selectedCdfCurve = computed(() => selectedMemory.value?.cdf_curve ?? [])
+const selectedCdfLength = computed(() => Math.max(2, selectedCdfCurve.value.length))
 const topKBucketValues = computed(() => selectedTopKBuckets.value.map((bucket: MemoryTopKBucket) => bucket.value ?? 0))
 const topKMinValue = computed(() => Math.min(...topKBucketValues.value))
 const topKMaxValue = computed(() => Math.max(...topKBucketValues.value))
@@ -706,7 +709,11 @@ async function loadMemories() {
       path: { bot_id: props.botId },
       throwOnError: true,
     })
-    memories.value = data.results ?? []
+    memories.value = (data.results ?? []).map((item) => ({
+      ...item,
+      cdf_curve: item.cdf_curve ?? [],
+      top_k_buckets: item.top_k_buckets ?? [],
+    }))
   } catch (error) {
     console.error('Failed to load memories:', error)
     toast.error(t('common.loadFailed'))

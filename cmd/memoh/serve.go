@@ -217,11 +217,13 @@ func provideAgentRuntimeManager(log *slog.Logger, cfg config.Config) *agentrunti
 func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, log *slog.Logger) memprovider.LLM {
 	return &lazyLLMClient{modelsService: modelsService, queries: queries, timeout: 30 * time.Second, logger: log}
 }
-func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, containerdHandler *handlers.ContainerdHandler) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
+	builtinRuntime := handlers.NewBuiltinMemoryRuntime(containerdHandler.FSService())
 	registry.RegisterFactory(memprovider.BuiltinType, func(id string, config map[string]any) (memprovider.Provider, error) {
-		return memprovider.NewBuiltinProvider(log, nil, chatService, accountService), nil
+		return memprovider.NewBuiltinProvider(log, builtinRuntime, chatService, accountService), nil
 	})
+	registry.Register("__builtin_default__", memprovider.NewBuiltinProvider(log, builtinRuntime, chatService, accountService))
 	return registry
 }
 func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *memprovider.Service, registry *memprovider.Registry) {
@@ -311,10 +313,11 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	containerdHandler.SetToolGatewayService(svc)
 	return svc
 }
-func provideMemoryHandler(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, cfg config.Config, manager *mcp.Manager, memoryRegistry *memprovider.Registry, settingsService *settings.Service) *handlers.MemoryHandler {
-	h := handlers.NewMemoryHandler(log, chatService, accountService)
+func provideMemoryHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, cfg config.Config, manager *mcp.Manager, memoryRegistry *memprovider.Registry, settingsService *settings.Service, containerdHandler *handlers.ContainerdHandler) *handlers.MemoryHandler {
+	h := handlers.NewMemoryHandler(log, botService, accountService)
 	h.SetMemoryRegistry(memoryRegistry)
 	h.SetSettingsService(settingsService)
+	h.SetFSService(containerdHandler.FSService())
 	return h
 }
 func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *boot.RuntimeConfig) *handlers.AuthHandler {

@@ -3,12 +3,10 @@ package storefs
 import (
 	"strings"
 	"testing"
-
-	memprovider "github.com/memohai/memoh/internal/memory/provider"
 )
 
 func TestFormatAndParseMemoryDayMD_Roundtrip(t *testing.T) {
-	items := []memprovider.MemoryItem{
+	items := []MemoryItem{
 		{
 			ID:        "mem_2",
 			Memory:    "second record",
