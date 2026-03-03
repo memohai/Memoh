@@ -15,24 +15,27 @@ import (
 )
 
 const telegramStreamEditThrottle = 5000 * time.Millisecond
+const telegramDraftThrottle = 300 * time.Millisecond
 const telegramStreamToolHintText = "Calling tools..."
 const telegramStreamPendingSuffix = "\n……"
 
 var testEditFunc func(bot *tgbotapi.BotAPI, chatID int64, msgID int, text string, parseMode string) error
 
 type telegramOutboundStream struct {
-	adapter      *TelegramAdapter
-	cfg          channel.ChannelConfig
-	target       string
-	reply        *channel.ReplyRef
-	parseMode    string
-	closed       atomic.Bool
-	mu           sync.Mutex
-	buf          strings.Builder
-	streamChatID int64
-	streamMsgID  int
-	lastEdited   string
-	lastEditedAt time.Time
+	adapter       *TelegramAdapter
+	cfg           channel.ChannelConfig
+	target        string
+	reply         *channel.ReplyRef
+	parseMode     string
+	isPrivateChat bool
+	draftID       int
+	closed        atomic.Bool
+	mu            sync.Mutex
+	buf           strings.Builder
+	streamChatID  int64
+	streamMsgID   int
+	lastEdited    string
+	lastEditedAt  time.Time
 }
 
 func (s *telegramOutboundStream) getBot(ctx context.Context) (bot *tgbotapi.BotAPI, err error) {
@@ -205,6 +208,59 @@ func (s *telegramOutboundStream) editStreamMessageFinal(ctx context.Context, tex
 	return nil
 }
 
+// sendDraft sends a partial message via sendMessageDraft with throttling.
+// Only used for private chats.
+func (s *telegramOutboundStream) sendDraft(ctx context.Context, text string) error {
+	s.mu.Lock()
+	lastEditedAt := s.lastEditedAt
+	s.mu.Unlock()
+
+	if time.Since(lastEditedAt) < telegramDraftThrottle {
+		return nil
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+
+	bot, err := s.getBot(ctx)
+	if err != nil {
+		return err
+	}
+
+	draftErr := sendTelegramDraft(bot, s.streamChatID, s.draftID, text, "")
+	if draftErr != nil {
+		if isTelegramTooManyRequests(draftErr) {
+			d := getTelegramRetryAfter(draftErr)
+			if d <= 0 {
+				d = telegramDraftThrottle
+			}
+			s.mu.Lock()
+			s.lastEditedAt = time.Now().Add(d)
+			s.mu.Unlock()
+			return nil
+		}
+		return draftErr
+	}
+
+	s.mu.Lock()
+	s.lastEditedAt = time.Now()
+	s.mu.Unlock()
+	return nil
+}
+
+// sendPermanentMessage sends a final, permanent message via sendMessage.
+// Used in draft mode to commit text after streaming is complete for a phase.
+func (s *telegramOutboundStream) sendPermanentMessage(ctx context.Context, text string, parseMode string) error {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	bot, replyTo, err := s.getBotAndReply(ctx)
+	if err != nil {
+		return err
+	}
+	return sendTelegramText(bot, s.target, text, replyTo, parseMode)
+}
+
 func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
 	if s == nil || s.adapter == nil {
 		return fmt.Errorf("telegram stream not configured")
@@ -225,12 +281,21 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 		bufText := strings.TrimSpace(s.buf.String())
 		hasMsg := s.streamMsgID != 0
 		s.mu.Unlock()
-		if hasMsg && bufText != "" {
+		if s.isPrivateChat {
+			// In draft mode, send buffered text as a permanent message before tool execution.
+			if bufText != "" {
+				if err := s.sendPermanentMessage(ctx, bufText, ""); err != nil {
+					slog.Warn("telegram: draft permanent message failed", slog.Any("error", err))
+				}
+			}
+		} else if hasMsg && bufText != "" {
 			_ = s.editStreamMessageFinal(ctx, bufText)
 		}
 		s.mu.Lock()
 		s.streamMsgID = 0
-		s.streamChatID = 0
+		if !s.isPrivateChat {
+			s.streamChatID = 0
+		}
 		s.lastEdited = ""
 		s.lastEditedAt = time.Time{}
 		s.buf.Reset()
@@ -239,7 +304,9 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 	case channel.StreamEventToolCallEnd:
 		s.mu.Lock()
 		s.streamMsgID = 0
-		s.streamChatID = 0
+		if !s.isPrivateChat {
+			s.streamChatID = 0
+		}
 		s.lastEdited = ""
 		s.lastEditedAt = time.Time{}
 		s.buf.Reset()
@@ -267,6 +334,11 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 		return nil
 	case channel.StreamEventPhaseEnd:
 		if event.Phase == channel.StreamPhaseText {
+			// In draft mode, skip phase-end finalization; StreamEventFinal sends the
+			// permanent formatted message.
+			if s.isPrivateChat {
+				return nil
+			}
 			s.mu.Lock()
 			finalText := strings.TrimSpace(s.buf.String())
 			s.mu.Unlock()
@@ -288,31 +360,43 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 		s.buf.WriteString(event.Delta)
 		content := s.buf.String()
 		s.mu.Unlock()
+		if s.isPrivateChat {
+			return s.sendDraft(ctx, content)
+		}
 		if err := s.ensureStreamMessage(ctx, content); err != nil {
 			return err
 		}
 		return s.editStreamMessage(ctx, content)
 	case channel.StreamEventFinal:
+		// In draft mode, read and reset buffer atomically to prevent duplicate
+		// permanent messages when multiple StreamEventFinal events fire
+		// (one per assistant output in multi-tool-call responses).
+		s.mu.Lock()
+		bufText := strings.TrimSpace(s.buf.String())
+		if s.isPrivateChat {
+			s.buf.Reset()
+		}
+		s.mu.Unlock()
 		if event.Final == nil || event.Final.Message.IsEmpty() {
-			s.mu.Lock()
-			finalText := strings.TrimSpace(s.buf.String())
-			s.mu.Unlock()
-			if finalText != "" {
-				if err := s.ensureStreamMessage(ctx, finalText); err != nil {
-					slog.Warn("telegram: ensure stream message failed", slog.Any("error", err))
-				}
-				if err := s.editStreamMessageFinal(ctx, finalText); err != nil {
-					slog.Warn("telegram: edit stream message failed", slog.Any("error", err))
+			if bufText != "" {
+				if s.isPrivateChat {
+					if err := s.sendPermanentMessage(ctx, bufText, ""); err != nil {
+						slog.Warn("telegram: draft final permanent message failed", slog.Any("error", err))
+					}
+				} else {
+					if err := s.ensureStreamMessage(ctx, bufText); err != nil {
+						slog.Warn("telegram: ensure stream message failed", slog.Any("error", err))
+					}
+					if err := s.editStreamMessageFinal(ctx, bufText); err != nil {
+						slog.Warn("telegram: edit stream message failed", slog.Any("error", err))
+					}
 				}
 			}
 			return nil
 		}
 		msg := event.Final.Message
-		s.mu.Lock()
-		bufText := strings.TrimSpace(s.buf.String())
-		s.mu.Unlock()
 		finalText := bufText
-		if finalText == "" {
+		if finalText == "" && !s.isPrivateChat {
 			finalText = strings.TrimSpace(msg.PlainText())
 		}
 		// Convert markdown to Telegram HTML for the final message.
@@ -323,11 +407,17 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 			s.mu.Unlock()
 			finalText = formatted
 		}
-		if err := s.ensureStreamMessage(ctx, finalText); err != nil {
-			return err
-		}
-		if err := s.editStreamMessageFinal(ctx, finalText); err != nil {
-			return err
+		if s.isPrivateChat {
+			if err := s.sendPermanentMessage(ctx, finalText, s.parseMode); err != nil {
+				return err
+			}
+		} else {
+			if err := s.ensureStreamMessage(ctx, finalText); err != nil {
+				return err
+			}
+			if err := s.editStreamMessageFinal(ctx, finalText); err != nil {
+				return err
+			}
 		}
 		if len(msg.Attachments) > 0 {
 			replyTo := parseReplyToMessageID(s.reply)
@@ -357,6 +447,9 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 			return nil
 		}
 		display := "Error: " + errText
+		if s.isPrivateChat {
+			return s.sendPermanentMessage(ctx, display, "")
+		}
 		if err := s.ensureStreamMessage(ctx, display); err != nil {
 			return err
 		}

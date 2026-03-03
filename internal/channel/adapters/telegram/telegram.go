@@ -585,8 +585,10 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 }
 
 // OpenStream opens a Telegram streaming session.
-// The adapter sends one message then edits it in place as deltas arrive (editMessageText),
-// avoiding one message per delta and rate limits.
+// For private chats, uses sendMessageDraft to stream partial content with smooth
+// animation, then sends a final permanent message via sendMessage.
+// For group/channel chats, sends one message then edits it in place as deltas
+// arrive (editMessageText), avoiding one message per delta and rate limits.
 func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -597,12 +599,25 @@ func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelCon
 		return nil, ctx.Err()
 	default:
 	}
+	isPrivateChat := false
+	var chatID int64
+	if opts.Metadata != nil {
+		if ct, ok := opts.Metadata["conversation_type"].(string); ok && ct == "private" {
+			if parsed, err := strconv.ParseInt(target, 10, 64); err == nil {
+				isPrivateChat = true
+				chatID = parsed
+			}
+		}
+	}
 	return &telegramOutboundStream{
-		adapter:   a,
-		cfg:       cfg,
-		target:    target,
-		reply:     opts.Reply,
-		parseMode: "",
+		adapter:       a,
+		cfg:           cfg,
+		target:        target,
+		reply:         opts.Reply,
+		parseMode:     "",
+		isPrivateChat: isPrivateChat,
+		streamChatID:  chatID,
+		draftID:       1,
 	}, nil
 }
 
@@ -732,6 +747,27 @@ func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, 
 	if err != nil && isTelegramMessageNotModified(err) {
 		return nil
 	}
+	return err
+}
+
+var sendDraftForTest func(bot *tgbotapi.BotAPI, chatID int64, draftID int, text string, parseMode string) error
+
+// sendTelegramDraft calls the sendMessageDraft Bot API method to stream a
+// partial message to a private chat while it is being generated.
+func sendTelegramDraft(bot *tgbotapi.BotAPI, chatID int64, draftID int, text string, parseMode string) error {
+	text = truncateTelegramText(sanitizeTelegramText(text))
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	if sendDraftForTest != nil {
+		return sendDraftForTest(bot, chatID, draftID, text, parseMode)
+	}
+	params := tgbotapi.Params{}
+	params.AddFirstValid("chat_id", chatID)
+	params.AddNonZero("draft_id", draftID)
+	params.AddNonEmpty("text", text)
+	params.AddNonEmpty("parse_mode", parseMode)
+	_, err := bot.MakeRequest("sendMessageDraft", params)
 	return err
 }
 
