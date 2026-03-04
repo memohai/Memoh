@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"strings"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
@@ -199,6 +200,9 @@ func (p *Executor) callRead(ctx context.Context, client *mcpclient.Client, args 
 		if offset < 1 {
 			return mcpgw.BuildToolErrorResult("line_offset must be >= 1"), nil
 		}
+		if offset > math.MaxInt32 {
+			return mcpgw.BuildToolErrorResult("line_offset exceeds maximum"), nil
+		}
 		lineOffset = int32(offset)
 	}
 
@@ -277,7 +281,7 @@ func (p *Executor) callEdit(ctx context.Context, client *mcpclient.Client, args 
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	raw, err := io.ReadAll(reader)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil

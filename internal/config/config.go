@@ -1,8 +1,8 @@
 package config
 
 import (
-	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -52,12 +52,12 @@ type ServerConfig struct {
 
 type AdminConfig struct {
 	Username string `toml:"username"`
-	Password string `toml:"password"`
+	Password string `toml:"password" json:"-"`
 	Email    string `toml:"email"`
 }
 
 type AuthConfig struct {
-	JWTSecret    string `toml:"jwt_secret"`
+	JWTSecret    string `toml:"jwt_secret"    json:"-"`
 	JWTExpiresIn string `toml:"jwt_expires_in"`
 }
 
@@ -113,14 +113,14 @@ type PostgresConfig struct {
 	Host     string `toml:"host"`
 	Port     int    `toml:"port"`
 	User     string `toml:"user"`
-	Password string `toml:"password"`
+	Password string `toml:"password" json:"-"`
 	Database string `toml:"database"`
 	SSLMode  string `toml:"sslmode"`
 }
 
 type QdrantConfig struct {
 	BaseURL        string `toml:"base_url"`
-	APIKey         string `toml:"api_key"`
+	APIKey         string `toml:"api_key" json:"-"`
 	TimeoutSeconds int    `toml:"timeout_seconds"`
 }
 
@@ -138,7 +138,7 @@ func (c AgentGatewayConfig) BaseURL() string {
 	if port == 0 {
 		port = 8081
 	}
-	return "http://" + host + ":" + fmt.Sprint(port)
+	return "http://" + host + ":" + strconv.Itoa(port)
 }
 
 func Load(path string) (Config, error) {

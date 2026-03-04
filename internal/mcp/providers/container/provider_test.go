@@ -2,16 +2,19 @@ package container
 
 import (
 	"context"
+	"math"
 	"net"
+	"strings"
 	"sync"
 	"testing"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/mcp/mcpclient"
 	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/test/bufconn"
 )
 
 const bufSize = 1 << 20
@@ -53,7 +56,7 @@ func (f *fakeContainerService) ReadFile(_ context.Context, req *pb.ReadFileReque
 	}
 	content := string(data)
 	lines := splitLines(content)
-	total := int32(len(lines))
+	total := int32(min(len(lines), math.MaxInt32)) //nolint:gosec // G115: value is clamped to math.MaxInt32 above
 
 	offset := req.GetLineOffset()
 	if offset < 1 {
@@ -73,12 +76,14 @@ func (f *fakeContainerService) ReadFile(_ context.Context, req *pb.ReadFileReque
 		end = len(lines)
 	}
 	result := ""
+	var resultSb76 strings.Builder
 	for i, l := range lines[start:end] {
 		if i > 0 {
-			result += "\n"
+			resultSb76.WriteString("\n")
 		}
-		result += l
+		resultSb76.WriteString(l)
 	}
+	result += resultSb76.String()
 	return &pb.ReadFileResponse{Content: result, TotalLines: total}, nil
 }
 
@@ -186,7 +191,7 @@ func testSetup(t *testing.T, svc *fakeContainerService) mcpclient.Provider {
 	if err != nil {
 		t.Fatalf("grpc.NewClient: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 
 	client := mcpclient.NewClientFromConn(conn)
 	return &staticProvider{client: client}

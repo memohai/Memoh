@@ -104,4 +104,3 @@ type NetworkSetupRequest struct {
 type NetworkResult struct {
 	IP string
 }
-

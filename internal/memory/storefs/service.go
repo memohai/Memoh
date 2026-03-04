@@ -80,7 +80,7 @@ func (s *Service) readFile(ctx context.Context, botID, filePath string) (string,
 	if err != nil {
 		return "", err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return "", err
@@ -449,6 +449,7 @@ func memoryDirPath() string      { return path.Join(config.DefaultDataMount, "me
 func memoryDayPath(date string) string {
 	return path.Join(memoryDirPath(), strings.TrimSpace(date)+".md")
 }
+
 func memoryLegacyItemPath(id string) string {
 	return path.Join(memoryDirPath(), strings.TrimSpace(id)+".md")
 }

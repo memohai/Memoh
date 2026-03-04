@@ -87,7 +87,7 @@ func (c *fakeMCPConnection) Close() error {
 	return nil
 }
 
-func (c *fakeMCPConnection) SessionID() string { return "test-session" }
+func (*fakeMCPConnection) SessionID() string { return "test-session" }
 
 func cloneJSONRPCRequest(req *sdkjsonrpc.Request) *sdkjsonrpc.Request {
 	if req == nil {
@@ -295,7 +295,7 @@ func TestMCPSession_ExplicitInitializeNoDoubling(t *testing.T) {
 // TestMCPSession_PendingCleanupOnContextCancel tests that cancelling a request
 // context removes it from the pending map.
 func TestMCPSession_PendingCleanupOnContextCancel(t *testing.T) {
-	conn := newFakeMCPConnection(func(req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
+	conn := newFakeMCPConnection(func(_ *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
 		// Never reply — caller should time out.
 		return nil, nil
 	})
@@ -324,7 +324,7 @@ func TestMCPSession_PendingCleanupOnContextCancel(t *testing.T) {
 // TestMCPSession_PendingCleanupOnClose tests that closing the session drains
 // all pending channels (callers unblock).
 func TestMCPSession_PendingCleanupOnClose(t *testing.T) {
-	conn := newFakeMCPConnection(func(req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
+	conn := newFakeMCPConnection(func(_ *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
 		return nil, nil // never reply
 	})
 	sess := newTestMCPSession(conn)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
 	"strings"
 	"sync"
 	"time"
@@ -34,9 +33,9 @@ type Manager struct {
 	logger          *slog.Logger
 	containerLockMu sync.Mutex
 	containerLocks  map[string]*sync.Mutex
-	mu             sync.RWMutex
-	containerIPs   map[string]string
-	grpcPool       *mcpclient.Pool
+	mu              sync.RWMutex
+	containerIPs    map[string]string
+	grpcPool        *mcpclient.Pool
 }
 
 func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string, conn *pgxpool.Pool) *Manager {

@@ -197,7 +197,7 @@ func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Confi
 	if err != nil {
 		return nil, err
 	}
-	lc.Append(fx.Hook{OnStop: func(ctx context.Context) error { cleanup(); return nil }})
+	lc.Append(fx.Hook{OnStop: func(_ context.Context) error { cleanup(); return nil }})
 	return svc, nil
 }
 
@@ -206,7 +206,7 @@ func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db connect: %w", err)
 	}
-	lc.Append(fx.Hook{OnStop: func(ctx context.Context) error { conn.Close(); return nil }})
+	lc.Append(fx.Hook{OnStop: func(_ context.Context) error { conn.Close(); return nil }})
 	return conn, nil
 }
 
@@ -214,21 +214,25 @@ func provideDBQueries(conn *pgxpool.Pool) *dbsqlc.Queries { return dbsqlc.New(co
 func provideMCPManager(log *slog.Logger, service ctr.Service, cfg config.Config, conn *pgxpool.Pool) *mcp.Manager {
 	return mcp.NewManager(log, service, cfg.MCP, cfg.Containerd.Namespace, conn)
 }
+
 func provideAgentRuntimeManager(log *slog.Logger, cfg config.Config) *agentruntime.Manager {
 	return agentruntime.NewManager(log, cfg)
 }
+
 func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, log *slog.Logger) memprovider.LLM {
 	return &lazyLLMClient{modelsService: modelsService, queries: queries, timeout: 30 * time.Second, logger: log}
 }
+
 func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, manager *mcp.Manager) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	builtinRuntime := handlers.NewBuiltinMemoryRuntime(manager)
-	registry.RegisterFactory(memprovider.BuiltinType, func(id string, config map[string]any) (memprovider.Provider, error) {
+	registry.RegisterFactory(memprovider.BuiltinType, func(_ string, _ map[string]any) (memprovider.Provider, error) {
 		return memprovider.NewBuiltinProvider(log, builtinRuntime, chatService, accountService), nil
 	})
 	registry.Register("__builtin_default__", memprovider.NewBuiltinProvider(log, builtinRuntime, chatService, accountService))
 	return registry
 }
+
 func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *memprovider.Service, registry *memprovider.Registry) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -246,15 +250,19 @@ func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *
 		},
 	})
 }
+
 func provideRouteService(log *slog.Logger, queries *dbsqlc.Queries, chatService *conversation.Service) *route.DBService {
 	return route.NewService(log, queries, chatService)
 }
+
 func provideMessageService(log *slog.Logger, queries *dbsqlc.Queries, hub *event.Hub) *message.DBService {
 	return message.NewService(log, queries, hub)
 }
+
 func provideScheduleTriggerer(resolver *flow.Resolver) schedule.Triggerer {
 	return flow.NewScheduleGateway(resolver)
 }
+
 func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
@@ -263,6 +271,7 @@ func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *mod
 	resolver.SetInboxService(inboxService)
 	return resolver
 }
+
 func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService *media.Service) *channel.Registry {
 	registry := channel.NewRegistry()
 	tgAdapter := telegram.NewTelegramAdapter(log)
@@ -277,6 +286,7 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	registry.MustRegister(local.NewWebAdapter(hub))
 	return registry
 }
+
 func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *local.RouteHub, routeService *route.DBService, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, policyService *policy.Service, preauthService *preauth.Service, bindService *bind.Service, mediaService *media.Service, inboxService *inbox.Service, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
 	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, botService, policyService, preauthService, bindService, rc.JwtSecret, 5*time.Minute)
 	processor.SetMediaService(mediaService)
@@ -284,6 +294,7 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 	processor.SetInboxService(inboxService)
 	return processor
 }
+
 func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor) *channel.Manager {
 	mgr := channel.NewManager(log, registry, channelStore, channelRouter)
 	if mw := channelRouter.IdentityMiddleware(); mw != nil {
@@ -291,15 +302,19 @@ func provideChannelManager(log *slog.Logger, registry *channel.Registry, channel
 	}
 	return mgr
 }
+
 func provideChannelLifecycleService(channelStore *channel.Store, channelManager *channel.Manager) *channel.Lifecycle {
 	return channel.NewLifecycle(channelStore, channelManager)
 }
+
 func provideContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *handlers.ContainerdHandler {
 	return handlers.NewContainerdHandler(log, service, manager, cfg.MCP, cfg.Containerd.Namespace, rc.ContainerBackend, botService, accountService, policyService, queries)
 }
+
 func provideFederationGateway(log *slog.Logger, containerdHandler *handlers.ContainerdHandler) *handlers.MCPFederationGateway {
 	return handlers.NewMCPFederationGateway(log, containerdHandler)
 }
+
 func provideOAuthService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) *mcp.OAuthService {
 	addr := strings.TrimSpace(cfg.Server.Addr)
 	if addr == "" {
@@ -312,7 +327,8 @@ func provideOAuthService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.C
 	callbackURL := "http://" + host + "/oauth/mcp/callback"
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
-func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService) *mcp.ToolGatewayService {
+
+func provideToolGatewayService(log *slog.Logger, _ config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, _ *conversation.Service, _ *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
 	var assetResolver mcpmessage.AssetResolver
 	if mediaService != nil {
@@ -331,19 +347,19 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	containerdHandler.SetToolGatewayService(svc)
 	return svc
 }
-func provideMemoryHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, cfg config.Config, manager *mcp.Manager, memoryRegistry *memprovider.Registry, settingsService *settings.Service, containerdHandler *handlers.ContainerdHandler) *handlers.MemoryHandler {
+
+func provideMemoryHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, _ config.Config, manager *mcp.Manager, memoryRegistry *memprovider.Registry, settingsService *settings.Service, _ *handlers.ContainerdHandler) *handlers.MemoryHandler {
 	h := handlers.NewMemoryHandler(log, botService, accountService)
 	h.SetMemoryRegistry(memoryRegistry)
 	h.SetSettingsService(settingsService)
 	h.SetMCPClientProvider(manager)
 	return h
 }
-func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *boot.RuntimeConfig) *handlers.AuthHandler {
-	return handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
-}
+
 func provideMemohAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *boot.RuntimeConfig) *memohAuthHandler {
 	return &memohAuthHandler{inner: handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)}
 }
+
 func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, msgService *message.DBService, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub) *handlers.MessageHandler {
 	h := handlers.NewMessageHandler(log, chatService, msgService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
@@ -356,16 +372,20 @@ func (h *memohAuthHandler) Register(e *echo.Echo) {
 	e.POST("/api/auth/login", h.inner.Login)
 	e.POST("/api/auth/refresh", h.inner.Refresh)
 }
+
 func provideMediaService(log *slog.Logger, manager *mcp.Manager) *media.Service {
 	provider := containerfs.New(manager)
 	return media.NewService(log, provider)
 }
+
 func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, identityService *identities.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry) *handlers.UsersHandler {
 	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelStore, channelLifecycle, channelManager, registry)
 }
+
 func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *handlers.LocalChannelHandler {
 	return handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelStore, chatService, hub, botService, accountService)
 }
+
 func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *handlers.LocalChannelHandler {
 	return handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
 }
@@ -480,9 +500,11 @@ func provideServer(params serverParams) *memohServer {
 	}
 	return &memohServer{echo: e, addr: addr}
 }
+
 func startScheduleService(lc fx.Lifecycle, scheduleService *schedule.Service) {
 	lc.Append(fx.Hook{OnStart: func(ctx context.Context) error { return scheduleService.Bootstrap(ctx) }})
 }
+
 func startChannelManager(lc fx.Lifecycle, channelManager *channel.Manager) {
 	ctx, cancel := context.WithCancel(context.Background())
 	lc.Append(fx.Hook{
@@ -490,15 +512,18 @@ func startChannelManager(lc fx.Lifecycle, channelManager *channel.Manager) {
 		OnStop:  func(stopCtx context.Context) error { cancel(); return channelManager.Shutdown(stopCtx) },
 	})
 }
+
 func startContainerReconciliation(lc fx.Lifecycle, containerdHandler *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
 	lc.Append(fx.Hook{OnStart: func(ctx context.Context) error { go containerdHandler.ReconcileContainers(ctx); return nil }})
 }
+
 func startAgentRuntime(lc fx.Lifecycle, manager *agentruntime.Manager) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error { return manager.Start(ctx) },
 		OnStop:  func(ctx context.Context) error { return manager.Stop(ctx) },
 	})
 }
+
 func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *memohServer, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, containerdHandler *handlers.ContainerdHandler, manager *mcp.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 	lc.Append(fx.Hook{
@@ -583,18 +608,22 @@ func hasAnyPrefix(path string, prefixes []string) bool {
 	}
 	return false
 }
+
 func provideEmailRegistry(log *slog.Logger) *emailpkg.Registry {
 	reg := emailpkg.NewRegistry()
 	reg.Register(emailgeneric.New(log))
 	reg.Register(emailmailgun.New(log))
 	return reg
 }
+
 func provideEmailChatGateway(resolver *flow.Resolver, queries *dbsqlc.Queries, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
 	return flow.NewEmailChatGateway(resolver, queries, cfg.Auth.JWTSecret, log)
 }
+
 func provideEmailTrigger(log *slog.Logger, service *emailpkg.Service, botInbox *inbox.Service, chatTriggerer emailpkg.ChatTriggerer) *emailpkg.Trigger {
 	return emailpkg.NewTrigger(log, service, botInbox, chatTriggerer)
 }
+
 func startEmailManager(lc fx.Lifecycle, emailManager *emailpkg.Manager) {
 	ctx, cancel := context.WithCancel(context.Background())
 	lc.Append(fx.Hook{
@@ -609,9 +638,10 @@ func startEmailManager(lc fx.Lifecycle, emailManager *emailpkg.Manager) {
 		OnStop: func(stopCtx context.Context) error { cancel(); emailManager.Stop(stopCtx); return nil },
 	})
 }
+
 func ensureAdminUser(ctx context.Context, log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) error {
 	if queries == nil {
-		return fmt.Errorf("db queries not configured")
+		return errors.New("db queries not configured")
 	}
 	count, err := queries.CountAccounts(ctx)
 	if err != nil {
@@ -624,7 +654,7 @@ func ensureAdminUser(ctx context.Context, log *slog.Logger, queries *dbsqlc.Quer
 	password := strings.TrimSpace(cfg.Admin.Password)
 	email := strings.TrimSpace(cfg.Admin.Email)
 	if username == "" || password == "" {
-		return fmt.Errorf("admin username/password required in config.toml")
+		return errors.New("admin username/password required in config.toml")
 	}
 	if password == "change-your-password-here" {
 		log.Warn("admin password uses default placeholder; please update config.toml")
@@ -669,6 +699,7 @@ func (c *lazyLLMClient) Extract(ctx context.Context, req memprovider.ExtractRequ
 	}
 	return client.Extract(ctx, req)
 }
+
 func (c *lazyLLMClient) Decide(ctx context.Context, req memprovider.DecideRequest) (memprovider.DecideResponse, error) {
 	client, err := c.resolve(ctx)
 	if err != nil {
@@ -676,6 +707,7 @@ func (c *lazyLLMClient) Decide(ctx context.Context, req memprovider.DecideReques
 	}
 	return client.Decide(ctx, req)
 }
+
 func (c *lazyLLMClient) Compact(ctx context.Context, req memprovider.CompactRequest) (memprovider.CompactResponse, error) {
 	client, err := c.resolve(ctx)
 	if err != nil {
@@ -683,6 +715,7 @@ func (c *lazyLLMClient) Compact(ctx context.Context, req memprovider.CompactRequ
 	}
 	return client.Compact(ctx, req)
 }
+
 func (c *lazyLLMClient) DetectLanguage(ctx context.Context, text string) (string, error) {
 	client, err := c.resolve(ctx)
 	if err != nil {
@@ -690,9 +723,10 @@ func (c *lazyLLMClient) DetectLanguage(ctx context.Context, text string) (string
 	}
 	return client.DetectLanguage(ctx, text)
 }
+
 func (c *lazyLLMClient) resolve(ctx context.Context) (memprovider.LLM, error) {
 	if c.modelsService == nil || c.queries == nil {
-		return nil, fmt.Errorf("models service not configured")
+		return nil, errors.New("models service not configured")
 	}
 	botID := ""
 	memoryModel, memoryProvider, err := models.SelectMemoryModelForBot(ctx, c.modelsService, c.queries, botID)
@@ -707,7 +741,7 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memprovider.LLM, error) {
 	}
 	_ = memoryProvider
 	_ = memoryModel
-	return nil, fmt.Errorf("memory llm runtime is not available")
+	return nil, errors.New("memory llm runtime is not available")
 }
 
 type skillLoaderAdapter struct{ handler *handlers.ContainerdHandler }
@@ -728,7 +762,7 @@ type mediaAssetResolverAdapter struct{ media *media.Service }
 
 func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, storageKey string) (mcpmessage.AssetMeta, error) {
 	if a == nil || a.media == nil {
-		return mcpmessage.AssetMeta{}, fmt.Errorf("media service not configured")
+		return mcpmessage.AssetMeta{}, errors.New("media service not configured")
 	}
 	asset, err := a.media.GetByStorageKey(ctx, botID, storageKey)
 	if err != nil {
@@ -736,9 +770,10 @@ func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, 
 	}
 	return mcpmessage.AssetMeta{ContentHash: asset.ContentHash, Mime: asset.Mime, SizeBytes: asset.SizeBytes, StorageKey: asset.StorageKey}, nil
 }
+
 func (a *mediaAssetResolverAdapter) IngestContainerFile(ctx context.Context, botID, containerPath string) (mcpmessage.AssetMeta, error) {
 	if a == nil || a.media == nil {
-		return mcpmessage.AssetMeta{}, fmt.Errorf("media service not configured")
+		return mcpmessage.AssetMeta{}, errors.New("media service not configured")
 	}
 	asset, err := a.media.IngestContainerFile(ctx, botID, containerPath)
 	if err != nil {
@@ -751,7 +786,7 @@ type gatewayAssetLoaderAdapter struct{ media *media.Service }
 
 func (a *gatewayAssetLoaderAdapter) OpenForGateway(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error) {
 	if a == nil || a.media == nil {
-		return nil, "", fmt.Errorf("media service not configured")
+		return nil, "", errors.New("media service not configured")
 	}
 	reader, asset, err := a.media.Open(ctx, botID, contentHash)
 	if err != nil {

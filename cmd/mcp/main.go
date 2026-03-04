@@ -10,10 +10,11 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/memohai/memoh/internal/logger"
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+
+	"github.com/memohai/memoh/internal/logger"
+	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 
 // initDataDir ensures /data exists and seeds template files on first boot.
 func initDataDir() {
-	if err := os.MkdirAll(defaultWorkDir, 0o755); err != nil {
+	if err := os.MkdirAll(defaultWorkDir, 0o750); err != nil {
 		logger.Warn("failed to create data dir", slog.Any("error", err))
 		return
 	}
@@ -64,10 +65,10 @@ func main() {
 		addr = defaultListenAddr
 	}
 
-	lis, err := net.Listen("tcp", addr)
+	lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {
 		logger.Error("failed to listen", slog.String("addr", addr), slog.Any("error", err))
-		os.Exit(1)
+		return
 	}
 
 	srv := grpc.NewServer()
@@ -76,13 +77,13 @@ func main() {
 
 	go func() {
 		<-ctx.Done()
-		logger.Info("shutting down gRPC server")
+		logger.FromContext(ctx).Info("shutting down gRPC server")
 		srv.GracefulStop()
 	}()
 
 	logger.Info("mcp gRPC server listening", slog.String("addr", addr))
 	if err := srv.Serve(lis); err != nil {
 		logger.Error("gRPC server failed", slog.Any("error", err))
-		os.Exit(1)
+		return
 	}
 }

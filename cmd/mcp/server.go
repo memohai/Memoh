@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,9 +16,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
 )
 
 const (
@@ -33,18 +36,18 @@ type containerServer struct {
 	pb.UnimplementedContainerServiceServer
 }
 
-func (s *containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
+func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
 	}
 	path = resolvePath(path)
 
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G304: MCP container filesystem server; paths are resolved within the container's /data, SSRF is by design
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "open: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	probe := make([]byte, binaryProbeBytes)
 	n, _ := f.Read(probe)
@@ -108,23 +111,23 @@ func (s *containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (
 	}, nil
 }
 
-func (s *containerServer) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
+func (*containerServer) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
 	}
 	path = resolvePath(path)
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, status.Errorf(codes.Internal, "mkdir: %v", err)
 	}
-	if err := os.WriteFile(path, req.GetContent(), 0o644); err != nil {
+	if err := os.WriteFile(path, req.GetContent(), 0o600); err != nil {
 		return nil, status.Errorf(codes.Internal, "write: %v", err)
 	}
 	return &pb.WriteFileResponse{}, nil
 }
 
-func (s *containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
+func (*containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
 	dir := req.GetPath()
 	if dir == "" {
 		dir = "."
@@ -167,7 +170,7 @@ func (s *containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*p
 	return &pb.ListDirResponse{Entries: entries}, nil
 }
 
-func (s *containerServer) Exec(stream pb.ContainerService_ExecServer) error {
+func (*containerServer) Exec(stream pb.ContainerService_ExecServer) error {
 	// Receive first message to get command details
 	firstMsg, err := stream.Recv()
 	if err != nil {
@@ -192,7 +195,7 @@ func (s *containerServer) Exec(stream pb.ContainerService_ExecServer) error {
 	ctx, cancel := context.WithTimeout(stream.Context(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command) //nolint:gosec // G204: MCP exec tool intentionally executes agent-issued shell commands inside the container
 	cmd.Dir = workDir
 	if len(firstMsg.GetEnv()) > 0 {
 		cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)
@@ -242,8 +245,10 @@ func (s *containerServer) Exec(stream pb.ContainerService_ExecServer) error {
 
 	exitCode := int32(0)
 	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = int32(exitErr.ExitCode())
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
+			ec := exitErr.ExitCode()
+			exitCode = int32(max(math.MinInt32, min(math.MaxInt32, ec))) //nolint:gosec // G115: value is clamped to int32 range above; Unix exit codes are 0-255
 		} else {
 			exitCode = -1
 		}
@@ -255,18 +260,18 @@ func (s *containerServer) Exec(stream pb.ContainerService_ExecServer) error {
 	})
 }
 
-func (s *containerServer) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_ReadRawServer) error {
+func (*containerServer) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_ReadRawServer) error {
 	path := req.GetPath()
 	if path == "" {
 		return status.Error(codes.InvalidArgument, "path is required")
 	}
 	path = resolvePath(path)
 
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G304: MCP container filesystem server; path is resolved within the container
 	if err != nil {
 		return status.Errorf(codes.NotFound, "open: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	buf := make([]byte, rawChunkSize)
 	for {
@@ -286,13 +291,13 @@ func (s *containerServer) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerSer
 	return nil
 }
 
-func (s *containerServer) WriteRaw(stream pb.ContainerService_WriteRawServer) error {
+func (*containerServer) WriteRaw(stream pb.ContainerService_WriteRawServer) error {
 	var f *os.File
 	var written int64
 
 	for {
 		chunk, err := stream.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -305,14 +310,14 @@ func (s *containerServer) WriteRaw(stream pb.ContainerService_WriteRawServer) er
 				return status.Error(codes.InvalidArgument, "first chunk must include path")
 			}
 			path = resolvePath(path)
-			if mkErr := os.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
+			if mkErr := os.MkdirAll(filepath.Dir(path), 0o750); mkErr != nil {
 				return status.Errorf(codes.Internal, "mkdir: %v", mkErr)
 			}
-			f, err = os.Create(path)
+			f, err = os.Create(path) //nolint:gosec // G304: MCP container filesystem server; path is resolved within the container
 			if err != nil {
 				return status.Errorf(codes.Internal, "create: %v", err)
 			}
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 		}
 
 		if len(chunk.GetData()) > 0 {
@@ -327,7 +332,7 @@ func (s *containerServer) WriteRaw(stream pb.ContainerService_WriteRawServer) er
 	return stream.SendAndClose(&pb.WriteRawResponse{BytesWritten: written})
 }
 
-func (s *containerServer) DeleteFile(_ context.Context, req *pb.DeleteFileRequest) (*pb.DeleteFileResponse, error) {
+func (*containerServer) DeleteFile(_ context.Context, req *pb.DeleteFileRequest) (*pb.DeleteFileResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
@@ -346,7 +351,7 @@ func (s *containerServer) DeleteFile(_ context.Context, req *pb.DeleteFileReques
 	return &pb.DeleteFileResponse{}, nil
 }
 
-func (s *containerServer) Stat(_ context.Context, req *pb.StatRequest) (*pb.StatResponse, error) {
+func (*containerServer) Stat(_ context.Context, req *pb.StatRequest) (*pb.StatResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
@@ -371,20 +376,20 @@ func (s *containerServer) Stat(_ context.Context, req *pb.StatRequest) (*pb.Stat
 	}, nil
 }
 
-func (s *containerServer) Mkdir(_ context.Context, req *pb.MkdirRequest) (*pb.MkdirResponse, error) {
+func (*containerServer) Mkdir(_ context.Context, req *pb.MkdirRequest) (*pb.MkdirResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
 	}
 	path = resolvePath(path)
 
-	if err := os.MkdirAll(path, 0o755); err != nil {
+	if err := os.MkdirAll(path, 0o750); err != nil {
 		return nil, status.Errorf(codes.Internal, "mkdir: %v", err)
 	}
 	return &pb.MkdirResponse{}, nil
 }
 
-func (s *containerServer) Rename(_ context.Context, req *pb.RenameRequest) (*pb.RenameResponse, error) {
+func (*containerServer) Rename(_ context.Context, req *pb.RenameRequest) (*pb.RenameResponse, error) {
 	oldPath := req.GetOldPath()
 	newPath := req.GetNewPath()
 	if oldPath == "" || newPath == "" {
@@ -393,7 +398,7 @@ func (s *containerServer) Rename(_ context.Context, req *pb.RenameRequest) (*pb.
 	oldPath = resolvePath(oldPath)
 	newPath = resolvePath(newPath)
 
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o750); err != nil {
 		return nil, status.Errorf(codes.Internal, "mkdir parent: %v", err)
 	}
 	if err := os.Rename(oldPath, newPath); err != nil {
@@ -418,7 +423,7 @@ func streamPipe(stream pb.ContainerService_ExecServer, r io.Reader, st pb.ExecOu
 	}
 }
 
-func buildFileEntry(name, fullPath string, d fs.DirEntry) (*pb.FileEntry, error) {
+func buildFileEntry(name, _ string, d fs.DirEntry) (*pb.FileEntry, error) {
 	info, err := d.Info()
 	if err != nil {
 		return nil, err
@@ -439,10 +444,10 @@ func resolvePath(path string) string {
 	return filepath.Join(defaultWorkDir, path)
 }
 
-func truncateRunes(s string, max int) string {
+func truncateRunes(s string, maxRunes int) string {
 	pos := 0
 	count := 0
-	for pos < len(s) && count < max {
+	for pos < len(s) && count < maxRunes {
 		_, size := utf8.DecodeRuneInString(s[pos:])
 		pos += size
 		count++

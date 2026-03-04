@@ -7,15 +7,17 @@ package mcpclient
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 
-	"github.com/memohai/memoh/internal/config"
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/memohai/memoh/internal/config"
+	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
 )
 
 // Client wraps a gRPC connection to a single MCP container.
@@ -36,7 +38,7 @@ func NewClientFromConn(conn *grpc.ClientConn) *Client {
 }
 
 // Dial creates a new Client connected to the given container IP.
-func Dial(ctx context.Context, ip string) (*Client, error) {
+func Dial(_ context.Context, ip string) (*Client, error) {
 	target := fmt.Sprintf("%s:%d", ip, config.MCPGRPCPort)
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -136,7 +138,7 @@ func (c *Client) ExecWithStdin(ctx context.Context, command, workDir string, tim
 
 	for {
 		msg, err := stream.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -276,7 +278,7 @@ func (r *streamReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func (r *streamReader) Close() error {
+func (*streamReader) Close() error {
 	return nil
 }
 
@@ -334,7 +336,7 @@ func (p *Pool) Get(ctx context.Context, botID string) (*Client, error) {
 	p.mu.Lock()
 	if existing, ok := p.clients[botID]; ok {
 		p.mu.Unlock()
-		c.Close()
+		_ = c.Close()
 		return existing, nil
 	}
 	p.clients[botID] = c
@@ -346,7 +348,7 @@ func (p *Pool) Get(ctx context.Context, botID string) (*Client, error) {
 func (p *Pool) Remove(botID string) {
 	p.mu.Lock()
 	if c, ok := p.clients[botID]; ok {
-		c.Close()
+		_ = c.Close()
 		delete(p.clients, botID)
 	}
 	p.mu.Unlock()
@@ -356,7 +358,7 @@ func (p *Pool) Remove(botID string) {
 func (p *Pool) CloseAll() {
 	p.mu.Lock()
 	for id, c := range p.clients {
-		c.Close()
+		_ = c.Close()
 		delete(p.clients, id)
 	}
 	p.mu.Unlock()

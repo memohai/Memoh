@@ -830,14 +830,14 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 				Summary:  "Container task state is unknown.",
 				Detail:   "Task state cannot be determined without a container record.",
 			})
-		checks = append(checks, BotCheck{
-			ID:       BotCheckTypeContainerData,
-			Type:     BotCheckTypeContainerData,
-			TitleKey: "bots.checks.titles.containerDataPath",
-			Status:   BotCheckStatusUnknown,
-			Summary:  "Container reachability is unknown.",
-			Detail:   "Reachability cannot be determined without a container record.",
-		})
+			checks = append(checks, BotCheck{
+				ID:       BotCheckTypeContainerData,
+				Type:     BotCheckTypeContainerData,
+				TitleKey: "bots.checks.titles.containerDataPath",
+				Status:   BotCheckStatusUnknown,
+				Summary:  "Container reachability is unknown.",
+				Detail:   "Reachability cannot be determined without a container record.",
+			})
 			if includeDynamic {
 				checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
 			}

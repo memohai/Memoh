@@ -5,6 +5,7 @@ package containerfs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -71,7 +72,7 @@ func (p *Provider) Delete(ctx context.Context, key string) error {
 }
 
 // AccessPath returns the container-internal path for a storage key.
-func (p *Provider) AccessPath(key string) string {
+func (*Provider) AccessPath(key string) string {
 	_, sub := splitRoutingKey(key)
 	return filepath.Join("/data", containerMediaRoot, sub)
 }
@@ -84,7 +85,7 @@ func (p *Provider) OpenContainerFile(ctx context.Context, botID, containerPath s
 	}
 	subPath := containerPath[len(dataPrefix):]
 	if subPath == "" || strings.Contains(subPath, "..") {
-		return nil, fmt.Errorf("invalid container path")
+		return nil, errors.New("invalid container path")
 	}
 	client, err := p.clients.MCPClient(ctx, botID)
 	if err != nil {

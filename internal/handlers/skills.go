@@ -48,7 +48,7 @@ type skillsOpResponse struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/skills [get]
+// @Router /bots/{bot_id}/container/skills [get].
 func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -73,7 +73,7 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/skills [post]
+// @Router /bots/{bot_id}/container/skills [post].
 func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -120,7 +120,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/skills [delete]
+// @Router /bots/{bot_id}/container/skills [delete].
 func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {

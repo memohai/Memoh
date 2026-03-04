@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/memohai/acgo"
 	"github.com/memohai/acgo/socktainer"
@@ -97,7 +96,7 @@ func (s *AppleService) Close() error {
 // Images
 // ---------------------------------------------------------------------------
 
-func (s *AppleService) PullImage(ctx context.Context, ref string, opts *PullImageOptions) (ImageInfo, error) {
+func (s *AppleService) PullImage(ctx context.Context, ref string, _ *PullImageOptions) (ImageInfo, error) {
 	if ref == "" {
 		return ImageInfo{}, ErrInvalidArgument
 	}
@@ -140,7 +139,7 @@ func (s *AppleService) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	return out, nil
 }
 
-func (s *AppleService) DeleteImage(ctx context.Context, ref string, opts *DeleteImageOptions) error {
+func (s *AppleService) DeleteImage(ctx context.Context, ref string, _ *DeleteImageOptions) error {
 	if ref == "" {
 		return ErrInvalidArgument
 	}
@@ -255,7 +254,7 @@ func (s *AppleService) ListContainersByLabel(ctx context.Context, key, value str
 // Task / process lifecycle
 // ---------------------------------------------------------------------------
 
-func (s *AppleService) StartContainer(ctx context.Context, containerID string, opts *StartTaskOptions) error {
+func (s *AppleService) StartContainer(ctx context.Context, containerID string, _ *StartTaskOptions) error {
 	if containerID == "" {
 		return ErrInvalidArgument
 	}
@@ -287,7 +286,7 @@ func (s *AppleService) StopContainer(ctx context.Context, containerID string, op
 	var stopOpts []acgo.StopOpt
 	stopOpts = append(stopOpts, acgo.WithStopTimeout(timeout))
 	if opts != nil && opts.Signal != 0 {
-		stopOpts = append(stopOpts, acgo.WithStopSignal(syscall.Signal(opts.Signal).String()))
+		stopOpts = append(stopOpts, acgo.WithStopSignal(opts.Signal.String()))
 	}
 	if err := ctr.Stop(ctx, stopOpts...); err != nil && opts != nil && opts.Force {
 		return ctr.Kill(ctx)
@@ -295,7 +294,7 @@ func (s *AppleService) StopContainer(ctx context.Context, containerID string, op
 	return nil
 }
 
-func (s *AppleService) DeleteTask(context.Context, string, *DeleteTaskOptions) error {
+func (*AppleService) DeleteTask(context.Context, string, *DeleteTaskOptions) error {
 	return nil
 }
 
@@ -355,28 +354,32 @@ func (s *AppleService) ListTasks(ctx context.Context, opts *ListTasksOptions) ([
 // Network (no-op — Apple Container handles networking natively)
 // ---------------------------------------------------------------------------
 
-func (s *AppleService) SetupNetwork(context.Context, NetworkSetupRequest) (NetworkResult, error) {
+func (*AppleService) SetupNetwork(context.Context, NetworkSetupRequest) (NetworkResult, error) {
 	return NetworkResult{}, nil
 }
-func (s *AppleService) RemoveNetwork(context.Context, NetworkSetupRequest) error { return nil }
+func (*AppleService) RemoveNetwork(context.Context, NetworkSetupRequest) error { return nil }
 
 // ---------------------------------------------------------------------------
 // Snapshots (not supported on Apple Container)
 // ---------------------------------------------------------------------------
 
-func (s *AppleService) CommitSnapshot(context.Context, string, string, string) error {
+func (*AppleService) CommitSnapshot(context.Context, string, string, string) error {
 	return ErrNotSupported
 }
-func (s *AppleService) ListSnapshots(context.Context, string) ([]SnapshotInfo, error) {
+
+func (*AppleService) ListSnapshots(context.Context, string) ([]SnapshotInfo, error) {
 	return nil, ErrNotSupported
 }
-func (s *AppleService) PrepareSnapshot(context.Context, string, string, string) error {
+
+func (*AppleService) PrepareSnapshot(context.Context, string, string, string) error {
 	return ErrNotSupported
 }
-func (s *AppleService) CreateContainerFromSnapshot(context.Context, CreateContainerRequest) (ContainerInfo, error) {
+
+func (*AppleService) CreateContainerFromSnapshot(context.Context, CreateContainerRequest) (ContainerInfo, error) {
 	return ContainerInfo{}, ErrNotSupported
 }
-func (s *AppleService) SnapshotMounts(context.Context, string, string) ([]MountInfo, error) {
+
+func (*AppleService) SnapshotMounts(context.Context, string, string) ([]MountInfo, error) {
 	return nil, ErrNotSupported
 }
 

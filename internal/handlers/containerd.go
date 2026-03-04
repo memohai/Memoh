@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -34,7 +33,6 @@ type ContainerdHandler struct {
 	containerBackend string
 	logger           *slog.Logger
 	toolGateway      *mcp.ToolGatewayService
-	mcpMu            sync.Mutex
 	mcpSess          map[string]*mcpSession
 	mcpStdioMu       sync.Mutex
 	mcpStdioSess     map[string]*mcpStdioSession
@@ -150,7 +148,7 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 // @Success 200 {object} CreateContainerResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container [post]
+// @Router /bots/{bot_id}/container [post].
 func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -295,7 +293,7 @@ func (h *ContainerdHandler) botContainerID(ctx context.Context, botID string) (s
 // @Success 200 {object} GetContainerResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container [get]
+// @Router /bots/{bot_id}/container [get].
 func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -360,7 +358,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 // @Success 204
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container [delete]
+// @Router /bots/{bot_id}/container [delete].
 func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -379,7 +377,7 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 // @Success 200 {object} object
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/start [post]
+// @Router /bots/{bot_id}/container/start [post].
 func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -411,7 +409,7 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 // @Success 200 {object} object
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/stop [post]
+// @Router /bots/{bot_id}/container/stop [post].
 func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -451,7 +449,7 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 501 {object} ErrorResponse "Snapshots currently not supported on this backend"
-// @Router /bots/{bot_id}/container/snapshots [post]
+// @Router /bots/{bot_id}/container/snapshots [post].
 func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	if h.containerBackend == "apple" {
 		return echo.NewHTTPError(http.StatusNotImplemented, "snapshots currently not supported on Apple Container backend")
@@ -490,7 +488,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 // @Param snapshotter query string false "Snapshotter name"
 // @Success 200 {object} ListSnapshotsResponse
 // @Failure 501 {object} ErrorResponse "Snapshots currently not supported on this backend"
-// @Router /bots/{bot_id}/container/snapshots [get]
+// @Router /bots/{bot_id}/container/snapshots [get].
 func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	if h.containerBackend == "apple" {
 		return echo.NewHTTPError(http.StatusNotImplemented, "snapshots currently not supported on Apple Container backend")
@@ -658,7 +656,7 @@ func (h *ContainerdHandler) requireBotAccess(c echo.Context) (string, error) {
 	return botID, nil
 }
 
-func (h *ContainerdHandler) requireChannelIdentityID(c echo.Context) (string, error) {
+func (*ContainerdHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }
 
@@ -689,7 +687,7 @@ func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string)
 	containerID := mcp.ContainerPrefix + botID
 
 	if h.manager == nil {
-		return fmt.Errorf("manager not configured")
+		return errors.New("manager not configured")
 	}
 
 	if err := h.manager.Start(ctx, botID); err != nil {

@@ -19,9 +19,10 @@ import (
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
-	"github.com/memohai/memoh/internal/config"
 	"github.com/opencontainers/image-spec/identity"
 	"github.com/opencontainers/runtime-spec/specs-go"
+
+	"github.com/memohai/memoh/internal/config"
 )
 
 var (
@@ -222,7 +223,7 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 	if err != nil {
 		return ContainerInfo{}, err
 	}
-	defer done(ctx)
+	defer func() { _ = done(ctx) }()
 	image, err := s.getImageWithFallback(ctx, req.ImageRef)
 	if err != nil {
 		pullOpts := &PullImageOptions{
@@ -288,13 +289,13 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 	return toContainerInfo(ctx, ctrObj)
 }
 
-func (s *DefaultService) snapshotParentFromLayers(ctx context.Context, image containerd.Image) (string, error) {
+func (*DefaultService) snapshotParentFromLayers(ctx context.Context, image containerd.Image) (string, error) {
 	diffIDs, err := image.RootFS(ctx)
 	if err != nil {
 		return "", fmt.Errorf("read image rootfs: %w", err)
 	}
 	if len(diffIDs) == 0 {
-		return "", fmt.Errorf("image has no layers")
+		return "", errors.New("image has no layers")
 	}
 	chainIDs := identity.ChainIDs(diffIDs)
 	return chainIDs[len(chainIDs)-1].String(), nil
@@ -422,7 +423,7 @@ func (s *DefaultService) DeleteContainer(ctx context.Context, id string, opts *D
 	return container.Delete(ctx, deleteOpts...)
 }
 
-func (s *DefaultService) StartContainer(ctx context.Context, containerID string, opts *StartTaskOptions) error {
+func (s *DefaultService) StartContainer(ctx context.Context, containerID string, _ *StartTaskOptions) error {
 	if containerID == "" {
 		return ErrInvalidArgument
 	}
@@ -615,7 +616,7 @@ func (s *DefaultService) ListSnapshots(ctx context.Context, snapshotter string) 
 	}
 	ctx = s.withNamespace(ctx)
 	var infos []SnapshotInfo
-	if err := s.client.SnapshotService(snapshotter).Walk(ctx, func(ctx context.Context, info snapshots.Info) error {
+	if err := s.client.SnapshotService(snapshotter).Walk(ctx, func(_ context.Context, info snapshots.Info) error {
 		infos = append(infos, SnapshotInfo{
 			Name:    info.Name,
 			Parent:  info.Parent,

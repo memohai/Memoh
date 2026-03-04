@@ -3,8 +3,10 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -13,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/config"
-
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
@@ -55,7 +56,7 @@ type BotSnapshotData struct {
 
 func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, source string) (*SnapshotCreateInfo, error) {
 	if m.db == nil || m.queries == nil {
-		return nil, fmt.Errorf("db is not configured")
+		return nil, errors.New("db is not configured")
 	}
 	if err := validateBotID(botID); err != nil {
 		return nil, err
@@ -128,7 +129,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 
 func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo, error) {
 	if m.db == nil || m.queries == nil {
-		return nil, fmt.Errorf("db is not configured")
+		return nil, errors.New("db is not configured")
 	}
 	if err := validateBotID(botID); err != nil {
 		return nil, err
@@ -254,7 +255,7 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 
 func (m *Manager) ListVersions(ctx context.Context, botID string) ([]VersionInfo, error) {
 	if m.db == nil || m.queries == nil {
-		return nil, fmt.Errorf("db is not configured")
+		return nil, errors.New("db is not configured")
 	}
 	if err := validateBotID(botID); err != nil {
 		return nil, err
@@ -284,10 +285,13 @@ func (m *Manager) ListVersions(ctx context.Context, botID string) ([]VersionInfo
 
 func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int) error {
 	if m.db == nil || m.queries == nil {
-		return fmt.Errorf("db is not configured")
+		return errors.New("db is not configured")
 	}
 	if err := validateBotID(botID); err != nil {
 		return err
+	}
+	if version < 1 || version > math.MaxInt32 {
+		return errors.New("version out of range")
 	}
 
 	containerID := m.containerID(botID)
@@ -327,10 +331,13 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 
 func (m *Manager) VersionSnapshotName(ctx context.Context, botID string, version int) (string, error) {
 	if m.db == nil || m.queries == nil {
-		return "", fmt.Errorf("db is not configured")
+		return "", errors.New("db is not configured")
 	}
 	if err := validateBotID(botID); err != nil {
 		return "", err
+	}
+	if version < 1 || version > math.MaxInt32 {
+		return "", errors.New("version out of range")
 	}
 
 	containerID := m.containerID(botID)
@@ -419,7 +426,7 @@ func (m *Manager) safeStopTask(ctx context.Context, containerID string) error {
 	return err
 }
 
-func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, runtime, imageRef string) (pgtype.UUID, error) {
+func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, _ string, imageRef string) (pgtype.UUID, error) {
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return pgtype.UUID{}, err
@@ -459,7 +466,7 @@ func (m *Manager) recordSnapshotVersion(ctx context.Context, containerID, runtim
 	if err != nil {
 		return "", 0, time.Time{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	qtx := m.queries.WithTx(tx)
 

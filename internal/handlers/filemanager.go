@@ -78,7 +78,7 @@ func resolveContainerPath(rawPath string) (string, error) {
 		cleaned = "/"
 	}
 	if strings.HasPrefix(cleaned, "..") {
-		return "", fmt.Errorf("invalid path")
+		return "", errors.New("invalid path")
 	}
 	return cleaned, nil
 }
@@ -129,7 +129,7 @@ func fsHTTPError(err error) *echo.HTTPError {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/fs [get]
+// @Router /bots/{bot_id}/container/fs [get].
 func (h *ContainerdHandler) FSStat(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -176,7 +176,7 @@ func (h *ContainerdHandler) FSStat(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/fs/list [get]
+// @Router /bots/{bot_id}/container/fs/list [get].
 func (h *ContainerdHandler) FSList(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -234,7 +234,7 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/fs/read [get]
+// @Router /bots/{bot_id}/container/fs/read [get].
 func (h *ContainerdHandler) FSRead(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -279,7 +279,7 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/fs/download [get]
+// @Router /bots/{bot_id}/container/fs/download [get].
 func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -305,7 +305,7 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 	if err != nil {
 		return fsHTTPError(err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
@@ -332,7 +332,7 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/fs/write [post]
+// @Router /bots/{bot_id}/container/fs/write [post].
 func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -376,7 +376,7 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/fs/upload [post]
+// @Router /bots/{bot_id}/container/fs/upload [post].
 func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -406,7 +406,7 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	written, err := client.WriteRaw(ctx, containerPath, src)
 	if err != nil {
@@ -429,7 +429,7 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/fs/mkdir [post]
+// @Router /bots/{bot_id}/container/fs/mkdir [post].
 func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -472,7 +472,7 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/fs/delete [post]
+// @Router /bots/{bot_id}/container/fs/delete [post].
 func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -519,7 +519,7 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/fs/rename [post]
+// @Router /bots/{bot_id}/container/fs/rename [post].
 func (h *ContainerdHandler) FSRename(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {

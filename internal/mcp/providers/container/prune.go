@@ -1,10 +1,6 @@
 package container
 
 import (
-	"strconv"
-	"strings"
-	"unicode/utf8"
-
 	textprune "github.com/memohai/memoh/internal/prune"
 )
 
@@ -39,60 +35,4 @@ func pruneToolOutputText(text, label string) string {
 		TailLines: toolOutputTailLines,
 		Marker:    textprune.DefaultMarker,
 	})
-}
-
-// pruneReadOutput prunes read tool output.
-func pruneReadOutput(text string) string {
-	return textprune.PruneWithEdges(text, "read output", textprune.Config{
-		MaxBytes:  readMaxBytes,
-		MaxLines:  readMaxLines,
-		HeadBytes: readHeadBytes,
-		TailBytes: readTailBytes,
-		HeadLines: readHeadLines,
-		TailLines: readTailLines,
-		Marker:    textprune.DefaultMarker,
-	})
-}
-
-// truncateLine truncates a line to maxLength runes (not bytes) and adds ellipsis if truncated.
-func truncateLine(line string, maxLength int) string {
-	if maxLength <= 0 {
-		return line
-	}
-
-	// Count runes, not bytes.
-	runeCount := utf8.RuneCountInString(line)
-	if runeCount <= maxLength {
-		return line
-	}
-
-	// Find the byte position where we should cut (at maxLength runes).
-	bytePos := 0
-	runes := 0
-	for bytePos < len(line) && runes < maxLength {
-		_, size := utf8.DecodeRuneInString(line[bytePos:])
-		bytePos += size
-		runes++
-	}
-
-	return line[:bytePos] + "..."
-}
-
-// formatTruncatedLines formats a list of line numbers for display, collapsing consecutive numbers.
-func formatTruncatedLines(lines []int) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	if len(lines) == 1 {
-		return strconv.Itoa(lines[0])
-	}
-	if len(lines) <= 3 {
-		parts := make([]string, len(lines))
-		for i, n := range lines {
-			parts[i] = strconv.Itoa(n)
-		}
-		return strings.Join(parts, ", ")
-	}
-	// For many truncated lines, show count and examples.
-	return strconv.Itoa(lines[0]) + ", " + strconv.Itoa(lines[1]) + ", " + strconv.Itoa(lines[2]) + "... (" + strconv.Itoa(len(lines)) + " total)"
 }

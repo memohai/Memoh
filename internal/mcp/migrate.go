@@ -91,11 +91,11 @@ func (m *Manager) migrateBindMountData(ctx context.Context, botID string) {
 }
 
 func copyFileToContainer(ctx context.Context, client *mcpclient.Client, hostPath, containerRelPath string) error {
-	f, err := os.Open(hostPath)
+	f, err := os.Open(hostPath) //nolint:gosec // G304: hostPath is an operator-configured migration asset path, not user input
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	containerRelPath = strings.ReplaceAll(containerRelPath, string(filepath.Separator), "/")
 	_, err = client.WriteRaw(ctx, containerRelPath, f)

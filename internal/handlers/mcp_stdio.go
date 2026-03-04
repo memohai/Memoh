@@ -167,7 +167,7 @@ func (s *mcpSession) callRaw(ctx context.Context, req mcptools.JSONRPCRequest) (
 	}
 	target := sdkIDKey(targetID)
 	if target == "" {
-		return nil, fmt.Errorf("missing request id")
+		return nil, errors.New("missing request id")
 	}
 
 	respCh := make(chan *sdkjsonrpc.Response, 1)
@@ -218,7 +218,8 @@ func sdkResponsePayload(resp *sdkjsonrpc.Response) (map[string]any, error) {
 	if resp.Error != nil {
 		code := int64(-32603)
 		message := strings.TrimSpace(resp.Error.Error())
-		if wireErr, ok := resp.Error.(*sdkjsonrpc.Error); ok {
+		wireErr := &sdkjsonrpc.Error{}
+		if errors.As(resp.Error, &wireErr) {
 			code = wireErr.Code
 			message = strings.TrimSpace(wireErr.Message)
 		}
@@ -377,11 +378,11 @@ func (s *mcpSession) invokeCall(ctx context.Context, req *sdkjsonrpc.Request) (*
 		return nil, io.EOF
 	}
 	if req == nil || !req.ID.IsValid() {
-		return nil, fmt.Errorf("missing request id")
+		return nil, errors.New("missing request id")
 	}
 	key := sdkIDKey(req.ID)
 	if key == "" {
-		return nil, fmt.Errorf("invalid request id")
+		return nil, errors.New("invalid request id")
 	}
 
 	respCh := make(chan *sdkjsonrpc.Response, 1)
@@ -425,7 +426,7 @@ func (s *mcpSession) removePending(key string) {
 
 func parseRawJSONRPCID(raw json.RawMessage) (sdkjsonrpc.ID, error) {
 	if len(raw) == 0 {
-		return sdkjsonrpc.ID{}, fmt.Errorf("missing request id")
+		return sdkjsonrpc.ID{}, errors.New("missing request id")
 	}
 	var idValue any
 	if err := json.Unmarshal(raw, &idValue); err != nil {
@@ -436,7 +437,7 @@ func parseRawJSONRPCID(raw json.RawMessage) (sdkjsonrpc.ID, error) {
 		return sdkjsonrpc.ID{}, err
 	}
 	if !id.IsValid() {
-		return sdkjsonrpc.ID{}, fmt.Errorf("missing request id")
+		return sdkjsonrpc.ID{}, errors.New("missing request id")
 	}
 	return id, nil
 }
@@ -573,7 +574,7 @@ type mcpStdioSession struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp-stdio [post]
+// @Router /bots/{bot_id}/mcp-stdio [post].
 func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -639,7 +640,7 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp-stdio/{connection_id} [post]
+// @Router /bots/{bot_id}/mcp-stdio/{connection_id} [post].
 func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -742,7 +743,7 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 		for {
 			output, err := execStream.Recv()
 			if err != nil {
-				if err != io.EOF {
+				if !errors.Is(err, io.EOF) {
 					h.logger.Debug("exec stream recv done", slog.Any("error", err))
 				}
 				_ = stdoutW.Close()
