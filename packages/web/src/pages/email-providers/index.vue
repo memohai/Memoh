@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, provide, watch, reactive } from 'vue'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { useQuery} from '@pinia/colada'
 import {
   Button,
   ScrollArea,
@@ -29,8 +29,6 @@ const { data: providerData } = useQuery({
     return data
   },
 })
-const queryCache = useQueryCache()
-
 const curProvider = ref<EmailProviderResponse>()
 provide('curEmailProvider', curProvider)
 

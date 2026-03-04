@@ -610,7 +610,7 @@
 
   <!-- Export dialog -->
   <Dialog v-model:open="exportDialogOpen">
-    <DialogContent class="sm:max-w-lg w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] sm:w-auto">
+    <DialogContent>
       <DialogHeader>
         <DialogTitle>{{ $t('common.export') }} mcpServers</DialogTitle>
       </DialogHeader>

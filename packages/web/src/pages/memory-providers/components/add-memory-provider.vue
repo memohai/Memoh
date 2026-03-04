@@ -3,7 +3,7 @@
     <DialogTrigger as-child>
       <Button
         variant="outline"
-        class="w-full"
+        class="w-full mb-4 text-muted-foreground"
       >
         <FontAwesomeIcon
           :icon="['fas', 'plus']"

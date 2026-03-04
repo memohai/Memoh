@@ -14,6 +14,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  Button
 } from '@memoh/ui'
 import { getMemoryProviders } from '@memoh/sdk'
 import type { MemoryprovidersGetResponse } from '@memoh/sdk'
@@ -128,8 +129,18 @@ const openStatus = reactive({ addOpen: false })
         </EmptyHeader>
         <EmptyTitle>{{ $t('memoryProvider.emptyTitle') }}</EmptyTitle>
         <EmptyDescription>{{ $t('memoryProvider.emptyDescription') }}</EmptyDescription>
-        <EmptyContent>
-          <AddMemoryProvider v-model:open="openStatus.addOpen" />
+        <EmptyContent>        
+          <Button
+            variant="outline"
+            class="w-full"
+            @click="openStatus.addOpen=true"
+          >
+            <FontAwesomeIcon
+              :icon="['fas', 'plus']"
+              class="mr-2"
+            />
+            {{ $t('memoryProvider.add') }}
+          </Button>
         </EmptyContent>
       </Empty>
     </template>

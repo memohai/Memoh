@@ -111,9 +111,9 @@
                 <Toggle
                   :class="`py-4 border border-transparent ${activeTab === tab.value ? 'border-inherit' : ''}`"
                   :model-value="isActive(tab.value as string).value"
-                  @update:model-value="(isSelect:boolean) => {
+                  @update:model-value="(isSelect: boolean) => {
                     if (isSelect) {
-                      activeTab=tab.value
+                      activeTab = tab.value
                     }
                   }"
                 >
@@ -127,36 +127,14 @@
         <template #sidebar-footer />
 
         <template #detail>
-          <template v-if="activeTab === 'files'">
-            <div class="h-full">
-              <KeepAlive>
-                <BotFiles
-                  :bot-id="botId"
-                  :bot-type="bot?.type"
-                />
-              </KeepAlive>
-            </div>
-          </template>
-          <template v-else-if="activeTab === 'mcp'">
-            <div class="h-full relative">
-              <KeepAlive>
-                <BotMcp
-                  :bot-id="botId"
-                  :bot-type="bot?.type"
-                />
-              </KeepAlive>
-            </div>
-          </template>
-          <ScrollArea
-            v-else
+          <ScrollArea         
             class="max-h-full h-full"
           >
             <section class="p-4">
               <KeepAlive>
                 <component
                   :is="activeComponent?.component"
-                  :bot-id="botId"
-                  :bot-type="bot?.type"
+                  v-bind="activeComponent?.params"
                 />
               </KeepAlive>
             </section>
@@ -241,7 +219,7 @@ import {
   SidebarMenuItem,
   Toggle
 } from '@memoh/ui'
-import { computed, ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted, toValue } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
@@ -250,7 +228,7 @@ import {
   getBotsById, putBotsById,
   getBotsByIdChecks,
   getBotsByBotIdContainer,
-  getBotsByBotIdContainerSnapshots, 
+  getBotsByBotIdContainerSnapshots,
 } from '@memoh/sdk'
 import type {
   BotsBotCheck, HandlersGetContainerResponse,
@@ -276,7 +254,6 @@ import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
-
 type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
@@ -284,35 +261,6 @@ type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: 
 const route = useRoute()
 const { t } = useI18n()
 const botId = computed(() => route.params.botId as string)
-
-const tabList = [
-  { value: 'overview', label: 'bots.tabs.overview',component: BotOverview },
-  { value: 'memory', label: 'bots.tabs.memory',component:BotMemory },
-  { value: 'channels', label: 'bots.tabs.channels', component: BotChannels },
-  { value: 'email', label: 'bots.tabs.email', component: BotEmail },
-  { value: 'container', label: 'bots.tabs.container', component: BotContainer },
-  { value: 'files', label: 'bots.tabs.files', component: BotFiles },
-  { value: 'mcp', label: 'bots.tabs.mcp' ,component: BotMcp },
-  { value: 'subagents', label: 'bots.tabs.subagents',component: BotSubagents },
-  { value: 'heartbeat', label: 'bots.tabs.heartbeat',component: BotHeartbeat },
-  { value: 'schedule', label: 'bots.tabs.schedule', component: BotSchedule },
-  { value: 'history', label: 'bots.tabs.history',component: BotHistory },
-  { value: 'skills', label: 'bots.tabs.skills',component: BotSkills },
-  { value: 'settings', label: 'bots.tabs.settings',component: BotSettings }
-]
-
-const isActive = (name: string) => computed(() => {
-  return activeTab.value===name
-})
-
-const activeComponent = computed(() => {
-  return tabList.find(tab=>tab.value===activeTab.value)
-})
-
-const capabilitiesStore = useCapabilitiesStore()
-onMounted(() => {
-  void capabilitiesStore.load()
-})
 
 const { data: bot } = useQuery({
   key: () => ['bot', botId.value],
@@ -322,6 +270,42 @@ const { data: bot } = useQuery({
   },
   enabled: () => !!botId.value,
 })
+const tabList = computed(() => {
+  const bot_id = toValue(botId)
+  return [
+    {
+      value: 'overview', label: 'bots.tabs.overview', component: BotOverview, params: {}
+    },
+    { value: 'memory', label: 'bots.tabs.memory', component: BotMemory, params: { 'bot-id': bot_id } },
+    { value: 'channels', label: 'bots.tabs.channels', component: BotChannels, params: { 'bot-id': bot_id } },
+    { value: 'email', label: 'bots.tabs.email', component: BotEmail, params: { 'bot-id': bot_id } },
+    { value: 'container', label: 'bots.tabs.container', component: BotContainer, params: {} },
+    { value: 'files', label: 'bots.tabs.files', component: BotFiles, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
+    { value: 'mcp', label: 'bots.tabs.mcp', component: BotMcp, params: { 'bot-id': bot_id } },
+    { value: 'subagents', label: 'bots.tabs.subagents', component: BotSubagents, params: { 'bot-id': bot_id } },
+    { value: 'heartbeat', label: 'bots.tabs.heartbeat', component: BotHeartbeat, params: { 'bot-id': bot_id } },
+    { value: 'schedule', label: 'bots.tabs.schedule', component: BotSchedule, params: { 'bot-id': bot_id } },
+    { value: 'history', label: 'bots.tabs.history', component: BotHistory, params: { 'bot-id': bot_id } },
+    { value: 'skills', label: 'bots.tabs.skills', component: BotSkills, params: { 'bot-id': bot_id } },
+    { value: 'settings', label: 'bots.tabs.settings', component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } }
+  ]
+})
+
+
+const isActive = (name: string) => computed(() => {
+  return activeTab.value === name
+})
+
+const activeComponent = computed(() => {
+  return tabList.value.find(tab => tab.value === activeTab.value)
+})
+
+const capabilitiesStore = useCapabilitiesStore()
+onMounted(() => {
+  void capabilitiesStore.load()
+})
+
+
 
 const queryCache = useQueryCache()
 const { mutateAsync: updateBot, isLoading: updateBotLoading } = useMutation({
