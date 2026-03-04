@@ -18,7 +18,7 @@ COPY packages/config/ ./packages/config/
 COPY packages/agent/ ./packages/agent/
 COPY agent/ ./agent/
 
-RUN cd agent && bun run build --external jsdom
+RUN cd agent && bun run build
 
 FROM oven/bun:1-alpine
 

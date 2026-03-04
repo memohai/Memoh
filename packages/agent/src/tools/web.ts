@@ -1,7 +1,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { Readability } from '@mozilla/readability'
-import { JSDOM } from 'jsdom'
+import { parseHTML } from 'linkedom'
 import TurndownService from 'turndown'
 
 const turndownService = new TurndownService()
@@ -76,8 +76,8 @@ export const getWebTools = () => {
 
           case 'markdown': {
             try {
-              const dom = new JSDOM(content, { url })
-              const reader = new Readability(dom.window.document)
+              const { document } = parseHTML(content)
+              const reader = new Readability(document as unknown as Document)
               const article = reader.parse()
 
               if (!article || !article.content) {

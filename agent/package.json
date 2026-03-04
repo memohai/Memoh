@@ -7,17 +7,15 @@
     "start": "pnpm run build && bun run dist/index.js"
   },
   "dependencies": {
-    "@memoh/config": "workspace:*",
-    "@memoh/agent": "workspace:*",
     "@elysiajs/bearer": "^1.4.2",
     "@elysiajs/cors": "^1.4.1",
+    "@memoh/agent": "workspace:*",
+    "@memoh/config": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@mozilla/readability": "^0.6.0",
-    "@types/jsdom": "^27.0.0",
     "@types/turndown": "^5.0.6",
     "ai": "^6.0.25",
     "elysia": "latest",
-    "jsdom": "^27.4.0",
     "toml": "^3.0.0",
     "turndown": "^7.2.2",
     "zod": "^4.3.5"
