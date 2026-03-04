@@ -9,8 +9,6 @@ output:
   show-stats: false
 
 issues:
-  new: true
-  whole-files: false
   max-issues-per-linter: 0
   max-same-issues: 0
 
