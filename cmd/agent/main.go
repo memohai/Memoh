@@ -541,9 +541,9 @@ func startEmailManager(lc fx.Lifecycle, emailManager *emailpkg.Manager) {
 			}()
 			return nil
 		},
-		OnStop: func(_ context.Context) error {
+		OnStop: func(stopCtx context.Context) error {
 			cancel()
-			emailManager.Stop()
+			emailManager.Stop(stopCtx)
 			return nil
 		},
 	})

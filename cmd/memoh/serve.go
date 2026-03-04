@@ -606,7 +606,7 @@ func startEmailManager(lc fx.Lifecycle, emailManager *emailpkg.Manager) {
 			}()
 			return nil
 		},
-		OnStop: func(_ context.Context) error { cancel(); emailManager.Stop(); return nil },
+		OnStop: func(stopCtx context.Context) error { cancel(); emailManager.Stop(stopCtx); return nil },
 	})
 }
 func ensureAdminUser(ctx context.Context, log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) error {
