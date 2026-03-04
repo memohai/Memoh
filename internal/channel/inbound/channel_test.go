@@ -542,14 +542,8 @@ func TestChannelInboundProcessorGroupPassiveSync(t *testing.T) {
 	if len(sender.sent) != 0 {
 		t.Fatalf("group passive sync should not send reply: %+v", sender.sent)
 	}
-	if len(chatSvc.persisted) != 1 {
-		t.Fatalf("expected 1 passive persisted message, got: %d", len(chatSvc.persisted))
-	}
-	if chatSvc.persisted[0].Role != "user" {
-		t.Fatalf("expected persisted role user, got: %s", chatSvc.persisted[0].Role)
-	}
-	if chatSvc.persisted[0].BotID != "bot-1" {
-		t.Fatalf("expected passive persisted bot_id bot-1, got: %s", chatSvc.persisted[0].BotID)
+	if len(chatSvc.persisted) != 0 {
+		t.Fatalf("group passive sync should not persist to messages directly, got: %d", len(chatSvc.persisted))
 	}
 }
 

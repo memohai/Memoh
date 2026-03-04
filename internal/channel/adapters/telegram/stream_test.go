@@ -183,8 +183,6 @@ func TestEditStreamMessage_NoEditWhenThrottled(t *testing.T) {
 }
 
 func TestEditStreamMessage_429SetsBackoffAndReturnsNil(t *testing.T) {
-	t.Parallel()
-
 	adapter := NewTelegramAdapter(nil)
 	before := time.Now().Add(-time.Minute)
 	s := &telegramOutboundStream{
@@ -231,8 +229,6 @@ func TestEditStreamMessage_429SetsBackoffAndReturnsNil(t *testing.T) {
 }
 
 func TestEditStreamMessageFinal_Success(t *testing.T) {
-	t.Parallel()
-
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
 		adapter:      adapter,
@@ -343,8 +339,6 @@ func TestSendDraft_EmptyTextSkip(t *testing.T) {
 }
 
 func TestSendDraft_Success(t *testing.T) {
-	t.Parallel()
-
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
 		adapter:       adapter,
@@ -391,8 +385,6 @@ func TestSendDraft_Success(t *testing.T) {
 }
 
 func TestSendDraft_429Backoff(t *testing.T) {
-	t.Parallel()
-
 	adapter := NewTelegramAdapter(nil)
 	before := time.Now().Add(-time.Minute)
 	s := &telegramOutboundStream{
@@ -435,8 +427,6 @@ func TestSendDraft_429Backoff(t *testing.T) {
 }
 
 func TestDraftMode_DeltaUsesSendDraft(t *testing.T) {
-	t.Parallel()
-
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
 		adapter:       adapter,
@@ -500,8 +490,6 @@ func TestDraftMode_PhaseEndTextIsNoOp(t *testing.T) {
 }
 
 func TestDraftMode_ToolCallStartSendsPermanentMessage(t *testing.T) {
-	t.Parallel()
-
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
 		adapter:       adapter,
@@ -557,8 +545,6 @@ func TestDraftMode_ToolCallStartSendsPermanentMessage(t *testing.T) {
 }
 
 func TestDraftMode_FinalEmptyBufferSkipsDuplicate(t *testing.T) {
-	t.Parallel()
-
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
 		adapter:       adapter,
@@ -602,8 +588,6 @@ func TestDraftMode_FinalEmptyBufferSkipsDuplicate(t *testing.T) {
 // responses), only the first one sends the buffer text as a permanent message.
 // Subsequent finals find the buffer empty and skip sending.
 func TestDraftMode_MultipleFinalEventsOnlyOneSend(t *testing.T) {
-	t.Parallel()
-
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
 		adapter:       adapter,

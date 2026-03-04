@@ -25,6 +25,9 @@ import (
 const telegramMaxMessageLength = 4096
 const telegramMediaGroupCollectWindow = 700 * time.Millisecond
 
+var telegramBotLogger = newSlogBotLogger(nil)
+var telegramLoggerInitOnce sync.Once
+
 type telegramMediaGroupBuffer struct {
 	messages []*tgbotapi.Message
 	timer    *time.Timer
@@ -54,8 +57,15 @@ func NewTelegramAdapter(log *slog.Logger) *TelegramAdapter {
 		bots:          make(map[string]*tgbotapi.BotAPI),
 		fileEndpoints: make(map[string]string),
 	}
-	_ = tgbotapi.SetLogger(&slogBotLogger{log: adapter.logger})
+	initTelegramBotLogger(adapter.logger)
 	return adapter
+}
+
+func initTelegramBotLogger(log *slog.Logger) {
+	telegramLoggerInitOnce.Do(func() {
+		_ = tgbotapi.SetLogger(telegramBotLogger)
+	})
+	telegramBotLogger.SetLogger(log)
 }
 
 // SetAssetOpener injects the media asset reader for storage-first file delivery.
@@ -105,7 +115,23 @@ func (a *TelegramAdapter) getFileDirectURL(bot *tgbotapi.BotAPI, fileID string) 
 	if endpoint == "" {
 		endpoint = tgbotapi.FileEndpoint
 	}
-	return fmt.Sprintf(endpoint, bot.Token, file.FilePath), nil
+	return formatTelegramFileURL(endpoint, bot.Token, file.FilePath), nil
+}
+
+func formatTelegramFileURL(endpoint, token, filePath string) string {
+	placeholderCount := strings.Count(endpoint, "%s")
+	switch {
+	case placeholderCount >= 2:
+		return fmt.Sprintf(endpoint, token, filePath)
+	case placeholderCount == 1:
+		return fmt.Sprintf(endpoint, filePath)
+	default:
+		base := strings.TrimRight(strings.TrimSpace(endpoint), "/")
+		if base == "" {
+			return filePath
+		}
+		return base + "/" + strings.TrimLeft(filePath, "/")
+	}
 }
 
 // Type returns the Telegram channel type.
