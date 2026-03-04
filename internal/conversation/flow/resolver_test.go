@@ -291,6 +291,7 @@ func TestStreamChat_AllowsLargeSSEDataLines(t *testing.T) {
 		gatewayRequest{},
 		conversation.ChatRequest{},
 		chunkCh,
+		"model-test",
 	)
 	if err != nil {
 		t.Fatalf("streamChat returned error: %v", err)
@@ -328,7 +329,7 @@ func TestStreamChat_RejectsOverLimitSSELine(t *testing.T) {
 	}
 
 	chunkCh := make(chan conversation.StreamChunk, 1)
-	err := resolver.streamChat(context.Background(), gatewayRequest{}, conversation.ChatRequest{}, chunkCh)
+	err := resolver.streamChat(context.Background(), gatewayRequest{}, conversation.ChatRequest{}, chunkCh, "model-test")
 	if err == nil {
 		t.Fatalf("expected streamChat to error on oversized SSE line")
 	}

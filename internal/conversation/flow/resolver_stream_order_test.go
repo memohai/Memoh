@@ -105,7 +105,7 @@ func TestStreamChat_PersistsFinalMessagesBeforeForwardingDoneEvent(t *testing.T)
 
 	streamDone := make(chan error, 1)
 	go func() {
-		streamDone <- r.streamChat(context.Background(), payload, req, chunkCh)
+		streamDone <- r.streamChat(context.Background(), payload, req, chunkCh, "model-test")
 		close(chunkCh)
 	}()
 
