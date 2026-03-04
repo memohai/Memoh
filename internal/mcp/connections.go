@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -14,19 +15,19 @@ import (
 
 // Connection represents a stored MCP connection for a bot.
 type Connection struct {
-	ID            string         `json:"id"`
-	BotID         string         `json:"bot_id"`
-	Name          string         `json:"name"`
-	Type          string         `json:"type"`
-	Config        map[string]any `json:"config"`
-	Active        bool           `json:"is_active"`
-	Status        string         `json:"status"`
+	ID            string           `json:"id"`
+	BotID         string           `json:"bot_id"`
+	Name          string           `json:"name"`
+	Type          string           `json:"type"`
+	Config        map[string]any   `json:"config"`
+	Active        bool             `json:"is_active"`
+	Status        string           `json:"status"`
 	ToolsCache    []ToolDescriptor `json:"tools_cache"`
-	LastProbedAt  *time.Time     `json:"last_probed_at,omitempty"`
-	StatusMessage string         `json:"status_message"`
-	AuthType      string         `json:"auth_type"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	LastProbedAt  *time.Time       `json:"last_probed_at,omitempty"`
+	StatusMessage string           `json:"status_message"`
+	AuthType      string           `json:"auth_type"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
 }
 
 // UpsertRequest accepts standard mcpServers item format.
@@ -90,7 +91,7 @@ func NewConnectionService(log *slog.Logger, queries *sqlc.Queries) *ConnectionSe
 // ListByBot returns all MCP connections for a bot.
 func (s *ConnectionService) ListByBot(ctx context.Context, botID string) ([]Connection, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("mcp queries not configured")
+		return nil, errors.New("mcp queries not configured")
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -129,7 +130,7 @@ func (s *ConnectionService) ListActiveByBot(ctx context.Context, botID string) (
 // Get returns a specific MCP connection for a bot.
 func (s *ConnectionService) Get(ctx context.Context, botID, id string) (Connection, error) {
 	if s.queries == nil {
-		return Connection{}, fmt.Errorf("mcp queries not configured")
+		return Connection{}, errors.New("mcp queries not configured")
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -152,7 +153,7 @@ func (s *ConnectionService) Get(ctx context.Context, botID, id string) (Connecti
 // Create inserts a new MCP connection for a bot.
 func (s *ConnectionService) Create(ctx context.Context, botID string, req UpsertRequest) (Connection, error) {
 	if s.queries == nil {
-		return Connection{}, fmt.Errorf("mcp queries not configured")
+		return Connection{}, errors.New("mcp queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -160,7 +161,7 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Connection{}, fmt.Errorf("name is required")
+		return Connection{}, errors.New("name is required")
 	}
 	mcpType, config, err := inferTypeAndConfig(req)
 	if err != nil {
@@ -195,7 +196,7 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 // Update modifies an existing MCP connection.
 func (s *ConnectionService) Update(ctx context.Context, botID, id string, req UpsertRequest) (Connection, error) {
 	if s.queries == nil {
-		return Connection{}, fmt.Errorf("mcp queries not configured")
+		return Connection{}, errors.New("mcp queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -207,7 +208,7 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Connection{}, fmt.Errorf("name is required")
+		return Connection{}, errors.New("name is required")
 	}
 	mcpType, config, err := inferTypeAndConfig(req)
 	if err != nil {
@@ -246,7 +247,7 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 // Connections not in the input are left untouched.
 func (s *ConnectionService) Import(ctx context.Context, botID string, req ImportRequest) ([]Connection, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("mcp queries not configured")
+		return nil, errors.New("mcp queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -304,7 +305,7 @@ func (s *ConnectionService) ExportByBot(ctx context.Context, botID string) (Expo
 // Delete removes an MCP connection.
 func (s *ConnectionService) Delete(ctx context.Context, botID, id string) error {
 	if s.queries == nil {
-		return fmt.Errorf("mcp queries not configured")
+		return errors.New("mcp queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -323,7 +324,7 @@ func (s *ConnectionService) Delete(ctx context.Context, botID, id string) error 
 // BatchDelete removes multiple MCP connections by IDs. Invalid IDs are skipped; at least one must succeed for no error.
 func (s *ConnectionService) BatchDelete(ctx context.Context, botID string, ids []string) error {
 	if s.queries == nil {
-		return fmt.Errorf("mcp queries not configured")
+		return errors.New("mcp queries not configured")
 	}
 	if len(ids) == 0 {
 		return nil
@@ -383,7 +384,7 @@ func decodeToolsCache(raw []byte) ([]ToolDescriptor, error) {
 // UpdateProbeResult persists the result of a probe operation.
 func (s *ConnectionService) UpdateProbeResult(ctx context.Context, botID, id, status string, tools []ToolDescriptor, message string) error {
 	if s.queries == nil {
-		return fmt.Errorf("mcp queries not configured")
+		return errors.New("mcp queries not configured")
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -426,10 +427,10 @@ func inferTypeAndConfig(req UpsertRequest) (string, map[string]any, error) {
 	hasURL := strings.TrimSpace(req.URL) != ""
 
 	if !hasCommand && !hasURL {
-		return "", nil, fmt.Errorf("command or url is required")
+		return "", nil, errors.New("command or url is required")
 	}
 	if hasCommand && hasURL {
-		return "", nil, fmt.Errorf("command and url are mutually exclusive")
+		return "", nil, errors.New("command and url are mutually exclusive")
 	}
 
 	config := map[string]any{}

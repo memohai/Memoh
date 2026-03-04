@@ -52,7 +52,7 @@ func (h *InboxHandler) Register(e *echo.Echo) {
 // @Success 200 {array} inbox.Item
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/inbox [get]
+// @Router /bots/{bot_id}/inbox [get].
 func (h *InboxHandler) List(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
@@ -91,7 +91,7 @@ func (h *InboxHandler) List(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/inbox/{id} [get]
+// @Router /bots/{bot_id}/inbox/{id} [get].
 func (h *InboxHandler) GetByID(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
@@ -124,7 +124,7 @@ func (h *InboxHandler) GetByID(c echo.Context) error {
 // @Success 201 {object} inbox.Item
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/inbox [post]
+// @Router /bots/{bot_id}/inbox [post].
 func (h *InboxHandler) Create(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
@@ -161,7 +161,7 @@ func (h *InboxHandler) Create(c echo.Context) error {
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/inbox/{id} [delete]
+// @Router /bots/{bot_id}/inbox/{id} [delete].
 func (h *InboxHandler) Delete(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
@@ -197,7 +197,7 @@ type markReadRequest struct {
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/inbox/mark-read [post]
+// @Router /bots/{bot_id}/inbox/mark-read [post].
 func (h *InboxHandler) MarkRead(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
@@ -231,7 +231,7 @@ func (h *InboxHandler) MarkRead(c echo.Context) error {
 // @Success 200 {object} inbox.CountResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/inbox/count [get]
+// @Router /bots/{bot_id}/inbox/count [get].
 func (h *InboxHandler) Count(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {

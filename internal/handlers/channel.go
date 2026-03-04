@@ -38,7 +38,7 @@ func (h *ChannelHandler) Register(e *echo.Echo) {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/me/channels/{platform} [get]
+// @Router /users/me/channels/{platform} [get].
 func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -67,7 +67,7 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 // @Success 200 {object} channel.ChannelIdentityBinding
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /users/me/channels/{platform} [put]
+// @Router /users/me/channels/{platform} [put].
 func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -107,7 +107,7 @@ type ChannelMeta struct {
 // @Tags channel
 // @Success 200 {array} ChannelMeta
 // @Failure 500 {object} ErrorResponse
-// @Router /channels [get]
+// @Router /channels [get].
 func (h *ChannelHandler) ListChannels(c echo.Context) error {
 	descs := h.registry.ListDescriptors()
 	items := make([]ChannelMeta, 0, len(descs))
@@ -136,7 +136,7 @@ func (h *ChannelHandler) ListChannels(c echo.Context) error {
 // @Success 200 {object} ChannelMeta
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /channels/{platform} [get]
+// @Router /channels/{platform} [get].
 func (h *ChannelHandler) GetChannel(c echo.Context) error {
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
@@ -158,6 +158,6 @@ func (h *ChannelHandler) GetChannel(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *ChannelHandler) requireChannelIdentityID(c echo.Context) (string, error) {
+func (*ChannelHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }

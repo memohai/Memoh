@@ -61,7 +61,7 @@ func (h *LocalChannelHandler) Register(e *echo.Echo) {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/web/stream [get]
-// @Router /bots/{bot_id}/cli/stream [get]
+// @Router /bots/{bot_id}/cli/stream [get].
 func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -107,10 +107,12 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 			if err != nil {
 				continue
 			}
-			if _, err := writer.WriteString(fmt.Sprintf("data: %s\n\n", string(data))); err != nil {
+			if _, err := fmt.Fprintf(writer, "data: %s\n\n", string(data)); err != nil {
 				return nil // client disconnected
 			}
-			writer.Flush()
+			if err := writer.Flush(); err != nil {
+				return nil
+			}
 			flusher.Flush()
 		}
 	}
@@ -138,7 +140,7 @@ type LocalChannelMessageRequest struct {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/web/messages [post]
-// @Router /bots/{bot_id}/cli/messages [post]
+// @Router /bots/{bot_id}/cli/messages [post].
 func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -208,7 +210,7 @@ func (h *LocalChannelHandler) ensureBotParticipant(ctx context.Context, botID, c
 	return nil
 }
 
-func (h *LocalChannelHandler) requireChannelIdentityID(c echo.Context) (string, error) {
+func (*LocalChannelHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }
 

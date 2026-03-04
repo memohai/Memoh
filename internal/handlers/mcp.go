@@ -58,7 +58,7 @@ func (h *MCPHandler) Register(e *echo.Echo) {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp [get]
+// @Router /bots/{bot_id}/mcp [get].
 func (h *MCPHandler) List(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -88,7 +88,7 @@ func (h *MCPHandler) List(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp [post]
+// @Router /bots/{bot_id}/mcp [post].
 func (h *MCPHandler) Create(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -122,7 +122,7 @@ func (h *MCPHandler) Create(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/{id} [get]
+// @Router /bots/{bot_id}/mcp/{id} [get].
 func (h *MCPHandler) Get(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -160,7 +160,7 @@ func (h *MCPHandler) Get(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/{id} [put]
+// @Router /bots/{bot_id}/mcp/{id} [put].
 func (h *MCPHandler) Update(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -201,7 +201,7 @@ func (h *MCPHandler) Update(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/{id} [delete]
+// @Router /bots/{bot_id}/mcp/{id} [delete].
 func (h *MCPHandler) Delete(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -226,10 +226,10 @@ func (h *MCPHandler) Delete(c echo.Context) error {
 
 // ProbeResponse is the response for a probe operation.
 type ProbeResponse struct {
-	Status       string             `json:"status"`
+	Status       string               `json:"status"`
 	Tools        []mcp.ToolDescriptor `json:"tools"`
-	Error        string             `json:"error,omitempty"`
-	AuthRequired bool               `json:"auth_required,omitempty"`
+	Error        string               `json:"error,omitempty"`
+	AuthRequired bool                 `json:"auth_required,omitempty"`
 }
 
 // Probe godoc
@@ -242,7 +242,7 @@ type ProbeResponse struct {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/{id}/probe [post]
+// @Router /bots/{bot_id}/mcp/{id}/probe [post].
 func (h *MCPHandler) Probe(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -313,7 +313,7 @@ func (h *MCPHandler) Probe(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/import [put]
+// @Router /bots/{bot_id}/mcp/import [put].
 func (h *MCPHandler) Import(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -351,7 +351,7 @@ type BatchDeleteRequest struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp-ops/batch-delete [post]
+// @Router /bots/{bot_id}/mcp-ops/batch-delete [post].
 func (h *MCPHandler) BatchDelete(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -385,7 +385,7 @@ func (h *MCPHandler) BatchDelete(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/export [get]
+// @Router /bots/{bot_id}/mcp/export [get].
 func (h *MCPHandler) Export(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -405,7 +405,7 @@ func (h *MCPHandler) Export(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *MCPHandler) requireChannelIdentityID(c echo.Context) (string, error) {
+func (*MCPHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }
 

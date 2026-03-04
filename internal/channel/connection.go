@@ -3,7 +3,6 @@ package channel
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -95,7 +94,7 @@ func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
 func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error {
 	_, ok := m.registry.GetReceiver(cfg.ChannelType)
 	if !ok {
-		m.markConnectionStatus(cfg, false, fmt.Errorf("receiver not available"))
+		m.markConnectionStatus(cfg, false, errors.New("receiver not available"))
 		return nil
 	}
 
@@ -155,7 +154,7 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 
 	receiver, ok := m.registry.GetReceiver(cfg.ChannelType)
 	if !ok {
-		m.markConnectionStatus(cfg, false, fmt.Errorf("receiver not available"))
+		m.markConnectionStatus(cfg, false, errors.New("receiver not available"))
 		return nil
 	}
 
@@ -182,11 +181,8 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 	for i := len(m.middlewares) - 1; i >= 0; i-- {
 		handler = m.middlewares[i](handler)
 	}
-	connectCtx := context.Background()
-	if ctx != nil {
-		// Decouple long-lived adapter connections from short-lived request contexts.
-		connectCtx = context.WithoutCancel(ctx)
-	}
+	// Decouple long-lived adapter connections from short-lived request contexts.
+	connectCtx := context.WithoutCancel(ctx)
 	conn, err := receiver.Connect(connectCtx, cfg, handler)
 	if err != nil {
 		m.markConnectionStatus(cfg, false, err)
@@ -200,7 +196,7 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 		running := existing.connection != nil && existing.connection.Running()
 		m.setConnectionStatusLocked(existing.config, running, nil)
 		m.mu.Unlock()
-		_ = conn.Stop(context.Background())
+		_ = conn.Stop(connectCtx)
 		return nil
 	}
 	m.connections[cfg.ID] = &connectionEntry{
@@ -216,7 +212,7 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 // Disabled configs are stopped and removed; enabled configs are started or restarted.
 func (m *Manager) EnsureConnection(ctx context.Context, cfg ChannelConfig) error {
 	if cfg.ID == "" {
-		return fmt.Errorf("config id is required")
+		return errors.New("config id is required")
 	}
 	if cfg.Disabled {
 		return m.removeConnection(ctx, cfg.ID)
@@ -329,7 +325,7 @@ func (m *Manager) stopAll(ctx context.Context) {
 func (m *Manager) Stop(ctx context.Context, configID string) error {
 	configID = strings.TrimSpace(configID)
 	if configID == "" {
-		return fmt.Errorf("config id is required")
+		return errors.New("config id is required")
 	}
 	m.mu.Lock()
 	entry := m.connections[configID]
@@ -349,7 +345,7 @@ func (m *Manager) Stop(ctx context.Context, configID string) error {
 func (m *Manager) StopByBot(ctx context.Context, botID string) error {
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
-		return fmt.Errorf("bot id is required")
+		return errors.New("bot id is required")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

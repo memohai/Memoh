@@ -68,7 +68,7 @@ func (h *MessageHandler) Register(e *echo.Echo) {
 // --- Messages ---
 
 func writeSSEData(writer *bufio.Writer, flusher http.Flusher, payload string) error {
-	if _, err := writer.WriteString(fmt.Sprintf("data: %s\n\n", payload)); err != nil {
+	if _, err := fmt.Fprintf(writer, "data: %s\n\n", payload); err != nil {
 		return err
 	}
 	if err := writer.Flush(); err != nil {
@@ -101,7 +101,7 @@ func parseSinceParam(raw string) (time.Time, bool, error) {
 	if epochMillis, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
 		return time.UnixMilli(epochMillis).UTC(), true, nil
 	}
-	return time.Time{}, false, fmt.Errorf("invalid since parameter")
+	return time.Time{}, false, errors.New("invalid since parameter")
 }
 
 // ListMessages godoc
@@ -116,7 +116,7 @@ func parseSinceParam(raw string) (time.Time, bool, error) {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/messages [get]
+// @Router /bots/{bot_id}/messages [get].
 func (h *MessageHandler) ListMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -325,7 +325,7 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/messages [delete]
+// @Router /bots/{bot_id}/messages [delete].
 func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -349,7 +349,7 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 
 // --- helpers ---
 
-func (h *MessageHandler) requireChannelIdentityID(c echo.Context) (string, error) {
+func (*MessageHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }
 
@@ -359,30 +359,6 @@ func (h *MessageHandler) authorizeBotAccess(ctx context.Context, channelIdentity
 
 func (h *MessageHandler) authorizeBotManage(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
 	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
-}
-
-func (h *MessageHandler) requireParticipant(ctx context.Context, conversationID, channelIdentityID string) error {
-	if h.conversationService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "conversation service not configured")
-	}
-	// Admin bypass.
-	if h.accountService != nil {
-		isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-		}
-		if isAdmin {
-			return nil
-		}
-	}
-	ok, err := h.conversationService.IsParticipant(ctx, conversationID, channelIdentityID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if !ok {
-		return echo.NewHTTPError(http.StatusForbidden, "not a participant")
-	}
-	return nil
 }
 
 func (h *MessageHandler) requireReadable(ctx context.Context, conversationID, channelIdentityID string) error {
@@ -439,7 +415,7 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	contentType := asset.Mime
 	if contentType == "" {
 		contentType = "application/octet-stream"

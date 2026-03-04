@@ -2,7 +2,7 @@ package local
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/memohai/memoh/internal/channel"
@@ -19,12 +19,12 @@ func NewWebAdapter(hub *RouteHub) *WebAdapter {
 }
 
 // Type returns the Web channel type.
-func (a *WebAdapter) Type() channel.ChannelType {
+func (*WebAdapter) Type() channel.ChannelType {
 	return WebType
 }
 
 // Descriptor returns the Web channel metadata.
-func (a *WebAdapter) Descriptor() channel.Descriptor {
+func (*WebAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        WebType,
 		DisplayName: "Web",
@@ -46,29 +46,29 @@ func (a *WebAdapter) Descriptor() channel.Descriptor {
 }
 
 // Send publishes an outbound message to the Web route hub.
-func (a *WebAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *WebAdapter) Send(_ context.Context, _ channel.ChannelConfig, msg channel.OutboundMessage) error {
 	if a.hub == nil {
-		return fmt.Errorf("web hub not configured")
+		return errors.New("web hub not configured")
 	}
 	target := strings.TrimSpace(msg.Target)
 	if target == "" {
-		return fmt.Errorf("web target is required")
+		return errors.New("web target is required")
 	}
 	if msg.Message.IsEmpty() {
-		return fmt.Errorf("message is required")
+		return errors.New("message is required")
 	}
 	a.hub.Publish(target, msg)
 	return nil
 }
 
 // OpenStream opens a local stream session bound to the target route.
-func (a *WebAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *WebAdapter) OpenStream(ctx context.Context, _ channel.ChannelConfig, target string, _ channel.StreamOptions) (channel.OutboundStream, error) {
 	if a.hub == nil {
-		return nil, fmt.Errorf("web hub not configured")
+		return nil, errors.New("web hub not configured")
 	}
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return nil, fmt.Errorf("web target is required")
+		return nil, errors.New("web target is required")
 	}
 	select {
 	case <-ctx.Done():

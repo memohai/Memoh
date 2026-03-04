@@ -4,7 +4,6 @@ import (
 	"testing"
 )
 
-
 func TestMimeExtension(t *testing.T) {
 	tests := []struct {
 		mime string

@@ -61,7 +61,7 @@ func (h *WebhookHandler) Register(e *echo.Echo) {
 }
 
 // HandleProbe responds to health/probe requests on the webhook URL.
-func (h *WebhookHandler) HandleProbe(c echo.Context) error {
+func (*WebhookHandler) HandleProbe(c echo.Context) error {
 	return c.String(http.StatusOK, "ok")
 }
 
@@ -102,15 +102,16 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 
 	botOpenID := h.adapter.resolveBotOpenID(context.WithoutCancel(c.Request().Context()), cfg)
 
+	reqCtx := c.Request().Context()
 	eventDispatcher := dispatcher.NewEventDispatcher(feishuCfg.VerificationToken, feishuCfg.EncryptKey)
 	eventDispatcher.OnP2MessageReceiveV1(func(_ context.Context, event *larkim.P2MessageReceiveV1) error {
-		msg := extractFeishuInbound(event, botOpenID)
+		msg := extractFeishuInbound(event, botOpenID, h.adapter.logger)
 		if strings.TrimSpace(msg.Message.PlainText()) == "" && len(msg.Message.Attachments) == 0 {
 			return nil
 		}
-		h.adapter.enrichSenderProfile(context.WithoutCancel(c.Request().Context()), cfg, event, &msg)
+		h.adapter.enrichSenderProfile(reqCtx, cfg, event, &msg)
 		msg.BotID = cfg.BotID
-		return h.manager.HandleInbound(context.WithoutCancel(c.Request().Context()), cfg, msg)
+		return h.manager.HandleInbound(reqCtx, cfg, msg)
 	})
 
 	resp := eventDispatcher.Handle(c.Request().Context(), &larkevent.EventReq{

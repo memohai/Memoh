@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -28,7 +29,7 @@ func directoryLimit(n int) int {
 }
 
 // ListPeers lists users (peers) from Feishu contact, optionally filtered by query.
-func (a *FeishuAdapter) ListPeers(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*FeishuAdapter) ListPeers(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return nil, err
@@ -60,7 +61,7 @@ func (a *FeishuAdapter) ListPeers(ctx context.Context, cfg channel.ChannelConfig
 }
 
 // ListGroups lists chat groups from Feishu IM, optionally filtered by query.
-func (a *FeishuAdapter) ListGroups(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*FeishuAdapter) ListGroups(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return nil, err
@@ -104,17 +105,15 @@ func (a *FeishuAdapter) ListGroups(ctx context.Context, cfg channel.ChannelConfi
 }
 
 // ListGroupMembers lists members of a Feishu chat group.
-func (a *FeishuAdapter) ListGroupMembers(ctx context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*FeishuAdapter) ListGroupMembers(ctx context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return nil, err
 	}
 	chatID := strings.TrimSpace(groupID)
-	if strings.HasPrefix(chatID, "chat_id:") {
-		chatID = strings.TrimPrefix(chatID, "chat_id:")
-	}
+	chatID = strings.TrimPrefix(chatID, "chat_id:")
 	if chatID == "" {
-		return nil, fmt.Errorf("feishu list group members: empty group id")
+		return nil, errors.New("feishu list group members: empty group id")
 	}
 	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret, lark.WithOpenBaseUrl(feishuCfg.openBaseURL()))
 	pageSize := directoryLimit(query.Limit)
@@ -159,7 +158,7 @@ func (a *FeishuAdapter) ResolveEntry(ctx context.Context, cfg channel.ChannelCon
 	}
 }
 
-func (a *FeishuAdapter) resolveUser(ctx context.Context, client *lark.Client, input string) (channel.DirectoryEntry, error) {
+func (*FeishuAdapter) resolveUser(ctx context.Context, client *lark.Client, input string) (channel.DirectoryEntry, error) {
 	userID, userIDType := parseFeishuUserInput(input)
 	if userID == "" {
 		return channel.DirectoryEntry{}, fmt.Errorf("feishu resolve entry user: invalid input %q", input)
@@ -176,16 +175,14 @@ func (a *FeishuAdapter) resolveUser(ctx context.Context, client *lark.Client, in
 		return channel.DirectoryEntry{}, fmt.Errorf("feishu get user: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	if resp.Data == nil || resp.Data.User == nil {
-		return channel.DirectoryEntry{}, fmt.Errorf("feishu get user: empty response")
+		return channel.DirectoryEntry{}, errors.New("feishu get user: empty response")
 	}
 	return feishuUserToEntry(resp.Data.User), nil
 }
 
-func (a *FeishuAdapter) resolveGroup(ctx context.Context, client *lark.Client, input string) (channel.DirectoryEntry, error) {
+func (*FeishuAdapter) resolveGroup(ctx context.Context, client *lark.Client, input string) (channel.DirectoryEntry, error) {
 	chatID := strings.TrimSpace(input)
-	if strings.HasPrefix(chatID, "chat_id:") {
-		chatID = strings.TrimPrefix(chatID, "chat_id:")
-	}
+	chatID = strings.TrimPrefix(chatID, "chat_id:")
 	if chatID == "" {
 		return channel.DirectoryEntry{}, fmt.Errorf("feishu resolve entry group: invalid input %q", input)
 	}

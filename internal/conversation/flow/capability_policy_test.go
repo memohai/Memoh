@@ -26,7 +26,7 @@ func TestRouteAttachmentsByCapability_TextOnly(t *testing.T) {
 		{Type: "video", Transport: gatewayTransportToolFileRef, Payload: "/data/video.mp4"},
 	}
 	result := routeAttachmentsByCapability(modalities, attachments)
-	assert.Len(t, result.Native, 0)
+	assert.Empty(t, result.Native)
 	assert.Len(t, result.Fallback, 2)
 }
 
@@ -49,7 +49,7 @@ func TestRouteAttachmentsByCapability_ImagePathOnlyFallsBack(t *testing.T) {
 		{Type: "image", Transport: gatewayTransportToolFileRef, Payload: "/data/image.png"},
 	}
 	result := routeAttachmentsByCapability(modalities, attachments)
-	assert.Len(t, result.Native, 0)
+	assert.Empty(t, result.Native)
 	assert.Len(t, result.Fallback, 1)
 	assert.Equal(t, "image", result.Fallback[0].Type)
 }
@@ -61,7 +61,7 @@ func TestRouteAttachmentsByCapability_ImageURLIsNative(t *testing.T) {
 	}
 	result := routeAttachmentsByCapability(modalities, attachments)
 	assert.Len(t, result.Native, 1)
-	assert.Len(t, result.Fallback, 0)
+	assert.Empty(t, result.Fallback)
 	assert.Equal(t, "image", result.Native[0].Type)
 }
 
@@ -71,14 +71,14 @@ func TestRouteAttachmentsByCapability_UnknownType(t *testing.T) {
 		{Type: "hologram", Transport: gatewayTransportToolFileRef, Payload: "/data/holo.dat"},
 	}
 	result := routeAttachmentsByCapability(modalities, attachments)
-	assert.Len(t, result.Native, 0)
+	assert.Empty(t, result.Native)
 	assert.Len(t, result.Fallback, 1)
 }
 
 func TestRouteAttachmentsByCapability_Empty(t *testing.T) {
 	result := routeAttachmentsByCapability([]string{"text"}, nil)
-	assert.Len(t, result.Native, 0)
-	assert.Len(t, result.Fallback, 0)
+	assert.Empty(t, result.Native)
+	assert.Empty(t, result.Fallback)
 }
 
 func TestAttachmentsToAny(t *testing.T) {

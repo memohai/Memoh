@@ -2,7 +2,7 @@ package policy
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -36,11 +36,11 @@ func NewService(log *slog.Logger, botsService *bots.Service, settingsService *se
 // Resolve evaluates the full access policy for a bot.
 func (s *Service) Resolve(ctx context.Context, botID string) (Decision, error) {
 	if s == nil || s.bots == nil || s.settings == nil {
-		return Decision{}, fmt.Errorf("policy service not configured")
+		return Decision{}, errors.New("policy service not configured")
 	}
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
-		return Decision{}, fmt.Errorf("bot id is required")
+		return Decision{}, errors.New("bot id is required")
 	}
 	bot, err := s.bots.Get(ctx, botID)
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *Service) BotType(ctx context.Context, botID string) (string, error) {
 // BotOwnerUserID returns bot owner's user id. Implements router.PolicyService.
 func (s *Service) BotOwnerUserID(ctx context.Context, botID string) (string, error) {
 	if s == nil || s.bots == nil {
-		return "", fmt.Errorf("policy service not configured")
+		return "", errors.New("policy service not configured")
 	}
 	bot, err := s.bots.Get(ctx, strings.TrimSpace(botID))
 	if err != nil {

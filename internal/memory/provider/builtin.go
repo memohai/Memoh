@@ -2,7 +2,7 @@ package provider
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"sort"
 	"strings"
@@ -65,7 +65,7 @@ func NewBuiltinProvider(log *slog.Logger, service any, chatAccessor conversation
 	}
 }
 
-func (p *BuiltinProvider) Type() string { return BuiltinType }
+func (*BuiltinProvider) Type() string { return BuiltinType }
 
 // --- Conversation Hooks ---
 
@@ -305,7 +305,7 @@ func (p *BuiltinProvider) canAccessChat(ctx context.Context, chatID, channelIden
 		}
 	}
 	if p.chatAccessor == nil {
-		return false, fmt.Errorf("chat service not available")
+		return false, errors.New("chat service not available")
 	}
 	return p.chatAccessor.IsParticipant(ctx, chatID, channelIdentityID)
 }
@@ -314,63 +314,63 @@ func (p *BuiltinProvider) canAccessChat(ctx context.Context, chatID, channelIden
 
 func (p *BuiltinProvider) Add(ctx context.Context, req AddRequest) (SearchResponse, error) {
 	if p.service == nil {
-		return SearchResponse{}, fmt.Errorf("memory runtime not configured")
+		return SearchResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Add(ctx, req)
 }
 
 func (p *BuiltinProvider) Search(ctx context.Context, req SearchRequest) (SearchResponse, error) {
 	if p.service == nil {
-		return SearchResponse{}, fmt.Errorf("memory runtime not configured")
+		return SearchResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Search(ctx, req)
 }
 
 func (p *BuiltinProvider) GetAll(ctx context.Context, req GetAllRequest) (SearchResponse, error) {
 	if p.service == nil {
-		return SearchResponse{}, fmt.Errorf("memory runtime not configured")
+		return SearchResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.GetAll(ctx, req)
 }
 
 func (p *BuiltinProvider) Update(ctx context.Context, req UpdateRequest) (MemoryItem, error) {
 	if p.service == nil {
-		return MemoryItem{}, fmt.Errorf("memory runtime not configured")
+		return MemoryItem{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Update(ctx, req)
 }
 
 func (p *BuiltinProvider) Delete(ctx context.Context, memoryID string) (DeleteResponse, error) {
 	if p.service == nil {
-		return DeleteResponse{}, fmt.Errorf("memory runtime not configured")
+		return DeleteResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Delete(ctx, memoryID)
 }
 
 func (p *BuiltinProvider) DeleteBatch(ctx context.Context, memoryIDs []string) (DeleteResponse, error) {
 	if p.service == nil {
-		return DeleteResponse{}, fmt.Errorf("memory runtime not configured")
+		return DeleteResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.DeleteBatch(ctx, memoryIDs)
 }
 
 func (p *BuiltinProvider) DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteResponse, error) {
 	if p.service == nil {
-		return DeleteResponse{}, fmt.Errorf("memory runtime not configured")
+		return DeleteResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.DeleteAll(ctx, req)
 }
 
 func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (CompactResult, error) {
 	if p.service == nil {
-		return CompactResult{}, fmt.Errorf("memory runtime not configured")
+		return CompactResult{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Compact(ctx, filters, ratio, decayDays)
 }
 
 func (p *BuiltinProvider) Usage(ctx context.Context, filters map[string]any) (UsageResponse, error) {
 	if p.service == nil {
-		return UsageResponse{}, fmt.Errorf("memory runtime not configured")
+		return UsageResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Usage(ctx, filters)
 }

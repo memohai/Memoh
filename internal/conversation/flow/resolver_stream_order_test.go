@@ -3,7 +3,6 @@ package flow
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +18,7 @@ type blockingMessageService struct {
 	persistContinue chan struct{}
 }
 
-func (s *blockingMessageService) Persist(ctx context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+func (s *blockingMessageService) Persist(_ context.Context, _ messagepkg.PersistInput) (messagepkg.Message, error) {
 	select {
 	case <-s.persistCalled:
 	default:
@@ -29,27 +28,27 @@ func (s *blockingMessageService) Persist(ctx context.Context, input messagepkg.P
 	return messagepkg.Message{}, nil
 }
 
-func (s *blockingMessageService) List(ctx context.Context, botID string) ([]messagepkg.Message, error) {
+func (*blockingMessageService) List(_ context.Context, _ string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (s *blockingMessageService) ListSince(ctx context.Context, botID string, since time.Time) ([]messagepkg.Message, error) {
+func (*blockingMessageService) ListSince(_ context.Context, _ string, _ time.Time) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (s *blockingMessageService) ListActiveSince(ctx context.Context, botID string, since time.Time) ([]messagepkg.Message, error) {
+func (*blockingMessageService) ListActiveSince(_ context.Context, _ string, _ time.Time) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (s *blockingMessageService) ListLatest(ctx context.Context, botID string, limit int32) ([]messagepkg.Message, error) {
+func (*blockingMessageService) ListLatest(_ context.Context, _ string, _ int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (s *blockingMessageService) ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]messagepkg.Message, error) {
+func (*blockingMessageService) ListBefore(_ context.Context, _ string, _ time.Time, _ int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (s *blockingMessageService) DeleteByBot(ctx context.Context, botID string) error {
+func (*blockingMessageService) DeleteByBot(_ context.Context, _ string) error {
 	return nil
 }
 
@@ -94,7 +93,7 @@ func TestStreamChat_PersistsFinalMessagesBeforeForwardingDoneEvent(t *testing.T)
 	r := &Resolver{
 		messageService:  msgSvc,
 		gatewayBaseURL:  srv.URL,
-		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:          slog.New(slog.DiscardHandler),
 		streamingClient: srv.Client(),
 		httpClient:      srv.Client(),
 	}

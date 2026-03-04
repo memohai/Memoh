@@ -21,7 +21,7 @@ func TestContextLogger(t *testing.T) {
 
 	expectedKey := "request_id"
 	expectedValue := "12345"
-	customLogger := L.With(expectedKey, expectedValue)
+	customLogger := L.With(slog.String(expectedKey, expectedValue))
 
 	ctx := WithContext(context.Background(), customLogger)
 	extracted := FromContext(ctx)

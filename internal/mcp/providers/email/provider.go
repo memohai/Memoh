@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"strconv"
 	"strings"
 
@@ -32,7 +33,7 @@ func NewExecutor(log *slog.Logger, service *email.Service, manager *email.Manage
 	}
 }
 
-func (e *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (*Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	return []mcpgw.ToolDescriptor{
 		{
 			Name:        toolListEmailAccounts,
@@ -147,7 +148,7 @@ func (e *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 	}
 }
 
-func (e *Executor) callAccounts(_ context.Context, bindings []email.BindingResponse) (map[string]any, error) {
+func (*Executor) callAccounts(_ context.Context, bindings []email.BindingResponse) (map[string]any, error) {
 	accounts := make([]map[string]any, 0, len(bindings))
 	for _, b := range bindings {
 		accounts = append(accounts, map[string]any{
@@ -249,6 +250,9 @@ func (e *Executor) callRead(ctx context.Context, providerID string, args map[str
 	}
 	if uidRaw <= 0 {
 		return mcpgw.BuildToolErrorResult("uid is required"), nil
+	}
+	if uidRaw > math.MaxUint32 {
+		return mcpgw.BuildToolErrorResult("uid out of range"), nil
 	}
 
 	providerName, config, err := e.service.ProviderConfig(ctx, providerID)

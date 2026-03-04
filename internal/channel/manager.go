@@ -135,9 +135,6 @@ func (m *Manager) AddAdapter(ctx context.Context, adapter Adapter) {
 
 // RemoveAdapter unregisters an adapter and stops all its active connections.
 func (m *Manager) RemoveAdapter(ctx context.Context, channelType ChannelType) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	m.mu.Lock()
 	for id, entry := range m.connections {
 		if entry != nil && entry.config.ChannelType == channelType {
@@ -190,7 +187,7 @@ func (m *Manager) Start(ctx context.Context) {
 // Send delivers an outbound message to the specified channel, resolving target and config automatically.
 func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelType, req SendRequest) error {
 	if m.service == nil {
-		return fmt.Errorf("channel manager not configured")
+		return errors.New("channel manager not configured")
 	}
 	sender, ok := m.registry.GetSender(channelType)
 	if !ok {
@@ -204,14 +201,14 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 	if target == "" {
 		targetChannelIdentityID := strings.TrimSpace(req.ChannelIdentityID)
 		if targetChannelIdentityID == "" {
-			return fmt.Errorf("target or channel_identity_id is required")
+			return errors.New("target or channel_identity_id is required")
 		}
 		userCfg, err := m.service.GetChannelIdentityConfig(ctx, targetChannelIdentityID, channelType)
 		if err != nil {
 			if m.logger != nil {
 				m.logger.Warn("channel binding missing", slog.String("channel", channelType.String()), slog.String("channel_identity_id", targetChannelIdentityID))
 			}
-			return fmt.Errorf("channel binding required")
+			return errors.New("channel binding required")
 		}
 		target, err = m.registry.ResolveTargetFromUserConfig(channelType, userCfg.Config)
 		if err != nil {
@@ -222,7 +219,7 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 		target = normalized
 	}
 	if req.Message.IsEmpty() {
-		return fmt.Errorf("message is required")
+		return errors.New("message is required")
 	}
 	if m.logger != nil {
 		m.logger.Info("send outbound", slog.String("channel", channelType.String()), slog.String("bot_id", botID))
@@ -249,7 +246,7 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 // React adds or removes an emoji reaction on a channel message.
 func (m *Manager) React(ctx context.Context, botID string, channelType ChannelType, req ReactRequest) error {
 	if m.service == nil {
-		return fmt.Errorf("channel manager not configured")
+		return errors.New("channel manager not configured")
 	}
 	reactor, ok := m.registry.GetReactor(channelType)
 	if !ok {
@@ -261,18 +258,18 @@ func (m *Manager) React(ctx context.Context, botID string, channelType ChannelTy
 	}
 	target := strings.TrimSpace(req.Target)
 	if target == "" {
-		return fmt.Errorf("target is required for reactions")
+		return errors.New("target is required for reactions")
 	}
 	if normalized, ok := m.registry.NormalizeTarget(channelType, target); ok {
 		target = normalized
 	}
 	messageID := strings.TrimSpace(req.MessageID)
 	if messageID == "" {
-		return fmt.Errorf("message_id is required for reactions")
+		return errors.New("message_id is required for reactions")
 	}
 	emoji := strings.TrimSpace(req.Emoji)
 	if !req.Remove && emoji == "" {
-		return fmt.Errorf("emoji is required when adding a reaction")
+		return errors.New("emoji is required when adding a reaction")
 	}
 	if m.logger != nil {
 		m.logger.Info("react outbound",

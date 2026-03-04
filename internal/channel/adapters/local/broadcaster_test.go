@@ -55,7 +55,7 @@ func TestRouteHubBroadcaster_EmptyBotID(t *testing.T) {
 	}
 }
 
-func TestRouteHubBroadcaster_NilHub(t *testing.T) {
+func TestRouteHubBroadcaster_NilHub(_ *testing.T) {
 	broadcaster := NewRouteHubBroadcaster(nil)
 	// Must not panic.
 	broadcaster.OnStreamEvent(context.Background(), "bot1", "telegram", channel.StreamEvent{

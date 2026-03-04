@@ -27,44 +27,56 @@ type fakeProvider struct {
 	callErr  error
 }
 
-func (f *fakeProvider) Type() string { return "fake" }
-func (f *fakeProvider) OnBeforeChat(_ context.Context, _ memprovider.BeforeChatRequest) (*memprovider.BeforeChatResult, error) {
+func (*fakeProvider) Type() string { return "fake" }
+func (*fakeProvider) OnBeforeChat(_ context.Context, _ memprovider.BeforeChatRequest) (*memprovider.BeforeChatResult, error) {
 	return nil, nil
 }
-func (f *fakeProvider) OnAfterChat(_ context.Context, _ memprovider.AfterChatRequest) error {
+
+func (*fakeProvider) OnAfterChat(_ context.Context, _ memprovider.AfterChatRequest) error {
 	return nil
 }
+
 func (f *fakeProvider) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	return f.tools, nil
 }
+
 func (f *fakeProvider) CallTool(_ context.Context, _ mcpgw.ToolSessionContext, _ string, _ map[string]any) (map[string]any, error) {
 	return f.callResp, f.callErr
 }
-func (f *fakeProvider) Add(_ context.Context, _ memprovider.AddRequest) (memprovider.SearchResponse, error) {
+
+func (*fakeProvider) Add(_ context.Context, _ memprovider.AddRequest) (memprovider.SearchResponse, error) {
 	return memprovider.SearchResponse{}, nil
 }
-func (f *fakeProvider) Search(_ context.Context, _ memprovider.SearchRequest) (memprovider.SearchResponse, error) {
+
+func (*fakeProvider) Search(_ context.Context, _ memprovider.SearchRequest) (memprovider.SearchResponse, error) {
 	return memprovider.SearchResponse{}, nil
 }
-func (f *fakeProvider) GetAll(_ context.Context, _ memprovider.GetAllRequest) (memprovider.SearchResponse, error) {
+
+func (*fakeProvider) GetAll(_ context.Context, _ memprovider.GetAllRequest) (memprovider.SearchResponse, error) {
 	return memprovider.SearchResponse{}, nil
 }
-func (f *fakeProvider) Update(_ context.Context, _ memprovider.UpdateRequest) (memprovider.MemoryItem, error) {
+
+func (*fakeProvider) Update(_ context.Context, _ memprovider.UpdateRequest) (memprovider.MemoryItem, error) {
 	return memprovider.MemoryItem{}, nil
 }
-func (f *fakeProvider) Delete(_ context.Context, _ string) (memprovider.DeleteResponse, error) {
+
+func (*fakeProvider) Delete(_ context.Context, _ string) (memprovider.DeleteResponse, error) {
 	return memprovider.DeleteResponse{}, nil
 }
-func (f *fakeProvider) DeleteBatch(_ context.Context, _ []string) (memprovider.DeleteResponse, error) {
+
+func (*fakeProvider) DeleteBatch(_ context.Context, _ []string) (memprovider.DeleteResponse, error) {
 	return memprovider.DeleteResponse{}, nil
 }
-func (f *fakeProvider) DeleteAll(_ context.Context, _ memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
+
+func (*fakeProvider) DeleteAll(_ context.Context, _ memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
 	return memprovider.DeleteResponse{}, nil
 }
-func (f *fakeProvider) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (memprovider.CompactResult, error) {
+
+func (*fakeProvider) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (memprovider.CompactResult, error) {
 	return memprovider.CompactResult{}, nil
 }
-func (f *fakeProvider) Usage(_ context.Context, _ map[string]any) (memprovider.UsageResponse, error) {
+
+func (*fakeProvider) Usage(_ context.Context, _ map[string]any) (memprovider.UsageResponse, error) {
 	return memprovider.UsageResponse{}, nil
 }
 

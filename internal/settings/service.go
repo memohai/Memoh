@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 
 	"github.com/google/uuid"
@@ -20,9 +21,11 @@ type Service struct {
 	logger  *slog.Logger
 }
 
-var ErrPersonalBotGuestAccessUnsupported = errors.New("personal bots do not support guest access")
-var ErrModelIDAmbiguous = errors.New("model_id is ambiguous across providers")
-var ErrInvalidModelRef = errors.New("invalid model reference")
+var (
+	ErrPersonalBotGuestAccessUnsupported = errors.New("personal bots do not support guest access")
+	ErrModelIDAmbiguous                  = errors.New("model_id is ambiguous across providers")
+	ErrInvalidModelRef                   = errors.New("invalid model reference")
+)
 
 func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	return &Service{
@@ -45,7 +48,7 @@ func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
 
 func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest) (Settings, error) {
 	if s.queries == nil {
-		return Settings{}, fmt.Errorf("settings queries not configured")
+		return Settings{}, errors.New("settings queries not configured")
 	}
 	pgID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -122,6 +125,12 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		memoryProviderUUID = providerID
 	}
+	if current.MaxContextLoadTime < math.MinInt32 || current.MaxContextLoadTime > math.MaxInt32 ||
+		current.MaxContextTokens < math.MinInt32 || current.MaxContextTokens > math.MaxInt32 ||
+		current.MaxInboxItems < math.MinInt32 || current.MaxInboxItems > math.MaxInt32 ||
+		current.HeartbeatInterval < math.MinInt32 || current.HeartbeatInterval > math.MaxInt32 {
+		return Settings{}, errors.New("settings numeric value out of int32 range")
+	}
 
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
 		ID:                 pgID,
@@ -132,9 +141,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		AllowGuest:         current.AllowGuest,
 		ReasoningEnabled:   current.ReasoningEnabled,
 		ReasoningEffort:    current.ReasoningEffort,
-		HeartbeatEnabled:  current.HeartbeatEnabled,
-		HeartbeatInterval: int32(current.HeartbeatInterval),
-		HeartbeatPrompt:  "",
+		HeartbeatEnabled:   current.HeartbeatEnabled,
+		HeartbeatInterval:  int32(current.HeartbeatInterval),
+		HeartbeatPrompt:    "",
 		ChatModelID:        chatModelUUID,
 		HeartbeatModelID:   heartbeatModelUUID,
 		SearchProviderID:   searchProviderUUID,
@@ -148,7 +157,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 
 func (s *Service) Delete(ctx context.Context, botID string) error {
 	if s.queries == nil {
-		return fmt.Errorf("settings queries not configured")
+		return errors.New("settings queries not configured")
 	}
 	pgID, err := db.ParseUUID(botID)
 	if err != nil {

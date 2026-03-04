@@ -25,11 +25,11 @@ type fakeDBTX struct {
 	queryRowFunc func(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-func (d *fakeDBTX) Exec(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
+func (*fakeDBTX) Exec(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, nil
 }
 
-func (d *fakeDBTX) Query(context.Context, string, ...interface{}) (pgx.Rows, error) {
+func (*fakeDBTX) Query(context.Context, string, ...interface{}) (pgx.Rows, error) {
 	return nil, nil
 }
 
@@ -37,14 +37,14 @@ func (d *fakeDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 	if d.queryRowFunc != nil {
 		return d.queryRowFunc(ctx, sql, args...)
 	}
-	return &fakeRow{scanFunc: func(dest ...any) error { return pgx.ErrNoRows }}
+	return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
 }
 
 // makeBotRow creates a fakeRow that populates a sqlc.Bot via Scan.
 // Column order: id, owner_user_id, type, display_name, avatar_url, is_active, status,
 // max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest,
 // reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id,
-// heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+// heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at.
 func makeBotRow(botID, ownerUserID pgtype.UUID, botType string, allowGuest bool) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
@@ -63,8 +63,8 @@ func makeBotRow(botID, ownerUserID pgtype.UUID, botType string, allowGuest bool)
 			*dest[9].(*int32) = 10   // MaxInboxItems
 			*dest[10].(*string) = "en"
 			*dest[11].(*bool) = allowGuest
-			*dest[12].(*bool) = false      // ReasoningEnabled
-			*dest[13].(*string) = "medium" // ReasoningEffort
+			*dest[12].(*bool) = false                // ReasoningEnabled
+			*dest[13].(*string) = "medium"           // ReasoningEffort
 			*dest[14].(*pgtype.UUID) = pgtype.UUID{} // ChatModelID
 			*dest[15].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
 			*dest[16].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
@@ -95,7 +95,7 @@ func makeMemberRow(botID, userID pgtype.UUID) *fakeRow {
 }
 
 func makeNoRow() *fakeRow {
-	return &fakeRow{scanFunc: func(dest ...any) error { return pgx.ErrNoRows }}
+	return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
 }
 
 func mustParseUUID(s string) pgtype.UUID {
@@ -198,7 +198,7 @@ func TestAuthorizeAccess(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db := &fakeDBTX{
-				queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+				queryRowFunc: func(_ context.Context, _ string, args ...any) pgx.Row {
 					// Route to bot or member row based on query.
 					if len(args) == 1 {
 						return makeBotRow(botUUID, ownerUUID, tt.botType, tt.allowGst)
@@ -219,10 +219,8 @@ func TestAuthorizeAccess(t *testing.T) {
 				if tt.wantErrIs != nil && err.Error() != tt.wantErrIs.Error() {
 					t.Fatalf("expected error %q, got %q", tt.wantErrIs, err)
 				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
 		})
 	}

@@ -24,7 +24,7 @@ type fakeChannelIdentityService struct {
 	lastMeta        map[string]any
 }
 
-func (f *fakeChannelIdentityService) ResolveByChannelIdentity(ctx context.Context, platform, externalID, displayName string, meta map[string]any) (identities.ChannelIdentity, error) {
+func (f *fakeChannelIdentityService) ResolveByChannelIdentity(_ context.Context, _, externalID, displayName string, meta map[string]any) (identities.ChannelIdentity, error) {
 	f.calls++
 	f.lastDisplayName = displayName
 	f.lastMeta = meta
@@ -40,7 +40,7 @@ func (f *fakeChannelIdentityService) ResolveByChannelIdentity(ctx context.Contex
 	return f.channelIdentity, nil
 }
 
-func (f *fakeChannelIdentityService) Canonicalize(ctx context.Context, channelIdentityID string) (string, error) {
+func (f *fakeChannelIdentityService) Canonicalize(_ context.Context, channelIdentityID string) (string, error) {
 	if f.canonical != nil {
 		if value, ok := f.canonical[channelIdentityID]; ok {
 			return value, nil
@@ -49,7 +49,7 @@ func (f *fakeChannelIdentityService) Canonicalize(ctx context.Context, channelId
 	return channelIdentityID, nil
 }
 
-func (f *fakeChannelIdentityService) GetLinkedUserID(ctx context.Context, channelIdentityID string) (string, error) {
+func (f *fakeChannelIdentityService) GetLinkedUserID(_ context.Context, channelIdentityID string) (string, error) {
 	if f.linked != nil {
 		if value, ok := f.linked[channelIdentityID]; ok {
 			return value, nil
@@ -60,7 +60,7 @@ func (f *fakeChannelIdentityService) GetLinkedUserID(ctx context.Context, channe
 	return channelIdentityID, nil
 }
 
-func (f *fakeChannelIdentityService) LinkChannelIdentityToUser(ctx context.Context, channelIdentityID, userID string) error {
+func (f *fakeChannelIdentityService) LinkChannelIdentityToUser(_ context.Context, channelIdentityID, userID string) error {
 	if f.linked == nil {
 		f.linked = map[string]string{}
 	}
@@ -73,11 +73,11 @@ type fakeMemberService struct {
 	upsertCalled bool
 }
 
-func (f *fakeMemberService) IsMember(ctx context.Context, botID, channelIdentityID string) (bool, error) {
+func (f *fakeMemberService) IsMember(_ context.Context, _, _ string) (bool, error) {
 	return f.isMember, nil
 }
 
-func (f *fakeMemberService) UpsertMemberSimple(ctx context.Context, botID, channelIdentityID, role string) error {
+func (f *fakeMemberService) UpsertMemberSimple(_ context.Context, _, _, _ string) error {
 	f.upsertCalled = true
 	return nil
 }
@@ -89,21 +89,21 @@ type fakePolicyService struct {
 	err         error
 }
 
-func (f *fakePolicyService) AllowGuest(ctx context.Context, botID string) (bool, error) {
+func (f *fakePolicyService) AllowGuest(_ context.Context, _ string) (bool, error) {
 	if f.err != nil {
 		return false, f.err
 	}
 	return f.allow, nil
 }
 
-func (f *fakePolicyService) BotType(ctx context.Context, botID string) (string, error) {
+func (f *fakePolicyService) BotType(_ context.Context, _ string) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
 	return f.botType, nil
 }
 
-func (f *fakePolicyService) BotOwnerUserID(ctx context.Context, botID string) (string, error) {
+func (f *fakePolicyService) BotOwnerUserID(_ context.Context, _ string) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
@@ -116,7 +116,7 @@ type fakePreauthServiceIdentity struct {
 	markUsed bool
 }
 
-func (f *fakePreauthServiceIdentity) Get(ctx context.Context, token string) (preauth.Key, error) {
+func (f *fakePreauthServiceIdentity) Get(_ context.Context, token string) (preauth.Key, error) {
 	if f.err != nil {
 		return preauth.Key{}, f.err
 	}
@@ -126,7 +126,7 @@ func (f *fakePreauthServiceIdentity) Get(ctx context.Context, token string) (pre
 	return f.key, nil
 }
 
-func (f *fakePreauthServiceIdentity) MarkUsed(ctx context.Context, id string) (preauth.Key, error) {
+func (f *fakePreauthServiceIdentity) MarkUsed(_ context.Context, _ string) (preauth.Key, error) {
 	f.markUsed = true
 	return f.key, nil
 }
@@ -139,7 +139,7 @@ type fakeBindService struct {
 	onConsume     func(channelChannelIdentityID string)
 }
 
-func (f *fakeBindService) Get(ctx context.Context, token string) (bind.Code, error) {
+func (f *fakeBindService) Get(_ context.Context, token string) (bind.Code, error) {
 	if f.getErr != nil {
 		return bind.Code{}, f.getErr
 	}
@@ -149,7 +149,7 @@ func (f *fakeBindService) Get(ctx context.Context, token string) (bind.Code, err
 	return f.code, nil
 }
 
-func (f *fakeBindService) Consume(ctx context.Context, code bind.Code, channelChannelIdentityID string) error {
+func (f *fakeBindService) Consume(_ context.Context, _ bind.Code, channelChannelIdentityID string) error {
 	f.consumeCalled = true
 	if f.onConsume != nil {
 		f.onConsume(channelChannelIdentityID)
@@ -168,21 +168,21 @@ func (f *fakeDirectoryAdapter) Type() channel.ChannelType {
 
 func (f *fakeDirectoryAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
-		Type:        f.channelType,
-		DisplayName: "FakeDirectory",
+		Type:         f.channelType,
+		DisplayName:  "FakeDirectory",
 		Capabilities: channel.ChannelCapabilities{},
 	}
 }
 
-func (f *fakeDirectoryAdapter) ListPeers(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*fakeDirectoryAdapter) ListPeers(_ context.Context, _ channel.ChannelConfig, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
-func (f *fakeDirectoryAdapter) ListGroups(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*fakeDirectoryAdapter) ListGroups(_ context.Context, _ channel.ChannelConfig, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
-func (f *fakeDirectoryAdapter) ListGroupMembers(ctx context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*fakeDirectoryAdapter) ListGroupMembers(_ context.Context, _ channel.ChannelConfig, _ string, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
@@ -225,7 +225,7 @@ func TestIdentityResolverResolveDisplayNameFromDirectory(t *testing.T) {
 	registry := channel.NewRegistry()
 	directoryAdapter := &fakeDirectoryAdapter{
 		channelType: channel.ChannelType("feishu"),
-		resolveFn: func(ctx context.Context, cfg channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
+		resolveFn: func(_ context.Context, _ channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
 			if kind != channel.DirectoryEntryUser {
 				t.Fatalf("expected kind user, got %s", kind)
 			}
@@ -275,7 +275,7 @@ func TestIdentityResolverDirectoryLookupFailureDoesNotFallbackToOpenID(t *testin
 	registry := channel.NewRegistry()
 	directoryAdapter := &fakeDirectoryAdapter{
 		channelType: channel.ChannelType("feishu"),
-		resolveFn: func(ctx context.Context, cfg channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
+		resolveFn: func(_ context.Context, _ channel.ChannelConfig, _ string, _ channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
 			return channel.DirectoryEntry{}, errors.New("lookup failed")
 		},
 	}
@@ -317,7 +317,7 @@ func TestIdentityResolverDirectoryAvatarURLPropagated(t *testing.T) {
 	registry := channel.NewRegistry()
 	directoryAdapter := &fakeDirectoryAdapter{
 		channelType: channel.ChannelType("feishu"),
-		resolveFn: func(ctx context.Context, cfg channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
+		resolveFn: func(_ context.Context, _ channel.ChannelConfig, _ string, _ channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
 			return channel.DirectoryEntry{
 				Kind:      channel.DirectoryEntryUser,
 				Name:      "Avatar User",

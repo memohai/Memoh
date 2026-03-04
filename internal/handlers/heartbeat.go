@@ -47,7 +47,7 @@ func (h *HeartbeatHandler) Register(e *echo.Echo) {
 // @Success 200 {object} heartbeat.ListLogsResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/heartbeat/logs [get]
+// @Router /bots/{bot_id}/heartbeat/logs [get].
 func (h *HeartbeatHandler) ListLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
@@ -91,7 +91,7 @@ func (h *HeartbeatHandler) ListLogs(c echo.Context) error {
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/heartbeat/logs [delete]
+// @Router /bots/{bot_id}/heartbeat/logs [delete].
 func (h *HeartbeatHandler) DeleteLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
@@ -110,7 +110,7 @@ func (h *HeartbeatHandler) DeleteLogs(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *HeartbeatHandler) requireUserID(c echo.Context) (string, error) {
+func (*HeartbeatHandler) requireUserID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }
 

@@ -77,6 +77,6 @@ func (h *BindHandler) Issue(c echo.Context) error {
 	})
 }
 
-func (h *BindHandler) requireUserID(c echo.Context) (string, error) {
+func (*BindHandler) requireUserID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }

@@ -3,8 +3,9 @@ package models_test
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/models"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/memohai/memoh/internal/models"
 )
 
 // This is an example test file demonstrating how to use the models service
@@ -281,14 +282,14 @@ func TestModel_HasInputModality(t *testing.T) {
 
 func TestModelTypes(t *testing.T) {
 	t.Run("ModelType constants", func(t *testing.T) {
-		assert.Equal(t, models.ModelType("chat"), models.ModelTypeChat)
-		assert.Equal(t, models.ModelType("embedding"), models.ModelTypeEmbedding)
+		assert.Equal(t, models.ModelTypeChat, models.ModelType("chat"))
+		assert.Equal(t, models.ModelTypeEmbedding, models.ModelType("embedding"))
 	})
 
 	t.Run("ClientType constants", func(t *testing.T) {
-		assert.Equal(t, models.ClientType("openai-responses"), models.ClientTypeOpenAIResponses)
-		assert.Equal(t, models.ClientType("openai-completions"), models.ClientTypeOpenAICompletions)
-		assert.Equal(t, models.ClientType("anthropic-messages"), models.ClientTypeAnthropicMessages)
-		assert.Equal(t, models.ClientType("google-generative-ai"), models.ClientTypeGoogleGenerativeAI)
+		assert.Equal(t, models.ClientTypeOpenAIResponses, models.ClientType("openai-responses"))
+		assert.Equal(t, models.ClientTypeOpenAICompletions, models.ClientType("openai-completions"))
+		assert.Equal(t, models.ClientTypeAnthropicMessages, models.ClientType("anthropic-messages"))
+		assert.Equal(t, models.ClientTypeGoogleGenerativeAI, models.ClientType("google-generative-ai"))
 	})
 }

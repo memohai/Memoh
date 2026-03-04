@@ -23,7 +23,7 @@ type AfterChatRequest struct {
 	Messages []Message
 }
 
-// LLM is the interface for LLM operations needed by memory service
+// LLM is the interface for LLM operations needed by memory service.
 type LLM interface {
 	Extract(ctx context.Context, req ExtractRequest) (ExtractResponse, error)
 	Decide(ctx context.Context, req DecideRequest) (DecideResponse, error)

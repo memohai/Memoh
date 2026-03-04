@@ -2,7 +2,7 @@ package channel
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"testing"
 )
@@ -13,8 +13,8 @@ type mockAdapter struct {
 	streamEvents []StreamEvent
 }
 
-func (m *mockAdapter) Type() ChannelType { return ChannelType("test") }
-func (m *mockAdapter) Descriptor() Descriptor {
+func (*mockAdapter) Type() ChannelType { return ChannelType("test") }
+func (*mockAdapter) Descriptor() Descriptor {
 	return Descriptor{
 		Type:        ChannelType("test"),
 		DisplayName: "Test",
@@ -25,12 +25,13 @@ func (m *mockAdapter) Descriptor() Descriptor {
 		},
 	}
 }
-func (m *mockAdapter) Send(ctx context.Context, cfg ChannelConfig, msg OutboundMessage) error {
+
+func (m *mockAdapter) Send(_ context.Context, _ ChannelConfig, msg OutboundMessage) error {
 	m.sentMessages = append(m.sentMessages, msg)
 	return nil
 }
 
-func (m *mockAdapter) OpenStream(ctx context.Context, cfg ChannelConfig, target string, opts StreamOptions) (OutboundStream, error) {
+func (m *mockAdapter) OpenStream(_ context.Context, _ ChannelConfig, _ string, _ StreamOptions) (OutboundStream, error) {
 	return &mockAdapterStream{adapter: m}, nil
 }
 
@@ -38,7 +39,7 @@ type mockAdapterStream struct {
 	adapter *mockAdapter
 }
 
-func (s *mockAdapterStream) Push(ctx context.Context, event StreamEvent) error {
+func (s *mockAdapterStream) Push(_ context.Context, event StreamEvent) error {
 	if s == nil || s.adapter == nil {
 		return nil
 	}
@@ -52,7 +53,7 @@ func (s *mockAdapterStream) Push(ctx context.Context, event StreamEvent) error {
 	return nil
 }
 
-func (s *mockAdapterStream) Close(ctx context.Context) error {
+func (*mockAdapterStream) Close(_ context.Context) error {
 	return nil
 }
 
@@ -73,14 +74,14 @@ func (f *fakeInboundProcessor) HandleInbound(ctx context.Context, cfg ChannelCon
 		return nil
 	}
 	if sender == nil {
-		return fmt.Errorf("sender missing")
+		return errors.New("sender missing")
 	}
 	return sender.Send(ctx, *f.resp)
 }
 
 type fakeInboundStreamProcessor struct{}
 
-func (f *fakeInboundStreamProcessor) HandleInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage, sender StreamReplySender) error {
+func (*fakeInboundStreamProcessor) HandleInbound(ctx context.Context, _ ChannelConfig, _ InboundMessage, sender StreamReplySender) error {
 	stream, err := sender.OpenStream(ctx, "stream-target", StreamOptions{})
 	if err != nil {
 		return err

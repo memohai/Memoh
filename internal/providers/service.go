@@ -14,13 +14,13 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
-// Service handles provider operations
+// Service handles provider operations.
 type Service struct {
 	queries *sqlc.Queries
 	logger  *slog.Logger
 }
 
-// NewService creates a new provider service
+// NewService creates a new provider service.
 func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	return &Service{
 		queries: queries,
@@ -28,7 +28,7 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	}
 }
 
-// Create creates a new LLM provider
+// Create creates a new LLM provider.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
 	// Marshal metadata
 	metadataJSON, err := json.Marshal(req.Metadata)
@@ -50,7 +50,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 	return s.toGetResponse(provider), nil
 }
 
-// Get retrieves a provider by ID
+// Get retrieves a provider by ID.
 func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -65,7 +65,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 	return s.toGetResponse(provider), nil
 }
 
-// GetByName retrieves a provider by name
+// GetByName retrieves a provider by name.
 func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, error) {
 	provider, err := s.queries.GetLlmProviderByName(ctx, name)
 	if err != nil {
@@ -75,7 +75,7 @@ func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, erro
 	return s.toGetResponse(provider), nil
 }
 
-// List retrieves all providers
+// List retrieves all providers.
 func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	providers, err := s.queries.ListLlmProviders(ctx)
 	if err != nil {
@@ -89,7 +89,7 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	return results, nil
 }
 
-// Update updates an existing provider
+// Update updates an existing provider.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (GetResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -139,7 +139,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	return s.toGetResponse(updated), nil
 }
 
-// Delete deletes a provider by ID
+// Delete deletes a provider by ID.
 func (s *Service) Delete(ctx context.Context, id string) error {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -152,7 +152,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Count returns the total count of providers
+// Count returns the total count of providers.
 func (s *Service) Count(ctx context.Context) (int64, error) {
 	count, err := s.queries.CountLlmProviders(ctx)
 	if err != nil {
@@ -215,11 +215,11 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", provider.ApiKey))
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -242,21 +242,23 @@ func probeReachable(ctx context.Context, baseURL string) (bool, string) {
 	if err != nil {
 		return false, err.Error()
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
 	if err != nil {
 		return false, err.Error()
 	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 	return true, ""
 }
 
-// toGetResponse converts a database provider to a response
+// toGetResponse converts a database provider to a response.
 func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 	var metadata map[string]any
 	if len(provider.Metadata) > 0 {
 		if err := json.Unmarshal(provider.Metadata, &metadata); err != nil {
-			slog.Warn("provider metadata unmarshal failed", slog.String("id", provider.ID.String()), slog.Any("error", err))
+			if s.logger != nil {
+				s.logger.Warn("provider metadata unmarshal failed", slog.String("id", provider.ID.String()), slog.Any("error", err))
+			}
 		}
 	}
 
@@ -274,7 +276,7 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 	}
 }
 
-// maskAPIKey masks an API key for security
+// maskAPIKey masks an API key for security.
 func maskAPIKey(apiKey string) string {
 	if apiKey == "" {
 		return ""

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -24,11 +25,11 @@ func NewToolRegistry() *ToolRegistry {
 
 func (r *ToolRegistry) Register(executor ToolExecutor, tool ToolDescriptor) error {
 	if executor == nil {
-		return fmt.Errorf("tool executor is required")
+		return errors.New("tool executor is required")
 	}
 	name := strings.TrimSpace(tool.Name)
 	if name == "" {
-		return fmt.Errorf("tool name is required")
+		return errors.New("tool name is required")
 	}
 	if tool.InputSchema == nil {
 		tool.InputSchema = map[string]any{

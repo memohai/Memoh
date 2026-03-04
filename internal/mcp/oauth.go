@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
@@ -69,11 +71,11 @@ type AuthorizeResult struct {
 // Discover performs the MCP OAuth discovery flow:
 // 1. Send request to MCP server, expect 401 with WWW-Authenticate
 // 2. Fetch Protected Resource Metadata
-// 3. Fetch Authorization Server Metadata
+// 3. Fetch Authorization Server Metadata.
 func (s *OAuthService) Discover(ctx context.Context, serverURL string) (*DiscoveryResult, error) {
 	serverURL = strings.TrimSpace(serverURL)
 	if serverURL == "" {
-		return nil, fmt.Errorf("server URL is required")
+		return nil, errors.New("server URL is required")
 	}
 
 	resourceURI := canonicalResourceURI(serverURL)
@@ -116,7 +118,7 @@ func (s *OAuthService) Discover(ctx context.Context, serverURL string) (*Discove
 		if prmErr != nil {
 			return nil, fmt.Errorf("failed to fetch protected resource metadata: %w", prmErr)
 		}
-		return nil, fmt.Errorf("no authorization servers found in protected resource metadata")
+		return nil, errors.New("no authorization servers found in protected resource metadata")
 	}
 
 	// Step 3: Fetch Authorization Server Metadata
@@ -183,7 +185,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 	}
 
 	if token.AuthorizationEndpoint == "" {
-		return nil, fmt.Errorf("authorization endpoint not configured")
+		return nil, errors.New("authorization endpoint not configured")
 	}
 
 	// Resolve client_id via priority chain
@@ -221,7 +223,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 		}
 	}
 	if clientID == "" {
-		return nil, fmt.Errorf("client_id is required: the authorization server does not support automatic registration, please provide a client_id from a registered OAuth application")
+		return nil, errors.New("client_id is required: the authorization server does not support automatic registration, please provide a client_id from a registered OAuth application")
 	}
 
 	// Persist client_secret if provided by the user
@@ -277,7 +279,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 // HandleCallback exchanges the authorization code for tokens.
 func (s *OAuthService) HandleCallback(ctx context.Context, state, code string) (string, error) {
 	if state == "" || code == "" {
-		return "", fmt.Errorf("state and code are required")
+		return "", errors.New("state and code are required")
 	}
 
 	token, err := s.queries.GetMCPOAuthTokenByState(ctx, state)
@@ -286,7 +288,7 @@ func (s *OAuthService) HandleCallback(ctx context.Context, state, code string) (
 	}
 
 	if token.TokenEndpoint == "" || token.PkceCodeVerifier == "" {
-		return "", fmt.Errorf("invalid OAuth state: missing token endpoint or code verifier")
+		return "", errors.New("invalid OAuth state: missing token endpoint or code verifier")
 	}
 
 	redirectURI := token.RedirectUri
@@ -336,12 +338,12 @@ func (s *OAuthService) GetValidToken(ctx context.Context, connectionID string) (
 	}
 
 	if token.AccessToken == "" {
-		return "", fmt.Errorf("no access token available, authorization required")
+		return "", errors.New("no access token available, authorization required")
 	}
 
 	if token.ExpiresAt.Valid && time.Now().After(token.ExpiresAt.Time.Add(-30*time.Second)) {
 		if token.RefreshToken == "" {
-			return "", fmt.Errorf("access token expired and no refresh token available")
+			return "", errors.New("access token expired and no refresh token available")
 		}
 		refreshed, err := s.refreshToken(ctx, token.TokenEndpoint, token.RefreshToken, token.ClientID, token.ResourceUri)
 		if err != nil {
@@ -429,8 +431,8 @@ type authServerMetadata struct {
 }
 
 type tokenResponse struct {
-	AccessToken      string `json:"access_token"`
-	RefreshToken     string `json:"refresh_token"`
+	AccessToken      string `json:"access_token"`  //nolint:gosec // intentional: OAuth token response field
+	RefreshToken     string `json:"refresh_token"` //nolint:gosec // intentional: OAuth token response field
 	TokenType        string `json:"token_type"`
 	ExpiresIn        int    `json:"expires_in"`
 	Scope            string `json:"scope"`
@@ -445,12 +447,12 @@ func (s *OAuthService) probeForAuth(ctx context.Context, serverURL string) (reso
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.httpClient.Do(req) //nolint:gosec // G704: URL is from OAuth server discovery metadata or operator config, not user input
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		return "", "", fmt.Errorf("expected 401 Unauthorized, got %d (server may not require OAuth)", resp.StatusCode)
@@ -466,7 +468,7 @@ func (s *OAuthService) probeForAuth(ctx context.Context, serverURL string) (reso
 	return resourceMetaURL, scope, nil
 }
 
-func (s *OAuthService) guessResourceMetadataURL(serverURL string) string {
+func (*OAuthService) guessResourceMetadataURL(serverURL string) string {
 	parsed, err := url.Parse(serverURL)
 	if err != nil {
 		return ""
@@ -483,11 +485,11 @@ func (s *OAuthService) fetchProtectedResourceMetadata(ctx context.Context, metad
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.httpClient.Do(req) //nolint:gosec // G704: URL is from OAuth server discovery metadata or operator config, not user input
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -545,11 +547,11 @@ func (s *OAuthService) tryFetchASMetadata(ctx context.Context, metadataURL strin
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.httpClient.Do(req) //nolint:gosec // G704: URL is from OAuth server discovery metadata or operator config, not user input
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("metadata endpoint %s returned %d", metadataURL, resp.StatusCode)
@@ -560,7 +562,7 @@ func (s *OAuthService) tryFetchASMetadata(ctx context.Context, metadataURL strin
 		return nil, err
 	}
 	if meta.AuthorizationEndpoint == "" || meta.TokenEndpoint == "" {
-		return nil, fmt.Errorf("metadata missing required endpoints")
+		return nil, errors.New("metadata missing required endpoints")
 	}
 	return &meta, nil
 }
@@ -596,11 +598,11 @@ func (s *OAuthService) exchangeCode(ctx context.Context, tokenEndpoint, code, co
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.httpClient.Do(req) //nolint:gosec // G704: URL is from OAuth server discovery metadata or operator config, not user input
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {
@@ -630,7 +632,7 @@ func parseTokenResponse(body []byte) (*tokenResponse, error) {
 			return nil, fmt.Errorf("%s", tok.Error)
 		}
 		if tok.AccessToken == "" {
-			return nil, fmt.Errorf("no access_token in response")
+			return nil, errors.New("no access_token in response")
 		}
 		if tok.TokenType == "" {
 			tok.TokenType = "Bearer"
@@ -659,7 +661,7 @@ func parseTokenResponse(body []byte) (*tokenResponse, error) {
 		tok.TokenType = "Bearer"
 	}
 	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("no access_token in response")
+		return nil, errors.New("no access_token in response")
 	}
 	return &tok, nil
 }
@@ -688,11 +690,11 @@ func (s *OAuthService) refreshToken(ctx context.Context, tokenEndpoint, refreshT
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.httpClient.Do(req) //nolint:gosec // G704: URL is from OAuth server discovery metadata or operator config, not user input
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {
@@ -722,7 +724,7 @@ type dcrRequest struct {
 
 type dcrResponse struct {
 	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret,omitempty"`
+	ClientSecret string `json:"client_secret,omitempty"` //nolint:gosec // intentional: OAuth Dynamic Client Registration response field
 }
 
 func (s *OAuthService) registerClient(ctx context.Context, registrationEndpoint, callbackURL string) (*dcrResponse, error) {
@@ -744,11 +746,11 @@ func (s *OAuthService) registerClient(ctx context.Context, registrationEndpoint,
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.httpClient.Do(req) //nolint:gosec // G704: URL is from OAuth server discovery metadata or operator config, not user input
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
@@ -760,7 +762,7 @@ func (s *OAuthService) registerClient(ctx context.Context, registrationEndpoint,
 		return nil, fmt.Errorf("failed to decode DCR response: %w", err)
 	}
 	if result.ClientID == "" {
-		return nil, fmt.Errorf("DCR response missing client_id")
+		return nil, errors.New("DCR response missing client_id")
 	}
 	return &result, nil
 }

@@ -11,7 +11,7 @@ import (
 
 type testFlusher struct{}
 
-func (f *testFlusher) Flush() {}
+func (*testFlusher) Flush() {}
 
 func TestParseSinceParam(t *testing.T) {
 	t.Parallel()

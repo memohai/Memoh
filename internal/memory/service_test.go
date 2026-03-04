@@ -112,4 +112,3 @@ func TestRenderMemoryDayForDisplay_NonMemoryPathUnchanged(t *testing.T) {
 		t.Fatalf("non-memory path should be unchanged, got: %s", out)
 	}
 }
-

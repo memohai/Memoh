@@ -2,7 +2,7 @@ package flow
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/memohai/memoh/internal/schedule"
 )
@@ -20,7 +20,7 @@ func NewScheduleGateway(resolver *Resolver) *ScheduleGateway {
 // TriggerSchedule delegates a schedule trigger to the chat Resolver.
 func (g *ScheduleGateway) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) error {
 	if g == nil || g.resolver == nil {
-		return fmt.Errorf("chat resolver not configured")
+		return errors.New("chat resolver not configured")
 	}
 	return g.resolver.TriggerSchedule(ctx, botID, payload, token)
 }

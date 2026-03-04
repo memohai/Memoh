@@ -1,6 +1,7 @@
 package container
 
 import (
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -83,43 +84,15 @@ func formatTruncatedLines(lines []int) string {
 		return ""
 	}
 	if len(lines) == 1 {
-		return itoa(lines[0])
+		return strconv.Itoa(lines[0])
 	}
 	if len(lines) <= 3 {
 		parts := make([]string, len(lines))
 		for i, n := range lines {
-			parts[i] = itoa(n)
+			parts[i] = strconv.Itoa(n)
 		}
 		return strings.Join(parts, ", ")
 	}
 	// For many truncated lines, show count and examples.
-	return itoa(lines[0]) + ", " + itoa(lines[1]) + ", " + itoa(lines[2]) + "... (" + itoa(len(lines)) + " total)"
-}
-
-// itoa converts int to string without allocation.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	sign := n < 0
-	var u uint64
-	if sign {
-		// Avoid overflow for MinInt.
-		u = uint64(-(n + 1))
-		u++
-	} else {
-		u = uint64(n)
-	}
-	for u > 0 {
-		i--
-		buf[i] = byte('0' + u%10)
-		u /= 10
-	}
-	if sign {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
+	return strconv.Itoa(lines[0]) + ", " + strconv.Itoa(lines[1]) + ", " + strconv.Itoa(lines[2]) + "... (" + strconv.Itoa(len(lines)) + " total)"
 }

@@ -3,7 +3,6 @@ package preauth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -28,7 +27,7 @@ func NewService(queries *sqlc.Queries) *Service {
 // Issue creates a new preauth key for the given bot.
 func (s *Service) Issue(ctx context.Context, botID, issuedByUserID string, ttl time.Duration) (Key, error) {
 	if s.queries == nil {
-		return Key{}, fmt.Errorf("preauth queries not configured")
+		return Key{}, errors.New("preauth queries not configured")
 	}
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
@@ -61,7 +60,7 @@ func (s *Service) Issue(ctx context.Context, botID, issuedByUserID string, ttl t
 
 func (s *Service) Get(ctx context.Context, token string) (Key, error) {
 	if s.queries == nil {
-		return Key{}, fmt.Errorf("preauth queries not configured")
+		return Key{}, errors.New("preauth queries not configured")
 	}
 	row, err := s.queries.GetBotPreauthKey(ctx, strings.TrimSpace(token))
 	if err != nil {
@@ -75,7 +74,7 @@ func (s *Service) Get(ctx context.Context, token string) (Key, error) {
 
 func (s *Service) MarkUsed(ctx context.Context, id string) (Key, error) {
 	if s.queries == nil {
-		return Key{}, fmt.Errorf("preauth queries not configured")
+		return Key{}, errors.New("preauth queries not configured")
 	}
 	pgID, err := db.ParseUUID(id)
 	if err != nil {

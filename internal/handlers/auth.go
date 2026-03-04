@@ -22,11 +22,11 @@ type AuthHandler struct {
 
 type LoginRequest struct {
 	Username string `json:"username"`
-	Password string `json:"password"`
+	Password string `json:"password"` //nolint:gosec // intentional: JSON request field carrying a user-supplied credential
 }
 
 type LoginResponse struct {
-	AccessToken string `json:"access_token"`
+	AccessToken string `json:"access_token"` //nolint:gosec // intentional: JWT is the purpose of this response field
 	TokenType   string `json:"token_type"`
 	ExpiresAt   string `json:"expires_at"`
 	UserID      string `json:"user_id"`
@@ -58,7 +58,7 @@ func (h *AuthHandler) Register(e *echo.Echo) {
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /auth/login [post]
+// @Router /auth/login [post].
 func (h *AuthHandler) Login(c echo.Context) error {
 	if h.accountService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "user service not configured")
@@ -106,7 +106,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 }
 
 type RefreshResponse struct {
-	AccessToken string `json:"access_token"`
+	AccessToken string `json:"access_token"` //nolint:gosec // intentional: JWT is the purpose of this response field
 	TokenType   string `json:"token_type"`
 	ExpiresAt   string `json:"expires_at"`
 }
@@ -119,7 +119,7 @@ type RefreshResponse struct {
 // @Success 200 {object} RefreshResponse
 // @Failure 401 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /auth/refresh [post]
+// @Router /auth/refresh [post].
 func (h *AuthHandler) Refresh(c echo.Context) error {
 	if strings.TrimSpace(h.jwtSecret) == "" {
 		return echo.NewHTTPError(http.StatusInternalServerError, "jwt secret not configured")

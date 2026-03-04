@@ -68,8 +68,10 @@ type namespaceScope struct {
 	ScopeID   string
 }
 
-const sharedMemoryNamespace = "bot"
-const defaultBuiltinProviderID = "__builtin_default__"
+const (
+	sharedMemoryNamespace    = "bot"
+	defaultBuiltinProviderID = "__builtin_default__"
+)
 
 // NewMemoryHandler creates a MemoryHandler.
 func NewMemoryHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service) *MemoryHandler {
@@ -159,7 +161,7 @@ func (h *MemoryHandler) checkService(ctx context.Context, botID string) (memprov
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory [post]
+// @Router /bots/{bot_id}/memory [post].
 func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -218,7 +220,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory/search [post]
+// @Router /bots/{bot_id}/memory/search [post].
 func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -275,7 +277,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory [get]
+// @Router /bots/{bot_id}/memory [get].
 func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -323,7 +325,7 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory [delete]
+// @Router /bots/{bot_id}/memory [delete].
 func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -372,7 +374,7 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory/{id} [delete]
+// @Router /bots/{bot_id}/memory/{id} [delete].
 func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -414,7 +416,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory/compact [post]
+// @Router /bots/{bot_id}/memory/compact [post].
 func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -466,7 +468,7 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory/usage [get]
+// @Router /bots/{bot_id}/memory/usage [get].
 func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -511,7 +513,7 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
-// @Router /bots/{bot_id}/memory/rebuild [post]
+// @Router /bots/{bot_id}/memory/rebuild [post].
 func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 	if h.memoryStore == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "memory filesystem not configured")
@@ -539,7 +541,7 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 // --- helpers ---
 
 // resolveEnabledScopes returns bot-shared namespace scope.
-func (h *MemoryHandler) resolveEnabledScopes(botID string) ([]namespaceScope, error) {
+func (*MemoryHandler) resolveEnabledScopes(botID string) ([]namespaceScope, error) {
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "bot id is empty")
@@ -551,7 +553,7 @@ func (h *MemoryHandler) resolveEnabledScopes(botID string) ([]namespaceScope, er
 }
 
 // resolveWriteScope returns (scopeID, botID) for shared bot memory.
-func (h *MemoryHandler) resolveWriteScope(botID string) (string, string, error) {
+func (*MemoryHandler) resolveWriteScope(botID string) (string, string, error) {
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
 		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "bot id is empty")
@@ -568,7 +570,7 @@ func normalizeSharedMemoryNamespace(raw string) (string, error) {
 	}
 }
 
-func (h *MemoryHandler) resolveBotID(c echo.Context) (string, error) {
+func (*MemoryHandler) resolveBotID(c echo.Context) (string, error) {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
 		return "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
@@ -605,7 +607,7 @@ func deduplicateMemoryItems(items []memprovider.MemoryItem) []memprovider.Memory
 	return result
 }
 
-func (h *MemoryHandler) requireChannelIdentityID(c echo.Context) (string, error) {
+func (*MemoryHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }
 

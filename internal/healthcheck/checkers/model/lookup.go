@@ -2,6 +2,7 @@ package modelchecker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -22,7 +23,7 @@ func NewQueriesLookup(queries *sqlc.Queries) *QueriesLookup {
 // GetBotModelIDs fetches model IDs configured directly on the bot.
 func (l *QueriesLookup) GetBotModelIDs(ctx context.Context, botID string) (BotModels, error) {
 	if strings.TrimSpace(botID) == "" {
-		return BotModels{}, fmt.Errorf("bot id is required")
+		return BotModels{}, errors.New("bot id is required")
 	}
 	pgID, err := db.ParseUUID(botID)
 	if err != nil {

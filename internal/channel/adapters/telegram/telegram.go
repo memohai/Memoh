@@ -22,11 +22,15 @@ import (
 	"github.com/memohai/memoh/internal/media"
 )
 
-const telegramMaxMessageLength = 4096
-const telegramMediaGroupCollectWindow = 700 * time.Millisecond
+const (
+	telegramMaxMessageLength        = 4096
+	telegramMediaGroupCollectWindow = 700 * time.Millisecond
+)
 
-var telegramBotLogger = newSlogBotLogger(nil)
-var telegramLoggerInitOnce sync.Once
+var (
+	telegramBotLogger      = newSlogBotLogger(nil)
+	telegramLoggerInitOnce sync.Once
+)
 
 type telegramMediaGroupBuffer struct {
 	messages []*tgbotapi.Message
@@ -135,12 +139,12 @@ func formatTelegramFileURL(endpoint, token, filePath string) string {
 }
 
 // Type returns the Telegram channel type.
-func (a *TelegramAdapter) Type() channel.ChannelType {
+func (*TelegramAdapter) Type() channel.ChannelType {
 	return Type
 }
 
 // Descriptor returns the Telegram channel metadata.
-func (a *TelegramAdapter) Descriptor() channel.Descriptor {
+func (*TelegramAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        Type,
 		DisplayName: "Telegram",
@@ -188,32 +192,32 @@ func (a *TelegramAdapter) Descriptor() channel.Descriptor {
 }
 
 // NormalizeConfig validates and normalizes a Telegram channel configuration map.
-func (a *TelegramAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
+func (*TelegramAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeConfig(raw)
 }
 
 // NormalizeUserConfig validates and normalizes a Telegram user-binding configuration map.
-func (a *TelegramAdapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
+func (*TelegramAdapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeUserConfig(raw)
 }
 
 // NormalizeTarget normalizes a Telegram delivery target string.
-func (a *TelegramAdapter) NormalizeTarget(raw string) string {
+func (*TelegramAdapter) NormalizeTarget(raw string) string {
 	return normalizeTarget(raw)
 }
 
 // ResolveTarget derives a delivery target from a Telegram user-binding configuration.
-func (a *TelegramAdapter) ResolveTarget(userConfig map[string]any) (string, error) {
+func (*TelegramAdapter) ResolveTarget(userConfig map[string]any) (string, error) {
 	return resolveTarget(userConfig)
 }
 
 // MatchBinding reports whether a Telegram user binding matches the given criteria.
-func (a *TelegramAdapter) MatchBinding(config map[string]any, criteria channel.BindingCriteria) bool {
+func (*TelegramAdapter) MatchBinding(config map[string]any, criteria channel.BindingCriteria) bool {
 	return matchBinding(config, criteria)
 }
 
 // BuildUserConfig constructs a Telegram user-binding config from an Identity.
-func (a *TelegramAdapter) BuildUserConfig(identity channel.Identity) map[string]any {
+func (*TelegramAdapter) BuildUserConfig(identity channel.Identity) map[string]any {
 	return buildUserConfig(identity)
 }
 
@@ -246,8 +250,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 	mediaGroups := make(map[string]*telegramMediaGroupBuffer)
 	var mediaGroupsMu sync.Mutex
 
-	var flushMediaGroup func(groupKey string)
-	flushMediaGroup = func(groupKey string) {
+	flushMediaGroup := func(groupKey string) {
 		var batch []*tgbotapi.Message
 		mediaGroupsMu.Lock()
 		buffer, ok := mediaGroups[groupKey]
@@ -475,7 +478,7 @@ func (a *TelegramAdapter) buildTelegramMediaGroupInboundMessage(
 
 func (a *TelegramAdapter) toInboundTelegramMessage(
 	bot *tgbotapi.BotAPI,
-	cfg channel.ChannelConfig,
+	_ channel.ChannelConfig,
 	raw *tgbotapi.Message,
 	text string,
 	attachments []channel.Attachment,
@@ -585,14 +588,14 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	}
 	to := strings.TrimSpace(msg.Target)
 	if to == "" {
-		return fmt.Errorf("telegram target is required")
+		return errors.New("telegram target is required")
 	}
 	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
 	if err != nil {
 		return err
 	}
 	if msg.Message.IsEmpty() {
-		return fmt.Errorf("message is required")
+		return errors.New("message is required")
 	}
 	text := strings.TrimSpace(msg.Message.PlainText())
 	text, parseMode := formatTelegramOutput(text, msg.Message.Format)
@@ -632,7 +635,7 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return nil, fmt.Errorf("telegram target is required")
+		return nil, errors.New("telegram target is required")
 	}
 	select {
 	case <-ctx.Done():
@@ -754,7 +757,7 @@ func sendTelegramTextReturnMessage(bot *tgbotapi.BotAPI, target string, text str
 	} else {
 		chatID, err = strconv.ParseInt(target, 10, 64)
 		if err != nil {
-			return 0, 0, fmt.Errorf("telegram target must be @username or chat_id")
+			return 0, 0, errors.New("telegram target must be @username or chat_id")
 		}
 		message := tgbotapi.NewMessage(chatID, text)
 		message.ParseMode = parseMode
@@ -805,7 +808,7 @@ func sendTelegramDraft(bot *tgbotapi.BotAPI, chatID int64, draftID int, text str
 		return sendDraftForTest(bot, chatID, draftID, text, parseMode)
 	}
 	params := tgbotapi.Params{}
-	params.AddFirstValid("chat_id", chatID)
+	_ = params.AddFirstValid("chat_id", chatID)
 	params.AddNonZero("draft_id", draftID)
 	params.AddNonEmpty("text", text)
 	params.AddNonEmpty("parse_mode", parseMode)
@@ -850,18 +853,14 @@ func sendTelegramAttachmentWithAssets(ctx context.Context, bot *tgbotapi.BotAPI,
 	return sendTelegramAttachmentImpl(ctx, bot, target, att, caption, replyTo, parseMode, opener)
 }
 
-func sendTelegramAttachment(bot *tgbotapi.BotAPI, target string, att channel.Attachment, caption string, replyTo int, parseMode string) error {
-	return sendTelegramAttachmentImpl(context.Background(), bot, target, att, caption, replyTo, parseMode, nil)
-}
-
-func sendTelegramAttachmentImpl(_ context.Context, bot *tgbotapi.BotAPI, target string, att channel.Attachment, caption string, replyTo int, parseMode string, opener assetOpener) error {
+func sendTelegramAttachmentImpl(ctx context.Context, bot *tgbotapi.BotAPI, target string, att channel.Attachment, caption string, replyTo int, parseMode string, opener assetOpener) error {
 	urlRef := strings.TrimSpace(att.URL)
 	keyRef := strings.TrimSpace(att.PlatformKey)
 	sourcePlatform := strings.TrimSpace(att.SourcePlatform)
 	base64Ref := strings.TrimSpace(att.Base64)
 	assetID := strings.TrimSpace(att.ContentHash)
 	if urlRef == "" && keyRef == "" && base64Ref == "" && assetID == "" {
-		return fmt.Errorf("attachment reference is required")
+		return errors.New("attachment reference is required")
 	}
 	if strings.TrimSpace(caption) == "" && strings.TrimSpace(att.Caption) != "" {
 		caption = strings.TrimSpace(att.Caption)
@@ -872,7 +871,7 @@ func sendTelegramAttachmentImpl(_ context.Context, bot *tgbotapi.BotAPI, target 
 			botID = bid
 		}
 	}
-	file, err := resolveTelegramFile(urlRef, keyRef, base64Ref, sourcePlatform, att, assetID, botID, opener)
+	file, err := resolveTelegramFile(ctx, urlRef, keyRef, base64Ref, sourcePlatform, att, assetID, botID, opener)
 	if err != nil {
 		return err
 	}
@@ -885,7 +884,7 @@ func sendTelegramAttachmentImpl(_ context.Context, bot *tgbotapi.BotAPI, target 
 		} else {
 			chatID, err := strconv.ParseInt(target, 10, 64)
 			if err != nil {
-				return fmt.Errorf("telegram target must be @username or chat_id")
+				return errors.New("telegram target must be @username or chat_id")
 			}
 			photo = tgbotapi.NewPhoto(chatID, file)
 		}
@@ -908,7 +907,7 @@ func sendTelegramAttachmentImpl(_ context.Context, bot *tgbotapi.BotAPI, target 
 		} else {
 			chatID, err := strconv.ParseInt(target, 10, 64)
 			if err != nil {
-				return fmt.Errorf("telegram target must be @username or chat_id")
+				return errors.New("telegram target must be @username or chat_id")
 			}
 			document = tgbotapi.NewDocument(chatID, file)
 		}
@@ -974,12 +973,12 @@ func sendTelegramAttachmentImpl(_ context.Context, bot *tgbotapi.BotAPI, target 
 
 // resolveTelegramFile determines the best tgbotapi.RequestFileData for an attachment.
 // Priority: PlatformKey > ContentHash (storage) > public URL > base64 data URL.
-func resolveTelegramFile(urlRef, keyRef, base64Ref, sourcePlatform string, att channel.Attachment, assetID, botID string, opener assetOpener) (tgbotapi.RequestFileData, error) {
+func resolveTelegramFile(ctx context.Context, urlRef, keyRef, base64Ref, sourcePlatform string, att channel.Attachment, assetID, botID string, opener assetOpener) (tgbotapi.RequestFileData, error) {
 	if keyRef != "" && (sourcePlatform == "" || strings.EqualFold(sourcePlatform, Type.String())) {
 		return tgbotapi.FileID(keyRef), nil
 	}
 	if assetID != "" && opener != nil {
-		reader, asset, err := opener.Open(context.Background(), botID, assetID)
+		reader, asset, err := opener.Open(ctx, botID, assetID)
 		if err == nil {
 			data, readErr := io.ReadAll(io.LimitReader(reader, media.MaxAssetBytes+1))
 			_ = reader.Close()
@@ -1013,7 +1012,7 @@ func resolveTelegramFile(urlRef, keyRef, base64Ref, sourcePlatform string, att c
 	if urlRef != "" {
 		return tgbotapi.FileURL(urlRef), nil
 	}
-	return nil, fmt.Errorf("no usable attachment reference for telegram")
+	return nil, errors.New("no usable attachment reference for telegram")
 }
 
 func decodeDataURLBytes(dataURL string) ([]byte, error) {
@@ -1164,7 +1163,7 @@ func buildTelegramAudio(target string, file tgbotapi.RequestFileData) (tgbotapi.
 	}
 	chatID, err := strconv.ParseInt(target, 10, 64)
 	if err != nil {
-		return tgbotapi.AudioConfig{}, fmt.Errorf("telegram target must be @username or chat_id")
+		return tgbotapi.AudioConfig{}, errors.New("telegram target must be @username or chat_id")
 	}
 	return tgbotapi.NewAudio(chatID, file), nil
 }
@@ -1177,7 +1176,7 @@ func buildTelegramVoice(target string, file tgbotapi.RequestFileData) (tgbotapi.
 	}
 	chatID, err := strconv.ParseInt(target, 10, 64)
 	if err != nil {
-		return tgbotapi.VoiceConfig{}, fmt.Errorf("telegram target must be @username or chat_id")
+		return tgbotapi.VoiceConfig{}, errors.New("telegram target must be @username or chat_id")
 	}
 	return tgbotapi.NewVoice(chatID, file), nil
 }
@@ -1190,7 +1189,7 @@ func buildTelegramVideo(target string, file tgbotapi.RequestFileData) (tgbotapi.
 	}
 	chatID, err := strconv.ParseInt(target, 10, 64)
 	if err != nil {
-		return tgbotapi.VideoConfig{}, fmt.Errorf("telegram target must be @username or chat_id")
+		return tgbotapi.VideoConfig{}, errors.New("telegram target must be @username or chat_id")
 	}
 	return tgbotapi.NewVideo(chatID, file), nil
 }
@@ -1203,7 +1202,7 @@ func buildTelegramAnimation(target string, file tgbotapi.RequestFileData) (tgbot
 	}
 	chatID, err := strconv.ParseInt(target, 10, 64)
 	if err != nil {
-		return tgbotapi.AnimationConfig{}, fmt.Errorf("telegram target must be @username or chat_id")
+		return tgbotapi.AnimationConfig{}, errors.New("telegram target must be @username or chat_id")
 	}
 	return tgbotapi.NewAnimation(chatID, file), nil
 }
@@ -1381,7 +1380,7 @@ func (a *TelegramAdapter) buildTelegramAttachment(bot *tgbotapi.BotAPI, attType 
 func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
 	fileID := strings.TrimSpace(attachment.PlatformKey)
 	if fileID == "" && strings.TrimSpace(attachment.URL) == "" {
-		return channel.AttachmentPayload{}, fmt.Errorf("telegram attachment requires platform_key or url")
+		return channel.AttachmentPayload{}, errors.New("telegram attachment requires platform_key or url")
 	}
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
@@ -1403,7 +1402,7 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 		return channel.AttachmentPayload{}, fmt.Errorf("build download request: %w", err)
 	}
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: URL is a Telegram file download URL from the Telegram Bot API
 	if err != nil {
 		return channel.AttachmentPayload{}, fmt.Errorf("download attachment: %w", err)
 	}
@@ -1442,7 +1441,7 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 }
 
 // DiscoverSelf retrieves the bot's own identity from the Telegram platform.
-func (a *TelegramAdapter) DiscoverSelf(ctx context.Context, credentials map[string]any) (map[string]any, string, error) {
+func (a *TelegramAdapter) DiscoverSelf(_ context.Context, credentials map[string]any) (map[string]any, string, error) {
 	cfg, err := parseConfig(credentials)
 	if err != nil {
 		return nil, "", err
@@ -1529,7 +1528,7 @@ func truncateTelegramText(text string) string {
 }
 
 // ProcessingStarted sends a "typing" chat action to indicate processing.
-func (a *TelegramAdapter) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+func (a *TelegramAdapter) ProcessingStarted(_ context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
 	chatID := strings.TrimSpace(info.ReplyTarget)
 	if chatID == "" {
 		return channel.ProcessingStatusHandle{}, nil
@@ -1549,12 +1548,12 @@ func (a *TelegramAdapter) ProcessingStarted(ctx context.Context, cfg channel.Cha
 }
 
 // ProcessingCompleted is a no-op for Telegram (typing indicator clears automatically).
-func (a *TelegramAdapter) ProcessingCompleted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
+func (*TelegramAdapter) ProcessingCompleted(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage, _ channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle) error {
 	return nil
 }
 
 // ProcessingFailed is a no-op for Telegram (typing indicator clears automatically).
-func (a *TelegramAdapter) ProcessingFailed(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
+func (*TelegramAdapter) ProcessingFailed(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage, _ channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle, _ error) error {
 	return nil
 }
 
@@ -1587,7 +1586,7 @@ func clearTelegramReaction(bot *tgbotapi.BotAPI, chatID, messageID string) error
 }
 
 // React adds an emoji reaction to a message (implements channel.Reactor).
-func (a *TelegramAdapter) React(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, emoji string) error {
+func (a *TelegramAdapter) React(_ context.Context, cfg channel.ChannelConfig, target string, messageID string, emoji string) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
@@ -1601,7 +1600,7 @@ func (a *TelegramAdapter) React(ctx context.Context, cfg channel.ChannelConfig, 
 
 // Unreact removes the bot's reaction from a message (implements channel.Reactor).
 // The emoji parameter is ignored; Telegram clears all bot reactions at once.
-func (a *TelegramAdapter) Unreact(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, _ string) error {
+func (a *TelegramAdapter) Unreact(_ context.Context, cfg channel.ChannelConfig, target string, messageID string, _ string) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err

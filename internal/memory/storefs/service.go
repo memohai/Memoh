@@ -499,7 +499,7 @@ func formatMemoryDayMD(date string, items []MemoryItem) string {
 func parseMemoryDayMD(content string) ([]MemoryItem, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return nil, fmt.Errorf("empty memory file")
+		return nil, errors.New("empty memory file")
 	}
 	lines := strings.Split(content, "\n")
 	items := make([]MemoryItem, 0, 8)
@@ -536,7 +536,7 @@ func parseMemoryDayMD(content string) ([]MemoryItem, error) {
 		i = end
 	}
 	if len(items) == 0 {
-		return nil, fmt.Errorf("no memory entries found")
+		return nil, errors.New("no memory entries found")
 	}
 	return items, nil
 }
@@ -544,11 +544,11 @@ func parseMemoryDayMD(content string) ([]MemoryItem, error) {
 func parseLegacyMemoryMD(content string) (MemoryItem, error) {
 	content = strings.TrimSpace(content)
 	if !strings.HasPrefix(content, "---") {
-		return MemoryItem{}, fmt.Errorf("missing frontmatter")
+		return MemoryItem{}, errors.New("missing frontmatter")
 	}
 	parts := strings.SplitN(content[3:], "---", 2)
 	if len(parts) < 2 {
-		return MemoryItem{}, fmt.Errorf("incomplete frontmatter")
+		return MemoryItem{}, errors.New("incomplete frontmatter")
 	}
 	item := MemoryItem{Memory: strings.TrimSpace(parts[1])}
 	for _, line := range strings.Split(strings.TrimSpace(parts[0]), "\n") {
@@ -568,7 +568,7 @@ func parseLegacyMemoryMD(content string) (MemoryItem, error) {
 		}
 	}
 	if item.ID == "" {
-		return MemoryItem{}, fmt.Errorf("missing id in frontmatter")
+		return MemoryItem{}, errors.New("missing id in frontmatter")
 	}
 	return item, nil
 }

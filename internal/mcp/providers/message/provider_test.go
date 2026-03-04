@@ -14,7 +14,7 @@ type fakeSender struct {
 	lastReq channel.SendRequest
 }
 
-func (f *fakeSender) Send(ctx context.Context, botID string, channelType channel.ChannelType, req channel.SendRequest) error {
+func (f *fakeSender) Send(_ context.Context, _ string, _ channel.ChannelType, req channel.SendRequest) error {
 	f.lastReq = req
 	return f.err
 }
@@ -24,7 +24,7 @@ type fakeReactor struct {
 	lastReq channel.ReactRequest
 }
 
-func (f *fakeReactor) React(ctx context.Context, botID string, channelType channel.ChannelType, req channel.ReactRequest) error {
+func (f *fakeReactor) React(_ context.Context, _ string, _ channel.ChannelType, req channel.ReactRequest) error {
 	f.lastReq = req
 	return f.err
 }
@@ -34,7 +34,7 @@ type fakeResolver struct {
 	err error
 }
 
-func (f *fakeResolver) ParseChannelType(raw string) (channel.ChannelType, error) {
+func (f *fakeResolver) ParseChannelType(_ string) (channel.ChannelType, error) {
 	if f.err != nil {
 		return "", f.err
 	}
@@ -95,7 +95,7 @@ func TestExecutor_CallTool_NotFound(t *testing.T) {
 	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver, nil)
 	_, err := exec.CallTool(context.Background(), mcpgw.ToolSessionContext{BotID: "bot1"}, "other_tool", nil)
-	if err != mcpgw.ErrToolNotFound {
+	if !errors.Is(err, mcpgw.ErrToolNotFound) {
 		t.Errorf("expected ErrToolNotFound, got %v", err)
 	}
 }

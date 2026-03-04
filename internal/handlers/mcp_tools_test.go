@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +56,8 @@ func TestHandleMCPToolsWithoutGateway(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected service unavailable error")
 	}
-	httpErr, ok := err.(*echo.HTTPError)
+	httpErr := &echo.HTTPError{}
+	ok := errors.As(err, &httpErr)
 	if !ok {
 		t.Fatalf("expected echo HTTP error, got %T", err)
 	}
@@ -68,7 +70,7 @@ type mcpToolsTestExecutor struct {
 	lastSession mcpgw.ToolSessionContext
 }
 
-func (e *mcpToolsTestExecutor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (e *mcpToolsTestExecutor) ListTools(_ context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	e.lastSession = session
 	return []mcpgw.ToolDescriptor{
 		{
@@ -84,7 +86,7 @@ func (e *mcpToolsTestExecutor) ListTools(ctx context.Context, session mcpgw.Tool
 	}, nil
 }
 
-func (e *mcpToolsTestExecutor) CallTool(ctx context.Context, session mcpgw.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
+func (e *mcpToolsTestExecutor) CallTool(_ context.Context, session mcpgw.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
 	e.lastSession = session
 	if strings.TrimSpace(toolName) != "echo_tool" {
 		return nil, mcpgw.ErrToolNotFound

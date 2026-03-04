@@ -15,19 +15,24 @@ issues:
 linters:
   default: none
   enable:
+    - bodyclose
+    - contextcheck
     - errcheck
     - errorlint
     - exptostd
     - fatcontext
     - gocritic
+    - gosec
     - godot
     - govet
     - ineffassign
     - misspell
+    - noctx
     - nilnesserr
     - perfsprint
     - predeclared
     - revive
+    - sqlclosecheck
     - sloglint
     - staticcheck
     - testifylint
@@ -67,9 +72,7 @@ linters:
         - name: error-naming
         - name: error-return
         - name: error-strings
-        - name: exported
         - name: increment-decrement
-        - name: var-naming
         - name: var-declaration
         - name: unreachable-code
         - name: unused-parameter

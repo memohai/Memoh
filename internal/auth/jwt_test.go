@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRefreshTokenFromContext(t *testing.T) {
@@ -23,13 +25,13 @@ func TestRefreshTokenFromContext(t *testing.T) {
 	// Create an initial token with a 5-minute lifespan
 	initialDuration := 5 * time.Minute
 	initialTokenStr, _, err := GenerateToken(userID, secret, initialDuration)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Parse the token to place it into the echo context
-	token, err := jwt.Parse(initialTokenStr, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(initialTokenStr, func(_ *jwt.Token) (interface{}, error) {
 		return []byte(secret), nil
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	c.Set("user", token)
 
 	// Simulate some time passing to ensure the new token has a different 'iat' and 'exp'
@@ -38,7 +40,7 @@ func TestRefreshTokenFromContext(t *testing.T) {
 	// Run the refresh function
 	defaultDuration := 1 * time.Hour
 	newTokenStr, newExpiresAt, err := RefreshTokenFromContext(c, secret, defaultDuration)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotEmpty(t, newTokenStr)
 
 	// Parse the original token claims for comparison
@@ -47,10 +49,10 @@ func TestRefreshTokenFromContext(t *testing.T) {
 	origIat := int64(originalClaims["iat"].(float64))
 
 	// Parse the new token
-	newToken, err := jwt.Parse(newTokenStr, func(token *jwt.Token) (interface{}, error) {
+	newToken, err := jwt.Parse(newTokenStr, func(_ *jwt.Token) (interface{}, error) {
 		return []byte(secret), nil
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, newToken.Valid)
 
 	newClaims, ok := newToken.Claims.(jwt.MapClaims)
@@ -69,11 +71,11 @@ func TestRefreshTokenFromContext(t *testing.T) {
 
 	// 2. Ensure the refreshed token has a positive lifetime and does not exceed the configured default duration
 	lifetimeSeconds := newExp - newIat
-	assert.Greater(t, lifetimeSeconds, int64(0))
+	assert.Positive(t, lifetimeSeconds)
 	assert.LessOrEqual(t, lifetimeSeconds, int64(defaultDuration.Seconds()))
 
 	// 3. Ensure the return value matches the claim
-	assert.Equal(t, newExpiresAt.Unix(), newExp)
+	assert.Equal(t, newExp, newExpiresAt.Unix())
 }
 
 func TestRefreshTokenFromContext_MissingUser(t *testing.T) {
@@ -87,9 +89,10 @@ func TestRefreshTokenFromContext_MissingUser(t *testing.T) {
 
 	// Context without the "user" key
 	_, _, err := RefreshTokenFromContext(c, secret, defaultDuration)
-	assert.Error(t, err)
+	require.Error(t, err)
 
-	httpErr, ok := err.(*echo.HTTPError)
+	httpErr := &echo.HTTPError{}
+	ok := errors.As(err, &httpErr)
 	assert.True(t, ok)
 	assert.Equal(t, http.StatusUnauthorized, httpErr.Code)
 	assert.Equal(t, "invalid token", httpErr.Message)

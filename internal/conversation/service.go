@@ -466,7 +466,7 @@ func parseUUID(id string) (pgtype.UUID, error) {
 func (s *Service) resolveModelUUID(ctx context.Context, modelRef string) (pgtype.UUID, error) {
 	modelRef = strings.TrimSpace(modelRef)
 	if modelRef == "" {
-		return pgtype.UUID{}, fmt.Errorf("model_id is required")
+		return pgtype.UUID{}, errors.New("model_id is required")
 	}
 
 	// Prefer UUID path; if not found, fall back to model_id slug.
@@ -511,8 +511,6 @@ func parseJSONMap(data []byte) map[string]any {
 		return nil
 	}
 	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		slog.Warn("parseJSONMap: unmarshal failed", slog.Any("error", err))
-	}
+	_ = json.Unmarshal(data, &m)
 	return m
 }

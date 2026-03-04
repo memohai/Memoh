@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+
 	"github.com/memohai/memoh/internal/boot"
 )
 
@@ -35,7 +36,7 @@ func (h *PingHandler) Register(e *echo.Echo) {
 // @Summary Health check with server capabilities
 // @Tags system
 // @Success 200 {object} PingResponse
-// @Router /ping [get]
+// @Router /ping [get].
 func (h *PingHandler) Ping(c echo.Context) error {
 	return c.JSON(http.StatusOK, PingResponse{
 		Status:            "ok",
@@ -44,6 +45,6 @@ func (h *PingHandler) Ping(c echo.Context) error {
 	})
 }
 
-func (h *PingHandler) PingHead(c echo.Context) error {
+func (*PingHandler) PingHead(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }

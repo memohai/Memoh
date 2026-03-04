@@ -2,7 +2,6 @@ package bind_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,12 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/channel/identities"
-	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
@@ -48,28 +45,6 @@ func createUserForBind(ctx context.Context, queries *sqlc.Queries) (string, erro
 	row, err := queries.CreateUser(ctx, sqlc.CreateUserParams{
 		IsActive: true,
 		Metadata: []byte("{}"),
-	})
-	if err != nil {
-		return "", err
-	}
-	return row.ID.String(), nil
-}
-
-func createBotForBind(ctx context.Context, queries *sqlc.Queries, ownerUserID string) (string, error) {
-	pgOwnerID, err := db.ParseUUID(ownerUserID)
-	if err != nil {
-		return "", err
-	}
-	meta, err := json.Marshal(map[string]any{"source": "bind-integration-test"})
-	if err != nil {
-		return "", err
-	}
-	row, err := queries.CreateBot(ctx, sqlc.CreateBotParams{
-		OwnerUserID: pgOwnerID,
-		Type:        "personal",
-		DisplayName: pgtype.Text{String: "bind-test-bot", Valid: true},
-		IsActive:    true,
-		Metadata:    meta,
 	})
 	if err != nil {
 		return "", err

@@ -2,11 +2,13 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
 	"github.com/memohai/memoh/internal/channel"
 )
 
@@ -112,7 +114,7 @@ func TestTelegramOutboundStream_CloseContextCanceled(t *testing.T) {
 	cancel()
 
 	err := s.Close(ctx)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Close with canceled context should return context.Canceled: %v", err)
 	}
 }
@@ -513,7 +515,7 @@ func TestDraftMode_ToolCallStartSendsPermanentMessage(t *testing.T) {
 		sentText = text
 		return 123, 1, nil
 	}
-	sendEditForTest = func(_ *tgbotapi.BotAPI, edit tgbotapi.EditMessageTextConfig) error {
+	sendEditForTest = func(_ *tgbotapi.BotAPI, _ tgbotapi.EditMessageTextConfig) error {
 		t.Error("editMessage should not be called in draft mode")
 		return nil
 	}

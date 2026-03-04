@@ -47,7 +47,7 @@ func (h *ModelsHandler) Register(e *echo.Echo) {
 // @Success 201 {object} models.AddResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /models [post]
+// @Router /models [post].
 func (h *ModelsHandler) Create(c echo.Context) error {
 	var req models.AddRequest
 	if err := c.Bind(&req); err != nil {
@@ -73,7 +73,7 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 // @Success 200 {array} models.GetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /models [get]
+// @Router /models [get].
 func (h *ModelsHandler) List(c echo.Context) error {
 	modelType := c.QueryParam("type")
 	clientType := c.QueryParam("client_type")
@@ -81,11 +81,12 @@ func (h *ModelsHandler) List(c echo.Context) error {
 	var resp []models.GetResponse
 	var err error
 
-	if modelType != "" {
+	switch {
+	case modelType != "":
 		resp, err = h.service.ListByType(c.Request().Context(), models.ModelType(modelType))
-	} else if clientType != "" {
+	case clientType != "":
 		resp, err = h.service.ListByClientType(c.Request().Context(), models.ClientType(clientType))
-	} else {
+	default:
 		resp, err = h.service.List(c.Request().Context())
 	}
 
@@ -104,7 +105,7 @@ func (h *ModelsHandler) List(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /models/{id} [get]
+// @Router /models/{id} [get].
 func (h *ModelsHandler) GetByID(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -127,7 +128,7 @@ func (h *ModelsHandler) GetByID(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /models/model/{modelId} [get]
+// @Router /models/model/{modelId} [get].
 func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 	modelID := c.Param("modelId")
 	if modelID == "" {
@@ -162,7 +163,7 @@ func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /models/{id} [put]
+// @Router /models/{id} [put].
 func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -194,7 +195,7 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /models/model/{modelId} [put]
+// @Router /models/model/{modelId} [put].
 func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 	modelID := c.Param("modelId")
 	if modelID == "" {
@@ -236,7 +237,7 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /models/{id} [delete]
+// @Router /models/{id} [delete].
 func (h *ModelsHandler) DeleteByID(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -258,7 +259,7 @@ func (h *ModelsHandler) DeleteByID(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /models/model/{modelId} [delete]
+// @Router /models/model/{modelId} [delete].
 func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 	modelID := c.Param("modelId")
 	if modelID == "" {
@@ -293,7 +294,7 @@ func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /models/{id}/test [post]
+// @Router /models/{id}/test [post].
 func (h *ModelsHandler) Test(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -319,7 +320,7 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 // @Success 200 {object} models.CountResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /models/count [get]
+// @Router /models/count [get].
 func (h *ModelsHandler) Count(c echo.Context) error {
 	modelType := c.QueryParam("type")
 

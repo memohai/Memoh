@@ -2,7 +2,7 @@ package channel
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -119,7 +119,7 @@ func (r *recordingStream) Push(_ context.Context, event StreamEvent) error {
 	return nil
 }
 
-func (r *recordingStream) Close(_ context.Context) error { return nil }
+func (*recordingStream) Close(_ context.Context) error { return nil }
 
 func (r *recordingStream) Events() []StreamEvent {
 	r.mu.Lock()
@@ -133,11 +133,11 @@ type failingFinalStream struct {
 	recordingStream
 }
 
-func (f *failingFinalStream) Push(_ context.Context, event StreamEvent) error {
+func (f *failingFinalStream) Push(ctx context.Context, event StreamEvent) error {
 	if event.Type == StreamEventFinal {
 		return context.DeadlineExceeded
 	}
-	return f.recordingStream.Push(context.Background(), event)
+	return f.recordingStream.Push(ctx, event)
 }
 
 func newChunkingTestStream(t *testing.T, chunkLimit int) (*managerOutboundStream, *recordingStream, *[]OutboundMessage) {
@@ -540,7 +540,7 @@ func (r *reopenableStream) current() *recordingStream {
 func (r *reopenableStream) reopen(_ context.Context) (OutboundStream, error) {
 	r.idx++
 	if r.idx >= len(r.streams) {
-		return nil, fmt.Errorf("no more streams")
+		return nil, errors.New("no more streams")
 	}
 	return r.streams[r.idx], nil
 }

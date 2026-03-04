@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -103,6 +104,9 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		if contentHash == "" {
 			s.logger.Warn("skip asset ref without content_hash")
 			continue
+		}
+		if ref.Ordinal < math.MinInt32 || ref.Ordinal > math.MaxInt32 {
+			return Message{}, fmt.Errorf("asset ordinal out of range: %d", ref.Ordinal)
 		}
 		if _, assetErr := s.queries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
 			MessageID:   pgMsgID,
@@ -464,21 +468,12 @@ func coalesce(values ...string) string {
 	return ""
 }
 
-func toPgInt8(v int64) pgtype.Int8 {
-	if v == 0 {
-		return pgtype.Int8{}
-	}
-	return pgtype.Int8{Int64: v, Valid: true}
-}
-
 func parseJSONMap(data []byte) map[string]any {
 	if len(data) == 0 {
 		return nil
 	}
 	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		slog.Warn("parseJSONMap: unmarshal failed", slog.Any("error", err))
-	}
+	_ = json.Unmarshal(data, &m)
 	return m
 }
 

@@ -22,7 +22,7 @@ func ResolveConfSource(dataDir string) (string, error) {
 		return systemdResolvConf, nil
 	}
 
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		return "", err
 	}
 	fallbackPath := filepath.Join(dataDir, "resolv.conf")
@@ -31,7 +31,7 @@ func ResolveConfSource(dataDir string) (string, error) {
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
-	if err := os.WriteFile(fallbackPath, []byte(fallbackResolv), 0o644); err != nil {
+	if err := os.WriteFile(fallbackPath, []byte(fallbackResolv), 0o600); err != nil {
 		return "", err
 	}
 	return fallbackPath, nil

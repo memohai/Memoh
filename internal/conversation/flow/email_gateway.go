@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -34,7 +35,7 @@ func NewEmailChatGateway(resolver *Resolver, queries *sqlc.Queries, jwtSecret st
 
 func (g *EmailChatGateway) TriggerBotChat(ctx context.Context, botID, content string) error {
 	if g == nil || g.resolver == nil {
-		return fmt.Errorf("chat resolver not configured")
+		return errors.New("chat resolver not configured")
 	}
 
 	ownerUserID, err := g.resolveBotOwner(ctx, botID)
@@ -75,14 +76,14 @@ func (g *EmailChatGateway) resolveBotOwner(ctx context.Context, botID string) (s
 	}
 	ownerID := bot.OwnerUserID.String()
 	if ownerID == "" {
-		return "", fmt.Errorf("bot owner not found")
+		return "", errors.New("bot owner not found")
 	}
 	return ownerID, nil
 }
 
 func (g *EmailChatGateway) generateToken(userID string) (string, error) {
 	if strings.TrimSpace(g.jwtSecret) == "" {
-		return "", fmt.Errorf("jwt secret not configured")
+		return "", errors.New("jwt secret not configured")
 	}
 	signed, _, err := auth.GenerateToken(userID, g.jwtSecret, emailTriggerTokenTTL)
 	if err != nil {

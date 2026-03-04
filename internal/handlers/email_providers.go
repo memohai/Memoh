@@ -37,7 +37,7 @@ func (h *EmailProvidersHandler) Register(e *echo.Echo) {
 // @Description List available email provider types and config schemas
 // @Tags email-providers
 // @Success 200 {array} email.ProviderMeta
-// @Router /email-providers/meta [get]
+// @Router /email-providers/meta [get].
 func (h *EmailProvidersHandler) ListMeta(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.service.ListMeta(c.Request().Context()))
 }
@@ -51,7 +51,7 @@ func (h *EmailProvidersHandler) ListMeta(c echo.Context) error {
 // @Success 201 {object} email.ProviderResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /email-providers [post]
+// @Router /email-providers [post].
 func (h *EmailProvidersHandler) Create(c echo.Context) error {
 	var req email.CreateProviderRequest
 	if err := c.Bind(&req); err != nil {
@@ -77,7 +77,7 @@ func (h *EmailProvidersHandler) Create(c echo.Context) error {
 // @Param provider query string false "Provider type filter"
 // @Success 200 {array} email.ProviderResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /email-providers [get]
+// @Router /email-providers [get].
 func (h *EmailProvidersHandler) List(c echo.Context) error {
 	items, err := h.service.ListProviders(c.Request().Context(), c.QueryParam("provider"))
 	if err != nil {
@@ -93,7 +93,7 @@ func (h *EmailProvidersHandler) List(c echo.Context) error {
 // @Param id path string true "Provider ID"
 // @Success 200 {object} email.ProviderResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /email-providers/{id} [get]
+// @Router /email-providers/{id} [get].
 func (h *EmailProvidersHandler) Get(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -116,7 +116,7 @@ func (h *EmailProvidersHandler) Get(c echo.Context) error {
 // @Success 200 {object} email.ProviderResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /email-providers/{id} [put]
+// @Router /email-providers/{id} [put].
 func (h *EmailProvidersHandler) Update(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -139,7 +139,7 @@ func (h *EmailProvidersHandler) Update(c echo.Context) error {
 // @Param id path string true "Provider ID"
 // @Success 204 "No Content"
 // @Failure 500 {object} ErrorResponse
-// @Router /email-providers/{id} [delete]
+// @Router /email-providers/{id} [delete].
 func (h *EmailProvidersHandler) Delete(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {

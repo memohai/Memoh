@@ -22,7 +22,7 @@ type fakeProcessingReactionGateway struct {
 	removeErr error
 }
 
-func (g *fakeProcessingReactionGateway) Add(ctx context.Context, messageID, reactionType string) (string, error) {
+func (g *fakeProcessingReactionGateway) Add(_ context.Context, messageID, reactionType string) (string, error) {
 	g.addCalls = append(g.addCalls, struct{ messageID, reactionType string }{
 		messageID:    messageID,
 		reactionType: reactionType,
@@ -35,7 +35,7 @@ func (g *fakeProcessingReactionGateway) Add(ctx context.Context, messageID, reac
 	return resp.reactionID, resp.err
 }
 
-func (g *fakeProcessingReactionGateway) Remove(ctx context.Context, messageID, reactionID string) error {
+func (g *fakeProcessingReactionGateway) Remove(_ context.Context, messageID, reactionID string) error {
 	g.removeCalls = append(g.removeCalls, struct{ messageID, reactionID string }{
 		messageID:  messageID,
 		reactionID: reactionID,

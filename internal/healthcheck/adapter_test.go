@@ -9,7 +9,7 @@ type testChecker struct {
 	items []CheckResult
 }
 
-func (c *testChecker) ListChecks(ctx context.Context, botID string) []CheckResult {
+func (c *testChecker) ListChecks(_ context.Context, _ string) []CheckResult {
 	return c.items
 }
 

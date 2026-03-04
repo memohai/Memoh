@@ -56,7 +56,7 @@ func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister) 
 		log = slog.Default()
 	}
 	return &Source{
-		logger:      log.With(slog.String("source", "federated_mcp_tool")),
+		logger:      log.With(slog.String("tool_source", "federated_mcp_tool")),
 		gateway:     gateway,
 		connections: connections,
 		cache:       map[string]cacheEntry{},

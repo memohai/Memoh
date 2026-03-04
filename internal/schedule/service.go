@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -48,14 +49,14 @@ func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, ru
 
 func (s *Service) Bootstrap(ctx context.Context) error {
 	if s.queries == nil {
-		return fmt.Errorf("schedule queries not configured")
+		return errors.New("schedule queries not configured")
 	}
 	items, err := s.queries.ListEnabledSchedules(ctx)
 	if err != nil {
 		return err
 	}
 	for _, item := range items {
-		if err := s.scheduleJob(item); err != nil {
+		if err := s.scheduleJob(ctx, item); err != nil {
 			return err
 		}
 	}
@@ -64,10 +65,10 @@ func (s *Service) Bootstrap(ctx context.Context) error {
 
 func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (Schedule, error) {
 	if s.queries == nil {
-		return Schedule{}, fmt.Errorf("schedule queries not configured")
+		return Schedule{}, errors.New("schedule queries not configured")
 	}
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Description) == "" || strings.TrimSpace(req.Pattern) == "" || strings.TrimSpace(req.Command) == "" {
-		return Schedule{}, fmt.Errorf("name, description, pattern, command are required")
+		return Schedule{}, errors.New("name, description, pattern, command are required")
 	}
 	if _, err := s.parser.Parse(req.Pattern); err != nil {
 		return Schedule{}, fmt.Errorf("invalid cron pattern: %w", err)
@@ -78,6 +79,9 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	}
 	maxCalls := pgtype.Int4{Valid: false}
 	if req.MaxCalls.Set && req.MaxCalls.Value != nil {
+		if *req.MaxCalls.Value < math.MinInt32 || *req.MaxCalls.Value > math.MaxInt32 {
+			return Schedule{}, fmt.Errorf("max_calls out of range: %d", *req.MaxCalls.Value)
+		}
 		maxCalls = pgtype.Int4{Int32: int32(*req.MaxCalls.Value), Valid: true}
 	}
 	enabled := true
@@ -97,7 +101,7 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 		return Schedule{}, err
 	}
 	if row.Enabled {
-		if err := s.scheduleJob(row); err != nil {
+		if err := s.scheduleJob(ctx, row); err != nil {
 			return Schedule{}, err
 		}
 	}
@@ -112,7 +116,7 @@ func (s *Service) Get(ctx context.Context, id string) (Schedule, error) {
 	row, err := s.queries.GetScheduleByID(ctx, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Schedule{}, fmt.Errorf("schedule not found")
+			return Schedule{}, errors.New("schedule not found")
 		}
 		return Schedule{}, err
 	}
@@ -168,6 +172,9 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 		if req.MaxCalls.Value == nil {
 			maxCalls = pgtype.Int4{Valid: false}
 		} else {
+			if *req.MaxCalls.Value < math.MinInt32 || *req.MaxCalls.Value > math.MaxInt32 {
+				return Schedule{}, fmt.Errorf("max_calls out of range: %d", *req.MaxCalls.Value)
+			}
 			maxCalls = pgtype.Int4{Int32: int32(*req.MaxCalls.Value), Valid: true}
 		}
 	}
@@ -187,7 +194,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	if err != nil {
 		return Schedule{}, err
 	}
-	if err := s.rescheduleJob(updated); err != nil {
+	if err := s.rescheduleJob(ctx, updated); err != nil {
 		return Schedule{}, fmt.Errorf("reschedule job: %w", err)
 	}
 	return toSchedule(updated), nil
@@ -207,14 +214,14 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 
 func (s *Service) Trigger(ctx context.Context, scheduleID string) error {
 	if s.triggerer == nil {
-		return fmt.Errorf("schedule triggerer not configured")
+		return errors.New("schedule triggerer not configured")
 	}
 	schedule, err := s.Get(ctx, scheduleID)
 	if err != nil {
 		return err
 	}
 	if !schedule.Enabled {
-		return fmt.Errorf("schedule is disabled")
+		return errors.New("schedule is disabled")
 	}
 	return s.runSchedule(ctx, schedule)
 }
@@ -223,7 +230,7 @@ const scheduleTokenTTL = 10 * time.Minute
 
 func (s *Service) runSchedule(ctx context.Context, schedule Schedule) error {
 	if s.triggerer == nil {
-		return fmt.Errorf("schedule triggerer not configured")
+		return errors.New("schedule triggerer not configured")
 	}
 	updated, err := s.queries.IncrementScheduleCalls(ctx, toUUID(schedule.ID))
 	if err != nil {
@@ -266,7 +273,7 @@ func (s *Service) resolveBotOwner(ctx context.Context, botID string) (string, er
 	}
 	ownerID := bot.OwnerUserID.String()
 	if ownerID == "" {
-		return "", fmt.Errorf("bot owner not found")
+		return "", errors.New("bot owner not found")
 	}
 	return ownerID, nil
 }
@@ -274,7 +281,7 @@ func (s *Service) resolveBotOwner(ctx context.Context, botID string) (string, er
 // generateTriggerToken creates a short-lived JWT for schedule trigger callbacks.
 func (s *Service) generateTriggerToken(userID string) (string, error) {
 	if strings.TrimSpace(s.jwtSecret) == "" {
-		return "", fmt.Errorf("jwt secret not configured")
+		return "", errors.New("jwt secret not configured")
 	}
 	signed, _, err := auth.GenerateToken(userID, s.jwtSecret, scheduleTokenTTL)
 	if err != nil {
@@ -283,13 +290,13 @@ func (s *Service) generateTriggerToken(userID string) (string, error) {
 	return "Bearer " + signed, nil
 }
 
-func (s *Service) scheduleJob(schedule sqlc.Schedule) error {
+func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error {
 	id := schedule.ID.String()
 	if id == "" {
-		return fmt.Errorf("schedule id missing")
+		return errors.New("schedule id missing")
 	}
 	job := func() {
-		if err := s.runSchedule(context.Background(), toSchedule(schedule)); err != nil {
+		if err := s.runSchedule(context.WithoutCancel(ctx), toSchedule(schedule)); err != nil {
 			s.logger.Error("scheduled job failed", slog.String("schedule_id", schedule.ID.String()), slog.Any("error", err))
 		}
 	}
@@ -303,14 +310,14 @@ func (s *Service) scheduleJob(schedule sqlc.Schedule) error {
 	return nil
 }
 
-func (s *Service) rescheduleJob(schedule sqlc.Schedule) error {
+func (s *Service) rescheduleJob(ctx context.Context, schedule sqlc.Schedule) error {
 	id := schedule.ID.String()
 	if id == "" {
 		return nil
 	}
 	s.removeJob(id)
 	if schedule.Enabled {
-		return s.scheduleJob(schedule)
+		return s.scheduleJob(ctx, schedule)
 	}
 	return nil
 }
@@ -337,8 +344,8 @@ func toSchedule(row sqlc.Schedule) Schedule {
 		BotID:        row.BotID.String(),
 	}
 	if row.MaxCalls.Valid {
-		max := int(row.MaxCalls.Int32)
-		item.MaxCalls = &max
+		maxCalls := int(row.MaxCalls.Int32)
+		item.MaxCalls = &maxCalls
 	}
 	if row.CreatedAt.Valid {
 		item.CreatedAt = row.CreatedAt.Time

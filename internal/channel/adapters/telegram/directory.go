@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -27,17 +28,17 @@ func directoryLimit(n int) int {
 }
 
 // ListPeers returns users the bot can reach. Telegram Bot API does not provide a list of users; returns empty.
-func (a *TelegramAdapter) ListPeers(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*TelegramAdapter) ListPeers(_ context.Context, _ channel.ChannelConfig, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
 // ListGroups returns chats the bot is in. Telegram Bot API does not provide a list of chats; returns empty.
-func (a *TelegramAdapter) ListGroups(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*TelegramAdapter) ListGroups(_ context.Context, _ channel.ChannelConfig, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
 // ListGroupMembers returns group managers for the given group (Telegram only exposes this list, not all members).
-func (a *TelegramAdapter) ListGroupMembers(ctx context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (a *TelegramAdapter) ListGroupMembers(_ context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return nil, err
@@ -96,7 +97,7 @@ func (a *TelegramAdapter) ResolveEntry(ctx context.Context, cfg channel.ChannelC
 	}
 }
 
-func (a *TelegramAdapter) resolveTelegramUser(ctx context.Context, bot *tgbotapi.BotAPI, input string) (channel.DirectoryEntry, error) {
+func (a *TelegramAdapter) resolveTelegramUser(_ context.Context, bot *tgbotapi.BotAPI, input string) (channel.DirectoryEntry, error) {
 	chatID, userID := parseTelegramUserInput(input)
 	if chatID == 0 && userID == 0 {
 		return channel.DirectoryEntry{}, fmt.Errorf("telegram resolve entry user: invalid input %q", input)
@@ -114,7 +115,7 @@ func (a *TelegramAdapter) resolveTelegramUser(ctx context.Context, bot *tgbotapi
 			return channel.DirectoryEntry{}, fmt.Errorf("telegram get chat member: %w", err)
 		}
 		if member.User == nil {
-			return channel.DirectoryEntry{}, fmt.Errorf("telegram get chat member: empty user")
+			return channel.DirectoryEntry{}, errors.New("telegram get chat member: empty user")
 		}
 		return a.telegramUserToEntryWithAvatar(bot, member.User), nil
 	}
@@ -148,7 +149,7 @@ func (a *TelegramAdapter) resolveTelegramUser(ctx context.Context, bot *tgbotapi
 	}, nil
 }
 
-func (a *TelegramAdapter) resolveTelegramGroup(ctx context.Context, bot *tgbotapi.BotAPI, input string) (channel.DirectoryEntry, error) {
+func (a *TelegramAdapter) resolveTelegramGroup(_ context.Context, bot *tgbotapi.BotAPI, input string) (channel.DirectoryEntry, error) {
 	chatID, superGroupUsername := parseTelegramChatInput(input)
 	if chatID == 0 && superGroupUsername == "" {
 		return channel.DirectoryEntry{}, fmt.Errorf("telegram resolve entry group: invalid input %q", input)

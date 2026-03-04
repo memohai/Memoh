@@ -3,7 +3,7 @@ package message
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -72,7 +72,7 @@ func NewExecutor(log *slog.Logger, sender Sender, reactor Reactor, resolver Chan
 	}
 }
 
-func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	var tools []mcpgw.ToolDescriptor
 	if p.sender != nil && p.resolver != nil {
 		tools = append(tools, mcpgw.ToolDescriptor{
@@ -295,16 +295,16 @@ func (p *Executor) callReact(ctx context.Context, session mcpgw.ToolSessionConte
 
 // --- shared helpers ---
 
-func (p *Executor) resolveBotID(arguments map[string]any, session mcpgw.ToolSessionContext) (string, error) {
+func (*Executor) resolveBotID(arguments map[string]any, session mcpgw.ToolSessionContext) (string, error) {
 	botID := mcpgw.FirstStringArg(arguments, "bot_id")
 	if botID == "" {
 		botID = strings.TrimSpace(session.BotID)
 	}
 	if botID == "" {
-		return "", fmt.Errorf("bot_id is required")
+		return "", errors.New("bot_id is required")
 	}
 	if strings.TrimSpace(session.BotID) != "" && botID != strings.TrimSpace(session.BotID) {
-		return "", fmt.Errorf("bot_id mismatch")
+		return "", errors.New("bot_id mismatch")
 	}
 	return botID, nil
 }
@@ -315,7 +315,7 @@ func (p *Executor) resolvePlatform(arguments map[string]any, session mcpgw.ToolS
 		platform = strings.TrimSpace(session.CurrentPlatform)
 	}
 	if platform == "" {
-		return "", fmt.Errorf("platform is required")
+		return "", errors.New("platform is required")
 	}
 	return p.resolver.ParseChannelType(platform)
 }
@@ -496,14 +496,14 @@ func parseOutboundMessage(arguments map[string]any, fallbackText string) (channe
 				return channel.Message{}, err
 			}
 		default:
-			return channel.Message{}, fmt.Errorf("message must be object or string")
+			return channel.Message{}, errors.New("message must be object or string")
 		}
 	}
 	if msg.IsEmpty() && strings.TrimSpace(fallbackText) != "" {
 		msg.Text = strings.TrimSpace(fallbackText)
 	}
 	if msg.IsEmpty() {
-		return channel.Message{}, fmt.Errorf("message is required")
+		return channel.Message{}, errors.New("message is required")
 	}
 	return msg, nil
 }

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
 )
@@ -30,7 +32,7 @@ func TestPostTriggerSchedule_Endpoint(t *testing.T) {
 			Messages: []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("ok")}},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
 	}))
 	defer srv.Close()
 
@@ -111,7 +113,7 @@ func TestPostTriggerSchedule_NoAuth(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedAuth = r.Header.Get("Authorization")
 		resp := gatewayResponse{Messages: []conversation.ModelMessage{}}
-		json.NewEncoder(w).Encode(resp)
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
 	}))
 	defer srv.Close()
 
@@ -141,9 +143,10 @@ func TestPostTriggerSchedule_NoAuth(t *testing.T) {
 }
 
 func TestPostTriggerSchedule_GatewayError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error"))
+		_, err := w.Write([]byte("internal error"))
+		require.NoError(t, err)
 	}))
 	defer srv.Close()
 
@@ -184,7 +187,7 @@ func TestPrepareGatewayAttachments_InlineAssetToBase64(t *testing.T) {
 	resolver := &Resolver{
 		logger: slog.Default(),
 		assetLoader: &fakeGatewayAssetLoader{
-			openFn: func(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error) {
+			openFn: func(_ context.Context, _, contentHash string) (io.ReadCloser, string, error) {
 				if contentHash != "asset-1" {
 					t.Fatalf("unexpected content hash: %s", contentHash)
 				}
@@ -300,7 +303,7 @@ func TestStreamChat_AllowsLargeSSEDataLines(t *testing.T) {
 	select {
 	case chunk := <-chunkCh:
 		if !bytes.Equal(chunk, dataJSON) {
-			t.Fatalf("unexpected reconstructed payload: got prefix %q", string(chunk[:min(len(chunk), 80)]))
+			t.Fatalf("unexpected reconstructed payload: got prefix %q", string(chunk[:minInt(len(chunk), 80)]))
 		}
 	default:
 		t.Fatalf("expected at least one streamed chunk")
@@ -338,7 +341,7 @@ func TestStreamChat_RejectsOverLimitSSELine(t *testing.T) {
 	}
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
@@ -414,7 +417,7 @@ func TestPrepareGatewayAttachments_DetectsImageMimeWhenOctetStream(t *testing.T)
 	resolver := &Resolver{
 		logger: slog.Default(),
 		assetLoader: &fakeGatewayAssetLoader{
-			openFn: func(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error) {
+			openFn: func(_ context.Context, _, _ string) (io.ReadCloser, string, error) {
 				return io.NopCloser(bytes.NewReader(jpegBytes)), "application/octet-stream", nil
 			},
 		},

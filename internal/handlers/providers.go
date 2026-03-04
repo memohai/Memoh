@@ -51,7 +51,7 @@ func (h *ProvidersHandler) Register(e *echo.Echo) {
 // @Success 201 {object} providers.GetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /providers [post]
+// @Router /providers [post].
 func (h *ProvidersHandler) Create(c echo.Context) error {
 	var req providers.CreateRequest
 	if err := c.Bind(&req); err != nil {
@@ -82,7 +82,7 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 // @Produce json
 // @Success 200 {array} providers.GetResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /providers [get]
+// @Router /providers [get].
 func (h *ProvidersHandler) List(c echo.Context) error {
 	resp, err := h.service.List(c.Request().Context())
 	if err != nil {
@@ -103,7 +103,7 @@ func (h *ProvidersHandler) List(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /providers/{id} [get]
+// @Router /providers/{id} [get].
 func (h *ProvidersHandler) Get(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -128,7 +128,7 @@ func (h *ProvidersHandler) Get(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /providers/{id}/models [get]
+// @Router /providers/{id}/models [get].
 func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 	if h.modelsService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "models service not configured")
@@ -167,7 +167,7 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /providers/name/{name} [get]
+// @Router /providers/name/{name} [get].
 func (h *ProvidersHandler) GetByName(c echo.Context) error {
 	name := c.Param("name")
 	if name == "" {
@@ -194,7 +194,7 @@ func (h *ProvidersHandler) GetByName(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /providers/{id} [put]
+// @Router /providers/{id} [put].
 func (h *ProvidersHandler) Update(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -225,7 +225,7 @@ func (h *ProvidersHandler) Update(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /providers/{id} [delete]
+// @Router /providers/{id} [delete].
 func (h *ProvidersHandler) Delete(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -247,7 +247,7 @@ func (h *ProvidersHandler) Delete(c echo.Context) error {
 // @Produce json
 // @Success 200 {object} providers.CountResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /providers/count [get]
+// @Router /providers/count [get].
 func (h *ProvidersHandler) Count(c echo.Context) error {
 	count, err := h.service.Count(c.Request().Context())
 	if err != nil {
@@ -268,7 +268,7 @@ func (h *ProvidersHandler) Count(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /providers/{id}/test [post]
+// @Router /providers/{id}/test [post].
 func (h *ProvidersHandler) Test(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -298,7 +298,7 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /providers/{id}/import-models [post]
+// @Router /providers/{id}/import-models [post].
 func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -333,7 +333,6 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			Type:            models.ModelTypeChat,
 			InputModalities: []string{models.ModelInputText},
 		})
-
 		if err != nil {
 			if errors.Is(err, models.ErrModelIDAlreadyExists) {
 				resp.Skipped++

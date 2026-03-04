@@ -34,7 +34,7 @@ func (h *SwaggerHandler) Register(e *echo.Echo) {
 	e.GET("api/docs/", h.UI)
 }
 
-func (h *SwaggerHandler) Spec(c echo.Context) error {
+func (*SwaggerHandler) Spec(c echo.Context) error {
 	swaggerOnce.Do(func() {
 		swaggerSpec, swaggerErr = os.ReadFile("spec/swagger.json")
 	})
@@ -44,7 +44,7 @@ func (h *SwaggerHandler) Spec(c echo.Context) error {
 	return c.Blob(http.StatusOK, "application/json", swaggerSpec)
 }
 
-func (h *SwaggerHandler) UI(c echo.Context) error {
+func (*SwaggerHandler) UI(c echo.Context) error {
 	return c.HTML(http.StatusOK, swaggerUIHTML)
 }
 

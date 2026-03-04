@@ -47,7 +47,7 @@ func NewExecutor(log *slog.Logger, clients mcpclient.Provider, execWorkDir strin
 }
 
 // ListTools returns read, write, list, edit, and exec tool descriptors.
-func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	wd := p.execWorkDir
 	if wd == "" {
 		wd = defaultExecWorkDir

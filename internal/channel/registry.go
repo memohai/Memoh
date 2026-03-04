@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -26,11 +27,11 @@ func NewRegistry() *Registry {
 // Register adds an adapter to the registry.
 func (r *Registry) Register(adapter Adapter) error {
 	if adapter == nil {
-		return fmt.Errorf("adapter is nil")
+		return errors.New("adapter is nil")
 	}
 	ct := normalizeChannelType(adapter.Type().String())
 	if ct == "" {
-		return fmt.Errorf("channel type is required")
+		return errors.New("channel type is required")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

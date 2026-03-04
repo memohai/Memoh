@@ -1,6 +1,7 @@
 package media
 
 import (
+	"errors"
 	"fmt"
 	"io"
 )
@@ -13,10 +14,10 @@ const (
 // ReadAllWithLimit reads from reader and rejects payloads larger than maxBytes.
 func ReadAllWithLimit(reader io.Reader, maxBytes int64) ([]byte, error) {
 	if reader == nil {
-		return nil, fmt.Errorf("reader is required")
+		return nil, errors.New("reader is required")
 	}
 	if maxBytes <= 0 {
-		return nil, fmt.Errorf("max bytes must be greater than 0")
+		return nil, errors.New("max bytes must be greater than 0")
 	}
 	limited := &io.LimitedReader{
 		R: reader,

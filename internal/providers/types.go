@@ -2,40 +2,40 @@ package providers
 
 import "time"
 
-// CreateRequest represents a request to create a new LLM provider
+// CreateRequest represents a request to create a new LLM provider.
 type CreateRequest struct {
 	Name     string         `json:"name" validate:"required"`
 	BaseURL  string         `json:"base_url" validate:"required,url"`
-	APIKey   string         `json:"api_key"`
+	APIKey   string         `json:"api_key"` //nolint:gosec // intentional: LLM provider API key supplied by operator
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// UpdateRequest represents a request to update an existing LLM provider
+// UpdateRequest represents a request to update an existing LLM provider.
 type UpdateRequest struct {
 	Name     *string        `json:"name,omitempty"`
 	BaseURL  *string        `json:"base_url,omitempty"`
-	APIKey   *string        `json:"api_key,omitempty"`
+	APIKey   *string        `json:"api_key,omitempty"` //nolint:gosec // intentional: LLM provider API key update field
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// GetResponse represents the response for getting a provider
+// GetResponse represents the response for getting a provider.
 type GetResponse struct {
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`
 	BaseURL   string         `json:"base_url"`
-	APIKey    string         `json:"api_key,omitempty"` // masked in response
+	APIKey    string         `json:"api_key,omitempty"` //nolint:gosec // intentional: partially masked API key for display
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
-// ListResponse represents the response for listing providers
+// ListResponse represents the response for listing providers.
 type ListResponse struct {
 	Providers []GetResponse `json:"providers"`
 	Total     int64         `json:"total"`
 }
 
-// CountResponse represents the count response
+// CountResponse represents the count response.
 type CountResponse struct {
 	Count int64 `json:"count"`
 }
@@ -47,7 +47,7 @@ type TestResponse struct {
 	Message   string `json:"message,omitempty"`
 }
 
-// RemoteModel represents a model returned by the provider's /v1/models endpoint
+// RemoteModel represents a model returned by the provider's /v1/models endpoint.
 type RemoteModel struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
@@ -55,18 +55,18 @@ type RemoteModel struct {
 	OwnedBy string `json:"owned_by"`
 }
 
-// FetchModelsResponse represents the response from the provider's /v1/models endpoint
+// FetchModelsResponse represents the response from the provider's /v1/models endpoint.
 type FetchModelsResponse struct {
 	Object string        `json:"object"`
 	Data   []RemoteModel `json:"data"`
 }
 
-// ImportModelsRequest represents a request to import models from a provider
+// ImportModelsRequest represents a request to import models from a provider.
 type ImportModelsRequest struct {
 	ClientType string `json:"client_type"`
 }
 
-// ImportModelsResponse represents the response for importing models
+// ImportModelsResponse represents the response for importing models.
 type ImportModelsResponse struct {
 	Created int      `json:"created"`
 	Skipped int      `json:"skipped"`

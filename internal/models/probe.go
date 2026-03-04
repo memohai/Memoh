@@ -119,12 +119,12 @@ func probeReachable(ctx context.Context, baseURL string) (bool, string) {
 	if err != nil {
 		return false, err.Error()
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
 	if err != nil {
 		return false, err.Error()
 	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 	return true, ""
 }
 
@@ -146,13 +146,13 @@ func doProbe(ctx context.Context, method, url string, headers map[string]string,
 	}
 
 	start := time.Now()
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		return probeResult{latencyMs: latency, message: err.Error()}
 	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 
 	return probeResult{statusCode: resp.StatusCode, latencyMs: latency}
 }

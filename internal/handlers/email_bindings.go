@@ -42,7 +42,7 @@ func (h *EmailBindingsHandler) Register(e *echo.Echo) {
 // @Success 201 {object} email.BindingResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/email-bindings [post]
+// @Router /bots/{bot_id}/email-bindings [post].
 func (h *EmailBindingsHandler) Create(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
@@ -74,7 +74,7 @@ func (h *EmailBindingsHandler) Create(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {array} email.BindingResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/email-bindings [get]
+// @Router /bots/{bot_id}/email-bindings [get].
 func (h *EmailBindingsHandler) List(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
@@ -98,7 +98,7 @@ func (h *EmailBindingsHandler) List(c echo.Context) error {
 // @Success 200 {object} email.BindingResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/email-bindings/{id} [put]
+// @Router /bots/{bot_id}/email-bindings/{id} [put].
 func (h *EmailBindingsHandler) Update(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -123,7 +123,7 @@ func (h *EmailBindingsHandler) Update(c echo.Context) error {
 // @Param id path string true "Binding ID"
 // @Success 204 "No Content"
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/email-bindings/{id} [delete]
+// @Router /bots/{bot_id}/email-bindings/{id} [delete].
 func (h *EmailBindingsHandler) Delete(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {

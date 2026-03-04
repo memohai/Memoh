@@ -2,7 +2,7 @@ package local
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"sync/atomic"
 
@@ -107,10 +107,10 @@ func newLocalOutboundStream(hub *RouteHub, target string) channel.OutboundStream
 
 func (s *localOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
 	if s == nil || s.hub == nil {
-		return fmt.Errorf("route hub not configured")
+		return errors.New("route hub not configured")
 	}
 	if s.closed.Load() {
-		return fmt.Errorf("stream is closed")
+		return errors.New("stream is closed")
 	}
 	select {
 	case <-ctx.Done():

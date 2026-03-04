@@ -3,8 +3,6 @@ package channel
 import (
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -19,31 +17,31 @@ type fakeConfigStore struct {
 	boundChannelIdentityID string
 }
 
-func (f *fakeConfigStore) ResolveEffectiveConfig(ctx context.Context, botID string, channelType ChannelType) (ChannelConfig, error) {
+func (f *fakeConfigStore) ResolveEffectiveConfig(_ context.Context, _ string, _ ChannelType) (ChannelConfig, error) {
 	return f.effectiveConfig, nil
 }
 
-func (f *fakeConfigStore) GetChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType) (ChannelIdentityBinding, error) {
+func (f *fakeConfigStore) GetChannelIdentityConfig(_ context.Context, _ string, _ ChannelType) (ChannelIdentityBinding, error) {
 	if f.channelIdentityConfig.ID == "" && len(f.channelIdentityConfig.Config) == 0 {
-		return ChannelIdentityBinding{}, fmt.Errorf("channel user config not found")
+		return ChannelIdentityBinding{}, errors.New("channel user config not found")
 	}
 	return f.channelIdentityConfig, nil
 }
 
-func (f *fakeConfigStore) UpsertChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType, req UpsertChannelIdentityConfigRequest) (ChannelIdentityBinding, error) {
+func (f *fakeConfigStore) UpsertChannelIdentityConfig(_ context.Context, _ string, _ ChannelType, _ UpsertChannelIdentityConfigRequest) (ChannelIdentityBinding, error) {
 	return f.channelIdentityConfig, nil
 }
 
-func (f *fakeConfigStore) ListConfigsByType(ctx context.Context, channelType ChannelType) ([]ChannelConfig, error) {
+func (f *fakeConfigStore) ListConfigsByType(_ context.Context, channelType ChannelType) ([]ChannelConfig, error) {
 	if f.configsByType == nil {
 		return nil, nil
 	}
 	return f.configsByType[channelType], nil
 }
 
-func (f *fakeConfigStore) ResolveChannelIdentityBinding(ctx context.Context, channelType ChannelType, criteria BindingCriteria) (string, error) {
+func (f *fakeConfigStore) ResolveChannelIdentityBinding(_ context.Context, _ ChannelType, _ BindingCriteria) (string, error) {
 	if f.boundChannelIdentityID == "" {
-		return "", fmt.Errorf("channel user binding not found")
+		return "", errors.New("channel user binding not found")
 	}
 	return f.boundChannelIdentityID, nil
 }
@@ -65,7 +63,7 @@ func (f *fakeInboundProcessorIntegration) HandleInbound(ctx context.Context, cfg
 		return nil
 	}
 	if sender == nil {
-		return fmt.Errorf("sender missing")
+		return errors.New("sender missing")
 	}
 	return sender.Send(ctx, *f.resp)
 }
@@ -88,17 +86,17 @@ func (f *fakeAdapter) Descriptor() Descriptor {
 	return Descriptor{Type: f.channelType, DisplayName: "Fake", Capabilities: ChannelCapabilities{Text: true}}
 }
 
-func (f *fakeAdapter) ResolveTarget(channelIdentityConfig map[string]any) (string, error) {
+func (*fakeAdapter) ResolveTarget(channelIdentityConfig map[string]any) (string, error) {
 	value := strings.TrimSpace(ReadString(channelIdentityConfig, "target"))
 	if value == "" {
-		return "", fmt.Errorf("missing target")
+		return "", errors.New("missing target")
 	}
 	return "resolved:" + value, nil
 }
 
-func (f *fakeAdapter) NormalizeTarget(raw string) string { return strings.TrimSpace(raw) }
+func (*fakeAdapter) NormalizeTarget(raw string) string { return strings.TrimSpace(raw) }
 
-func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (Connection, error) {
+func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, _ InboundHandler) (Connection, error) {
 	if f.connectErr != nil {
 		return nil, f.connectErr
 	}
@@ -115,7 +113,7 @@ func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, handler In
 	return NewConnection(cfg, stop), nil
 }
 
-func (f *fakeAdapter) Send(ctx context.Context, cfg ChannelConfig, msg OutboundMessage) error {
+func (f *fakeAdapter) Send(_ context.Context, _ ChannelConfig, msg OutboundMessage) error {
 	f.mu.Lock()
 	f.sent = append(f.sent, msg)
 	f.mu.Unlock()
@@ -125,7 +123,7 @@ func (f *fakeAdapter) Send(ctx context.Context, cfg ChannelConfig, msg OutboundM
 func TestManagerHandleInboundIntegratesAdapter(t *testing.T) {
 	t.Parallel()
 
-	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+	log := slog.New(slog.DiscardHandler)
 	store := &fakeConfigStore{}
 	processor := &fakeInboundProcessorIntegration{
 		resp: &OutboundMessage{
@@ -178,7 +176,7 @@ func TestManagerHandleInboundIntegratesAdapter(t *testing.T) {
 func TestManagerSendUsesBinding(t *testing.T) {
 	t.Parallel()
 
-	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+	log := slog.New(slog.DiscardHandler)
 	store := &fakeConfigStore{
 		effectiveConfig: ChannelConfig{
 			ID:          "cfg-1",
@@ -220,7 +218,7 @@ func TestManagerSendUsesBinding(t *testing.T) {
 func TestManagerReconcileStartsAndStops(t *testing.T) {
 	t.Parallel()
 
-	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+	log := slog.New(slog.DiscardHandler)
 	store := &fakeConfigStore{}
 	reg := NewRegistry()
 	adapter := &fakeAdapter{channelType: ChannelType("test")}
@@ -261,7 +259,7 @@ func TestManagerReconcileStartsAndStops(t *testing.T) {
 func TestManagerConnectionStatusesByBotTracksConnectFailure(t *testing.T) {
 	t.Parallel()
 
-	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+	log := slog.New(slog.DiscardHandler)
 	store := &fakeConfigStore{}
 	reg := NewRegistry()
 	adapter := &fakeAdapter{
@@ -295,7 +293,7 @@ func TestManagerConnectionStatusesByBotTracksConnectFailure(t *testing.T) {
 func TestManagerEnsureConnectionDetachesRequestContext(t *testing.T) {
 	t.Parallel()
 
-	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+	log := slog.New(slog.DiscardHandler)
 	store := &fakeConfigStore{}
 	reg := NewRegistry()
 	adapter := &fakeAdapter{channelType: ChannelType("test")}

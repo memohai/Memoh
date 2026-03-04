@@ -158,7 +158,7 @@ func (r *IdentityResolver) Middleware() channel.Middleware {
 //  2. Authorization: bot membership check with guest/preauth fallback
 func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) (IdentityState, error) {
 	if r.channelIdentities == nil {
-		return IdentityState{}, fmt.Errorf("identity resolver not configured")
+		return IdentityState{}, errors.New("identity resolver not configured")
 	}
 
 	botID := strings.TrimSpace(msg.BotID)
@@ -183,7 +183,7 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 
 	// Phase 1: Global identity resolution (unconditional).
 	if subjectID == "" {
-		return state, fmt.Errorf("cannot resolve identity: no channel_subject_id")
+		return state, errors.New("cannot resolve identity: no channel_subject_id")
 	}
 
 	channelIdentityID, linkedUserID, err := r.resolveIdentityWithLinkedUser(ctx, msg, subjectID, displayName, avatarURL)
@@ -289,7 +289,7 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 func (r *IdentityResolver) resolveIdentityWithLinkedUser(ctx context.Context, msg channel.InboundMessage, primarySubjectID, displayName, avatarURL string) (string, string, error) {
 	candidates := identitySubjectCandidates(msg, primarySubjectID)
 	if len(candidates) == 0 {
-		return "", "", fmt.Errorf("cannot resolve identity: no channel_subject_id")
+		return "", "", errors.New("cannot resolve identity: no channel_subject_id")
 	}
 
 	var meta map[string]any
@@ -503,9 +503,6 @@ func (r *IdentityResolver) resolveProfileFromDirectory(ctx context.Context, cfg 
 	directoryAdapter, ok := r.registry.DirectoryAdapter(msg.Channel)
 	if !ok || directoryAdapter == nil {
 		return "", ""
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

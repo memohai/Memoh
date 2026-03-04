@@ -75,7 +75,7 @@ type TokenUsageResponse struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/token-usage [get]
+// @Router /bots/{bot_id}/token-usage [get].
 func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
 	if err != nil {

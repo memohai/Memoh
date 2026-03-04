@@ -51,7 +51,7 @@ func (h *SubagentHandler) Register(e *echo.Echo) {
 // @Success 201 {object} subagent.Subagent
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/subagents [post]
+// @Router /bots/{bot_id}/subagents [post].
 func (h *SubagentHandler) Create(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -82,7 +82,7 @@ func (h *SubagentHandler) Create(c echo.Context) error {
 // @Success 200 {object} subagent.ListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/subagents [get]
+// @Router /bots/{bot_id}/subagents [get].
 func (h *SubagentHandler) List(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -111,7 +111,7 @@ func (h *SubagentHandler) List(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/subagents/{id} [get]
+// @Router /bots/{bot_id}/subagents/{id} [get].
 func (h *SubagentHandler) Get(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -148,7 +148,7 @@ func (h *SubagentHandler) Get(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/subagents/{id} [put]
+// @Router /bots/{bot_id}/subagents/{id} [put].
 func (h *SubagentHandler) Update(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -192,7 +192,7 @@ func (h *SubagentHandler) Update(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/subagents/{id} [delete]
+// @Router /bots/{bot_id}/subagents/{id} [delete].
 func (h *SubagentHandler) Delete(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -231,7 +231,7 @@ func (h *SubagentHandler) Delete(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/subagents/{id}/context [get]
+// @Router /bots/{bot_id}/subagents/{id}/context [get].
 func (h *SubagentHandler) GetContext(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -268,7 +268,7 @@ func (h *SubagentHandler) GetContext(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/subagents/{id}/context [put]
+// @Router /bots/{bot_id}/subagents/{id}/context [put].
 func (h *SubagentHandler) UpdateContext(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -312,7 +312,7 @@ func (h *SubagentHandler) UpdateContext(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/subagents/{id}/skills [get]
+// @Router /bots/{bot_id}/subagents/{id}/skills [get].
 func (h *SubagentHandler) GetSkills(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -349,7 +349,7 @@ func (h *SubagentHandler) GetSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/subagents/{id}/skills [put]
+// @Router /bots/{bot_id}/subagents/{id}/skills [put].
 func (h *SubagentHandler) UpdateSkills(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -394,7 +394,7 @@ func (h *SubagentHandler) UpdateSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/subagents/{id}/skills [post]
+// @Router /bots/{bot_id}/subagents/{id}/skills [post].
 func (h *SubagentHandler) AddSkills(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -429,7 +429,7 @@ func (h *SubagentHandler) AddSkills(c echo.Context) error {
 	return c.JSON(http.StatusOK, subagent.SkillsResponse{Skills: updated.Skills})
 }
 
-func (h *SubagentHandler) requireChannelIdentityID(c echo.Context) (string, error) {
+func (*SubagentHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }
 

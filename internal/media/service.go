@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -39,22 +40,23 @@ func (s *Service) Ingest(ctx context.Context, input IngestInput) (Asset, error) 
 		return Asset{}, ErrProviderUnavailable
 	}
 	if strings.TrimSpace(input.BotID) == "" {
-		return Asset{}, fmt.Errorf("bot id is required")
+		return Asset{}, errors.New("bot id is required")
 	}
 	if input.Reader == nil {
-		return Asset{}, fmt.Errorf("reader is required")
+		return Asset{}, errors.New("reader is required")
 	}
 
 	maxBytes := input.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = MaxAssetBytes
 	}
-	contentHash, sizeBytes, tempPath, err := spoolAndHashWithLimit(input.Reader, maxBytes)
+	contentHash, sizeBytes, tempFile, err := spoolAndHashWithLimit(input.Reader, maxBytes)
 	if err != nil {
 		return Asset{}, fmt.Errorf("read input: %w", err)
 	}
 	defer func() {
-		_ = os.Remove(tempPath)
+		_ = tempFile.Close()
+		_ = os.Remove(tempFile.Name()) //nolint:gosec // G703: path is from os.CreateTemp, not from user input
 	}()
 
 	mime := coalesce(input.Mime, "application/octet-stream")
@@ -76,13 +78,6 @@ func (s *Service) Ingest(ctx context.Context, input IngestInput) (Asset, error) 
 		}, nil
 	}
 
-	tempFile, err := os.Open(tempPath)
-	if err != nil {
-		return Asset{}, fmt.Errorf("open temp file: %w", err)
-	}
-	defer func() {
-		_ = tempFile.Close()
-	}()
 	if err := s.provider.Put(ctx, routingKey, tempFile); err != nil {
 		return Asset{}, fmt.Errorf("store media: %w", err)
 	}
@@ -153,13 +148,13 @@ func (s *Service) IngestContainerFile(ctx context.Context, botID, containerPath 
 	}
 	opener, ok := s.provider.(storage.ContainerFileOpener)
 	if !ok {
-		return Asset{}, fmt.Errorf("provider does not support container file reading")
+		return Asset{}, errors.New("provider does not support container file reading")
 	}
 	f, err := opener.OpenContainerFile(ctx, botID, containerPath)
 	if err != nil {
 		return Asset{}, fmt.Errorf("open container file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	ext := path.Ext(containerPath)
 	mime := mimeFromExtension(ext)
 	return s.Ingest(ctx, IngestInput{BotID: botID, Mime: mime, Reader: f, OriginalExt: ext})
@@ -294,38 +289,42 @@ func coalesce(values ...string) string {
 	return ""
 }
 
-func spoolAndHashWithLimit(reader io.Reader, maxBytes int64) (string, int64, string, error) {
+// spoolAndHashWithLimit streams reader into a temp file while computing its SHA-256.
+// Returns the open file seeked to the beginning; caller must close and remove it.
+func spoolAndHashWithLimit(reader io.Reader, maxBytes int64) (contentHash string, size int64, f *os.File, err error) {
 	if reader == nil {
-		return "", 0, "", fmt.Errorf("reader is required")
+		return "", 0, nil, errors.New("reader is required")
 	}
 	if maxBytes <= 0 {
-		return "", 0, "", fmt.Errorf("max bytes must be greater than 0")
+		return "", 0, nil, errors.New("max bytes must be greater than 0")
 	}
-	tempFile, err := os.CreateTemp("", "memoh-media-*")
-	if err != nil {
-		return "", 0, "", fmt.Errorf("create temp file: %w", err)
+	tmp, createErr := os.CreateTemp("", "memoh-media-*")
+	if createErr != nil {
+		return "", 0, nil, fmt.Errorf("create temp file: %w", createErr)
 	}
-	tempPath := tempFile.Name()
-	keepFile := false
-	defer func() {
-		_ = tempFile.Close()
-		if !keepFile {
-			_ = os.Remove(tempPath)
-		}
-	}()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name()) //nolint:gosec // G703: path is from os.CreateTemp, not from user input
+	}
 
 	hasher := sha256.New()
 	limited := &io.LimitedReader{R: reader, N: maxBytes + 1}
-	written, err := io.Copy(io.MultiWriter(tempFile, hasher), limited)
-	if err != nil {
-		return "", 0, "", fmt.Errorf("copy to temp file: %w", err)
+	written, copyErr := io.Copy(io.MultiWriter(tmp, hasher), limited)
+	if copyErr != nil {
+		cleanup()
+		return "", 0, nil, fmt.Errorf("copy to temp file: %w", copyErr)
 	}
 	if written > maxBytes {
-		return "", 0, "", fmt.Errorf("%w: max %d bytes", ErrAssetTooLarge, maxBytes)
+		cleanup()
+		return "", 0, nil, fmt.Errorf("%w: max %d bytes", ErrAssetTooLarge, maxBytes)
 	}
 	if written == 0 {
-		return "", 0, "", fmt.Errorf("asset payload is empty")
+		cleanup()
+		return "", 0, nil, errors.New("asset payload is empty")
 	}
-	keepFile = true
-	return hex.EncodeToString(hasher.Sum(nil)), written, tempPath, nil
+	if _, seekErr := tmp.Seek(0, io.SeekStart); seekErr != nil {
+		cleanup()
+		return "", 0, nil, fmt.Errorf("seek temp file: %w", seekErr)
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), written, tmp, nil
 }

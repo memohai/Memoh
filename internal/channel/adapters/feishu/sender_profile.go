@@ -2,7 +2,9 @@ package feishu
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -46,9 +48,6 @@ func (a *FeishuAdapter) enrichSenderProfile(ctx context.Context, cfg channel.Cha
 		chatID = strings.TrimSpace(*event.Event.Message.ChatId)
 	}
 
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -56,11 +55,11 @@ func (a *FeishuAdapter) enrichSenderProfile(ctx context.Context, cfg channel.Cha
 	if err != nil {
 		if a.logger != nil {
 			a.logger.Debug("feishu sender profile lookup failed",
-				"config_id", cfg.ID,
-				"open_id", openID,
-				"user_id", userID,
-				"chat_id", chatID,
-				"error", err,
+				slog.String("config_id", cfg.ID),
+				slog.String("open_id", openID),
+				slog.String("user_id", userID),
+				slog.String("chat_id", chatID),
+				slog.Any("error", err),
 			)
 		}
 	}
@@ -70,7 +69,7 @@ func (a *FeishuAdapter) enrichSenderProfile(ctx context.Context, cfg channel.Cha
 	applySenderProfile(msg, profile)
 }
 
-func (a *FeishuAdapter) lookupSenderProfile(ctx context.Context, cfg channel.ChannelConfig, openID, userID, chatID string) (feishuSenderProfile, error) {
+func (*FeishuAdapter) lookupSenderProfile(ctx context.Context, cfg channel.ChannelConfig, openID, userID, chatID string) (feishuSenderProfile, error) {
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return feishuSenderProfile{}, err
@@ -79,9 +78,7 @@ func (a *FeishuAdapter) lookupSenderProfile(ctx context.Context, cfg channel.Cha
 
 	var lastErr error
 	chatID = strings.TrimSpace(chatID)
-	if strings.HasPrefix(chatID, "chat_id:") {
-		chatID = strings.TrimPrefix(chatID, "chat_id:")
-	}
+	chatID = strings.TrimPrefix(chatID, "chat_id:")
 
 	// Group scene: chat members has the highest chance to return a human-readable name.
 	if chatID != "" && openID != "" {
@@ -125,7 +122,7 @@ func lookupSenderProfileFromContact(ctx context.Context, client *lark.Client, op
 		idType = larkcontact.UserIdTypeUserId
 	}
 	if lookupID == "" {
-		return feishuSenderProfile{}, fmt.Errorf("empty sender id")
+		return feishuSenderProfile{}, errors.New("empty sender id")
 	}
 	req := larkcontact.NewGetUserReqBuilder().
 		UserIdType(idType).
@@ -145,7 +142,7 @@ func lookupSenderProfileFromContact(ctx context.Context, client *lark.Client, op
 		return feishuSenderProfile{}, fmt.Errorf("feishu get user failed: code=%d msg=%s", code, msg)
 	}
 	if resp.Data == nil || resp.Data.User == nil {
-		return feishuSenderProfile{}, fmt.Errorf("feishu get user returned empty user")
+		return feishuSenderProfile{}, errors.New("feishu get user returned empty user")
 	}
 	displayName := ptrStr(resp.Data.User.Name)
 	username := ptrStr(resp.Data.User.Nickname)
@@ -162,7 +159,7 @@ func lookupSenderProfileFromGroupMember(ctx context.Context, client *lark.Client
 	memberIDType = strings.TrimSpace(memberIDType)
 	memberID = strings.TrimSpace(memberID)
 	if memberIDType == "" || memberID == "" {
-		return feishuSenderProfile{}, fmt.Errorf("empty member lookup input")
+		return feishuSenderProfile{}, errors.New("empty member lookup input")
 	}
 	pageToken := ""
 	for page := 0; page < 5; page++ {

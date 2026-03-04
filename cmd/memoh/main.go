@@ -10,7 +10,7 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "memoh",
 		Short: "Memoh unified binary",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			runServe()
 			return nil
 		},
@@ -19,7 +19,7 @@ func main() {
 	rootCmd.AddCommand(&cobra.Command{
 		Use:   "serve",
 		Short: "Start the server",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			runServe()
 			return nil
 		},
@@ -29,7 +29,7 @@ func main() {
 		Use:   "migrate <up|down|version|force N>",
 		Short: "Run database migrations",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			return runMigrate(args)
 		},
 	})
@@ -37,7 +37,7 @@ func main() {
 	rootCmd.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print version information",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			return runVersion()
 		},
 	})

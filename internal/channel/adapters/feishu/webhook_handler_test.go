@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,7 +18,7 @@ type fakeWebhookStore struct {
 	err     error
 }
 
-func (s *fakeWebhookStore) ListConfigsByType(ctx context.Context, channelType channel.ChannelType) ([]channel.ChannelConfig, error) {
+func (s *fakeWebhookStore) ListConfigsByType(_ context.Context, _ channel.ChannelType) ([]channel.ChannelConfig, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -32,7 +33,7 @@ type fakeWebhookManager struct {
 	err error
 }
 
-func (m *fakeWebhookManager) HandleInbound(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) error {
+func (m *fakeWebhookManager) HandleInbound(_ context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) error {
 	m.calls = append(m.calls, struct {
 		cfg channel.ChannelConfig
 		msg channel.InboundMessage
@@ -237,7 +238,8 @@ func TestWebhookHandler_EventCallbackRejectsInvalidTokenWhenEncryptKeyMissing(t 
 	if err == nil {
 		t.Fatal("expected unauthorized error")
 	}
-	he, ok := err.(*echo.HTTPError)
+	he := &echo.HTTPError{}
+	ok := errors.As(err, &he)
 	if !ok {
 		t.Fatalf("expected HTTPError, got %T", err)
 	}
@@ -282,7 +284,8 @@ func TestWebhookHandler_EventCallbackRequiresVerificationTokenWhenEncryptKeyMiss
 	if err == nil {
 		t.Fatal("expected forbidden error")
 	}
-	he, ok := err.(*echo.HTTPError)
+	he := &echo.HTTPError{}
+	ok := errors.As(err, &he)
 	if !ok {
 		t.Fatalf("expected HTTPError, got %T", err)
 	}
@@ -327,7 +330,8 @@ func TestWebhookHandler_RejectsOversizedBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected payload-too-large error")
 	}
-	he, ok := err.(*echo.HTTPError)
+	he := &echo.HTTPError{}
+	ok := errors.As(err, &he)
 	if !ok {
 		t.Fatalf("expected HTTPError, got %T", err)
 	}

@@ -3,6 +3,7 @@ package route
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -202,7 +203,7 @@ func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput)
 	}
 
 	if s.conversation == nil {
-		return ResolveConversationResult{}, fmt.Errorf("conversation service not configured")
+		return ResolveConversationResult{}, errors.New("conversation service not configured")
 	}
 
 	kind := determineConversationKind(input.ThreadID, input.ConversationType)
@@ -360,9 +361,7 @@ func parseJSONMap(data []byte) map[string]any {
 		return nil
 	}
 	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		slog.Warn("parseJSONMap: unmarshal failed", slog.Any("error", err))
-	}
+	_ = json.Unmarshal(data, &m)
 	return m
 }
 

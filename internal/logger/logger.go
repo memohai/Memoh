@@ -10,8 +10,8 @@ import (
 type ctxKey struct{}
 
 var (
-	L      *slog.Logger = slog.Default()
-	logKey              = ctxKey{}
+	L      = slog.Default()
+	logKey = ctxKey{}
 )
 
 // Init initializes the global logger with the given level and format (e.g. "debug", "json").
@@ -60,7 +60,18 @@ func parseLevel(level string) slog.Level {
 }
 
 // Debug, Info, Warn, Error log with the global logger (slog.Attr or key-value pairs).
-func Debug(msg string, args ...any) { L.Debug(msg, args...) }
-func Info(msg string, args ...any)  { L.Info(msg, args...) }
-func Warn(msg string, args ...any)  { L.Warn(msg, args...) }
-func Error(msg string, args ...any) { L.Error(msg, args...) }
+func Debug(msg string, args ...any) {
+	L.Log(context.Background(), slog.LevelDebug, "global log", append([]any{slog.String("message", msg)}, args...)...)
+}
+
+func Info(msg string, args ...any) {
+	L.Log(context.Background(), slog.LevelInfo, "global log", append([]any{slog.String("message", msg)}, args...)...)
+}
+
+func Warn(msg string, args ...any) {
+	L.Log(context.Background(), slog.LevelWarn, "global log", append([]any{slog.String("message", msg)}, args...)...)
+}
+
+func Error(msg string, args ...any) {
+	L.Log(context.Background(), slog.LevelError, "global log", append([]any{slog.String("message", msg)}, args...)...)
+}

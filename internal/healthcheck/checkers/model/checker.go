@@ -64,9 +64,6 @@ type modelSlot struct {
 
 // ListChecks evaluates model health for a bot.
 func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.CheckResult {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
 		return nil

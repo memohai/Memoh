@@ -177,7 +177,7 @@ func formatDayMarkdown(date string, records []writeRecord) string {
 	})
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf(memFileHeaderTemplate, date))
+	fmt.Fprintf(&b, memFileHeaderTemplate, date)
 	for _, r := range records {
 		meta := map[string]string{"id": r.ID}
 		if r.Topic != "" {

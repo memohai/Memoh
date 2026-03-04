@@ -88,7 +88,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 		return fmt.Errorf("agent binary missing: %w", err)
 	}
-	if err := os.Chmod(agentBinPath, 0o755); err != nil {
+	if err := os.Chmod(agentBinPath, 0o755); err != nil { //nolint:gosec // G302: executable binary requires execute bit; 0600 would make it non-executable
 		return fmt.Errorf("chmod agent binary: %w", err)
 	}
 	agentConfigPath := filepath.Join(agentDir, agentConfigFileName)
@@ -96,7 +96,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 
-	cmd := exec.Command(agentBinPath)
+	cmd := exec.CommandContext(ctx, agentBinPath) //nolint:gosec // G204: path is constructed internally from an embedded asset, not user input
 	cmd.Dir = agentDir
 	cmd.Env = append(
 		os.Environ(),
@@ -157,7 +157,7 @@ func (m *Manager) waitHealthy(ctx context.Context) error {
 	deadline := time.Now().Add(healthCheckTimeout)
 	for time.Now().Before(deadline) {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
-		resp, err := client.Do(req)
+		resp, err := client.Do(req) //nolint:gosec // G704: URL is constructed from operator-configured host/port, not from user input
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -174,7 +174,7 @@ func (m *Manager) address() string {
 }
 
 func extractFS(src fs.FS, targetDir string) error {
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o750); err != nil {
 		return err
 	}
 	return fs.WalkDir(src, ".", func(path string, d fs.DirEntry, err error) error {
@@ -186,19 +186,19 @@ func extractFS(src fs.FS, targetDir string) error {
 		}
 		target := filepath.Join(targetDir, path)
 		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
+			return os.MkdirAll(target, 0o750)
 		}
 
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 			return err
 		}
 		r, err := src.Open(path)
 		if err != nil {
 			return err
 		}
-		defer r.Close()
+		defer func() { _ = r.Close() }()
 
-		w, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		w, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) //nolint:gosec // G304: target is derived from an embedded FS walk within a process-owned temp dir
 		if err != nil {
 			return err
 		}
@@ -211,14 +211,14 @@ func extractFS(src fs.FS, targetDir string) error {
 }
 
 func writeAgentConfig(path string, cfg config.Config) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	f, err := os.Create(path)
+	f, err := os.Create(path) //nolint:gosec // G304: path is constructed internally from a process-owned temp dir
 	if err != nil {
 		return fmt.Errorf("create agent config: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return toml.NewEncoder(f).Encode(cfg)
 }
 
@@ -231,7 +231,7 @@ func (w *logWriter) Write(p []byte) (n int, err error) {
 	msg := string(p)
 	msg = trimTrailingNewline(msg)
 	if msg != "" {
-		w.log.Log(context.Background(), w.level, msg)
+		w.log.LogAttrs(context.Background(), w.level, "runtime process output", slog.String("detail", msg))
 	}
 	return len(p), nil
 }

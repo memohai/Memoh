@@ -2,7 +2,7 @@ package flow
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/memohai/memoh/internal/heartbeat"
 )
@@ -20,7 +20,7 @@ func NewHeartbeatGateway(resolver *Resolver) *HeartbeatGateway {
 // TriggerHeartbeat delegates a heartbeat trigger to the chat Resolver.
 func (g *HeartbeatGateway) TriggerHeartbeat(ctx context.Context, botID string, payload heartbeat.TriggerPayload, token string) (heartbeat.TriggerResult, error) {
 	if g == nil || g.resolver == nil {
-		return heartbeat.TriggerResult{}, fmt.Errorf("chat resolver not configured")
+		return heartbeat.TriggerResult{}, errors.New("chat resolver not configured")
 	}
 	return g.resolver.TriggerHeartbeat(ctx, botID, payload, token)
 }

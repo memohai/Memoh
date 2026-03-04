@@ -76,7 +76,9 @@ func TestFeishuGateway_Integration(t *testing.T) {
 					Text: "【Memoh 集成测试】主动推送验证成功。",
 				},
 			}
-			_ = adapter.Send(context.Background(), c, pushMsg)
+			pushCtx, pushCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer pushCancel()
+			_ = adapter.Send(pushCtx, c, pushMsg)
 		}()
 
 		return nil

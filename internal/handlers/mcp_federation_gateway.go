@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,8 +11,9 @@ import (
 	"strings"
 	"time"
 
-	mcpgw "github.com/memohai/memoh/internal/mcp"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	mcpgw "github.com/memohai/memoh/internal/mcp"
 )
 
 type MCPFederationGateway struct {
@@ -100,7 +102,7 @@ func (g *MCPFederationGateway) CallSSEConnectionTool(ctx context.Context, connec
 func (g *MCPFederationGateway) connectStreamableSession(ctx context.Context, connection mcpgw.Connection) (*sdkmcp.ClientSession, error) {
 	url := strings.TrimSpace(anyToString(connection.Config["url"]))
 	if url == "" {
-		return nil, fmt.Errorf("http mcp url is required")
+		return nil, errors.New("http mcp url is required")
 	}
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{
 		Name:    "memoh-federation-client",
@@ -108,7 +110,7 @@ func (g *MCPFederationGateway) connectStreamableSession(ctx context.Context, con
 	}, nil)
 	transport := &sdkmcp.StreamableClientTransport{
 		Endpoint:   url,
-		HTTPClient: g.connectionHTTPClient(connection),
+		HTTPClient: g.connectionHTTPClient(ctx, connection),
 		MaxRetries: -1,
 	}
 	return client.Connect(ctx, transport, nil)
@@ -117,7 +119,7 @@ func (g *MCPFederationGateway) connectStreamableSession(ctx context.Context, con
 func (g *MCPFederationGateway) connectSSESession(ctx context.Context, connection mcpgw.Connection) (*sdkmcp.ClientSession, error) {
 	endpoints := resolveSSEEndpointCandidates(connection.Config)
 	if len(endpoints) == 0 {
-		return nil, fmt.Errorf("sse mcp url is required")
+		return nil, errors.New("sse mcp url is required")
 	}
 	var lastErr error
 	for _, endpoint := range endpoints {
@@ -127,7 +129,7 @@ func (g *MCPFederationGateway) connectSSESession(ctx context.Context, connection
 		}, nil)
 		transport := &sdkmcp.SSEClientTransport{
 			Endpoint:   endpoint,
-			HTTPClient: g.connectionHTTPClient(connection),
+			HTTPClient: g.connectionHTTPClient(ctx, connection),
 		}
 		session, err := client.Connect(ctx, transport, nil)
 		if err == nil {
@@ -136,7 +138,7 @@ func (g *MCPFederationGateway) connectSSESession(ctx context.Context, connection
 		lastErr = err
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no sse endpoint candidate available")
+		lastErr = errors.New("no sse endpoint candidate available")
 	}
 	return nil, fmt.Errorf("connect sse mcp failed: %w", lastErr)
 }
@@ -192,7 +194,7 @@ func resolveSSEEndpointCandidates(config map[string]any) []string {
 	return out
 }
 
-func (g *MCPFederationGateway) connectionHTTPClient(connection mcpgw.Connection) *http.Client {
+func (g *MCPFederationGateway) connectionHTTPClient(ctx context.Context, connection mcpgw.Connection) *http.Client {
 	base := g.client
 	if base == nil {
 		base = &http.Client{Timeout: 30 * time.Second}
@@ -200,7 +202,7 @@ func (g *MCPFederationGateway) connectionHTTPClient(connection mcpgw.Connection)
 	headers := normalizeHeaderMap(connection.Config["headers"])
 
 	if strings.TrimSpace(connection.AuthType) == "oauth" && g.oauthService != nil {
-		token, err := g.oauthService.GetValidToken(context.Background(), connection.ID)
+		token, err := g.oauthService.GetValidToken(ctx, connection.ID)
 		if err != nil {
 			g.logger.Warn("failed to get OAuth token for connection",
 				slog.String("connection_id", connection.ID),
@@ -273,7 +275,7 @@ func (g *MCPFederationGateway) CallStdioConnectionTool(ctx context.Context, botI
 
 func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, botID string, connection mcpgw.Connection) (*mcpSession, error) {
 	if g.handler == nil {
-		return nil, fmt.Errorf("containerd handler not configured")
+		return nil, errors.New("containerd handler not configured")
 	}
 	containerID, err := g.handler.botContainerID(ctx, botID)
 	if err != nil {
@@ -285,7 +287,7 @@ func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, 
 
 	command := strings.TrimSpace(anyToString(connection.Config["command"]))
 	if command == "" {
-		return nil, fmt.Errorf("stdio mcp command is required")
+		return nil, errors.New("stdio mcp command is required")
 	}
 	request := MCPStdioRequest{
 		Name:    strings.TrimSpace(connection.Name),
@@ -303,11 +305,11 @@ func parseGatewayToolsListPayload(payload map[string]any) ([]mcpgw.ToolDescripto
 	}
 	result, ok := payload["result"].(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("invalid tools/list result")
+		return nil, errors.New("invalid tools/list result")
 	}
 	rawTools, ok := result["tools"].([]any)
 	if !ok {
-		return nil, fmt.Errorf("invalid tools/list tools field")
+		return nil, errors.New("invalid tools/list tools field")
 	}
 	tools := make([]mcpgw.ToolDescriptor, 0, len(rawTools))
 	for _, rawTool := range rawTools {

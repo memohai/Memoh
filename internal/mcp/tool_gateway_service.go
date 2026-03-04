@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -55,7 +54,7 @@ func NewToolGatewayService(log *slog.Logger, executors []ToolExecutor, sources [
 	}
 }
 
-func (s *ToolGatewayService) InitializeResult() map[string]any {
+func (*ToolGatewayService) InitializeResult() map[string]any {
 	return map[string]any{
 		"protocolVersion": "2025-06-18",
 		"capabilities": map[string]any{
@@ -81,7 +80,7 @@ func (s *ToolGatewayService) ListTools(ctx context.Context, session ToolSessionC
 func (s *ToolGatewayService) CallTool(ctx context.Context, session ToolSessionContext, payload ToolCallPayload) (map[string]any, error) {
 	toolName := strings.TrimSpace(payload.Name)
 	if toolName == "" {
-		return nil, fmt.Errorf("tool name is required")
+		return nil, errors.New("tool name is required")
 	}
 
 	registry, err := s.getRegistry(ctx, session, false)
@@ -121,7 +120,7 @@ func (s *ToolGatewayService) CallTool(ctx context.Context, session ToolSessionCo
 func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessionContext, force bool) (*ToolRegistry, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot id is required")
+		return nil, errors.New("bot id is required")
 	}
 	if !force {
 		s.mu.Lock()

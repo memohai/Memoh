@@ -13,7 +13,7 @@ type testConnectionLister struct {
 	err   error
 }
 
-func (l *testConnectionLister) ListActiveByBot(ctx context.Context, botID string) ([]mcpgw.Connection, error) {
+func (l *testConnectionLister) ListActiveByBot(_ context.Context, _ string) ([]mcpgw.Connection, error) {
 	if l.err != nil {
 		return nil, l.err
 	}
@@ -28,29 +28,29 @@ type testGateway struct {
 	lastCallType string
 }
 
-func (g *testGateway) ListHTTPConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+func (g *testGateway) ListHTTPConnectionTools(_ context.Context, _ mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
 	return g.listHTTP, nil
 }
 
-func (g *testGateway) CallHTTPConnectionTool(ctx context.Context, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error) {
+func (g *testGateway) CallHTTPConnectionTool(_ context.Context, _ mcpgw.Connection, _ string, _ map[string]any) (map[string]any, error) {
 	g.lastCallType = "http"
 	return map[string]any{"result": map[string]any{"ok": true, "route": "http"}}, nil
 }
 
-func (g *testGateway) ListSSEConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+func (g *testGateway) ListSSEConnectionTools(_ context.Context, _ mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
 	return g.listSSE, nil
 }
 
-func (g *testGateway) CallSSEConnectionTool(ctx context.Context, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error) {
+func (g *testGateway) CallSSEConnectionTool(_ context.Context, _ mcpgw.Connection, _ string, _ map[string]any) (map[string]any, error) {
 	g.lastCallType = "sse"
 	return map[string]any{"result": map[string]any{"ok": true, "route": "sse"}}, nil
 }
 
-func (g *testGateway) ListStdioConnectionTools(ctx context.Context, botID string, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+func (g *testGateway) ListStdioConnectionTools(_ context.Context, _ string, _ mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
 	return g.listStdio, nil
 }
 
-func (g *testGateway) CallStdioConnectionTool(ctx context.Context, botID string, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error) {
+func (g *testGateway) CallStdioConnectionTool(_ context.Context, _ string, _ mcpgw.Connection, _ string, _ map[string]any) (map[string]any, error) {
 	g.lastCallType = "stdio"
 	return map[string]any{"result": map[string]any{"ok": true, "route": "stdio"}}, nil
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+
 	memprovider "github.com/memohai/memoh/internal/memory/provider"
 )
 
@@ -36,7 +37,7 @@ func (h *MemoryProvidersHandler) Register(e *echo.Echo) {
 // @Description List available memory provider types and config schemas
 // @Tags memory-providers
 // @Success 200 {array} provider.ProviderMeta
-// @Router /memory-providers/meta [get]
+// @Router /memory-providers/meta [get].
 func (h *MemoryProvidersHandler) ListMeta(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.service.ListMeta(c.Request().Context()))
 }
@@ -51,7 +52,7 @@ func (h *MemoryProvidersHandler) ListMeta(c echo.Context) error {
 // @Success 201 {object} provider.ProviderGetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /memory-providers [post]
+// @Router /memory-providers [post].
 func (h *MemoryProvidersHandler) Create(c echo.Context) error {
 	var req memprovider.ProviderCreateRequest
 	if err := c.Bind(&req); err != nil {
@@ -77,7 +78,7 @@ func (h *MemoryProvidersHandler) Create(c echo.Context) error {
 // @Produce json
 // @Success 200 {array} provider.ProviderGetResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /memory-providers [get]
+// @Router /memory-providers [get].
 func (h *MemoryProvidersHandler) List(c echo.Context) error {
 	items, err := h.service.List(c.Request().Context())
 	if err != nil {
@@ -95,7 +96,7 @@ func (h *MemoryProvidersHandler) List(c echo.Context) error {
 // @Success 200 {object} provider.ProviderGetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /memory-providers/{id} [get]
+// @Router /memory-providers/{id} [get].
 func (h *MemoryProvidersHandler) Get(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -119,7 +120,7 @@ func (h *MemoryProvidersHandler) Get(c echo.Context) error {
 // @Success 200 {object} provider.ProviderGetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /memory-providers/{id} [put]
+// @Router /memory-providers/{id} [put].
 func (h *MemoryProvidersHandler) Update(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -144,7 +145,7 @@ func (h *MemoryProvidersHandler) Update(c echo.Context) error {
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /memory-providers/{id} [delete]
+// @Router /memory-providers/{id} [delete].
 func (h *MemoryProvidersHandler) Delete(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {

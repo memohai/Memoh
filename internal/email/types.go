@@ -4,7 +4,6 @@ import "time"
 
 type ProviderName string
 
-
 // FieldSchema describes a single configuration field for dynamic form generation.
 type FieldSchema struct {
 	Key         string   `json:"key"`

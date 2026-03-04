@@ -23,7 +23,7 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	}
 }
 
-func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
+func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 	return []ProviderMeta{
 		{
 			Provider:    string(ProviderBrave),

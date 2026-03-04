@@ -74,7 +74,7 @@ func (s *Service) AddRuntimeChecker(c RuntimeChecker) {
 // AuthorizeAccess checks whether userID may access the given bot.
 func (s *Service) AuthorizeAccess(ctx context.Context, userID, botID string, isAdmin bool, policy AccessPolicy) (Bot, error) {
 	if s.queries == nil {
-		return Bot{}, fmt.Errorf("bot queries not configured")
+		return Bot{}, errors.New("bot queries not configured")
 	}
 	bot, err := s.Get(ctx, botID)
 	if err != nil {
@@ -102,11 +102,11 @@ func (s *Service) AuthorizeAccess(ctx context.Context, userID, botID string, isA
 // Create creates a new bot owned by owner user.
 func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotRequest) (Bot, error) {
 	if s.queries == nil {
-		return Bot{}, fmt.Errorf("bot queries not configured")
+		return Bot{}, errors.New("bot queries not configured")
 	}
 	ownerID := strings.TrimSpace(ownerUserID)
 	if ownerID == "" {
-		return Bot{}, fmt.Errorf("owner user id is required")
+		return Bot{}, errors.New("owner user id is required")
 	}
 	ownerUUID, err := db.ParseUUID(ownerID)
 	if err != nil {
@@ -155,14 +155,14 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
-	s.enqueueCreateLifecycle(bot.ID)
+	s.enqueueCreateLifecycle(ctx, bot.ID)
 	return bot, nil
 }
 
 // Get returns a bot by its ID.
 func (s *Service) Get(ctx context.Context, botID string) (Bot, error) {
 	if s.queries == nil {
-		return Bot{}, fmt.Errorf("bot queries not configured")
+		return Bot{}, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -185,7 +185,7 @@ func (s *Service) Get(ctx context.Context, botID string) (Bot, error) {
 // ListByOwner returns bots owned by the given user.
 func (s *Service) ListByOwner(ctx context.Context, ownerUserID string) ([]Bot, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("bot queries not configured")
+		return nil, errors.New("bot queries not configured")
 	}
 	ownerUUID, err := db.ParseUUID(ownerUserID)
 	if err != nil {
@@ -212,7 +212,7 @@ func (s *Service) ListByOwner(ctx context.Context, ownerUserID string) ([]Bot, e
 // ListByMember returns bots where the user is a member.
 func (s *Service) ListByMember(ctx context.Context, channelIdentityID string) ([]Bot, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("bot queries not configured")
+		return nil, errors.New("bot queries not configured")
 	}
 	memberUUID, err := db.ParseUUID(channelIdentityID)
 	if err != nil {
@@ -265,7 +265,7 @@ func (s *Service) ListAccessible(ctx context.Context, channelIdentityID string) 
 // Update updates bot profile fields.
 func (s *Service) Update(ctx context.Context, botID string, req UpdateBotRequest) (Bot, error) {
 	if s.queries == nil {
-		return Bot{}, fmt.Errorf("bot queries not configured")
+		return Bot{}, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -324,7 +324,7 @@ func (s *Service) Update(ctx context.Context, botID string, req UpdateBotRequest
 // TransferOwner transfers bot ownership to another user.
 func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID string) (Bot, error) {
 	if s.queries == nil {
-		return Bot{}, fmt.Errorf("bot queries not configured")
+		return Bot{}, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -357,7 +357,7 @@ func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID s
 // Delete removes a bot and its associated resources.
 func (s *Service) Delete(ctx context.Context, botID string) error {
 	if s.queries == nil {
-		return fmt.Errorf("bot queries not configured")
+		return errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -376,14 +376,14 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	}); err != nil {
 		return err
 	}
-	s.enqueueDeleteLifecycle(botID)
+	s.enqueueDeleteLifecycle(ctx, botID)
 	return nil
 }
 
 // ListChecks evaluates runtime resource checks for a bot.
 func (s *Service) ListChecks(ctx context.Context, botID string) ([]BotCheck, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("bot queries not configured")
+		return nil, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -396,13 +396,13 @@ func (s *Service) ListChecks(ctx context.Context, botID string) ([]BotCheck, err
 	return s.buildRuntimeChecks(ctx, asSQLCBot(row), true)
 }
 
-func (s *Service) enqueueCreateLifecycle(botID string) {
+func (s *Service) enqueueCreateLifecycle(ctx context.Context, botID string) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), botLifecycleOperationTimeout)
+		lifecycleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), botLifecycleOperationTimeout)
 		defer cancel()
 
 		if s.containerLifecycle != nil {
-			if err := s.containerLifecycle.SetupBotContainer(ctx, botID); err != nil {
+			if err := s.containerLifecycle.SetupBotContainer(lifecycleCtx, botID); err != nil {
 				s.logger.Error("bot container setup failed",
 					slog.String("bot_id", botID),
 					slog.Any("error", err),
@@ -410,7 +410,7 @@ func (s *Service) enqueueCreateLifecycle(botID string) {
 			}
 		}
 
-		if err := s.updateStatus(ctx, botID, BotStatusReady); err != nil {
+		if err := s.updateStatus(lifecycleCtx, botID, BotStatusReady); err != nil {
 			s.logger.Error("failed to update bot status to ready after create",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
@@ -419,13 +419,13 @@ func (s *Service) enqueueCreateLifecycle(botID string) {
 	}()
 }
 
-func (s *Service) enqueueDeleteLifecycle(botID string) {
+func (s *Service) enqueueDeleteLifecycle(ctx context.Context, botID string) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), botLifecycleOperationTimeout)
+		lifecycleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), botLifecycleOperationTimeout)
 		defer cancel()
 
 		if s.containerLifecycle != nil {
-			if err := s.containerLifecycle.CleanupBotContainer(ctx, botID); err != nil {
+			if err := s.containerLifecycle.CleanupBotContainer(lifecycleCtx, botID); err != nil {
 				s.logger.Error("bot container cleanup failed",
 					slog.String("bot_id", botID),
 					slog.Any("error", err),
@@ -439,17 +439,17 @@ func (s *Service) enqueueDeleteLifecycle(botID string) {
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
 			)
-			if err := s.updateStatus(ctx, botID, BotStatusReady); err != nil {
+			if err := s.updateStatus(lifecycleCtx, botID, BotStatusReady); err != nil {
 				s.logger.Error("revert bot status failed", slog.String("bot_id", botID), slog.Any("error", err))
 			}
 			return
 		}
-		if err := s.queries.DeleteBotByID(ctx, botUUID); err != nil {
+		if err := s.queries.DeleteBotByID(lifecycleCtx, botUUID); err != nil {
 			s.logger.Error("failed to delete bot after cleanup",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
 			)
-			if err := s.updateStatus(ctx, botID, BotStatusReady); err != nil {
+			if err := s.updateStatus(lifecycleCtx, botID, BotStatusReady); err != nil {
 				s.logger.Error("revert bot status failed", slog.String("bot_id", botID), slog.Any("error", err))
 			}
 			return
@@ -459,7 +459,7 @@ func (s *Service) enqueueDeleteLifecycle(botID string) {
 
 func (s *Service) updateStatus(ctx context.Context, botID, status string) error {
 	if s.queries == nil {
-		return fmt.Errorf("bot queries not configured")
+		return errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -473,7 +473,7 @@ func (s *Service) updateStatus(ctx context.Context, botID, status string) error 
 
 func (s *Service) ensureUserExists(ctx context.Context, userID pgtype.UUID) error {
 	if s.queries == nil {
-		return fmt.Errorf("bot queries not configured")
+		return errors.New("bot queries not configured")
 	}
 	_, err := s.queries.GetUserByID(ctx, userID)
 	if err != nil {
@@ -488,7 +488,7 @@ func (s *Service) ensureUserExists(ctx context.Context, userID pgtype.UUID) erro
 // UpsertMember creates or updates a bot membership.
 func (s *Service) UpsertMember(ctx context.Context, botID string, req UpsertMemberRequest) (BotMember, error) {
 	if s.queries == nil {
-		return BotMember{}, fmt.Errorf("bot queries not configured")
+		return BotMember{}, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -516,7 +516,7 @@ func (s *Service) UpsertMember(ctx context.Context, botID string, req UpsertMemb
 // ListMembers returns all members of a bot.
 func (s *Service) ListMembers(ctx context.Context, botID string) ([]BotMember, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("bot queries not configured")
+		return nil, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -536,7 +536,7 @@ func (s *Service) ListMembers(ctx context.Context, botID string) ([]BotMember, e
 // GetMember returns a specific bot member.
 func (s *Service) GetMember(ctx context.Context, botID, channelIdentityID string) (BotMember, error) {
 	if s.queries == nil {
-		return BotMember{}, fmt.Errorf("bot queries not configured")
+		return BotMember{}, errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -559,7 +559,7 @@ func (s *Service) GetMember(ctx context.Context, botID, channelIdentityID string
 // DeleteMember removes a member from a bot.
 func (s *Service) DeleteMember(ctx context.Context, botID, channelIdentityID string) error {
 	if s.queries == nil {
-		return fmt.Errorf("bot queries not configured")
+		return errors.New("bot queries not configured")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {

@@ -1,7 +1,7 @@
 package feishu
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
@@ -79,7 +79,7 @@ func resolveTarget(raw map[string]any) (string, error) {
 	if cfg.UserID != "" {
 		return "user_id:" + cfg.UserID, nil
 	}
-	return "", fmt.Errorf("feishu binding is incomplete")
+	return "", errors.New("feishu binding is incomplete")
 }
 
 func matchBinding(raw map[string]any, criteria channel.BindingCriteria) bool {
@@ -126,7 +126,7 @@ func parseConfig(raw map[string]any) (Config, error) {
 		return Config{}, err
 	}
 	if appID == "" || appSecret == "" {
-		return Config{}, fmt.Errorf("feishu appId and appSecret are required")
+		return Config{}, errors.New("feishu appId and appSecret are required")
 	}
 	return Config{
 		AppID:             appID,
@@ -142,7 +142,7 @@ func parseUserConfig(raw map[string]any) (UserConfig, error) {
 	openID := strings.TrimSpace(channel.ReadString(raw, "openId", "open_id"))
 	userID := strings.TrimSpace(channel.ReadString(raw, "userId", "user_id"))
 	if openID == "" && userID == "" {
-		return UserConfig{}, fmt.Errorf("feishu user config requires open_id or user_id")
+		return UserConfig{}, errors.New("feishu user config requires open_id or user_id")
 	}
 	return UserConfig{OpenID: openID, UserID: userID}, nil
 }
@@ -171,7 +171,7 @@ func normalizeRegion(raw string) (string, error) {
 	case regionLark, "global", "intl", "international":
 		return regionLark, nil
 	default:
-		return "", fmt.Errorf("feishu region must be feishu or lark")
+		return "", errors.New("feishu region must be feishu or lark")
 	}
 }
 
@@ -182,7 +182,7 @@ func normalizeInboundMode(raw string) (string, error) {
 	case inboundModeWebhook:
 		return inboundModeWebhook, nil
 	default:
-		return "", fmt.Errorf("feishu inbound_mode must be websocket or webhook")
+		return "", errors.New("feishu inbound_mode must be websocket or webhook")
 	}
 }
 

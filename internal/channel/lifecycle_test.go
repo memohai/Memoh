@@ -65,12 +65,12 @@ func TestLifecycleUpsertDisabledRemovesConnection(t *testing.T) {
 
 	removeCalled := false
 	store := &fakeLifecycleStore{
-		upsertFunc: func(ctx context.Context, botID string, channelType ChannelType, req UpsertConfigRequest) (ChannelConfig, error) {
+		upsertFunc: func(_ context.Context, botID string, channelType ChannelType, _ UpsertConfigRequest) (ChannelConfig, error) {
 			return ChannelConfig{ID: "cfg-1", BotID: botID, ChannelType: channelType, Disabled: true}, nil
 		},
 	}
 	controller := &fakeConnectionController{
-		removeFunc: func(ctx context.Context, botID string, channelType ChannelType) {
+		removeFunc: func(_ context.Context, _ string, _ ChannelType) {
 			removeCalled = true
 		},
 	}
@@ -112,10 +112,10 @@ func TestLifecycleUpsertEnableFailureRollsBackToPrevious(t *testing.T) {
 	upsertCalls := 0
 	ensureCalls := 0
 	store := &fakeLifecycleStore{
-		resolveFunc: func(ctx context.Context, botID string, channelType ChannelType) (ChannelConfig, error) {
+		resolveFunc: func(_ context.Context, _ string, _ ChannelType) (ChannelConfig, error) {
 			return previous, nil
 		},
-		upsertFunc: func(ctx context.Context, botID string, channelType ChannelType, req UpsertConfigRequest) (ChannelConfig, error) {
+		upsertFunc: func(_ context.Context, _ string, _ ChannelType, req UpsertConfigRequest) (ChannelConfig, error) {
 			upsertCalls++
 			if upsertCalls == 1 {
 				return newConfig, nil
@@ -127,7 +127,7 @@ func TestLifecycleUpsertEnableFailureRollsBackToPrevious(t *testing.T) {
 		},
 	}
 	controller := &fakeConnectionController{
-		ensureFunc: func(ctx context.Context, cfg ChannelConfig) error {
+		ensureFunc: func(_ context.Context, _ ChannelConfig) error {
 			ensureCalls++
 			if ensureCalls == 1 {
 				return errors.New("dial failed")
@@ -158,10 +158,10 @@ func TestLifecycleUpsertEnableFailureWithoutPreviousDeletesNewConfig(t *testing.
 
 	deleteCalls := 0
 	store := &fakeLifecycleStore{
-		resolveFunc: func(ctx context.Context, botID string, channelType ChannelType) (ChannelConfig, error) {
+		resolveFunc: func(_ context.Context, _ string, _ ChannelType) (ChannelConfig, error) {
 			return ChannelConfig{}, ErrChannelConfigNotFound
 		},
-		upsertFunc: func(ctx context.Context, botID string, channelType ChannelType, req UpsertConfigRequest) (ChannelConfig, error) {
+		upsertFunc: func(_ context.Context, botID string, channelType ChannelType, _ UpsertConfigRequest) (ChannelConfig, error) {
 			return ChannelConfig{
 				ID:          "cfg-new",
 				BotID:       botID,
@@ -169,13 +169,13 @@ func TestLifecycleUpsertEnableFailureWithoutPreviousDeletesNewConfig(t *testing.
 				Credentials: map[string]any{"botToken": "new"},
 			}, nil
 		},
-		deleteFunc: func(ctx context.Context, botID string, channelType ChannelType) error {
+		deleteFunc: func(_ context.Context, _ string, _ ChannelType) error {
 			deleteCalls++
 			return nil
 		},
 	}
 	controller := &fakeConnectionController{
-		ensureFunc: func(ctx context.Context, cfg ChannelConfig) error {
+		ensureFunc: func(_ context.Context, _ ChannelConfig) error {
 			return errors.New("start failed")
 		},
 	}
@@ -199,12 +199,12 @@ func TestLifecycleDeleteStopsConnection(t *testing.T) {
 
 	removeCalled := false
 	store := &fakeLifecycleStore{
-		deleteFunc: func(ctx context.Context, botID string, channelType ChannelType) error {
+		deleteFunc: func(_ context.Context, _ string, _ ChannelType) error {
 			return nil
 		},
 	}
 	controller := &fakeConnectionController{
-		removeFunc: func(ctx context.Context, botID string, channelType ChannelType) {
+		removeFunc: func(_ context.Context, _ string, _ ChannelType) {
 			removeCalled = true
 		},
 	}
@@ -223,7 +223,7 @@ func TestLifecycleSetBotChannelStatusDisable(t *testing.T) {
 
 	removeCalled := false
 	store := &fakeLifecycleStore{
-		statusFunc: func(ctx context.Context, botID string, channelType ChannelType, disabled bool) (ChannelConfig, error) {
+		statusFunc: func(_ context.Context, botID string, channelType ChannelType, disabled bool) (ChannelConfig, error) {
 			if !disabled {
 				t.Fatalf("expected disabled=true update")
 			}
@@ -231,7 +231,7 @@ func TestLifecycleSetBotChannelStatusDisable(t *testing.T) {
 		},
 	}
 	controller := &fakeConnectionController{
-		removeFunc: func(ctx context.Context, botID string, channelType ChannelType) {
+		removeFunc: func(_ context.Context, _ string, _ ChannelType) {
 			removeCalled = true
 		},
 	}
@@ -255,7 +255,7 @@ func TestLifecycleSetBotChannelStatusEnableFailureRollsBack(t *testing.T) {
 	statusCalls := 0
 	removeCalled := false
 	store := &fakeLifecycleStore{
-		statusFunc: func(ctx context.Context, botID string, channelType ChannelType, disabled bool) (ChannelConfig, error) {
+		statusFunc: func(_ context.Context, botID string, channelType ChannelType, disabled bool) (ChannelConfig, error) {
 			statusCalls++
 			if statusCalls == 1 && disabled {
 				t.Fatalf("first status update should enable config")
@@ -272,10 +272,10 @@ func TestLifecycleSetBotChannelStatusEnableFailureRollsBack(t *testing.T) {
 		},
 	}
 	controller := &fakeConnectionController{
-		ensureFunc: func(ctx context.Context, cfg ChannelConfig) error {
+		ensureFunc: func(_ context.Context, _ ChannelConfig) error {
 			return errors.New("start failed")
 		},
-		removeFunc: func(ctx context.Context, botID string, channelType ChannelType) {
+		removeFunc: func(_ context.Context, _ string, _ ChannelType) {
 			removeCalled = true
 		},
 	}

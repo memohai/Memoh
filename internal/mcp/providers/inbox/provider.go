@@ -7,15 +7,14 @@ import (
 	"strings"
 	"time"
 
-	mcpgw "github.com/memohai/memoh/internal/mcp"
-
 	inboxsvc "github.com/memohai/memoh/internal/inbox"
+	mcpgw "github.com/memohai/memoh/internal/mcp"
 )
 
 const (
-	toolSearchInbox       = "search_inbox"
-	defaultSearchLimit    = 20
-	maxSearchLimit        = 100
+	toolSearchInbox    = "search_inbox"
+	defaultSearchLimit = 20
+	maxSearchLimit     = 100
 )
 
 type Executor struct {
@@ -33,7 +32,7 @@ func NewExecutor(log *slog.Logger, service *inboxsvc.Service) *Executor {
 	}
 }
 
-func (e *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (e *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	if e.service == nil {
 		return []mcpgw.ToolDescriptor{}, nil
 	}

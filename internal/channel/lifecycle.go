@@ -44,14 +44,14 @@ func NewLifecycle(store LifecycleStore, controller ConnectionController) *Lifecy
 // For disabled=false, it stores config then starts connection; on start failure it rolls back.
 func (s *Lifecycle) UpsertBotChannelConfig(ctx context.Context, botID string, channelType ChannelType, req UpsertConfigRequest) (ChannelConfig, error) {
 	if s.store == nil {
-		return ChannelConfig{}, fmt.Errorf("channel lifecycle store not configured")
+		return ChannelConfig{}, errors.New("channel lifecycle store not configured")
 	}
 	disabled := false
 	if req.Disabled != nil {
 		disabled = *req.Disabled
 	}
 	if !disabled && s.controller == nil {
-		return ChannelConfig{}, fmt.Errorf("channel connection controller not configured")
+		return ChannelConfig{}, errors.New("channel connection controller not configured")
 	}
 
 	previous, hadPrevious, err := s.getPreviousConfig(ctx, botID, channelType)
@@ -73,7 +73,7 @@ func (s *Lifecycle) UpsertBotChannelConfig(ctx context.Context, botID string, ch
 
 	if err := s.controller.EnsureConnection(ctx, updated); err != nil {
 		if rollbackErr := s.rollbackUpsert(ctx, botID, channelType, hadPrevious, previous); rollbackErr != nil {
-			return ChannelConfig{}, fmt.Errorf("%w (rollback failed: %v): %w", ErrEnableChannelFailed, rollbackErr, err)
+			return ChannelConfig{}, fmt.Errorf("%w (rollback failed: %w): %w", ErrEnableChannelFailed, rollbackErr, err)
 		}
 		return ChannelConfig{}, fmt.Errorf("%w: %w", ErrEnableChannelFailed, err)
 	}
@@ -83,7 +83,7 @@ func (s *Lifecycle) UpsertBotChannelConfig(ctx context.Context, botID string, ch
 // DeleteBotChannelConfig removes persisted config and stops active runtime connection.
 func (s *Lifecycle) DeleteBotChannelConfig(ctx context.Context, botID string, channelType ChannelType) error {
 	if s.store == nil {
-		return fmt.Errorf("channel lifecycle store not configured")
+		return errors.New("channel lifecycle store not configured")
 	}
 	if err := s.store.DeleteConfig(ctx, botID, channelType); err != nil {
 		return err
@@ -97,10 +97,10 @@ func (s *Lifecycle) DeleteBotChannelConfig(ctx context.Context, botID string, ch
 // SetBotChannelStatus updates only the disabled status and applies runtime lifecycle.
 func (s *Lifecycle) SetBotChannelStatus(ctx context.Context, botID string, channelType ChannelType, disabled bool) (ChannelConfig, error) {
 	if s.store == nil {
-		return ChannelConfig{}, fmt.Errorf("channel lifecycle store not configured")
+		return ChannelConfig{}, errors.New("channel lifecycle store not configured")
 	}
 	if s.controller == nil {
-		return ChannelConfig{}, fmt.Errorf("channel connection controller not configured")
+		return ChannelConfig{}, errors.New("channel connection controller not configured")
 	}
 
 	updated, err := s.store.UpdateConfigDisabled(ctx, botID, channelType, disabled)
@@ -114,7 +114,7 @@ func (s *Lifecycle) SetBotChannelStatus(ctx context.Context, botID string, chann
 
 	if err := s.controller.EnsureConnection(ctx, updated); err != nil {
 		if _, rollbackErr := s.store.UpdateConfigDisabled(ctx, botID, channelType, true); rollbackErr != nil {
-			return ChannelConfig{}, fmt.Errorf("%w (status rollback failed: %v): %w", ErrEnableChannelFailed, rollbackErr, err)
+			return ChannelConfig{}, fmt.Errorf("%w (status rollback failed: %w): %w", ErrEnableChannelFailed, rollbackErr, err)
 		}
 		s.controller.RemoveConnection(ctx, botID, channelType)
 		return ChannelConfig{}, fmt.Errorf("%w: %w", ErrEnableChannelFailed, err)

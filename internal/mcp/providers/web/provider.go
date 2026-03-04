@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,7 +47,7 @@ func NewExecutor(log *slog.Logger, settingsSvc *settings.Service, searchSvc *sea
 	}
 }
 
-func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	if p.settings == nil || p.searchProviders == nil {
 		return []mcpgw.ToolDescriptor{}, nil
 	}
@@ -140,7 +141,7 @@ func (p *Executor) callWebSearch(ctx context.Context, providerName string, confi
 	}
 }
 
-func (p *Executor) callBraveSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callBraveSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	endpoint := strings.TrimRight(firstNonEmpty(stringValue(cfg["base_url"]), "https://api.search.brave.com/res/v1/web/search"), "/")
 	reqURL, err := url.Parse(endpoint)
@@ -149,7 +150,7 @@ func (p *Executor) callBraveSearch(ctx context.Context, configJSON []byte, query
 	}
 	params := reqURL.Query()
 	params.Set("q", query)
-	params.Set("count", fmt.Sprintf("%d", count))
+	params.Set("count", strconv.Itoa(count))
 	reqURL.RawQuery = params.Encode()
 
 	timeout := parseTimeout(configJSON, 15*time.Second)
@@ -163,11 +164,11 @@ func (p *Executor) callBraveSearch(ctx context.Context, configJSON []byte, query
 	if strings.TrimSpace(apiKey) != "" {
 		req.Header.Set("X-Subscription-Token", strings.TrimSpace(apiKey))
 	}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -201,7 +202,7 @@ func (p *Executor) callBraveSearch(ctx context.Context, configJSON []byte, query
 	}), nil
 }
 
-func (p *Executor) callBingSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callBingSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	endpoint := strings.TrimRight(firstNonEmpty(stringValue(cfg["base_url"]), "https://api.bing.microsoft.com/v7.0/search"), "/")
 	reqURL, err := url.Parse(endpoint)
@@ -210,7 +211,7 @@ func (p *Executor) callBingSearch(ctx context.Context, configJSON []byte, query 
 	}
 	params := reqURL.Query()
 	params.Set("q", query)
-	params.Set("count", fmt.Sprintf("%d", count))
+	params.Set("count", strconv.Itoa(count))
 	reqURL.RawQuery = params.Encode()
 
 	timeout := parseTimeout(configJSON, 15*time.Second)
@@ -224,11 +225,11 @@ func (p *Executor) callBingSearch(ctx context.Context, configJSON []byte, query 
 	if strings.TrimSpace(apiKey) != "" {
 		req.Header.Set("Ocp-Apim-Subscription-Key", strings.TrimSpace(apiKey))
 	}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -262,7 +263,7 @@ func (p *Executor) callBingSearch(ctx context.Context, configJSON []byte, query 
 	}), nil
 }
 
-func (p *Executor) callGoogleSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callGoogleSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	endpoint := strings.TrimRight(firstNonEmpty(stringValue(cfg["base_url"]), "https://customsearch.googleapis.com/customsearch/v1"), "/")
 	reqURL, err := url.Parse(endpoint)
@@ -279,7 +280,7 @@ func (p *Executor) callGoogleSearch(ctx context.Context, configJSON []byte, quer
 	params := reqURL.Query()
 	params.Set("q", query)
 	params.Set("cx", cx)
-	params.Set("num", fmt.Sprintf("%d", count))
+	params.Set("num", strconv.Itoa(count))
 	apiKey := stringValue(cfg["api_key"])
 	if strings.TrimSpace(apiKey) != "" {
 		params.Set("key", strings.TrimSpace(apiKey))
@@ -293,11 +294,11 @@ func (p *Executor) callGoogleSearch(ctx context.Context, configJSON []byte, quer
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -329,7 +330,7 @@ func (p *Executor) callGoogleSearch(ctx context.Context, configJSON []byte, quer
 	}), nil
 }
 
-func (p *Executor) callTavilySearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callTavilySearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.tavily.com/search")
 	apiKey := stringValue(cfg["api_key"])
@@ -349,11 +350,11 @@ func (p *Executor) callTavilySearch(ctx context.Context, configJSON []byte, quer
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -385,7 +386,7 @@ func (p *Executor) callTavilySearch(ctx context.Context, configJSON []byte, quer
 	}), nil
 }
 
-func (p *Executor) callSogouSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callSogouSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	host := firstNonEmpty(stringValue(cfg["base_url"]), "wsa.tencentcloudapi.com")
 	secretID := stringValue(cfg["secret_id"])
@@ -403,7 +404,7 @@ func (p *Executor) callSogouSearch(ctx context.Context, configJSON []byte, query
 	})
 
 	now := time.Now().UTC()
-	timestamp := fmt.Sprintf("%d", now.Unix())
+	timestamp := strconv.FormatInt(now.Unix(), 10)
 	date := now.Format("2006-01-02")
 
 	hashedPayload := sha256Hex(payload)
@@ -437,11 +438,11 @@ func (p *Executor) callSogouSearch(ctx context.Context, configJSON []byte, query
 	req.Header.Set("X-TC-Action", action)
 	req.Header.Set("X-TC-Version", version)
 	req.Header.Set("X-TC-Timestamp", timestamp)
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -517,7 +518,7 @@ func hmacSHA256(key, data []byte) []byte {
 	return h.Sum(nil)
 }
 
-func (p *Executor) callSerperSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callSerperSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://google.serper.dev/search")
 	apiKey := stringValue(cfg["api_key"])
@@ -536,11 +537,11 @@ func (p *Executor) callSerperSearch(ctx context.Context, configJSON []byte, quer
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-API-KEY", apiKey)
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -579,7 +580,7 @@ func (p *Executor) callSerperSearch(ctx context.Context, configJSON []byte, quer
 	}), nil
 }
 
-func (p *Executor) callSearXNGSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callSearXNGSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	baseURL := stringValue(cfg["base_url"])
 	if baseURL == "" {
@@ -611,11 +612,11 @@ func (p *Executor) callSearXNGSearch(ctx context.Context, configJSON []byte, que
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -654,7 +655,7 @@ func (p *Executor) callSearXNGSearch(ctx context.Context, configJSON []byte, que
 	}), nil
 }
 
-func (p *Executor) callJinaSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callJinaSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://s.jina.ai/")
 	apiKey := stringValue(cfg["api_key"])
@@ -678,11 +679,11 @@ func (p *Executor) callJinaSearch(ctx context.Context, configJSON []byte, query 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Retain-Images", "none")
 	req.Header.Set("Authorization", apiKey)
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -714,7 +715,7 @@ func (p *Executor) callJinaSearch(ctx context.Context, configJSON []byte, query 
 	}), nil
 }
 
-func (p *Executor) callExaSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callExaSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.exa.ai/search")
 	apiKey := stringValue(cfg["api_key"])
@@ -739,11 +740,11 @@ func (p *Executor) callExaSearch(ctx context.Context, configJSON []byte, query s
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -775,7 +776,7 @@ func (p *Executor) callExaSearch(ctx context.Context, configJSON []byte, query s
 	}), nil
 }
 
-func (p *Executor) callBochaSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callBochaSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.bochaai.com/v1/web-search")
 	apiKey := stringValue(cfg["api_key"])
@@ -797,11 +798,11 @@ func (p *Executor) callBochaSearch(ctx context.Context, configJSON []byte, query
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -837,7 +838,7 @@ func (p *Executor) callBochaSearch(ctx context.Context, configJSON []byte, query
 	}), nil
 }
 
-func (p *Executor) callDuckDuckGoSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callDuckDuckGoSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://html.duckduckgo.com/html/")
 
@@ -853,11 +854,11 @@ func (p *Executor) callDuckDuckGoSearch(ctx context.Context, configJSON []byte, 
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -925,7 +926,7 @@ func extractDDGURL(rawURL string) string {
 	return rawURL
 }
 
-func (p *Executor) callYandexSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
+func (*Executor) callYandexSearch(ctx context.Context, configJSON []byte, query string, count int) (map[string]any, error) {
 	cfg := parseConfig(configJSON)
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://searchapi.api.cloud.yandex.net/v2/web/search")
 	apiKey := stringValue(cfg["api_key"])
@@ -952,11 +953,11 @@ func (p *Executor) callYandexSearch(ctx context.Context, configJSON []byte, quer
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Api-Key "+apiKey)
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: web browsing tool intentionally fetches user-specified URLs; SSRF is by design
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
@@ -986,7 +987,7 @@ func (p *Executor) callYandexSearch(ctx context.Context, configJSON []byte, quer
 
 type xmlInnerText string
 
-func (t *xmlInnerText) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+func (t *xmlInnerText) UnmarshalXML(d *xml.Decoder, _ xml.StartElement) error {
 	var buf strings.Builder
 	for {
 		tok, err := d.Token()

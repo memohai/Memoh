@@ -1,11 +1,13 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 
 	"github.com/golang-migrate/migrate/v4"
+	// Register postgres driver for golang-migrate.
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 
@@ -22,7 +24,7 @@ func RunMigrate(logger *slog.Logger, cfg config.PostgresConfig, migrationsFS fs.
 		return fmt.Errorf("unknown migrate command: %s (use: up, down, version, force)", command)
 	}
 	if command == "force" && len(args) == 0 {
-		return fmt.Errorf("force requires a version number argument")
+		return errors.New("force requires a version number argument")
 	}
 
 	dsn := DSN(cfg)
@@ -35,20 +37,20 @@ func RunMigrate(logger *slog.Logger, cfg config.PostgresConfig, migrationsFS fs.
 	if err != nil {
 		return fmt.Errorf("migrate init: %w", err)
 	}
-	defer m.Close()
+	defer func() { _, _ = m.Close() }()
 
 	m.Log = &migrateLogger{logger: logger}
 
 	switch command {
 	case "up":
-		if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 			return fmt.Errorf("migrate up: %w", err)
 		}
 		ver, dirty, _ := m.Version()
 		logger.Info("migration complete", slog.Uint64("version", uint64(ver)), slog.Bool("dirty", dirty))
 
 	case "down":
-		if err := m.Down(); err != nil && err != migrate.ErrNoChange {
+		if err := m.Down(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 			return fmt.Errorf("migrate down: %w", err)
 		}
 		logger.Info("all migrations rolled back")
@@ -79,9 +81,9 @@ type migrateLogger struct {
 }
 
 func (l *migrateLogger) Printf(format string, v ...interface{}) {
-	l.logger.Info(fmt.Sprintf(format, v...))
+	l.logger.Info("migration log", slog.String("detail", fmt.Sprintf(format, v...)))
 }
 
-func (l *migrateLogger) Verbose() bool {
+func (*migrateLogger) Verbose() bool {
 	return false
 }

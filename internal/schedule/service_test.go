@@ -1,7 +1,6 @@
 package schedule
 
 import (
-	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -9,21 +8,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 )
-
-type mockTriggerer struct {
-	called  bool
-	botID   string
-	payload TriggerPayload
-	token   string
-}
-
-func (m *mockTriggerer) TriggerSchedule(_ context.Context, botID string, payload TriggerPayload, token string) error {
-	m.called = true
-	m.botID = botID
-	m.payload = payload
-	m.token = token
-	return nil
-}
 
 func TestGenerateTriggerToken(t *testing.T) {
 	secret := "test-secret-key-for-schedule"
@@ -42,7 +26,7 @@ func TestGenerateTriggerToken(t *testing.T) {
 	}
 
 	raw := strings.TrimPrefix(tok, "Bearer ")
-	parsed, err := jwt.Parse(raw, func(token *jwt.Token) (any, error) {
+	parsed, err := jwt.Parse(raw, func(_ *jwt.Token) (any, error) {
 		return []byte(secret), nil
 	})
 	if err != nil {

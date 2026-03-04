@@ -56,7 +56,7 @@ type oauthDiscoverRequest struct {
 // @Success 200 {object} mcp.DiscoveryResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/{id}/oauth/discover [post]
+// @Router /bots/{bot_id}/mcp/{id}/oauth/discover [post].
 func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -107,7 +107,7 @@ func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 
 type oauthAuthorizeRequest struct {
 	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
+	ClientSecret string `json:"client_secret"` //nolint:gosec // intentional: OAuth client_secret is a required API parameter
 	CallbackURL  string `json:"callback_url"`
 }
 
@@ -120,7 +120,7 @@ type oauthAuthorizeRequest struct {
 // @Success 200 {object} mcp.AuthorizeResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/{id}/oauth/authorize [post]
+// @Router /bots/{bot_id}/mcp/{id}/oauth/authorize [post].
 func (h *MCPOAuthHandler) Authorize(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -158,7 +158,7 @@ type oauthExchangeRequest struct {
 // @Param payload body oauthExchangeRequest true "Authorization code and state"
 // @Success 200 {object} map[string]bool
 // @Failure 400 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/{id}/oauth/exchange [post]
+// @Router /bots/{bot_id}/mcp/{id}/oauth/exchange [post].
 func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
 	var req oauthExchangeRequest
 	if err := c.Bind(&req); err != nil {
@@ -188,7 +188,7 @@ func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
 // @Success 200 {object} mcp.OAuthStatus
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/{id}/oauth/status [get]
+// @Router /bots/{bot_id}/mcp/{id}/oauth/status [get].
 func (h *MCPOAuthHandler) Status(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -218,7 +218,7 @@ func (h *MCPOAuthHandler) Status(c echo.Context) error {
 // @Param id path string true "MCP connection ID"
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/{id}/oauth/token [delete]
+// @Router /bots/{bot_id}/mcp/{id}/oauth/token [delete].
 func (h *MCPOAuthHandler) RevokeToken(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -240,11 +240,10 @@ func (h *MCPOAuthHandler) RevokeToken(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *MCPOAuthHandler) requireChannelIdentityID(c echo.Context) (string, error) {
+func (*MCPOAuthHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }
 
 func (h *MCPOAuthHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
 	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
 }
-

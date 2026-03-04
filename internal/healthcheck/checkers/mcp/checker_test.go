@@ -3,7 +3,6 @@ package mcpchecker
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"testing"
 
@@ -15,7 +14,7 @@ type fakeConnectionLister struct {
 	err   error
 }
 
-func (f *fakeConnectionLister) ListActiveByBot(ctx context.Context, botID string) ([]mcp.Connection, error) {
+func (f *fakeConnectionLister) ListActiveByBot(_ context.Context, _ string) ([]mcp.Connection, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -27,7 +26,7 @@ type fakeToolLister struct {
 	err   error
 }
 
-func (f *fakeToolLister) ListTools(ctx context.Context, session mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
+func (f *fakeToolLister) ListTools(_ context.Context, _ mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -35,7 +34,7 @@ func (f *fakeToolLister) ListTools(ctx context.Context, session mcp.ToolSessionC
 }
 
 func newTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func TestCheckerListChecks(t *testing.T) {

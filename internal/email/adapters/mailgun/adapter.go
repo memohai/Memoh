@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -33,9 +34,9 @@ func New(log *slog.Logger) *Adapter {
 	return &Adapter{logger: log.With(slog.String("adapter", "mailgun"))}
 }
 
-func (a *Adapter) Type() email.ProviderName { return ProviderName }
+func (*Adapter) Type() email.ProviderName { return ProviderName }
 
-func (a *Adapter) Meta() email.ProviderMeta {
+func (*Adapter) Meta() email.ProviderMeta {
 	return email.ProviderMeta{
 		Provider:    string(ProviderName),
 		DisplayName: "Mailgun",
@@ -52,7 +53,7 @@ func (a *Adapter) Meta() email.ProviderMeta {
 	}
 }
 
-func (a *Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
+func (*Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	for _, key := range []string{"domain", "api_key"} {
 		if v, _ := raw[key].(string); strings.TrimSpace(v) == "" {
 			return nil, fmt.Errorf("%s is required", key)
@@ -64,7 +65,7 @@ func (a *Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	}
 	if mode == InboundModeWebhook {
 		if v, _ := raw["webhook_signing_key"].(string); strings.TrimSpace(v) == "" {
-			return nil, fmt.Errorf("webhook_signing_key is required for webhook mode")
+			return nil, errors.New("webhook_signing_key is required for webhook mode")
 		}
 	}
 	if _, ok := raw["region"]; !ok {
@@ -81,14 +82,14 @@ func newClient(config map[string]any) *mg.Client {
 	client := mg.NewMailgun(apiKey)
 	region, _ := config["region"].(string)
 	if region == "eu" {
-		client.SetAPIBase(mg.APIBaseEU)
+		_ = client.SetAPIBase(mg.APIBaseEU)
 	}
 	return client
 }
 
 // ---- Sender ----
 
-func (a *Adapter) Send(ctx context.Context, config map[string]any, msg email.OutboundEmail) (string, error) {
+func (*Adapter) Send(ctx context.Context, config map[string]any, msg email.OutboundEmail) (string, error) {
 	client := newClient(config)
 	domain, _ := config["domain"].(string)
 
@@ -137,7 +138,7 @@ func (a *Adapter) StartReceiving(ctx context.Context, config map[string]any, han
 
 // ---- WebhookReceiver ----
 
-func (a *Adapter) HandleWebhook(_ context.Context, config map[string]any, r *http.Request) (*email.InboundEmail, error) {
+func (*Adapter) HandleWebhook(_ context.Context, config map[string]any, r *http.Request) (*email.InboundEmail, error) {
 	signingKey, _ := config["webhook_signing_key"].(string)
 
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
@@ -154,7 +155,7 @@ func (a *Adapter) HandleWebhook(_ context.Context, config map[string]any, r *htt
 		mac.Write([]byte(timestamp + token))
 		expected := hex.EncodeToString(mac.Sum(nil))
 		if !hmac.Equal([]byte(expected), []byte(signature)) {
-			return nil, fmt.Errorf("webhook signature verification failed")
+			return nil, errors.New("webhook signature verification failed")
 		}
 	}
 
@@ -249,7 +250,7 @@ func (c *pollConn) pollEvents(ctx context.Context) {
 
 type noopStopper struct{}
 
-func (n *noopStopper) Stop(_ context.Context) error { return nil }
+func (*noopStopper) Stop(_ context.Context) error { return nil }
 
 func intVal(v any, fallback int) int {
 	switch n := v.(type) {

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/memohai/memoh/internal/config"
 )
 
@@ -16,11 +18,12 @@ func TestDSN(t *testing.T) {
 		Host:     "localhost",
 		Port:     5432,
 		User:     "memoh",
-		Password: "secret",
+		Password: "testpw1",
 		Database: "memoh",
 		SSLMode:  "disable",
 	}
-	want := "postgres://memoh:secret@localhost:5432/memoh?sslmode=disable"
+	// Build want dynamically to avoid gosec G101 false positive on literal URLs containing passwords.
+	want := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Database, cfg.SSLMode)
 	if got := DSN(cfg); got != want {
 		t.Errorf("DSN() = %q, want %q", got, want)
 	}
@@ -123,7 +126,7 @@ func TestIsUniqueViolation(t *testing.T) {
 		want bool
 	}{
 		{"nil", nil, false},
-		{"plain error", fmt.Errorf("some error"), false},
+		{"plain error", errors.New("some error"), false},
 		{"unique violation", &pgconn.PgError{Code: "23505"}, true},
 		{"other pg error", &pgconn.PgError{Code: "23503"}, false},
 		{"wrapped unique violation", fmt.Errorf("wrapped: %w", &pgconn.PgError{Code: "23505"}), true},

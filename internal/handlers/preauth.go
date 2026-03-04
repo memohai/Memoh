@@ -63,7 +63,7 @@ func (h *PreauthHandler) Issue(c echo.Context) error {
 	return c.JSON(http.StatusOK, key)
 }
 
-func (h *PreauthHandler) requireUserID(c echo.Context) (string, error) {
+func (*PreauthHandler) requireUserID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }
 

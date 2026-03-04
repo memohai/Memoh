@@ -3,6 +3,7 @@ package heartbeat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -46,7 +47,7 @@ func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, ru
 
 func (s *Service) Bootstrap(ctx context.Context) error {
 	if s.queries == nil {
-		return fmt.Errorf("heartbeat queries not configured")
+		return errors.New("heartbeat queries not configured")
 	}
 	rows, err := s.queries.ListHeartbeatEnabledBots(ctx)
 	if err != nil {
@@ -60,7 +61,7 @@ func (s *Service) Bootstrap(ctx context.Context) error {
 			OwnerUserID: ownerUserID,
 			Interval:    int(row.HeartbeatInterval),
 		}
-		if err := s.scheduleJob(cfg); err != nil {
+		if err := s.scheduleJob(ctx, cfg); err != nil {
 			s.logger.Error("failed to schedule heartbeat", slog.String("bot_id", botID), slog.Any("error", err))
 		}
 	}
@@ -87,7 +88,7 @@ func (s *Service) Reschedule(ctx context.Context, botID string) error {
 		OwnerUserID: bot.OwnerUserID.String(),
 		Interval:    int(bot.HeartbeatInterval),
 	}
-	return s.scheduleJob(cfg)
+	return s.scheduleJob(ctx, cfg)
 }
 
 func (s *Service) Stop(botID string) {
@@ -186,7 +187,7 @@ func (s *Service) DeleteLogs(ctx context.Context, botID string) error {
 
 func (s *Service) generateTriggerToken(userID string) (string, error) {
 	if strings.TrimSpace(s.jwtSecret) == "" {
-		return "", fmt.Errorf("jwt secret not configured")
+		return "", errors.New("jwt secret not configured")
 	}
 	signed, _, err := auth.GenerateToken(userID, s.jwtSecret, heartbeatTokenTTL)
 	if err != nil {
@@ -195,13 +196,13 @@ func (s *Service) generateTriggerToken(userID string) (string, error) {
 	return "Bearer " + signed, nil
 }
 
-func (s *Service) scheduleJob(cfg Config) error {
+func (s *Service) scheduleJob(ctx context.Context, cfg Config) error {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 30
 	}
 	spec := fmt.Sprintf("@every %dm", cfg.Interval)
 	job := func() {
-		s.runHeartbeat(context.Background(), cfg)
+		s.runHeartbeat(context.WithoutCancel(ctx), cfg)
 	}
 	entryID, err := s.cron.AddFunc(spec, job)
 	if err != nil {

@@ -65,4 +65,3 @@ func TestBindingCriteriaFromIdentity(t *testing.T) {
 		t.Fatalf("unexpected username: %s", criteria.Attribute("username"))
 	}
 }
-

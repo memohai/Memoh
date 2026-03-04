@@ -13,11 +13,11 @@ type gatewayTestProvider struct {
 	callErr    map[string]error
 }
 
-func (p *gatewayTestProvider) ListTools(ctx context.Context, session ToolSessionContext) ([]ToolDescriptor, error) {
+func (p *gatewayTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]ToolDescriptor, error) {
 	return p.tools, nil
 }
 
-func (p *gatewayTestProvider) CallTool(ctx context.Context, session ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
+func (p *gatewayTestProvider) CallTool(_ context.Context, _ ToolSessionContext, toolName string, _ map[string]any) (map[string]any, error) {
 	if err, ok := p.callErr[toolName]; ok {
 		return nil, err
 	}

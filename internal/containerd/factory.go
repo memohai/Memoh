@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	containerd "github.com/containerd/containerd/v2/client"
+
 	"github.com/memohai/memoh/internal/config"
 )
 

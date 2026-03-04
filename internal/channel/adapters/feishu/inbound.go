@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -14,7 +15,11 @@ import (
 
 // extractFeishuInbound converts a Feishu P2MessageReceiveV1 event into a channel.InboundMessage.
 // botOpenID is the bot's own open_id used to filter mentions; if empty, any mention is treated as bot mention.
-func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string) channel.InboundMessage {
+func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string, loggers ...*slog.Logger) channel.InboundMessage {
+	var log *slog.Logger
+	if len(loggers) > 0 {
+		log = loggers[0]
+	}
 	if event == nil || event.Event == nil || event.Event.Message == nil {
 		return channel.InboundMessage{Channel: Type}
 	}
@@ -28,7 +33,9 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string) ch
 	var contentMap map[string]any
 	if message.Content != nil {
 		if err := json.Unmarshal([]byte(*message.Content), &contentMap); err != nil {
-			slog.Warn("feishu inbound: unmarshal content failed", slog.Any("error", err))
+			if log != nil {
+				log.Warn("feishu inbound: unmarshal content failed", slog.Any("error", err))
+			}
 		}
 	}
 	isMentioned := isFeishuBotMentioned(contentMap, message.Mentions, botOpenID)
@@ -45,15 +52,15 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string) ch
 				msg.Text = postText
 			}
 			postAtts := extractFeishuPostAttachments(contentMap, msg.ID)
-			for _, att := range postAtts {
-				msg.Attachments = append(msg.Attachments, att)
-			}
+			msg.Attachments = append(msg.Attachments, postAtts...)
 			if len(postAtts) > 0 || postText != "" {
-				slog.Debug("feishu post extracted",
-					"message_id", msg.ID,
-					"text_len", len(postText),
-					"attachments", len(postAtts),
-				)
+				if log != nil {
+					log.Debug("feishu post extracted",
+						slog.String("message_id", msg.ID),
+						slog.Int("text_len", len(postText)),
+						slog.Int("attachments", len(postAtts)),
+					)
+				}
 			}
 		case larkim.MsgTypeImage:
 			if key, ok := contentMap["image_key"].(string); ok {
@@ -165,10 +172,7 @@ func isFeishuBotMentioned(contentMap map[string]any, mentions []*larkim.MentionE
 			return true
 		}
 	}
-	if matchFeishuContentMention(contentMap, botOpenID) {
-		return true
-	}
-	return false
+	return matchFeishuContentMention(contentMap, botOpenID)
 }
 
 // hasAnyFeishuMention is the fallback when the bot's open_id is unknown.
@@ -373,7 +377,7 @@ func stringValue(raw any) string {
 // resolveFeishuReceiveID parses target (open_id:/user_id:/chat_id: prefix) and returns receiveID and receiveType.
 func resolveFeishuReceiveID(raw string) (string, string, error) {
 	if raw == "" {
-		return "", "", fmt.Errorf("feishu target is required")
+		return "", "", errors.New("feishu target is required")
 	}
 	if strings.HasPrefix(raw, "open_id:") {
 		return strings.TrimPrefix(raw, "open_id:"), larkim.ReceiveIdTypeOpenId, nil

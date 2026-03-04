@@ -1,7 +1,7 @@
 package channel_test
 
 import (
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel"
@@ -12,8 +12,8 @@ const testChannelType = channel.ChannelType("test-config")
 // testConfigAdapter implements Adapter, ConfigNormalizer, TargetResolver, BindingMatcher for tests.
 type testConfigAdapter struct{}
 
-func (a *testConfigAdapter) Type() channel.ChannelType { return testChannelType }
-func (a *testConfigAdapter) Descriptor() channel.Descriptor {
+func (*testConfigAdapter) Type() channel.ChannelType { return testChannelType }
+func (*testConfigAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        testChannelType,
 		DisplayName: "Test",
@@ -35,38 +35,38 @@ func (a *testConfigAdapter) Descriptor() channel.Descriptor {
 	}
 }
 
-func (a *testConfigAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
+func (*testConfigAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	value := channel.ReadString(raw, "value")
 	if value == "" {
-		return nil, fmt.Errorf("value is required")
+		return nil, errors.New("value is required")
 	}
 	return map[string]any{"value": value}, nil
 }
 
-func (a *testConfigAdapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
+func (*testConfigAdapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
 	value := channel.ReadString(raw, "user")
 	if value == "" {
-		return nil, fmt.Errorf("user is required")
+		return nil, errors.New("user is required")
 	}
 	return map[string]any{"user": value}, nil
 }
 
-func (a *testConfigAdapter) NormalizeTarget(raw string) string { return raw }
+func (*testConfigAdapter) NormalizeTarget(raw string) string { return raw }
 
-func (a *testConfigAdapter) ResolveTarget(raw map[string]any) (string, error) {
+func (*testConfigAdapter) ResolveTarget(raw map[string]any) (string, error) {
 	value := channel.ReadString(raw, "target")
 	if value == "" {
-		return "", fmt.Errorf("target is required")
+		return "", errors.New("target is required")
 	}
 	return "resolved:" + value, nil
 }
 
-func (a *testConfigAdapter) MatchBinding(raw map[string]any, criteria channel.BindingCriteria) bool {
+func (*testConfigAdapter) MatchBinding(raw map[string]any, criteria channel.BindingCriteria) bool {
 	value := channel.ReadString(raw, "user")
 	return value != "" && value == criteria.SubjectID
 }
 
-func (a *testConfigAdapter) BuildUserConfig(identity channel.Identity) map[string]any {
+func (*testConfigAdapter) BuildUserConfig(_ channel.Identity) map[string]any {
 	return map[string]any{}
 }
 

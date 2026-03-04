@@ -3,7 +3,6 @@ package conversation
 
 import (
 	"encoding/json"
-	"log/slog"
 	"strings"
 	"time"
 )
@@ -153,7 +152,6 @@ func (m ModelMessage) HasContent() bool {
 func NewTextContent(text string) json.RawMessage {
 	data, err := json.Marshal(text)
 	if err != nil {
-		slog.Warn("NewTextContent: marshal failed", slog.Any("error", err))
 		return nil
 	}
 	return data

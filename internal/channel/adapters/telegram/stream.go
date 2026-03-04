@@ -2,7 +2,7 @@ package telegram
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -14,10 +14,12 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 )
 
-const telegramStreamEditThrottle = 5000 * time.Millisecond
-const telegramDraftThrottle = 300 * time.Millisecond
-const telegramStreamToolHintText = "Calling tools..."
-const telegramStreamPendingSuffix = "\n……"
+const (
+	telegramStreamEditThrottle  = 5000 * time.Millisecond
+	telegramDraftThrottle       = 300 * time.Millisecond
+	telegramStreamToolHintText  = "Calling tools..."
+	telegramStreamPendingSuffix = "\n……"
+)
 
 var testEditFunc func(bot *tgbotapi.BotAPI, chatID int64, msgID int, text string, parseMode string) error
 
@@ -38,7 +40,7 @@ type telegramOutboundStream struct {
 	lastEditedAt  time.Time
 }
 
-func (s *telegramOutboundStream) getBot(ctx context.Context) (bot *tgbotapi.BotAPI, err error) {
+func (s *telegramOutboundStream) getBot(_ context.Context) (bot *tgbotapi.BotAPI, err error) {
 	telegramCfg, err := parseConfig(s.cfg.Credentials)
 	if err != nil {
 		return nil, err
@@ -75,7 +77,9 @@ func (s *telegramOutboundStream) ensureStreamMessage(ctx context.Context, text s
 	s.mu.Lock()
 	go func() {
 		if err := s.refreshTypingAction(ctx); err != nil {
-			slog.Debug("refresh typing action failed", slog.Any("err", err))
+			if s.adapter != nil && s.adapter.logger != nil {
+				s.adapter.logger.Debug("refresh typing action failed", slog.Any("error", err))
+			}
 		}
 	}()
 	if s.streamMsgID != 0 {
@@ -263,10 +267,10 @@ func (s *telegramOutboundStream) sendPermanentMessage(ctx context.Context, text 
 
 func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
 	if s == nil || s.adapter == nil {
-		return fmt.Errorf("telegram stream not configured")
+		return errors.New("telegram stream not configured")
 	}
 	if s.closed.Load() {
-		return fmt.Errorf("telegram stream is closed")
+		return errors.New("telegram stream is closed")
 	}
 	select {
 	case <-ctx.Done():
@@ -285,7 +289,9 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 			// In draft mode, send buffered text as a permanent message before tool execution.
 			if bufText != "" {
 				if err := s.sendPermanentMessage(ctx, bufText, ""); err != nil {
-					slog.Warn("telegram: draft permanent message failed", slog.Any("error", err))
+					if s.adapter != nil && s.adapter.logger != nil {
+						s.adapter.logger.Warn("telegram: draft permanent message failed", slog.Any("error", err))
+					}
 				}
 			}
 		} else if hasMsg && bufText != "" {
@@ -322,11 +328,13 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 		}
 		for _, att := range event.Attachments {
 			if sendErr := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", replyTo, "", s.adapter.assets); sendErr != nil {
-				slog.Warn("telegram: stream attachment send failed",
-					slog.String("config_id", s.cfg.ID),
-					slog.String("type", string(att.Type)),
-					slog.Any("error", sendErr),
-				)
+				if s.adapter != nil && s.adapter.logger != nil {
+					s.adapter.logger.Warn("telegram: stream attachment send failed",
+						slog.String("config_id", s.cfg.ID),
+						slog.String("type", string(att.Type)),
+						slog.Any("error", sendErr),
+					)
+				}
 			}
 		}
 		return nil
@@ -381,14 +389,20 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 			if bufText != "" {
 				if s.isPrivateChat {
 					if err := s.sendPermanentMessage(ctx, bufText, ""); err != nil {
-						slog.Warn("telegram: draft final permanent message failed", slog.Any("error", err))
+						if s.adapter != nil && s.adapter.logger != nil {
+							s.adapter.logger.Warn("telegram: draft final permanent message failed", slog.Any("error", err))
+						}
 					}
 				} else {
 					if err := s.ensureStreamMessage(ctx, bufText); err != nil {
-						slog.Warn("telegram: ensure stream message failed", slog.Any("error", err))
+						if s.adapter != nil && s.adapter.logger != nil {
+							s.adapter.logger.Warn("telegram: ensure stream message failed", slog.Any("error", err))
+						}
 					}
 					if err := s.editStreamMessageFinal(ctx, bufText); err != nil {
-						slog.Warn("telegram: edit stream message failed", slog.Any("error", err))
+						if s.adapter != nil && s.adapter.logger != nil {
+							s.adapter.logger.Warn("telegram: edit stream message failed", slog.Any("error", err))
+						}
 					}
 				}
 			}

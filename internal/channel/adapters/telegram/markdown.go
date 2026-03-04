@@ -16,14 +16,13 @@ const (
 )
 
 var (
-	reCodeBlockFence = regexp.MustCompile("(?s)```(\\w*)\\n?(.*?)```")
-	reInlineCode     = regexp.MustCompile("`([^`\\n]+?)`")
-	reBold           = regexp.MustCompile(`\*\*(.+?)\*\*`)
-	reStrike         = regexp.MustCompile(`~~(.+?)~~`)
-	reLink           = regexp.MustCompile(`\[([^\]]+?)\]\(([^)]+?)\)`)
-	reHeading        = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)
-	reListBullet     = regexp.MustCompile(`(?m)^(\s*)[-+]\s`)
-	reItalic         = regexp.MustCompile(`\*([^*\n]+?)\*`)
+	reInlineCode = regexp.MustCompile("`([^`\\n]+?)`")
+	reBold       = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	reStrike     = regexp.MustCompile(`~~(.+?)~~`)
+	reLink       = regexp.MustCompile(`\[([^\]]+?)\]\(([^)]+?)\)`)
+	reHeading    = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)
+	reListBullet = regexp.MustCompile(`(?m)^(\s*)[-+]\s`)
+	reItalic     = regexp.MustCompile(`\*([^*\n]+?)\*`)
 )
 
 // formatTelegramOutput converts standard markdown to Telegram-compatible HTML
@@ -64,7 +63,7 @@ func markdownToTelegramHTML(text string) string {
 			lang, code := extractCodeBlockLang(seg)
 			escaped := telegramEscapeHTML(strings.TrimRight(code, "\n"))
 			if lang != "" {
-				buf.WriteString(fmt.Sprintf("<pre><code class=\"language-%s\">%s</code></pre>", lang, escaped))
+				fmt.Fprintf(&buf, "<pre><code class=\"language-%s\">%s</code></pre>", lang, escaped)
 			} else {
 				buf.WriteString("<pre>" + escaped + "</pre>")
 			}

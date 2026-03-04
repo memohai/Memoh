@@ -117,7 +117,7 @@ func (s *OutboxService) ListByBot(ctx context.Context, botID string, limit, offs
 	return items, count, nil
 }
 
-func (s *OutboxService) toOutboxResponse(row sqlc.EmailOutbox) OutboxItemResponse {
+func (*OutboxService) toOutboxResponse(row sqlc.EmailOutbox) OutboxItemResponse {
 	var to []string
 	_ = json.Unmarshal(row.ToAddresses, &to)
 	var attachments []any

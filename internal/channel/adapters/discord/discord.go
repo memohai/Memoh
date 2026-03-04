@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
+
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/common"
 	"github.com/memohai/memoh/internal/media"
@@ -57,11 +59,11 @@ func (a *DiscordAdapter) SetAssetOpener(opener assetOpener) {
 	a.assets = opener
 }
 
-func (a *DiscordAdapter) Type() channel.ChannelType {
+func (*DiscordAdapter) Type() channel.ChannelType {
 	return Type
 }
 
-func (a *DiscordAdapter) Descriptor() channel.Descriptor {
+func (*DiscordAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        Type,
 		DisplayName: "Discord",
@@ -159,7 +161,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 		}
 
 		text := strings.TrimSpace(m.Content)
-		botId := s.State.User.ID
+		botID := s.State.User.ID
 		if text == "" && len(m.Attachments) == 0 {
 			return
 		}
@@ -170,10 +172,10 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 			chatType = "guild"
 		}
 
-		isMentioned := a.isBotMentioned(m.Message, botId)
+		isMentioned := a.isBotMentioned(m.Message, botID)
 		isReplyToBot := m.ReferencedMessage != nil &&
 			m.ReferencedMessage.Author != nil &&
-			m.ReferencedMessage.Author.ID == botId
+			m.ReferencedMessage.Author.ID == botID
 
 		msg := channel.InboundMessage{
 			Channel: Type,
@@ -229,7 +231,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 		return nil, fmt.Errorf("discord open connection: %w", err)
 	}
 
-	stop := func(stopCtx context.Context) error {
+	stop := func(_ context.Context) error {
 		if a.logger != nil {
 			a.logger.Info("stop", slog.String("config_id", cfg.ID))
 		}
@@ -256,7 +258,7 @@ func (a *DiscordAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, ms
 
 	channelID := strings.TrimSpace(msg.Target)
 	if channelID == "" {
-		return fmt.Errorf("discord target is required")
+		return errors.New("discord target is required")
 	}
 
 	// Get botID from config metadata if available
@@ -268,7 +270,7 @@ func (a *DiscordAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, ms
 	return a.sendDiscordMessage(ctx, session, channelID, botID, msg)
 }
 
-func (a *DiscordAdapter) sendDiscordMessage(ctx context.Context, session *discordgo.Session, channelID, botID string, msg channel.OutboundMessage) error {
+func (a *DiscordAdapter) sendDiscordMessage(ctx context.Context, session *discordgo.Session, channelID, _ string, msg channel.OutboundMessage) error {
 	content := truncateDiscordText(msg.Message.Text)
 
 	// Build message send parameters
@@ -302,7 +304,7 @@ func (a *DiscordAdapter) sendDiscordMessage(ctx context.Context, session *discor
 
 	// Validate: must have content or files
 	if messageSend.Content == "" && len(messageSend.Files) == 0 {
-		return fmt.Errorf("cannot send empty message: no content and no valid attachments")
+		return errors.New("cannot send empty message: no content and no valid attachments")
 	}
 
 	_, err := session.ChannelMessageSendComplex(channelID, messageSend)
@@ -317,7 +319,7 @@ func truncateDiscordText(text string) string {
 	return string(runes[:discordMaxLength-3]) + "..."
 }
 
-// discordAttachmentToFile converts a channel attachment to discordgo.File
+// discordAttachmentToFile converts a channel attachment to discordgo.File.
 func discordAttachmentToFile(ctx context.Context, att channel.Attachment, opener assetOpener) *discordgo.File {
 	// Get file name
 	name := att.Name
@@ -343,7 +345,7 @@ func discordAttachmentToFile(ctx context.Context, att channel.Attachment, opener
 	if att.ContentHash != "" && botID != "" && opener != nil {
 		if rc, _, err := opener.Open(ctx, botID, att.ContentHash); err == nil {
 			data, _ := io.ReadAll(rc)
-			rc.Close()
+			_ = rc.Close()
 			if len(data) > 0 {
 				reader = bytes.NewReader(data)
 			}
@@ -360,11 +362,14 @@ func discordAttachmentToFile(ctx context.Context, att channel.Attachment, opener
 
 	// Fallback to URL
 	if reader == nil && att.URL != "" {
-		resp, err := http.Get(att.URL)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, att.URL, nil)
 		if err == nil {
-			defer resp.Body.Close()
-			data, _ := io.ReadAll(resp.Body)
-			reader = bytes.NewReader(data)
+			resp, doErr := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is a Discord attachment URL received from the Discord API
+			if doErr == nil {
+				defer func() { _ = resp.Body.Close() }()
+				data, _ := io.ReadAll(resp.Body)
+				reader = bytes.NewReader(data)
+			}
 		}
 	}
 
@@ -378,16 +383,16 @@ func discordAttachmentToFile(ctx context.Context, att channel.Attachment, opener
 	}
 }
 
-// base64DataURLToBytes decodes a base64 data URL to bytes
+// base64DataURLToBytes decodes a base64 data URL to bytes.
 func base64DataURLToBytes(dataURL string) ([]byte, error) {
 	parts := strings.SplitN(dataURL, ",", 2)
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid data URL")
+		return nil, errors.New("invalid data URL")
 	}
 	return base64.StdEncoding.DecodeString(parts[1])
 }
 
-// mimeExtension returns file extension for common mime types
+// mimeExtension returns file extension for common mime types.
 func mimeExtension(mime string) string {
 	switch mime {
 	case "image/jpeg", "image/jpg":
@@ -417,10 +422,10 @@ func mimeExtension(mime string) string {
 	}
 }
 
-func (a *DiscordAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *DiscordAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return nil, fmt.Errorf("discord target is required")
+		return nil, errors.New("discord target is required")
 	}
 
 	discordCfg, err := parseConfig(cfg.Credentials)
@@ -442,7 +447,7 @@ func (a *DiscordAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConf
 	}, nil
 }
 
-func (a *DiscordAdapter) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+func (a *DiscordAdapter) ProcessingStarted(_ context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
 	chatID := strings.TrimSpace(info.ReplyTarget)
 	if chatID == "" {
 		return channel.ProcessingStatusHandle{}, nil
@@ -463,15 +468,15 @@ func (a *DiscordAdapter) ProcessingStarted(ctx context.Context, cfg channel.Chan
 	return channel.ProcessingStatusHandle{}, err
 }
 
-func (a *DiscordAdapter) ProcessingCompleted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
+func (*DiscordAdapter) ProcessingCompleted(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage, _ channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle) error {
 	return nil
 }
 
-func (a *DiscordAdapter) ProcessingFailed(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
+func (*DiscordAdapter) ProcessingFailed(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage, _ channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle, _ error) error {
 	return nil
 }
 
-func (a *DiscordAdapter) React(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, emoji string) error {
+func (a *DiscordAdapter) React(_ context.Context, cfg channel.ChannelConfig, target string, messageID string, emoji string) error {
 	discordCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
@@ -485,7 +490,7 @@ func (a *DiscordAdapter) React(ctx context.Context, cfg channel.ChannelConfig, t
 	return session.MessageReactionAdd(target, messageID, emoji)
 }
 
-func (a *DiscordAdapter) Unreact(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, emoji string) error {
+func (a *DiscordAdapter) Unreact(_ context.Context, cfg channel.ChannelConfig, target string, messageID string, emoji string) error {
 	discordCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
@@ -499,31 +504,31 @@ func (a *DiscordAdapter) Unreact(ctx context.Context, cfg channel.ChannelConfig,
 	return session.MessageReactionRemove(target, messageID, emoji, "@me")
 }
 
-func (a *DiscordAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
+func (*DiscordAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeConfig(raw)
 }
 
-func (a *DiscordAdapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
+func (*DiscordAdapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeUserConfig(raw)
 }
 
-func (a *DiscordAdapter) NormalizeTarget(raw string) string {
+func (*DiscordAdapter) NormalizeTarget(raw string) string {
 	return normalizeTarget(raw)
 }
 
-func (a *DiscordAdapter) ResolveTarget(userConfig map[string]any) (string, error) {
+func (*DiscordAdapter) ResolveTarget(userConfig map[string]any) (string, error) {
 	return resolveTarget(userConfig)
 }
 
-func (a *DiscordAdapter) MatchBinding(config map[string]any, criteria channel.BindingCriteria) bool {
+func (*DiscordAdapter) MatchBinding(config map[string]any, criteria channel.BindingCriteria) bool {
 	return matchBinding(config, criteria)
 }
 
-func (a *DiscordAdapter) BuildUserConfig(identity channel.Identity) map[string]any {
+func (*DiscordAdapter) BuildUserConfig(identity channel.Identity) map[string]any {
 	return buildUserConfig(identity)
 }
 
-func (a *DiscordAdapter) collectAttachments(msg *discordgo.Message) []channel.Attachment {
+func (*DiscordAdapter) collectAttachments(msg *discordgo.Message) []channel.Attachment {
 	if msg == nil || len(msg.Attachments) == 0 {
 		return nil
 	}
@@ -558,7 +563,7 @@ func (a *DiscordAdapter) collectAttachments(msg *discordgo.Message) []channel.At
 	return attachments
 }
 
-func (a *DiscordAdapter) isBotMentioned(msg *discordgo.Message, botID string) bool {
+func (*DiscordAdapter) isBotMentioned(msg *discordgo.Message, botID string) bool {
 	if msg == nil {
 		return false
 	}

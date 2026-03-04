@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -50,7 +51,7 @@ func (r *Registry) Register(id string, provider Provider) {
 func (r *Registry) Get(id string) (Provider, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return nil, fmt.Errorf("provider id is required")
+		return nil, errors.New("provider id is required")
 	}
 	r.mu.RLock()
 	p, ok := r.instances[id]

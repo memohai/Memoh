@@ -35,10 +35,10 @@ func NewStore(queries *sqlc.Queries, registry *Registry) *Store {
 // UpsertConfig creates or updates a bot's channel configuration.
 func (s *Store) UpsertConfig(ctx context.Context, botID string, channelType ChannelType, req UpsertConfigRequest) (ChannelConfig, error) {
 	if s.queries == nil {
-		return ChannelConfig{}, fmt.Errorf("channel queries not configured")
+		return ChannelConfig{}, errors.New("channel queries not configured")
 	}
 	if channelType == "" {
-		return ChannelConfig{}, fmt.Errorf("channel type is required")
+		return ChannelConfig{}, errors.New("channel type is required")
 	}
 	normalized, err := s.registry.NormalizeConfig(channelType, req.Credentials)
 	if err != nil {
@@ -110,10 +110,10 @@ func (s *Store) UpsertConfig(ctx context.Context, botID string, channelType Chan
 // DeleteConfig removes a bot's channel configuration.
 func (s *Store) DeleteConfig(ctx context.Context, botID string, channelType ChannelType) error {
 	if s.queries == nil {
-		return fmt.Errorf("channel queries not configured")
+		return errors.New("channel queries not configured")
 	}
 	if channelType == "" {
-		return fmt.Errorf("channel type is required")
+		return errors.New("channel type is required")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -128,10 +128,10 @@ func (s *Store) DeleteConfig(ctx context.Context, botID string, channelType Chan
 // UpdateConfigDisabled updates only the disabled flag for a bot channel config and returns latest config.
 func (s *Store) UpdateConfigDisabled(ctx context.Context, botID string, channelType ChannelType, disabled bool) (ChannelConfig, error) {
 	if s.queries == nil {
-		return ChannelConfig{}, fmt.Errorf("channel queries not configured")
+		return ChannelConfig{}, errors.New("channel queries not configured")
 	}
 	if channelType == "" {
-		return ChannelConfig{}, fmt.Errorf("channel type is required")
+		return ChannelConfig{}, errors.New("channel type is required")
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -154,10 +154,10 @@ func (s *Store) UpdateConfigDisabled(ctx context.Context, botID string, channelT
 // UpsertChannelIdentityConfig creates or updates a channel identity's channel binding.
 func (s *Store) UpsertChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType, req UpsertChannelIdentityConfigRequest) (ChannelIdentityBinding, error) {
 	if s.queries == nil {
-		return ChannelIdentityBinding{}, fmt.Errorf("channel queries not configured")
+		return ChannelIdentityBinding{}, errors.New("channel queries not configured")
 	}
 	if channelType == "" {
-		return ChannelIdentityBinding{}, fmt.Errorf("channel type is required")
+		return ChannelIdentityBinding{}, errors.New("channel type is required")
 	}
 	normalized, err := s.registry.NormalizeUserConfig(channelType, req.Config)
 	if err != nil {
@@ -186,10 +186,10 @@ func (s *Store) UpsertChannelIdentityConfig(ctx context.Context, channelIdentity
 // For configless channel types, a synthetic config is returned.
 func (s *Store) ResolveEffectiveConfig(ctx context.Context, botID string, channelType ChannelType) (ChannelConfig, error) {
 	if s.queries == nil {
-		return ChannelConfig{}, fmt.Errorf("channel queries not configured")
+		return ChannelConfig{}, errors.New("channel queries not configured")
 	}
 	if channelType == "" {
-		return ChannelConfig{}, fmt.Errorf("channel type is required")
+		return ChannelConfig{}, errors.New("channel type is required")
 	}
 	if s.registry.IsConfigless(channelType) {
 		return ChannelConfig{
@@ -218,7 +218,7 @@ func (s *Store) ResolveEffectiveConfig(ctx context.Context, botID string, channe
 // ListConfigsByType returns all channel configurations of the given type.
 func (s *Store) ListConfigsByType(ctx context.Context, channelType ChannelType) ([]ChannelConfig, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("channel queries not configured")
+		return nil, errors.New("channel queries not configured")
 	}
 	if s.registry.IsConfigless(channelType) {
 		return []ChannelConfig{}, nil
@@ -241,10 +241,10 @@ func (s *Store) ListConfigsByType(ctx context.Context, channelType ChannelType) 
 // GetChannelIdentityConfig returns the channel identity's channel binding for the given channel type.
 func (s *Store) GetChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType) (ChannelIdentityBinding, error) {
 	if s.queries == nil {
-		return ChannelIdentityBinding{}, fmt.Errorf("channel queries not configured")
+		return ChannelIdentityBinding{}, errors.New("channel queries not configured")
 	}
 	if channelType == "" {
-		return ChannelIdentityBinding{}, fmt.Errorf("channel type is required")
+		return ChannelIdentityBinding{}, errors.New("channel type is required")
 	}
 	pgChannelIdentityID, err := db.ParseUUID(channelIdentityID)
 	if err != nil {
@@ -256,7 +256,7 @@ func (s *Store) GetChannelIdentityConfig(ctx context.Context, channelIdentityID 
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ChannelIdentityBinding{}, fmt.Errorf("channel user config not found")
+			return ChannelIdentityBinding{}, errors.New("channel user config not found")
 		}
 		return ChannelIdentityBinding{}, err
 	}
@@ -277,7 +277,7 @@ func (s *Store) GetChannelIdentityConfig(ctx context.Context, channelIdentityID 
 // ListChannelIdentityConfigsByType returns all channel identity bindings for the given channel type.
 func (s *Store) ListChannelIdentityConfigsByType(ctx context.Context, channelType ChannelType) ([]ChannelIdentityBinding, error) {
 	if s.queries == nil {
-		return nil, fmt.Errorf("channel queries not configured")
+		return nil, errors.New("channel queries not configured")
 	}
 	rows, err := s.queries.ListUserChannelBindingsByPlatform(ctx, channelType.String())
 	if err != nil {
@@ -308,7 +308,7 @@ func (s *Store) ResolveChannelIdentityBinding(ctx context.Context, channelType C
 			return row.ChannelIdentityID, nil
 		}
 	}
-	return "", fmt.Errorf("channel user binding not found")
+	return "", errors.New("channel user binding not found")
 }
 
 func normalizeChannelConfigFromRow(row sqlc.BotChannelConfig) (ChannelConfig, error) {

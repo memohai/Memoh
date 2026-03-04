@@ -21,7 +21,7 @@ func TestConnectWebhookModeDoesNotStartWebsocket(t *testing.T) {
 			"inbound_mode": "webhook",
 		},
 	}
-	conn, err := adapter.Connect(context.Background(), cfg, func(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) error {
+	conn, err := adapter.Connect(context.Background(), cfg, func(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage) error {
 		return nil
 	})
 	if err != nil {

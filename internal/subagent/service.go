@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -28,15 +27,15 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 
 func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (Subagent, error) {
 	if s.queries == nil {
-		return Subagent{}, fmt.Errorf("subagent queries not configured")
+		return Subagent{}, errors.New("subagent queries not configured")
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Subagent{}, fmt.Errorf("name is required")
+		return Subagent{}, errors.New("name is required")
 	}
 	description := strings.TrimSpace(req.Description)
 	if description == "" {
-		return Subagent{}, fmt.Errorf("description is required")
+		return Subagent{}, errors.New("description is required")
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -76,7 +75,7 @@ func (s *Service) Get(ctx context.Context, id string) (Subagent, error) {
 	row, err := s.queries.GetSubagentByID(ctx, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Subagent{}, fmt.Errorf("subagent not found")
+			return Subagent{}, errors.New("subagent not found")
 		}
 		return Subagent{}, err
 	}
@@ -94,7 +93,7 @@ func (s *Service) GetByBotAndName(ctx context.Context, botID string, name string
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Subagent{}, fmt.Errorf("subagent not found")
+			return Subagent{}, errors.New("subagent not found")
 		}
 		return Subagent{}, err
 	}
@@ -138,14 +137,14 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sub
 	if req.Name != nil {
 		name = strings.TrimSpace(*req.Name)
 		if name == "" {
-			return Subagent{}, fmt.Errorf("name is required")
+			return Subagent{}, errors.New("name is required")
 		}
 	}
 	description := existing.Description
 	if req.Description != nil {
 		description = strings.TrimSpace(*req.Description)
 		if description == "" {
-			return Subagent{}, fmt.Errorf("description is required")
+			return Subagent{}, errors.New("description is required")
 		}
 	}
 	metadata := existing.Metadata

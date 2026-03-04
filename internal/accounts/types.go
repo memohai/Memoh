@@ -19,7 +19,7 @@ type Account struct {
 // CreateAccountRequest is the input for creating an account.
 type CreateAccountRequest struct {
 	Username    string `json:"username"`
-	Password    string `json:"password"`
+	Password    string `json:"password"` //nolint:gosec // intentional: JSON request field carrying a user-supplied credential
 	Email       string `json:"email,omitempty"`
 	Role        string `json:"role,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`

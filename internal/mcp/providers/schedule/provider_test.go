@@ -21,32 +21,32 @@ type fakeScheduler struct {
 	deleteErr error
 }
 
-func (f *fakeScheduler) List(ctx context.Context, botID string) ([]sched.Schedule, error) {
+func (f *fakeScheduler) List(_ context.Context, _ string) ([]sched.Schedule, error) {
 	return f.list, nil
 }
 
-func (f *fakeScheduler) Get(ctx context.Context, id string) (sched.Schedule, error) {
+func (f *fakeScheduler) Get(_ context.Context, _ string) (sched.Schedule, error) {
 	if f.getErr != nil {
 		return sched.Schedule{}, f.getErr
 	}
 	return f.get, nil
 }
 
-func (f *fakeScheduler) Create(ctx context.Context, botID string, req sched.CreateRequest) (sched.Schedule, error) {
+func (f *fakeScheduler) Create(_ context.Context, _ string, _ sched.CreateRequest) (sched.Schedule, error) {
 	if f.createErr != nil {
 		return sched.Schedule{}, f.createErr
 	}
 	return f.create, nil
 }
 
-func (f *fakeScheduler) Update(ctx context.Context, id string, req sched.UpdateRequest) (sched.Schedule, error) {
+func (f *fakeScheduler) Update(_ context.Context, _ string, _ sched.UpdateRequest) (sched.Schedule, error) {
 	if f.updateErr != nil {
 		return sched.Schedule{}, f.updateErr
 	}
 	return f.update, nil
 }
 
-func (f *fakeScheduler) Delete(ctx context.Context, id string) error {
+func (f *fakeScheduler) Delete(_ context.Context, _ string) error {
 	return f.deleteErr
 }
 
@@ -83,7 +83,7 @@ func TestExecutor_CallTool_NotFound(t *testing.T) {
 	svc := &fakeScheduler{}
 	exec := NewExecutor(nil, svc)
 	_, err := exec.CallTool(context.Background(), mcpgw.ToolSessionContext{BotID: "bot1"}, "other_tool", nil)
-	if err != mcpgw.ErrToolNotFound {
+	if !errors.Is(err, mcpgw.ErrToolNotFound) {
 		t.Errorf("expected ErrToolNotFound, got %v", err)
 	}
 }

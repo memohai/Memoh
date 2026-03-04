@@ -5,25 +5,29 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
-var ErrModelIDAlreadyExists = errors.New("model_id already exists")
-var ErrModelIDAmbiguous = errors.New("model_id is ambiguous across providers")
+var (
+	ErrModelIDAlreadyExists = errors.New("model_id already exists")
+	ErrModelIDAmbiguous     = errors.New("model_id is ambiguous across providers")
+)
 
-// Service provides CRUD operations for models
+// Service provides CRUD operations for models.
 type Service struct {
 	queries *sqlc.Queries
 	logger  *slog.Logger
 }
 
-// NewService creates a new models service
+// NewService creates a new models service.
 func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	return &Service{
 		queries: queries,
@@ -31,7 +35,7 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	}
 }
 
-// Create adds a new model to the database
+// Create adds a new model to the database.
 func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, error) {
 	model := Model(req)
 	if err := model.Validate(); err != nil {
@@ -50,7 +54,7 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 	}
 	params := sqlc.CreateModelParams{
 		ModelID:           model.ModelID,
-		LlmProviderID:    llmProviderID,
+		LlmProviderID:     llmProviderID,
 		InputModalities:   inputMod,
 		SupportsReasoning: model.SupportsReasoning,
 		Type:              string(model.Type),
@@ -66,7 +70,11 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 
 	// Handle optional dimensions field (only for embedding models)
 	if model.Type == ModelTypeEmbedding && model.Dimensions > 0 {
-		params.Dimensions = pgtype.Int4{Int32: int32(model.Dimensions), Valid: true}
+		dimensions, err := intToInt4(model.Dimensions, "dimensions")
+		if err != nil {
+			return AddResponse{}, err
+		}
+		params.Dimensions = dimensions
 	}
 
 	created, err := s.queries.CreateModel(ctx, params)
@@ -93,7 +101,7 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 	}, nil
 }
 
-// GetByID retrieves a model by its internal UUID
+// GetByID retrieves a model by its internal UUID.
 func (s *Service) GetByID(ctx context.Context, id string) (GetResponse, error) {
 	uuid, err := db.ParseUUID(id)
 	if err != nil {
@@ -108,10 +116,10 @@ func (s *Service) GetByID(ctx context.Context, id string) (GetResponse, error) {
 	return convertToGetResponse(dbModel), nil
 }
 
-// GetByModelID retrieves a model by its model_id field
+// GetByModelID retrieves a model by its model_id field.
 func (s *Service) GetByModelID(ctx context.Context, modelID string) (GetResponse, error) {
 	if modelID == "" {
-		return GetResponse{}, fmt.Errorf("model_id is required")
+		return GetResponse{}, errors.New("model_id is required")
 	}
 
 	dbModel, err := s.findUniqueByModelID(ctx, modelID)
@@ -122,7 +130,7 @@ func (s *Service) GetByModelID(ctx context.Context, modelID string) (GetResponse
 	return convertToGetResponse(dbModel), nil
 }
 
-// List returns all models
+// List returns all models.
 func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	dbModels, err := s.queries.ListModels(ctx)
 	if err != nil {
@@ -132,7 +140,7 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	return convertToGetResponseList(dbModels), nil
 }
 
-// ListByType returns models filtered by type (chat or embedding)
+// ListByType returns models filtered by type (chat or embedding).
 func (s *Service) ListByType(ctx context.Context, modelType ModelType) ([]GetResponse, error) {
 	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding {
 		return nil, fmt.Errorf("invalid model type: %s", modelType)
@@ -146,7 +154,7 @@ func (s *Service) ListByType(ctx context.Context, modelType ModelType) ([]GetRes
 	return convertToGetResponseList(dbModels), nil
 }
 
-// ListByClientType returns models filtered by client type
+// ListByClientType returns models filtered by client type.
 func (s *Service) ListByClientType(ctx context.Context, clientType ClientType) ([]GetResponse, error) {
 	if !isValidClientType(clientType) {
 		return nil, fmt.Errorf("invalid client type: %s", clientType)
@@ -163,7 +171,7 @@ func (s *Service) ListByClientType(ctx context.Context, clientType ClientType) (
 // ListByProviderID returns models filtered by provider ID.
 func (s *Service) ListByProviderID(ctx context.Context, providerID string) ([]GetResponse, error) {
 	if strings.TrimSpace(providerID) == "" {
-		return nil, fmt.Errorf("provider id is required")
+		return nil, errors.New("provider id is required")
 	}
 	uuid, err := db.ParseUUID(providerID)
 	if err != nil {
@@ -182,7 +190,7 @@ func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string
 		return nil, fmt.Errorf("invalid model type: %s", modelType)
 	}
 	if strings.TrimSpace(providerID) == "" {
-		return nil, fmt.Errorf("provider id is required")
+		return nil, errors.New("provider id is required")
 	}
 	uuid, err := db.ParseUUID(providerID)
 	if err != nil {
@@ -198,7 +206,7 @@ func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string
 	return convertToGetResponseList(dbModels), nil
 }
 
-// UpdateByID updates a model by its internal UUID
+// UpdateByID updates a model by its internal UUID.
 func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) (GetResponse, error) {
 	uuid, err := db.ParseUUID(id)
 	if err != nil {
@@ -236,7 +244,11 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 	}
 
 	if model.Type == ModelTypeEmbedding && model.Dimensions > 0 {
-		params.Dimensions = pgtype.Int4{Int32: int32(model.Dimensions), Valid: true}
+		dimensions, err := intToInt4(model.Dimensions, "dimensions")
+		if err != nil {
+			return GetResponse{}, err
+		}
+		params.Dimensions = dimensions
 	}
 
 	updated, err := s.queries.UpdateModel(ctx, params)
@@ -250,10 +262,10 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 	return convertToGetResponse(updated), nil
 }
 
-// UpdateByModelID updates a model by its model_id field
+// UpdateByModelID updates a model by its model_id field.
 func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req UpdateRequest) (GetResponse, error) {
 	if modelID == "" {
-		return GetResponse{}, fmt.Errorf("model_id is required")
+		return GetResponse{}, errors.New("model_id is required")
 	}
 	current, err := s.findUniqueByModelID(ctx, modelID)
 	if err != nil {
@@ -290,7 +302,11 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 	}
 
 	if model.Type == ModelTypeEmbedding && model.Dimensions > 0 {
-		params.Dimensions = pgtype.Int4{Int32: int32(model.Dimensions), Valid: true}
+		dimensions, err := intToInt4(model.Dimensions, "dimensions")
+		if err != nil {
+			return GetResponse{}, err
+		}
+		params.Dimensions = dimensions
 	}
 
 	params.ModelID = model.ModelID
@@ -306,7 +322,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 	return convertToGetResponse(updated), nil
 }
 
-// DeleteByID deletes a model by its internal UUID
+// DeleteByID deletes a model by its internal UUID.
 func (s *Service) DeleteByID(ctx context.Context, id string) error {
 	uuid, err := db.ParseUUID(id)
 	if err != nil {
@@ -320,10 +336,10 @@ func (s *Service) DeleteByID(ctx context.Context, id string) error {
 	return nil
 }
 
-// DeleteByModelID deletes a model by its model_id field
+// DeleteByModelID deletes a model by its model_id field.
 func (s *Service) DeleteByModelID(ctx context.Context, modelID string) error {
 	if modelID == "" {
-		return fmt.Errorf("model_id is required")
+		return errors.New("model_id is required")
 	}
 	current, err := s.findUniqueByModelID(ctx, modelID)
 	if err != nil {
@@ -337,7 +353,7 @@ func (s *Service) DeleteByModelID(ctx context.Context, modelID string) error {
 	return nil
 }
 
-// Count returns the total number of models
+// Count returns the total number of models.
 func (s *Service) Count(ctx context.Context) (int64, error) {
 	count, err := s.queries.CountModels(ctx)
 	if err != nil {
@@ -346,7 +362,7 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-// CountByType returns the number of models of a specific type
+// CountByType returns the number of models of a specific type.
 func (s *Service) CountByType(ctx context.Context, modelType ModelType) (int64, error) {
 	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding {
 		return 0, fmt.Errorf("invalid model type: %s", modelType)
@@ -372,22 +388,22 @@ func convertToGetResponse(dbModel sqlc.Model) GetResponse {
 		},
 	}
 	if dbModel.ClientType.Valid {
-		resp.Model.ClientType = ClientType(dbModel.ClientType.String)
+		resp.ClientType = ClientType(dbModel.ClientType.String)
 	}
-	if resp.Model.Type == ModelTypeChat {
-		resp.Model.InputModalities = normalizeModalities(dbModel.InputModalities, []string{ModelInputText})
+	if resp.Type == ModelTypeChat {
+		resp.InputModalities = normalizeModalities(dbModel.InputModalities, []string{ModelInputText})
 	}
 
 	if dbModel.LlmProviderID.Valid {
-		resp.Model.LlmProviderID = dbModel.LlmProviderID.String()
+		resp.LlmProviderID = dbModel.LlmProviderID.String()
 	}
 
 	if dbModel.Name.Valid {
-		resp.Model.Name = dbModel.Name.String
+		resp.Name = dbModel.Name.String
 	}
 
 	if dbModel.Dimensions.Valid {
-		resp.Model.Dimensions = int(dbModel.Dimensions.Int32)
+		resp.Dimensions = int(dbModel.Dimensions.Int32)
 	}
 
 	return resp
@@ -438,14 +454,14 @@ func isValidClientType(clientType ClientType) bool {
 // SelectMemoryModel selects a chat model for memory operations.
 func SelectMemoryModel(ctx context.Context, modelsService *Service, queries *sqlc.Queries) (GetResponse, sqlc.LlmProvider, error) {
 	if modelsService == nil {
-		return GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("models service not configured")
+		return GetResponse{}, sqlc.LlmProvider{}, errors.New("models service not configured")
 	}
 	if queries == nil {
-		return GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("queries not configured")
+		return GetResponse{}, sqlc.LlmProvider{}, errors.New("queries not configured")
 	}
 	candidates, err := modelsService.ListByType(ctx, ModelTypeChat)
 	if err != nil || len(candidates) == 0 {
-		return GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("no chat models available for memory operations")
+		return GetResponse{}, sqlc.LlmProvider{}, errors.New("no chat models available for memory operations")
 	}
 	selected := candidates[0]
 	provider, err := FetchProviderByID(ctx, queries, selected.LlmProviderID)
@@ -465,11 +481,18 @@ func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, querie
 // FetchProviderByID fetches a provider by ID.
 func FetchProviderByID(ctx context.Context, queries *sqlc.Queries, providerID string) (sqlc.LlmProvider, error) {
 	if strings.TrimSpace(providerID) == "" {
-		return sqlc.LlmProvider{}, fmt.Errorf("provider id missing")
+		return sqlc.LlmProvider{}, errors.New("provider id missing")
 	}
 	parsed, err := db.ParseUUID(providerID)
 	if err != nil {
 		return sqlc.LlmProvider{}, err
 	}
 	return queries.GetLlmProviderByID(ctx, parsed)
+}
+
+func intToInt4(value int, name string) (pgtype.Int4, error) {
+	if value < math.MinInt32 || value > math.MaxInt32 {
+		return pgtype.Int4{}, fmt.Errorf("%s out of range: %d", name, value)
+	}
+	return pgtype.Int4{Int32: int32(value), Valid: true}, nil
 }

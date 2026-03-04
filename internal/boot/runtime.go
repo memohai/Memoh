@@ -12,7 +12,7 @@ import (
 )
 
 type RuntimeConfig struct {
-	JwtSecret            string
+	JwtSecret            string `json:"-"`
 	JwtExpiresIn         time.Duration
 	ServerAddr           string
 	ContainerdSocketPath string

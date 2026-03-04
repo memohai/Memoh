@@ -2,6 +2,7 @@ package email
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -9,10 +10,10 @@ import (
 
 // Manager manages the lifecycle of all email receiving connections.
 type Manager struct {
-	logger   *slog.Logger
-	service  *Service
-	trigger  *Trigger
-	outbox   *OutboxService
+	logger  *slog.Logger
+	service *Service
+	trigger *Trigger
+	outbox  *OutboxService
 
 	mu      sync.Mutex
 	conns   map[string]Stopper // provider_id -> stopper
@@ -57,7 +58,7 @@ func (m *Manager) startProvider(ctx context.Context, p ProviderResponse) error {
 	defer m.mu.Unlock()
 
 	if m.stopped {
-		return fmt.Errorf("manager is stopped")
+		return errors.New("manager is stopped")
 	}
 	if _, exists := m.conns[p.ID]; exists {
 		return nil
@@ -86,7 +87,7 @@ func (m *Manager) startProvider(ctx context.Context, p ProviderResponse) error {
 
 // RefreshProvider restarts receiving for a specific provider.
 func (m *Manager) RefreshProvider(ctx context.Context, providerID string) error {
-	m.stopProvider(providerID)
+	m.stopProvider(ctx, providerID)
 
 	p, err := m.service.GetProvider(ctx, providerID)
 	if err != nil {
@@ -104,7 +105,7 @@ func (m *Manager) RefreshProvider(ctx context.Context, providerID string) error 
 	return m.startProvider(ctx, p)
 }
 
-func (m *Manager) stopProvider(providerID string) {
+func (m *Manager) stopProvider(ctx context.Context, providerID string) {
 	m.mu.Lock()
 	stopper, exists := m.conns[providerID]
 	if exists {
@@ -113,14 +114,14 @@ func (m *Manager) stopProvider(providerID string) {
 	m.mu.Unlock()
 
 	if exists && stopper != nil {
-		if err := stopper.Stop(context.Background()); err != nil {
+		if err := stopper.Stop(ctx); err != nil {
 			m.logger.Error("failed to stop provider", slog.String("provider_id", providerID), slog.Any("error", err))
 		}
 	}
 }
 
 // Stop gracefully shuts down all receiving connections.
-func (m *Manager) Stop() {
+func (m *Manager) Stop(ctx context.Context) {
 	m.mu.Lock()
 	m.stopped = true
 	conns := make(map[string]Stopper, len(m.conns))
@@ -131,7 +132,7 @@ func (m *Manager) Stop() {
 	m.mu.Unlock()
 
 	for id, stopper := range conns {
-		if err := stopper.Stop(context.Background()); err != nil {
+		if err := stopper.Stop(ctx); err != nil {
 			m.logger.Error("failed to stop provider", slog.String("provider_id", id), slog.Any("error", err))
 		}
 	}

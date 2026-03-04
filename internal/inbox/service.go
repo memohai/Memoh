@@ -3,7 +3,9 @@ package inbox
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -131,10 +133,13 @@ func (s *Service) List(ctx context.Context, botID string, filter ListFilter) ([]
 	if limit > 500 {
 		limit = 500
 	}
+	if filter.Offset < 0 || filter.Offset > math.MaxInt32 {
+		return nil, fmt.Errorf("offset out of range: %d", filter.Offset)
+	}
 	rows, err := s.queries.ListInboxItems(ctx, sqlc.ListInboxItemsParams{
 		BotID:      botUUID,
 		IsRead:     boolOrNull(filter.IsRead),
-		Source:      textOrNull(filter.Source),
+		Source:     textOrNull(filter.Source),
 		MaxCount:   int32(limit),
 		ItemOffset: int32(filter.Offset),
 	})

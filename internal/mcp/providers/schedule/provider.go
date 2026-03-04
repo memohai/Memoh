@@ -40,7 +40,7 @@ func NewExecutor(log *slog.Logger, service Scheduler) *Executor {
 	}
 }
 
-func (p *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	if p.service == nil {
 		return []mcpgw.ToolDescriptor{}, nil
 	}

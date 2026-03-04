@@ -53,9 +53,6 @@ func NewChecker(log *slog.Logger, connections ConnectionLister, tools ToolLister
 
 // ListChecks evaluates all active MCP connections for a bot.
 func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.CheckResult {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
 		return []healthcheck.CheckResult{}

@@ -5,14 +5,14 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"time"
 
-	mail "github.com/wneessen/go-mail"
-
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	mail "github.com/wneessen/go-mail"
 
 	"github.com/memohai/memoh/internal/email"
 )
@@ -27,9 +27,9 @@ func New(log *slog.Logger) *Adapter {
 	return &Adapter{logger: log.With(slog.String("adapter", "generic"))}
 }
 
-func (a *Adapter) Type() email.ProviderName { return ProviderName }
+func (*Adapter) Type() email.ProviderName { return ProviderName }
 
-func (a *Adapter) Meta() email.ProviderMeta {
+func (*Adapter) Meta() email.ProviderMeta {
 	return email.ProviderMeta{
 		Provider:    string(ProviderName),
 		DisplayName: "Generic (SMTP/IMAP)",
@@ -49,7 +49,7 @@ func (a *Adapter) Meta() email.ProviderMeta {
 	}
 }
 
-func (a *Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
+func (*Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	for _, key := range []string{"smtp_host", "imap_host", "username", "password"} {
 		if v, _ := raw[key].(string); strings.TrimSpace(v) == "" {
 			return nil, fmt.Errorf("%s is required", key)
@@ -75,7 +75,7 @@ func (a *Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 
 // ---- Sender ----
 
-func (a *Adapter) Send(ctx context.Context, config map[string]any, msg email.OutboundEmail) (string, error) {
+func (*Adapter) Send(ctx context.Context, config map[string]any, msg email.OutboundEmail) (string, error) {
 	host, _ := config["smtp_host"].(string)
 	port := intVal(config["smtp_port"], 587)
 	username, _ := config["username"].(string)
@@ -223,7 +223,7 @@ func (c *imapConn) connectAndReceive(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dial imap (%s): %w", c.security, err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Login(c.username, c.password).Wait(); err != nil {
 		return fmt.Errorf("imap login: %w", err)
@@ -302,7 +302,7 @@ func (c *imapConn) fetchNewMessages(ctx context.Context, client *imapclient.Clie
 		BodySection: []*imap.FetchItemBodySection{{}},
 	}
 	fetchCmd := client.Fetch(uidSet, fetchOpts)
-	defer fetchCmd.Close()
+	defer func() { _ = fetchCmd.Close() }()
 
 	isFirstRun := c.lastUID == 0
 	processed := 0
@@ -341,7 +341,7 @@ func (c *imapConn) fetchNewMessages(ctx context.Context, client *imapclient.Clie
 	c.logger.Info("imap fetch completed", slog.Int("processed", processed), slog.Uint64("last_uid", uint64(c.lastUID)))
 }
 
-func (c *imapConn) bufToInbound(buf *imapclient.FetchMessageBuffer) *email.InboundEmail {
+func (*imapConn) bufToInbound(buf *imapclient.FetchMessageBuffer) *email.InboundEmail {
 	env := buf.Envelope
 	if env == nil {
 		return nil
@@ -373,7 +373,7 @@ func (c *imapConn) bufToInbound(buf *imapclient.FetchMessageBuffer) *email.Inbou
 
 // ---- MailboxReader (on-demand IMAP queries) ----
 
-func (a *Adapter) dialIMAP(config map[string]any) (*imapclient.Client, error) {
+func (*Adapter) dialIMAP(config map[string]any) (*imapclient.Client, error) {
 	host, _ := config["imap_host"].(string)
 	port := intVal(config["imap_port"], 993)
 	username, _ := config["username"].(string)
@@ -397,22 +397,22 @@ func (a *Adapter) dialIMAP(config map[string]any) (*imapclient.Client, error) {
 		return nil, err
 	}
 	if err := client.Login(username, password).Wait(); err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, err
 	}
 	if _, err := client.Select("INBOX", nil).Wait(); err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, err
 	}
 	return client, nil
 }
 
-func (a *Adapter) ListMailbox(ctx context.Context, config map[string]any, page, pageSize int) ([]email.InboundEmail, int, error) {
+func (a *Adapter) ListMailbox(_ context.Context, config map[string]any, page, pageSize int) ([]email.InboundEmail, int, error) {
 	client, err := a.dialIMAP(config)
 	if err != nil {
 		return nil, 0, fmt.Errorf("imap connect: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Get total message count via STATUS
 	statusData, err := client.Status("INBOX", &imap.StatusOptions{NumMessages: true}).Wait()
@@ -438,6 +438,9 @@ func (a *Adapter) ListMailbox(ctx context.Context, config map[string]any, page, 
 	}
 
 	seqSet := imap.SeqSet{}
+	if start > math.MaxUint32 || end > math.MaxUint32 {
+		return nil, 0, fmt.Errorf("mail sequence range out of bounds: start=%d end=%d", start, end)
+	}
 	seqSet.AddRange(uint32(start), uint32(end))
 
 	fetchOpts := &imap.FetchOptions{
@@ -445,7 +448,7 @@ func (a *Adapter) ListMailbox(ctx context.Context, config map[string]any, page, 
 		UID:      true,
 	}
 	fetchCmd := client.Fetch(seqSet, fetchOpts)
-	defer fetchCmd.Close()
+	defer func() { _ = fetchCmd.Close() }()
 
 	var results []email.InboundEmail
 	for {
@@ -478,12 +481,12 @@ func (a *Adapter) ListMailbox(ctx context.Context, config map[string]any, page, 
 	return results, total, nil
 }
 
-func (a *Adapter) ReadMailbox(ctx context.Context, config map[string]any, uid uint32) (*email.InboundEmail, error) {
+func (a *Adapter) ReadMailbox(_ context.Context, config map[string]any, uid uint32) (*email.InboundEmail, error) {
 	client, err := a.dialIMAP(config)
 	if err != nil {
 		return nil, fmt.Errorf("imap connect: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	uidSet := imap.UIDSet{}
 	uidSet.AddNum(imap.UID(uid))
@@ -494,7 +497,7 @@ func (a *Adapter) ReadMailbox(ctx context.Context, config map[string]any, uid ui
 		BodySection: []*imap.FetchItemBodySection{{}},
 	}
 	fetchCmd := client.Fetch(uidSet, fetchOpts)
-	defer fetchCmd.Close()
+	defer func() { _ = fetchCmd.Close() }()
 
 	msgData := fetchCmd.Next()
 	if msgData == nil {

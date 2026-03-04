@@ -43,7 +43,7 @@ func (h *EmailWebhookHandler) Register(e *echo.Echo) {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /email/mailgun/webhook/{config_id} [post]
+// @Router /email/mailgun/webhook/{config_id} [post].
 func (h *EmailWebhookHandler) HandleMailgun(c echo.Context) error {
 	configID := strings.TrimSpace(c.Param("config_id"))
 	if configID == "" {

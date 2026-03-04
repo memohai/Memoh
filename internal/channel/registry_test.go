@@ -14,25 +14,25 @@ const dirTestChannelType = channel.ChannelType("dir-test")
 // dirMockAdapter implements Adapter and ChannelDirectoryAdapter for registry DirectoryAdapter tests.
 type dirMockAdapter struct{}
 
-func (a *dirMockAdapter) Type() channel.ChannelType { return dirTestChannelType }
+func (*dirMockAdapter) Type() channel.ChannelType { return dirTestChannelType }
 
-func (a *dirMockAdapter) Descriptor() channel.Descriptor {
+func (*dirMockAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{Type: dirTestChannelType, DisplayName: "DirTest"}
 }
 
-func (a *dirMockAdapter) ListPeers(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*dirMockAdapter) ListPeers(_ context.Context, _ channel.ChannelConfig, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
-func (a *dirMockAdapter) ListGroups(ctx context.Context, cfg channel.ChannelConfig, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*dirMockAdapter) ListGroups(_ context.Context, _ channel.ChannelConfig, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
-func (a *dirMockAdapter) ListGroupMembers(ctx context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (*dirMockAdapter) ListGroupMembers(_ context.Context, _ channel.ChannelConfig, _ string, _ channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	return nil, nil
 }
 
-func (a *dirMockAdapter) ResolveEntry(ctx context.Context, cfg channel.ChannelConfig, input string, kind channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
+func (*dirMockAdapter) ResolveEntry(_ context.Context, _ channel.ChannelConfig, _ string, _ channel.DirectoryEntryKind) (channel.DirectoryEntry, error) {
 	return channel.DirectoryEntry{}, nil
 }
 
@@ -66,15 +66,15 @@ func TestDirectoryAdapter_UnknownType(t *testing.T) {
 
 type attachmentResolverMockAdapter struct{}
 
-func (a *attachmentResolverMockAdapter) Type() channel.ChannelType {
+func (*attachmentResolverMockAdapter) Type() channel.ChannelType {
 	return channel.ChannelType("attachment-test")
 }
 
-func (a *attachmentResolverMockAdapter) Descriptor() channel.Descriptor {
+func (*attachmentResolverMockAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{Type: channel.ChannelType("attachment-test"), DisplayName: "AttachmentTest"}
 }
 
-func (a *attachmentResolverMockAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
+func (*attachmentResolverMockAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, _ channel.Attachment) (channel.AttachmentPayload, error) {
 	return channel.AttachmentPayload{
 		Reader: io.NopCloser(strings.NewReader("payload")),
 		Mime:   "text/plain",

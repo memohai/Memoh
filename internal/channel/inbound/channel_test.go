@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -29,7 +28,7 @@ type fakeChatGateway struct {
 	onChat func(conversation.ChatRequest)
 }
 
-func (f *fakeChatGateway) Chat(ctx context.Context, req conversation.ChatRequest) (conversation.ChatResponse, error) {
+func (f *fakeChatGateway) Chat(_ context.Context, req conversation.ChatRequest) (conversation.ChatResponse, error) {
 	f.gotReq = req
 	if f.onChat != nil {
 		f.onChat(req)
@@ -37,7 +36,7 @@ func (f *fakeChatGateway) Chat(ctx context.Context, req conversation.ChatRequest
 	return f.resp, f.err
 }
 
-func (f *fakeChatGateway) StreamChat(ctx context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
+func (f *fakeChatGateway) StreamChat(_ context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
 	f.gotReq = req
 	if f.onChat != nil {
 		f.onChat(req)
@@ -63,7 +62,7 @@ func (f *fakeChatGateway) StreamChat(ctx context.Context, req conversation.ChatR
 	return chunks, errs
 }
 
-func (f *fakeChatGateway) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) error {
+func (*fakeChatGateway) TriggerSchedule(_ context.Context, _ string, _ schedule.TriggerPayload, _ string) error {
 	return nil
 }
 
@@ -72,12 +71,12 @@ type fakeReplySender struct {
 	events []channel.StreamEvent
 }
 
-func (s *fakeReplySender) Send(ctx context.Context, msg channel.OutboundMessage) error {
+func (s *fakeReplySender) Send(_ context.Context, msg channel.OutboundMessage) error {
 	s.sent = append(s.sent, msg)
 	return nil
 }
 
-func (s *fakeReplySender) OpenStream(ctx context.Context, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (s *fakeReplySender) OpenStream(_ context.Context, target string, _ channel.StreamOptions) (channel.OutboundStream, error) {
 	return &fakeOutboundStream{
 		sender: s,
 		target: strings.TrimSpace(target),
@@ -89,7 +88,7 @@ type fakeOutboundStream struct {
 	target string
 }
 
-func (s *fakeOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
+func (s *fakeOutboundStream) Push(_ context.Context, event channel.StreamEvent) error {
 	if s == nil || s.sender == nil {
 		return nil
 	}
@@ -103,7 +102,7 @@ func (s *fakeOutboundStream) Push(ctx context.Context, event channel.StreamEvent
 	return nil
 }
 
-func (s *fakeOutboundStream) Close(ctx context.Context) error {
+func (*fakeOutboundStream) Close(_ context.Context) error {
 	return nil
 }
 
@@ -119,20 +118,20 @@ type fakeProcessingStatusNotifier struct {
 	failedCause   error
 }
 
-func (n *fakeProcessingStatusNotifier) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+func (n *fakeProcessingStatusNotifier) ProcessingStarted(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
 	n.events = append(n.events, "started")
 	n.info = append(n.info, info)
 	return n.startedHandle, n.startedErr
 }
 
-func (n *fakeProcessingStatusNotifier) ProcessingCompleted(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
+func (n *fakeProcessingStatusNotifier) ProcessingCompleted(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle) error {
 	n.events = append(n.events, "completed")
 	n.info = append(n.info, info)
 	n.completedSeen = handle
 	return n.completedErr
 }
 
-func (n *fakeProcessingStatusNotifier) ProcessingFailed(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
+func (n *fakeProcessingStatusNotifier) ProcessingFailed(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, cause error) error {
 	n.events = append(n.events, "failed")
 	n.info = append(n.info, info)
 	n.failedSeen = handle
@@ -144,11 +143,11 @@ type fakeProcessingStatusAdapter struct {
 	notifier *fakeProcessingStatusNotifier
 }
 
-func (a *fakeProcessingStatusAdapter) Type() channel.ChannelType {
+func (*fakeProcessingStatusAdapter) Type() channel.ChannelType {
 	return channel.ChannelType("feishu")
 }
 
-func (a *fakeProcessingStatusAdapter) Descriptor() channel.Descriptor {
+func (*fakeProcessingStatusAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type: channel.ChannelType("feishu"),
 		Capabilities: channel.ChannelCapabilities{
@@ -188,7 +187,7 @@ type fakeMediaIngestor struct {
 	storageKeyErr   error
 }
 
-func (f *fakeMediaIngestor) Ingest(ctx context.Context, input media.IngestInput) (media.Asset, error) {
+func (f *fakeMediaIngestor) Ingest(_ context.Context, input media.IngestInput) (media.Asset, error) {
 	f.calls++
 	f.inputs = append(f.inputs, input)
 	if input.Reader != nil {
@@ -217,21 +216,21 @@ func (f *fakeMediaIngestor) GetByStorageKey(_ context.Context, _, _ string) (med
 	return f.storageKeyAsset, f.storageKeyErr
 }
 
-func (f *fakeMediaIngestor) IngestContainerFile(_ context.Context, _, _ string) (media.Asset, error) {
-	return media.Asset{}, fmt.Errorf("not implemented in test")
+func (*fakeMediaIngestor) IngestContainerFile(_ context.Context, _, _ string) (media.Asset, error) {
+	return media.Asset{}, errors.New("not implemented in test")
 }
 
-func (f *fakeMediaIngestor) AccessPath(asset media.Asset) string {
+func (*fakeMediaIngestor) AccessPath(asset media.Asset) string {
 	return "/data/media/" + asset.StorageKey
 }
 
 type fakeAttachmentResolverAdapter struct{}
 
-func (a *fakeAttachmentResolverAdapter) Type() channel.ChannelType {
+func (*fakeAttachmentResolverAdapter) Type() channel.ChannelType {
 	return channel.ChannelType("resolver-test")
 }
 
-func (a *fakeAttachmentResolverAdapter) Descriptor() channel.Descriptor {
+func (*fakeAttachmentResolverAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        channel.ChannelType("resolver-test"),
 		DisplayName: "ResolverTest",
@@ -242,7 +241,7 @@ func (a *fakeAttachmentResolverAdapter) Descriptor() channel.Descriptor {
 	}
 }
 
-func (a *fakeAttachmentResolverAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
+func (*fakeAttachmentResolverAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, _ channel.Attachment) (channel.AttachmentPayload, error) {
 	return channel.AttachmentPayload{
 		Reader: io.NopCloser(strings.NewReader("resolver-bytes")),
 		Mime:   "application/octet-stream",
@@ -251,14 +250,14 @@ func (a *fakeAttachmentResolverAdapter) ResolveAttachment(ctx context.Context, c
 	}, nil
 }
 
-func (f *fakeChatService) ResolveConversation(ctx context.Context, input route.ResolveInput) (route.ResolveConversationResult, error) {
+func (f *fakeChatService) ResolveConversation(_ context.Context, _ route.ResolveInput) (route.ResolveConversationResult, error) {
 	if f.resolveErr != nil {
 		return route.ResolveConversationResult{}, f.resolveErr
 	}
 	return f.resolveResult, nil
 }
 
-func (f *fakeChatService) Persist(ctx context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+func (f *fakeChatService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
 	f.persistedIn = append(f.persistedIn, input)
 	msg := messagepkg.Message{
 		BotID:                   input.BotID,
@@ -615,11 +614,11 @@ func TestChannelInboundProcessorPersistsAttachmentAssetRefs(t *testing.T) {
 			Text: "attachment test",
 			Attachments: []channel.Attachment{
 				{
-					Type:    channel.AttachmentImage,
-					URL:     "https://example.com/img.png",
+					Type:        channel.AttachmentImage,
+					URL:         "https://example.com/img.png",
 					ContentHash: "asset-1",
-					Name:    "img.png",
-					Mime:    "image/png",
+					Name:        "img.png",
+					Mime:        "image/png",
 				},
 			},
 		},
@@ -887,7 +886,7 @@ func TestChannelInboundProcessorProcessingStatusSuccessLifecycle(t *testing.T) {
 				{Role: "assistant", Content: conversation.NewTextContent("AI reply")},
 			},
 		},
-		onChat: func(req conversation.ChatRequest) {
+		onChat: func(_ conversation.ChatRequest) {
 			if len(notifier.events) != 1 || notifier.events[0] != "started" {
 				t.Fatalf("expected started before chat call, got events: %+v", notifier.events)
 			}
@@ -1059,7 +1058,7 @@ func TestChannelInboundProcessorProcessingFailedNotifyErrorDoesNotOverrideChatEr
 func TestDownloadInboundAttachmentURLTooLarge(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", "999999999")
 		_, _ = w.Write([]byte("x"))
@@ -1458,11 +1457,11 @@ func TestMapChannelToChatAttachments(t *testing.T) {
 
 	attachments := []channel.Attachment{
 		{
-			Type:    channel.AttachmentImage,
+			Type:        channel.AttachmentImage,
 			ContentHash: "asset-1",
-			URL:     "/data/media/ab/c.png",
-			Base64:  "AAAA",
-			Mime:    "image/png",
+			URL:         "/data/media/ab/c.png",
+			Base64:      "AAAA",
+			Mime:        "image/png",
 		},
 		{
 			Type: channel.AttachmentFile,
