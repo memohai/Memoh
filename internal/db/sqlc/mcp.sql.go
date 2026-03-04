@@ -12,9 +12,9 @@ import (
 )
 
 const createMCPConnection = `-- name: CreateMCPConnection :one
-INSERT INTO mcp_connections (bot_id, name, type, config, is_active)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, bot_id, name, type, config, is_active, created_at, updated_at
+INSERT INTO mcp_connections (bot_id, name, type, config, is_active, auth_type)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at
 `
 
 type CreateMCPConnectionParams struct {
@@ -23,6 +23,7 @@ type CreateMCPConnectionParams struct {
 	Type     string      `json:"type"`
 	Config   []byte      `json:"config"`
 	IsActive bool        `json:"is_active"`
+	AuthType string      `json:"auth_type"`
 }
 
 func (q *Queries) CreateMCPConnection(ctx context.Context, arg CreateMCPConnectionParams) (McpConnection, error) {
@@ -32,6 +33,7 @@ func (q *Queries) CreateMCPConnection(ctx context.Context, arg CreateMCPConnecti
 		arg.Type,
 		arg.Config,
 		arg.IsActive,
+		arg.AuthType,
 	)
 	var i McpConnection
 	err := row.Scan(
@@ -41,6 +43,11 @@ func (q *Queries) CreateMCPConnection(ctx context.Context, arg CreateMCPConnecti
 		&i.Type,
 		&i.Config,
 		&i.IsActive,
+		&i.Status,
+		&i.ToolsCache,
+		&i.LastProbedAt,
+		&i.StatusMessage,
+		&i.AuthType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -63,7 +70,7 @@ func (q *Queries) DeleteMCPConnection(ctx context.Context, arg DeleteMCPConnecti
 }
 
 const getMCPConnectionByID = `-- name: GetMCPConnectionByID :one
-SELECT id, bot_id, name, type, config, is_active, created_at, updated_at
+SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at
 FROM mcp_connections
 WHERE bot_id = $1 AND id = $2
 LIMIT 1
@@ -84,6 +91,11 @@ func (q *Queries) GetMCPConnectionByID(ctx context.Context, arg GetMCPConnection
 		&i.Type,
 		&i.Config,
 		&i.IsActive,
+		&i.Status,
+		&i.ToolsCache,
+		&i.LastProbedAt,
+		&i.StatusMessage,
+		&i.AuthType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -91,7 +103,7 @@ func (q *Queries) GetMCPConnectionByID(ctx context.Context, arg GetMCPConnection
 }
 
 const listMCPConnectionsByBotID = `-- name: ListMCPConnectionsByBotID :many
-SELECT id, bot_id, name, type, config, is_active, created_at, updated_at
+SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at
 FROM mcp_connections
 WHERE bot_id = $1
 ORDER BY created_at DESC
@@ -113,6 +125,11 @@ func (q *Queries) ListMCPConnectionsByBotID(ctx context.Context, botID pgtype.UU
 			&i.Type,
 			&i.Config,
 			&i.IsActive,
+			&i.Status,
+			&i.ToolsCache,
+			&i.LastProbedAt,
+			&i.StatusMessage,
+			&i.AuthType,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -132,9 +149,10 @@ SET name = $3,
     type = $4,
     config = $5,
     is_active = $6,
+    auth_type = $7,
     updated_at = now()
 WHERE bot_id = $1 AND id = $2
-RETURNING id, bot_id, name, type, config, is_active, created_at, updated_at
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at
 `
 
 type UpdateMCPConnectionParams struct {
@@ -144,6 +162,7 @@ type UpdateMCPConnectionParams struct {
 	Type     string      `json:"type"`
 	Config   []byte      `json:"config"`
 	IsActive bool        `json:"is_active"`
+	AuthType string      `json:"auth_type"`
 }
 
 func (q *Queries) UpdateMCPConnection(ctx context.Context, arg UpdateMCPConnectionParams) (McpConnection, error) {
@@ -154,6 +173,7 @@ func (q *Queries) UpdateMCPConnection(ctx context.Context, arg UpdateMCPConnecti
 		arg.Type,
 		arg.Config,
 		arg.IsActive,
+		arg.AuthType,
 	)
 	var i McpConnection
 	err := row.Scan(
@@ -163,10 +183,61 @@ func (q *Queries) UpdateMCPConnection(ctx context.Context, arg UpdateMCPConnecti
 		&i.Type,
 		&i.Config,
 		&i.IsActive,
+		&i.Status,
+		&i.ToolsCache,
+		&i.LastProbedAt,
+		&i.StatusMessage,
+		&i.AuthType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const updateMCPConnectionAuthType = `-- name: UpdateMCPConnectionAuthType :exec
+UPDATE mcp_connections
+SET auth_type = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type UpdateMCPConnectionAuthTypeParams struct {
+	ID       pgtype.UUID `json:"id"`
+	AuthType string      `json:"auth_type"`
+}
+
+func (q *Queries) UpdateMCPConnectionAuthType(ctx context.Context, arg UpdateMCPConnectionAuthTypeParams) error {
+	_, err := q.db.Exec(ctx, updateMCPConnectionAuthType, arg.ID, arg.AuthType)
+	return err
+}
+
+const updateMCPConnectionProbeResult = `-- name: UpdateMCPConnectionProbeResult :exec
+UPDATE mcp_connections
+SET status = $3,
+    tools_cache = $4,
+    last_probed_at = now(),
+    status_message = $5,
+    updated_at = now()
+WHERE bot_id = $1 AND id = $2
+`
+
+type UpdateMCPConnectionProbeResultParams struct {
+	BotID         pgtype.UUID `json:"bot_id"`
+	ID            pgtype.UUID `json:"id"`
+	Status        string      `json:"status"`
+	ToolsCache    []byte      `json:"tools_cache"`
+	StatusMessage string      `json:"status_message"`
+}
+
+func (q *Queries) UpdateMCPConnectionProbeResult(ctx context.Context, arg UpdateMCPConnectionProbeResultParams) error {
+	_, err := q.db.Exec(ctx, updateMCPConnectionProbeResult,
+		arg.BotID,
+		arg.ID,
+		arg.Status,
+		arg.ToolsCache,
+		arg.StatusMessage,
+	)
+	return err
 }
 
 const upsertMCPConnectionByName = `-- name: UpsertMCPConnectionByName :one
@@ -176,7 +247,7 @@ ON CONFLICT (bot_id, name)
 DO UPDATE SET type = EXCLUDED.type,
               config = EXCLUDED.config,
               updated_at = now()
-RETURNING id, bot_id, name, type, config, is_active, created_at, updated_at
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at
 `
 
 type UpsertMCPConnectionByNameParams struct {
@@ -201,6 +272,11 @@ func (q *Queries) UpsertMCPConnectionByName(ctx context.Context, arg UpsertMCPCo
 		&i.Type,
 		&i.Config,
 		&i.IsActive,
+		&i.Status,
+		&i.ToolsCache,
+		&i.LastProbedAt,
+		&i.StatusMessage,
+		&i.AuthType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

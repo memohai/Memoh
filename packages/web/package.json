@@ -17,6 +17,7 @@
     "@memoh/sdk": "workspace:*",
     "@memoh/ui": "workspace:*",
     "@pinia/colada": "^0.21.1",
+    "@shikijs/transformers": "^4.0.1",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/vue-table": "^8.21.3",
     "@vee-validate/zod": "^4.15.1",

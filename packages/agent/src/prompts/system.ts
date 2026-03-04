@@ -92,6 +92,7 @@ export const system = ({
   ]
     .filter((line): line is string => Boolean(line))
     .join('\n')
+  console.log('inbox', inbox)
 
   return `
 ---

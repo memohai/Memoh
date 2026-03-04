@@ -253,6 +253,22 @@ watch(() => props.botId, () => {
 onMounted(() => {
   restoreFileFromUrl()
 })
+
+function navigateTo(dirPath: string) {
+  openFile.value = null
+  syncFileToUrl(null)
+  void loadDirectory(dirPath)
+}
+
+function openFileByPath(filePath: string) {
+  const name = filePath.split('/').pop() ?? ''
+  const dir = filePath.substring(0, filePath.lastIndexOf('/')) || '/'
+  openFile.value = { path: filePath, name, isDir: false }
+  syncFileToUrl(filePath)
+  void loadDirectory(dir)
+}
+
+defineExpose({ navigateTo, openFileByPath })
 </script>
 
 <template>

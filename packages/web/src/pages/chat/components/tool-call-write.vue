@@ -1,0 +1,102 @@
+<template>
+  <div class="rounded-lg border bg-muted/30 text-sm overflow-hidden">
+    <div class="flex items-center gap-2 px-3 py-2 bg-muted/50">
+      <FontAwesomeIcon
+        :icon="['fas', block.done ? 'check' : 'spinner']"
+        class="size-3"
+        :class="block.done ? 'text-green-600 dark:text-green-400' : 'animate-spin text-muted-foreground'"
+      />
+      <FontAwesomeIcon
+        :icon="['fas', 'pen']"
+        class="size-3 text-muted-foreground"
+      />
+      <button
+        class="font-mono text-xs truncate hover:underline text-foreground cursor-pointer"
+        :title="filePath"
+        @click="handleOpenFile"
+      >
+        {{ filePath }}
+      </button>
+      <Badge
+        v-if="block.done"
+        variant="secondary"
+        class="text-[10px] ml-auto shrink-0"
+      >
+        {{ $t('chat.toolDone') }}
+      </Badge>
+      <Badge
+        v-else
+        variant="outline"
+        class="text-[10px] ml-auto shrink-0"
+      >
+        {{ $t('chat.toolRunning') }}
+      </Badge>
+    </div>
+
+    <Collapsible
+      v-if="content"
+      v-model:open="contentOpen"
+    >
+      <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full">
+        <FontAwesomeIcon
+          :icon="['fas', 'chevron-right']"
+          class="size-2.5 transition-transform"
+          :class="{ 'rotate-90': contentOpen }"
+        />
+        {{ $t('chat.toolWriteContent') }}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div
+          v-if="shiki.loading.value"
+          class="px-3 pb-2 text-xs text-muted-foreground"
+        >
+          <FontAwesomeIcon
+            :icon="['fas', 'spinner']"
+            class="size-3 animate-spin"
+          />
+        </div>
+        <div
+          v-else
+          class="shiki-container overflow-x-auto text-xs [&_pre]:bg-transparent! [&_pre]:p-3 [&_pre]:m-0 [&_code]:text-xs"
+          v-html="shiki.html.value"
+        />
+      </CollapsibleContent>
+    </Collapsible>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, inject, watch } from 'vue'
+import { Badge, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memoh/ui'
+import type { ToolCallBlock } from '@/store/chat-list'
+import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { useShikiHighlighter, extractFilename } from '@/composables/useShikiHighlighter'
+
+const props = defineProps<{ block: ToolCallBlock }>()
+
+const openInFileManager = inject(openInFileManagerKey, undefined)
+const shiki = useShikiHighlighter()
+const contentOpen = ref(false)
+
+const filePath = computed(() => {
+  const input = props.block.input as Record<string, unknown> | undefined
+  return (input?.path as string) ?? ''
+})
+
+const content = computed(() => {
+  const input = props.block.input as Record<string, unknown> | undefined
+  return (input?.content as string) ?? ''
+})
+
+watch(contentOpen, (open) => {
+  if (open && content.value && !shiki.html.value) {
+    void shiki.highlight(content.value, extractFilename(filePath.value))
+  }
+})
+
+function handleOpenFile() {
+  if (filePath.value && openInFileManager) {
+    openInFileManager(filePath.value, false)
+  }
+}
+</script>

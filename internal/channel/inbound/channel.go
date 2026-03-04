@@ -235,9 +235,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				slog.Int("attachments", len(attachments)),
 			)
 		}
-		if !strings.EqualFold(identity.BotType, "personal") {
-			p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, attachments, "passive_sync")
-		}
 		return nil
 	}
 

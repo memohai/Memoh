@@ -1,87 +1,58 @@
 <template>
-  <div class="rounded-lg border bg-muted/30 text-sm overflow-hidden">
-    <!-- Header -->
-    <div class="flex items-center gap-2 px-3 py-2 bg-muted/50">
-      <FontAwesomeIcon
-        :icon="['fas', block.done ? 'check' : 'spinner']"
-        class="size-3"
-        :class="block.done ? 'text-green-600 dark:text-green-400' : 'animate-spin text-muted-foreground'"
-      />
-      <span class="font-mono font-medium text-xs">
-        {{ block.toolName }}
-      </span>
-      <Badge
-        v-if="block.done"
-        variant="secondary"
-        class="text-[10px] ml-auto"
-      >
-        {{ $t('chat.toolDone') }}
-      </Badge>
-      <Badge
-        v-else
-        variant="outline"
-        class="text-[10px] ml-auto"
-      >
-        {{ $t('chat.toolRunning') }}
-      </Badge>
-    </div>
-
-    <!-- Input (collapsible) -->
-    <Collapsible
-      v-if="block.input"
-      v-model:open="inputOpen"
-    >
-      <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full">
-        <FontAwesomeIcon
-          :icon="['fas', 'chevron-right']"
-          class="size-2.5 transition-transform"
-          :class="{ 'rotate-90': inputOpen }"
-        />
-        {{ $t('chat.toolInput') }}
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <pre class="px-3 pb-2 text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all">{{ formatJson(block.input) }}</pre>
-      </CollapsibleContent>
-    </Collapsible>
-
-    <!-- Result (collapsible) -->
-    <Collapsible
-      v-if="block.done && block.result != null"
-      v-model:open="resultOpen"
-    >
-      <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full border-t border-muted">
-        <FontAwesomeIcon
-          :icon="['fas', 'chevron-right']"
-          class="size-2.5 transition-transform"
-          :class="{ 'rotate-90': resultOpen }"
-        />
-        {{ $t('chat.toolResult') }}
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <pre class="px-3 pb-2 text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all">{{ formatJson(block.result) }}</pre>
-      </CollapsibleContent>
-    </Collapsible>
-  </div>
+  <ToolCallRead
+    v-if="block.toolName === 'read'"
+    :block="block"
+  />
+  <ToolCallWrite
+    v-else-if="block.toolName === 'write'"
+    :block="block"
+  />
+  <ToolCallEdit
+    v-else-if="block.toolName === 'edit'"
+    :block="block"
+  />
+  <ToolCallList
+    v-else-if="block.toolName === 'list'"
+    :block="block"
+  />
+  <ToolCallExec
+    v-else-if="block.toolName === 'exec'"
+    :block="block"
+  />
+  <ToolCallWebSearch
+    v-else-if="block.toolName === 'web_search'"
+    :block="block"
+  />
+  <ToolCallSchedule
+    v-else-if="scheduleTools.has(block.toolName)"
+    :block="block"
+  />
+  <ToolCallGeneric
+    v-else
+    :block="block"
+  />
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Badge, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memoh/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
+import ToolCallRead from './tool-call-read.vue'
+import ToolCallWrite from './tool-call-write.vue'
+import ToolCallEdit from './tool-call-edit.vue'
+import ToolCallList from './tool-call-list.vue'
+import ToolCallExec from './tool-call-exec.vue'
+import ToolCallWebSearch from './tool-call-web-search.vue'
+import ToolCallSchedule from './tool-call-schedule.vue'
+import ToolCallGeneric from './tool-call-generic.vue'
 
 defineProps<{
   block: ToolCallBlock
 }>()
 
-const inputOpen = ref(false)
-const resultOpen = ref(false)
-
-function formatJson(val: unknown): string {
-  if (typeof val === 'string') return val
-  try {
-    return JSON.stringify(val, null, 2)
-  } catch {
-    return String(val)
-  }
-}
+const scheduleTools = new Set([
+  'list_schedule',
+  'get_schedule',
+  'create_schedule',
+  'update_schedule',
+  'delete_schedule',
+])
 </script>

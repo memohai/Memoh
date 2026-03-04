@@ -15,9 +15,10 @@ import (
 )
 
 type MCPFederationGateway struct {
-	handler *ContainerdHandler
-	logger  *slog.Logger
-	client  *http.Client
+	handler      *ContainerdHandler
+	logger       *slog.Logger
+	client       *http.Client
+	oauthService *mcpgw.OAuthService
 }
 
 func NewMCPFederationGateway(log *slog.Logger, handler *ContainerdHandler) *MCPFederationGateway {
@@ -31,6 +32,11 @@ func NewMCPFederationGateway(log *slog.Logger, handler *ContainerdHandler) *MCPF
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// SetOAuthService injects the OAuth service for token-based authentication.
+func (g *MCPFederationGateway) SetOAuthService(svc *mcpgw.OAuthService) {
+	g.oauthService = svc
 }
 
 func (g *MCPFederationGateway) ListHTTPConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
@@ -192,6 +198,21 @@ func (g *MCPFederationGateway) connectionHTTPClient(connection mcpgw.Connection)
 		base = &http.Client{Timeout: 30 * time.Second}
 	}
 	headers := normalizeHeaderMap(connection.Config["headers"])
+
+	if strings.TrimSpace(connection.AuthType) == "oauth" && g.oauthService != nil {
+		token, err := g.oauthService.GetValidToken(context.Background(), connection.ID)
+		if err != nil {
+			g.logger.Warn("failed to get OAuth token for connection",
+				slog.String("connection_id", connection.ID),
+				slog.Any("error", err))
+		} else if token != "" {
+			if headers == nil {
+				headers = map[string]string{}
+			}
+			headers["Authorization"] = "Bearer " + token
+		}
+	}
+
 	if len(headers) == 0 {
 		return base
 	}

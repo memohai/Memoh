@@ -188,6 +188,7 @@
         </SheetHeader>
         <FileManager
           v-if="currentBotId"
+          ref="fileManagerRef"
           :bot-id="currentBotId"
           :sync-url="false"
           class="flex-1 min-h-0"
@@ -198,7 +199,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, provide } from 'vue'
 import { Textarea, Button, Avatar, AvatarImage, AvatarFallback, Badge, InputGroup, InputGroupAddon, InputGroupButton, InputGroupText, InputGroupTextarea, Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@memoh/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
@@ -206,12 +207,26 @@ import MessageItem from './message-item.vue'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import FileManager from '@/components/file-manager/index.vue'
 import { useMediaGallery } from '../composables/useMediaGallery'
+import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 import type { ChatAttachment } from '@/composables/api/useChat'
 
 const chatStore = useChatStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
 const fileManagerOpen = ref(false)
+const fileManagerRef = ref<InstanceType<typeof FileManager> | null>(null)
+
+provide(openInFileManagerKey, (path: string, isDir = false) => {
+  fileManagerOpen.value = true
+  nextTick(() => {
+    if (!fileManagerRef.value) return
+    if (isDir) {
+      fileManagerRef.value.navigateTo(path)
+    } else {
+      fileManagerRef.value.openFileByPath(path)
+    }
+  })
+})
 const {
   messages,
   streaming,

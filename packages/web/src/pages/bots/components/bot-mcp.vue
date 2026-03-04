@@ -45,7 +45,7 @@
               <div class="flex items-center gap-2 w-full min-w-0">
                 <span
                   class="size-2 rounded-full shrink-0"
-                  :class="item.is_active ? 'bg-green-500' : 'bg-muted-foreground/40'"
+                  :class="statusDotClass(item)"
                 />
                 <span class="truncate flex-1">
                   {{ item.name }}
@@ -266,6 +266,235 @@
               </Button>
             </div>
           </form>
+
+          <!-- Probe status & tools -->
+          <div
+            v-if="selectedItem.id"
+            class="border-t pt-4 space-y-4"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <h4 class="text-sm font-medium">
+                  {{ $t('mcp.tools') }}
+                </h4>
+                <Badge
+                  v-if="selectedItem.status === 'connected'"
+                  variant="outline"
+                  class="text-[10px] text-green-600"
+                >
+                  {{ $t('mcp.statusConnected') }}
+                </Badge>
+                <Badge
+                  v-else-if="selectedItem.status === 'error'"
+                  variant="outline"
+                  class="text-[10px] text-destructive"
+                >
+                  {{ $t('mcp.statusError') }}
+                </Badge>
+                <Badge
+                  v-else
+                  variant="outline"
+                  class="text-[10px] text-muted-foreground"
+                >
+                  {{ $t('mcp.statusUnknown') }}
+                </Badge>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                :disabled="probing"
+                @click="handleProbe(selectedItem!)"
+              >
+                <Spinner
+                  v-if="probing"
+                  class="mr-1.5"
+                />
+                <FontAwesomeIcon
+                  v-else
+                  :icon="['fas', 'rotate']"
+                  class="mr-1.5"
+                />
+                {{ probing ? $t('mcp.probing') : $t('mcp.probe') }}
+              </Button>
+            </div>
+
+            <div
+              v-if="selectedItem.status_message && selectedItem.status === 'error'"
+              class="text-sm text-destructive bg-destructive/5 rounded-md p-3"
+            >
+              {{ selectedItem.status_message }}
+            </div>
+
+            <div
+              v-if="probeAuthRequired"
+              class="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 rounded-md p-3 flex items-center gap-2"
+            >
+              <FontAwesomeIcon :icon="['fas', 'lock']" />
+              {{ $t('mcp.authRequired') }}
+            </div>
+
+            <!-- OAuth section (remote connections only) -->
+            <div
+              v-if="selectedItem.type !== 'stdio' && (probeAuthRequired || selectedItem.auth_type === 'oauth' || oauthStatus)"
+              class="border rounded-md p-4 space-y-3"
+            >
+              <div class="flex items-center justify-between">
+                <h4 class="text-sm font-medium">
+                  {{ $t('mcp.oauth.title') }}
+                </h4>
+                <Badge
+                  v-if="oauthStatus?.has_token && !oauthStatus?.expired"
+                  variant="outline"
+                  class="text-[10px] text-green-600"
+                >
+                  {{ $t('mcp.oauth.authorized') }}
+                </Badge>
+                <Badge
+                  v-else-if="oauthStatus?.has_token && oauthStatus?.expired"
+                  variant="outline"
+                  class="text-[10px] text-amber-600"
+                >
+                  {{ $t('mcp.oauth.expired') }}
+                </Badge>
+                <Badge
+                  v-else-if="oauthStatus?.configured"
+                  variant="outline"
+                  class="text-[10px] text-muted-foreground"
+                >
+                  {{ $t('mcp.oauth.notConfigured') }}
+                </Badge>
+              </div>
+
+              <div
+                v-if="oauthStatus?.auth_server"
+                class="text-xs text-muted-foreground"
+              >
+                {{ $t('mcp.oauth.authServer') }}: {{ oauthStatus.auth_server }}
+              </div>
+
+              <!-- Client ID input (shown when server doesn't support DCR) -->
+              <div
+                v-if="oauthNeedsClientId && (!oauthStatus?.has_token || oauthStatus?.expired)"
+                class="space-y-2"
+              >
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('mcp.oauth.clientIdHint') }}
+                </p>
+                <div class="space-y-1.5">
+                  <Label class="text-xs">
+                    {{ $t('mcp.oauth.clientId') }}
+                  </Label>
+                  <Input
+                    v-model="oauthClientId"
+                    :placeholder="$t('mcp.oauth.clientIdPlaceholder')"
+                    class="font-mono text-xs"
+                  />
+                </div>
+                <div class="space-y-1.5">
+                  <Label class="text-xs">
+                    {{ $t('mcp.oauth.clientSecret') }}
+                  </Label>
+                  <Input
+                    v-model="oauthClientSecret"
+                    type="password"
+                    :placeholder="$t('mcp.oauth.clientSecretPlaceholder')"
+                    class="font-mono text-xs"
+                  />
+                </div>
+                <div
+                  v-if="oauthCallbackUrl"
+                  class="space-y-1"
+                >
+                  <Label class="text-xs">
+                    {{ $t('mcp.oauth.callbackUrl') }}
+                  </Label>
+                  <div class="flex items-center gap-1.5">
+                    <code class="text-xs bg-muted px-2 py-1 rounded flex-1 break-all select-all">{{ oauthCallbackUrl }}</code>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      @click="copyText(oauthCallbackUrl); toast.success($t('common.copied'))"
+                    >
+                      <FontAwesomeIcon :icon="['far', 'copy']" />
+                    </Button>
+                  </div>
+                  <p class="text-xs text-muted-foreground">
+                    {{ $t('mcp.oauth.callbackUrlHint') }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="flex gap-2">
+                <Button
+                  v-if="!oauthStatus?.has_token || oauthStatus?.expired"
+                  variant="outline"
+                  size="sm"
+                  :disabled="oauthDiscovering || oauthAuthorizing || (oauthNeedsClientId && !oauthClientId.trim())"
+                  @click="handleOAuthFlow"
+                >
+                  <Spinner
+                    v-if="oauthDiscovering || oauthAuthorizing"
+                    class="mr-1.5"
+                  />
+                  <FontAwesomeIcon
+                    v-else
+                    :icon="['fas', 'key']"
+                    class="mr-1.5"
+                  />
+                  {{ oauthDiscovering ? $t('mcp.oauth.discovering') : oauthAuthorizing ? $t('mcp.oauth.authorizing') : $t('mcp.oauth.authorize') }}
+                </Button>
+                <Button
+                  v-if="oauthStatus?.has_token"
+                  variant="ghost"
+                  size="sm"
+                  @click="handleOAuthRevoke"
+                >
+                  {{ $t('mcp.oauth.revoke') }}
+                </Button>
+              </div>
+            </div>
+
+            <div
+              v-if="displayTools.length > 0"
+              class="space-y-1"
+            >
+              <p class="text-xs text-muted-foreground mb-2">
+                {{ $t('mcp.toolsCount', { count: displayTools.length }) }}
+              </p>
+              <div
+                v-for="tool in displayTools"
+                :key="tool.name"
+                class="flex items-start gap-2 py-1.5 px-2 rounded text-sm hover:bg-accent/50"
+              >
+                <FontAwesomeIcon
+                  :icon="['fas', 'wrench']"
+                  class="mt-1 text-muted-foreground shrink-0 text-xs"
+                />
+                <div class="min-w-0">
+                  <span class="font-mono text-xs font-medium">{{ tool.name }}</span>
+                  <p
+                    v-if="tool.description"
+                    class="text-xs text-muted-foreground truncate"
+                  >
+                    {{ tool.description }}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <p
+              v-else-if="selectedItem.status === 'connected'"
+              class="text-sm text-muted-foreground"
+            >
+              {{ $t('mcp.toolsEmpty') }}
+            </p>
+
+            <p
+              v-if="selectedItem.last_probed_at"
+              class="text-xs text-muted-foreground"
+            >
+              {{ $t('mcp.lastProbed') }}: {{ formatDate(selectedItem.last_probed_at) }}
+            </p>
+          </div>
         </div>
       </ScrollArea>
 
@@ -469,12 +698,22 @@ import { client } from '@memoh/sdk/client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useClipboard } from '@/composables/useClipboard'
 
+interface ToolDescriptor {
+  name: string
+  description: string
+}
+
 interface McpItem {
   id: string
   name: string
   type: string
   config: Record<string, unknown>
   is_active: boolean
+  status: string
+  tools_cache: ToolDescriptor[]
+  last_probed_at: string | null
+  status_message: string
+  auth_type: string
 }
 
 interface McpServerEntry {
@@ -485,6 +724,13 @@ interface McpServerEntry {
   url?: string
   headers?: Record<string, string>
   transport?: string
+}
+
+interface ProbeResponse {
+  status: string
+  tools: ToolDescriptor[]
+  error?: string
+  auth_required?: boolean
 }
 
 const DRAFT_ID = ''
@@ -513,6 +759,33 @@ const items = ref<McpItem[]>([])
 const selectedItem = ref<McpItem | null>(null)
 const searchText = ref('')
 const submitting = ref(false)
+const probing = ref(false)
+const probeAuthRequired = ref(false)
+const oauthDiscovering = ref(false)
+const oauthAuthorizing = ref(false)
+
+interface OAuthStatusResponse {
+  configured: boolean
+  has_token: boolean
+  expired: boolean
+  scopes?: string
+  expires_at?: string
+  auth_server?: string
+  callback_url?: string
+}
+
+interface OAuthDiscoveryResponse {
+  registration_endpoint?: string
+  authorization_endpoint?: string
+  token_endpoint?: string
+}
+
+const oauthStatus = ref<OAuthStatusResponse | null>(null)
+const oauthClientId = ref('')
+const oauthClientSecret = ref('')
+const oauthNeedsClientId = ref(false)
+const oauthCallbackUrl = ref('')
+const oauthDiscovered = ref(false)
 
 const createDialogOpen = ref(false)
 const createName = ref('')
@@ -543,6 +816,30 @@ const filteredItems = computed(() => {
   const kw = searchText.value.toLowerCase()
   return items.value.filter((i) => i.id === DRAFT_ID || i.name.toLowerCase().includes(kw))
 })
+
+const displayTools = computed<ToolDescriptor[]>(() => {
+  if (!selectedItem.value) return []
+  return selectedItem.value.tools_cache ?? []
+})
+
+function statusDotClass(item: McpItem): string {
+  if (!item.id) return 'bg-muted-foreground/40'
+  if (!item.is_active) return 'bg-muted-foreground/40'
+  switch (item.status) {
+    case 'connected': return 'bg-green-500'
+    case 'error': return 'bg-destructive'
+    default: return 'bg-amber-400'
+  }
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return ''
+  try {
+    return new Date(dateStr).toLocaleString()
+  } catch {
+    return dateStr
+  }
+}
 
 function configValue(config: Record<string, unknown>, key: string): string {
   const val = config?.[key]
@@ -581,6 +878,16 @@ function pairsToRecord(pairs: KeyValuePair[]): Record<string, string> {
 
 function selectItem(item: McpItem) {
   selectedItem.value = item
+  probeAuthRequired.value = false
+  oauthStatus.value = null
+  oauthClientId.value = ''
+  oauthClientSecret.value = ''
+  oauthNeedsClientId.value = false
+  oauthCallbackUrl.value = ''
+  oauthDiscovered.value = false
+  if (item.id && item.type !== 'stdio') {
+    loadOAuthStatus(item)
+  }
   const cfg = item.config ?? {}
   connectionType.value = item.type === 'stdio' ? 'stdio' : 'remote'
   formData.value = {
@@ -621,6 +928,11 @@ function handleCreateDraft() {
     type: createType.value === 'stdio' ? 'stdio' : 'http',
     config: {},
     is_active: true,
+    status: 'unknown',
+    tools_cache: [],
+    last_probed_at: null,
+    status_message: '',
+    auth_type: 'none',
   }
   items.value = [draft, ...items.value]
   selectItem(draft)
@@ -677,7 +989,14 @@ async function loadList() {
       path: { bot_id: props.botId },
       throwOnError: true,
     })
-    const serverItems: McpItem[] = data.items ?? []
+    const serverItems: McpItem[] = (data.items ?? []).map((item: Record<string, unknown>) => ({
+      ...item,
+      status: item.status ?? 'unknown',
+      tools_cache: item.tools_cache ?? [],
+      last_probed_at: item.last_probed_at ?? null,
+      status_message: item.status_message ?? '',
+      auth_type: item.auth_type ?? 'none',
+    }))
     const draft = items.value.find((i) => i.id === DRAFT_ID)
     items.value = draft ? [draft, ...serverItems] : serverItems
 
@@ -696,23 +1015,57 @@ async function loadList() {
   }
 }
 
+async function handleProbe(item: McpItem) {
+  if (!item.id) return
+  probing.value = true
+  probeAuthRequired.value = false
+  try {
+    const { data } = await client.post<ProbeResponse>({
+      url: '/bots/{bot_id}/mcp/{id}/probe',
+      path: { bot_id: props.botId, id: item.id },
+      throwOnError: true,
+    })
+    if (data) {
+      item.status = data.status
+      item.tools_cache = data.tools ?? []
+      item.status_message = data.error ?? ''
+      item.last_probed_at = new Date().toISOString()
+      probeAuthRequired.value = !!data.auth_required
+      if (data.status === 'connected') {
+        toast.success(t('mcp.probeSuccess'))
+      } else if (data.auth_required) {
+        toast.warning(t('mcp.authRequired'))
+      } else {
+        toast.error(data.error || t('mcp.probeFailed'))
+      }
+    }
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('mcp.probeFailed')))
+  } finally {
+    probing.value = false
+  }
+}
+
 async function handleSubmit() {
   if (!selectedItem.value) return
   submitting.value = true
   try {
     const body = buildRequestBody(formData.value, connectionType.value, argsTags.value, envPairs.value, headerPairs.value)
+    let savedId: string | undefined
     if (isDraft.value) {
       const { data } = await postBotsByBotIdMcp({
         path: { bot_id: props.botId },
         body,
         throwOnError: true,
       })
+      savedId = data?.id
       removeDraft()
       await loadList()
-      const created = items.value.find((i) => i.id === data?.id) ?? items.value.find((i) => i.name === body.name)
+      const created = items.value.find((i) => i.id === savedId) ?? items.value.find((i) => i.name === body.name)
       if (created) selectItem(created)
       toast.success(t('mcp.createSuccess'))
     } else {
+      savedId = selectedItem.value.id
       await putBotsByBotIdMcpById({
         path: { bot_id: props.botId, id: selectedItem.value.id },
         body,
@@ -720,6 +1073,9 @@ async function handleSubmit() {
       })
       await loadList()
       toast.success(t('mcp.updateSuccess'))
+    }
+    if (savedId && selectedItem.value) {
+      handleProbe(selectedItem.value)
     }
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
@@ -784,6 +1140,130 @@ function handleExportSingle() {
 function handleCopyExport() {
   void copyText(exportJson.value)
   toast.success(t('common.copied'))
+}
+
+async function loadOAuthStatus(item: McpItem) {
+  if (!item.id || item.type === 'stdio') {
+    oauthStatus.value = null
+    return
+  }
+  try {
+    const { data } = await client.get<OAuthStatusResponse>({
+      url: '/bots/{bot_id}/mcp/{id}/oauth/status',
+      path: { bot_id: props.botId, id: item.id },
+      throwOnError: true,
+    })
+    oauthStatus.value = data ?? null
+    oauthCallbackUrl.value = `${window.location.origin}/oauth/mcp/callback`
+  } catch {
+    oauthStatus.value = null
+  }
+}
+
+async function handleOAuthDiscover() {
+  if (!selectedItem.value?.id) return
+  const item = selectedItem.value
+
+  oauthDiscovering.value = true
+  oauthNeedsClientId.value = false
+  try {
+    const { data } = await client.post<OAuthDiscoveryResponse>({
+      url: '/bots/{bot_id}/mcp/{id}/oauth/discover',
+      path: { bot_id: props.botId, id: item.id },
+      throwOnError: true,
+    })
+    toast.success(t('mcp.oauth.discoverSuccess'))
+    if (!data?.registration_endpoint) {
+      oauthNeedsClientId.value = true
+    }
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('mcp.oauth.discoverFailed')))
+    oauthDiscovering.value = false
+    return false
+  }
+  oauthDiscovering.value = false
+  return true
+}
+
+async function handleOAuthFlow() {
+  if (!selectedItem.value?.id) return
+  const item = selectedItem.value
+
+  if (!oauthDiscovered.value) {
+    const discovered = await handleOAuthDiscover()
+    if (!discovered) return
+    oauthDiscovered.value = true
+    if (oauthNeedsClientId.value && !oauthClientId.value.trim()) {
+      return
+    }
+  }
+
+  oauthAuthorizing.value = true
+  try {
+    const { data } = await client.post<{ authorization_url: string }>({
+      url: '/bots/{bot_id}/mcp/{id}/oauth/authorize',
+      path: { bot_id: props.botId, id: item.id },
+      body: {
+        client_id: oauthClientId.value.trim() || undefined,
+        client_secret: oauthClientSecret.value.trim() || undefined,
+        callback_url: `${window.location.origin}/oauth/mcp/callback`,
+      },
+      throwOnError: true,
+    })
+    if (!data?.authorization_url) {
+      toast.error(t('mcp.oauth.authFailed'))
+      oauthAuthorizing.value = false
+      return
+    }
+
+    const popup = window.open(data.authorization_url, 'mcp-oauth', 'width=600,height=700')
+
+    const onMessage = async (event: MessageEvent) => {
+      if (event.data?.type === 'mcp-oauth-callback') {
+        window.removeEventListener('message', onMessage)
+        oauthAuthorizing.value = false
+        if (event.data.status === 'success') {
+          toast.success(t('mcp.oauth.authSuccess'))
+          await loadOAuthStatus(item)
+          handleProbe(item)
+        } else {
+          toast.error(event.data.error || t('mcp.oauth.authFailed'))
+        }
+      }
+    }
+    window.addEventListener('message', onMessage)
+
+    const pollTimer = setInterval(() => {
+      if (popup && popup.closed) {
+        clearInterval(pollTimer)
+        window.removeEventListener('message', onMessage)
+        oauthAuthorizing.value = false
+        loadOAuthStatus(item)
+      }
+    }, 500)
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('mcp.oauth.authFailed')))
+    oauthAuthorizing.value = false
+  }
+}
+
+async function handleOAuthRevoke() {
+  if (!selectedItem.value?.id) return
+  try {
+    await client.delete({
+      url: '/bots/{bot_id}/mcp/{id}/oauth/token',
+      path: { bot_id: props.botId, id: selectedItem.value.id },
+      throwOnError: true,
+    })
+    toast.success(t('mcp.oauth.revokeSuccess'))
+    oauthDiscovered.value = false
+    oauthNeedsClientId.value = false
+    oauthClientId.value = ''
+    oauthClientSecret.value = ''
+    await loadOAuthStatus(selectedItem.value)
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('mcp.oauth.revokeFailed')))
+  }
 }
 
 watch(connectionType, (mode) => {

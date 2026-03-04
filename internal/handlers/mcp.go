@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -19,14 +20,16 @@ type MCPHandler struct {
 	service        *mcp.ConnectionService
 	botService     *bots.Service
 	accountService *accounts.Service
+	fedGateway     *MCPFederationGateway
 	logger         *slog.Logger
 }
 
-func NewMCPHandler(log *slog.Logger, service *mcp.ConnectionService, botService *bots.Service, accountService *accounts.Service) *MCPHandler {
+func NewMCPHandler(log *slog.Logger, service *mcp.ConnectionService, botService *bots.Service, accountService *accounts.Service, fedGateway *MCPFederationGateway) *MCPHandler {
 	return &MCPHandler{
 		service:        service,
 		botService:     botService,
 		accountService: accountService,
+		fedGateway:     fedGateway,
 		logger:         log.With(slog.String("handler", "mcp")),
 	}
 }
@@ -38,6 +41,7 @@ func (h *MCPHandler) Register(e *echo.Echo) {
 	group.GET("/:id", h.Get)
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
+	group.POST("/:id/probe", h.Probe)
 
 	ops := e.Group("/bots/:bot_id/mcp-ops")
 	ops.PUT("/import", h.Import)
@@ -218,6 +222,86 @@ func (h *MCPHandler) Delete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// ProbeResponse is the response for a probe operation.
+type ProbeResponse struct {
+	Status       string             `json:"status"`
+	Tools        []mcp.ToolDescriptor `json:"tools"`
+	Error        string             `json:"error,omitempty"`
+	AuthRequired bool               `json:"auth_required,omitempty"`
+}
+
+// Probe godoc
+// @Summary Probe MCP connection
+// @Description Probe a MCP connection to discover tools and verify connectivity
+// @Tags mcp
+// @Param id path string true "MCP connection ID"
+// @Success 200 {object} ProbeResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/mcp/{id}/probe [post]
+func (h *MCPHandler) Probe(c echo.Context) error {
+	userID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	}
+	conn, err := h.service.Get(c.Request().Context(), botID, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if h.fedGateway == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "federation gateway not configured")
+	}
+
+	ctx := c.Request().Context()
+	var tools []mcp.ToolDescriptor
+	var probeErr error
+
+	switch strings.ToLower(strings.TrimSpace(conn.Type)) {
+	case "http":
+		tools, probeErr = h.fedGateway.ListHTTPConnectionTools(ctx, conn)
+	case "sse":
+		tools, probeErr = h.fedGateway.ListSSEConnectionTools(ctx, conn)
+	case "stdio":
+		tools, probeErr = h.fedGateway.ListStdioConnectionTools(ctx, botID, conn)
+	default:
+		probeErr = fmt.Errorf("unsupported connection type: %s", conn.Type)
+	}
+
+	resp := ProbeResponse{}
+	if probeErr != nil {
+		resp.Status = "error"
+		resp.Error = probeErr.Error()
+		resp.Tools = []mcp.ToolDescriptor{}
+		authRequired := strings.Contains(probeErr.Error(), "401") || strings.Contains(strings.ToLower(probeErr.Error()), "unauthorized")
+		resp.AuthRequired = authRequired
+		_ = h.service.UpdateProbeResult(ctx, botID, id, "error", []mcp.ToolDescriptor{}, probeErr.Error())
+	} else {
+		resp.Status = "connected"
+		if tools == nil {
+			tools = []mcp.ToolDescriptor{}
+		}
+		resp.Tools = tools
+		_ = h.service.UpdateProbeResult(ctx, botID, id, "connected", tools, "")
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 // Import godoc

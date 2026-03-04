@@ -123,6 +123,7 @@ func runServe() {
 			provideScheduleTriggerer,
 			schedule.NewService,
 			provideContainerdHandler,
+			provideFederationGateway,
 			provideToolGatewayService,
 			provideServerHandler(handlers.NewPingHandler),
 			provideServerHandler(provideMemohAuthHandler),
@@ -146,6 +147,8 @@ func runServe() {
 			provideServerHandler(handlers.NewEmailOutboxHandler),
 			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServerHandler(handlers.NewMCPHandler),
+			provideServerHandler(handlers.NewMCPOAuthHandler),
+			provideOAuthService,
 			provideServerHandler(handlers.NewInboxHandler),
 			provideServerHandler(provideCLIHandler),
 			provideServerHandler(provideWebHandler),
@@ -294,7 +297,23 @@ func provideChannelLifecycleService(channelStore *channel.Store, channelManager 
 func provideContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *handlers.ContainerdHandler {
 	return handlers.NewContainerdHandler(log, service, manager, cfg.MCP, cfg.Containerd.Namespace, rc.ContainerBackend, botService, accountService, policyService, queries)
 }
-func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager) *mcp.ToolGatewayService {
+func provideFederationGateway(log *slog.Logger, containerdHandler *handlers.ContainerdHandler) *handlers.MCPFederationGateway {
+	return handlers.NewMCPFederationGateway(log, containerdHandler)
+}
+func provideOAuthService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) *mcp.OAuthService {
+	addr := strings.TrimSpace(cfg.Server.Addr)
+	if addr == "" {
+		addr = ":8080"
+	}
+	host := addr
+	if strings.HasPrefix(host, ":") {
+		host = "localhost" + host
+	}
+	callbackURL := "http://" + host + "/oauth/mcp/callback"
+	return mcp.NewOAuthService(log, queries, callbackURL)
+}
+func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, chatService *conversation.Service, accountService *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService) *mcp.ToolGatewayService {
+	fedGateway.SetOAuthService(oauthService)
 	var assetResolver mcpmessage.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -306,7 +325,6 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	webExec := mcpweb.NewExecutor(log, settingsService, searchProviderService)
 	inboxExec := mcpinbox.NewExecutor(log, inboxService)
 	fsExec := mcpcontainer.NewExecutor(log, manager, config.DefaultDataMount)
-	fedGateway := handlers.NewMCPFederationGateway(log, containerdHandler)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService)
 	emailExec := mcpemail.NewExecutor(log, emailService, emailManager)
 	svc := mcp.NewToolGatewayService(log, []mcp.ToolExecutor{messageExec, contactsExec, scheduleExec, memoryExec, webExec, fsExec, inboxExec, emailExec}, []mcp.ToolSource{fedSource})

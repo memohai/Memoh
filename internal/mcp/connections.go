@@ -14,14 +14,19 @@ import (
 
 // Connection represents a stored MCP connection for a bot.
 type Connection struct {
-	ID        string         `json:"id"`
-	BotID     string         `json:"bot_id"`
-	Name      string         `json:"name"`
-	Type      string         `json:"type"`
-	Config    map[string]any `json:"config"`
-	Active    bool           `json:"is_active"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	ID            string         `json:"id"`
+	BotID         string         `json:"bot_id"`
+	Name          string         `json:"name"`
+	Type          string         `json:"type"`
+	Config        map[string]any `json:"config"`
+	Active        bool           `json:"is_active"`
+	Status        string         `json:"status"`
+	ToolsCache    []ToolDescriptor `json:"tools_cache"`
+	LastProbedAt  *time.Time     `json:"last_probed_at,omitempty"`
+	StatusMessage string         `json:"status_message"`
+	AuthType      string         `json:"auth_type"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
 // UpsertRequest accepts standard mcpServers item format.
@@ -36,6 +41,7 @@ type UpsertRequest struct {
 	Headers   map[string]string `json:"headers,omitempty"`
 	Transport string            `json:"transport,omitempty"`
 	Active    *bool             `json:"is_active,omitempty"`
+	AuthType  string            `json:"auth_type,omitempty"`
 }
 
 // ImportRequest accepts a standard mcpServers dict for batch import.
@@ -168,12 +174,17 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 	if req.Active != nil {
 		active = *req.Active
 	}
+	authType := strings.TrimSpace(req.AuthType)
+	if authType == "" {
+		authType = "none"
+	}
 	row, err := s.queries.CreateMCPConnection(ctx, sqlc.CreateMCPConnectionParams{
 		BotID:    botUUID,
 		Name:     name,
 		Type:     mcpType,
 		Config:   configPayload,
 		IsActive: active,
+		AuthType: authType,
 	})
 	if err != nil {
 		return Connection{}, err
@@ -206,6 +217,10 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	if req.Active != nil {
 		active = *req.Active
 	}
+	authType := strings.TrimSpace(req.AuthType)
+	if authType == "" {
+		authType = "none"
+	}
 	configPayload, err := json.Marshal(config)
 	if err != nil {
 		return Connection{}, err
@@ -217,6 +232,7 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 		Type:     mcpType,
 		Config:   configPayload,
 		IsActive: active,
+		AuthType: authType,
 	})
 	if err != nil {
 		return Connection{}, err
@@ -330,16 +346,64 @@ func normalizeMCPConnection(row sqlc.McpConnection) (Connection, error) {
 	if err != nil {
 		return Connection{}, err
 	}
+	toolsCache, _ := decodeToolsCache(row.ToolsCache)
+	var lastProbedAt *time.Time
+	if row.LastProbedAt.Valid {
+		t := db.TimeFromPg(row.LastProbedAt)
+		lastProbedAt = &t
+	}
 	return Connection{
-		ID:        row.ID.String(),
-		BotID:     row.BotID.String(),
-		Name:      strings.TrimSpace(row.Name),
-		Type:      strings.TrimSpace(row.Type),
-		Config:    config,
-		Active:    row.IsActive,
-		CreatedAt: db.TimeFromPg(row.CreatedAt),
-		UpdatedAt: db.TimeFromPg(row.UpdatedAt),
+		ID:            row.ID.String(),
+		BotID:         row.BotID.String(),
+		Name:          strings.TrimSpace(row.Name),
+		Type:          strings.TrimSpace(row.Type),
+		Config:        config,
+		Active:        row.IsActive,
+		Status:        strings.TrimSpace(row.Status),
+		ToolsCache:    toolsCache,
+		LastProbedAt:  lastProbedAt,
+		StatusMessage: strings.TrimSpace(row.StatusMessage),
+		AuthType:      strings.TrimSpace(row.AuthType),
+		CreatedAt:     db.TimeFromPg(row.CreatedAt),
+		UpdatedAt:     db.TimeFromPg(row.UpdatedAt),
 	}, nil
+}
+
+func decodeToolsCache(raw []byte) ([]ToolDescriptor, error) {
+	if len(raw) == 0 {
+		return []ToolDescriptor{}, nil
+	}
+	var tools []ToolDescriptor
+	if err := json.Unmarshal(raw, &tools); err != nil {
+		return []ToolDescriptor{}, nil
+	}
+	return tools, nil
+}
+
+// UpdateProbeResult persists the result of a probe operation.
+func (s *ConnectionService) UpdateProbeResult(ctx context.Context, botID, id, status string, tools []ToolDescriptor, message string) error {
+	if s.queries == nil {
+		return fmt.Errorf("mcp queries not configured")
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return err
+	}
+	pgID, err := db.ParseUUID(id)
+	if err != nil {
+		return err
+	}
+	toolsPayload, err := json.Marshal(tools)
+	if err != nil {
+		return err
+	}
+	return s.queries.UpdateMCPConnectionProbeResult(ctx, sqlc.UpdateMCPConnectionProbeResultParams{
+		BotID:         pgBotID,
+		ID:            pgID,
+		Status:        status,
+		ToolsCache:    toolsPayload,
+		StatusMessage: message,
+	})
 }
 
 func decodeMCPConfig(raw []byte) (map[string]any, error) {
