@@ -290,7 +290,7 @@ func coalesce(values ...string) string {
 }
 
 // spoolAndHashWithLimit streams reader into a temp file while computing its SHA-256.
-// Returns the open file seeked to the beginning; caller must close and remove it.
+// Returns the open file sought to the beginning; caller must close and remove it.
 func spoolAndHashWithLimit(reader io.Reader, maxBytes int64) (contentHash string, size int64, f *os.File, err error) {
 	if reader == nil {
 		return "", 0, nil, errors.New("reader is required")
