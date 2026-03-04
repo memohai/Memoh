@@ -603,12 +603,14 @@
       "noAvailableTypes": "所有平台类型均已配置",
       "types": {
         "feishu": "飞书",
+        "discord": "Discord",
         "telegram": "Telegram",
         "web": "Web",
         "local": "本地"
       },
       "typesShort": {
         "feishu": "飞",
+        "discord": "DC",
         "telegram": "TG",
         "web": "Web",
         "local": "CLI"

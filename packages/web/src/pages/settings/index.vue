@@ -303,7 +303,7 @@ function platformLabel(platformKey: string): string {
 }
 
 const platformOptions = computed(() => {
-  const options = new Set<string>(['telegram', 'feishu'])
+  const options = new Set<string>(['telegram', 'feishu', 'discord'])
   for (const identity of identities.value) {
     const platform = identity.channel.trim()
     if (platform) {

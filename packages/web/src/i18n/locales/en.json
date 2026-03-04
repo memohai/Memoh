@@ -607,12 +607,14 @@
       "noAvailableTypes": "All platform types have been configured",
       "types": {
         "feishu": "Feishu",
+        "discord": "Discord",
         "telegram": "Telegram",
         "web": "Web",
         "local": "Local"
       },
       "typesShort": {
         "feishu": "FS",
+        "discord": "DC",
         "telegram": "TG",
         "web": "Web",
         "local": "CLI"
