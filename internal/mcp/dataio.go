@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/containerd/errdefs"
 	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/errdefs"
 
 	ctr "github.com/memohai/memoh/internal/containerd"
 )
@@ -516,14 +516,16 @@ func untarGzDir(r io.Reader, dst string) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, fs.FileMode(header.Mode)); err != nil {
+			mode := header.FileInfo().Mode().Perm()
+			if err := os.MkdirAll(target, mode); err != nil {
 				return err
 			}
 		case tar.TypeReg:
+			mode := header.FileInfo().Mode().Perm()
 			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return err
 			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fs.FileMode(header.Mode)) //nolint:gosec // G304: extracted from operator-created archive
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode) //nolint:gosec // G304: extracted from operator-created archive
 			if err != nil {
 				return err
 			}

@@ -139,7 +139,7 @@ func (s *AppleService) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	return out, nil
 }
 
-func (s *AppleService) ResolveRemoteDigest(_ context.Context, _ string) (string, error) {
+func (*AppleService) ResolveRemoteDigest(_ context.Context, _ string) (string, error) {
 	return "", ErrNotSupported
 }
 

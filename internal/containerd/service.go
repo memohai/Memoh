@@ -735,7 +735,7 @@ func (s *DefaultService) withNamespace(ctx context.Context) context.Context {
 	return namespaces.WithNamespace(ctx, s.namespace)
 }
 
-func (s *DefaultService) ResolveRemoteDigest(ctx context.Context, ref string) (string, error) {
+func (*DefaultService) ResolveRemoteDigest(ctx context.Context, ref string) (string, error) {
 	if ref == "" {
 		return "", ErrInvalidArgument
 	}

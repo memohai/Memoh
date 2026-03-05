@@ -114,12 +114,12 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		return nil, err
 	}
 	if err := m.insertEvent(dctx, containerID, "snapshot_create", map[string]any{
-		"snapshot_name":          coalesceSnapshotName(displayName, versionNumber),
-		"display_name":           displayName,
-		"runtime_snapshot_name":  runtimeSnapshotName,
-		"snapshotter":            info.Snapshotter,
-		"source":                 normalizedSource,
-		"version":                versionNumber,
+		"snapshot_name":         coalesceSnapshotName(displayName, versionNumber),
+		"display_name":          displayName,
+		"runtime_snapshot_name": runtimeSnapshotName,
+		"snapshotter":           info.Snapshotter,
+		"source":                normalizedSource,
+		"version":               versionNumber,
 	}); err != nil {
 		return nil, err
 	}

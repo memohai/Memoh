@@ -89,18 +89,18 @@ type CreateSnapshotResponse struct {
 }
 
 type SnapshotInfo struct {
-	Snapshotter       string            `json:"snapshotter"`
-	Name              string            `json:"name"`
-	DisplayName       string            `json:"display_name,omitempty"`
-	RuntimeName       string            `json:"runtime_snapshot_name"`
-	Parent            string            `json:"parent,omitempty"`
-	Kind              string            `json:"kind"`
-	CreatedAt         time.Time         `json:"created_at,omitempty"`
-	UpdatedAt         time.Time         `json:"updated_at,omitempty"`
-	Labels            map[string]string `json:"labels,omitempty"`
-	Source            string            `json:"source"`
-	Managed           bool              `json:"managed"`
-	Version           *int              `json:"version,omitempty"`
+	Snapshotter string            `json:"snapshotter"`
+	Name        string            `json:"name"`
+	DisplayName string            `json:"display_name,omitempty"`
+	RuntimeName string            `json:"runtime_snapshot_name"`
+	Parent      string            `json:"parent,omitempty"`
+	Kind        string            `json:"kind"`
+	CreatedAt   time.Time         `json:"created_at,omitempty"`
+	UpdatedAt   time.Time         `json:"updated_at,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Source      string            `json:"source"`
+	Managed     bool              `json:"managed"`
+	Version     *int              `json:"version,omitempty"`
 }
 
 type ListSnapshotsResponse struct {
@@ -345,17 +345,17 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 				if row.UpdatedAt.Valid {
 					updatedAt = row.UpdatedAt.Time
 				}
-			return c.JSON(http.StatusOK, GetContainerResponse{
-				ContainerID:      row.ContainerID,
-				Image:            row.Image,
-				Status:           row.Status,
-				Namespace:        row.Namespace,
-				ContainerPath:    row.ContainerPath,
-				TaskRunning:      taskRunning,
-				HasPreservedData: h.manager.HasPreservedData(botID),
-				CreatedAt:        createdAt,
-				UpdatedAt:        updatedAt,
-			})
+				return c.JSON(http.StatusOK, GetContainerResponse{
+					ContainerID:      row.ContainerID,
+					Image:            row.Image,
+					Status:           row.Status,
+					Namespace:        row.Namespace,
+					ContainerPath:    row.ContainerPath,
+					TaskRunning:      taskRunning,
+					HasPreservedData: h.manager.HasPreservedData(botID),
+					CreatedAt:        createdAt,
+					UpdatedAt:        updatedAt,
+				})
 			}
 		}
 	}
