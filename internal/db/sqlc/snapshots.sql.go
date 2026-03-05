@@ -16,6 +16,7 @@ SELECT
   id,
   container_id,
   runtime_snapshot_name,
+  display_name,
   parent_runtime_snapshot_name,
   snapshotter,
   source,
@@ -38,6 +39,7 @@ func (q *Queries) GetSnapshotByContainerAndRuntimeName(ctx context.Context, arg 
 		&i.ID,
 		&i.ContainerID,
 		&i.RuntimeSnapshotName,
+		&i.DisplayName,
 		&i.ParentRuntimeSnapshotName,
 		&i.Snapshotter,
 		&i.Source,
@@ -51,6 +53,7 @@ SELECT
   id,
   container_id,
   runtime_snapshot_name,
+  display_name,
   parent_runtime_snapshot_name,
   snapshotter,
   source,
@@ -73,6 +76,7 @@ func (q *Queries) ListSnapshotsByContainerID(ctx context.Context, containerID st
 			&i.ID,
 			&i.ContainerID,
 			&i.RuntimeSnapshotName,
+			&i.DisplayName,
 			&i.ParentRuntimeSnapshotName,
 			&i.Snapshotter,
 			&i.Source,
@@ -93,6 +97,7 @@ SELECT
   s.id,
   s.container_id,
   s.runtime_snapshot_name,
+  s.display_name,
   s.parent_runtime_snapshot_name,
   s.snapshotter,
   s.source,
@@ -108,6 +113,7 @@ type ListSnapshotsWithVersionByContainerIDRow struct {
 	ID                        pgtype.UUID        `json:"id"`
 	ContainerID               string             `json:"container_id"`
 	RuntimeSnapshotName       string             `json:"runtime_snapshot_name"`
+	DisplayName               pgtype.Text        `json:"display_name"`
 	ParentRuntimeSnapshotName pgtype.Text        `json:"parent_runtime_snapshot_name"`
 	Snapshotter               string             `json:"snapshotter"`
 	Source                    string             `json:"source"`
@@ -128,6 +134,7 @@ func (q *Queries) ListSnapshotsWithVersionByContainerID(ctx context.Context, con
 			&i.ID,
 			&i.ContainerID,
 			&i.RuntimeSnapshotName,
+			&i.DisplayName,
 			&i.ParentRuntimeSnapshotName,
 			&i.Snapshotter,
 			&i.Source,
@@ -148,6 +155,7 @@ const upsertSnapshot = `-- name: UpsertSnapshot :one
 INSERT INTO snapshots (
   container_id,
   runtime_snapshot_name,
+  display_name,
   parent_runtime_snapshot_name,
   snapshotter,
   source
@@ -157,19 +165,22 @@ VALUES (
   $2,
   $3,
   $4,
-  $5
+  $5,
+  $6
 )
 ON CONFLICT (container_id, runtime_snapshot_name) DO UPDATE
 SET
+  display_name = EXCLUDED.display_name,
   parent_runtime_snapshot_name = EXCLUDED.parent_runtime_snapshot_name,
   snapshotter = EXCLUDED.snapshotter,
   source = EXCLUDED.source
-RETURNING id, container_id, runtime_snapshot_name, parent_runtime_snapshot_name, snapshotter, source, created_at
+RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at
 `
 
 type UpsertSnapshotParams struct {
 	ContainerID               string      `json:"container_id"`
 	RuntimeSnapshotName       string      `json:"runtime_snapshot_name"`
+	DisplayName               pgtype.Text `json:"display_name"`
 	ParentRuntimeSnapshotName pgtype.Text `json:"parent_runtime_snapshot_name"`
 	Snapshotter               string      `json:"snapshotter"`
 	Source                    string      `json:"source"`
@@ -179,6 +190,7 @@ func (q *Queries) UpsertSnapshot(ctx context.Context, arg UpsertSnapshotParams) 
 	row := q.db.QueryRow(ctx, upsertSnapshot,
 		arg.ContainerID,
 		arg.RuntimeSnapshotName,
+		arg.DisplayName,
 		arg.ParentRuntimeSnapshotName,
 		arg.Snapshotter,
 		arg.Source,
@@ -188,6 +200,7 @@ func (q *Queries) UpsertSnapshot(ctx context.Context, arg UpsertSnapshotParams) 
 		&i.ID,
 		&i.ContainerID,
 		&i.RuntimeSnapshotName,
+		&i.DisplayName,
 		&i.ParentRuntimeSnapshotName,
 		&i.Snapshotter,
 		&i.Source,

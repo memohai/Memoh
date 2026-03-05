@@ -2,6 +2,7 @@
 INSERT INTO snapshots (
   container_id,
   runtime_snapshot_name,
+  display_name,
   parent_runtime_snapshot_name,
   snapshotter,
   source
@@ -9,22 +10,25 @@ INSERT INTO snapshots (
 VALUES (
   sqlc.arg(container_id),
   sqlc.arg(runtime_snapshot_name),
+  sqlc.arg(display_name),
   sqlc.arg(parent_runtime_snapshot_name),
   sqlc.arg(snapshotter),
   sqlc.arg(source)
 )
 ON CONFLICT (container_id, runtime_snapshot_name) DO UPDATE
 SET
+  display_name = EXCLUDED.display_name,
   parent_runtime_snapshot_name = EXCLUDED.parent_runtime_snapshot_name,
   snapshotter = EXCLUDED.snapshotter,
   source = EXCLUDED.source
-RETURNING id, container_id, runtime_snapshot_name, parent_runtime_snapshot_name, snapshotter, source, created_at;
+RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at;
 
 -- name: ListSnapshotsByContainerID :many
 SELECT
   id,
   container_id,
   runtime_snapshot_name,
+  display_name,
   parent_runtime_snapshot_name,
   snapshotter,
   source,
@@ -38,6 +42,7 @@ SELECT
   s.id,
   s.container_id,
   s.runtime_snapshot_name,
+  s.display_name,
   s.parent_runtime_snapshot_name,
   s.snapshotter,
   s.source,
@@ -53,6 +58,7 @@ SELECT
   id,
   container_id,
   runtime_snapshot_name,
+  display_name,
   parent_runtime_snapshot_name,
   snapshotter,
   source,

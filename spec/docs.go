@@ -15,45 +15,6 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/oauth/mcp/callback": {
-            "get": {
-                "description": "Handles the OAuth authorization callback, exchanges code for tokens",
-                "tags": [
-                    "mcp"
-                ],
-                "summary": "OAuth callback handler",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Authorization code",
-                        "name": "code",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "State parameter",
-                        "name": "state",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "HTML page that closes the popup",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/auth/login": {
             "post": {
                 "description": "Validate user credentials and issue a JWT",
@@ -422,11 +383,135 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Export /data before deletion",
+                        "name": "preserve_data",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/data/export": {
+            "post": {
+                "produces": [
+                    "application/gzip"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Export container /data as a tar.gz archive",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/data/import": {
+            "post": {
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Import a tar.gz archive into container /data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "tar.gz archive",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/data/restore": {
+            "post": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Restore previously preserved data into container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -1164,6 +1249,52 @@ const docTemplate = `{
                     },
                     "501": {
                         "description": "Snapshots currently not supported on this backend",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/snapshots/rollback": {
+            "post": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Rollback container to a previous snapshot version",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Rollback payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RollbackRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -2448,6 +2579,43 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp/{id}/oauth/exchange": {
+            "post": {
+                "description": "Frontend callback page calls this to exchange the authorization code for access/refresh tokens",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Exchange OAuth authorization code for tokens",
+                "parameters": [
+                    {
+                        "description": "Authorization code and state",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.oauthExchangeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -8150,29 +8318,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_memohai_memoh_internal_fs.FileInfo": {
-            "type": "object",
-            "properties": {
-                "isDir": {
-                    "type": "boolean"
-                },
-                "modTime": {
-                    "type": "string"
-                },
-                "mode": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "path": {
-                    "type": "string"
-                },
-                "size": {
-                    "type": "integer"
-                }
-            }
-        },
         "github_com_memohai_memoh_internal_mcp.Connection": {
             "type": "object",
             "properties": {
@@ -8261,6 +8406,9 @@ const docTemplate = `{
         "handlers.CreateContainerRequest": {
             "type": "object",
             "properties": {
+                "restore_data": {
+                    "type": "boolean"
+                },
                 "snapshotter": {
                     "type": "string"
                 }
@@ -8271,6 +8419,12 @@ const docTemplate = `{
             "properties": {
                 "container_id": {
                     "type": "string"
+                },
+                "data_restored": {
+                    "type": "boolean"
+                },
+                "has_preserved_data": {
+                    "type": "boolean"
                 },
                 "image": {
                     "type": "string"
@@ -8295,6 +8449,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "container_id": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "runtime_snapshot_name": {
                     "type": "string"
                 },
                 "snapshot_name": {
@@ -8382,7 +8542,7 @@ const docTemplate = `{
                 "entries": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_memohai_memoh_internal_fs.FileInfo"
+                        "$ref": "#/definitions/handlers.FSFileInfo"
                     }
                 },
                 "path": {
@@ -8457,8 +8617,8 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
-                "host_path": {
-                    "type": "string"
+                "has_preserved_data": {
+                    "type": "boolean"
                 },
                 "image": {
                     "type": "string"
@@ -8650,6 +8810,14 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.RollbackRequest": {
+            "type": "object",
+            "properties": {
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.SkillItem": {
             "type": "object",
             "properties": {
@@ -8710,6 +8878,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "display_name": {
+                    "type": "string"
+                },
                 "kind": {
                     "type": "string"
                 },
@@ -8726,6 +8897,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "parent": {
+                    "type": "string"
+                },
+                "runtime_snapshot_name": {
                     "type": "string"
                 },
                 "snapshotter": {
@@ -8887,7 +9061,13 @@ const docTemplate = `{
         "handlers.oauthAuthorizeRequest": {
             "type": "object",
             "properties": {
+                "callback_url": {
+                    "type": "string"
+                },
                 "client_id": {
+                    "type": "string"
+                },
+                "client_secret": {
                     "type": "string"
                 }
             }
@@ -8896,6 +9076,17 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.oauthExchangeRequest": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "state": {
                     "type": "string"
                 }
             }
@@ -9153,6 +9344,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "auth_server": {
+                    "type": "string"
+                },
+                "callback_url": {
                     "type": "string"
                 },
                 "configured": {
@@ -9793,7 +9987,6 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "api_key": {
-                    "description": "masked in response",
                     "type": "string"
                 },
                 "base_url": {
@@ -10374,7 +10567,7 @@ const docTemplate = `{
     }
 }`
 
-// SwaggerInfo holds exported Swagger Info so clients can modify it.
+// SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0.0",
 	Host:             "",

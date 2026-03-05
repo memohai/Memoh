@@ -362,6 +362,7 @@ type Snapshot struct {
 	ID                        pgtype.UUID        `json:"id"`
 	ContainerID               string             `json:"container_id"`
 	RuntimeSnapshotName       string             `json:"runtime_snapshot_name"`
+	DisplayName               pgtype.Text        `json:"display_name"`
 	ParentRuntimeSnapshotName pgtype.Text        `json:"parent_runtime_snapshot_name"`
 	Snapshotter               string             `json:"snapshotter"`
 	Source                    string             `json:"source"`

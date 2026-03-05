@@ -690,21 +690,6 @@ definitions:
       provider:
         type: string
     type: object
-  github_com_memohai_memoh_internal_fs.FileInfo:
-    properties:
-      isDir:
-        type: boolean
-      modTime:
-        type: string
-      mode:
-        type: string
-      name:
-        type: string
-      path:
-        type: string
-      size:
-        type: integer
-    type: object
   github_com_memohai_memoh_internal_mcp.Connection:
     properties:
       auth_type:
@@ -763,6 +748,8 @@ definitions:
     type: object
   handlers.CreateContainerRequest:
     properties:
+      restore_data:
+        type: boolean
       snapshotter:
         type: string
     type: object
@@ -770,6 +757,10 @@ definitions:
     properties:
       container_id:
         type: string
+      data_restored:
+        type: boolean
+      has_preserved_data:
+        type: boolean
       image:
         type: string
       snapshotter:
@@ -785,6 +776,10 @@ definitions:
   handlers.CreateSnapshotResponse:
     properties:
       container_id:
+        type: string
+      display_name:
+        type: string
+      runtime_snapshot_name:
         type: string
       snapshot_name:
         type: string
@@ -841,7 +836,7 @@ definitions:
     properties:
       entries:
         items:
-          $ref: '#/definitions/github_com_memohai_memoh_internal_fs.FileInfo'
+          $ref: '#/definitions/handlers.FSFileInfo'
         type: array
       path:
         type: string
@@ -889,8 +884,8 @@ definitions:
         type: string
       created_at:
         type: string
-      host_path:
-        type: string
+      has_preserved_data:
+        type: boolean
       image:
         type: string
       namespace:
@@ -1014,6 +1009,11 @@ definitions:
       token_type:
         type: string
     type: object
+  handlers.RollbackRequest:
+    properties:
+      version:
+        type: integer
+    type: object
   handlers.SkillItem:
     properties:
       content:
@@ -1053,6 +1053,8 @@ definitions:
     properties:
       created_at:
         type: string
+      display_name:
+        type: string
       kind:
         type: string
       labels:
@@ -1064,6 +1066,8 @@ definitions:
       name:
         type: string
       parent:
+        type: string
+      runtime_snapshot_name:
         type: string
       snapshotter:
         type: string
@@ -1169,12 +1173,23 @@ definitions:
     type: object
   handlers.oauthAuthorizeRequest:
     properties:
+      callback_url:
+        type: string
       client_id:
+        type: string
+      client_secret:
         type: string
     type: object
   handlers.oauthDiscoverRequest:
     properties:
       url:
+        type: string
+    type: object
+  handlers.oauthExchangeRequest:
+    properties:
+      code:
+        type: string
+      state:
         type: string
     type: object
   handlers.skillsOpResponse:
@@ -1343,6 +1358,8 @@ definitions:
   mcp.OAuthStatus:
     properties:
       auth_server:
+        type: string
+      callback_url:
         type: string
       configured:
         type: boolean
@@ -1769,7 +1786,6 @@ definitions:
   providers.GetResponse:
     properties:
       api_key:
-        description: masked in response
         type: string
       base_url:
         type: string
@@ -2163,32 +2179,6 @@ info:
   title: Memoh API
   version: 1.0.0
 paths:
-  /api/oauth/mcp/callback:
-    get:
-      description: Handles the OAuth authorization callback, exchanges code for tokens
-      parameters:
-      - description: Authorization code
-        in: query
-        name: code
-        required: true
-        type: string
-      - description: State parameter
-        in: query
-        name: state
-        required: true
-        type: string
-      responses:
-        "200":
-          description: HTML page that closes the popup
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: OAuth callback handler
-      tags:
-      - mcp
   /auth/login:
     post:
       description: Validate user credentials and issue a JWT
@@ -2379,6 +2369,10 @@ paths:
         name: bot_id
         required: true
         type: string
+      - description: Export /data before deletion
+        in: query
+        name: preserve_data
+        type: boolean
       responses:
         "204":
           description: No Content
@@ -2443,6 +2437,83 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Create and start MCP container for bot
+      tags:
+      - containerd
+  /bots/{bot_id}/container/data/export:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/gzip
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Export container /data as a tar.gz archive
+      tags:
+      - containerd
+  /bots/{bot_id}/container/data/import:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: tar.gz archive
+        in: formData
+        name: file
+        required: true
+        type: file
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Import a tar.gz archive into container /data
+      tags:
+      - containerd
+  /bots/{bot_id}/container/data/restore:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Restore previously preserved data into container
       tags:
       - containerd
   /bots/{bot_id}/container/fs:
@@ -2926,6 +2997,36 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Create container snapshot for bot
+      tags:
+      - containerd
+  /bots/{bot_id}/container/snapshots/rollback:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Rollback payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.RollbackRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Rollback container to a previous snapshot version
       tags:
       - containerd
   /bots/{bot_id}/container/start:
@@ -3724,6 +3825,31 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Discover OAuth configuration for MCP server
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp/{id}/oauth/exchange:
+    post:
+      description: Frontend callback page calls this to exchange the authorization
+        code for access/refresh tokens
+      parameters:
+      - description: Authorization code and state
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.oauthExchangeRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Exchange OAuth authorization code for tokens
       tags:
       - mcp
   /bots/{bot_id}/mcp/{id}/oauth/status:

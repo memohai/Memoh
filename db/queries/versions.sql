@@ -5,7 +5,8 @@ SELECT
   cv.snapshot_id,
   cv.version,
   cv.created_at,
-  s.runtime_snapshot_name
+  s.runtime_snapshot_name,
+  s.display_name
 FROM container_versions cv
 JOIN snapshots s ON s.id = cv.snapshot_id
 WHERE cv.container_id = sqlc.arg(container_id)

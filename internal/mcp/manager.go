@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -154,15 +155,60 @@ func (m *Manager) MCPClient(ctx context.Context, botID string) (*mcpclient.Clien
 func (m *Manager) Init(ctx context.Context) error {
 	image := m.imageRef()
 
-	if _, err := m.service.GetImage(ctx, image); err == nil {
+	needsPull, remoteErr := m.checkImageUpgrade(ctx, image)
+	if remoteErr != nil {
+		// Remote check failed (network unavailable, registry down, etc.).
+		// Fall back to local image if available; fail only when nothing is cached.
+		m.logger.Warn("image upgrade check failed, falling back to local",
+			slog.String("image", image), slog.Any("error", remoteErr))
+		if _, err := m.service.GetImage(ctx, image); err != nil {
+			_, err = m.service.PullImage(ctx, image, &ctr.PullImageOptions{
+				Unpack:      true,
+				Snapshotter: m.cfg.Snapshotter,
+			})
+			return err
+		}
 		return nil
 	}
 
-	_, err := m.service.PullImage(ctx, image, &ctr.PullImageOptions{
+	if !needsPull {
+		return nil
+	}
+
+	m.logger.Info("pulling updated MCP image", slog.String("image", image))
+	if _, err := m.service.PullImage(ctx, image, &ctr.PullImageOptions{
 		Unpack:      true,
 		Snapshotter: m.cfg.Snapshotter,
-	})
-	return err
+	}); err != nil {
+		m.logger.Warn("image pull failed, using existing version", slog.Any("error", err))
+		if _, err2 := m.service.GetImage(ctx, image); err2 != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Existing bot containers keep running with their current image.
+	// New containers created after this point will use the updated image.
+	return nil
+}
+
+// checkImageUpgrade compares the local image digest against the remote registry.
+// Returns (true, nil) when a newer image is available or no local image exists.
+// Returns (false, err) when the remote cannot be reached.
+func (m *Manager) checkImageUpgrade(ctx context.Context, image string) (needsPull bool, _ error) {
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	remoteDigest, err := m.service.ResolveRemoteDigest(checkCtx, image)
+	if err != nil {
+		return false, err
+	}
+
+	localImg, err := m.service.GetImage(ctx, image)
+	if err != nil {
+		return true, nil // no local image
+	}
+	return localImg.ID != remoteDigest, nil
 }
 
 // EnsureBot creates the MCP container for a bot if it does not exist.
@@ -254,11 +300,6 @@ func (m *Manager) Start(ctx context.Context, botID string) error {
 		m.containerIPs[botID] = netResult.IP
 		m.mu.Unlock()
 		m.logger.Info("container network ready", slog.String("bot_id", botID), slog.String("ip", netResult.IP))
-
-		// Run migration in the background so Start() returns immediately.
-		// Migration uses its own context so it isn't cancelled when the
-		// caller's HTTP request finishes.
-		go m.migrateBindMountData(context.WithoutCancel(ctx), botID)
 	}
 	return nil
 }
@@ -273,22 +314,53 @@ func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration)
 	})
 }
 
-func (m *Manager) Delete(ctx context.Context, botID string) error {
+func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) error {
 	if err := validateBotID(botID); err != nil {
 		return err
 	}
 
+	containerID := m.containerID(botID)
+	stoppedForPreserve := false
+
+	if preserveData {
+		info, err := m.service.GetContainer(ctx, containerID)
+		if err != nil {
+			return fmt.Errorf("get container for preserve: %w", err)
+		}
+		if _, err := m.snapshotMounts(ctx, info); errors.Is(err, errMountNotSupported) {
+			// Apple backend fallback uses gRPC against a running container.
+		} else if err != nil {
+			return err
+		} else {
+			if err := m.safeStopTask(ctx, containerID); err != nil {
+				return fmt.Errorf("stop for data preserve: %w", err)
+			}
+			stoppedForPreserve = true
+		}
+
+		if err := m.PreserveData(ctx, botID); err != nil {
+			// Export failed — restart only if we stopped the task, and abort
+			// deletion to prevent data loss.
+			if stoppedForPreserve {
+				m.restartContainer(ctx, botID, containerID)
+			}
+			return fmt.Errorf("preserve data: %w", err)
+		}
+	}
+
+	m.grpcPool.Remove(botID)
+
 	if err := m.service.RemoveNetwork(ctx, ctr.NetworkSetupRequest{
-		ContainerID: m.containerID(botID),
+		ContainerID: containerID,
 		CNIBinDir:   m.cfg.CNIBinaryDir,
 		CNIConfDir:  m.cfg.CNIConfigDir,
 	}); err != nil {
-		m.logger.Warn("cleanup: remove network failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", err))
+		m.logger.Warn("cleanup: remove network failed", slog.String("container_id", containerID), slog.Any("error", err))
 	}
-	if err := m.service.DeleteTask(ctx, m.containerID(botID), &ctr.DeleteTaskOptions{Force: true}); err != nil {
-		m.logger.Warn("cleanup: delete task failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", err))
+	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
+		m.logger.Warn("cleanup: delete task failed", slog.String("container_id", containerID), slog.Any("error", err))
 	}
-	return m.service.DeleteContainer(ctx, m.containerID(botID), &ctr.DeleteContainerOptions{
+	return m.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{
 		CleanupSnapshot: true,
 	})
 }
