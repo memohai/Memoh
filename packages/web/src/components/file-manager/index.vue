@@ -14,6 +14,7 @@ import {
   DialogTitle,
   DialogFooter,
   Spinner,
+  ScrollArea
 } from '@memoh/ui'
 import {
   getBotsByBotIdContainerFsList,
@@ -272,7 +273,7 @@ defineExpose({ navigateTo, openFileByPath })
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden">
+  <div class="flex absolute inset-0 flex-col overflow-hidden">
     <!-- Toolbar -->
     <div class="flex items-center gap-2 border-b border-border px-4 py-2">
       <!-- Breadcrumb -->
@@ -348,10 +349,10 @@ defineExpose({ navigateTo, openFileByPath })
     </div>
 
     <!-- Main content area -->
-    <div class="flex flex-1 min-h-0 overflow-hidden">
+    <div class="flex flex-1 min-h-0 overflow-hidden h-full ">
       <!-- File list -->
-      <div
-        class="overflow-auto border-border transition-colors"
+      <ScrollArea
+        class=" border-border transition-colors "
         :class="openFile ? 'w-80 shrink-0 border-r' : 'w-full'"
       >
         <FileList
@@ -363,12 +364,12 @@ defineExpose({ navigateTo, openFileByPath })
           @rename="openRenameDialog"
           @delete="openDeleteDialog"
         />
-      </div>
+      </ScrollArea>
 
       <!-- File viewer -->
       <div
         v-if="openFile"
-        class="flex-1 overflow-hidden"
+        class="flex-1 overflow-hidden max-h-full"
       >
         <FileViewer
           :bot-id="botId"
