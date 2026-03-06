@@ -1,5 +1,5 @@
 <template>
-  <div class="flex gap-6 min-h-125 h-[calc(100vh-300px)] mx-auto">
+  <div class="flex gap-6 h-full absolute inset-0 p-4 mx-auto">
     <!-- Left: File list -->
     <div class="w-64 shrink-0 flex flex-col border rounded-lg overflow-hidden max-h-full">
       <div class="p-3 border-b space-y-3 shrink-0">

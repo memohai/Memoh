@@ -261,10 +261,13 @@ onMounted(() => {
 let userScrolledUp = false
 
 function scrollToBottom(instant = false) {
-  nextTick(() => {
-    const el = scrollContainer.value
-    if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior: instant ? 'instant' : 'smooth' })
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const el = scrollContainer.value   
+      if (!el) return
+      el.scrollTo({ top: el.scrollHeight, behavior: instant ? 'instant' : 'smooth' })   
+    })
+   
   })
 }
 

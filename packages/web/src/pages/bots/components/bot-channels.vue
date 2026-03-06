@@ -1,8 +1,8 @@
 <template>
-  <div class="flex gap-6 min-h-[400px]  mx-auto">
+  <div class="flex gap-6 absolute inset-0  mx-auto p-4">
     <!-- Left: Channel list -->
-    <div class="w-60 shrink-0 flex flex-col border rounded-lg">
-      <div class="flex-1 overflow-y-auto">
+    <div class="h-full flex-col border rounded-lg overflow-hidden flex">
+      <ScrollArea class="w-60 flex-1 flex flex-col ">
         <!-- Loading -->
         <div
           v-if="isLoading && configuredChannels.length === 0"
@@ -39,11 +39,11 @@
             :aria-pressed="selectedType === item.meta.type"
             class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors hover:bg-accent"
             :class="{ 'bg-accent': selectedType === item.meta.type }"
-            @click="selectedType = item.meta.type"
+            @click="selectedType = item.meta.type as string"
           >
             <div
               class="flex size-8 shrink-0 items-center justify-center rounded-md text-xs font-bold uppercase"
-              :class="channelBadgeClass(item.meta.type)"
+              :class="channelBadgeClass(item.meta.type as string)"
             >
               {{ channelIcon(item.meta.type) }}
             </div>
@@ -68,10 +68,9 @@
             </div>
           </button>
         </div>
-      </div>
-
+      </ScrollArea>
       <!-- Add button -->
-      <div class="border-t p-2">
+      <div class="border-t p-2  ">
         <Popover v-model:open="addPopoverOpen">
           <PopoverTrigger as-child>
             <Button
@@ -116,7 +115,6 @@
         </Popover>
       </div>
     </div>
-
     <!-- Right: Channel settings -->
     <div class="flex-1 min-w-0">
       <div
@@ -144,6 +142,7 @@ import {
   Popover,
   PopoverTrigger,
   PopoverContent,
+  ScrollArea
 } from '@memoh/ui'
 import { useQuery } from '@pinia/colada'
 import { getChannels, getBotsByIdChannelByPlatform } from '@memoh/sdk'
