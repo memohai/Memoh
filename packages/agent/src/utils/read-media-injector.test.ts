@@ -10,6 +10,11 @@ const baseModelConfig: ModelConfig = {
   input: [ModelInput.Image],
 }
 
+const createToolOptions = (toolCallId: string) => ({
+  toolCallId,
+  messages: [],
+})
+
 describe('read_media runtime', () => {
   it('caches image and injects it into messages', async () => {
     const fs = {
@@ -23,10 +28,10 @@ describe('read_media runtime', () => {
       fs,
       systemPrompt: 'sys',
     })
-    const readMedia = tools.read_media
-    const output = await readMedia.execute(
+    const executeReadMedia = tools.read_media.execute!
+    const output = await executeReadMedia(
       { path: '/data/media/a.png' },
-      { toolCallId: 'call-1' },
+      createToolOptions('call-1'),
     )
     expect((output as { ok?: boolean }).ok).toBe(true)
     const prepared = await prepareStep({
@@ -56,10 +61,10 @@ describe('read_media runtime', () => {
       fs,
       systemPrompt: 'sys',
     })
-    const readMedia = tools.read_media
-    const output = await readMedia.execute(
+    const executeReadMedia = tools.read_media.execute!
+    const output = await executeReadMedia(
       { path: '/data/media/a.png' },
-      { toolCallId: 'call-2' },
+      createToolOptions('call-2'),
     )
     expect((output as { isError?: boolean }).isError).toBe(true)
     const prepared = await prepareStep({
@@ -86,14 +91,14 @@ describe('read_media runtime', () => {
       fs,
       systemPrompt: 'sys',
     })
-    const readMedia = tools.read_media
-    const first = readMedia.execute(
+    const executeReadMedia = tools.read_media.execute!
+    const first = executeReadMedia(
       { path: '/data/media/a.png' },
-      { toolCallId: 'call-1' },
+      createToolOptions('call-1'),
     )
-    const second = readMedia.execute(
+    const second = executeReadMedia(
       { path: '/data/media/b.png' },
-      { toolCallId: 'call-2' },
+      createToolOptions('call-2'),
     )
     await Promise.all([first, second])
     const prepared = await prepareStep({
