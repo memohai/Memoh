@@ -1,15 +1,12 @@
 import { ImagePart, PrepareStepFunction, ToolSet, UserModelMessage, tool } from 'ai'
 import { z } from 'zod'
 import { ModelConfig, ModelInput, hasInputModality } from '../types/model'
+import { createBinaryImagePart } from './image-parts'
 
 const READ_MEDIA_TOOL_NAME = 'read_media'
 
 const isImageMime = (mime: string): boolean => {
   return mime.trim().toLowerCase().startsWith('image/')
-}
-
-const toImagePart = (payload: string): ImagePart => {
-  return { type: 'image', image: payload } as ImagePart
 }
 
 type ReadMediaFS = {
@@ -22,20 +19,19 @@ const buildReadMediaToolError = (message: string) => ({
   structuredContent: { ok: false, error: message },
 })
 
-const loadImageAsDataUrl = async (
+const loadImageBytes = async (
   fs: ReadMediaFS,
   path: string,
-): Promise<{ ok: true; dataUrl: string; mime: string } | { ok: false; error: string }> => {
+): Promise<{ ok: true; bytes: Uint8Array; mime: string } | { ok: false; error: string }> => {
   try {
     const response = await fs.download(path)
-    const arrayBuffer = await response.arrayBuffer()
-    const base64 = Buffer.from(arrayBuffer).toString('base64')
+    const bytes = new Uint8Array(await response.arrayBuffer())
     const header = response.headers.get('content-type') ?? ''
     const mime = header.split(';')[0]?.trim() ?? ''
     if (!mime || !isImageMime(mime)) {
       return { ok: false, error: 'read_media only supports image files' }
     }
-    return { ok: true, dataUrl: `data:${mime};base64,${base64}`, mime }
+    return { ok: true, bytes, mime }
   } catch (error) {
     console.error(error)
     const message = error instanceof Error ? error.message : String(error)
@@ -77,11 +73,11 @@ export const createPrepareStepWithReadMedia = (params: {
         cachedImages.set(toolCallId, null)
         callOrder.push(toolCallId)
       }
-      const loaded = await loadImageAsDataUrl(params.fs, trimmedPath)
+      const loaded = await loadImageBytes(params.fs, trimmedPath)
       if (!loaded.ok) {
         return buildReadMediaToolError(loaded.error)
       }
-      cachedImages.set(toolCallId, toImagePart(loaded.dataUrl) as ImagePart)
+      cachedImages.set(toolCallId, createBinaryImagePart(loaded.bytes, loaded.mime))
       return { ok: true, path: trimmedPath, mime: loaded.mime }
     },
   })

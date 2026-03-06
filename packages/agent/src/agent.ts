@@ -30,6 +30,7 @@ import {
   dedupeAttachments,
   AttachmentsStreamExtractor,
 } from './utils/attachments'
+import { createImagePartFromAttachment } from './utils/image-parts'
 import type { GatewayInputAttachment } from './types/attachment'
 import { getMCPTools } from './tools/mcp'
 import { getTools } from './tools'
@@ -82,12 +83,8 @@ const buildStepUsages = (
 
 export const buildNativeImageParts = (attachments: GatewayInputAttachment[]): ImagePart[] => {
   return attachments
-    .filter((attachment) =>
-      attachment.type === 'image' &&
-      (attachment.transport === 'inline_data_url' || attachment.transport === 'public_url') &&
-      Boolean(attachment.payload),
-    )
-    .map((attachment): ImagePart => ({ type: 'image', image: attachment.payload }))
+    .map((attachment) => createImagePartFromAttachment(attachment))
+    .filter((attachment): attachment is ImagePart => attachment != null)
 }
 
 export const createAgent = (
