@@ -47,6 +47,11 @@ host = "agent"
 port = 8081
 server_addr = "server:8080"
 
+[browser_gateway]
+host = "browser"
+port = 8083
+server_addr = "server:8080"
+
 [web]
 host = "0.0.0.0"
 port = 8082

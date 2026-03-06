@@ -47,6 +47,11 @@ host = "127.0.0.1"
 port = 8081
 server_addr = ":8080"
 
+[browser_gateway]
+host = "127.0.0.1"
+port = 8083
+server_addr = ":8080"
+
 [web]
 host = "127.0.0.1"
 port = 8082

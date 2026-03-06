@@ -125,6 +125,14 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		memoryProviderUUID = providerID
 	}
+	browserContextUUID := pgtype.UUID{}
+	if value := strings.TrimSpace(req.BrowserContextID); value != "" {
+		ctxID, err := db.ParseUUID(value)
+		if err != nil {
+			return Settings{}, err
+		}
+		browserContextUUID = ctxID
+	}
 	if current.MaxContextLoadTime < math.MinInt32 || current.MaxContextLoadTime > math.MaxInt32 ||
 		current.MaxContextTokens < math.MinInt32 || current.MaxContextTokens > math.MaxInt32 ||
 		current.MaxInboxItems < math.MinInt32 || current.MaxInboxItems > math.MaxInt32 ||
@@ -148,6 +156,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		HeartbeatModelID:   heartbeatModelUUID,
 		SearchProviderID:   searchProviderUUID,
 		MemoryProviderID:   memoryProviderUUID,
+		BrowserContextID:   browserContextUUID,
 	})
 	if err != nil {
 		return Settings{}, err
@@ -223,6 +232,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.HeartbeatModelID,
 		row.SearchProviderID,
 		row.MemoryProviderID,
+		row.BrowserContextID,
 	)
 }
 
@@ -241,6 +251,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.HeartbeatModelID,
 		row.SearchProviderID,
 		row.MemoryProviderID,
+		row.BrowserContextID,
 	)
 }
 
@@ -258,6 +269,7 @@ func normalizeBotSettingsFields(
 	heartbeatModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 	memoryProviderID pgtype.UUID,
+	browserContextID pgtype.UUID,
 ) Settings {
 	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, maxInboxItems, language, allowGuest, reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval)
 	if chatModelID.Valid {
@@ -271,6 +283,9 @@ func normalizeBotSettingsFields(
 	}
 	if memoryProviderID.Valid {
 		settings.MemoryProviderID = uuid.UUID(memoryProviderID.Bytes).String()
+	}
+	if browserContextID.Valid {
+		settings.BrowserContextID = uuid.UUID(browserContextID.Bytes).String()
 	}
 	return settings
 }

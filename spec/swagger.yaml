@@ -196,6 +196,39 @@ definitions:
       user_id:
         type: string
     type: object
+  browsercontexts.BrowserContext:
+    properties:
+      config:
+        items:
+          type: integer
+        type: array
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  browsercontexts.CreateRequest:
+    properties:
+      config:
+        items:
+          type: integer
+        type: array
+      name:
+        type: string
+    type: object
+  browsercontexts.UpdateRequest:
+    properties:
+      config:
+        items:
+          type: integer
+        type: array
+      name:
+        type: string
+    type: object
   channel.Action:
     properties:
       label:
@@ -690,21 +723,6 @@ definitions:
       provider:
         type: string
     type: object
-  github_com_memohai_memoh_internal_fs.FileInfo:
-    properties:
-      isDir:
-        type: boolean
-      modTime:
-        type: string
-      mode:
-        type: string
-      name:
-        type: string
-      path:
-        type: string
-      size:
-        type: integer
-    type: object
   github_com_memohai_memoh_internal_mcp.Connection:
     properties:
       auth_type:
@@ -841,7 +859,7 @@ definitions:
     properties:
       entries:
         items:
-          $ref: '#/definitions/github_com_memohai_memoh_internal_fs.FileInfo'
+          $ref: '#/definitions/handlers.FSFileInfo'
         type: array
       path:
         type: string
@@ -888,8 +906,6 @@ definitions:
       container_path:
         type: string
       created_at:
-        type: string
-      host_path:
         type: string
       image:
         type: string
@@ -1169,12 +1185,23 @@ definitions:
     type: object
   handlers.oauthAuthorizeRequest:
     properties:
+      callback_url:
+        type: string
       client_id:
+        type: string
+      client_secret:
         type: string
     type: object
   handlers.oauthDiscoverRequest:
     properties:
       url:
+        type: string
+    type: object
+  handlers.oauthExchangeRequest:
+    properties:
+      code:
+        type: string
+      state:
         type: string
     type: object
   handlers.skillsOpResponse:
@@ -1343,6 +1370,8 @@ definitions:
   mcp.OAuthStatus:
     properties:
       auth_server:
+        type: string
+      callback_url:
         type: string
       configured:
         type: boolean
@@ -1769,7 +1798,6 @@ definitions:
   providers.GetResponse:
     properties:
       api_key:
-        description: masked in response
         type: string
       base_url:
         type: string
@@ -1991,6 +2019,8 @@ definitions:
     properties:
       allow_guest:
         type: boolean
+      browser_context_id:
+        type: string
       chat_model_id:
         type: string
       heartbeat_enabled:
@@ -2020,6 +2050,8 @@ definitions:
     properties:
       allow_guest:
         type: boolean
+      browser_context_id:
+        type: string
       chat_model_id:
         type: string
       heartbeat_enabled:
@@ -2163,32 +2195,6 @@ info:
   title: Memoh API
   version: 1.0.0
 paths:
-  /api/oauth/mcp/callback:
-    get:
-      description: Handles the OAuth authorization callback, exchanges code for tokens
-      parameters:
-      - description: Authorization code
-        in: query
-        name: code
-        required: true
-        type: string
-      - description: State parameter
-        in: query
-        name: state
-        required: true
-        type: string
-      responses:
-        "200":
-          description: HTML page that closes the popup
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: OAuth callback handler
-      tags:
-      - mcp
   /auth/login:
     post:
       description: Validate user credentials and issue a JWT
@@ -3724,6 +3730,31 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Discover OAuth configuration for MCP server
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp/{id}/oauth/exchange:
+    post:
+      description: Frontend callback page calls this to exchange the authorization
+        code for access/refresh tokens
+      parameters:
+      - description: Authorization code and state
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.oauthExchangeRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Exchange OAuth authorization code for tokens
       tags:
       - mcp
   /bots/{bot_id}/mcp/{id}/oauth/status:
@@ -5450,6 +5481,137 @@ paths:
       summary: Transfer bot owner (admin only)
       tags:
       - bots
+  /browser-contexts:
+    get:
+      description: List all browser context configurations
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/browsercontexts.BrowserContext'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List browser contexts
+      tags:
+      - browser-contexts
+    post:
+      consumes:
+      - application/json
+      description: Create a browser context configuration
+      parameters:
+      - description: Browser context configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/browsercontexts.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/browsercontexts.BrowserContext'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a browser context
+      tags:
+      - browser-contexts
+  /browser-contexts/{id}:
+    delete:
+      description: Delete browser context by ID
+      parameters:
+      - description: Browser Context ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a browser context
+      tags:
+      - browser-contexts
+    get:
+      description: Get browser context by ID
+      parameters:
+      - description: Browser Context ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/browsercontexts.BrowserContext'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a browser context
+      tags:
+      - browser-contexts
+    put:
+      consumes:
+      - application/json
+      description: Update browser context by ID
+      parameters:
+      - description: Browser Context ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/browsercontexts.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/browsercontexts.BrowserContext'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a browser context
+      tags:
+      - browser-contexts
   /channels:
     get:
       description: List channel meta information including capabilities and schemas

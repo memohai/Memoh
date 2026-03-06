@@ -60,7 +60,8 @@
     "home": "首页",
     "mcp": "MCP",
     "platform": "接入平台",
-    "usage": "用量统计"
+    "usage": "用量统计",
+    "browserContexts": "浏览器"
   },
   "breadcrumb": {
     "main": "主页"
@@ -275,6 +276,30 @@
       "inbound_mode": "入站模式",
       "webhook_signing_key": "Webhook 签名密钥"
     }
+  },
+  "browserContext": {
+    "title": "浏览器上下文",
+    "add": "添加浏览器上下文",
+    "searchPlaceholder": "搜索浏览器上下文...",
+    "emptyTitle": "暂无浏览器上下文",
+    "emptyDescription": "添加浏览器上下文以启用 Bot 的浏览器自动化功能",
+    "deleteConfirm": "确定要删除此浏览器上下文吗？使用它的 Bot 将无法使用浏览器功能。",
+    "saveSuccess": "浏览器上下文已保存",
+    "deleteSuccess": "浏览器上下文已删除",
+    "name": "名称",
+    "namePlaceholder": "输入上下文名称",
+    "viewportWidth": "视口宽度",
+    "viewportHeight": "视口高度",
+    "userAgent": "User Agent",
+    "userAgentPlaceholder": "自定义 User Agent 字符串",
+    "deviceScaleFactor": "设备缩放比",
+    "isMobile": "移动设备",
+    "locale": "语言区域",
+    "localePlaceholder": "例如 zh-CN",
+    "timezoneId": "时区",
+    "timezonePlaceholder": "例如 Asia/Shanghai",
+    "ignoreHTTPSErrors": "忽略 HTTPS 错误",
+    "config": "配置"
   },
   "mcp": {
     "addTitle": "添加 MCP",
@@ -565,6 +590,8 @@
       "heartbeatModel": "心跳模型",
       "heartbeatModelDescription": "选择心跳检查使用的模型，未设置时默认使用聊天模型。",
       "heartbeatModelPlaceholder": "使用聊天模型（默认）",
+      "browserContext": "浏览器上下文",
+      "browserContextPlaceholder": "选择浏览器上下文（未配置时不启用）",
       "allowGuest": "允许游客访问",
       "allowGuestPersonalHint": "个人 Bot 不支持游客访问，请使用公开 Bot。",
       "loopDetectionTitle": "自动检测并阻止模型循环输出",

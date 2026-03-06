@@ -84,6 +84,14 @@ const routes = [
         },
       },
       {
+        name: 'browser-contexts',
+        path: '/browser-contexts',
+        component: () => import('@/pages/browser-contexts/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.browserContexts'),
+        },
+      },
+      {
         name: 'usage',
         path: '/usage',
         component: () => import('@/pages/usage/index.vue'),

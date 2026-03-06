@@ -92,6 +92,7 @@ tmp/
 
 # compiled files
 memoh
+agent
 
 docs/docs/.vitepress/cache
 .pnpm-store

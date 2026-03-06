@@ -15,45 +15,6 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/oauth/mcp/callback": {
-            "get": {
-                "description": "Handles the OAuth authorization callback, exchanges code for tokens",
-                "tags": [
-                    "mcp"
-                ],
-                "summary": "OAuth callback handler",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Authorization code",
-                        "name": "code",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "State parameter",
-                        "name": "state",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "HTML page that closes the popup",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/auth/login": {
             "post": {
                 "description": "Validate user credentials and issue a JWT",
@@ -2448,6 +2409,43 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp/{id}/oauth/exchange": {
+            "post": {
+                "description": "Frontend callback page calls this to exchange the authorization code for access/refresh tokens",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Exchange OAuth authorization code for tokens",
+                "parameters": [
+                    {
+                        "description": "Authorization code and state",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.oauthExchangeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -4950,6 +4948,204 @@ const docTemplate = `{
                 }
             }
         },
+        "/browser-contexts": {
+            "get": {
+                "description": "List all browser context configurations",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser-contexts"
+                ],
+                "summary": "List browser contexts",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/browsercontexts.BrowserContext"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a browser context configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser-contexts"
+                ],
+                "summary": "Create a browser context",
+                "parameters": [
+                    {
+                        "description": "Browser context configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/browsercontexts.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/browsercontexts.BrowserContext"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/browser-contexts/{id}": {
+            "get": {
+                "description": "Get browser context by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser-contexts"
+                ],
+                "summary": "Get a browser context",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Browser Context ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/browsercontexts.BrowserContext"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update browser context by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser-contexts"
+                ],
+                "summary": "Update a browser context",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Browser Context ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/browsercontexts.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/browsercontexts.BrowserContext"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete browser context by ID",
+                "tags": [
+                    "browser-contexts"
+                ],
+                "summary": "Delete a browser context",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Browser Context ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/channels": {
             "get": {
                 "description": "List channel meta information including capabilities and schemas",
@@ -7424,6 +7620,57 @@ const docTemplate = `{
                 }
             }
         },
+        "browsercontexts.BrowserContext": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "browsercontexts.CreateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "browsercontexts.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "channel.Action": {
             "type": "object",
             "properties": {
@@ -8150,29 +8397,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_memohai_memoh_internal_fs.FileInfo": {
-            "type": "object",
-            "properties": {
-                "isDir": {
-                    "type": "boolean"
-                },
-                "modTime": {
-                    "type": "string"
-                },
-                "mode": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "path": {
-                    "type": "string"
-                },
-                "size": {
-                    "type": "integer"
-                }
-            }
-        },
         "github_com_memohai_memoh_internal_mcp.Connection": {
             "type": "object",
             "properties": {
@@ -8382,7 +8606,7 @@ const docTemplate = `{
                 "entries": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_memohai_memoh_internal_fs.FileInfo"
+                        "$ref": "#/definitions/handlers.FSFileInfo"
                     }
                 },
                 "path": {
@@ -8455,9 +8679,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "created_at": {
-                    "type": "string"
-                },
-                "host_path": {
                     "type": "string"
                 },
                 "image": {
@@ -8887,7 +9108,13 @@ const docTemplate = `{
         "handlers.oauthAuthorizeRequest": {
             "type": "object",
             "properties": {
+                "callback_url": {
+                    "type": "string"
+                },
                 "client_id": {
+                    "type": "string"
+                },
+                "client_secret": {
                     "type": "string"
                 }
             }
@@ -8896,6 +9123,17 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.oauthExchangeRequest": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "state": {
                     "type": "string"
                 }
             }
@@ -9153,6 +9391,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "auth_server": {
+                    "type": "string"
+                },
+                "callback_url": {
                     "type": "string"
                 },
                 "configured": {
@@ -9793,7 +10034,6 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "api_key": {
-                    "description": "masked in response",
                     "type": "string"
                 },
                 "base_url": {
@@ -10120,6 +10360,9 @@ const docTemplate = `{
                 "allow_guest": {
                     "type": "boolean"
                 },
+                "browser_context_id": {
+                    "type": "string"
+                },
                 "chat_model_id": {
                     "type": "string"
                 },
@@ -10163,6 +10406,9 @@ const docTemplate = `{
             "properties": {
                 "allow_guest": {
                     "type": "boolean"
+                },
+                "browser_context_id": {
+                    "type": "string"
                 },
                 "chat_model_id": {
                     "type": "string"
@@ -10374,7 +10620,7 @@ const docTemplate = `{
     }
 }`
 
-// SwaggerInfo holds exported Swagger Info so clients can modify it.
+// SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0.0",
 	Host:             "",

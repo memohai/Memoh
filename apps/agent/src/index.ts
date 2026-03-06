@@ -90,5 +90,5 @@ const app = new Elysia()
   })
 
 console.log(
-  `Agent Gateway is running at ${app.server?.hostname}:${app.server?.port}`,
+  `⚙️ Agent Gateway is running at ${app.server?.hostname}:${app.server?.port}`,
 )

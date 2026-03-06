@@ -99,6 +99,19 @@ services:
     networks:
       - memoh-network
 
+  browser:
+    image: memohai/browser:latest
+    container_name: memoh-browser
+    volumes:
+      - ${MEMOH_CONFIG:-./config.toml}:/config.toml:ro
+    ports:
+      - "8083:8083"
+    depends_on:
+      - server
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
 volumes:
   postgres_data:
     driver: local

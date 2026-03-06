@@ -32,6 +32,16 @@
       />
     </div>
 
+    <!-- Browser Context -->
+    <div class="space-y-2">
+      <Label>{{ $t('bots.settings.browserContext') }}</Label>
+      <BrowserContextSelect
+        v-model="form.browser_context_id"
+        :contexts="browserContexts"
+        :placeholder="$t('bots.settings.browserContextPlaceholder')"
+      />
+    </div>
+
     <Separator />
 
     <!-- Max Context Load Time -->
@@ -189,8 +199,9 @@ import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ModelSelect from './model-select.vue'
 import SearchProviderSelect from './search-provider-select.vue'
 import MemoryProviderSelect from './memory-provider-select.vue'
+import BrowserContextSelect from './browser-context-select.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders } from '@memoh/sdk'
+import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getBrowserContexts } from '@memoh/sdk'
 import type { SettingsSettings } from '@memoh/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -251,6 +262,14 @@ const { data: memoryProviderData } = useQuery({
   },
 })
 
+const { data: browserContextData } = useQuery({
+  key: ['all-browser-contexts'],
+  query: async () => {
+    const { data } = await getBrowserContexts({ throwOnError: true })
+    return data
+  },
+})
+
 const { mutateAsync: updateSettings, isLoading } = useMutation({
   mutation: async (body: Partial<SettingsSettings>) => {
     const { data } = await putBotsByBotIdSettings({
@@ -277,6 +296,7 @@ const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 const searchProviders = computed(() => searchProviderData.value ?? [])
 const memoryProviders = computed(() => memoryProviderData.value ?? [])
+const browserContexts = computed(() => browserContextData.value ?? [])
 
 const chatModelSupportsReasoning = computed(() => {
   if (!form.chat_model_id) return false
@@ -289,6 +309,7 @@ const form = reactive({
   chat_model_id: '',
   search_provider_id: '',
   memory_provider_id: '',
+  browser_context_id: '',
   max_context_load_time: 0,
   max_context_tokens: 0,
   language: '',
@@ -302,6 +323,7 @@ watch(settings, (val) => {
     form.chat_model_id = val.chat_model_id ?? ''
     form.search_provider_id = val.search_provider_id ?? ''
     form.memory_provider_id = (val as any).memory_provider_id ?? ''
+    form.browser_context_id = (val as any).browser_context_id ?? ''
     form.max_context_load_time = val.max_context_load_time ?? 0
     form.max_context_tokens = val.max_context_tokens ?? 0
     form.language = val.language ?? ''
@@ -318,6 +340,7 @@ const hasChanges = computed(() => {
     form.chat_model_id !== (s.chat_model_id ?? '')
     || form.search_provider_id !== (s.search_provider_id ?? '')
     || form.memory_provider_id !== (s.memory_provider_id ?? '')
+    || form.browser_context_id !== (s.browser_context_id ?? '')
     || form.max_context_load_time !== (s.max_context_load_time ?? 0)
     || form.max_context_tokens !== (s.max_context_tokens ?? 0)
     || form.language !== (s.language ?? '')

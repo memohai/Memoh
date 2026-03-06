@@ -14,12 +14,14 @@ SELECT
   chat_models.id AS chat_model_id,
   heartbeat_models.id AS heartbeat_model_id,
   search_providers.id AS search_provider_id,
-  memory_providers.id AS memory_provider_id
+  memory_providers.id AS memory_provider_id,
+  browser_contexts.id AS browser_context_id
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
+LEFT JOIN browser_contexts ON browser_contexts.id = bots.browser_context_id
 WHERE bots.id = $1;
 
 -- name: UpsertBotSettings :one
@@ -39,9 +41,10 @@ WITH updated AS (
       heartbeat_model_id = COALESCE(sqlc.narg(heartbeat_model_id)::uuid, bots.heartbeat_model_id),
       search_provider_id = COALESCE(sqlc.narg(search_provider_id)::uuid, bots.search_provider_id),
       memory_provider_id = COALESCE(sqlc.narg(memory_provider_id)::uuid, bots.memory_provider_id),
+      browser_context_id = COALESCE(sqlc.narg(browser_context_id)::uuid, bots.browser_context_id),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.allow_guest, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.chat_model_id, bots.heartbeat_model_id, bots.search_provider_id, bots.memory_provider_id
+  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.allow_guest, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.chat_model_id, bots.heartbeat_model_id, bots.search_provider_id, bots.memory_provider_id, bots.browser_context_id
 )
 SELECT
   updated.id AS bot_id,
@@ -58,12 +61,14 @@ SELECT
   chat_models.id AS chat_model_id,
   heartbeat_models.id AS heartbeat_model_id,
   search_providers.id AS search_provider_id,
-  memory_providers.id AS memory_provider_id
+  memory_providers.id AS memory_provider_id,
+  browser_contexts.id AS browser_context_id
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id
-LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id;
+LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id
+LEFT JOIN browser_contexts ON browser_contexts.id = updated.browser_context_id;
 
 -- name: DeleteSettingsByBotID :exec
 UPDATE bots
@@ -81,5 +86,6 @@ SET max_context_load_time = 1440,
     heartbeat_model_id = NULL,
     search_provider_id = NULL,
     memory_provider_id = NULL,
+    browser_context_id = NULL,
     updated_at = now()
 WHERE id = $1;

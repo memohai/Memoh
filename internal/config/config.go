@@ -38,7 +38,8 @@ type Config struct {
 	MCP          MCPConfig          `toml:"mcp"`
 	Postgres     PostgresConfig     `toml:"postgres"`
 	Qdrant       QdrantConfig       `toml:"qdrant"`
-	AgentGateway AgentGatewayConfig `toml:"agent_gateway"`
+	AgentGateway   AgentGatewayConfig   `toml:"agent_gateway"`
+	BrowserGateway BrowserGatewayConfig `toml:"browser_gateway"`
 }
 
 type LogConfig struct {
@@ -141,6 +142,23 @@ func (c AgentGatewayConfig) BaseURL() string {
 	return "http://" + host + ":" + strconv.Itoa(port)
 }
 
+type BrowserGatewayConfig struct {
+	Host string `toml:"host"`
+	Port int    `toml:"port"`
+}
+
+func (c BrowserGatewayConfig) BaseURL() string {
+	host := c.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := c.Port
+	if port == 0 {
+		port = 8083
+	}
+	return "http://" + host + ":" + strconv.Itoa(port)
+}
+
 func Load(path string) (Config, error) {
 	cfg := Config{
 		Log: LogConfig{
@@ -178,6 +196,10 @@ func Load(path string) (Config, error) {
 		AgentGateway: AgentGatewayConfig{
 			Host: "127.0.0.1",
 			Port: 8081,
+		},
+		BrowserGateway: BrowserGatewayConfig{
+			Host: "127.0.0.1",
+			Port: 8083,
 		},
 	}
 

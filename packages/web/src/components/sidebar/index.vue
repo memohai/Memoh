@@ -137,6 +137,11 @@ const sidebarInfo = computed(() => [
     icon: ['fas', 'envelope'],
   },
   {
+    title: t('sidebar.browserContexts'),
+    name: 'browser-contexts',
+    icon: ['fas', 'window-maximize'],
+  },
+  {
     title: t('sidebar.usage'),
     name: 'usage',
     icon: ['fas', 'chart-line'],

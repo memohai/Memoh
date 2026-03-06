@@ -47,3 +47,8 @@ timeout_seconds = 10
 host = "127.0.0.1"
 port = 8081
 server_addr = "127.0.0.1:8080"
+
+[browser_gateway]
+host = "127.0.0.1"
+port = 8083
+server_addr = "127.0.0.1:8080"

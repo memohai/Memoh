@@ -8,6 +8,7 @@ export interface Config {
   postgres: PostgresConfig;
   qdrant: QdrantConfig;
   agent_gateway: AgentGatewayConfig;
+  browser_gateway: BrowserGatewayConfig;
   web: WebConfig;
 }
 
@@ -59,6 +60,12 @@ export interface QdrantConfig {
 }
 
 export interface AgentGatewayConfig {
+  host: string;
+  port: number;
+  server_addr?: string;
+}
+
+export interface BrowserGatewayConfig {
   host: string;
   port: number;
   server_addr?: string;
