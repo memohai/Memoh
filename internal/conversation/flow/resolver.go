@@ -342,7 +342,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	overhead += systemPromptReserve
 
 	historyBudget := maxTokens - overhead
-	if historyBudget < 0 {
+	if maxTokens > 0 && historyBudget <= 0 {
+		historyBudget = 1
+	} else if historyBudget < 0 {
 		historyBudget = 0
 	}
 
@@ -1279,7 +1281,7 @@ func estimateMessageTokens(msg conversation.ModelMessage) int {
 }
 
 func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxTokens int) []conversation.ModelMessage {
-	if maxTokens <= 0 || len(messages) == 0 {
+	if maxTokens == 0 || len(messages) == 0 {
 		result := make([]conversation.ModelMessage, len(messages))
 		for i, m := range messages {
 			result[i] = m.Message
@@ -1287,10 +1289,9 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 		return result
 	}
 
-	// Scan from newest to oldest, accumulating per-message outputTokens from
-	// stored usage data. Messages without usage (user / tool) are included for
-	// free — the outputTokens of surrounding assistant turns already account
-	// for the context they consumed.
+	// Scan from newest to oldest, accumulating per-message token costs.
+	// Messages with stored usage data use that value; others fall back to a
+	// character-based estimate so that user/tool messages are not free-passed.
 	totalTokens := 0
 	cutoff := 0
 	messagesWithUsage := 0
@@ -1298,6 +1299,8 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 		if messages[i].UsageOutputTokens != nil {
 			totalTokens += *messages[i].UsageOutputTokens
 			messagesWithUsage++
+		} else {
+			totalTokens += estimateMessageTokens(messages[i].Message)
 		}
 		if totalTokens > maxTokens {
 			cutoff = i + 1

@@ -112,3 +112,55 @@ func TestTrimMessagesByTokens_NoUsage_KeepsAll(t *testing.T) {
 		t.Fatalf("messages without outputTokens should all be kept, got %d", len(trimmed))
 	}
 }
+
+func TestTrimMessagesByTokens_ZeroMeansNoLimit(t *testing.T) {
+	t.Parallel()
+
+	messages := []messageWithUsage{
+		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}, UsageOutputTokens: intPtr(10000)},
+		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("world")}, UsageOutputTokens: intPtr(10000)},
+	}
+
+	// maxTokens = 0 means "no limit configured", should keep all messages.
+	trimmed := trimMessagesByTokens(nil, messages, 0)
+	if len(trimmed) != 2 {
+		t.Fatalf("maxTokens=0 should keep all messages, got %d", len(trimmed))
+	}
+}
+
+func TestTrimMessagesByTokens_SmallBudgetTrims(t *testing.T) {
+	t.Parallel()
+
+	messages := []messageWithUsage{
+		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("old message")}, UsageOutputTokens: intPtr(100)},
+		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("old reply")}, UsageOutputTokens: intPtr(200)},
+		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("new message")}, UsageOutputTokens: intPtr(50)},
+		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("new reply")}, UsageOutputTokens: intPtr(60)},
+	}
+
+	// Budget of 1: should trim aggressively, NOT return all messages.
+	trimmed := trimMessagesByTokens(nil, messages, 1)
+	if len(trimmed) >= len(messages) {
+		t.Fatalf("maxTokens=1 should trim history, but got %d messages (same as input)", len(trimmed))
+	}
+}
+
+func TestTrimMessagesByTokens_EstimatesFallback(t *testing.T) {
+	t.Parallel()
+
+	// Long user message without usage data — should be estimated.
+	longText := make([]byte, 400)
+	for i := range longText {
+		longText[i] = 'x'
+	}
+	messages := []messageWithUsage{
+		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(string(longText))}},
+		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("ok")}, UsageOutputTokens: intPtr(10)},
+	}
+
+	// Budget of 50: user message is ~100 estimated tokens (400/4), should be trimmed.
+	trimmed := trimMessagesByTokens(nil, messages, 50)
+	if len(trimmed) == 2 {
+		t.Fatalf("expected long user message without usage to be trimmed via estimation, got %d", len(trimmed))
+	}
+}
