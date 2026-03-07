@@ -287,7 +287,11 @@ func normalizeOutboundMessage(msg Message) Message {
 		if len(msg.Parts) > 0 {
 			msg.Format = MessageFormatRich
 		} else if strings.TrimSpace(msg.Text) != "" {
-			msg.Format = MessageFormatPlain
+			if ContainsMarkdown(msg.Text) {
+				msg.Format = MessageFormatMarkdown
+			} else {
+				msg.Format = MessageFormatPlain
+			}
 		}
 	}
 	return msg
