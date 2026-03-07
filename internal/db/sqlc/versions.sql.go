@@ -67,7 +67,8 @@ SELECT
   cv.snapshot_id,
   cv.version,
   cv.created_at,
-  s.runtime_snapshot_name
+  s.runtime_snapshot_name,
+  s.display_name
 FROM container_versions cv
 JOIN snapshots s ON s.id = cv.snapshot_id
 WHERE cv.container_id = $1
@@ -81,6 +82,7 @@ type ListVersionsByContainerIDRow struct {
 	Version             int32              `json:"version"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	RuntimeSnapshotName string             `json:"runtime_snapshot_name"`
+	DisplayName         pgtype.Text        `json:"display_name"`
 }
 
 func (q *Queries) ListVersionsByContainerID(ctx context.Context, containerID string) ([]ListVersionsByContainerIDRow, error) {
@@ -99,6 +101,7 @@ func (q *Queries) ListVersionsByContainerID(ctx context.Context, containerID str
 			&i.Version,
 			&i.CreatedAt,
 			&i.RuntimeSnapshotName,
+			&i.DisplayName,
 		); err != nil {
 			return nil, err
 		}

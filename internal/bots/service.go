@@ -425,7 +425,7 @@ func (s *Service) enqueueDeleteLifecycle(ctx context.Context, botID string) {
 		defer cancel()
 
 		if s.containerLifecycle != nil {
-			if err := s.containerLifecycle.CleanupBotContainer(lifecycleCtx, botID); err != nil {
+			if err := s.containerLifecycle.CleanupBotContainer(lifecycleCtx, botID, false); err != nil {
 				s.logger.Error("bot container cleanup failed",
 					slog.String("bot_id", botID),
 					slog.Any("error", err),

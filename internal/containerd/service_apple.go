@@ -139,6 +139,10 @@ func (s *AppleService) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	return out, nil
 }
 
+func (*AppleService) ResolveRemoteDigest(_ context.Context, _ string) (string, error) {
+	return "", ErrNotSupported
+}
+
 func (s *AppleService) DeleteImage(ctx context.Context, ref string, _ *DeleteImageOptions) error {
 	if ref == "" {
 		return ErrInvalidArgument

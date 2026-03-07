@@ -383,11 +383,135 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Export /data before deletion",
+                        "name": "preserve_data",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/data/export": {
+            "post": {
+                "produces": [
+                    "application/gzip"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Export container /data as a tar.gz archive",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/data/import": {
+            "post": {
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Import a tar.gz archive into container /data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "tar.gz archive",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/data/restore": {
+            "post": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Restore previously preserved data into container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -1125,6 +1249,52 @@ const docTemplate = `{
                     },
                     "501": {
                         "description": "Snapshots currently not supported on this backend",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/snapshots/rollback": {
+            "post": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Rollback container to a previous snapshot version",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Rollback payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RollbackRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -8485,6 +8655,9 @@ const docTemplate = `{
         "handlers.CreateContainerRequest": {
             "type": "object",
             "properties": {
+                "restore_data": {
+                    "type": "boolean"
+                },
                 "snapshotter": {
                     "type": "string"
                 }
@@ -8495,6 +8668,12 @@ const docTemplate = `{
             "properties": {
                 "container_id": {
                     "type": "string"
+                },
+                "data_restored": {
+                    "type": "boolean"
+                },
+                "has_preserved_data": {
+                    "type": "boolean"
                 },
                 "image": {
                     "type": "string"
@@ -8519,6 +8698,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "container_id": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "runtime_snapshot_name": {
                     "type": "string"
                 },
                 "snapshot_name": {
@@ -8680,6 +8865,9 @@ const docTemplate = `{
                 },
                 "created_at": {
                     "type": "string"
+                },
+                "has_preserved_data": {
+                    "type": "boolean"
                 },
                 "image": {
                     "type": "string"
@@ -8871,6 +9059,14 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.RollbackRequest": {
+            "type": "object",
+            "properties": {
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.SkillItem": {
             "type": "object",
             "properties": {
@@ -8931,6 +9127,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "display_name": {
+                    "type": "string"
+                },
                 "kind": {
                     "type": "string"
                 },
@@ -8947,6 +9146,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "parent": {
+                    "type": "string"
+                },
+                "runtime_snapshot_name": {
                     "type": "string"
                 },
                 "snapshotter": {

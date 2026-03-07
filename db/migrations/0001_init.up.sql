@@ -338,6 +338,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   container_id TEXT NOT NULL REFERENCES containers(container_id) ON DELETE CASCADE,
   runtime_snapshot_name TEXT NOT NULL,
+  display_name TEXT,
   parent_runtime_snapshot_name TEXT,
   snapshotter TEXT NOT NULL,
   source TEXT NOT NULL,

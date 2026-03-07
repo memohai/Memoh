@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -44,24 +46,32 @@ type ContainerdHandler struct {
 
 type CreateContainerRequest struct {
 	Snapshotter string `json:"snapshotter,omitempty"`
+	RestoreData bool   `json:"restore_data,omitempty"`
 }
 
 type CreateContainerResponse struct {
-	ContainerID string `json:"container_id"`
-	Image       string `json:"image"`
-	Snapshotter string `json:"snapshotter"`
-	Started     bool   `json:"started"`
+	ContainerID      string `json:"container_id"`
+	Image            string `json:"image"`
+	Snapshotter      string `json:"snapshotter"`
+	Started          bool   `json:"started"`
+	DataRestored     bool   `json:"data_restored"`
+	HasPreservedData bool   `json:"has_preserved_data"`
 }
 
 type GetContainerResponse struct {
-	ContainerID   string    `json:"container_id"`
-	Image         string    `json:"image"`
-	Status        string    `json:"status"`
-	Namespace     string    `json:"namespace"`
-	ContainerPath string    `json:"container_path"`
-	TaskRunning   bool      `json:"task_running"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ContainerID      string    `json:"container_id"`
+	Image            string    `json:"image"`
+	Status           string    `json:"status"`
+	Namespace        string    `json:"namespace"`
+	ContainerPath    string    `json:"container_path"`
+	TaskRunning      bool      `json:"task_running"`
+	HasPreservedData bool      `json:"has_preserved_data"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type RollbackRequest struct {
+	Version int `json:"version"`
 }
 
 type CreateSnapshotRequest struct {
@@ -69,16 +79,20 @@ type CreateSnapshotRequest struct {
 }
 
 type CreateSnapshotResponse struct {
-	ContainerID  string `json:"container_id"`
-	SnapshotName string `json:"snapshot_name"`
-	Snapshotter  string `json:"snapshotter"`
-	Version      int    `json:"version"`
-	Source       string `json:"source"`
+	ContainerID         string `json:"container_id"`
+	SnapshotName        string `json:"snapshot_name"`
+	RuntimeSnapshotName string `json:"runtime_snapshot_name"`
+	DisplayName         string `json:"display_name"`
+	Snapshotter         string `json:"snapshotter"`
+	Version             int    `json:"version"`
+	Source              string `json:"source"`
 }
 
 type SnapshotInfo struct {
 	Snapshotter string            `json:"snapshotter"`
 	Name        string            `json:"name"`
+	DisplayName string            `json:"display_name,omitempty"`
+	RuntimeName string            `json:"runtime_snapshot_name"`
 	Parent      string            `json:"parent,omitempty"`
 	Kind        string            `json:"kind"`
 	CreatedAt   time.Time         `json:"created_at,omitempty"`
@@ -121,6 +135,10 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group.POST("/stop", h.StopContainer)
 	group.POST("/snapshots", h.CreateSnapshot)
 	group.GET("/snapshots", h.ListSnapshots)
+	group.POST("/snapshots/rollback", h.RollbackSnapshot)
+	group.POST("/data/export", h.ExportContainerData)
+	group.POST("/data/import", h.ImportContainerData)
+	group.POST("/data/restore", h.RestorePreservedData)
 	group.GET("/skills", h.ListSkills)
 	group.POST("/skills", h.UpsertSkills)
 	group.DELETE("/skills", h.DeleteSkills)
@@ -183,13 +201,25 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		started = true
 	}
 
+	dataRestored := false
+	if started && req.RestoreData && h.manager.HasPreservedData(botID) {
+		if err := h.manager.RestorePreservedData(ctx, botID); err != nil {
+			h.logger.Warn("restore preserved data on create failed",
+				slog.String("bot_id", botID), slog.Any("error", err))
+		} else {
+			dataRestored = true
+		}
+	}
+
 	h.upsertContainerRecord(ctx, botID, containerID, map[bool]string{true: "running", false: "created"}[started])
 
 	return c.JSON(http.StatusOK, CreateContainerResponse{
-		ContainerID: containerID,
-		Image:       image,
-		Snapshotter: snapshotter,
-		Started:     started,
+		ContainerID:      containerID,
+		Image:            image,
+		Snapshotter:      snapshotter,
+		Started:          started,
+		DataRestored:     dataRestored,
+		HasPreservedData: h.manager.HasPreservedData(botID),
 	})
 }
 
@@ -316,14 +346,15 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 					updatedAt = row.UpdatedAt.Time
 				}
 				return c.JSON(http.StatusOK, GetContainerResponse{
-					ContainerID:   row.ContainerID,
-					Image:         row.Image,
-					Status:        row.Status,
-					Namespace:     row.Namespace,
-					ContainerPath: row.ContainerPath,
-					TaskRunning:   taskRunning,
-					CreatedAt:     createdAt,
-					UpdatedAt:     updatedAt,
+					ContainerID:      row.ContainerID,
+					Image:            row.Image,
+					Status:           row.Status,
+					Namespace:        row.Namespace,
+					ContainerPath:    row.ContainerPath,
+					TaskRunning:      taskRunning,
+					HasPreservedData: h.manager.HasPreservedData(botID),
+					CreatedAt:        createdAt,
+					UpdatedAt:        updatedAt,
 				})
 			}
 		}
@@ -341,13 +372,14 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, GetContainerResponse{
-		ContainerID: info.ID,
-		Image:       info.Image,
-		Status:      "unknown",
-		Namespace:   h.namespace,
-		TaskRunning: h.isTaskRunning(ctx, containerID),
-		CreatedAt:   info.CreatedAt,
-		UpdatedAt:   info.UpdatedAt,
+		ContainerID:      info.ID,
+		Image:            info.Image,
+		Status:           "unknown",
+		Namespace:        h.namespace,
+		TaskRunning:      h.isTaskRunning(ctx, containerID),
+		HasPreservedData: h.manager.HasPreservedData(botID),
+		CreatedAt:        info.CreatedAt,
+		UpdatedAt:        info.UpdatedAt,
 	})
 }
 
@@ -355,6 +387,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 // @Summary Delete MCP container for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
+// @Param preserve_data query bool false "Export /data before deletion"
 // @Success 204
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -364,7 +397,8 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.CleanupBotContainer(c.Request().Context(), botID); err != nil {
+	preserveData := c.QueryParam("preserve_data") == "true"
+	if err := h.CleanupBotContainer(c.Request().Context(), botID, preserveData); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -473,11 +507,13 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, CreateSnapshotResponse{
-		ContainerID:  created.ContainerID,
-		SnapshotName: created.SnapshotName,
-		Snapshotter:  created.Snapshotter,
-		Version:      created.Version,
-		Source:       mcp.SnapshotSourceManual,
+		ContainerID:         created.ContainerID,
+		SnapshotName:        created.SnapshotName,
+		RuntimeSnapshotName: created.RuntimeSnapshotName,
+		DisplayName:         created.DisplayName,
+		Snapshotter:         created.Snapshotter,
+		Version:             created.Version,
+		Source:              mcp.SnapshotSourceManual,
 	})
 }
 
@@ -542,16 +578,28 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 		source := fallbackSource
 		managed := false
 		var version *int
+		displayName := ""
 		if meta != nil {
 			if meta.Source != "" {
 				source = meta.Source
 			}
 			managed = true
 			version = meta.Version
+			displayName = strings.TrimSpace(meta.DisplayName)
+		}
+		name := displayName
+		if name == "" {
+			if version != nil {
+				name = fmt.Sprintf("Version %d", *version)
+			} else {
+				name = runtimeInfo.Name
+			}
 		}
 		items = append(items, SnapshotInfo{
 			Snapshotter: data.Snapshotter,
-			Name:        runtimeInfo.Name,
+			Name:        name,
+			DisplayName: displayName,
+			RuntimeName: runtimeInfo.Name,
 			Parent:      runtimeInfo.Parent,
 			Kind:        runtimeInfo.Kind,
 			CreatedAt:   runtimeInfo.Created,
@@ -598,6 +646,130 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 		Snapshotter: data.Snapshotter,
 		Snapshots:   items,
 	})
+}
+
+// RollbackSnapshot godoc
+// @Summary Rollback container to a previous snapshot version
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Param payload body RollbackRequest true "Rollback payload"
+// @Success 200 {object} object
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/container/snapshots/rollback [post].
+func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.manager == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "manager not configured")
+	}
+
+	var req RollbackRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+	if req.Version < 1 {
+		return echo.NewHTTPError(http.StatusBadRequest, "version must be >= 1")
+	}
+
+	if err := h.manager.RollbackVersion(c.Request().Context(), botID, req.Version); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]any{"rolled_back_to": req.Version})
+}
+
+// ExportContainerData godoc
+// @Summary Export container /data as a tar.gz archive
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Produce application/gzip
+// @Success 200 {file} file
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/container/data/export [post].
+func (h *ContainerdHandler) ExportContainerData(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.manager == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "manager not configured")
+	}
+
+	reader, err := h.manager.ExportData(c.Request().Context(), botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	defer func() { _ = reader.Close() }()
+
+	c.Response().Header().Set("Content-Type", "application/gzip")
+	c.Response().Header().Set("Content-Disposition", `attachment; filename="`+botID+`-data.tar.gz"`)
+	c.Response().WriteHeader(http.StatusOK)
+	_, err = io.Copy(c.Response(), reader)
+	return err
+}
+
+// ImportContainerData godoc
+// @Summary Import a tar.gz archive into container /data
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Accept multipart/form-data
+// @Param file formData file true "tar.gz archive"
+// @Success 200 {object} object
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/container/data/import [post].
+func (h *ContainerdHandler) ImportContainerData(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.manager == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "manager not configured")
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "file is required")
+	}
+	src, err := file.Open()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "failed to open uploaded file")
+	}
+	defer func() { _ = src.Close() }()
+
+	if err := h.manager.ImportData(c.Request().Context(), botID, src); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"imported": true})
+}
+
+// RestorePreservedData godoc
+// @Summary Restore previously preserved data into container
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} object
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/container/data/restore [post].
+func (h *ContainerdHandler) RestorePreservedData(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.manager == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "manager not configured")
+	}
+
+	if !h.manager.HasPreservedData(botID) {
+		return echo.NewHTTPError(http.StatusNotFound, "no preserved data found")
+	}
+
+	if err := h.manager.RestorePreservedData(c.Request().Context(), botID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"restored": true})
 }
 
 func snapshotLineage(root string, all []ctr.SnapshotInfo) ([]ctr.SnapshotInfo, bool) {
@@ -704,63 +876,23 @@ func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string)
 }
 
 // CleanupBotContainer removes the containerd container and DB record for a bot.
-func (h *ContainerdHandler) CleanupBotContainer(ctx context.Context, botID string) error {
-	h.logger.Info("CleanupBotContainer starting", slog.String("bot_id", botID))
-	containerID, err := h.botContainerID(ctx, botID)
-	if err != nil {
-		h.logger.Warn("CleanupBotContainer: container not found for bot, cleaning up DB only",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
-		if h.queries != nil {
-			if pgBotID, parseErr := db.ParseUUID(botID); parseErr == nil {
-				if dbErr := h.queries.DeleteContainerByBotID(ctx, pgBotID); dbErr != nil {
-					h.logger.Error("CleanupBotContainer: failed to delete DB record",
-						slog.String("bot_id", botID), slog.Any("error", dbErr))
-				}
+// When preserveData is true, /data is exported to a backup archive before
+// deletion so it can be restored into a future container.
+func (h *ContainerdHandler) CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error {
+	h.logger.Info("CleanupBotContainer starting",
+		slog.String("bot_id", botID), slog.Bool("preserve_data", preserveData))
+
+	if h.manager != nil {
+		if err := h.manager.Delete(ctx, botID, preserveData); err != nil {
+			if !errdefs.IsNotFound(err) {
+				return err
 			}
+			h.logger.Warn("CleanupBotContainer: container not found in containerd",
+				slog.String("bot_id", botID))
 		}
-		return nil
-	}
-
-	h.logger.Info("CleanupBotContainer: found container",
-		slog.String("bot_id", botID),
-		slog.String("container_id", containerID),
-	)
-
-	h.logger.Info("CleanupBotContainer: removing network", slog.String("container_id", containerID))
-	if err := h.service.RemoveNetwork(ctx, ctr.NetworkSetupRequest{
-		ContainerID: containerID,
-		CNIBinDir:   h.cfg.CNIBinaryDir,
-		CNIConfDir:  h.cfg.CNIConfigDir,
-	}); err != nil {
-		h.logger.Warn("cleanup: remove network failed", slog.String("container_id", containerID), slog.Any("error", err))
-	}
-	h.logger.Info("CleanupBotContainer: stopping task", slog.String("container_id", containerID))
-	if err := h.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{
-		Timeout: 5 * time.Second,
-		Force:   true,
-	}); err != nil {
-		h.logger.Warn("cleanup: stop task failed", slog.String("container_id", containerID), slog.Any("error", err))
-	}
-	h.logger.Info("CleanupBotContainer: deleting task", slog.String("container_id", containerID))
-	if err := h.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
-		h.logger.Warn("cleanup: delete task failed", slog.String("container_id", containerID), slog.Any("error", err))
-	}
-
-	h.logger.Info("CleanupBotContainer: deleting container", slog.String("container_id", containerID))
-	if err := h.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{
-		CleanupSnapshot: true,
-	}); err != nil && !errdefs.IsNotFound(err) {
-		h.logger.Error("CleanupBotContainer: failed to delete container",
-			slog.String("container_id", containerID),
-			slog.Any("error", err),
-		)
-		return err
 	}
 
 	if h.queries != nil {
-		h.logger.Info("CleanupBotContainer: deleting container record from DB", slog.String("bot_id", botID))
 		if pgBotID, parseErr := db.ParseUUID(botID); parseErr == nil {
 			if dbErr := h.queries.DeleteContainerByBotID(ctx, pgBotID); dbErr != nil {
 				h.logger.Error("CleanupBotContainer: failed to delete DB record",

@@ -88,7 +88,7 @@ type ListChecksResponse struct {
 // ContainerLifecycle handles container lifecycle events bound to bot operations.
 type ContainerLifecycle interface {
 	SetupBotContainer(ctx context.Context, botID string) error
-	CleanupBotContainer(ctx context.Context, botID string) error
+	CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error
 }
 
 // RuntimeChecker produces runtime check items for a bot.

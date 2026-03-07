@@ -465,11 +465,14 @@ export type HandlersChannelMeta = {
 };
 
 export type HandlersCreateContainerRequest = {
+    restore_data?: boolean;
     snapshotter?: string;
 };
 
 export type HandlersCreateContainerResponse = {
     container_id?: string;
+    data_restored?: boolean;
+    has_preserved_data?: boolean;
     image?: string;
     snapshotter?: string;
     started?: boolean;
@@ -481,6 +484,8 @@ export type HandlersCreateSnapshotRequest = {
 
 export type HandlersCreateSnapshotResponse = {
     container_id?: string;
+    display_name?: string;
+    runtime_snapshot_name?: string;
     snapshot_name?: string;
     snapshotter?: string;
     source?: string;
@@ -548,6 +553,7 @@ export type HandlersGetContainerResponse = {
     container_id?: string;
     container_path?: string;
     created_at?: string;
+    has_preserved_data?: boolean;
     image?: string;
     namespace?: string;
     status?: string;
@@ -623,6 +629,10 @@ export type HandlersRefreshResponse = {
     token_type?: string;
 };
 
+export type HandlersRollbackRequest = {
+    version?: number;
+};
+
 export type HandlersSkillItem = {
     content?: string;
     description?: string;
@@ -647,6 +657,7 @@ export type HandlersSkillsUpsertRequest = {
 
 export type HandlersSnapshotInfo = {
     created_at?: string;
+    display_name?: string;
     kind?: string;
     labels?: {
         [key: string]: string;
@@ -654,6 +665,7 @@ export type HandlersSnapshotInfo = {
     managed?: boolean;
     name?: string;
     parent?: string;
+    runtime_snapshot_name?: string;
     snapshotter?: string;
     source?: string;
     updated_at?: string;
@@ -1558,7 +1570,12 @@ export type DeleteBotsByBotIdContainerData = {
          */
         bot_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Export /data before deletion
+         */
+        preserve_data?: boolean;
+    };
     url: '/bots/{bot_id}/container';
 };
 
@@ -1652,6 +1669,111 @@ export type PostBotsByBotIdContainerResponses = {
 };
 
 export type PostBotsByBotIdContainerResponse = PostBotsByBotIdContainerResponses[keyof PostBotsByBotIdContainerResponses];
+
+export type PostBotsByBotIdContainerDataExportData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/data/export';
+};
+
+export type PostBotsByBotIdContainerDataExportErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerDataExportError = PostBotsByBotIdContainerDataExportErrors[keyof PostBotsByBotIdContainerDataExportErrors];
+
+export type PostBotsByBotIdContainerDataExportResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostBotsByBotIdContainerDataImportData = {
+    body: {
+        /**
+         * tar.gz archive
+         */
+        file: Blob | File;
+    };
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/data/import';
+};
+
+export type PostBotsByBotIdContainerDataImportErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerDataImportError = PostBotsByBotIdContainerDataImportErrors[keyof PostBotsByBotIdContainerDataImportErrors];
+
+export type PostBotsByBotIdContainerDataImportResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type PostBotsByBotIdContainerDataImportResponse = PostBotsByBotIdContainerDataImportResponses[keyof PostBotsByBotIdContainerDataImportResponses];
+
+export type PostBotsByBotIdContainerDataRestoreData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/data/restore';
+};
+
+export type PostBotsByBotIdContainerDataRestoreErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerDataRestoreError = PostBotsByBotIdContainerDataRestoreErrors[keyof PostBotsByBotIdContainerDataRestoreErrors];
+
+export type PostBotsByBotIdContainerDataRestoreResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type PostBotsByBotIdContainerDataRestoreResponse = PostBotsByBotIdContainerDataRestoreResponses[keyof PostBotsByBotIdContainerDataRestoreResponses];
 
 export type GetBotsByBotIdContainerFsData = {
     body?: never;
@@ -2241,6 +2363,45 @@ export type PostBotsByBotIdContainerSnapshotsResponses = {
 };
 
 export type PostBotsByBotIdContainerSnapshotsResponse = PostBotsByBotIdContainerSnapshotsResponses[keyof PostBotsByBotIdContainerSnapshotsResponses];
+
+export type PostBotsByBotIdContainerSnapshotsRollbackData = {
+    /**
+     * Rollback payload
+     */
+    body: HandlersRollbackRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/snapshots/rollback';
+};
+
+export type PostBotsByBotIdContainerSnapshotsRollbackErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerSnapshotsRollbackError = PostBotsByBotIdContainerSnapshotsRollbackErrors[keyof PostBotsByBotIdContainerSnapshotsRollbackErrors];
+
+export type PostBotsByBotIdContainerSnapshotsRollbackResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type PostBotsByBotIdContainerSnapshotsRollbackResponse = PostBotsByBotIdContainerSnapshotsRollbackResponses[keyof PostBotsByBotIdContainerSnapshotsRollbackResponses];
 
 export type PostBotsByBotIdContainerStartData = {
     body?: never;

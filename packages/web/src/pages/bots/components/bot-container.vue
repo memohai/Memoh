@@ -1,71 +1,96 @@
 <script setup lang="ts">
-import { computed, ref,watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { resolveApiErrorMessage } from '@/utils/api-error'
-import { useCapabilitiesStore } from '@/store/capabilities'
+import { useRoute } from 'vue-router'
+import { useQuery } from '@pinia/colada'
 import {
+  deleteBotsByBotIdContainer,
   getBotsByBotIdContainer,
-  type HandlersGetContainerResponse,
-  type HandlersListSnapshotsResponse,
   getBotsByBotIdContainerSnapshots,
   getBotsById,
   postBotsByBotIdContainer,
-  postBotsByBotIdContainerStop,
+  postBotsByBotIdContainerDataExport,
+  postBotsByBotIdContainerDataImport,
+  postBotsByBotIdContainerDataRestore,
+  postBotsByBotIdContainerSnapshots,
+  postBotsByBotIdContainerSnapshotsRollback,
   postBotsByBotIdContainerStart,
-  deleteBotsByBotIdContainer,
-  postBotsByBotIdContainerSnapshots
+  postBotsByBotIdContainerStop,
+  type HandlersGetContainerResponse,
+  type HandlersListSnapshotsResponse,
 } from '@memoh/sdk'
-import { useRoute } from 'vue-router'
-import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
-import { useQuery } from '@pinia/colada'
-import { formatDateTime } from '@/utils/date-time' 
-import { Spinner, Button, Separator,Input } from '@memoh/ui'
+import { Button, Input, Label, Separator, Spinner, Switch } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
+import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
+import { useCapabilitiesStore } from '@/store/capabilities'
+import { formatDateTime } from '@/utils/date-time'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
-
-const route=useRoute()
-
+const route = useRoute()
 const { t } = useI18n()
 
-const containerLoading = ref(false)
-const containerAction = ref<'refresh' | 'create' | 'start' | 'stop' | 'delete' | 'snapshot' | ''>('')
+type ContainerAction =
+  | 'refresh'
+  | 'create'
+  | 'start'
+  | 'stop'
+  | 'delete'
+  | 'delete-preserve'
+  | 'snapshot'
+  | 'export'
+  | 'import'
+  | 'restore'
+  | 'rollback'
+  | ''
 
+const containerLoading = ref(false)
+const containerAction = ref<ContainerAction>('')
+const rollbackVersion = ref<number | null>(null)
+const createRestoreData = ref(false)
+const newSnapshotName = ref('')
+const importInputRef = ref<HTMLInputElement | null>(null)
+
+const capabilitiesStore = useCapabilitiesStore()
+const botId = computed(() => route.params.botId as string)
 const containerBusy = computed(() => containerLoading.value || containerAction.value !== '')
+
+type BotContainerInfo = HandlersGetContainerResponse
+type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
+
+const containerInfo = ref<BotContainerInfo | null>(null)
+const containerMissing = ref(false)
+const snapshots = ref<BotContainerSnapshot[]>([])
+const snapshotsLoading = ref(false)
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
   return resolveApiErrorMessage(error, fallback)
 }
 
-async function runContainerAction(
-  action: 'refresh' | 'create' | 'start' | 'stop' | 'delete' | 'snapshot',
-  operation: () => Promise<void>,
-  successMessage: string,
+async function runContainerAction<T>(
+  action: ContainerAction,
+  operation: () => Promise<T>,
+  successMessage?: string | ((result: T) => string),
 ) {
   containerAction.value = action
   try {
-    await operation()
-    if (successMessage) {
-      toast.success(successMessage)
+    const result = await operation()
+    const message = typeof successMessage === 'function'
+      ? successMessage(result)
+      : successMessage
+    if (message) {
+      toast.success(message)
     }
+    return result
   } catch (error) {
     toast.error(resolveErrorMessage(error, t('bots.container.actionFailed')))
+    return undefined
   } finally {
     containerAction.value = ''
   }
 }
 
-
-const capabilitiesStore = useCapabilitiesStore()
-const botId = computed(() => route.params.botId as string)
-
-type BotContainerInfo = HandlersGetContainerResponse
-const containerInfo = ref<BotContainerInfo | null>(null)
-const containerMissing = ref(false)
-
-type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
-const snapshots = ref<BotContainerSnapshot[]>([])
 async function loadContainerData(showLoadingToast: boolean) {
   await capabilitiesStore.load()
   containerLoading.value = true
@@ -80,10 +105,14 @@ async function loadContainerData(showLoadingToast: boolean) {
       }
       throw result.error
     }
+
     containerInfo.value = result.data
     containerMissing.value = false
+
     if (capabilitiesStore.snapshotSupported) {
       await loadSnapshots()
+    } else {
+      snapshots.value = []
     }
   } catch (error) {
     if (showLoadingToast) {
@@ -94,16 +123,18 @@ async function loadContainerData(showLoadingToast: boolean) {
   }
 }
 
-const snapshotsLoading = ref(false)
-
 async function loadSnapshots() {
   if (!containerInfo.value || !capabilitiesStore.snapshotSupported) {
     snapshots.value = []
     return
   }
+
   snapshotsLoading.value = true
   try {
-    const { data } = await getBotsByBotIdContainerSnapshots({ path: { bot_id: botId.value }, throwOnError: true })
+    const { data } = await getBotsByBotIdContainerSnapshots({
+      path: { bot_id: botId.value },
+      throwOnError: true,
+    })
     snapshots.value = data.snapshots ?? []
   } catch (error) {
     snapshots.value = []
@@ -113,15 +144,8 @@ async function loadSnapshots() {
   }
 }
 
-
 async function handleRefreshContainer() {
-  await runContainerAction(
-    'refresh',
-    async () => {
-      await loadContainerData(false)
-    },
-    '',
-  )
+  await runContainerAction('refresh', () => loadContainerData(false))
 }
 
 const { data: bot } = useQuery({
@@ -133,33 +157,45 @@ const { data: bot } = useQuery({
   enabled: () => !!botId.value,
 })
 
-
-const {
-  isPending: botLifecyclePending,
-} = useBotStatusMeta(bot, t)
+const { isPending: botLifecyclePending } = useBotStatusMeta(bot, t)
 
 async function handleCreateContainer() {
   if (botLifecyclePending.value) return
+
   await runContainerAction(
     'create',
     async () => {
-      await postBotsByBotIdContainer({ path: { bot_id: botId.value }, body: {}, throwOnError: true })
+      const { data } = await postBotsByBotIdContainer({
+        path: { bot_id: botId.value },
+        body: {
+          restore_data: createRestoreData.value,
+        },
+        throwOnError: true,
+      })
+      createRestoreData.value = false
       await loadContainerData(false)
+      return data
     },
-    t('bots.container.createSuccess'),
+    (result) => result.data_restored
+      ? t('bots.container.createRestoreSuccess')
+      : t('bots.container.createSuccess'),
   )
 }
 
 const isContainerTaskRunning = computed(() => {
   const info = containerInfo.value
   if (!info) return false
+
   const status = (info.status ?? '').trim().toLowerCase()
   if (status === 'stopped' || status === 'exited') return false
-  return info.task_running
+  return !!info.task_running
 })
+
+const hasPreservedData = computed(() => !!containerInfo.value?.has_preserved_data)
 
 async function handleStopContainer() {
   if (botLifecyclePending.value || !containerInfo.value) return
+
   await runContainerAction(
     'stop',
     async () => {
@@ -172,6 +208,7 @@ async function handleStopContainer() {
 
 async function handleStartContainer() {
   if (botLifecyclePending.value || !containerInfo.value) return
+
   await runContainerAction(
     'start',
     async () => {
@@ -182,17 +219,102 @@ async function handleStartContainer() {
   )
 }
 
-async function handleDeleteContainer() {
+async function handleDeleteContainer(preserveData: boolean) {
   if (botLifecyclePending.value || !containerInfo.value) return
+
+  const action: ContainerAction = preserveData ? 'delete-preserve' : 'delete'
+  const successMessage = preserveData
+    ? t('bots.container.deletePreserveSuccess')
+    : t('bots.container.deleteSuccess')
+
   await runContainerAction(
-    'delete',
+    action,
     async () => {
-      await deleteBotsByBotIdContainer({ path: { bot_id: botId.value }, throwOnError: true })
+      await deleteBotsByBotIdContainer({
+        path: { bot_id: botId.value },
+        query: preserveData ? { preserve_data: true } : undefined,
+        throwOnError: true,
+      })
       containerInfo.value = null
       containerMissing.value = true
       snapshots.value = []
+      createRestoreData.value = preserveData
     },
-    t('bots.container.deleteSuccess'),
+    successMessage,
+  )
+}
+
+function buildExportFilename() {
+  const timestamp = new Date().toISOString().replaceAll(':', '-')
+  return `bot-${botId.value}-data-${timestamp}.tar.gz`
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+async function handleExportData() {
+  if (botLifecyclePending.value || !containerInfo.value) return
+
+  await runContainerAction(
+    'export',
+    async () => {
+      const response = await postBotsByBotIdContainerDataExport({
+        path: { bot_id: botId.value },
+        parseAs: 'blob',
+        throwOnError: true,
+      })
+      downloadBlob(response.data as unknown as Blob, buildExportFilename())
+    },
+    t('bots.container.exportSuccess'),
+  )
+}
+
+function triggerImportData() {
+  importInputRef.value?.click()
+}
+
+async function handleImportData(event: Event) {
+  if (botLifecyclePending.value || !containerInfo.value) return
+
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  await runContainerAction(
+    'import',
+    async () => {
+      await postBotsByBotIdContainerDataImport({
+        path: { bot_id: botId.value },
+        body: { file },
+        throwOnError: true,
+      })
+      await loadContainerData(false)
+    },
+    t('bots.container.importSuccess'),
+  )
+
+  input.value = ''
+}
+
+async function handleRestorePreservedData() {
+  if (botLifecyclePending.value || !containerInfo.value || !hasPreservedData.value) return
+
+  await runContainerAction(
+    'restore',
+    async () => {
+      await postBotsByBotIdContainerDataRestore({
+        path: { bot_id: botId.value },
+        throwOnError: true,
+      })
+      await loadContainerData(false)
+    },
+    t('bots.container.restoreSuccess'),
   )
 }
 
@@ -204,27 +326,92 @@ const statusKeyMap: Record<string, string> = {
 }
 
 const containerStatusText = computed(() => {
-  const s = (containerInfo.value?.status ?? '').trim().toLowerCase()
-  const key = statusKeyMap[s] ?? 'statusUnknown'
+  const status = (containerInfo.value?.status ?? '').trim().toLowerCase()
+  const key = statusKeyMap[status] ?? 'statusUnknown'
   return t(`bots.container.${key}`)
 })
 
 const containerTaskText = computed(() => {
   const info = containerInfo.value
   if (!info) return '-'
+
   const status = (info.status ?? '').trim().toLowerCase()
   if (status === 'exited') return t('bots.container.taskCompleted')
   return info.task_running ? t('bots.container.taskRunning') : t('bots.container.taskStopped')
 })
 
+const preservedDataText = computed(() => hasPreservedData.value
+  ? t('bots.container.preservedDataAvailableShort')
+  : t('bots.container.preservedDataEmpty'))
+
 function formatDate(value: string | undefined): string {
   return formatDateTime(value, { fallback: '-' })
 }
 
-const newSnapshotName = ref('')
+function snapshotCreatedAt(value: BotContainerSnapshot) {
+  const timestamp = Date.parse(value.created_at ?? '')
+  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp
+}
+
+function snapshotDisplayName(value: BotContainerSnapshot) {
+  return (value.display_name ?? value.name ?? value.runtime_snapshot_name ?? '').trim() || '-'
+}
+
+function snapshotRuntimeName(value: BotContainerSnapshot) {
+  const runtimeName = (value.runtime_snapshot_name ?? '').trim()
+  return runtimeName && runtimeName !== snapshotDisplayName(value) ? runtimeName : ''
+}
+
+function snapshotVersionText(value: BotContainerSnapshot) {
+  return value.version !== undefined ? `v${value.version}` : '-'
+}
+
+function snapshotSourceText(value: BotContainerSnapshot) {
+  const source = (value.source ?? '').trim().toLowerCase()
+  if (!source) return '-'
+
+  const sourceKeyMap: Record<string, string> = {
+    manual: 'sourceManual',
+    pre_exec: 'sourcePreExec',
+    rollback: 'sourceRollback',
+  }
+  const sourceKey = sourceKeyMap[source]
+  return sourceKey ? t(`bots.container.${sourceKey}`) : source
+}
+
+function canRollbackSnapshot(value: BotContainerSnapshot) {
+  return !!value.managed && typeof value.version === 'number' && value.version > 0
+}
+
+async function handleRollbackSnapshot(snapshot: BotContainerSnapshot) {
+  if (
+    botLifecyclePending.value
+    || !containerInfo.value
+    || !canRollbackSnapshot(snapshot)
+    || snapshot.version === undefined
+  ) {
+    return
+  }
+
+  rollbackVersion.value = snapshot.version
+  await runContainerAction(
+    'rollback',
+    async () => {
+      await postBotsByBotIdContainerSnapshotsRollback({
+        path: { bot_id: botId.value },
+        body: { version: snapshot.version },
+        throwOnError: true,
+      })
+      await loadContainerData(false)
+    },
+    t('bots.container.rollbackSuccess'),
+  )
+  rollbackVersion.value = null
+}
 
 async function handleCreateSnapshot() {
   if (botLifecyclePending.value || !containerInfo.value || !capabilitiesStore.snapshotSupported) return
+
   await runContainerAction(
     'snapshot',
     async () => {
@@ -241,39 +428,35 @@ async function handleCreateSnapshot() {
 }
 
 const sortedSnapshots = computed(() => {
-  const copied = [...snapshots.value]
-  copied.sort((a, b) => {
-    const left = Date.parse(a.created_at ?? '')
-    const right = Date.parse(b.created_at ?? '')
-    if (Number.isNaN(left) && Number.isNaN(right)) {
-      return (a.name ?? '').localeCompare(b.name ?? '')
-    }
-    if (Number.isNaN(left)) return 1
-    if (Number.isNaN(right)) return -1
-    return right - left
-  })
-  return copied
-})
+  return [...snapshots.value].sort((left, right) => {
+    const managedDiff = Number(!!right.managed) - Number(!!left.managed)
+    if (managedDiff !== 0) return managedDiff
 
+    const leftVersion = left.version ?? Number.NEGATIVE_INFINITY
+    const rightVersion = right.version ?? Number.NEGATIVE_INFINITY
+    if (leftVersion !== rightVersion) return rightVersion - leftVersion
+
+    const createdDiff = snapshotCreatedAt(right) - snapshotCreatedAt(left)
+    if (createdDiff !== 0) return createdDiff
+
+    return snapshotDisplayName(left).localeCompare(snapshotDisplayName(right))
+  })
+})
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
 
 watch([activeTab, botId], ([tab]) => {
-  if (!botId.value) {
-    return
-  }
+  if (!botId.value) return
   if (tab === 'container') {
     void loadContainerData(true)
-    return
   }
- 
 }, { immediate: true })
 </script>
 
 <template>
-  <div class=" mx-auto space-y-5">
+  <div class="mx-auto space-y-5">
     <div class="flex items-start justify-between gap-3">
-      <div class="space-y-1 min-w-0">
+      <div class="min-w-0 space-y-1">
         <h3 class="text-lg font-semibold">
           {{ $t('bots.container.title') }}
         </h3>
@@ -281,7 +464,7 @@ watch([activeTab, botId], ([tab]) => {
           {{ $t('bots.container.subtitle') }}
         </p>
       </div>
-      <div class="flex flex-wrap gap-2 shrink-0 justify-end">
+      <div class="flex shrink-0 flex-wrap justify-end gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -295,49 +478,18 @@ watch([activeTab, botId], ([tab]) => {
           {{ $t('common.refresh') }}
         </Button>
         <Button
-          v-if="containerMissing"
+          v-if="containerInfo"
+          variant="secondary"
+          size="sm"
           :disabled="containerBusy || botLifecyclePending"
-          @click="handleCreateContainer"
+          @click="isContainerTaskRunning ? handleStopContainer() : handleStartContainer()"
         >
           <Spinner
-            v-if="containerAction === 'create'"
+            v-if="containerAction === 'start' || containerAction === 'stop'"
             class="mr-1.5"
           />
-          {{ $t('bots.container.actions.create') }}
+          {{ isContainerTaskRunning ? $t('bots.container.actions.stop') : $t('bots.container.actions.start') }}
         </Button>
-        <template v-if="containerInfo">
-          <Button
-            variant="secondary"
-            size="sm"
-            :disabled="containerBusy || botLifecyclePending"
-            @click="isContainerTaskRunning ? handleStopContainer() : handleStartContainer()"
-          >
-            <Spinner
-              v-if="containerAction === 'start' || containerAction === 'stop'"
-              class="mr-1.5"
-            />
-            {{ isContainerTaskRunning ? $t('bots.container.actions.stop') : $t('bots.container.actions.start') }}
-          </Button>
-          <ConfirmPopover
-            :message="$t('bots.container.deleteConfirm')"
-            :loading="containerAction === 'delete'"
-            @confirm="handleDeleteContainer"
-          >
-            <template #trigger>
-              <Button
-                variant="destructive"
-                size="sm"
-                :disabled="containerBusy || botLifecyclePending"
-              >
-                <Spinner
-                  v-if="containerAction === 'delete'"
-                  class="mr-1.5"
-                />
-                {{ $t('bots.container.actions.delete') }}
-              </Button>
-            </template>
-          </ConfirmPopover>
-        </template>
       </div>
     </div>
 
@@ -358,11 +510,49 @@ watch([activeTab, botId], ([tab]) => {
 
     <div
       v-else-if="containerMissing"
-      class="rounded-md border p-4"
+      class="space-y-4 rounded-md border p-4"
     >
       <p class="text-sm text-muted-foreground">
         {{ $t('bots.container.empty') }}
       </p>
+
+      <div class="rounded-md border p-4 space-y-4">
+        <div class="space-y-1">
+          <p class="text-sm font-medium">
+            {{ $t('bots.container.actions.create') }}
+          </p>
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.container.createHint') }}
+          </p>
+        </div>
+
+        <div class="flex items-start justify-between gap-4 rounded-md border p-3">
+          <div class="space-y-1">
+            <Label>{{ $t('bots.container.createRestoreDataLabel') }}</Label>
+            <p class="text-xs text-muted-foreground">
+              {{ $t('bots.container.createRestoreDataDescription') }}
+            </p>
+          </div>
+          <Switch
+            :model-value="createRestoreData"
+            :disabled="containerBusy || botLifecyclePending"
+            @update:model-value="(value) => createRestoreData = !!value"
+          />
+        </div>
+
+        <div class="flex justify-end">
+          <Button
+            :disabled="containerBusy || botLifecyclePending"
+            @click="handleCreateContainer"
+          >
+            <Spinner
+              v-if="containerAction === 'create'"
+              class="mr-1.5"
+            />
+            {{ $t('bots.container.actions.create') }}
+          </Button>
+        </div>
+      </div>
     </div>
 
     <div
@@ -375,7 +565,7 @@ watch([activeTab, botId], ([tab]) => {
             <dt class="text-muted-foreground">
               {{ $t('bots.container.fields.id') }}
             </dt>
-            <dd class="font-mono break-all">
+            <dd class="break-all font-mono">
               {{ containerInfo.container_id }}
             </dd>
           </div>
@@ -407,19 +597,17 @@ watch([activeTab, botId], ([tab]) => {
           </div>
           <div class="space-y-1 sm:col-span-2">
             <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.hostPath') }}
-            </dt>
-            <dd class="break-all">
-              {{ containerInfo.host_path || '-' }}
-            </dd>
-          </div>
-          <div class="space-y-1 sm:col-span-2">
-            <dt class="text-muted-foreground">
               {{ $t('bots.container.fields.containerPath') }}
             </dt>
             <dd class="break-all">
               {{ containerInfo.container_path }}
             </dd>
+          </div>
+          <div class="space-y-1">
+            <dt class="text-muted-foreground">
+              {{ $t('bots.container.fields.preservedData') }}
+            </dt>
+            <dd>{{ preservedDataText }}</dd>
           </div>
           <div class="space-y-1">
             <dt class="text-muted-foreground">
@@ -436,29 +624,156 @@ watch([activeTab, botId], ([tab]) => {
         </dl>
       </div>
 
+      <div class="space-y-4 rounded-md border p-4">
+        <div class="space-y-1">
+          <h4 class="text-sm font-medium">
+            {{ $t('bots.container.dataTitle') }}
+          </h4>
+          <p class="text-sm text-muted-foreground">
+            {{ $t('bots.container.dataSubtitle') }}
+          </p>
+        </div>
+
+        <div
+          v-if="hasPreservedData"
+          class="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm"
+        >
+          {{ $t('bots.container.preservedDataAvailable') }}
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            :disabled="containerBusy || botLifecyclePending"
+            @click="handleExportData"
+          >
+            <Spinner
+              v-if="containerAction === 'export'"
+              class="mr-1.5"
+            />
+            {{ $t('bots.container.actions.exportData') }}
+          </Button>
+          <Button
+            variant="outline"
+            :disabled="containerBusy || botLifecyclePending"
+            @click="triggerImportData"
+          >
+            <Spinner
+              v-if="containerAction === 'import'"
+              class="mr-1.5"
+            />
+            {{ $t('bots.container.actions.importData') }}
+          </Button>
+          <ConfirmPopover
+            :message="$t('bots.container.restoreConfirm')"
+            :loading="containerAction === 'restore'"
+            @confirm="handleRestorePreservedData"
+          >
+            <template #trigger>
+              <Button
+                variant="outline"
+                :disabled="containerBusy || botLifecyclePending || !hasPreservedData"
+              >
+                <Spinner
+                  v-if="containerAction === 'restore'"
+                  class="mr-1.5"
+                />
+                {{ $t('bots.container.actions.restoreData') }}
+              </Button>
+            </template>
+          </ConfirmPopover>
+        </div>
+
+        <input
+          ref="importInputRef"
+          type="file"
+          accept=".tar.gz,.tgz,application/gzip,application/x-gzip,application/x-tar"
+          class="hidden"
+          @change="handleImportData"
+        >
+
+        <Separator />
+
+        <div class="space-y-3">
+          <div class="space-y-1">
+            <h4 class="text-sm font-medium text-destructive">
+              {{ $t('bots.container.deleteTitle') }}
+            </h4>
+            <p class="text-sm text-muted-foreground">
+              {{ $t('bots.container.deleteSubtitle') }}
+            </p>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <ConfirmPopover
+              :message="$t('bots.container.deletePreserveConfirm')"
+              :loading="containerAction === 'delete-preserve'"
+              @confirm="handleDeleteContainer(true)"
+            >
+              <template #trigger>
+                <Button
+                  variant="outline"
+                  :disabled="containerBusy || botLifecyclePending"
+                >
+                  <Spinner
+                    v-if="containerAction === 'delete-preserve'"
+                    class="mr-1.5"
+                  />
+                  {{ $t('bots.container.actions.deletePreserve') }}
+                </Button>
+              </template>
+            </ConfirmPopover>
+
+            <ConfirmPopover
+              :message="$t('bots.container.deleteConfirm')"
+              :loading="containerAction === 'delete'"
+              @confirm="handleDeleteContainer(false)"
+            >
+              <template #trigger>
+                <Button
+                  variant="destructive"
+                  :disabled="containerBusy || botLifecyclePending"
+                >
+                  <Spinner
+                    v-if="containerAction === 'delete'"
+                    class="mr-1.5"
+                  />
+                  {{ $t('bots.container.actions.delete') }}
+                </Button>
+              </template>
+            </ConfirmPopover>
+          </div>
+        </div>
+      </div>
+
       <Separator v-if="capabilitiesStore.snapshotSupported" />
 
       <div
         v-if="capabilitiesStore.snapshotSupported"
         class="space-y-3"
       >
-        <div class="flex flex-col gap-2 sm:flex-row">
-          <Input
-            v-model="newSnapshotName"
-            :placeholder="$t('bots.container.snapshotNamePlaceholder')"
-            :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
-            class="max-w-50"
-          />
-          <Button
-            :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
-            @click="handleCreateSnapshot"
-          >
-            <Spinner
-              v-if="containerAction === 'snapshot'"
-              class="mr-1.5"
+        <div class="space-y-2">
+          <div class="flex flex-col gap-2 sm:flex-row">
+            <Input
+              v-model="newSnapshotName"
+              :placeholder="$t('bots.container.snapshotNamePlaceholder')"
+              :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
+              class="sm:max-w-72"
             />
-            {{ $t('bots.container.actions.snapshot') }}
-          </Button>
+            <Button
+              :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
+              @click="handleCreateSnapshot"
+            >
+              <Spinner
+                v-if="containerAction === 'snapshot'"
+                class="mr-1.5"
+              />
+              {{ $t('bots.container.actions.snapshot') }}
+            </Button>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.container.snapshotNameHint') }}
+          </p>
         </div>
 
         <div
@@ -476,46 +791,180 @@ watch([activeTab, botId], ([tab]) => {
         </div>
         <div
           v-else
-          class="overflow-x-auto rounded-md border"
+          class="space-y-3"
         >
-          <table class="w-full text-sm">
-            <thead class="bg-muted/50 text-left">
-              <tr>
-                <th class="px-3 py-2 font-medium">
+          <div class="space-y-3 md:hidden">
+            <div
+              v-for="item in sortedSnapshots"
+              :key="`${item.snapshotter}:${item.runtime_snapshot_name || item.name}`"
+              class="rounded-md border p-4 space-y-4"
+            >
+              <div class="space-y-1">
+                <p class="text-xs text-muted-foreground">
                   {{ $t('bots.container.snapshotColumns.name') }}
-                </th>
-                <th class="px-3 py-2 font-medium">
-                  {{ $t('bots.container.snapshotColumns.kind') }}
-                </th>
-                <th class="px-3 py-2 font-medium">
-                  {{ $t('bots.container.snapshotColumns.parent') }}
-                </th>
-                <th class="px-3 py-2 font-medium">
-                  {{ $t('bots.container.snapshotColumns.createdAt') }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="item in sortedSnapshots"
-                :key="`${item.snapshotter}:${item.name}`"
-                class="border-t"
-              >
-                <td class="px-3 py-2 font-mono text-xs break-all">
-                  {{ item.name }}
-                </td>
-                <td class="px-3 py-2">
-                  {{ item.kind }}
-                </td>
-                <td class="px-3 py-2 break-all">
-                  {{ item.parent || '-' }}
-                </td>
-                <td class="px-3 py-2">
-                  {{ formatDate(item.created_at) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </p>
+                <div class="break-all font-medium">
+                  {{ snapshotDisplayName(item) }}
+                </div>
+                <div
+                  v-if="snapshotRuntimeName(item)"
+                  class="break-all font-mono text-xs text-muted-foreground"
+                >
+                  {{ snapshotRuntimeName(item) }}
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div class="space-y-1">
+                  <p class="text-xs text-muted-foreground">
+                    {{ $t('bots.container.snapshotColumns.version') }}
+                  </p>
+                  <div>{{ snapshotVersionText(item) }}</div>
+                </div>
+                <div class="space-y-1">
+                  <p class="text-xs text-muted-foreground">
+                    {{ $t('bots.container.snapshotColumns.source') }}
+                  </p>
+                  <div>{{ snapshotSourceText(item) }}</div>
+                </div>
+                <div class="space-y-1">
+                  <p class="text-xs text-muted-foreground">
+                    {{ $t('bots.container.snapshotColumns.parent') }}
+                  </p>
+                  <div class="break-all">
+                    {{ item.parent || '-' }}
+                  </div>
+                </div>
+                <div class="space-y-1">
+                  <p class="text-xs text-muted-foreground">
+                    {{ $t('bots.container.snapshotColumns.createdAt') }}
+                  </p>
+                  <div>{{ formatDate(item.created_at) }}</div>
+                </div>
+              </div>
+
+              <div class="space-y-1">
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('bots.container.snapshotColumns.actions') }}
+                </p>
+                <ConfirmPopover
+                  v-if="canRollbackSnapshot(item)"
+                  :message="$t('bots.container.rollbackConfirm')"
+                  :loading="containerAction === 'rollback' && rollbackVersion === item.version"
+                  @confirm="handleRollbackSnapshot(item)"
+                >
+                  <template #trigger>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="w-full"
+                      :disabled="containerBusy || botLifecyclePending"
+                    >
+                      <Spinner
+                        v-if="containerAction === 'rollback' && rollbackVersion === item.version"
+                        class="mr-1.5"
+                      />
+                      {{ $t('bots.container.actions.rollback') }}
+                    </Button>
+                  </template>
+                </ConfirmPopover>
+                <div
+                  v-else
+                  class="text-sm text-muted-foreground"
+                >
+                  -
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="hidden overflow-x-auto rounded-md border md:block">
+            <table class="w-full text-sm">
+              <thead class="bg-muted/50 text-left">
+                <tr>
+                  <th class="px-3 py-2 font-medium">
+                    {{ $t('bots.container.snapshotColumns.name') }}
+                  </th>
+                  <th class="px-3 py-2 font-medium">
+                    {{ $t('bots.container.snapshotColumns.version') }}
+                  </th>
+                  <th class="px-3 py-2 font-medium">
+                    {{ $t('bots.container.snapshotColumns.source') }}
+                  </th>
+                  <th class="px-3 py-2 font-medium">
+                    {{ $t('bots.container.snapshotColumns.parent') }}
+                  </th>
+                  <th class="px-3 py-2 font-medium">
+                    {{ $t('bots.container.snapshotColumns.createdAt') }}
+                  </th>
+                  <th class="px-3 py-2 font-medium">
+                    {{ $t('bots.container.snapshotColumns.actions') }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="item in sortedSnapshots"
+                  :key="`${item.snapshotter}:${item.runtime_snapshot_name || item.name}`"
+                  class="border-t align-top"
+                >
+                  <td class="px-3 py-2">
+                    <div class="space-y-1">
+                      <div class="break-all font-medium">
+                        {{ snapshotDisplayName(item) }}
+                      </div>
+                      <div
+                        v-if="snapshotRuntimeName(item)"
+                        class="break-all font-mono text-xs text-muted-foreground"
+                      >
+                        {{ snapshotRuntimeName(item) }}
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-3 py-2">
+                    {{ snapshotVersionText(item) }}
+                  </td>
+                  <td class="px-3 py-2">
+                    {{ snapshotSourceText(item) }}
+                  </td>
+                  <td class="px-3 py-2 break-all">
+                    {{ item.parent || '-' }}
+                  </td>
+                  <td class="px-3 py-2">
+                    {{ formatDate(item.created_at) }}
+                  </td>
+                  <td class="px-3 py-2">
+                    <ConfirmPopover
+                      v-if="canRollbackSnapshot(item)"
+                      :message="$t('bots.container.rollbackConfirm')"
+                      :loading="containerAction === 'rollback' && rollbackVersion === item.version"
+                      @confirm="handleRollbackSnapshot(item)"
+                    >
+                      <template #trigger>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          :disabled="containerBusy || botLifecyclePending"
+                        >
+                          <Spinner
+                            v-if="containerAction === 'rollback' && rollbackVersion === item.version"
+                            class="mr-1.5"
+                          />
+                          {{ $t('bots.container.actions.rollback') }}
+                        </Button>
+                      </template>
+                    </ConfirmPopover>
+                    <span
+                      v-else
+                      class="text-muted-foreground"
+                    >
+                      -
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
