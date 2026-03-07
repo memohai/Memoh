@@ -4,7 +4,7 @@
   "version": "0.3.1",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build src/index.ts --outfile dist/index.js --target bun --minify",
+    "build": "bun build src/index.ts --outfile dist/index.js --target bun --minify --external playwright --external playwright-core",
     "start": "pnpm run build && bun run dist/index.js"
   },
   "devDependencies": {
