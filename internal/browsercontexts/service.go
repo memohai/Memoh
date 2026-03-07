@@ -3,6 +3,7 @@ package browsercontexts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -119,7 +120,7 @@ func marshalConfig(raw json.RawMessage) ([]byte, error) {
 		return []byte("{}"), nil
 	}
 	if !json.Valid(raw) {
-		return nil, fmt.Errorf("config is not valid JSON")
+		return nil, errors.New("config is not valid JSON")
 	}
 	return raw, nil
 }

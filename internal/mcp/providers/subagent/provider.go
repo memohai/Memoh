@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,12 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/memohai/memoh/internal/db/sqlc"
 	mcpgw "github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 	subagentsvc "github.com/memohai/memoh/internal/subagent"
-
-	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
 const (
@@ -222,7 +222,7 @@ func (e *Executor) callQuery(ctx context.Context, session mcpgw.ToolSessionConte
 
 func (e *Executor) resolveModel(ctx context.Context, botID string) (models.GetResponse, sqlc.LlmProvider, error) {
 	if e.settings == nil || e.models == nil || e.queries == nil {
-		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("model resolution services not configured")
+		return models.GetResponse{}, sqlc.LlmProvider{}, errors.New("model resolution services not configured")
 	}
 	botSettings, err := e.settings.GetBot(ctx, botID)
 	if err != nil {
@@ -230,7 +230,7 @@ func (e *Executor) resolveModel(ctx context.Context, botID string) (models.GetRe
 	}
 	chatModelID := strings.TrimSpace(botSettings.ChatModelID)
 	if chatModelID == "" {
-		return models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("no chat model configured for bot")
+		return models.GetResponse{}, sqlc.LlmProvider{}, errors.New("no chat model configured for bot")
 	}
 	model, err := e.models.GetByID(ctx, chatModelID)
 	if err != nil {

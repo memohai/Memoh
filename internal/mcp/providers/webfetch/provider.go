@@ -11,9 +11,8 @@ import (
 	"strings"
 	"time"
 
-	readability "github.com/go-shiori/go-readability"
-
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
+	readability "github.com/go-shiori/go-readability"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
 )

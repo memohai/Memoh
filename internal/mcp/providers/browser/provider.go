@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	mcpgw "github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/browsercontexts"
 	"github.com/memohai/memoh/internal/config"
+	mcpgw "github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/mcp/mcpclient"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -145,7 +145,7 @@ func (e *Executor) ensureContext(ctx context.Context, contextID string, bc brows
 	if err != nil {
 		return err
 	}
-	resp, err := e.httpClient.Do(req)
+	resp, err := e.httpClient.Do(req) //nolint:gosec // URL from internal gateway config
 	if err != nil {
 		return fmt.Errorf("browser gateway unreachable: %w", err)
 	}
@@ -165,7 +165,7 @@ func (e *Executor) ensureContext(ctx context.Context, contextID string, bc brows
 	createPayload, _ := json.Marshal(map[string]any{
 		"id":     contextID,
 		"name":   bc.Name,
-		"config": json.RawMessage(bc.Config),
+		"config": bc.Config,
 	})
 	createURL := fmt.Sprintf("%s/context", e.gatewayBaseURL)
 	createReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(createPayload))
@@ -173,7 +173,7 @@ func (e *Executor) ensureContext(ctx context.Context, contextID string, bc brows
 		return err
 	}
 	createReq.Header.Set("Content-Type", "application/json")
-	createResp, err := e.httpClient.Do(createReq)
+	createResp, err := e.httpClient.Do(createReq) //nolint:gosec // URL from internal gateway config
 	if err != nil {
 		return fmt.Errorf("failed to create browser context: %w", err)
 	}
@@ -238,7 +238,7 @@ func (e *Executor) doGatewayAction(ctx context.Context, botID, contextID string,
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := e.httpClient.Do(req)
+	resp, err := e.httpClient.Do(req) //nolint:gosec // URL from internal gateway config
 	if err != nil {
 		return mcpgw.BuildToolErrorResult("browser gateway request failed: " + err.Error()), nil
 	}

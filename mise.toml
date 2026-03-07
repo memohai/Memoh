@@ -13,6 +13,8 @@ pnpm = "10"
 sqlc = "latest"
 # typos for spell check
 typos = "latest"
+# golangci-lint for Go linting
+"golangci-lint" = "2.10.1"
 
 [task_config]
 dir = "{{cwd}}"
@@ -113,6 +115,14 @@ run = "cd packages/cli && npm install -g"
 [tasks.install-socktainer]
 description = "Install socktainer"
 run = "brew tap socktainer/tap && brew install socktainer"
+
+[tasks."lint:go"]
+description = "Run Go linter"
+run = "golangci-lint run ./..."
+
+[tasks."lint:go:fix"]
+description = "Run Go linter with auto-fix"
+run = "golangci-lint run --fix ./..."
 
 [tasks.setup]
 description = "Setup development environment"

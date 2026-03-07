@@ -30,14 +30,14 @@ const (
 )
 
 type Config struct {
-	Log          LogConfig          `toml:"log"`
-	Server       ServerConfig       `toml:"server"`
-	Admin        AdminConfig        `toml:"admin"`
-	Auth         AuthConfig         `toml:"auth"`
-	Containerd   ContainerdConfig   `toml:"containerd"`
-	MCP          MCPConfig          `toml:"mcp"`
-	Postgres     PostgresConfig     `toml:"postgres"`
-	Qdrant       QdrantConfig       `toml:"qdrant"`
+	Log            LogConfig            `toml:"log"`
+	Server         ServerConfig         `toml:"server"`
+	Admin          AdminConfig          `toml:"admin"`
+	Auth           AuthConfig           `toml:"auth"`
+	Containerd     ContainerdConfig     `toml:"containerd"`
+	MCP            MCPConfig            `toml:"mcp"`
+	Postgres       PostgresConfig       `toml:"postgres"`
+	Qdrant         QdrantConfig         `toml:"qdrant"`
 	AgentGateway   AgentGatewayConfig   `toml:"agent_gateway"`
 	BrowserGateway BrowserGatewayConfig `toml:"browser_gateway"`
 }
