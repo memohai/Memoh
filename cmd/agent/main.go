@@ -475,7 +475,7 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	webFetchExec := mcpwebfetch.NewExecutor(log)
 	subagentExec := mcpsubagent.NewExecutor(log, subagentService, settingsService, modelsService, queries, cfg.AgentGateway.BaseURL())
 	skillExec := mcpskill.NewExecutor(log)
-	browserExec := mcpbrowser.NewExecutor(log, settingsService, browserContextService, cfg.BrowserGateway)
+	browserExec := mcpbrowser.NewExecutor(log, settingsService, browserContextService, manager, cfg.BrowserGateway)
 
 	svc := mcp.NewToolGatewayService(
 		log,

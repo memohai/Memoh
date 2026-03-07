@@ -36,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [server, agent, web, mcp]
+        image: [server, agent, web, mcp, browser]
         platform: [linux/amd64, linux/arm64]
         include:
           - image: server
@@ -47,6 +47,8 @@ jobs:
             dockerfile: docker/Dockerfile.web
           - image: mcp
             dockerfile: docker/Dockerfile.mcp
+          - image: browser
+            dockerfile: docker/Dockerfile.browser
           - platform: linux/amd64
             runner: ubuntu-latest
           - platform: linux/arm64
@@ -130,7 +132,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        image: [server, agent, web, mcp]
+        image: [server, agent, web, mcp, browser]
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4

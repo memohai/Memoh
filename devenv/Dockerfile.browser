@@ -4,10 +4,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 
-WORKDIR /app
-COPY package.json bun.lock* ./
-RUN bun install --frozen-lockfile
-COPY . .
-
-EXPOSE 8083
-CMD ["bun", "run", "src/index.ts"]
+WORKDIR /workspace

@@ -3,6 +3,7 @@ package browser
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	mcpgw "github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/browsercontexts"
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/mcp/mcpclient"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -26,11 +28,12 @@ type Executor struct {
 	logger          *slog.Logger
 	settings        *settings.Service
 	browserContexts *browsercontexts.Service
+	containers      mcpclient.Provider
 	gatewayBaseURL  string
 	httpClient      *http.Client
 }
 
-func NewExecutor(log *slog.Logger, settingsSvc *settings.Service, browserSvc *browsercontexts.Service, gatewayCfg config.BrowserGatewayConfig) *Executor {
+func NewExecutor(log *slog.Logger, settingsSvc *settings.Service, browserSvc *browsercontexts.Service, containers mcpclient.Provider, gatewayCfg config.BrowserGatewayConfig) *Executor {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -38,6 +41,7 @@ func NewExecutor(log *slog.Logger, settingsSvc *settings.Service, browserSvc *br
 		logger:          log.With(slog.String("provider", "browser_tool")),
 		settings:        settingsSvc,
 		browserContexts: browserSvc,
+		containers:      containers,
 		gatewayBaseURL:  strings.TrimRight(gatewayCfg.BaseURL(), "/"),
 		httpClient:      &http.Client{Timeout: 60 * time.Second},
 	}
@@ -120,9 +124,9 @@ func (e *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 
 	switch toolName {
 	case toolBrowserAction:
-		return e.callAction(ctx, browserCtxID, arguments)
+		return e.callAction(ctx, botID, browserCtxID, arguments)
 	case toolBrowserObserve:
-		return e.callObserve(ctx, browserCtxID, arguments)
+		return e.callObserve(ctx, botID, browserCtxID, arguments)
 	default:
 		return nil, mcpgw.ErrToolNotFound
 	}
@@ -174,7 +178,7 @@ func (e *Executor) ensureContext(ctx context.Context, contextID string, bc brows
 	return nil
 }
 
-func (e *Executor) callAction(ctx context.Context, contextID string, arguments map[string]any) (map[string]any, error) {
+func (e *Executor) callAction(ctx context.Context, botID, contextID string, arguments map[string]any) (map[string]any, error) {
 	action := mcpgw.StringArg(arguments, "action")
 	if action == "" {
 		return mcpgw.BuildToolErrorResult("action is required"), nil
@@ -195,10 +199,10 @@ func (e *Executor) callAction(ctx context.Context, contextID string, arguments m
 	if v, ok, _ := mcpgw.IntArg(arguments, "timeout"); ok {
 		payload["timeout"] = v
 	}
-	return e.doGatewayAction(ctx, contextID, payload)
+	return e.doGatewayAction(ctx, botID, contextID, payload)
 }
 
-func (e *Executor) callObserve(ctx context.Context, contextID string, arguments map[string]any) (map[string]any, error) {
+func (e *Executor) callObserve(ctx context.Context, botID, contextID string, arguments map[string]any) (map[string]any, error) {
 	observe := mcpgw.StringArg(arguments, "observe")
 	if observe == "" {
 		return mcpgw.BuildToolErrorResult("observe is required"), nil
@@ -210,10 +214,10 @@ func (e *Executor) callObserve(ctx context.Context, contextID string, arguments 
 	if v := mcpgw.StringArg(arguments, "script"); v != "" {
 		payload["script"] = v
 	}
-	return e.doGatewayAction(ctx, contextID, payload)
+	return e.doGatewayAction(ctx, botID, contextID, payload)
 }
 
-func (e *Executor) doGatewayAction(ctx context.Context, contextID string, payload map[string]any) (map[string]any, error) {
+func (e *Executor) doGatewayAction(ctx context.Context, botID, contextID string, payload map[string]any) (map[string]any, error) {
 	body, _ := json.Marshal(payload)
 	actionURL := fmt.Sprintf("%s/context/%s/action", e.gatewayBaseURL, contextID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, actionURL, bytes.NewReader(body))
@@ -244,5 +248,59 @@ func (e *Executor) doGatewayAction(ctx context.Context, contextID string, payloa
 		}
 		return mcpgw.BuildToolErrorResult(errMsg), nil
 	}
+
+	if b64, ok := gwResp.Data["screenshot"].(string); ok && b64 != "" {
+		return e.buildScreenshotResult(ctx, botID, b64), nil
+	}
 	return mcpgw.BuildToolSuccessResult(gwResp.Data), nil
+}
+
+const screenshotContainerDir = "/data/browser-screenshots"
+
+func (e *Executor) buildScreenshotResult(ctx context.Context, botID, base64Data string) map[string]any {
+	mimeType := "image/png"
+
+	imgBytes, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		e.logger.Warn("failed to decode screenshot base64", slog.Any("error", err))
+		return map[string]any{
+			"content": []map[string]any{
+				{"type": "text", "text": "Screenshot captured (failed to decode for saving)"},
+				{"type": "image", "data": base64Data, "mimeType": mimeType},
+			},
+		}
+	}
+
+	containerPath := fmt.Sprintf("%s/%d.png", screenshotContainerDir, time.Now().UnixMilli())
+
+	client, clientErr := e.containers.MCPClient(ctx, botID)
+	if clientErr != nil {
+		e.logger.Warn("container not reachable for screenshot save", slog.String("bot_id", botID), slog.Any("error", clientErr))
+		return map[string]any{
+			"content": []map[string]any{
+				{"type": "text", "text": "Screenshot captured (container not reachable, not saved to disk)"},
+				{"type": "image", "data": base64Data, "mimeType": mimeType},
+			},
+		}
+	}
+
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", screenshotContainerDir)
+	_, _ = client.Exec(ctx, mkdirCmd, "/", 5)
+
+	if writeErr := client.WriteFile(ctx, containerPath, imgBytes); writeErr != nil {
+		e.logger.Warn("failed to write screenshot to container", slog.String("bot_id", botID), slog.Any("error", writeErr))
+		return map[string]any{
+			"content": []map[string]any{
+				{"type": "text", "text": fmt.Sprintf("Screenshot captured (failed to save: %s)", writeErr.Error())},
+				{"type": "image", "data": base64Data, "mimeType": mimeType},
+			},
+		}
+	}
+
+	return map[string]any{
+		"content": []map[string]any{
+			{"type": "text", "text": fmt.Sprintf("Screenshot saved to %s", containerPath)},
+			{"type": "image", "data": base64Data, "mimeType": mimeType},
+		},
+	}
 }

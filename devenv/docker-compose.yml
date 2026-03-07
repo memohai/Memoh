@@ -140,7 +140,7 @@ services:
   browser:
     build:
       context: ..
-      dockerfile: apps/browser/Dockerfile
+      dockerfile: devenv/Dockerfile.browser
     container_name: memoh-dev-browser
     working_dir: /workspace/apps/browser
     command: ["bun", "run", "--watch", "src/index.ts"]

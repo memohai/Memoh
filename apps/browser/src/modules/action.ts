@@ -33,7 +33,7 @@ async function executeAction(contextId: string, req: ActionRequest): Promise<Rec
     }
     case 'screenshot': {
       const buffer = await page.screenshot({ fullPage: false })
-      return { screenshot: buffer.toString('base64'), encoding: 'base64' }
+      return { screenshot: buffer.toString('base64'), mimeType: 'image/png' }
     }
     case 'get_content': {
       const text = req.selector
