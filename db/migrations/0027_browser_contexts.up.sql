@@ -1,4 +1,4 @@
--- 0026_browser_contexts
+-- 0027_browser_contexts
 -- Add browser_contexts table and browser_context_id to bots
 
 CREATE TABLE IF NOT EXISTS browser_contexts (
