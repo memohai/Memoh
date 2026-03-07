@@ -1038,3 +1038,35 @@ func TestIsNaturalBreakPoint(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeOutboundMessage_MarkdownDetected(t *testing.T) {
+	t.Parallel()
+	msg := normalizeOutboundMessage(Message{Text: "Hello **world**"})
+	if msg.Format != MessageFormatMarkdown {
+		t.Errorf("expected %q, got %q", MessageFormatMarkdown, msg.Format)
+	}
+}
+
+func TestNormalizeOutboundMessage_PlainText(t *testing.T) {
+	t.Parallel()
+	msg := normalizeOutboundMessage(Message{Text: "Hello world"})
+	if msg.Format != MessageFormatPlain {
+		t.Errorf("expected %q, got %q", MessageFormatPlain, msg.Format)
+	}
+}
+
+func TestNormalizeOutboundMessage_ExplicitFormatPreserved(t *testing.T) {
+	t.Parallel()
+	msg := normalizeOutboundMessage(Message{Text: "Hello **world**", Format: MessageFormatPlain})
+	if msg.Format != MessageFormatPlain {
+		t.Errorf("expected explicit format %q preserved, got %q", MessageFormatPlain, msg.Format)
+	}
+}
+
+func TestNormalizeOutboundMessage_RichParts(t *testing.T) {
+	t.Parallel()
+	msg := normalizeOutboundMessage(Message{Parts: []MessagePart{{Type: "text", Text: "hello"}}})
+	if msg.Format != MessageFormatRich {
+		t.Errorf("expected %q, got %q", MessageFormatRich, msg.Format)
+	}
+}

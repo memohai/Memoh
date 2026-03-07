@@ -231,7 +231,7 @@ func (s *telegramOutboundStream) sendDraft(ctx context.Context, text string) err
 		return err
 	}
 
-	draftErr := sendTelegramDraft(bot, s.streamChatID, s.draftID, text, "")
+	draftErr := sendTelegramDraft(bot, s.streamChatID, s.draftID, text, s.parseMode)
 	if draftErr != nil {
 		if isTelegramTooManyRequests(draftErr) {
 			d := getTelegramRetryAfter(draftErr)
@@ -295,10 +295,13 @@ func (s *telegramOutboundStream) pushToolCallStart(ctx context.Context) error {
 	bufText := strings.TrimSpace(s.buf.String())
 	hasMsg := s.streamMsgID != 0
 	s.mu.Unlock()
+	if bufText != "" {
+		bufText = s.formatStreamContent(bufText)
+	}
 	if s.isPrivateChat {
 		// In draft mode, send buffered text as a permanent message before tool execution.
 		if bufText != "" {
-			if err := s.sendPermanentMessage(ctx, bufText, ""); err != nil {
+			if err := s.sendPermanentMessage(ctx, bufText, s.parseMode); err != nil {
 				if s.adapter != nil && s.adapter.logger != nil {
 					s.adapter.logger.Warn("telegram: draft permanent message failed", slog.Any("error", err))
 				}
@@ -346,6 +349,7 @@ func (s *telegramOutboundStream) pushPhaseEnd(ctx context.Context, event channel
 	finalText := strings.TrimSpace(s.buf.String())
 	s.mu.Unlock()
 	if finalText != "" {
+		finalText = s.formatStreamContent(finalText)
 		if err := s.ensureStreamMessage(ctx, finalText); err != nil {
 			return err
 		}
@@ -362,6 +366,7 @@ func (s *telegramOutboundStream) pushDelta(ctx context.Context, event channel.St
 	s.buf.WriteString(event.Delta)
 	content := s.buf.String()
 	s.mu.Unlock()
+	content = s.formatStreamContent(content)
 	if s.isPrivateChat {
 		return s.sendDraft(ctx, content)
 	}
@@ -384,7 +389,8 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.St
 
 	if event.Final == nil || event.Final.Message.IsEmpty() {
 		if bufText != "" {
-			if err := s.deliverFinalText(ctx, bufText, ""); err != nil {
+			bufText = s.formatStreamContent(bufText)
+			if err := s.deliverFinalText(ctx, bufText, s.parseMode); err != nil {
 				if s.adapter != nil && s.adapter.logger != nil {
 					s.adapter.logger.Warn("telegram: deliver buffered final text failed", slog.Any("error", err))
 				}
@@ -418,7 +424,7 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.St
 			return err
 		}
 		replyTo := parseReplyToMessageID(s.reply)
-		parseMode := resolveTelegramParseMode(msg.Format)
+		parseMode := s.parseMode
 		for i, att := range msg.Attachments {
 			to := replyTo
 			if i > 0 {
@@ -438,6 +444,11 @@ func (s *telegramOutboundStream) pushError(ctx context.Context, event channel.St
 		return nil
 	}
 	display := "Error: " + errText
+	// Error messages are plain text; reset parseMode so HTML-mode
+	// left over from earlier deltas does not corrupt the output.
+	s.mu.Lock()
+	s.parseMode = ""
+	s.mu.Unlock()
 	if s.isPrivateChat {
 		return s.sendPermanentMessage(ctx, display, "")
 	}
@@ -478,6 +489,22 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.StreamE
 	default:
 		return nil
 	}
+}
+
+// formatStreamContent applies markdown-to-HTML conversion for the accumulated
+// stream buffer text and updates parseMode accordingly. Safe for incomplete
+// markdown — unclosed constructs are left as plain text.
+func (s *telegramOutboundStream) formatStreamContent(text string) string {
+	if channel.ContainsMarkdown(text) {
+		formatted, pm := formatTelegramOutput(text, channel.MessageFormatMarkdown)
+		if pm != "" {
+			s.mu.Lock()
+			s.parseMode = pm
+			s.mu.Unlock()
+			return formatted
+		}
+	}
+	return text
 }
 
 func (s *telegramOutboundStream) Close(ctx context.Context) error {

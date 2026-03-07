@@ -792,7 +792,7 @@ func buildChannelMessage(output conversation.AssistantOutput, capabilities chann
 	msg := channel.Message{}
 	if strings.TrimSpace(output.Content) != "" {
 		msg.Text = strings.TrimSpace(output.Content)
-		if containsMarkdown(msg.Text) && (capabilities.Markdown || capabilities.RichText) {
+		if channel.ContainsMarkdown(msg.Text) && (capabilities.Markdown || capabilities.RichText) {
 			msg.Format = channel.MessageFormatMarkdown
 		}
 	}
@@ -831,35 +831,13 @@ func buildChannelMessage(output conversation.AssistantOutput, capabilities chann
 	}
 	if len(textParts) > 0 {
 		msg.Text = strings.Join(textParts, "\n")
-		if msg.Format == "" && containsMarkdown(msg.Text) && (capabilities.Markdown || capabilities.RichText) {
+		if msg.Format == "" && channel.ContainsMarkdown(msg.Text) && (capabilities.Markdown || capabilities.RichText) {
 			msg.Format = channel.MessageFormatMarkdown
 		}
 	}
 	return msg
 }
 
-func containsMarkdown(text string) bool {
-	if strings.TrimSpace(text) == "" {
-		return false
-	}
-	patterns := []string{
-		`\\*\\*[^*]+\\*\\*`,
-		`\\*[^*]+\\*`,
-		`~~[^~]+~~`,
-		"`[^`]+`",
-		"```[\\s\\S]*```",
-		`\\[.+\\]\\(.+\\)`,
-		`(?m)^#{1,6}\\s`,
-		`(?m)^[-*]\\s`,
-		`(?m)^\\d+\\.\\s`,
-	}
-	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, text); matched {
-			return true
-		}
-	}
-	return false
-}
 
 func contentPartHasValue(part conversation.ContentPart) bool {
 	if strings.TrimSpace(part.Text) != "" {

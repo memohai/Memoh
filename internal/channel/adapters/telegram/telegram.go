@@ -1200,15 +1200,6 @@ func buildTelegramAnimation(target string, file tgbotapi.RequestFileData) (tgbot
 	return animation, nil
 }
 
-func resolveTelegramParseMode(format channel.MessageFormat) string {
-	switch format {
-	case channel.MessageFormatMarkdown:
-		return tgbotapi.ModeMarkdown
-	default:
-		return ""
-	}
-}
-
 // extractTelegramMentionParts extracts structured mention parts from Telegram message entities.
 func extractTelegramMentionParts(msg *tgbotapi.Message) []channel.MessagePart {
 	if msg == nil {
