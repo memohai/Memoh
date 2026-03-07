@@ -275,6 +275,24 @@
       "region": "区域",
       "inbound_mode": "入站模式",
       "webhook_signing_key": "Webhook 签名密钥"
+    },
+    "oauth": {
+      "title": "OAuth2 授权",
+      "description": "授权此提供商以您的名义发送邮件，系统将跳转到提供商登录页面。",
+      "authorize": "授权",
+      "authorizeOpened": "授权页面已在新标签页打开",
+      "authorizeFailed": "启动授权失败",
+      "status": {
+        "checking": "正在检查授权状态...",
+        "authorized": "已授权账号 {email}",
+        "authorizedUnknown": "已授权",
+        "expired": "授权已过期，请重新授权。",
+        "missing": "尚未授权。完成授权后 Bot 才能访问 Gmail。",
+        "notConfigured": "缺少 Client ID，填写后才能发起授权。"
+      },
+      "logout": "注销授权",
+      "logoutSuccess": "授权已撤销",
+      "logoutFailed": "撤销授权失败"
     }
   },
   "browserContext": {

@@ -1,0 +1,132 @@
+// Hand-written sqlc-style queries for email_oauth_tokens.
+
+package sqlc
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+const upsertEmailOAuthToken = `-- name: UpsertEmailOAuthToken :one
+INSERT INTO email_oauth_tokens (email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (email_provider_id) DO UPDATE SET
+  email_address  = EXCLUDED.email_address,
+  access_token   = EXCLUDED.access_token,
+  refresh_token  = EXCLUDED.refresh_token,
+  expires_at     = EXCLUDED.expires_at,
+  scope          = EXCLUDED.scope,
+  state          = EXCLUDED.state,
+  updated_at     = now()
+RETURNING id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at
+`
+
+type UpsertEmailOAuthTokenParams struct {
+	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
+	EmailAddress    string             `json:"email_address"`
+	AccessToken     string             `json:"access_token"`
+	RefreshToken    string             `json:"refresh_token"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	Scope           string             `json:"scope"`
+	State           string             `json:"state"`
+}
+
+func (q *Queries) UpsertEmailOAuthToken(ctx context.Context, arg UpsertEmailOAuthTokenParams) (EmailOAuthToken, error) {
+	row := q.db.QueryRow(ctx, upsertEmailOAuthToken,
+		arg.EmailProviderID,
+		arg.EmailAddress,
+		arg.AccessToken,
+		arg.RefreshToken,
+		arg.ExpiresAt,
+		arg.Scope,
+		arg.State,
+	)
+	var i EmailOAuthToken
+	err := row.Scan(
+		&i.ID,
+		&i.EmailProviderID,
+		&i.EmailAddress,
+		&i.AccessToken,
+		&i.RefreshToken,
+		&i.ExpiresAt,
+		&i.Scope,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEmailOAuthTokenByProvider = `-- name: GetEmailOAuthTokenByProvider :one
+SELECT id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at
+FROM email_oauth_tokens WHERE email_provider_id = $1
+`
+
+func (q *Queries) GetEmailOAuthTokenByProvider(ctx context.Context, providerID pgtype.UUID) (EmailOAuthToken, error) {
+	row := q.db.QueryRow(ctx, getEmailOAuthTokenByProvider, providerID)
+	var i EmailOAuthToken
+	err := row.Scan(
+		&i.ID,
+		&i.EmailProviderID,
+		&i.EmailAddress,
+		&i.AccessToken,
+		&i.RefreshToken,
+		&i.ExpiresAt,
+		&i.Scope,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEmailOAuthTokenByState = `-- name: GetEmailOAuthTokenByState :one
+SELECT id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at
+FROM email_oauth_tokens WHERE state = $1 AND state != ''
+`
+
+func (q *Queries) GetEmailOAuthTokenByState(ctx context.Context, state string) (EmailOAuthToken, error) {
+	row := q.db.QueryRow(ctx, getEmailOAuthTokenByState, state)
+	var i EmailOAuthToken
+	err := row.Scan(
+		&i.ID,
+		&i.EmailProviderID,
+		&i.EmailAddress,
+		&i.AccessToken,
+		&i.RefreshToken,
+		&i.ExpiresAt,
+		&i.Scope,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateEmailOAuthState = `-- name: UpdateEmailOAuthState :exec
+INSERT INTO email_oauth_tokens (email_provider_id, state)
+VALUES ($1, $2)
+ON CONFLICT (email_provider_id) DO UPDATE SET
+  state      = EXCLUDED.state,
+  updated_at = now()
+`
+
+type UpdateEmailOAuthStateParams struct {
+	EmailProviderID pgtype.UUID `json:"email_provider_id"`
+	State           string      `json:"state"`
+}
+
+func (q *Queries) UpdateEmailOAuthState(ctx context.Context, arg UpdateEmailOAuthStateParams) error {
+	_, err := q.db.Exec(ctx, updateEmailOAuthState, arg.EmailProviderID, arg.State)
+	return err
+}
+
+const deleteEmailOAuthToken = `-- name: DeleteEmailOAuthToken :exec
+DELETE FROM email_oauth_tokens WHERE email_provider_id = $1
+`
+
+func (q *Queries) DeleteEmailOAuthToken(ctx context.Context, providerID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteEmailOAuthToken, providerID)
+	return err
+}
