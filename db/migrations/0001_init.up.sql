@@ -120,6 +120,31 @@ CREATE TABLE IF NOT EXISTS memory_providers (
   CONSTRAINT memory_providers_name_unique UNIQUE (name)
 );
 
+-- tts_providers: pluggable TTS service backends
+CREATE TABLE IF NOT EXISTS tts_providers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT tts_providers_name_unique UNIQUE (name)
+);
+
+-- tts_models: available models per TTS provider with per-model configuration
+CREATE TABLE IF NOT EXISTS tts_models (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  model_id TEXT NOT NULL,
+  name TEXT,
+  tts_provider_id UUID NOT NULL REFERENCES tts_providers(id) ON DELETE CASCADE,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT tts_models_provider_model_id_unique UNIQUE (tts_provider_id, model_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tts_models_provider_id ON tts_models(tts_provider_id);
+
 CREATE TABLE IF NOT EXISTS browser_contexts (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name        TEXT NOT NULL DEFAULT '',
@@ -150,6 +175,7 @@ CREATE TABLE IF NOT EXISTS bots (
   heartbeat_interval INTEGER NOT NULL DEFAULT 30,
   heartbeat_prompt TEXT NOT NULL DEFAULT '',
   heartbeat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  tts_model_id UUID REFERENCES tts_models(id) ON DELETE SET NULL,
   browser_context_id UUID REFERENCES browser_contexts(id) ON DELETE SET NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

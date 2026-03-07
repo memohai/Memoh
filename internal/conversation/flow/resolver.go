@@ -1843,6 +1843,8 @@ func (r *Resolver) markInboxRead(ctx context.Context, botID string, ids []string
 	}
 }
 
+// --- allowed actions ---
+
 // --- settings ---
 
 func (r *Resolver) loadBotSettings(ctx context.Context, botID string) (settings.Settings, error) {

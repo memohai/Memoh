@@ -590,7 +590,7 @@ WITH updated AS (
   SET display_name = $1,
       updated_at = now()
   WHERE bots.id = $2
-  RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, allow_guest, reasoning_enabled, reasoning_effort, max_inbox_items, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id, browser_context_id, metadata, created_at, updated_at
+  RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, allow_guest, reasoning_enabled, reasoning_effort, max_inbox_items, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id, tts_model_id, browser_context_id, metadata, created_at, updated_at
 )
 SELECT
   updated.id AS id,

@@ -132,6 +132,11 @@ const sidebarInfo = computed(() => [
     icon: ['fas', 'brain'],
   },
   {
+    title: t('sidebar.ttsProvider'),
+    name: 'tts-providers',
+    icon: ['fas', 'volume-high'],
+  },
+  {
     title: t('sidebar.emailProvider'),
     name: 'email-providers',
     icon: ['fas', 'envelope'],

@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,8 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
+var base64Std = base64.StdEncoding
+
 const (
 	silentReplyToken        = "NO_REPLY"
 	minDuplicateTextLength  = 10
@@ -49,6 +52,11 @@ type mediaIngestor interface {
 	IngestContainerFile(ctx context.Context, botID, containerPath string) (media.Asset, error)
 }
 
+// ttsTempReader provides read-and-delete access to TTS temporary audio files.
+type ttsTempReader interface {
+	ReadAndDelete(id string) ([]byte, error)
+}
+
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
 	runner        flow.Runner
@@ -62,6 +70,7 @@ type ChannelInboundProcessor struct {
 	tokenTTL      time.Duration
 	identity      *IdentityResolver
 	observer      channel.StreamObserver
+	ttsTempStore  ttsTempReader
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -131,6 +140,15 @@ func (p *ChannelInboundProcessor) SetInboxService(service *inbox.Service) {
 		return
 	}
 	p.inboxService = service
+}
+
+// SetTtsTempStore configures the TTS temp store for resolving voice attachments
+// from text_to_speech tool results.
+func (p *ChannelInboundProcessor) SetTtsTempStore(store ttsTempReader) {
+	if p == nil {
+		return
+	}
+	p.ttsTempStore = store
 }
 
 // HandleInbound processes an inbound channel message through identity resolution and chat gateway.
@@ -423,30 +441,27 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 					events[i].Attachments = ingested
 					outboundAttachments = append(outboundAttachments, ingested...)
 					assetMu.Lock()
-					for _, att := range ingested {
-						contentHash := strings.TrimSpace(att.ContentHash)
-						if contentHash == "" {
-							continue
-						}
-						ref := conversation.OutboundAssetRef{
-							ContentHash: contentHash,
-							Role:        "attachment",
-							Ordinal:     len(outboundAssetRefs),
-							Mime:        strings.TrimSpace(att.Mime),
-							SizeBytes:   att.Size,
-						}
-						if att.Metadata != nil {
-							if sk, ok := att.Metadata["storage_key"].(string); ok {
-								ref.StorageKey = sk
-							}
-						}
-						outboundAssetRefs = append(outboundAssetRefs, ref)
-					}
+					outboundAssetRefs = append(outboundAssetRefs, buildAssetRefs(ingested, len(outboundAssetRefs))...)
 					assetMu.Unlock()
 				}
 				if pushErr := stream.Push(ctx, events[i]); pushErr != nil {
 					streamErr = pushErr
 					break
+				}
+				if voiceAtt := p.extractTtsVoiceAttachment(event); voiceAtt != nil {
+					voiceEvent := channel.StreamEvent{
+						Type:        channel.StreamEventAttachment,
+						Attachments: []channel.Attachment{*voiceAtt},
+					}
+					ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), voiceEvent.Attachments)
+					voiceEvent.Attachments = ingested
+					assetMu.Lock()
+					outboundAssetRefs = append(outboundAssetRefs, buildAssetRefs(ingested, len(outboundAssetRefs))...)
+					assetMu.Unlock()
+					if pushErr := stream.Push(ctx, voiceEvent); pushErr != nil {
+						streamErr = pushErr
+						break
+					}
 				}
 			}
 			if len(messages) > 0 {
@@ -1951,6 +1966,89 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 		})
 	}
 	return attachments
+}
+
+// extractTtsVoiceAttachment checks if a stream event is a text_to_speech
+// tool_call_end and, if so, reads the audio from the temp store and returns
+// a voice Attachment. Returns nil for non-TTS events or if no temp store is set.
+func (p *ChannelInboundProcessor) extractTtsVoiceAttachment(event channel.StreamEvent) *channel.Attachment {
+	if p.ttsTempStore == nil {
+		return nil
+	}
+	if event.Type != channel.StreamEventToolCallEnd || event.ToolCall == nil {
+		return nil
+	}
+	if event.ToolCall.Name != "text_to_speech" {
+		return nil
+	}
+
+	var result struct {
+		TempID      string `json:"temp_id"`
+		ContentType string `json:"content_type"`
+		Size        int64  `json:"size"`
+	}
+
+	raw, err := json.Marshal(event.ToolCall.Result)
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+
+	// MCP ToolExecutor wraps the payload in structuredContent; unwrap if present.
+	var wrapper struct {
+		StructuredContent json.RawMessage `json:"structuredContent"`
+	}
+	if json.Unmarshal(raw, &wrapper) == nil && len(wrapper.StructuredContent) > 0 {
+		raw = wrapper.StructuredContent
+	}
+
+	if err := json.Unmarshal(raw, &result); err != nil || result.TempID == "" {
+		return nil
+	}
+
+	audioData, err := p.ttsTempStore.ReadAndDelete(result.TempID)
+	if err != nil {
+		return nil
+	}
+	dataURL := encodeDataURL(result.ContentType, audioData)
+	return &channel.Attachment{
+		Type: channel.AttachmentVoice,
+		URL:  dataURL,
+		Mime: result.ContentType,
+		Size: int64(len(audioData)),
+	}
+}
+
+func buildAssetRefs(attachments []channel.Attachment, startOrdinal int) []conversation.OutboundAssetRef {
+	var refs []conversation.OutboundAssetRef
+	for _, att := range attachments {
+		contentHash := strings.TrimSpace(att.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		ref := conversation.OutboundAssetRef{
+			ContentHash: contentHash,
+			Role:        "attachment",
+			Ordinal:     startOrdinal + len(refs),
+			Mime:        strings.TrimSpace(att.Mime),
+			SizeBytes:   att.Size,
+		}
+		if att.Metadata != nil {
+			if sk, ok := att.Metadata["storage_key"].(string); ok {
+				ref.StorageKey = sk
+			}
+		}
+		refs = append(refs, ref)
+	}
+	return refs
+}
+
+func encodeDataURL(mime string, data []byte) string {
+	encoded := base64Encode(data)
+	return "data:" + mime + ";base64," + encoded
+}
+
+func base64Encode(data []byte) string {
+	return base64Std.EncodeToString(data)
 }
 
 // buildRouteMetadata extracts user/conversation information for route metadata persistence.

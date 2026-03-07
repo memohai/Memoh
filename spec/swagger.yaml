@@ -1230,6 +1230,20 @@ definitions:
       ok:
         type: boolean
     type: object
+  handlers.synthesizeRequest:
+    properties:
+      text:
+        type: string
+    type: object
+  handlers.synthesizeResponse:
+    properties:
+      content_type:
+        type: string
+      size:
+        type: integer
+      temp_id:
+        type: string
+    type: object
   heartbeat.ListLogsResponse:
     properties:
       items:
@@ -2066,6 +2080,8 @@ definitions:
         type: boolean
       search_provider_id:
         type: string
+      tts_provider_id:
+        type: string
     type: object
   settings.UpsertRequest:
     properties:
@@ -2096,6 +2112,8 @@ definitions:
       reasoning_enabled:
         type: boolean
       search_provider_id:
+        type: string
+      tts_provider_id:
         type: string
     type: object
   subagent.AddSkillsRequest:
@@ -2210,6 +2228,98 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  tts.Capabilities:
+    properties:
+      formats:
+        items:
+          type: string
+        type: array
+      pitch:
+        $ref: '#/definitions/tts.ParamConstraint'
+      speed:
+        $ref: '#/definitions/tts.ParamConstraint'
+      voices:
+        items:
+          $ref: '#/definitions/tts.VoiceInfo'
+        type: array
+    type: object
+  tts.CreateProviderRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      provider:
+        type: string
+    type: object
+  tts.ParamConstraint:
+    properties:
+      default:
+        type: number
+      max:
+        type: number
+      min:
+        type: number
+      options:
+        items:
+          type: number
+        type: array
+    type: object
+  tts.ProviderMetaResponse:
+    properties:
+      capabilities:
+        $ref: '#/definitions/tts.Capabilities'
+      description:
+        type: string
+      display_name:
+        type: string
+      provider:
+        type: string
+    type: object
+  tts.ProviderResponse:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      provider:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  tts.TestSynthesizeRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      text:
+        type: string
+    type: object
+  tts.UpdateProviderRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      provider:
+        type: string
+    type: object
+  tts.VoiceInfo:
+    properties:
+      id:
+        type: string
+      lang:
+        type: string
+      name:
+        type: string
     type: object
 info:
   contact: {}
@@ -5007,6 +5117,42 @@ paths:
       summary: Unified MCP tools gateway
       tags:
       - containerd
+  /bots/{bot_id}/tts/synthesize:
+    post:
+      consumes:
+      - application/json
+      description: Stream-synthesize text using the bot's configured TTS provider,
+        write to temp file
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Text to synthesize
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.synthesizeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.synthesizeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Synthesize speech for a bot
+      tags:
+      - bots
   /bots/{bot_id}/web/messages:
     post:
       consumes:
@@ -6868,6 +7014,177 @@ paths:
       summary: List search provider metadata
       tags:
       - search-providers
+  /tts-providers:
+    get:
+      parameters:
+      - description: Provider type filter
+        in: query
+        name: provider
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ProviderResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List TTS providers
+      tags:
+      - tts-providers
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: TTS provider configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.CreateProviderRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/tts.ProviderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a TTS provider
+      tags:
+      - tts-providers
+  /tts-providers/{id}:
+    delete:
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a TTS provider
+      tags:
+      - tts-providers
+    get:
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ProviderResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a TTS provider
+      tags:
+      - tts-providers
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.UpdateProviderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ProviderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a TTS provider
+      tags:
+      - tts-providers
+  /tts-providers/{id}/test:
+    post:
+      consumes:
+      - application/json
+      description: Synthesize text using the provider's saved config and return audio
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Text to synthesize
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.TestSynthesizeRequest'
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Audio data
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Test TTS synthesis
+      tags:
+      - tts-providers
+  /tts-providers/meta:
+    get:
+      description: List available TTS provider types with their capabilities
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ProviderMetaResponse'
+            type: array
+      summary: List TTS provider metadata
+      tags:
+      - tts-providers
   /users:
     get:
       description: List users

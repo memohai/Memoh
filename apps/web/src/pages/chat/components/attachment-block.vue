@@ -28,6 +28,19 @@
         />
       </button>
 
+      <!-- Audio player -->
+      <div
+        v-else-if="isAudio(att) && getUrl(att)"
+        class="rounded-lg border bg-muted/30 px-3 py-2 min-w-[280px] max-w-[400px]"
+      >
+        <audio
+          controls
+          preload="metadata"
+          class="w-full"
+          :src="getUrl(att)"
+        />
+      </div>
+
       <!-- Downloadable file -->
       <a
         v-else-if="getUrl(att)"
@@ -87,6 +100,13 @@ function isVideo(att: Record<string, unknown>): boolean {
   if (type === 'video') return true
   const mime = String(att.mime ?? '').toLowerCase()
   return mime.startsWith('video/')
+}
+
+function isAudio(att: Record<string, unknown>): boolean {
+  const type = String(att.type ?? '').toLowerCase()
+  if (type === 'audio' || type === 'voice') return true
+  const mime = String(att.mime ?? '').toLowerCase()
+  return mime.startsWith('audio/')
 }
 
 function handleMediaClick(att: Record<string, unknown>) {
