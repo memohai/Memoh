@@ -63,7 +63,11 @@ func setupCNINetwork(ctx context.Context, task client.Task, containerID string, 
 			return "", err
 		}
 	}
-	return extractIP(result), nil
+	ip := extractIP(result)
+	if ip == "" {
+		return "", fmt.Errorf("cni setup returned no usable IP for %s", containerID)
+	}
+	return ip, nil
 }
 
 func extractIP(result *gocni.Result) string {
