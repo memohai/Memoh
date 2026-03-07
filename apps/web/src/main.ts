@@ -24,13 +24,11 @@ import {
   far
 } from '@fortawesome/free-regular-svg-icons'
 import { fab } from '@fortawesome/free-brands-svg-icons'
-import { customSearchIcons } from './components/search-provider-logo/custom-icons'
 
 library.add(
   far,
   fab,
   fas,
-  ...customSearchIcons,
 )
 
 createApp(App)

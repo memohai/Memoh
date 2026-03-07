@@ -1,0 +1,10 @@
+{
+  "include": ["src/**/*", "src/**/*.vue"],
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "baseUrl": ".",
+    "paths": {
+      "#/*": ["./src/*"]
+    }
+  }
+}
