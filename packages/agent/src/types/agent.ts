@@ -50,6 +50,7 @@ export interface AgentInput {
   attachments: GatewayInputAttachment[]
   skills: string[]
   query: string
+  signal?: AbortSignal
 }
 
 export interface AgentSkill {

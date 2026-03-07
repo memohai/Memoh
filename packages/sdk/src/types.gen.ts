@@ -1562,6 +1562,35 @@ export type GetBotsByBotIdCliStreamResponses = {
 
 export type GetBotsByBotIdCliStreamResponse = GetBotsByBotIdCliStreamResponses[keyof GetBotsByBotIdCliStreamResponses];
 
+export type GetBotsByBotIdCliWsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/cli/ws';
+};
+
+export type GetBotsByBotIdCliWsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdCliWsError = GetBotsByBotIdCliWsErrors[keyof GetBotsByBotIdCliWsErrors];
+
 export type DeleteBotsByBotIdContainerData = {
     body?: never;
     path: {
@@ -4890,6 +4919,35 @@ export type GetBotsByBotIdWebStreamResponses = {
 };
 
 export type GetBotsByBotIdWebStreamResponse = GetBotsByBotIdWebStreamResponses[keyof GetBotsByBotIdWebStreamResponses];
+
+export type GetBotsByBotIdWebWsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/web/ws';
+};
+
+export type GetBotsByBotIdWebWsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
 
 export type DeleteBotsByIdData = {
     body?: never;

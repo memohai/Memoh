@@ -46,7 +46,8 @@ export default defineConfig(({ command }) => {
         '/api': {
           target: baseUrl,
           changeOrigin: true,
-          rewrite: (path: string) => path.replace(/^\/api/, '')
+          rewrite: (path: string) => path.replace(/^\/api/, ''),
+          ws: true,
         }
       },
     },
@@ -57,7 +58,8 @@ export default defineConfig(({ command }) => {
         '/api': {
           target: baseUrl,
           changeOrigin: true,
-          rewrite: (path: string) => path.replace(/^\/api/, '')
+          rewrite: (path: string) => path.replace(/^\/api/, ''),
+          ws: true,
         }
       },
       allowedHosts: true,

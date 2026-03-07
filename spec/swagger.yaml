@@ -2398,6 +2398,36 @@ paths:
       summary: Subscribe to local channel events via SSE
       tags:
       - local-channel
+  /bots/{bot_id}/cli/ws:
+    get:
+      description: Upgrade to WebSocket for bidirectional chat streaming with abort
+        support.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "101":
+          description: Switching Protocols
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: WebSocket chat endpoint
+      tags:
+      - local-channel
   /bots/{bot_id}/container:
     delete:
       parameters:
@@ -5079,6 +5109,36 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Subscribe to local channel events via SSE
+      tags:
+      - local-channel
+  /bots/{bot_id}/web/ws:
+    get:
+      description: Upgrade to WebSocket for bidirectional chat streaming with abort
+        support.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "101":
+          description: Switching Protocols
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: WebSocket chat endpoint
       tags:
       - local-channel
   /bots/{id}:
