@@ -379,10 +379,11 @@ func (p *BuiltinProvider) Usage(ctx context.Context, filters map[string]any) (Us
 
 func truncateSnippet(s string, n int) string {
 	trimmed := strings.TrimSpace(s)
-	if len(trimmed) <= n {
+	runes := []rune(trimmed)
+	if len(runes) <= n {
 		return trimmed
 	}
-	return strings.TrimSpace(trimmed[:n]) + "..."
+	return strings.TrimSpace(string(runes[:n])) + "..."
 }
 
 func deduplicateItems(items []MemoryItem) []MemoryItem {
