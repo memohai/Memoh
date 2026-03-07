@@ -1,6 +1,12 @@
 #!/bin/sh
 set -e
 
+# Clean up stale CNI state from previous runs. After a container restart the
+# cni0 bridge may linger with a zeroed MAC (00:00:00:00:00:00), causing the
+# bridge plugin to fail with "could not set bridge's mac: invalid argument".
+ip link delete cni0 2>/dev/null || true
+rm -rf /var/lib/cni/networks/* /var/lib/cni/results/* 2>/dev/null || true
+
 # Ensure IP forwarding and subnet MASQUERADE for CNI.
 sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
 iptables -t nat -C POSTROUTING -s 10.88.0.0/16 ! -o cni0 -j MASQUERADE 2>/dev/null || \
