@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -51,19 +52,26 @@ func setupCNINetwork(ctx context.Context, task client.Task, containerID string, 
 	}
 	result, err := cni.Setup(ctx, containerID, netnsPath)
 	if err != nil {
-		if !isDuplicateAllocationError(err) && !isVethExistsError(err) {
+		retryable := isDuplicateAllocationError(err) || isVethExistsError(err) || isBridgeMACError(err)
+		if !retryable {
 			return "", err
 		}
-		// Stale IPAM allocation or veth exists (e.g. after container restart with persisted
-		// /var/lib/cni). Remove may fail if the previous iptables/veth state
-		// is already gone; ignore the error so the retry Setup still runs.
+		if isBridgeMACError(err) {
+			// Stale bridge with zeroed MAC after container restart; delete it so
+			// the plugin can recreate a healthy one.
+			_ = exec.CommandContext(ctx, "ip", "link", "delete", "cni0").Run()
+		}
 		_ = cni.Remove(ctx, containerID, netnsPath)
 		result, err = cni.Setup(ctx, containerID, netnsPath)
 		if err != nil {
 			return "", err
 		}
 	}
-	return extractIP(result), nil
+	ip := extractIP(result)
+	if ip == "" {
+		return "", fmt.Errorf("cni setup returned no usable IP for %s", containerID)
+	}
+	return ip, nil
 }
 
 func extractIP(result *gocni.Result) string {
@@ -138,4 +146,14 @@ func isVethExistsError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "already exists")
+}
+
+// isBridgeMACError returns true if the CNI bridge plugin failed because the
+// stale cni0 bridge has a zeroed MAC address (common after container restart).
+func isBridgeMACError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "set bridge") && strings.Contains(msg, "mac")
 }

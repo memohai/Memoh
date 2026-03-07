@@ -247,15 +247,8 @@ func (h *ContainerdHandler) ensureContainerAndTask(ctx context.Context, containe
 	}
 	if len(tasks) > 0 {
 		if tasks[0].Status == ctr.TaskStatusRunning {
-			if netResult, netErr := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-				ContainerID: containerID,
-				CNIBinDir:   h.cfg.CNIBinaryDir,
-				CNIConfDir:  h.cfg.CNIConfigDir,
-			}); netErr != nil {
-				h.logger.Warn("network re-setup failed for running task",
-					slog.String("container_id", containerID), slog.Any("error", netErr))
-			} else if netResult.IP != "" && h.manager != nil {
-				h.manager.SetContainerIP(botID, netResult.IP)
+			if err := h.setupNetworkOrFail(ctx, containerID, botID); err != nil {
+				return err
 			}
 			return nil
 		}
@@ -270,17 +263,37 @@ func (h *ContainerdHandler) ensureContainerAndTask(ctx context.Context, containe
 	if err := h.service.StartContainer(ctx, containerID, nil); err != nil {
 		return err
 	}
-	if netResult, netErr := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-		ContainerID: containerID,
-		CNIBinDir:   h.cfg.CNIBinaryDir,
-		CNIConfDir:  h.cfg.CNIConfigDir,
-	}); netErr != nil {
-		h.logger.Warn("network setup failed, task kept running",
-			slog.String("container_id", containerID), slog.Any("error", netErr))
-	} else if netResult.IP != "" && h.manager != nil {
-		h.manager.SetContainerIP(botID, netResult.IP)
+	return h.setupNetworkOrFail(ctx, containerID, botID)
+}
+
+// setupNetworkOrFail attempts CNI network setup with one retry. Returns an error
+// if no usable IP is obtained — callers must not silently ignore this.
+func (h *ContainerdHandler) setupNetworkOrFail(ctx context.Context, containerID, botID string) error {
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		netResult, err := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+			ContainerID: containerID,
+			CNIBinDir:   h.cfg.CNIBinaryDir,
+			CNIConfDir:  h.cfg.CNIConfigDir,
+		})
+		if err != nil {
+			lastErr = err
+			h.logger.Warn("network setup attempt failed",
+				slog.String("container_id", containerID),
+				slog.Int("attempt", attempt+1),
+				slog.Any("error", err))
+			continue
+		}
+		if netResult.IP == "" {
+			lastErr = fmt.Errorf("network setup returned no IP for %s", containerID)
+			continue
+		}
+		if h.manager != nil {
+			h.manager.SetContainerIP(botID, netResult.IP)
+		}
+		return nil
 	}
-	return nil
+	return fmt.Errorf("network setup failed for container %s: %w", containerID, lastErr)
 }
 
 // botContainerID resolves container_id for a bot from the database.
@@ -967,20 +980,15 @@ func (h *ContainerdHandler) ReconcileContainers(ctx context.Context) {
 						slog.String("bot_id", botID), slog.Any("error", dbErr))
 				}
 			}
-			if netResult, netErr := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-				ContainerID: containerID,
-				CNIBinDir:   h.cfg.CNIBinaryDir,
-				CNIConfDir:  h.cfg.CNIConfigDir,
-			}); netErr != nil {
-				h.logger.Warn("reconcile: network re-setup failed for running task",
+			if netErr := h.setupNetworkOrFail(ctx, containerID, botID); netErr != nil {
+				h.logger.Error("reconcile: network setup failed for running task, container unreachable",
 					slog.String("bot_id", botID),
 					slog.String("container_id", containerID),
 					slog.Any("error", netErr))
-			} else if netResult.IP != "" && h.manager != nil {
-				h.manager.SetContainerIP(botID, netResult.IP)
+			} else {
+				h.logger.Info("reconcile: container healthy",
+					slog.String("bot_id", botID), slog.String("container_id", containerID))
 			}
-			h.logger.Info("reconcile: container healthy",
-				slog.String("bot_id", botID), slog.String("container_id", containerID))
 			continue
 		}
 

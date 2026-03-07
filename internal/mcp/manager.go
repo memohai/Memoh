@@ -116,34 +116,39 @@ func (m *Manager) SetContainerIP(botID, ip string) {
 }
 
 // recoverContainerIP attempts to restore the container IP by re-running CNI setup.
-// CNI plugins are idempotent - calling Setup again returns the existing IP allocation.
+// CNI plugins are idempotent — calling Setup again returns the existing IP allocation.
+// Retries up to 2 times to tolerate transient CNI failures (IPAM lock contention, etc.).
 func (m *Manager) recoverContainerIP(botID string) (string, error) {
 	ctx := context.Background()
 	containerID := m.containerID(botID)
 
-	// First check if container exists and get basic info
 	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
 		return "", err
 	}
 
-	// Check if IP is stored in labels (if we ever add label persistence)
 	if ip, ok := info.Labels["mcp.container_ip"]; ok {
 		return ip, nil
 	}
 
-	// Container exists but IP not cached - need to re-setup network to get IP
-	// This happens after server restart when in-memory cache is lost
-	netResult, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-		ContainerID: containerID,
-		CNIBinDir:   m.cfg.CNIBinaryDir,
-		CNIConfDir:  m.cfg.CNIConfigDir,
-	})
-	if err != nil {
-		return "", fmt.Errorf("network setup for IP recovery: %w", err)
+	const maxAttempts = 2
+	var lastErr error
+	for i := 0; i < maxAttempts; i++ {
+		netResult, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+			ContainerID: containerID,
+			CNIBinDir:   m.cfg.CNIBinaryDir,
+			CNIConfDir:  m.cfg.CNIConfigDir,
+		})
+		if err != nil {
+			lastErr = err
+			m.logger.Warn("IP recovery attempt failed",
+				slog.String("bot_id", botID), slog.Int("attempt", i+1), slog.Any("error", err))
+			time.Sleep(time.Duration(i+1) * 500 * time.Millisecond)
+			continue
+		}
+		return netResult.IP, nil
 	}
-
-	return netResult.IP, nil
+	return "", fmt.Errorf("network setup for IP recovery after %d attempts: %w", maxAttempts, lastErr)
 }
 
 // MCPClient returns a gRPC client for the given bot's container.
@@ -295,12 +300,14 @@ func (m *Manager) Start(ctx context.Context, botID string) error {
 		}
 		return err
 	}
-	if netResult.IP != "" {
-		m.mu.Lock()
-		m.containerIPs[botID] = netResult.IP
-		m.mu.Unlock()
-		m.logger.Info("container network ready", slog.String("bot_id", botID), slog.String("ip", netResult.IP))
+	if netResult.IP == "" {
+		if stopErr := m.service.StopContainer(ctx, m.containerID(botID), &ctr.StopTaskOptions{Force: true}); stopErr != nil {
+			m.logger.Warn("cleanup: stop task failed", slog.String("container_id", m.containerID(botID)), slog.Any("error", stopErr))
+		}
+		return fmt.Errorf("network setup returned no IP for bot %s", botID)
 	}
+	m.SetContainerIP(botID, netResult.IP)
+	m.logger.Info("container network ready", slog.String("bot_id", botID), slog.String("ip", netResult.IP))
 	return nil
 }
 
