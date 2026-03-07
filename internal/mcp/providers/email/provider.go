@@ -205,7 +205,11 @@ func (e *Executor) callList(ctx context.Context, providerID string, args map[str
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
+	config = ensureProviderID(config, providerID)
+	return e.callListForProvider(ctx, providerName, config, args)
+}
 
+func (e *Executor) callListForProvider(ctx context.Context, providerName email.ProviderName, config map[string]any, args map[string]any) (map[string]any, error) {
 	reader, err := e.service.Registry().GetMailboxReader(providerName)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult("mailbox listing not supported for this provider"), nil
@@ -259,13 +263,17 @@ func (e *Executor) callRead(ctx context.Context, providerID string, args map[str
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
+	config = ensureProviderID(config, providerID)
+	return e.callReadForProvider(ctx, providerName, config, uint32(uidRaw))
+}
 
+func (e *Executor) callReadForProvider(ctx context.Context, providerName email.ProviderName, config map[string]any, uid uint32) (map[string]any, error) {
 	reader, err := e.service.Registry().GetMailboxReader(providerName)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult("mailbox reading not supported for this provider"), nil
 	}
 
-	item, err := reader.ReadMailbox(ctx, config, uint32(uidRaw))
+	item, err := reader.ReadMailbox(ctx, config, uid)
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
@@ -278,4 +286,18 @@ func (e *Executor) callRead(ctx context.Context, providerID string, args map[str
 		"body":        item.BodyText,
 		"received_at": item.ReceivedAt,
 	}), nil
+}
+
+func ensureProviderID(config map[string]any, providerID string) map[string]any {
+	if config == nil {
+		config = make(map[string]any)
+	} else {
+		copied := make(map[string]any, len(config)+1)
+		for k, v := range config {
+			copied[k] = v
+		}
+		config = copied
+	}
+	config["_provider_id"] = providerID
+	return config
 }

@@ -41,6 +41,7 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	emailgeneric "github.com/memohai/memoh/internal/email/adapters/generic"
+	emailgmail "github.com/memohai/memoh/internal/email/adapters/gmail"
 	emailmailgun "github.com/memohai/memoh/internal/email/adapters/mailgun"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/healthcheck"
@@ -146,6 +147,8 @@ func runServe() {
 			provideServerHandler(handlers.NewEmailBindingsHandler),
 			provideServerHandler(handlers.NewEmailOutboxHandler),
 			provideServerHandler(handlers.NewEmailWebhookHandler),
+			provideServerHandler(provideEmailOAuthHandler),
+			emailpkg.NewDBOAuthTokenStore,
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideOAuthService,
@@ -420,6 +423,7 @@ var (
 		"/api/docs",
 		"/channels/feishu/webhook/",
 		"/email/mailgun/webhook/",
+		"/email/oauth/callback",
 	}
 	memohSPABackendPrefixes = []string{
 		"/api",
@@ -609,11 +613,25 @@ func hasAnyPrefix(path string, prefixes []string) bool {
 	return false
 }
 
-func provideEmailRegistry(log *slog.Logger) *emailpkg.Registry {
+func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenStore) *emailpkg.Registry {
 	reg := emailpkg.NewRegistry()
 	reg.Register(emailgeneric.New(log))
 	reg.Register(emailmailgun.New(log))
+	reg.Register(emailgmail.New(log, tokenStore))
 	return reg
+}
+
+func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, cfg config.Config) *handlers.EmailOAuthHandler {
+	addr := strings.TrimSpace(cfg.Server.Addr)
+	if addr == "" {
+		addr = ":8080"
+	}
+	host := addr
+	if strings.HasPrefix(host, ":") {
+		host = "localhost" + host
+	}
+	callbackURL := "http://" + host + "/email/oauth/callback"
+	return handlers.NewEmailOAuthHandler(log, service, tokenStore, callbackURL)
 }
 
 func provideEmailChatGateway(resolver *flow.Resolver, queries *dbsqlc.Queries, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
