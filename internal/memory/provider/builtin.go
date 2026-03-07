@@ -125,7 +125,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req BeforeChatReques
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Relevant memory context (use when helpful):\n")
+	sb.WriteString("<memory-context>\nRelevant memory context (use when helpful):\n")
 	for _, entry := range results {
 		text := strings.TrimSpace(entry.item.Memory)
 		if text == "" {
@@ -137,6 +137,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req BeforeChatReques
 		sb.WriteString(truncateSnippet(text, memoryContextItemMaxChars))
 		sb.WriteString("\n")
 	}
+	sb.WriteString("</memory-context>")
 	payload := strings.TrimSpace(sb.String())
 	if payload == "" {
 		return nil, nil
