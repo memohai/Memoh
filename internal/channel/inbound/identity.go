@@ -384,6 +384,9 @@ func (r *IdentityResolver) tryHandleBindCode(ctx context.Context, msg channel.In
 		return IdentityDecision{Stop: true, Reply: channel.Message{Text: text}}
 	}
 	if !code.UsedAt.IsZero() {
+    	if code.UsedByChannelIdentityID == channelIdentityID {
+            return true, reply(r.bindReply), code.IssuedByUserID, nil
+        }
 		return true, reply("Bind code already used."), "", nil
 	}
 	if !code.ExpiresAt.IsZero() && time.Now().UTC().After(code.ExpiresAt) {
