@@ -11,6 +11,56 @@ async function getOrCreatePage(contextId: string): Promise<Page> {
   return await entry.context.newPage()
 }
 
+interface AccessibilityNode {
+  role: string
+  name?: string
+  value?: string
+  description?: string
+  level?: number
+  checked?: boolean | 'mixed'
+  disabled?: boolean
+  expanded?: boolean
+  selected?: boolean
+  children?: AccessibilityNode[]
+}
+
+function formatAccessibilityTree(node: AccessibilityNode, indent = 0): string {
+  const prefix = '  '.repeat(indent) + '- '
+  let line = prefix + node.role
+  if (node.name) line += ` "${node.name}"`
+  const attrs: string[] = []
+  if (node.level !== undefined) attrs.push(`level=${node.level}`)
+  if (node.value !== undefined) attrs.push(`value="${node.value}"`)
+  if (node.checked !== undefined) attrs.push(`checked=${node.checked}`)
+  if (node.disabled) attrs.push('disabled')
+  if (node.expanded !== undefined) attrs.push(`expanded=${node.expanded}`)
+  if (node.selected) attrs.push('selected')
+  if (attrs.length) line += ` [${attrs.join(', ')}]`
+  const lines = [line]
+  if (node.children) {
+    for (const child of node.children) {
+      lines.push(formatAccessibilityTree(child, indent + 1))
+    }
+  }
+  return lines.join('\n')
+}
+
+const INTERACTIVE_SELECTORS = [
+  'a[href]',
+  'button',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="tab"]',
+  '[role="menuitem"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[onclick]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ')
+
 async function executeAction(contextId: string, req: ActionRequest): Promise<Record<string, unknown>> {
   const page = await getOrCreatePage(contextId)
 
@@ -25,15 +75,125 @@ async function executeAction(contextId: string, req: ActionRequest): Promise<Rec
       await page.click(req.selector, { timeout: req.timeout ?? 5000 })
       return { clicked: req.selector }
     }
+    case 'dblclick': {
+      if (!req.selector) throw new Error('selector is required for dblclick')
+      await page.dblclick(req.selector, { timeout: req.timeout ?? 5000 })
+      return { dblclicked: req.selector }
+    }
+    case 'focus': {
+      if (!req.selector) throw new Error('selector is required for focus')
+      await page.focus(req.selector, { timeout: req.timeout ?? 5000 })
+      return { focused: req.selector }
+    }
     case 'type': {
       if (!req.selector) throw new Error('selector is required for type')
       if (!req.text) throw new Error('text is required for type')
-      await page.fill(req.selector, req.text, { timeout: req.timeout ?? 5000 })
+      await page.locator(req.selector).pressSequentially(req.text, { timeout: req.timeout ?? 5000 })
       return { typed: req.text, selector: req.selector }
     }
+    case 'fill': {
+      if (!req.selector) throw new Error('selector is required for fill')
+      if (!req.text) throw new Error('text is required for fill')
+      await page.fill(req.selector, req.text, { timeout: req.timeout ?? 5000 })
+      return { filled: req.text, selector: req.selector }
+    }
+    case 'press': {
+      if (!req.key) throw new Error('key is required for press')
+      await page.keyboard.press(req.key)
+      return { pressed: req.key }
+    }
+    case 'keyboard_type': {
+      if (!req.text) throw new Error('text is required for keyboard_type')
+      await page.keyboard.type(req.text)
+      return { keyboard_typed: req.text }
+    }
+    case 'keyboard_inserttext': {
+      if (!req.text) throw new Error('text is required for keyboard_inserttext')
+      await page.keyboard.insertText(req.text)
+      return { inserted_text: req.text }
+    }
+    case 'keydown': {
+      if (!req.key) throw new Error('key is required for keydown')
+      await page.keyboard.down(req.key)
+      return { keydown: req.key }
+    }
+    case 'keyup': {
+      if (!req.key) throw new Error('key is required for keyup')
+      await page.keyboard.up(req.key)
+      return { keyup: req.key }
+    }
+    case 'hover': {
+      if (!req.selector) throw new Error('selector is required for hover')
+      await page.hover(req.selector, { timeout: req.timeout ?? 5000 })
+      return { hovered: req.selector }
+    }
+    case 'select': {
+      if (!req.selector) throw new Error('selector is required for select')
+      if (!req.value) throw new Error('value is required for select')
+      const selected = await page.selectOption(req.selector, req.value, { timeout: req.timeout ?? 5000 })
+      return { selected: selected, selector: req.selector }
+    }
+    case 'check': {
+      if (!req.selector) throw new Error('selector is required for check')
+      await page.check(req.selector, { timeout: req.timeout ?? 5000 })
+      return { checked: req.selector }
+    }
+    case 'uncheck': {
+      if (!req.selector) throw new Error('selector is required for uncheck')
+      await page.uncheck(req.selector, { timeout: req.timeout ?? 5000 })
+      return { unchecked: req.selector }
+    }
     case 'screenshot': {
-      const buffer = await page.screenshot({ fullPage: false })
+      const buffer = await page.screenshot({ fullPage: req.full_page ?? false })
       return { screenshot: buffer.toString('base64'), mimeType: 'image/png' }
+    }
+    case 'screenshot_annotate': {
+      type AnnotationEntry = { ref: number, tag: string, role: string, name: string }
+
+      /* eslint-disable @typescript-eslint/no-explicit-any -- evaluate callbacks run in browser context */
+      const annotations: AnnotationEntry[] = await page.evaluate((selectors) => {
+        const doc = (globalThis as any).document
+        const elements = doc.querySelectorAll(selectors)
+        const result: AnnotationEntry[] = []
+        let ref = 1
+        elements.forEach((el: any) => {
+          const rect = el.getBoundingClientRect()
+          if (rect.width === 0 || rect.height === 0) return
+          if ((globalThis as any).getComputedStyle(el).visibility === 'hidden') return
+          result.push({
+            ref,
+            tag: el.tagName.toLowerCase(),
+            role: el.getAttribute('role') || '',
+            name: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 80),
+          })
+          const label = doc.createElement('div')
+          label.className = '__memoh_annotation__'
+          label.textContent = String(ref)
+          label.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top - 18}px;z-index:2147483647;background:#e63946;color:#fff;font:bold 11px/16px monospace;padding:0 4px;border-radius:3px;pointer-events:none;`
+          doc.body.appendChild(label)
+          ref++
+        })
+        return result
+      }, INTERACTIVE_SELECTORS)
+
+      const buffer = await page.screenshot({ fullPage: false })
+
+      await page.evaluate(() => {
+        ;(globalThis as any).document.querySelectorAll('.__memoh_annotation__').forEach((el: any) => el.remove())
+      })
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+
+      return {
+        screenshot: buffer.toString('base64'),
+        mimeType: 'image/png',
+        annotations,
+      }
+    }
+    case 'snapshot': {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessibility API is deprecated but functional
+      const tree = await (page as any).accessibility.snapshot() as AccessibilityNode | null
+      if (!tree) return { snapshot: '(empty page)' }
+      return { snapshot: formatAccessibilityTree(tree) }
     }
     case 'get_content': {
       const text = req.selector
@@ -57,8 +217,29 @@ async function executeAction(contextId: string, req: ActionRequest): Promise<Rec
       const amt = req.amount ?? 500
       const deltaX = dir === 'left' ? -amt : dir === 'right' ? amt : 0
       const deltaY = dir === 'up' ? -amt : dir === 'down' ? amt : 0
-      await page.mouse.wheel(deltaX, deltaY)
-      return { scrolled: dir, amount: amt }
+      if (req.selector) {
+        await page.locator(req.selector).evaluate((el, { dx, dy }) => { el.scrollBy(dx, dy) }, { dx: deltaX, dy: deltaY })
+      } else {
+        await page.mouse.wheel(deltaX, deltaY)
+      }
+      return { scrolled: dir, amount: amt, selector: req.selector }
+    }
+    case 'scrollintoview': {
+      if (!req.selector) throw new Error('selector is required for scrollintoview')
+      await page.locator(req.selector).scrollIntoViewIfNeeded({ timeout: req.timeout ?? 5000 })
+      return { scrolled_into_view: req.selector }
+    }
+    case 'drag': {
+      if (!req.selector) throw new Error('selector (source) is required for drag')
+      if (!req.target_selector) throw new Error('target_selector is required for drag')
+      await page.dragAndDrop(req.selector, req.target_selector, { timeout: req.timeout ?? 5000 })
+      return { dragged: req.selector, target: req.target_selector }
+    }
+    case 'upload': {
+      if (!req.selector) throw new Error('selector is required for upload')
+      if (!req.files || req.files.length === 0) throw new Error('files is required for upload')
+      await page.setInputFiles(req.selector, req.files, { timeout: req.timeout ?? 5000 })
+      return { uploaded: req.files, selector: req.selector }
     }
     case 'wait': {
       if (req.selector) {
@@ -85,6 +266,10 @@ async function executeAction(contextId: string, req: ActionRequest): Promise<Rec
     }
     case 'get_title': {
       return { title: await page.title() }
+    }
+    case 'pdf': {
+      const buffer = await page.pdf()
+      return { pdf: buffer.toString('base64'), mimeType: 'application/pdf' }
     }
     default:
       throw new Error(`Unknown action: ${req.action}`)

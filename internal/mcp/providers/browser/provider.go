@@ -65,29 +65,35 @@ func (e *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 	return []mcpgw.ToolDescriptor{
 		{
 			Name:        toolBrowserAction,
-			Description: "Execute a browser action: navigate to URL, click element, type text, scroll, go back/forward, reload, or wait.",
+			Description: "Execute a browser action: navigate, click, double-click, focus, type, fill, press key, keyboard input, hover, select option, check/uncheck, scroll, drag-and-drop, upload files, go back/forward, reload, or wait.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"action":    map[string]any{"type": "string", "enum": []string{"navigate", "click", "type", "scroll", "go_back", "go_forward", "reload", "wait"}, "description": "The browser action to perform"},
-					"url":       map[string]any{"type": "string", "description": "URL to navigate to (for navigate action)"},
-					"selector":  map[string]any{"type": "string", "description": "CSS selector for the target element"},
-					"text":      map[string]any{"type": "string", "description": "Text to type (for type action)"},
-					"direction": map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}, "description": "Scroll direction"},
-					"timeout":   map[string]any{"type": "integer", "description": "Timeout in milliseconds"},
+					"action":          map[string]any{"type": "string", "enum": []string{"navigate", "click", "dblclick", "focus", "type", "fill", "press", "keyboard_type", "keyboard_inserttext", "keydown", "keyup", "hover", "select", "check", "uncheck", "scroll", "scrollintoview", "drag", "upload", "wait", "go_back", "go_forward", "reload"}, "description": "The browser action to perform"},
+					"url":             map[string]any{"type": "string", "description": "URL to navigate to (for navigate)"},
+					"selector":        map[string]any{"type": "string", "description": "CSS selector for the target element"},
+					"text":            map[string]any{"type": "string", "description": "Text to type or fill (for type, fill, keyboard_type, keyboard_inserttext)"},
+					"key":             map[string]any{"type": "string", "description": "Key to press (for press, keydown, keyup). Examples: Enter, Tab, Escape, Control+a"},
+					"value":           map[string]any{"type": "string", "description": "Value to select (for select action)"},
+					"target_selector": map[string]any{"type": "string", "description": "Target CSS selector (for drag action)"},
+					"files":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "File paths to upload (for upload action)"},
+					"direction":       map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}, "description": "Scroll direction (for scroll)"},
+					"amount":          map[string]any{"type": "integer", "description": "Scroll amount in pixels (for scroll, default 500)"},
+					"timeout":         map[string]any{"type": "integer", "description": "Timeout in milliseconds"},
 				},
 				"required": []string{"action"},
 			},
 		},
 		{
 			Name:        toolBrowserObserve,
-			Description: "Observe the current browser page: take screenshot, get text content, get HTML, evaluate JavaScript, get current URL, or get page title.",
+			Description: "Observe the current browser page: take screenshot (optionally annotated with numbered element labels or full-page), get accessibility tree snapshot, get text content, get HTML, evaluate JavaScript, get current URL, get page title, or export PDF.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"observe":  map[string]any{"type": "string", "enum": []string{"screenshot", "get_content", "get_html", "evaluate", "get_url", "get_title"}, "description": "What to observe from the page"},
-					"selector": map[string]any{"type": "string", "description": "CSS selector to scope the observation"},
-					"script":   map[string]any{"type": "string", "description": "JavaScript to evaluate (for evaluate observation)"},
+					"observe":   map[string]any{"type": "string", "enum": []string{"screenshot", "screenshot_annotate", "snapshot", "get_content", "get_html", "evaluate", "get_url", "get_title", "pdf"}, "description": "What to observe from the page"},
+					"selector":  map[string]any{"type": "string", "description": "CSS selector to scope the observation"},
+					"script":    map[string]any{"type": "string", "description": "JavaScript to evaluate (for evaluate)"},
+					"full_page": map[string]any{"type": "boolean", "description": "Capture full page screenshot (for screenshot, default false)"},
 				},
 				"required": []string{"observe"},
 			},
@@ -184,20 +190,19 @@ func (e *Executor) callAction(ctx context.Context, botID, contextID string, argu
 		return mcpgw.BuildToolErrorResult("action is required"), nil
 	}
 	payload := map[string]any{"action": action}
-	if v := mcpgw.StringArg(arguments, "url"); v != "" {
-		payload["url"] = v
-	}
-	if v := mcpgw.StringArg(arguments, "selector"); v != "" {
-		payload["selector"] = v
-	}
-	if v := mcpgw.StringArg(arguments, "text"); v != "" {
-		payload["text"] = v
-	}
-	if v := mcpgw.StringArg(arguments, "direction"); v != "" {
-		payload["direction"] = v
+	for _, key := range []string{"url", "selector", "text", "key", "value", "target_selector", "direction"} {
+		if v := mcpgw.StringArg(arguments, key); v != "" {
+			payload[key] = v
+		}
 	}
 	if v, ok, _ := mcpgw.IntArg(arguments, "timeout"); ok {
 		payload["timeout"] = v
+	}
+	if v, ok, _ := mcpgw.IntArg(arguments, "amount"); ok {
+		payload["amount"] = v
+	}
+	if files, ok := arguments["files"].([]any); ok && len(files) > 0 {
+		payload["files"] = files
 	}
 	return e.doGatewayAction(ctx, botID, contextID, payload)
 }
@@ -213,6 +218,9 @@ func (e *Executor) callObserve(ctx context.Context, botID, contextID string, arg
 	}
 	if v := mcpgw.StringArg(arguments, "script"); v != "" {
 		payload["script"] = v
+	}
+	if v, ok := arguments["full_page"].(bool); ok {
+		payload["full_page"] = v
 	}
 	return e.doGatewayAction(ctx, botID, contextID, payload)
 }
