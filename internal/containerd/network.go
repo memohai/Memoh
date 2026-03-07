@@ -59,7 +59,7 @@ func setupCNINetwork(ctx context.Context, task client.Task, containerID string, 
 		if isBridgeMACError(err) {
 			// Stale bridge with zeroed MAC after container restart; delete it so
 			// the plugin can recreate a healthy one.
-			_ = exec.Command("ip", "link", "delete", "cni0").Run()
+			_ = exec.CommandContext(ctx, "ip", "link", "delete", "cni0").Run()
 		}
 		_ = cni.Remove(ctx, containerID, netnsPath)
 		result, err = cni.Setup(ctx, containerID, netnsPath)
