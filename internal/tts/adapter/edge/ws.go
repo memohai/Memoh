@@ -275,7 +275,18 @@ func (c *EdgeWsClient) Synthesize(ctx context.Context, text string, config tts.A
 		}
 		mt, data, err := conn.ReadMessage()
 		if err != nil {
-			return nil, fmt.Errorf("edge tts read: %w", err)
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				if len(out) > 0 {
+					c.mu.Lock()
+					_ = c.resetLocked()
+					c.mu.Unlock()
+					return out, nil
+				}
+			}
+			c.mu.Lock()
+			_ = c.resetLocked()
+			c.mu.Unlock()
+			return nil, fmt.Errorf("edge tts read (format=%q voice=%q): %w", config.Format, config.Voice.ID, err)
 		}
 		switch mt {
 		case websocket.TextMessage:

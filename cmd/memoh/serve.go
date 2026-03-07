@@ -72,6 +72,8 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/subagent"
+	ttspkg "github.com/memohai/memoh/internal/tts"
+	ttsedge "github.com/memohai/memoh/internal/tts/adapter/edge"
 	"github.com/memohai/memoh/internal/version"
 )
 
@@ -104,6 +106,8 @@ func runServe() {
 			bind.NewService,
 			event.NewHub,
 			inbox.NewService,
+			provideTtsRegistry,
+			ttspkg.NewService,
 			provideEmailRegistry,
 			emailpkg.NewService,
 			emailpkg.NewOutboxService,
@@ -142,6 +146,7 @@ func runServe() {
 			provideServerHandler(feishu.NewWebhookServerHandler),
 			provideServerHandler(provideUsersHandler),
 			provideServerHandler(handlers.NewMemoryProvidersHandler),
+			provideServerHandler(handlers.NewTtsProvidersHandler),
 			provideServerHandler(handlers.NewEmailProvidersHandler),
 			provideServerHandler(handlers.NewEmailBindingsHandler),
 			provideServerHandler(handlers.NewEmailOutboxHandler),
@@ -607,6 +612,12 @@ func hasAnyPrefix(path string, prefixes []string) bool {
 		}
 	}
 	return false
+}
+
+func provideTtsRegistry(log *slog.Logger) *ttspkg.Registry {
+	reg := ttspkg.NewRegistry()
+	reg.Register(ttsedge.NewEdgeAdapter(log))
+	return reg
 }
 
 func provideEmailRegistry(log *slog.Logger) *emailpkg.Registry {

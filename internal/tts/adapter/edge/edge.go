@@ -46,8 +46,6 @@ var edgeFormats = []string{
 	"audio-24khz-48kbitrate-mono-mp3",
 	"audio-24khz-96kbitrate-mono-mp3",
 	"webm-24khz-16bit-mono-opus",
-	"ogg-24khz-16bit-mono-opus",
-	"audio-16khz-32kbitrate-mono-mp3",
 }
 
 var edgeSpeedConstraint = &tts.ParamConstraint{

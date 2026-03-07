@@ -690,21 +690,6 @@ definitions:
       provider:
         type: string
     type: object
-  github_com_memohai_memoh_internal_fs.FileInfo:
-    properties:
-      isDir:
-        type: boolean
-      modTime:
-        type: string
-      mode:
-        type: string
-      name:
-        type: string
-      path:
-        type: string
-      size:
-        type: integer
-    type: object
   github_com_memohai_memoh_internal_mcp.Connection:
     properties:
       auth_type:
@@ -841,7 +826,7 @@ definitions:
     properties:
       entries:
         items:
-          $ref: '#/definitions/github_com_memohai_memoh_internal_fs.FileInfo'
+          $ref: '#/definitions/handlers.FSFileInfo'
         type: array
       path:
         type: string
@@ -888,8 +873,6 @@ definitions:
       container_path:
         type: string
       created_at:
-        type: string
-      host_path:
         type: string
       image:
         type: string
@@ -1169,12 +1152,23 @@ definitions:
     type: object
   handlers.oauthAuthorizeRequest:
     properties:
+      callback_url:
+        type: string
       client_id:
+        type: string
+      client_secret:
         type: string
     type: object
   handlers.oauthDiscoverRequest:
     properties:
       url:
+        type: string
+    type: object
+  handlers.oauthExchangeRequest:
+    properties:
+      code:
+        type: string
+      state:
         type: string
     type: object
   handlers.skillsOpResponse:
@@ -1343,6 +1337,8 @@ definitions:
   mcp.OAuthStatus:
     properties:
       auth_server:
+        type: string
+      callback_url:
         type: string
       configured:
         type: boolean
@@ -1769,7 +1765,6 @@ definitions:
   providers.GetResponse:
     properties:
       api_key:
-        description: masked in response
         type: string
       base_url:
         type: string
@@ -2015,6 +2010,8 @@ definitions:
         type: boolean
       search_provider_id:
         type: string
+      tts_provider_id:
+        type: string
     type: object
   settings.UpsertRequest:
     properties:
@@ -2043,6 +2040,8 @@ definitions:
       reasoning_enabled:
         type: boolean
       search_provider_id:
+        type: string
+      tts_provider_id:
         type: string
     type: object
   subagent.AddSkillsRequest:
@@ -2158,37 +2157,103 @@ definitions:
           type: string
         type: array
     type: object
+  tts.Capabilities:
+    properties:
+      formats:
+        items:
+          type: string
+        type: array
+      pitch:
+        $ref: '#/definitions/tts.ParamConstraint'
+      speed:
+        $ref: '#/definitions/tts.ParamConstraint'
+      voices:
+        items:
+          $ref: '#/definitions/tts.VoiceInfo'
+        type: array
+    type: object
+  tts.CreateProviderRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      provider:
+        type: string
+    type: object
+  tts.ParamConstraint:
+    properties:
+      default:
+        type: number
+      max:
+        type: number
+      min:
+        type: number
+      options:
+        items:
+          type: number
+        type: array
+    type: object
+  tts.ProviderMetaResponse:
+    properties:
+      capabilities:
+        $ref: '#/definitions/tts.Capabilities'
+      description:
+        type: string
+      display_name:
+        type: string
+      provider:
+        type: string
+    type: object
+  tts.ProviderResponse:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      provider:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  tts.TestSynthesizeRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      text:
+        type: string
+    type: object
+  tts.UpdateProviderRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      provider:
+        type: string
+    type: object
+  tts.VoiceInfo:
+    properties:
+      id:
+        type: string
+      lang:
+        type: string
+      name:
+        type: string
+    type: object
 info:
   contact: {}
   title: Memoh API
   version: 1.0.0
 paths:
-  /api/oauth/mcp/callback:
-    get:
-      description: Handles the OAuth authorization callback, exchanges code for tokens
-      parameters:
-      - description: Authorization code
-        in: query
-        name: code
-        required: true
-        type: string
-      - description: State parameter
-        in: query
-        name: state
-        required: true
-        type: string
-      responses:
-        "200":
-          description: HTML page that closes the popup
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: OAuth callback handler
-      tags:
-      - mcp
   /auth/login:
     post:
       description: Validate user credentials and issue a JWT
@@ -3724,6 +3789,31 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Discover OAuth configuration for MCP server
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp/{id}/oauth/exchange:
+    post:
+      description: Frontend callback page calls this to exchange the authorization
+        code for access/refresh tokens
+      parameters:
+      - description: Authorization code and state
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.oauthExchangeRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Exchange OAuth authorization code for tokens
       tags:
       - mcp
   /bots/{bot_id}/mcp/{id}/oauth/status:
@@ -6574,6 +6664,177 @@ paths:
       summary: List search provider metadata
       tags:
       - search-providers
+  /tts-providers:
+    get:
+      parameters:
+      - description: Provider type filter
+        in: query
+        name: provider
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ProviderResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List TTS providers
+      tags:
+      - tts-providers
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: TTS provider configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.CreateProviderRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/tts.ProviderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a TTS provider
+      tags:
+      - tts-providers
+  /tts-providers/{id}:
+    delete:
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a TTS provider
+      tags:
+      - tts-providers
+    get:
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ProviderResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a TTS provider
+      tags:
+      - tts-providers
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.UpdateProviderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ProviderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a TTS provider
+      tags:
+      - tts-providers
+  /tts-providers/{id}/test:
+    post:
+      consumes:
+      - application/json
+      description: Synthesize text using the provider's saved config and return audio
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Text to synthesize
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.TestSynthesizeRequest'
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Audio data
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Test TTS synthesis
+      tags:
+      - tts-providers
+  /tts-providers/meta:
+    get:
+      description: List available TTS provider types with their capabilities
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ProviderMetaResponse'
+            type: array
+      summary: List TTS provider metadata
+      tags:
+      - tts-providers
   /users:
     get:
       description: List users

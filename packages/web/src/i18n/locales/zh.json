@@ -55,6 +55,7 @@
     "models": "模型管理",
     "searchProvider": "搜索提供方",
     "memoryProvider": "记忆",
+    "ttsProvider": "语音合成",
     "emailProvider": "邮件提供方",
     "settings": "设置",
     "home": "首页",
@@ -249,6 +250,34 @@
     "embeddingModelDescription": "用于稠密向量搜索的embedding模型",
     "providerNames": {
       "builtin": "内置"
+    }
+  },
+  "ttsProvider": {
+    "title": "语音合成",
+    "add": "添加语音合成提供方",
+    "providerType": "提供方类型",
+    "searchPlaceholder": "搜索语音合成提供方...",
+    "emptyTitle": "暂无语音合成提供方",
+    "emptyDescription": "添加语音合成提供方以为 Bot 启用文字转语音功能",
+    "deleteConfirm": "确定要删除此语音合成提供方吗？此操作不可撤销。",
+    "voiceSettings": "语音设置",
+    "fields": {
+      "language": "语言",
+      "languagePlaceholder": "选择语言...",
+      "voice": "声音",
+      "voicePlaceholder": "选择声音...",
+      "format": "输出格式",
+      "formatPlaceholder": "选择格式...",
+      "speed": "语速",
+      "speedDescription": "播放速度（默认：{default}）",
+      "pitch": "音调",
+      "pitchDescription": "语音音调调整，单位 Hz（默认：{default}）"
+    },
+    "test": {
+      "title": "测试合成",
+      "placeholder": "输入要合成的文本...",
+      "generate": "生成",
+      "failed": "合成失败"
     }
   },
   "emailProvider": {
@@ -551,6 +580,8 @@
       "searchProviderPlaceholder": "选择搜索提供方",
       "memoryProvider": "记忆提供方",
       "memoryProviderPlaceholder": "选择记忆提供方（为空则禁用）",
+      "ttsProvider": "语音合成提供方",
+      "ttsProviderPlaceholder": "选择语音合成提供方",
       "maxContextLoadTime": "最大上下文加载时间",
       "maxContextTokens": "最大上下文Token数",
       "language": "语言",

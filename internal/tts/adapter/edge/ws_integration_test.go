@@ -55,6 +55,37 @@ func TestRealEdgeTTS_Stream(t *testing.T) {
 	t.Logf("streamed %d bytes total", total)
 }
 
+// TestRealEdgeTTS_Formats tries every candidate format and reports which ones are supported.
+//
+//	go test -tags=integration ./internal/tts/adapter/edge/... -run TestRealEdgeTTS_Formats -v
+func TestRealEdgeTTS_Formats(t *testing.T) {
+	formats := []string{
+		"audio-24khz-48kbitrate-mono-mp3",
+		"audio-24khz-96kbitrate-mono-mp3",
+		"webm-24khz-16bit-mono-opus",
+	}
+
+	for _, fmt := range formats {
+		t.Run(fmt, func(t *testing.T) {
+			client := NewEdgeWsClient()
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			config := tts.AudioConfig{
+				Voice:  tts.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"},
+				Format: fmt,
+				Speed:  1.0,
+			}
+			audio, err := client.Synthesize(ctx, "Hello, format test.", config)
+			if err != nil {
+				t.Errorf("UNSUPPORTED format %q: %v", fmt, err)
+				return
+			}
+			t.Logf("OK format %q -> %d bytes", fmt, len(audio))
+		})
+	}
+}
+
 // TestRealEdgeTTS_SaveAudio synthesizes speech and writes the result to a file for manual inspection.
 //
 //	go test -tags=integration ./internal/tts/adapter/edge/... -run TestRealEdgeTTS_SaveAudio -v

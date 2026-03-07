@@ -414,15 +414,6 @@ export type EmailUpdateProviderRequest = {
     provider?: string;
 };
 
-export type GithubComMemohaiMemohInternalFsFileInfo = {
-    isDir?: boolean;
-    modTime?: string;
-    mode?: string;
-    name?: string;
-    path?: string;
-    size?: number;
-};
-
 export type GithubComMemohaiMemohInternalMcpConnection = {
     auth_type?: string;
     bot_id?: string;
@@ -506,7 +497,7 @@ export type HandlersFsFileInfo = {
 };
 
 export type HandlersFsListResponse = {
-    entries?: Array<GithubComMemohaiMemohInternalFsFileInfo>;
+    entries?: Array<HandlersFsFileInfo>;
     path?: string;
 };
 
@@ -539,7 +530,6 @@ export type HandlersGetContainerResponse = {
     container_id?: string;
     container_path?: string;
     created_at?: string;
-    host_path?: string;
     image?: string;
     namespace?: string;
     status?: string;
@@ -708,11 +698,18 @@ export type HandlersMemorySearchPayload = {
 };
 
 export type HandlersOauthAuthorizeRequest = {
+    callback_url?: string;
     client_id?: string;
+    client_secret?: string;
 };
 
 export type HandlersOauthDiscoverRequest = {
     url?: string;
+};
+
+export type HandlersOauthExchangeRequest = {
+    code?: string;
+    state?: string;
 };
 
 export type HandlersSkillsOpResponse = {
@@ -823,6 +820,7 @@ export type McpMcpServerEntry = {
 
 export type McpOAuthStatus = {
     auth_server?: string;
+    callback_url?: string;
     configured?: boolean;
     expired?: boolean;
     expires_at?: string;
@@ -1078,9 +1076,6 @@ export type ProvidersCreateRequest = {
 };
 
 export type ProvidersGetResponse = {
-    /**
-     * masked in response
-     */
     api_key?: string;
     base_url?: string;
     created_at?: string;
@@ -1222,6 +1217,7 @@ export type SettingsSettings = {
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
+    tts_provider_id?: string;
 };
 
 export type SettingsUpsertRequest = {
@@ -1238,6 +1234,7 @@ export type SettingsUpsertRequest = {
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
+    tts_provider_id?: string;
 };
 
 export type SubagentAddSkillsRequest = {
@@ -1315,39 +1312,66 @@ export type SubagentUpdateSkillsRequest = {
     skills?: Array<string>;
 };
 
-export type GetApiOauthMcpCallbackData = {
-    body?: never;
-    path?: never;
-    query: {
-        /**
-         * Authorization code
-         */
-        code: string;
-        /**
-         * State parameter
-         */
-        state: string;
+export type TtsCapabilities = {
+    formats?: Array<string>;
+    pitch?: TtsParamConstraint;
+    speed?: TtsParamConstraint;
+    voices?: Array<TtsVoiceInfo>;
+};
+
+export type TtsCreateProviderRequest = {
+    config?: {
+        [key: string]: unknown;
     };
-    url: '/api/oauth/mcp/callback';
+    name?: string;
+    provider?: string;
 };
 
-export type GetApiOauthMcpCallbackErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
+export type TtsParamConstraint = {
+    default?: number;
+    max?: number;
+    min?: number;
+    options?: Array<number>;
 };
 
-export type GetApiOauthMcpCallbackError = GetApiOauthMcpCallbackErrors[keyof GetApiOauthMcpCallbackErrors];
-
-export type GetApiOauthMcpCallbackResponses = {
-    /**
-     * HTML page that closes the popup
-     */
-    200: string;
+export type TtsProviderMetaResponse = {
+    capabilities?: TtsCapabilities;
+    description?: string;
+    display_name?: string;
+    provider?: string;
 };
 
-export type GetApiOauthMcpCallbackResponse = GetApiOauthMcpCallbackResponses[keyof GetApiOauthMcpCallbackResponses];
+export type TtsProviderResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    name?: string;
+    provider?: string;
+    updated_at?: string;
+};
+
+export type TtsTestSynthesizeRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    text?: string;
+};
+
+export type TtsUpdateProviderRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    provider?: string;
+};
+
+export type TtsVoiceInfo = {
+    id?: string;
+    lang?: string;
+    name?: string;
+};
 
 export type PostAuthLoginData = {
     /**
@@ -3328,6 +3352,36 @@ export type PostBotsByBotIdMcpByIdOauthDiscoverResponses = {
 };
 
 export type PostBotsByBotIdMcpByIdOauthDiscoverResponse = PostBotsByBotIdMcpByIdOauthDiscoverResponses[keyof PostBotsByBotIdMcpByIdOauthDiscoverResponses];
+
+export type PostBotsByBotIdMcpByIdOauthExchangeData = {
+    /**
+     * Authorization code and state
+     */
+    body: HandlersOauthExchangeRequest;
+    path?: never;
+    query?: never;
+    url: '/bots/{bot_id}/mcp/{id}/oauth/exchange';
+};
+
+export type PostBotsByBotIdMcpByIdOauthExchangeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdMcpByIdOauthExchangeError = PostBotsByBotIdMcpByIdOauthExchangeErrors[keyof PostBotsByBotIdMcpByIdOauthExchangeErrors];
+
+export type PostBotsByBotIdMcpByIdOauthExchangeResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: boolean;
+    };
+};
+
+export type PostBotsByBotIdMcpByIdOauthExchangeResponse = PostBotsByBotIdMcpByIdOauthExchangeResponses[keyof PostBotsByBotIdMcpByIdOauthExchangeResponses];
 
 export type GetBotsByBotIdMcpByIdOauthStatusData = {
     body?: never;
@@ -6727,6 +6781,214 @@ export type PutSearchProvidersByIdResponses = {
 };
 
 export type PutSearchProvidersByIdResponse = PutSearchProvidersByIdResponses[keyof PutSearchProvidersByIdResponses];
+
+export type GetTtsProvidersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Provider type filter
+         */
+        provider?: string;
+    };
+    url: '/tts-providers';
+};
+
+export type GetTtsProvidersErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetTtsProvidersError = GetTtsProvidersErrors[keyof GetTtsProvidersErrors];
+
+export type GetTtsProvidersResponses = {
+    /**
+     * OK
+     */
+    200: Array<TtsProviderResponse>;
+};
+
+export type GetTtsProvidersResponse = GetTtsProvidersResponses[keyof GetTtsProvidersResponses];
+
+export type PostTtsProvidersData = {
+    /**
+     * TTS provider configuration
+     */
+    body: TtsCreateProviderRequest;
+    path?: never;
+    query?: never;
+    url: '/tts-providers';
+};
+
+export type PostTtsProvidersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostTtsProvidersError = PostTtsProvidersErrors[keyof PostTtsProvidersErrors];
+
+export type PostTtsProvidersResponses = {
+    /**
+     * Created
+     */
+    201: TtsProviderResponse;
+};
+
+export type PostTtsProvidersResponse = PostTtsProvidersResponses[keyof PostTtsProvidersResponses];
+
+export type GetTtsProvidersMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/tts-providers/meta';
+};
+
+export type GetTtsProvidersMetaResponses = {
+    /**
+     * OK
+     */
+    200: Array<TtsProviderMetaResponse>;
+};
+
+export type GetTtsProvidersMetaResponse = GetTtsProvidersMetaResponses[keyof GetTtsProvidersMetaResponses];
+
+export type DeleteTtsProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-providers/{id}';
+};
+
+export type DeleteTtsProvidersByIdErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteTtsProvidersByIdError = DeleteTtsProvidersByIdErrors[keyof DeleteTtsProvidersByIdErrors];
+
+export type DeleteTtsProvidersByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetTtsProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-providers/{id}';
+};
+
+export type GetTtsProvidersByIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetTtsProvidersByIdError = GetTtsProvidersByIdErrors[keyof GetTtsProvidersByIdErrors];
+
+export type GetTtsProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: TtsProviderResponse;
+};
+
+export type GetTtsProvidersByIdResponse = GetTtsProvidersByIdResponses[keyof GetTtsProvidersByIdResponses];
+
+export type PutTtsProvidersByIdData = {
+    /**
+     * Updated configuration
+     */
+    body: TtsUpdateProviderRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-providers/{id}';
+};
+
+export type PutTtsProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutTtsProvidersByIdError = PutTtsProvidersByIdErrors[keyof PutTtsProvidersByIdErrors];
+
+export type PutTtsProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: TtsProviderResponse;
+};
+
+export type PutTtsProvidersByIdResponse = PutTtsProvidersByIdResponses[keyof PutTtsProvidersByIdResponses];
+
+export type PostTtsProvidersByIdTestData = {
+    /**
+     * Text to synthesize
+     */
+    body: TtsTestSynthesizeRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-providers/{id}/test';
+};
+
+export type PostTtsProvidersByIdTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostTtsProvidersByIdTestError = PostTtsProvidersByIdTestErrors[keyof PostTtsProvidersByIdTestErrors];
+
+export type PostTtsProvidersByIdTestResponses = {
+    /**
+     * Audio data
+     */
+    200: unknown;
+};
 
 export type GetUsersData = {
     body?: never;
