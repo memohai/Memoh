@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -392,16 +391,18 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	// unconditionally so the next call dials fresh to the new process.
 	m.grpcPool.Remove(botID)
 
-	if netResult, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+	netResult, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
 		ContainerID: containerID,
 		CNIBinDir:   m.cfg.CNIBinaryDir,
 		CNIConfDir:  m.cfg.CNIConfigDir,
-	}); err != nil {
-		m.logger.Warn("network setup failed after snapshot replace",
-			slog.String("container_id", containerID), slog.Any("error", err))
-	} else {
-		m.SetContainerIP(botID, netResult.IP)
+	})
+	if err != nil {
+		return fmt.Errorf("network setup after snapshot replace: %w", err)
 	}
+	if netResult.IP == "" {
+		return fmt.Errorf("network setup returned no IP after snapshot replace for %s", containerID)
+	}
+	m.SetContainerIP(botID, netResult.IP)
 	return nil
 }
 
