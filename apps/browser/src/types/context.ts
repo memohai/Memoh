@@ -1,4 +1,4 @@
-import type { BrowserContext } from 'playwright'
+import type { BrowserContext, Page } from 'playwright'
 import type { BrowserContextConfig } from '../models'
 
 export interface GatewayBrowserContext {
@@ -6,4 +6,5 @@ export interface GatewayBrowserContext {
   name: string
   context: BrowserContext
   config: BrowserContextConfig
+  activePage?: Page
 }

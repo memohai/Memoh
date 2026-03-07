@@ -2,13 +2,16 @@ import { Elysia } from 'elysia'
 import { storage } from '../storage'
 import { ActionRequestModel, type ActionRequest } from '../models'
 import type { Page } from 'playwright'
+import type { GatewayBrowserContext } from '../types'
 
-async function getOrCreatePage(contextId: string): Promise<Page> {
-  const entry = storage.get(contextId)
-  if (!entry) throw new Error(`Context ${contextId} not found`)
+function getActivePage(entry: GatewayBrowserContext): Page | null {
+  if (entry.activePage && !entry.activePage.isClosed()) {
+    return entry.activePage
+  }
   const pages = entry.context.pages()
-  if (pages.length > 0) return pages[0]!
-  return await entry.context.newPage()
+  const page = pages.length > 0 ? pages[0]! : null
+  if (page) entry.activePage = page
+  return page
 }
 
 interface AccessibilityNode {
@@ -62,7 +65,58 @@ const INTERACTIVE_SELECTORS = [
 ].join(', ')
 
 async function executeAction(contextId: string, req: ActionRequest): Promise<Record<string, unknown>> {
-  const page = await getOrCreatePage(contextId)
+  const entry = storage.get(contextId)
+  if (!entry) throw new Error(`Context ${contextId} not found`)
+
+  switch (req.action) {
+    case 'tab_new': {
+      const page = await entry.context.newPage()
+      entry.activePage = page
+      if (req.url) {
+        await page.goto(req.url, { timeout: req.timeout ?? 30000 })
+      }
+      return { tab_index: entry.context.pages().indexOf(page), url: page.url() }
+    }
+    case 'tab_select': {
+      if (req.tab_index === undefined) throw new Error('tab_index is required for tab_select')
+      const pages = entry.context.pages()
+      const page = pages[req.tab_index]
+      if (!page) throw new Error(`Tab index ${req.tab_index} out of range (${pages.length} tabs)`)
+      entry.activePage = page
+      await page.bringToFront()
+      return { tab_index: req.tab_index, url: page.url(), title: await page.title() }
+    }
+    case 'tab_close': {
+      const pages = entry.context.pages()
+      const active = getActivePage(entry)
+      const idx = req.tab_index ?? (active ? pages.indexOf(active) : 0)
+      const page = pages[idx]
+      if (!page) throw new Error(`Tab index ${idx} out of range (${pages.length} tabs)`)
+      await page.close()
+      const remaining = entry.context.pages()
+      if (remaining.length > 0) {
+        entry.activePage = remaining[Math.min(idx, remaining.length - 1)]
+      } else {
+        entry.activePage = undefined
+      }
+      const activeIdx = entry.activePage ? remaining.indexOf(entry.activePage) : null
+      return { closed: idx, active_tab: activeIdx }
+    }
+    case 'tab_list': {
+      const pages = entry.context.pages()
+      const active = getActivePage(entry)
+      const tabs = await Promise.all(pages.map(async (p, i) => ({
+        index: i,
+        url: p.url(),
+        title: await p.title(),
+        active: p === active,
+      })))
+      return { tabs }
+    }
+  }
+
+  const page = getActivePage(entry) ?? await entry.context.newPage()
+  if (!entry.activePage) entry.activePage = page
 
   switch (req.action) {
     case 'navigate': {

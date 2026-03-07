@@ -65,18 +65,19 @@ func (e *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 	return []mcpgw.ToolDescriptor{
 		{
 			Name:        toolBrowserAction,
-			Description: "Execute a browser action: navigate, click, double-click, focus, type, fill, press key, keyboard input, hover, select option, check/uncheck, scroll, drag-and-drop, upload files, go back/forward, reload, or wait.",
+			Description: "Execute a browser action: navigate, click, double-click, focus, type, fill, press key, keyboard input, hover, select option, check/uncheck, scroll, drag-and-drop, upload files, go back/forward, reload, wait, or manage tabs (new/select/close).",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"action":          map[string]any{"type": "string", "enum": []string{"navigate", "click", "dblclick", "focus", "type", "fill", "press", "keyboard_type", "keyboard_inserttext", "keydown", "keyup", "hover", "select", "check", "uncheck", "scroll", "scrollintoview", "drag", "upload", "wait", "go_back", "go_forward", "reload"}, "description": "The browser action to perform"},
-					"url":             map[string]any{"type": "string", "description": "URL to navigate to (for navigate)"},
+					"action":          map[string]any{"type": "string", "enum": []string{"navigate", "click", "dblclick", "focus", "type", "fill", "press", "keyboard_type", "keyboard_inserttext", "keydown", "keyup", "hover", "select", "check", "uncheck", "scroll", "scrollintoview", "drag", "upload", "wait", "go_back", "go_forward", "reload", "tab_new", "tab_select", "tab_close"}, "description": "The browser action to perform"},
+					"url":             map[string]any{"type": "string", "description": "URL to navigate to (for navigate, tab_new)"},
 					"selector":        map[string]any{"type": "string", "description": "CSS selector for the target element"},
 					"text":            map[string]any{"type": "string", "description": "Text to type or fill (for type, fill, keyboard_type, keyboard_inserttext)"},
 					"key":             map[string]any{"type": "string", "description": "Key to press (for press, keydown, keyup). Examples: Enter, Tab, Escape, Control+a"},
 					"value":           map[string]any{"type": "string", "description": "Value to select (for select action)"},
 					"target_selector": map[string]any{"type": "string", "description": "Target CSS selector (for drag action)"},
 					"files":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "File paths to upload (for upload action)"},
+					"tab_index":       map[string]any{"type": "integer", "description": "Tab index (for tab_select, tab_close)"},
 					"direction":       map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}, "description": "Scroll direction (for scroll)"},
 					"amount":          map[string]any{"type": "integer", "description": "Scroll amount in pixels (for scroll, default 500)"},
 					"timeout":         map[string]any{"type": "integer", "description": "Timeout in milliseconds"},
@@ -86,11 +87,11 @@ func (e *Executor) ListTools(ctx context.Context, session mcpgw.ToolSessionConte
 		},
 		{
 			Name:        toolBrowserObserve,
-			Description: "Observe the current browser page: take screenshot (optionally annotated with numbered element labels or full-page), get accessibility tree snapshot, get text content, get HTML, evaluate JavaScript, get current URL, get page title, or export PDF.",
+			Description: "Observe the current browser page: take screenshot (optionally annotated with numbered element labels or full-page), get accessibility tree snapshot, get text content, get HTML, evaluate JavaScript, get current URL, get page title, export PDF, or list open tabs.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"observe":   map[string]any{"type": "string", "enum": []string{"screenshot", "screenshot_annotate", "snapshot", "get_content", "get_html", "evaluate", "get_url", "get_title", "pdf"}, "description": "What to observe from the page"},
+					"observe":   map[string]any{"type": "string", "enum": []string{"screenshot", "screenshot_annotate", "snapshot", "get_content", "get_html", "evaluate", "get_url", "get_title", "pdf", "tab_list"}, "description": "What to observe from the page"},
 					"selector":  map[string]any{"type": "string", "description": "CSS selector to scope the observation"},
 					"script":    map[string]any{"type": "string", "description": "JavaScript to evaluate (for evaluate)"},
 					"full_page": map[string]any{"type": "boolean", "description": "Capture full page screenshot (for screenshot, default false)"},
@@ -200,6 +201,9 @@ func (e *Executor) callAction(ctx context.Context, botID, contextID string, argu
 	}
 	if v, ok, _ := mcpgw.IntArg(arguments, "amount"); ok {
 		payload["amount"] = v
+	}
+	if v, ok, _ := mcpgw.IntArg(arguments, "tab_index"); ok {
+		payload["tab_index"] = v
 	}
 	if files, ok := arguments["files"].([]any); ok && len(files) > 0 {
 		payload["files"] = files
