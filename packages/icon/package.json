@@ -1,0 +1,13 @@
+{
+  "name": "@memoh/icon",
+  "version": "0.4.1",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "peerDependencies": {
+    "vue": "^3.5.26"
+  }
+}
