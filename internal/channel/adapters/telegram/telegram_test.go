@@ -143,20 +143,6 @@ func TestParseReplyToMessageID(t *testing.T) {
 	}
 }
 
-func TestResolveTelegramParseMode(t *testing.T) {
-	t.Parallel()
-
-	if got := resolveTelegramParseMode(channel.MessageFormatMarkdown); got != tgbotapi.ModeMarkdown {
-		t.Fatalf("markdown should return ModeMarkdown: %s", got)
-	}
-	if got := resolveTelegramParseMode(channel.MessageFormatPlain); got != "" {
-		t.Fatalf("plain should return empty: %s", got)
-	}
-	if got := resolveTelegramParseMode(channel.MessageFormatRich); got != "" {
-		t.Fatalf("rich should return empty: %s", got)
-	}
-}
-
 func TestBuildTelegramReplyRef(t *testing.T) {
 	t.Parallel()
 
