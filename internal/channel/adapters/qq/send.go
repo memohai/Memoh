@@ -149,7 +149,7 @@ func (a *QQAdapter) sendAttachment(ctx context.Context, cfg channel.ChannelConfi
 		}
 		return client.sendMedia(ctx, target, fileInfo, replyTo, att.Caption)
 	case channel.AttachmentVoice, channel.AttachmentAudio:
-		if !supportsQQVoiceUpload(att, upload.FileName) {
+		if !supportsQQVoiceUpload(att, upload.FileName, upload.Mime) {
 			return errors.New("qq voice attachments require SILK/WAV/MP3/AMR input")
 		}
 		fileInfo, err := client.uploadMedia(ctx, target, qqMediaTypeVoice, upload.Base64, "")
@@ -335,7 +335,7 @@ func mimeExtension(mimeType string) string {
 	}
 }
 
-func supportsQQVoiceUpload(att channel.Attachment, fileName string) bool {
+func supportsQQVoiceUpload(att channel.Attachment, fileName string, resolvedMime string) bool {
 	check := strings.ToLower(strings.TrimSpace(fileName))
 	if check == "" {
 		check = strings.ToLower(strings.TrimSpace(att.Name))
@@ -345,7 +345,11 @@ func supportsQQVoiceUpload(att channel.Attachment, fileName string) bool {
 			return true
 		}
 	}
-	switch strings.ToLower(strings.TrimSpace(att.Mime)) {
+	mimeType := strings.ToLower(strings.TrimSpace(resolvedMime))
+	if mimeType == "" {
+		mimeType = strings.ToLower(strings.TrimSpace(att.Mime))
+	}
+	switch mimeType {
 	case "audio/silk", "audio/amr", "audio/wav", "audio/x-wav", "audio/mpeg", "audio/mp3":
 		return true
 	default:

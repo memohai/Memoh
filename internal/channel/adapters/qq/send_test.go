@@ -602,6 +602,78 @@ func TestQQSendChannelImageFromStoredAssetIsUnsupported(t *testing.T) {
 	}
 }
 
+func TestQQSendVoiceAttachmentFromHTTPURLUsesDetectedMime(t *testing.T) {
+	t.Parallel()
+
+	const voiceBytes = "remote-voice-bytes"
+
+	var uploadBody map[string]any
+	var messageBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/getAppAccessToken":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "token-1",
+				"expires_in":   7200,
+			})
+		case "/remote/voice":
+			w.Header().Set("Content-Type", "audio/mpeg")
+			_, _ = w.Write([]byte(voiceBytes))
+		case "/v2/groups/group-openid/files":
+			if err := json.NewDecoder(r.Body).Decode(&uploadBody); err != nil {
+				t.Fatalf("decode upload body: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"file_uuid": "file-uuid-voice",
+				"file_info": "file-info-voice",
+				"ttl":       60,
+			})
+		case "/v2/groups/group-openid/messages":
+			if err := json.NewDecoder(r.Body).Decode(&messageBody); err != nil {
+				t.Fatalf("decode message body: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "m-voice"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := newTestQQAdapter(server)
+	err := adapter.Send(context.Background(), channel.ChannelConfig{
+		ID:    "cfg-voice",
+		BotID: "bot-voice",
+		Credentials: map[string]any{
+			"appId":        "524288",
+			"clientSecret": "secret",
+		},
+	}, channel.OutboundMessage{
+		Target: "group:group-openid",
+		Message: channel.Message{
+			Attachments: []channel.Attachment{{
+				Type: channel.AttachmentVoice,
+				URL:  server.URL + "/remote/voice",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("send remote voice attachment: %v", err)
+	}
+	if uploadBody["file_type"] != float64(qqMediaTypeVoice) {
+		t.Fatalf("unexpected file_type: %#v", uploadBody["file_type"])
+	}
+	if uploadBody["file_data"] != base64.StdEncoding.EncodeToString([]byte(voiceBytes)) {
+		t.Fatalf("unexpected file_data: %#v", uploadBody["file_data"])
+	}
+	mediaPayload, ok := messageBody["media"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected media payload: %#v", messageBody["media"])
+	}
+	if mediaPayload["file_info"] != "file-info-voice" {
+		t.Fatalf("unexpected media.file_info: %#v", mediaPayload["file_info"])
+	}
+}
+
 func TestQQSendImageAttachmentFromHTTPURLUsesFetchedBytes(t *testing.T) {
 	t.Parallel()
 
