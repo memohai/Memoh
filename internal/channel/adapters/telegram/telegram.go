@@ -20,6 +20,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/common"
 	"github.com/memohai/memoh/internal/media"
+	"github.com/memohai/memoh/internal/textutil"
 )
 
 const (
@@ -1515,16 +1516,7 @@ func sanitizeTelegramText(text string) string {
 // truncateTelegramText truncates text to telegramMaxMessageLength on a valid
 // UTF-8 rune boundary, appending "..." when truncation occurs.
 func truncateTelegramText(text string) string {
-	if len(text) <= telegramMaxMessageLength {
-		return text
-	}
-	const suffix = "..."
-	limit := telegramMaxMessageLength - len(suffix)
-	// Walk backwards to a rune boundary.
-	for limit > 0 && !utf8.RuneStart(text[limit]) {
-		limit--
-	}
-	return text[:limit] + suffix
+	return textutil.TruncateRunesWithSuffix(text, telegramMaxMessageLength, "...")
 }
 
 // ProcessingStarted sends a "typing" chat action to indicate processing.
