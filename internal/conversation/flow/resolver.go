@@ -28,6 +28,7 @@ import (
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/textutil"
 )
 
 const (
@@ -1918,10 +1919,7 @@ func nonNilModelMessages(m []conversation.ModelMessage) []conversation.ModelMess
 }
 
 func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
+	return textutil.TruncateRunesWithSuffix(s, n, "...")
 }
 
 func parseResolverUUID(id string) (pgtype.UUID, error) {
