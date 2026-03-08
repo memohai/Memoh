@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -8,7 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -434,8 +435,8 @@ func (a *TelegramAdapter) buildTelegramMediaGroupInboundMessage(
 	if len(items) == 0 {
 		return channel.InboundMessage{}, false
 	}
-	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].MessageID < items[j].MessageID
+	slices.SortStableFunc(items, func(a, b *tgbotapi.Message) int {
+		return cmp.Compare(a.MessageID, b.MessageID)
 	})
 	anchor := items[0]
 	text := ""
@@ -743,32 +744,25 @@ func sendTelegramTextReturnMessage(bot *tgbotapi.BotAPI, target string, text str
 	if sendTextForTest != nil {
 		return sendTextForTest(bot, target, text, replyTo, parseMode)
 	}
-	var sent tgbotapi.Message
-	if strings.HasPrefix(target, "@") {
-		message := tgbotapi.NewMessageToChannel(target, text)
-		message.ParseMode = parseMode
-		if replyTo > 0 {
-			message.ReplyToMessageID = replyTo
-		}
-		sent, err = bot.Send(message)
-		if err != nil {
-			return 0, 0, err
-		}
-	} else {
-		chatID, err = strconv.ParseInt(target, 10, 64)
-		if err != nil {
-			return 0, 0, errors.New("telegram target must be @username or chat_id")
-		}
-		message := tgbotapi.NewMessage(chatID, text)
-		message.ParseMode = parseMode
-		if replyTo > 0 {
-			message.ReplyToMessageID = replyTo
-		}
-		sent, err = bot.Send(message)
-		if err != nil {
-			return 0, 0, err
-		}
+	parsedChatID, channelUsername, parseErr := parseTelegramTarget(target)
+	if parseErr != nil {
+		return 0, 0, parseErr
 	}
+	var message tgbotapi.MessageConfig
+	if channelUsername != "" {
+		message = tgbotapi.NewMessageToChannel(channelUsername, text)
+	} else {
+		message = tgbotapi.NewMessage(parsedChatID, text)
+	}
+	message.ParseMode = parseMode
+	if replyTo > 0 {
+		message.ReplyToMessageID = replyTo
+	}
+	sent, err := bot.Send(message)
+	if err != nil {
+		return 0, 0, err
+	}
+	chatID = parsedChatID
 	if sent.Chat != nil {
 		chatID = sent.Chat.ID
 	}
@@ -875,17 +869,17 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tgbotapi.BotAPI, targe
 	if err != nil {
 		return err
 	}
-	isChannel := strings.HasPrefix(target, "@")
+	chatID, channelUsername, targetErr := parseTelegramTarget(target)
+	if targetErr != nil {
+		return targetErr
+	}
+	isChannel := channelUsername != ""
 	switch att.Type {
 	case channel.AttachmentImage:
 		var photo tgbotapi.PhotoConfig
 		if isChannel {
-			photo = tgbotapi.NewPhotoToChannel(target, file)
+			photo = tgbotapi.NewPhotoToChannel(channelUsername, file)
 		} else {
-			chatID, err := strconv.ParseInt(target, 10, 64)
-			if err != nil {
-				return errors.New("telegram target must be @username or chat_id")
-			}
 			photo = tgbotapi.NewPhoto(chatID, file)
 		}
 		photo.Caption = caption
@@ -900,15 +894,11 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tgbotapi.BotAPI, targe
 		if isChannel {
 			document = tgbotapi.DocumentConfig{
 				BaseFile: tgbotapi.BaseFile{
-					BaseChat: tgbotapi.BaseChat{ChannelUsername: target},
+					BaseChat: tgbotapi.BaseChat{ChannelUsername: channelUsername},
 					File:     file,
 				},
 			}
 		} else {
-			chatID, err := strconv.ParseInt(target, 10, 64)
-			if err != nil {
-				return errors.New("telegram target must be @username or chat_id")
-			}
 			document = tgbotapi.NewDocument(chatID, file)
 		}
 		document.Caption = caption
@@ -1017,8 +1007,8 @@ func resolveTelegramFile(ctx context.Context, urlRef, keyRef, base64Ref, sourceP
 
 func decodeDataURLBytes(dataURL string) ([]byte, error) {
 	value := dataURL
-	if idx := strings.Index(value, ","); idx >= 0 {
-		value = value[idx+1:]
+	if _, after, ok := strings.Cut(value, ","); ok {
+		value = after
 	}
 	return io.ReadAll(io.LimitReader(
 		base64StdDecoder(strings.NewReader(value)),
@@ -1155,56 +1145,58 @@ func buildTelegramForwardContext(msg *tgbotapi.Message) string {
 	return ""
 }
 
-func buildTelegramAudio(target string, file tgbotapi.RequestFileData) (tgbotapi.AudioConfig, error) {
+// parseTelegramTarget resolves a target string into a numeric chat ID and an
+// optional channel username. Exactly one of chatID or channelUsername will be
+// set; callers can use this to construct any message config type.
+func parseTelegramTarget(target string) (chatID int64, channelUsername string, err error) {
 	if strings.HasPrefix(target, "@") {
-		audio := tgbotapi.NewAudio(0, file)
-		audio.ChannelUsername = target
-		return audio, nil
+		return 0, target, nil
 	}
-	chatID, err := strconv.ParseInt(target, 10, 64)
+	chatID, err = strconv.ParseInt(target, 10, 64)
 	if err != nil {
-		return tgbotapi.AudioConfig{}, errors.New("telegram target must be @username or chat_id")
+		return 0, "", errors.New("telegram target must be @username or chat_id")
 	}
-	return tgbotapi.NewAudio(chatID, file), nil
+	return chatID, "", nil
+}
+
+func buildTelegramAudio(target string, file tgbotapi.RequestFileData) (tgbotapi.AudioConfig, error) {
+	chatID, channelUsername, err := parseTelegramTarget(target)
+	if err != nil {
+		return tgbotapi.AudioConfig{}, err
+	}
+	audio := tgbotapi.NewAudio(chatID, file)
+	audio.ChannelUsername = channelUsername
+	return audio, nil
 }
 
 func buildTelegramVoice(target string, file tgbotapi.RequestFileData) (tgbotapi.VoiceConfig, error) {
-	if strings.HasPrefix(target, "@") {
-		voice := tgbotapi.NewVoice(0, file)
-		voice.ChannelUsername = target
-		return voice, nil
-	}
-	chatID, err := strconv.ParseInt(target, 10, 64)
+	chatID, channelUsername, err := parseTelegramTarget(target)
 	if err != nil {
-		return tgbotapi.VoiceConfig{}, errors.New("telegram target must be @username or chat_id")
+		return tgbotapi.VoiceConfig{}, err
 	}
-	return tgbotapi.NewVoice(chatID, file), nil
+	voice := tgbotapi.NewVoice(chatID, file)
+	voice.ChannelUsername = channelUsername
+	return voice, nil
 }
 
 func buildTelegramVideo(target string, file tgbotapi.RequestFileData) (tgbotapi.VideoConfig, error) {
-	if strings.HasPrefix(target, "@") {
-		video := tgbotapi.NewVideo(0, file)
-		video.ChannelUsername = target
-		return video, nil
-	}
-	chatID, err := strconv.ParseInt(target, 10, 64)
+	chatID, channelUsername, err := parseTelegramTarget(target)
 	if err != nil {
-		return tgbotapi.VideoConfig{}, errors.New("telegram target must be @username or chat_id")
+		return tgbotapi.VideoConfig{}, err
 	}
-	return tgbotapi.NewVideo(chatID, file), nil
+	video := tgbotapi.NewVideo(chatID, file)
+	video.ChannelUsername = channelUsername
+	return video, nil
 }
 
 func buildTelegramAnimation(target string, file tgbotapi.RequestFileData) (tgbotapi.AnimationConfig, error) {
-	if strings.HasPrefix(target, "@") {
-		animation := tgbotapi.NewAnimation(0, file)
-		animation.ChannelUsername = target
-		return animation, nil
-	}
-	chatID, err := strconv.ParseInt(target, 10, 64)
+	chatID, channelUsername, err := parseTelegramTarget(target)
 	if err != nil {
-		return tgbotapi.AnimationConfig{}, errors.New("telegram target must be @username or chat_id")
+		return tgbotapi.AnimationConfig{}, err
 	}
-	return tgbotapi.NewAnimation(chatID, file), nil
+	animation := tgbotapi.NewAnimation(chatID, file)
+	animation.ChannelUsername = channelUsername
+	return animation, nil
 }
 
 func resolveTelegramParseMode(format channel.MessageFormat) string {
@@ -1424,8 +1416,8 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 	mime := strings.TrimSpace(attachment.Mime)
 	if mime == "" {
 		mime = strings.TrimSpace(resp.Header.Get("Content-Type"))
-		if idx := strings.Index(mime, ";"); idx >= 0 {
-			mime = strings.TrimSpace(mime[:idx])
+		if base, _, ok := strings.Cut(mime, ";"); ok {
+			mime = strings.TrimSpace(base)
 		}
 	}
 	size := attachment.Size
