@@ -19,6 +19,7 @@ For detailed step-by-step guides on how to create and configure bots for each pl
 - **[Telegram Configuration](/channels/telegram)**
 - **[Feishu (Lark) Configuration](/channels/feishu)**
 - **[Discord Configuration](/channels/discord)**
+- **[QQ Configuration](/channels/qq)**
 
 ---
 
