@@ -698,7 +698,10 @@ func (r *Resolver) StreamChatWS(
 	dialer := websocket.Dialer{
 		HandshakeTimeout: r.timeout,
 	}
-	conn, _, err := dialer.DialContext(ctx, wsURL, nil)
+	conn, resp, err := dialer.DialContext(ctx, wsURL, nil)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		return fmt.Errorf("gateway ws dial: %w", err)
 	}
@@ -1483,47 +1486,6 @@ func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversatio
 }
 
 // --- store helpers ---
-
-func (r *Resolver) persistUserMessage(ctx context.Context, req conversation.ChatRequest) error {
-	if r.messageService == nil {
-		return nil
-	}
-	if strings.TrimSpace(req.BotID) == "" {
-		return errors.New("bot id is required for persistence")
-	}
-	text := strings.TrimSpace(req.Query)
-	if text == "" && len(req.Attachments) == 0 {
-		return nil
-	}
-
-	message := conversation.ModelMessage{
-		Role:    "user",
-		Content: conversation.NewTextContent(text),
-	}
-	content, err := json.Marshal(message)
-	if err != nil {
-		return err
-	}
-	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
-	meta := buildRouteMetadata(req)
-	if meta == nil {
-		meta = map[string]any{}
-	}
-	meta["trigger_mode"] = "active_chat"
-	_, err = r.messageService.Persist(ctx, messagepkg.PersistInput{
-		BotID:                   req.BotID,
-		RouteID:                 req.RouteID,
-		SenderChannelIdentityID: senderChannelIdentityID,
-		SenderUserID:            senderUserID,
-		Platform:                req.CurrentChannel,
-		ExternalMessageID:       req.ExternalMessageID,
-		Role:                    "user",
-		Content:                 content,
-		Metadata:                meta,
-		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
-	})
-	return err
-}
 
 func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage, usages []json.RawMessage, modelID string) error {
 	fullRound := make([]conversation.ModelMessage, 0, len(messages))

@@ -209,7 +209,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 }
 
 var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
 type wsClientMessage struct {
