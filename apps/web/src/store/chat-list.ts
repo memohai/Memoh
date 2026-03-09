@@ -614,10 +614,10 @@ export const useChatStore = defineStore('chat', () => {
         break
       }
       case 'agent_abort':
+      case 'agent_end':
         resolvePendingAssistantStream()
         break
       case 'agent_start':
-      case 'agent_end':
       default: {
         const fallback = extractFallbackText(event)
         if (fallback) {
