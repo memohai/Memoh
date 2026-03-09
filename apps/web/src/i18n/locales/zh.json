@@ -181,7 +181,9 @@
     "importSuccess": "成功导入 {created} 个模型，跳过 {skipped} 个",
     "importFailed": "导入模型失败",
     "importClientType": "模型客户端类型",
-    "importClientTypeHint": "为导入的模型设置默认客户端类型"
+    "importClientTypeHint": "为导入的模型设置默认客户端类型",
+    "showingCount": "显示 {count} / {total}",
+    "showMore": "加载更多"
   },
   "provider": {
     "add": "添加服务商",

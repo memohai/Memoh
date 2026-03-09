@@ -185,7 +185,9 @@
     "importSuccess": "Successfully imported {created} models, skipped {skipped}",
     "importFailed": "Failed to import models",
     "importClientType": "Model Client Type",
-    "importClientTypeHint": "Set default client type for imported models"
+    "importClientTypeHint": "Set default client type for imported models",
+    "showingCount": "Showing {count} of {total}",
+    "showMore": "Show More"
   },
   "provider": {
     "add": "Add Provider",
