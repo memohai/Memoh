@@ -120,7 +120,7 @@ export function connectWebSocket(
 
         onStreamEvent(parsed as StreamEvent)
       } catch {
-        // Ignore unparseable messages.
+        // Ignore unparsable messages.
       }
     }
   }

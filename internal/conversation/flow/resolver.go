@@ -711,8 +711,8 @@ func (r *Resolver) StreamChatWS(
 	rawToken = strings.TrimPrefix(rawToken, "bearer ")
 
 	startPayload := struct {
-		Type   string         `json:"type"`
-		Bearer string         `json:"bearer,omitempty"`
+		Type   string `json:"type"`
+		Bearer string `json:"bearer,omitempty"`
 		gatewayRequest
 	}{
 		Type:           "start",
@@ -751,7 +751,7 @@ func (r *Resolver) StreamChatWS(
 
 		if !stored {
 			var envelope struct {
-				Type     string `json:"type"`
+				Type string `json:"type"`
 			}
 			if json.Unmarshal(msgData, &envelope) == nil && isTerminalStreamEvent(envelope.Type) {
 				if _, storeErr := r.tryStoreStream(ctx, req, msgData, modelID); storeErr != nil {
