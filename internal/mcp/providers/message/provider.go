@@ -214,6 +214,11 @@ func (p *Executor) callSend(ctx context.Context, session mcpgw.ToolSessionContex
 		outboundMessage.Reply = &channel.ReplyRef{MessageID: replyTo}
 	}
 
+	// Auto-detect markdown when format is not explicitly set.
+	if outboundMessage.Format == "" && channel.ContainsMarkdown(outboundMessage.Text) {
+		outboundMessage.Format = channel.MessageFormatMarkdown
+	}
+
 	target := mcpgw.FirstStringArg(arguments, "target")
 	if target == "" {
 		target = strings.TrimSpace(session.ReplyTarget)

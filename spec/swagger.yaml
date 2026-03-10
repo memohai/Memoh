@@ -1126,6 +1126,21 @@ definitions:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
     type: object
+  handlers.emailOAuthStatusResponse:
+    properties:
+      configured:
+        type: boolean
+      email_address:
+        type: string
+      expired:
+        type: boolean
+      expires_at:
+        type: string
+      has_token:
+        type: boolean
+      provider:
+        type: string
+    type: object
   handlers.fsOpResponse:
     properties:
       ok:
@@ -2080,7 +2095,7 @@ definitions:
         type: boolean
       search_provider_id:
         type: string
-      tts_provider_id:
+      tts_model_id:
         type: string
     type: object
   settings.UpsertRequest:
@@ -2113,7 +2128,7 @@ definitions:
         type: boolean
       search_provider_id:
         type: string
-      tts_provider_id:
+      tts_model_id:
         type: string
     type: object
   subagent.AddSkillsRequest:
@@ -2229,7 +2244,14 @@ definitions:
           type: string
         type: array
     type: object
-  tts.Capabilities:
+  tts.CreateProviderRequest:
+    properties:
+      name:
+        type: string
+      provider:
+        type: string
+    type: object
+  tts.ModelCapabilities:
     properties:
       formats:
         items:
@@ -2244,14 +2266,35 @@ definitions:
           $ref: '#/definitions/tts.VoiceInfo'
         type: array
     type: object
-  tts.CreateProviderRequest:
+  tts.ModelInfo:
+    properties:
+      capabilities:
+        $ref: '#/definitions/tts.ModelCapabilities'
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  tts.ModelResponse:
     properties:
       config:
         additionalProperties: {}
         type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      model_id:
+        type: string
       name:
         type: string
-      provider:
+      provider_type:
+        type: string
+      tts_provider_id:
+        type: string
+      updated_at:
         type: string
     type: object
   tts.ParamConstraint:
@@ -2269,20 +2312,21 @@ definitions:
     type: object
   tts.ProviderMetaResponse:
     properties:
-      capabilities:
-        $ref: '#/definitions/tts.Capabilities'
+      default_model:
+        type: string
       description:
         type: string
       display_name:
         type: string
+      models:
+        items:
+          $ref: '#/definitions/tts.ModelInfo'
+        type: array
       provider:
         type: string
     type: object
   tts.ProviderResponse:
     properties:
-      config:
-        additionalProperties: {}
-        type: object
       created_at:
         type: string
       id:
@@ -2302,14 +2346,17 @@ definitions:
       text:
         type: string
     type: object
-  tts.UpdateProviderRequest:
+  tts.UpdateModelRequest:
     properties:
       config:
         additionalProperties: {}
         type: object
       name:
         type: string
-      provider:
+    type: object
+  tts.UpdateProviderRequest:
+    properties:
+      name:
         type: string
     type: object
   tts.VoiceInfo:
@@ -2506,6 +2553,36 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Subscribe to local channel events via SSE
+      tags:
+      - local-channel
+  /bots/{bot_id}/cli/ws:
+    get:
+      description: Upgrade to WebSocket for bidirectional chat streaming with abort
+        support.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "101":
+          description: Switching Protocols
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: WebSocket chat endpoint
       tags:
       - local-channel
   /bots/{bot_id}/container:
@@ -5121,8 +5198,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Stream-synthesize text using the bot's configured TTS provider,
-        write to temp file
+      description: Stream-synthesize text using the bot's configured TTS model, write
+        to temp file
       parameters:
       - description: Bot ID
         in: path
@@ -5225,6 +5302,36 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Subscribe to local channel events via SSE
+      tags:
+      - local-channel
+  /bots/{bot_id}/web/ws:
+    get:
+      description: Upgrade to WebSocket for bidirectional chat streaming with abort
+        support.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "101":
+          description: Switching Protocols
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: WebSocket chat endpoint
       tags:
       - local-channel
   /bots/{id}:
@@ -6055,6 +6162,79 @@ paths:
       summary: Update an email provider
       tags:
       - email-providers
+  /email-providers/{id}/oauth/authorize:
+    get:
+      description: Returns the authorization URL to redirect the user to
+      parameters:
+      - description: Email provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start OAuth2 authorization for an email provider
+      tags:
+      - email-oauth
+  /email-providers/{id}/oauth/status:
+    get:
+      parameters:
+      - description: Email provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.emailOAuthStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get OAuth2 status for an email provider
+      tags:
+      - email-oauth
+  /email-providers/{id}/oauth/token:
+    delete:
+      parameters:
+      - description: Email provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Revoke stored OAuth2 tokens for an email provider
+      tags:
+      - email-oauth
   /email-providers/meta:
     get:
       description: List available email provider types and config schemas
@@ -6099,6 +6279,38 @@ paths:
       summary: Mailgun inbound email webhook
       tags:
       - email-webhook
+  /email/oauth/callback:
+    get:
+      description: Handles the OAuth2 callback, exchanges the code for tokens
+      parameters:
+      - description: Authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: State parameter
+        in: query
+        name: state
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: OAuth2 callback for email providers
+      tags:
+      - email-oauth
   /memory-providers:
     get:
       description: List configured memory providers
@@ -7014,6 +7226,153 @@ paths:
       summary: List search provider metadata
       tags:
       - search-providers
+  /tts-models:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ModelResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List all TTS models
+      tags:
+      - tts-models
+  /tts-models/{id}:
+    delete:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a TTS model
+      tags:
+      - tts-models
+    get:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ModelResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a TTS model
+      tags:
+      - tts-models
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.UpdateModelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ModelResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a TTS model
+      tags:
+      - tts-models
+  /tts-models/{id}/capabilities:
+    get:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ModelCapabilities'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get TTS model capabilities
+      tags:
+      - tts-models
+  /tts-models/{id}/test:
+    post:
+      consumes:
+      - application/json
+      description: Synthesize text using a specific model's config and return audio
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Text to synthesize
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.TestSynthesizeRequest'
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Audio data
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Test TTS model synthesis
+      tags:
+      - tts-models
   /tts-providers:
     get:
       parameters:
@@ -7040,6 +7399,7 @@ paths:
     post:
       consumes:
       - application/json
+      description: Create a TTS provider and auto-import its available models
       parameters:
       - description: TTS provider configuration
         in: body
@@ -7137,44 +7497,58 @@ paths:
       summary: Update a TTS provider
       tags:
       - tts-providers
-  /tts-providers/{id}/test:
+  /tts-providers/{id}/import-models:
     post:
-      consumes:
-      - application/json
-      description: Synthesize text using the provider's saved config and return audio
+      description: Discover and import available models from the TTS adapter
       parameters:
       - description: Provider ID
         in: path
         name: id
         required: true
         type: string
-      - description: Text to synthesize
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/tts.TestSynthesizeRequest'
       produces:
-      - application/octet-stream
+      - application/json
       responses:
         "200":
-          description: Audio data
+          description: OK
           schema:
-            type: file
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            items:
+              $ref: '#/definitions/tts.ModelResponse'
+            type: array
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Test TTS synthesis
+      summary: Import models for a TTS provider
+      tags:
+      - tts-providers
+  /tts-providers/{id}/models:
+    get:
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ModelResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List models for a TTS provider
       tags:
       - tts-providers
   /tts-providers/meta:
     get:
-      description: List available TTS provider types with their capabilities
+      description: List available TTS provider types with their models and capabilities
       responses:
         "200":
           description: OK

@@ -19,6 +19,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/textutil"
 )
 
 // OAuthService manages OAuth flows for MCP connections.
@@ -667,10 +668,7 @@ func parseTokenResponse(body []byte) (*tokenResponse, error) {
 }
 
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
+	return textutil.TruncateRunesWithSuffix(s, maxLen, "...")
 }
 
 func (s *OAuthService) refreshToken(ctx context.Context, tokenEndpoint, refreshToken, clientID, resourceURI string) (*tokenResponse, error) {

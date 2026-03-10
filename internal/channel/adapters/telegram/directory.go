@@ -222,11 +222,9 @@ func parseTelegramUserInput(input string) (chatID, userID int64) {
 	if input == "" {
 		return 0, 0
 	}
-	if idx := strings.Index(input, ":"); idx >= 0 {
-		left := strings.TrimSpace(input[:idx])
-		right := strings.TrimSpace(input[idx+1:])
-		cid, err1 := strconv.ParseInt(left, 10, 64)
-		uid, err2 := strconv.ParseInt(right, 10, 64)
+	if left, right, ok := strings.Cut(input, ":"); ok {
+		cid, err1 := strconv.ParseInt(strings.TrimSpace(left), 10, 64)
+		uid, err2 := strconv.ParseInt(strings.TrimSpace(right), 10, 64)
 		if err1 == nil && err2 == nil && cid != 0 && uid != 0 {
 			return cid, uid
 		}

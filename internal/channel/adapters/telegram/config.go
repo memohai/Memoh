@@ -15,22 +15,23 @@ type Config struct {
 	APIBaseURL string // Reverse proxy base URL for regions where Telegram is blocked (e.g. China mainland)
 }
 
-// apiEndpoint returns the Sprintf-formatted API endpoint derived from the base URL.
-func (c Config) apiEndpoint() string {
+// baseURL returns the effective base URL with trailing slashes removed.
+func (c Config) baseURL() string {
 	base := c.APIBaseURL
 	if base == "" {
 		base = defaultAPIBaseURL
 	}
-	return strings.TrimRight(base, "/") + "/bot%s/%s"
+	return strings.TrimRight(base, "/")
+}
+
+// apiEndpoint returns the Sprintf-formatted API endpoint derived from the base URL.
+func (c Config) apiEndpoint() string {
+	return c.baseURL() + "/bot%s/%s"
 }
 
 // fileEndpoint returns the Sprintf-formatted file download endpoint derived from the base URL.
 func (c Config) fileEndpoint() string {
-	base := c.APIBaseURL
-	if base == "" {
-		base = defaultAPIBaseURL
-	}
-	return strings.TrimRight(base, "/") + "/file/bot%s/%s"
+	return c.baseURL() + "/file/bot%s/%s"
 }
 
 // UserConfig holds the identifiers used to target a Telegram user or group.

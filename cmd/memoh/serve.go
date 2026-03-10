@@ -41,6 +41,7 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	emailgeneric "github.com/memohai/memoh/internal/email/adapters/generic"
+	emailgmail "github.com/memohai/memoh/internal/email/adapters/gmail"
 	emailmailgun "github.com/memohai/memoh/internal/email/adapters/mailgun"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/healthcheck"
@@ -154,6 +155,8 @@ func runServe() {
 			provideServerHandler(handlers.NewEmailBindingsHandler),
 			provideServerHandler(handlers.NewEmailOutboxHandler),
 			provideServerHandler(handlers.NewEmailWebhookHandler),
+			provideServerHandler(provideEmailOAuthHandler),
+			emailpkg.NewDBOAuthTokenStore,
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideOAuthService,
@@ -393,12 +396,16 @@ func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, ide
 	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelStore, channelLifecycle, channelManager, registry)
 }
 
-func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *handlers.LocalChannelHandler {
-	return handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelStore, chatService, hub, botService, accountService)
+func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver) *handlers.LocalChannelHandler {
+	h := handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelStore, chatService, hub, botService, accountService)
+	h.SetResolver(resolver)
+	return h
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *handlers.LocalChannelHandler {
-	return handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver) *handlers.LocalChannelHandler {
+	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
+	h.SetResolver(resolver)
+	return h
 }
 
 type serverParams struct {
@@ -431,6 +438,7 @@ var (
 		"/api/docs",
 		"/channels/feishu/webhook/",
 		"/email/mailgun/webhook/",
+		"/email/oauth/callback",
 	}
 	memohSPABackendPrefixes = []string{
 		"/api",
@@ -644,11 +652,25 @@ func startTtsTempStoreCleanup(lc fx.Lifecycle, store *ttspkg.TempStore) {
 	})
 }
 
-func provideEmailRegistry(log *slog.Logger) *emailpkg.Registry {
+func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenStore) *emailpkg.Registry {
 	reg := emailpkg.NewRegistry()
 	reg.Register(emailgeneric.New(log))
 	reg.Register(emailmailgun.New(log))
+	reg.Register(emailgmail.New(log, tokenStore))
 	return reg
+}
+
+func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, cfg config.Config) *handlers.EmailOAuthHandler {
+	addr := strings.TrimSpace(cfg.Server.Addr)
+	if addr == "" {
+		addr = ":8080"
+	}
+	host := addr
+	if strings.HasPrefix(host, ":") {
+		host = "localhost" + host
+	}
+	callbackURL := "http://" + host + "/email/oauth/callback"
+	return handlers.NewEmailOAuthHandler(log, service, tokenStore, callbackURL)
 }
 
 func provideEmailChatGateway(resolver *flow.Resolver, queries *dbsqlc.Queries, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {

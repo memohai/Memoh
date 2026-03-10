@@ -39,6 +39,10 @@ export default defineConfig(({ command }) => {
 
   return {
     plugins: [vue(), tailwindcss()],
+    optimizeDeps: {
+      // Pre-bundle deps for route pages to avoid slow first load / navigation
+      entries: ['src/main.ts', 'src/pages/**/*.vue'],
+    },
     server: {
       port,
       host,
@@ -46,7 +50,8 @@ export default defineConfig(({ command }) => {
         '/api': {
           target: baseUrl,
           changeOrigin: true,
-          rewrite: (path: string) => path.replace(/^\/api/, '')
+          rewrite: (path: string) => path.replace(/^\/api/, ''),
+          ws: true,
         }
       },
     },
@@ -57,7 +62,8 @@ export default defineConfig(({ command }) => {
         '/api': {
           target: baseUrl,
           changeOrigin: true,
-          rewrite: (path: string) => path.replace(/^\/api/, '')
+          rewrite: (path: string) => path.replace(/^\/api/, ''),
+          ws: true,
         }
       },
       allowedHosts: true,

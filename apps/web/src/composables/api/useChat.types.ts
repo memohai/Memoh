@@ -47,7 +47,7 @@ export interface StreamEvent {
     | 'reasoning_start' | 'reasoning_delta' | 'reasoning_end'
     | 'tool_call_start' | 'tool_call_end'
     | 'attachment_delta'
-    | 'agent_start' | 'agent_end'
+    | 'agent_start' | 'agent_end' | 'agent_abort'
     | 'processing_started' | 'processing_completed' | 'processing_failed'
     | 'error'
   delta?: string

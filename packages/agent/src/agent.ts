@@ -4,6 +4,7 @@ import {
   LanguageModelUsage,
   ModelMessage,
   stepCountIs,
+  type StepResult,
   streamText,
   ToolSet,
   UserModelMessage,
@@ -83,6 +84,16 @@ export const buildNativeImageParts = (attachments: GatewayInputAttachment[]): Im
   return attachments
     .map((attachment) => createImagePartFromAttachment(attachment))
     .filter((attachment): attachment is ImagePart => attachment != null)
+}
+
+const rebuildPartialMessages = (steps: StepResult<ToolSet>[]): ModelMessage[] => {
+  const messages: ModelMessage[] = []
+  for (const step of steps) {
+    if (step.response?.messages) {
+      messages.push(...(step.response.messages as ModelMessage[]))
+    }
+  }
+  return messages
 }
 
 export const createAgent = (
@@ -508,7 +519,6 @@ export const createAgent = (
       basePrepareStep: () => ({ system: systemPrompt }),
     })
     const tools = { ...baseTools, ...readMediaTools }
-    // Stream path needs deferred abort to keep tool_call_start/tool_call_end event pairing.
     const guardedTools = buildGuardedTools(tools, (toolCallId) => {
       toolLoopAbortCallIds.add(toolCallId)
     })
@@ -519,6 +529,17 @@ export const createAgent = (
       }
       await closePromise
     }
+
+    const abortController = new AbortController()
+    if (input.signal) {
+      if (input.signal.aborted) {
+        abortController.abort(input.signal.reason)
+      } else {
+        input.signal.addEventListener('abort', () => abortController.abort(input.signal!.reason), { once: true })
+      }
+    }
+    const abortedSteps: StepResult<ToolSet>[] = []
+    let wasAborted = false
     let streamError: unknown = null
     try {
       const { fullStream } = streamText({
@@ -529,12 +550,17 @@ export const createAgent = (
         stopWhen: stepCountIs(Infinity),
         prepareStep,
         tools: guardedTools,
+        abortSignal: abortController.signal,
         onFinish: async ({ usage, reasoning, response, steps }) => {
           await closeTools()
           result.usage = usage as never
           result.reasoning = reasoning.map((part) => part.text)
           result.messages = response.messages
           result.usages = buildStepUsages(steps)
+        },
+        onAbort: ({ steps }) => {
+          wasAborted = true
+          abortedSteps.push(...steps)
         },
       })
       yield {
@@ -593,7 +619,6 @@ export const createAgent = (
             break
           }
           case 'text-end': {
-            // Flush any remaining buffered content before ending the text stream.
             const remainder = attachmentsExtractor.flushRemainder()
             if (remainder.visibleText) {
               if (textLoopProbeBuffer) {
@@ -620,7 +645,6 @@ export const createAgent = (
             break
           }
           case 'tool-call':
-            // Flush any remaining buffered content before ending the text stream.
             const remainder = attachmentsExtractor.flushRemainder()
             if (remainder.visibleText) {
               if (textLoopProbeBuffer) {
@@ -649,8 +673,6 @@ export const createAgent = (
             }
             break
           case 'tool-result':
-            // Always emit the terminal tool event first so downstream reducers
-            // can close the in-flight tool block before the stream aborts.
             const shouldAbortForToolLoop = toolLoopAbortCallIds.delete(chunk.toolCallId)
             yield {
               type: 'tool_call_end',
@@ -702,8 +724,30 @@ export const createAgent = (
       }
     } catch (error) {
       streamError = error
-      console.error(error)
-      throw error
+
+      if (wasAborted || abortController.signal.aborted) {
+        const partialMessages = rebuildPartialMessages(abortedSteps)
+        const partialUsages = abortedSteps.length > 0
+          ? buildStepUsages(abortedSteps as Parameters<typeof buildStepUsages>[0])
+          : []
+        const partialUsage = abortedSteps.length > 0
+          ? abortedSteps[abortedSteps.length - 1].usage
+          : null
+        const partialReasoning = abortedSteps.flatMap(
+          (s) => (s.reasoning ?? []).map((r: { text: string }) => r.text),
+        )
+        yield {
+          type: 'agent_abort',
+          messages: [userPrompt, ...partialMessages],
+          usages: [null, ...partialUsages],
+          reasoning: partialReasoning,
+          usage: partialUsage as LanguageModelUsage | null,
+          skills: getEnabledSkills(),
+        }
+      } else {
+        console.error(error)
+        throw error
+      }
     } finally {
       try {
         await closeTools()

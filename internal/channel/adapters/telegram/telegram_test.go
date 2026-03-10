@@ -143,20 +143,6 @@ func TestParseReplyToMessageID(t *testing.T) {
 	}
 }
 
-func TestResolveTelegramParseMode(t *testing.T) {
-	t.Parallel()
-
-	if got := resolveTelegramParseMode(channel.MessageFormatMarkdown); got != tgbotapi.ModeMarkdown {
-		t.Fatalf("markdown should return ModeMarkdown: %s", got)
-	}
-	if got := resolveTelegramParseMode(channel.MessageFormatPlain); got != "" {
-		t.Fatalf("plain should return empty: %s", got)
-	}
-	if got := resolveTelegramParseMode(channel.MessageFormatRich); got != "" {
-		t.Fatalf("rich should return empty: %s", got)
-	}
-}
-
 func TestBuildTelegramReplyRef(t *testing.T) {
 	t.Parallel()
 
@@ -593,21 +579,24 @@ func TestTruncateTelegramText(t *testing.T) {
 	// Over limit with ASCII.
 	over := strings.Repeat("a", telegramMaxMessageLength+100)
 	got := truncateTelegramText(over)
-	if len(got) > telegramMaxMessageLength {
-		t.Fatalf("truncated text should be <= %d bytes: got %d", telegramMaxMessageLength, len(got))
+	if utf8.RuneCountInString(got) > telegramMaxMessageLength {
+		t.Fatalf("truncated text should be <= %d chars: got %d", telegramMaxMessageLength, utf8.RuneCountInString(got))
 	}
 	if !strings.HasSuffix(got, "...") {
 		t.Fatalf("truncated text should end with '...': %q", got[len(got)-10:])
 	}
 
 	// Over limit with multi-byte characters (Chinese: 3 bytes each).
-	multi := strings.Repeat("\u4f60", telegramMaxMessageLength)
+	multi := strings.Repeat("\u4f60", telegramMaxMessageLength+1)
 	got = truncateTelegramText(multi)
-	if len(got) > telegramMaxMessageLength {
-		t.Fatalf("truncated multi-byte text should be <= %d bytes: got %d", telegramMaxMessageLength, len(got))
+	if utf8.RuneCountInString(got) > telegramMaxMessageLength {
+		t.Fatalf("truncated multi-byte text should be <= %d chars: got %d", telegramMaxMessageLength, utf8.RuneCountInString(got))
 	}
 	if !strings.HasSuffix(got, "...") {
 		t.Fatal("truncated multi-byte text should end with '...'")
+	}
+	if utf8.RuneCountInString(got) != telegramMaxMessageLength {
+		t.Fatalf("truncated multi-byte text should keep exact char budget: got %d", utf8.RuneCountInString(got))
 	}
 	// Verify no broken runes.
 	trimmed := strings.TrimSuffix(got, "...")

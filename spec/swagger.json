@@ -282,6 +282,50 @@
                 }
             }
         },
+        "/bots/{bot_id}/cli/ws": {
+            "get": {
+                "description": "Upgrade to WebSocket for bidirectional chat streaming with abort support.",
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "WebSocket chat endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/container": {
             "get": {
                 "tags": [
@@ -4203,7 +4247,7 @@
         },
         "/bots/{bot_id}/tts/synthesize": {
             "post": {
-                "description": "Stream-synthesize text using the bot's configured TTS provider, write to temp file",
+                "description": "Stream-synthesize text using the bot's configured TTS model, write to temp file",
                 "consumes": [
                     "application/json"
                 ],
@@ -4338,6 +4382,50 @@
                 "responses": {
                     "200": {
                         "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/web/ws": {
+            "get": {
+                "description": "Upgrade to WebSocket for bidirectional chat streaming with abort support.",
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "WebSocket chat endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols",
                         "schema": {
                             "type": "string"
                         }
@@ -5633,6 +5721,118 @@
                 }
             }
         },
+        "/email-providers/{id}/oauth/authorize": {
+            "get": {
+                "description": "Returns the authorization URL to redirect the user to",
+                "tags": [
+                    "email-oauth"
+                ],
+                "summary": "Start OAuth2 authorization for an email provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/email-providers/{id}/oauth/status": {
+            "get": {
+                "tags": [
+                    "email-oauth"
+                ],
+                "summary": "Get OAuth2 status for an email provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.emailOAuthStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/email-providers/{id}/oauth/token": {
+            "delete": {
+                "tags": [
+                    "email-oauth"
+                ],
+                "summary": "Revoke stored OAuth2 tokens for an email provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/email/mailgun/webhook/{config_id}": {
             "post": {
                 "description": "Receives inbound emails from Mailgun",
@@ -5667,6 +5867,54 @@
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/email/oauth/callback": {
+            "get": {
+                "description": "Handles the OAuth2 callback, exchanges the code for tokens",
+                "tags": [
+                    "email-oauth"
+                ],
+                "summary": "OAuth2 callback for email providers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Authorization code",
+                        "name": "code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "State parameter",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -7060,6 +7308,231 @@
                 }
             }
         },
+        "/tts-models": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tts-models"
+                ],
+                "summary": "List all TTS models",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/tts.ModelResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tts-models/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tts-models"
+                ],
+                "summary": "Get a TTS model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/tts.ModelResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tts-models"
+                ],
+                "summary": "Update a TTS model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/tts.UpdateModelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/tts.ModelResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "tts-models"
+                ],
+                "summary": "Delete a TTS model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tts-models/{id}/capabilities": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tts-models"
+                ],
+                "summary": "Get TTS model capabilities",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/tts.ModelCapabilities"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tts-models/{id}/test": {
+            "post": {
+                "description": "Synthesize text using a specific model's config and return audio",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "tts-models"
+                ],
+                "summary": "Test TTS model synthesis",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Text to synthesize",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/tts.TestSynthesizeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Audio data",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/tts-providers": {
             "get": {
                 "produces": [
@@ -7096,6 +7569,7 @@
                 }
             },
             "post": {
+                "description": "Create a TTS provider and auto-import its available models",
                 "consumes": [
                     "application/json"
                 ],
@@ -7141,7 +7615,7 @@
         },
         "/tts-providers/meta": {
             "get": {
-                "description": "List available TTS provider types with their capabilities",
+                "description": "List available TTS provider types with their models and capabilities",
                 "tags": [
                     "tts-providers"
                 ],
@@ -7269,19 +7743,16 @@
                 }
             }
         },
-        "/tts-providers/{id}/test": {
+        "/tts-providers/{id}/import-models": {
             "post": {
-                "description": "Synthesize text using the provider's saved config and return audio",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "Discover and import available models from the TTS adapter",
                 "produces": [
-                    "application/octet-stream"
+                    "application/json"
                 ],
                 "tags": [
                     "tts-providers"
                 ],
-                "summary": "Test TTS synthesis",
+                "summary": "Import models for a TTS provider",
                 "parameters": [
                     {
                         "type": "string",
@@ -7289,28 +7760,53 @@
                         "name": "id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "description": "Text to synthesize",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/tts.TestSynthesizeRequest"
-                        }
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "Audio data",
+                        "description": "OK",
                         "schema": {
-                            "type": "file"
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/tts.ModelResponse"
+                            }
                         }
                     },
-                    "400": {
-                        "description": "Bad Request",
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tts-providers/{id}/models": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tts-providers"
+                ],
+                "summary": "List models for a TTS provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/tts.ModelResponse"
+                            }
                         }
                     },
                     "500": {
@@ -9494,6 +9990,29 @@
                 }
             }
         },
+        "handlers.emailOAuthStatusResponse": {
+            "type": "object",
+            "properties": {
+                "configured": {
+                    "type": "boolean"
+                },
+                "email_address": {
+                    "type": "string"
+                },
+                "expired": {
+                    "type": "boolean"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "has_token": {
+                    "type": "boolean"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.fsOpResponse": {
             "type": "object",
             "properties": {
@@ -10929,7 +11448,7 @@
                 "search_provider_id": {
                     "type": "string"
                 },
-                "tts_provider_id": {
+                "tts_model_id": {
                     "type": "string"
                 }
             }
@@ -10979,7 +11498,7 @@
                 "search_provider_id": {
                     "type": "string"
                 },
-                "tts_provider_id": {
+                "tts_model_id": {
                     "type": "string"
                 }
             }
@@ -11153,7 +11672,18 @@
                 }
             }
         },
-        "tts.Capabilities": {
+        "tts.CreateProviderRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "tts.ModelCapabilities": {
             "type": "object",
             "properties": {
                 "formats": {
@@ -11176,17 +11706,49 @@
                 }
             }
         },
-        "tts.CreateProviderRequest": {
+        "tts.ModelInfo": {
+            "type": "object",
+            "properties": {
+                "capabilities": {
+                    "$ref": "#/definitions/tts.ModelCapabilities"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "tts.ModelResponse": {
             "type": "object",
             "properties": {
                 "config": {
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model_id": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
-                "provider": {
+                "provider_type": {
+                    "type": "string"
+                },
+                "tts_provider_id": {
+                    "type": "string"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }
@@ -11214,14 +11776,20 @@
         "tts.ProviderMetaResponse": {
             "type": "object",
             "properties": {
-                "capabilities": {
-                    "$ref": "#/definitions/tts.Capabilities"
+                "default_model": {
+                    "type": "string"
                 },
                 "description": {
                     "type": "string"
                 },
                 "display_name": {
                     "type": "string"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/tts.ModelInfo"
+                    }
                 },
                 "provider": {
                     "type": "string"
@@ -11231,10 +11799,6 @@
         "tts.ProviderResponse": {
             "type": "object",
             "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
                 "created_at": {
                     "type": "string"
                 },
@@ -11264,7 +11828,7 @@
                 }
             }
         },
-        "tts.UpdateProviderRequest": {
+        "tts.UpdateModelRequest": {
             "type": "object",
             "properties": {
                 "config": {
@@ -11273,8 +11837,13 @@
                 },
                 "name": {
                     "type": "string"
-                },
-                "provider": {
+                }
+            }
+        },
+        "tts.UpdateProviderRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
                     "type": "string"
                 }
             }

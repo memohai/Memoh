@@ -21,7 +21,9 @@ import {
   sendLocalChannelMessage,
   streamLocalChannel,
   streamMessageEvents,
+  connectWebSocket,
   type ChatAttachment,
+  type ChatWebSocket,
 } from '@/composables/api/useChat'
 
 // ---- Message model (blocks-based, aligned with main branch) ----
@@ -103,6 +105,7 @@ export const useChatStore = defineStore('chat', () => {
   let pendingAssistantStream: PendingAssistantStream | null = null
   const messageEventsStream = useRetryingStream()
   const localStream = useRetryingStream()
+  let activeWs: ChatWebSocket | null = null
 
   const participantChats = computed(() =>
     chats.value.filter((c) => (c.access_mode ?? 'participant') === 'participant'),
@@ -123,6 +126,7 @@ export const useChatStore = defineStore('chat', () => {
     } else {
       stopMessageEvents()
       stopLocalStream()
+      stopWebSocket()
       rejectPendingAssistantStream(new Error('Bot stream stopped'))
       messageEventsSince = ''
       chats.value = []
@@ -332,6 +336,9 @@ export const useChatStore = defineStore('chat', () => {
   // ---- Abort ----
 
   function abort() {
+    if (activeWs) {
+      activeWs.abort()
+    }
     abortFn?.()
     abortFn = null
     for (const msg of messages) {
@@ -354,6 +361,25 @@ export const useChatStore = defineStore('chat', () => {
 
   function stopLocalStream() {
     localStream.stop()
+  }
+
+  function stopWebSocket() {
+    if (activeWs) {
+      activeWs.close()
+      activeWs = null
+    }
+  }
+
+  function startWebSocket(targetBotId: string) {
+    const bid = targetBotId.trim()
+    stopWebSocket()
+    if (!bid) return
+
+    activeWs = connectWebSocket(
+      bid,
+      handleLocalStreamEvent,
+      (e) => handleStreamEvent(bid, e),
+    )
   }
 
   function pushAssistantBlock(session: PendingAssistantStream, block: ContentBlock): number {
@@ -587,8 +613,11 @@ export const useChatStore = defineStore('chat', () => {
         rejectPendingAssistantStream(new Error(message))
         break
       }
-      case 'agent_start':
+      case 'agent_abort':
       case 'agent_end':
+        resolvePendingAssistantStream()
+        break
+      case 'agent_start':
       default: {
         const fallback = extractFallbackText(event)
         if (fallback) {
@@ -750,6 +779,7 @@ export const useChatStore = defineStore('chat', () => {
     loadingChats.value = true
     stopMessageEvents()
     stopLocalStream()
+    stopWebSocket()
     try {
       const bid = await ensureBot()
       if (!bid) {
@@ -772,6 +802,7 @@ export const useChatStore = defineStore('chat', () => {
         : visible[0]!.id
       chatId.value = activeChatId
       await loadMessages(bid, activeChatId)
+      startWebSocket(bid)
       startMessageEvents(bid)
       startLocalStream(bid)
     } finally {
@@ -900,10 +931,17 @@ export const useChatStore = defineStore('chat', () => {
       abortFn = () => {
         const abortError = new Error('aborted')
         abortError.name = 'AbortError'
+        if (activeWs) {
+          activeWs.abort()
+        }
         rejectPendingAssistantStream(abortError)
       }
 
-      await sendLocalChannelMessage(bid, trimmed, attachments)
+      if (activeWs?.connected) {
+        activeWs.send({ type: 'message', text: trimmed, attachments })
+      } else {
+        await sendLocalChannelMessage(bid, trimmed, attachments)
+      }
       await completion
 
       assistantMsg.streaming = false

@@ -236,6 +236,19 @@ type EmailProvider struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type EmailOAuthToken struct {
+	ID              pgtype.UUID        `json:"id"`
+	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
+	EmailAddress    string             `json:"email_address"`
+	AccessToken     string             `json:"access_token"`
+	RefreshToken    string             `json:"refresh_token"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	Scope           string             `json:"scope"`
+	State           string             `json:"state"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type LifecycleEvent struct {
 	ID          string             `json:"id"`
 	ContainerID string             `json:"container_id"`

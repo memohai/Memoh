@@ -128,6 +128,67 @@
         </div>
       </div>
 
+      <!-- OAuth authorization button for Gmail -->
+      <section
+        v-if="isOAuthProvider"
+        class="mt-6 p-4 border rounded-lg bg-muted/30"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="flex-1 min-w-[220px]">
+            <p class="text-sm font-medium">
+              {{ $t('emailProvider.oauth.title') }}
+            </p>
+            <p class="text-xs text-muted-foreground mt-0.5">
+              {{ $t('emailProvider.oauth.description') }}
+            </p>
+            <p
+              class="text-xs mt-2"
+              :class="oauthTokenExpired ? 'text-destructive' : 'text-muted-foreground'"
+            >
+              <template v-if="oauthStatusLoading">
+                {{ $t('emailProvider.oauth.status.checking') }}
+              </template>
+              <template v-else-if="oauthStatus && !oauthStatus.configured">
+                {{ $t('emailProvider.oauth.status.notConfigured') }}
+              </template>
+              <template v-else-if="oauthTokenExpired">
+                {{ $t('emailProvider.oauth.status.expired') }}
+              </template>
+              <template v-else-if="oauthStatus && oauthStatus.has_token">
+                {{ oauthStatus.email_address ? $t('emailProvider.oauth.status.authorized', { email: oauthStatus.email_address }) : $t('emailProvider.oauth.status.authorizedUnknown') }}
+              </template>
+              <template v-else>
+                {{ $t('emailProvider.oauth.status.missing') }}
+              </template>
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <LoadingButton
+              type="button"
+              variant="outline"
+              :disabled="!canAuthorize"
+              :loading="authorizeLoading"
+              @click="handleAuthorize"
+            >
+              <FontAwesomeIcon
+                :icon="['fas', 'key']"
+                class="mr-1.5"
+              />
+              {{ $t('emailProvider.oauth.authorize') }}
+            </LoadingButton>
+            <LoadingButton
+              v-if="hasOAuthToken"
+              type="button"
+              variant="ghost"
+              :loading="revokeLoading"
+              @click="handleRevoke"
+            >
+              {{ $t('emailProvider.oauth.logout') }}
+            </LoadingButton>
+          </div>
+        </div>
+      </section>
+
       <section class="flex justify-end mt-6 gap-4">
         <ConfirmPopover
           :message="$t('emailProvider.deleteConfirm')"
@@ -180,7 +241,19 @@ import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { putEmailProvidersById, deleteEmailProvidersById, getEmailProvidersMeta } from '@memoh/sdk'
+import { client } from '@memoh/sdk/client'
 import type { EmailProviderResponse, EmailFieldSchema } from '@memoh/sdk'
+
+interface EmailOAuthStatusResponse {
+  provider: string
+  configured: boolean
+  has_token: boolean
+  expired: boolean
+  email_address?: string
+  expires_at?: string
+}
+
+const OAUTH_PROVIDERS = ['gmail']
 
 const { t } = useI18n()
 const curProvider = inject('curEmailProvider', ref<EmailProviderResponse>())
@@ -205,6 +278,14 @@ const orderedFields = computed<EmailFieldSchema[]>(() => {
   return [...fields].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 })
 
+const isOAuthProvider = computed(() =>
+  OAUTH_PROVIDERS.includes(curProvider.value?.provider ?? ''),
+)
+
+const oauthStatus = ref<EmailOAuthStatusResponse | null>(null)
+const oauthStatusLoading = ref(false)
+const revokeLoading = ref(false)
+
 const queryCache = useQueryCache()
 
 const schema = toTypedSchema(z.object({
@@ -226,8 +307,19 @@ watch(() => curProvider.value?.id, (id) => {
     const cfg = p.config ?? {}
     Object.keys(configData).forEach((k) => delete configData[k])
     Object.assign(configData, { ...cfg })
+    if (isOAuthProvider.value) {
+      void fetchOAuthStatus()
+    }
   }
 }, { immediate: true })
+
+watch([isOAuthProvider, curProviderId], () => {
+  if (!isOAuthProvider.value) {
+    oauthStatus.value = null
+    return
+  }
+  void fetchOAuthStatus()
+})
 
 const { mutateAsync: submitUpdate, isLoading: editLoading } = useMutation({
   mutation: async (data: { name: string; config: Record<string, unknown> }) => {
@@ -254,6 +346,9 @@ const handleSave = form.handleSubmit(async (values) => {
   try {
     await submitUpdate({ name: values.name, config: { ...configData } })
     toast.success(t('provider.saveChanges'))
+    if (isOAuthProvider.value) {
+      await fetchOAuthStatus()
+    }
   } catch (e: any) {
     toast.error(e?.message || t('common.saveFailed'))
   }
@@ -265,6 +360,74 @@ async function handleDelete() {
     toast.success(t('common.deleteSuccess'))
   } catch (e: any) {
     toast.error(e?.message || t('common.saveFailed'))
+  }
+}
+
+const authorizeLoading = ref(false)
+const hasOAuthToken = computed(() => Boolean(oauthStatus.value?.has_token))
+const oauthTokenExpired = computed(() => Boolean(oauthStatus.value?.has_token && oauthStatus.value?.expired))
+const canAuthorize = computed(() => {
+  if (!isOAuthProvider.value) return false
+  if (oauthStatusLoading.value) return false
+  if (oauthStatus.value && !oauthStatus.value.configured) return false
+  return true
+})
+
+async function handleAuthorize() {
+  if (!curProviderId.value) return
+  authorizeLoading.value = true
+  try {
+    const { data, error } = await client.get<{ auth_url: string }, unknown>({
+      url: `/email-providers/${curProviderId.value}/oauth/authorize`,
+    })
+    if (error || !data?.auth_url) {
+      throw new Error(t('emailProvider.oauth.authorizeFailed'))
+    }
+    window.open(data.auth_url, '_blank', 'noopener,noreferrer')
+    toast.success(t('emailProvider.oauth.authorizeOpened'))
+  } catch (e: any) {
+    toast.error(e?.message || t('emailProvider.oauth.authorizeFailed'))
+  } finally {
+    authorizeLoading.value = false
+  }
+}
+
+async function fetchOAuthStatus() {
+  if (!isOAuthProvider.value || !curProviderId.value) {
+    oauthStatus.value = null
+    return
+  }
+  oauthStatusLoading.value = true
+  try {
+    const { data, error } = await client.get<EmailOAuthStatusResponse, unknown>({
+      url: `/email-providers/${curProviderId.value}/oauth/status`,
+    })
+    if (error) {
+      throw error
+    }
+    oauthStatus.value = data ?? null
+  } catch (error: any) {
+    oauthStatus.value = null
+    console.error('failed to fetch email oauth status', error)
+  } finally {
+    oauthStatusLoading.value = false
+  }
+}
+
+async function handleRevoke() {
+  if (!curProviderId.value) return
+  revokeLoading.value = true
+  try {
+    const { error } = await client.delete({
+      url: `/email-providers/${curProviderId.value}/oauth/token`,
+    })
+    if (error) throw error
+    toast.success(t('emailProvider.oauth.logoutSuccess'))
+    await fetchOAuthStatus()
+  } catch (error: any) {
+    toast.error(error?.message || t('emailProvider.oauth.logoutFailed'))
+  } finally {
+    revokeLoading.value = false
   }
 }
 </script>

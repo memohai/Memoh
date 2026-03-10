@@ -63,15 +63,13 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.StreamEv
 		return nil
 
 	case channel.StreamEventFinal:
-		if event.Final != nil && !event.Final.Message.IsEmpty() {
-			finalText := strings.TrimSpace(event.Final.Message.PlainText())
-			if finalText != "" {
-				return s.finalizeMessage(finalText)
-			}
-		}
 		s.mu.Lock()
-		finalText := strings.TrimSpace(s.buffer.String())
+		bufText := strings.TrimSpace(s.buffer.String())
 		s.mu.Unlock()
+		finalText := bufText
+		if finalText == "" && event.Final != nil && !event.Final.Message.IsEmpty() {
+			finalText = strings.TrimSpace(event.Final.Message.PlainText())
+		}
 		if finalText != "" {
 			return s.finalizeMessage(finalText)
 		}

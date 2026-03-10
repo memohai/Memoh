@@ -16,7 +16,9 @@
           :src="getUrl(att)"
           :alt="String(att.name ?? 'image')"
           class="w-full h-full object-contain pointer-events-none"
-          loading="lazy"
+          loading="eager"
+          width="192"
+          height="192"
         >
         <video
           v-else

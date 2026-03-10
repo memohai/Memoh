@@ -67,6 +67,15 @@ export interface AgentEndAction extends BaseAction {
   usages: (LanguageModelUsage | null)[]
 }
 
+export interface AgentAbortAction extends BaseAction {
+  type: 'agent_abort'
+  messages: ModelMessage[]
+  skills: string[]
+  reasoning: string[]
+  usage: LanguageModelUsage | null
+  usages: (LanguageModelUsage | null)[]
+}
+
 export type AgentStreamAction = 
   | AgentStartAction
   | ReasoningStartAction
@@ -79,3 +88,4 @@ export type AgentStreamAction =
   | ToolCallStartAction
   | ToolCallEndAction
   | AgentEndAction
+  | AgentAbortAction
