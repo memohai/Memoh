@@ -1,4 +1,4 @@
-package provider
+package adapters
 
 import (
 	"context"
@@ -205,7 +205,7 @@ type UsageResponse struct {
 
 type RebuildResult struct {
 	FsCount       int `json:"fs_count"`
-	QdrantCount   int `json:"qdrant_count"`
+	StorageCount  int `json:"storage_count"`
 	MissingCount  int `json:"missing_count"`
 	RestoredCount int `json:"restored_count"`
 }
@@ -214,7 +214,9 @@ type RebuildResult struct {
 type ProviderType string
 
 const (
-	ProviderBuiltin ProviderType = "builtin"
+	ProviderBuiltin    ProviderType = "builtin"
+	ProviderMem0       ProviderType = "mem0"
+	ProviderOpenViking ProviderType = "openviking"
 )
 
 type ProviderCreateRequest struct {
@@ -247,6 +249,7 @@ type ProviderFieldSchema struct {
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	Required    bool   `json:"required,omitempty"`
+	Secret      bool   `json:"secret,omitempty"`
 	Example     any    `json:"example,omitempty"`
 }
 

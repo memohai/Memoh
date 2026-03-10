@@ -17,7 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/mcp/mcpclient"
-	memprovider "github.com/memohai/memoh/internal/memory/provider"
+	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -532,7 +532,7 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, memprovider.RebuildResult{
 		FsCount:       len(fsItems),
-		QdrantCount:   len(fsItems),
+		StorageCount:  len(fsItems),
 		MissingCount:  0,
 		RestoredCount: 0,
 	})

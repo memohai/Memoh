@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
-	memprovider "github.com/memohai/memoh/internal/memory/provider"
+	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/settings"
 )
 

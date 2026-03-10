@@ -7,7 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	memprovider "github.com/memohai/memoh/internal/memory/provider"
+	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 )
 
 type MemoryProvidersHandler struct {

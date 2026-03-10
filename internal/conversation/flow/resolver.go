@@ -24,7 +24,7 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/inbox"
-	memprovider "github.com/memohai/memoh/internal/memory/provider"
+	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/schedule"

@@ -43,7 +43,7 @@
       />
     </div>
 
-    <!-- Builtin Config -->
+    <!-- Builtin Config (model selectors) -->
     <template v-if="curProvider.provider === 'builtin'">
       <div class="space-y-2">
         <Label>{{ $t('memoryProvider.memoryModel') }}</Label>
@@ -73,6 +73,34 @@
       </div>
     </template>
 
+    <!-- Remote provider config (mem0 / openviking) -->
+    <template v-if="curProvider.provider !== 'builtin' && providerSchema">
+      <div
+        v-for="(fieldSchema, fieldKey) in providerSchema.fields"
+        :key="fieldKey"
+        class="space-y-2"
+      >
+        <Label>
+          {{ fieldSchema.title || fieldKey }}
+          <span
+            v-if="fieldSchema.required"
+            class="text-destructive"
+          >*</span>
+        </Label>
+        <p
+          v-if="fieldSchema.description"
+          class="text-xs text-muted-foreground"
+        >
+          {{ fieldSchema.description }}
+        </p>
+        <Input
+          v-model="configForm[fieldKey]"
+          :type="fieldSchema.secret ? 'password' : 'text'"
+          :placeholder="fieldSchema.example ? String(fieldSchema.example) : ''"
+        />
+      </div>
+    </template>
+
     <div class="flex justify-end">
       <Button
         :disabled="saveLoading"
@@ -92,7 +120,7 @@
 import { inject, ref, reactive, watch, computed, type Ref } from 'vue'
 import { Button, Input, Label, Separator, Spinner } from '@memoh/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getModels, getProviders, putMemoryProvidersById, deleteMemoryProvidersById } from '@memoh/sdk'
+import { getModels, getProviders, getMemoryProvidersMeta, putMemoryProvidersById, deleteMemoryProvidersById } from '@memoh/sdk'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
@@ -104,10 +132,7 @@ const queryCache = useQueryCache()
 const curProvider = inject<Ref<any>>('curMemoryProvider')
 
 const form = reactive({ name: '' })
-const configForm = reactive<Record<string, string>>({
-  memory_model_id: '',
-  embedding_model_id: '',
-})
+const configForm = reactive<Record<string, string>>({})
 
 const saveLoading = ref(false)
 const deleteLoading = ref(false)
@@ -126,15 +151,38 @@ const { data: providerData } = useQuery({
     return data
   },
 })
+const { data: metaData } = useQuery({
+  key: ['memory-providers-meta'],
+  query: async () => {
+    const { data } = await getMemoryProvidersMeta({ throwOnError: true })
+    return data
+  },
+})
 
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 
+const providerSchema = computed(() => {
+  if (!curProvider?.value || !metaData.value) return null
+  const meta = (metaData.value as any[])?.find(
+    (m: any) => m.provider === curProvider.value.provider,
+  )
+  return meta?.config_schema ?? null
+})
+
 watch(curProvider!, (val) => {
   if (val) {
     form.name = val.name ?? ''
-    configForm.memory_model_id = val.config?.memory_model_id ?? ''
-    configForm.embedding_model_id = val.config?.embedding_model_id ?? ''
+    Object.keys(configForm).forEach((k) => delete configForm[k])
+    if (val.config) {
+      Object.entries(val.config).forEach(([k, v]) => {
+        configForm[k] = (v as string) ?? ''
+      })
+    }
+    if (val.provider === 'builtin') {
+      if (!configForm.memory_model_id) configForm.memory_model_id = ''
+      if (!configForm.embedding_model_id) configForm.embedding_model_id = ''
+    }
   }
 }, { immediate: true })
 
@@ -143,9 +191,8 @@ async function handleSave() {
   saveLoading.value = true
   try {
     const config: Record<string, any> = {}
-    if (curProvider.value.provider === 'builtin') {
-      if (configForm.memory_model_id) config.memory_model_id = configForm.memory_model_id
-      if (configForm.embedding_model_id) config.embedding_model_id = configForm.embedding_model_id
+    for (const [k, v] of Object.entries(configForm)) {
+      if (v) config[k] = v
     }
     const { data } = await putMemoryProvidersById({
       path: { id: curProvider.value.id! },

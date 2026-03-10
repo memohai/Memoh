@@ -255,7 +255,9 @@
     "embeddingModel": "Embedding Model",
     "embeddingModelDescription": "Embedding model for dense vector search",
     "providerNames": {
-      "builtin": "Built-in"
+      "builtin": "Built-in",
+      "mem0": "Mem0",
+      "openviking": "OpenViking"
     }
   },
   "emailProvider": {

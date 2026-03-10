@@ -1,0 +1,17 @@
+services:
+  mem0:
+    image: mem0/mem0-api-server:latest
+    container_name: memoh-mem0
+    env_file:
+      - path: ${MEM0_ENV_FILE:-.env.mem0}
+        required: false
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8000/docs || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - memoh-network

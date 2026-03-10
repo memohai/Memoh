@@ -251,7 +251,9 @@
     "embeddingModel": "向量化模型",
     "embeddingModelDescription": "用于稠密向量搜索的embedding模型",
     "providerNames": {
-      "builtin": "内置"
+      "builtin": "内置",
+      "mem0": "Mem0",
+      "openviking": "OpenViking"
     }
   },
   "emailProvider": {

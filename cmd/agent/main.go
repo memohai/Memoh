@@ -67,7 +67,10 @@ import (
 	mcpwebfetch "github.com/memohai/memoh/internal/mcp/providers/webfetch"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
 	"github.com/memohai/memoh/internal/media"
-	memprovider "github.com/memohai/memoh/internal/memory/provider"
+	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
+	memmem0 "github.com/memohai/memoh/internal/memory/adapters/mem0"
+	memopenviking "github.com/memohai/memoh/internal/memory/adapters/openviking"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
@@ -339,10 +342,16 @@ func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, lo
 func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, manager *mcp.Manager) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	builtinRuntime := handlers.NewBuiltinMemoryRuntime(manager)
-	registry.RegisterFactory(memprovider.BuiltinType, func(_ string, _ map[string]any) (memprovider.Provider, error) {
-		return memprovider.NewBuiltinProvider(log, builtinRuntime, chatService, accountService), nil
+	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, _ map[string]any) (memprovider.Provider, error) {
+		return membuiltin.NewBuiltinProvider(log, builtinRuntime, chatService, accountService), nil
 	})
-	registry.Register("__builtin_default__", memprovider.NewBuiltinProvider(log, builtinRuntime, chatService, accountService))
+	registry.RegisterFactory(string(memprovider.ProviderMem0), func(_ string, config map[string]any) (memprovider.Provider, error) {
+		return memmem0.NewMem0Provider(log, config)
+	})
+	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, config map[string]any) (memprovider.Provider, error) {
+		return memopenviking.NewOpenVikingProvider(log, config)
+	})
+	registry.Register("__builtin_default__", membuiltin.NewBuiltinProvider(log, builtinRuntime, chatService, accountService))
 	return registry
 }
 
@@ -630,6 +639,7 @@ func provideServer(params serverParams) *server.Server {
 // ---------------------------------------------------------------------------
 
 func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *memprovider.Service, registry *memprovider.Registry) {
+	mpService.SetRegistry(registry)
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			resp, err := mpService.EnsureDefault(ctx)

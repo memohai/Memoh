@@ -1,4 +1,4 @@
-package provider
+package adapters
 
 import (
 	"context"
@@ -12,8 +12,9 @@ import (
 )
 
 type Service struct {
-	queries *sqlc.Queries
-	logger  *slog.Logger
+	queries  *sqlc.Queries
+	registry *Registry
+	logger   *slog.Logger
 }
 
 func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
@@ -21,6 +22,12 @@ func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 		queries: queries,
 		logger:  log.With(slog.String("service", "memory_providers")),
 	}
+}
+
+// SetRegistry configures the runtime registry so that CRUD operations
+// can instantiate/evict provider instances automatically.
+func (s *Service) SetRegistry(registry *Registry) {
+	s.registry = registry
 }
 
 func (*Service) ListMeta(_ context.Context) []ProviderMeta {
@@ -45,6 +52,64 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 				},
 			},
 		},
+		{
+			Provider:    string(ProviderMem0),
+			DisplayName: "Mem0",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Mem0 API base URL (self-hosted or SaaS)",
+						Required:    true,
+						Example:     "http://mem0:8000",
+					},
+					"api_key": {
+						Type:        "string",
+						Title:       "API Key",
+						Description: "API key for Mem0 authentication",
+						Secret:      true,
+					},
+					"org_id": {
+						Type:        "string",
+						Title:       "Organization ID",
+						Description: "Organization ID (SaaS mode only)",
+					},
+					"project_id": {
+						Type:        "string",
+						Title:       "Project ID",
+						Description: "Project ID (SaaS mode only)",
+					},
+				},
+			},
+		},
+		{
+			Provider:    string(ProviderOpenViking),
+			DisplayName: "OpenViking",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "OpenViking API base URL (self-hosted or SaaS)",
+						Required:    true,
+						Example:     "http://openviking:8088",
+					},
+					"api_key": {
+						Type:        "string",
+						Title:       "API Key",
+						Description: "API key for OpenViking authentication",
+						Secret:      true,
+					},
+					"memory_root": {
+						Type:        "string",
+						Title:       "Memory Root",
+						Description: "URI root for bot-scoped memory (e.g. viking://agent/)",
+						Example:     "viking://agent/",
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -65,7 +130,9 @@ func (s *Service) Create(ctx context.Context, req ProviderCreateRequest) (Provid
 	if err != nil {
 		return ProviderGetResponse{}, fmt.Errorf("create memory provider: %w", err)
 	}
-	return s.toGetResponse(row), nil
+	resp := s.toGetResponse(row)
+	s.tryInstantiate(resp.ID, resp.Provider, resp.Config)
+	return resp, nil
 }
 
 func (s *Service) Get(ctx context.Context, id string) (ProviderGetResponse, error) {
@@ -121,7 +188,9 @@ func (s *Service) Update(ctx context.Context, id string, req ProviderUpdateReque
 	if err != nil {
 		return ProviderGetResponse{}, fmt.Errorf("update memory provider: %w", err)
 	}
-	return s.toGetResponse(updated), nil
+	resp := s.toGetResponse(updated)
+	s.tryEvictAndReinstantiate(resp.ID, resp.Provider, resp.Config)
+	return resp, nil
 }
 
 func (s *Service) Delete(ctx context.Context, id string) error {
@@ -129,7 +198,13 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteMemoryProvider(ctx, pgID)
+	if err := s.queries.DeleteMemoryProvider(ctx, pgID); err != nil {
+		return err
+	}
+	if s.registry != nil {
+		s.registry.Remove(id)
+	}
+	return nil
 }
 
 // EnsureDefault creates a default builtin provider if none exists.
@@ -169,9 +244,27 @@ func (s *Service) toGetResponse(row sqlc.MemoryProvider) ProviderGetResponse {
 	}
 }
 
+func (s *Service) tryInstantiate(id, providerType string, config map[string]any) {
+	if s.registry == nil {
+		return
+	}
+	if _, err := s.registry.Instantiate(id, providerType, config); err != nil {
+		s.logger.Warn("auto-instantiate memory provider failed",
+			slog.String("id", id), slog.String("provider", providerType), slog.Any("error", err))
+	}
+}
+
+func (s *Service) tryEvictAndReinstantiate(id, providerType string, config map[string]any) {
+	if s.registry == nil {
+		return
+	}
+	s.registry.Remove(id)
+	s.tryInstantiate(id, providerType, config)
+}
+
 func isValidProviderType(t ProviderType) bool {
 	switch t {
-	case ProviderBuiltin:
+	case ProviderBuiltin, ProviderMem0, ProviderOpenViking:
 		return true
 	default:
 		return false

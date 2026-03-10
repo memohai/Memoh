@@ -1,4 +1,4 @@
-package provider
+package builtin
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/mcp"
 )
@@ -36,15 +37,15 @@ type BuiltinProvider struct {
 // It is intentionally defined as an interface to decouple provider wiring from
 // concrete service structs in the memory package.
 type memoryRuntime interface {
-	Add(ctx context.Context, req AddRequest) (SearchResponse, error)
-	Search(ctx context.Context, req SearchRequest) (SearchResponse, error)
-	GetAll(ctx context.Context, req GetAllRequest) (SearchResponse, error)
-	Update(ctx context.Context, req UpdateRequest) (MemoryItem, error)
-	Delete(ctx context.Context, memoryID string) (DeleteResponse, error)
-	DeleteBatch(ctx context.Context, memoryIDs []string) (DeleteResponse, error)
-	DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteResponse, error)
-	Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (CompactResult, error)
-	Usage(ctx context.Context, filters map[string]any) (UsageResponse, error)
+	Add(ctx context.Context, req adapters.AddRequest) (adapters.SearchResponse, error)
+	Search(ctx context.Context, req adapters.SearchRequest) (adapters.SearchResponse, error)
+	GetAll(ctx context.Context, req adapters.GetAllRequest) (adapters.SearchResponse, error)
+	Update(ctx context.Context, req adapters.UpdateRequest) (adapters.MemoryItem, error)
+	Delete(ctx context.Context, memoryID string) (adapters.DeleteResponse, error)
+	DeleteBatch(ctx context.Context, memoryIDs []string) (adapters.DeleteResponse, error)
+	DeleteAll(ctx context.Context, req adapters.DeleteAllRequest) (adapters.DeleteResponse, error)
+	Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (adapters.CompactResult, error)
+	Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error)
 }
 
 // AdminChecker checks whether a channel identity has admin privileges.
@@ -69,7 +70,7 @@ func (*BuiltinProvider) Type() string { return BuiltinType }
 
 // --- Conversation Hooks ---
 
-func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req BeforeChatRequest) (*BeforeChatResult, error) {
+func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeChatRequest) (*adapters.BeforeChatResult, error) {
 	if p.service == nil {
 		return nil, nil
 	}
@@ -77,7 +78,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req BeforeChatReques
 		return nil, nil
 	}
 
-	resp, err := p.service.Search(ctx, SearchRequest{
+	resp, err := p.service.Search(ctx, adapters.SearchRequest{
 		Query: req.Query,
 		BotID: req.BotID,
 		Limit: memoryContextLimitPerScope,
@@ -96,7 +97,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req BeforeChatReques
 	seen := map[string]struct{}{}
 	type contextItem struct {
 		namespace string
-		item      MemoryItem
+		item      adapters.MemoryItem
 	}
 	results := make([]contextItem, 0, memoryContextLimitPerScope)
 	for _, item := range resp.Results {
@@ -134,7 +135,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req BeforeChatReques
 		sb.WriteString("- [")
 		sb.WriteString(entry.namespace)
 		sb.WriteString("] ")
-		sb.WriteString(truncateSnippet(text, memoryContextItemMaxChars))
+		sb.WriteString(adapters.TruncateSnippet(text, memoryContextItemMaxChars))
 		sb.WriteString("\n")
 	}
 	sb.WriteString("</memory-context>")
@@ -142,10 +143,10 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req BeforeChatReques
 	if payload == "" {
 		return nil, nil
 	}
-	return &BeforeChatResult{ContextText: payload}, nil
+	return &adapters.BeforeChatResult{ContextText: payload}, nil
 }
 
-func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req AfterChatRequest) error {
+func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterChatRequest) error {
 	if p.service == nil {
 		return nil
 	}
@@ -161,7 +162,7 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req AfterChatRequest)
 		"scopeId":   botID,
 		"bot_id":    botID,
 	}
-	if _, err := p.service.Add(ctx, AddRequest{
+	if _, err := p.service.Add(ctx, adapters.AddRequest{
 		Messages: req.Messages,
 		BotID:    botID,
 		Filters:  filters,
@@ -256,7 +257,7 @@ func (p *BuiltinProvider) CallTool(ctx context.Context, session mcp.ToolSessionC
 		}
 	}
 
-	resp, err := p.service.Search(ctx, SearchRequest{
+	resp, err := p.service.Search(ctx, adapters.SearchRequest{
 		Query: query,
 		BotID: botID,
 		Limit: limit,
@@ -271,7 +272,7 @@ func (p *BuiltinProvider) CallTool(ctx context.Context, session mcp.ToolSessionC
 		return mcp.BuildToolErrorResult("memory search failed"), nil
 	}
 
-	allResults := deduplicateItems(resp.Results)
+	allResults := adapters.DeduplicateItems(resp.Results)
 	sort.Slice(allResults, func(i, j int) bool {
 		return allResults[i].Score > allResults[j].Score
 	})
@@ -313,99 +314,65 @@ func (p *BuiltinProvider) canAccessChat(ctx context.Context, chatID, channelIden
 
 // --- CRUD ---
 
-func (p *BuiltinProvider) Add(ctx context.Context, req AddRequest) (SearchResponse, error) {
+func (p *BuiltinProvider) Add(ctx context.Context, req adapters.AddRequest) (adapters.SearchResponse, error) {
 	if p.service == nil {
-		return SearchResponse{}, errors.New("memory runtime not configured")
+		return adapters.SearchResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Add(ctx, req)
 }
 
-func (p *BuiltinProvider) Search(ctx context.Context, req SearchRequest) (SearchResponse, error) {
+func (p *BuiltinProvider) Search(ctx context.Context, req adapters.SearchRequest) (adapters.SearchResponse, error) {
 	if p.service == nil {
-		return SearchResponse{}, errors.New("memory runtime not configured")
+		return adapters.SearchResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Search(ctx, req)
 }
 
-func (p *BuiltinProvider) GetAll(ctx context.Context, req GetAllRequest) (SearchResponse, error) {
+func (p *BuiltinProvider) GetAll(ctx context.Context, req adapters.GetAllRequest) (adapters.SearchResponse, error) {
 	if p.service == nil {
-		return SearchResponse{}, errors.New("memory runtime not configured")
+		return adapters.SearchResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.GetAll(ctx, req)
 }
 
-func (p *BuiltinProvider) Update(ctx context.Context, req UpdateRequest) (MemoryItem, error) {
+func (p *BuiltinProvider) Update(ctx context.Context, req adapters.UpdateRequest) (adapters.MemoryItem, error) {
 	if p.service == nil {
-		return MemoryItem{}, errors.New("memory runtime not configured")
+		return adapters.MemoryItem{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Update(ctx, req)
 }
 
-func (p *BuiltinProvider) Delete(ctx context.Context, memoryID string) (DeleteResponse, error) {
+func (p *BuiltinProvider) Delete(ctx context.Context, memoryID string) (adapters.DeleteResponse, error) {
 	if p.service == nil {
-		return DeleteResponse{}, errors.New("memory runtime not configured")
+		return adapters.DeleteResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Delete(ctx, memoryID)
 }
 
-func (p *BuiltinProvider) DeleteBatch(ctx context.Context, memoryIDs []string) (DeleteResponse, error) {
+func (p *BuiltinProvider) DeleteBatch(ctx context.Context, memoryIDs []string) (adapters.DeleteResponse, error) {
 	if p.service == nil {
-		return DeleteResponse{}, errors.New("memory runtime not configured")
+		return adapters.DeleteResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.DeleteBatch(ctx, memoryIDs)
 }
 
-func (p *BuiltinProvider) DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteResponse, error) {
+func (p *BuiltinProvider) DeleteAll(ctx context.Context, req adapters.DeleteAllRequest) (adapters.DeleteResponse, error) {
 	if p.service == nil {
-		return DeleteResponse{}, errors.New("memory runtime not configured")
+		return adapters.DeleteResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.DeleteAll(ctx, req)
 }
 
-func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (CompactResult, error) {
+func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (adapters.CompactResult, error) {
 	if p.service == nil {
-		return CompactResult{}, errors.New("memory runtime not configured")
+		return adapters.CompactResult{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Compact(ctx, filters, ratio, decayDays)
 }
 
-func (p *BuiltinProvider) Usage(ctx context.Context, filters map[string]any) (UsageResponse, error) {
+func (p *BuiltinProvider) Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error) {
 	if p.service == nil {
-		return UsageResponse{}, errors.New("memory runtime not configured")
+		return adapters.UsageResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Usage(ctx, filters)
-}
-
-// --- helpers ---
-
-func truncateSnippet(s string, n int) string {
-	trimmed := strings.TrimSpace(s)
-	runes := []rune(trimmed)
-	if len(runes) <= n {
-		return trimmed
-	}
-	return strings.TrimSpace(string(runes[:n])) + "..."
-}
-
-func deduplicateItems(items []MemoryItem) []MemoryItem {
-	if len(items) == 0 {
-		return items
-	}
-	seen := make(map[string]struct{}, len(items))
-	result := make([]MemoryItem, 0, len(items))
-	for _, item := range items {
-		id := strings.TrimSpace(item.ID)
-		if id == "" {
-			id = strings.TrimSpace(item.Memory)
-		}
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		result = append(result, item)
-	}
-	return result
 }
