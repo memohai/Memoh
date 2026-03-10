@@ -413,9 +413,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 			go func() {
 				for event := range eventCh {
-					for _, processed := range h.processWSEvent(streamCtx, botID, event) {
-						writer.Send(processed)
-					}
+				for _, processed := range h.processWSEvent(streamCtx, botID, event) {
+					writer.Send(processed)
+				}
 				}
 			}()
 
