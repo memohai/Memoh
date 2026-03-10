@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -14,12 +17,19 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/local"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/media"
 )
+
+// ttsTempReader provides read-and-delete access to TTS temporary audio files.
+type ttsTempReader interface {
+	ReadAndDelete(id string) ([]byte, error)
+}
 
 // LocalChannelHandler handles local channel (CLI/Web) routes backed by bot history.
 type LocalChannelHandler struct {
@@ -31,6 +41,8 @@ type LocalChannelHandler struct {
 	botService     *bots.Service
 	accountService *accounts.Service
 	resolver       *flow.Resolver
+	mediaService   *media.Service
+	ttsTempStore   ttsTempReader
 	logger         *slog.Logger
 }
 
@@ -51,6 +63,16 @@ func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *cha
 // SetResolver sets the flow resolver for WebSocket streaming.
 func (h *LocalChannelHandler) SetResolver(resolver *flow.Resolver) {
 	h.resolver = resolver
+}
+
+// SetMediaService sets the media service for WebSocket attachment ingestion.
+func (h *LocalChannelHandler) SetMediaService(svc *media.Service) {
+	h.mediaService = svc
+}
+
+// SetTtsTempStore sets the TTS temp store for extracting voice attachments.
+func (h *LocalChannelHandler) SetTtsTempStore(store ttsTempReader) {
+	h.ttsTempStore = store
 }
 
 // Register registers the local channel routes.
@@ -391,7 +413,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 			go func() {
 				for event := range eventCh {
-					writer.Send(event)
+					for _, processed := range h.processWSEvent(streamCtx, botID, event) {
+						writer.Send(processed)
+					}
 				}
 			}()
 
@@ -423,4 +447,225 @@ func (*LocalChannelHandler) requireChannelIdentityID(c echo.Context) (string, er
 
 func (h *LocalChannelHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
 	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: true})
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket event processing — attachment ingestion + TTS extraction
+// ---------------------------------------------------------------------------
+
+type wsEventEnvelope struct {
+	Type     string          `json:"type"`
+	ToolName string          `json:"toolName,omitempty"`
+	Result   json.RawMessage `json:"result,omitempty"`
+}
+
+// processWSEvent transforms a raw WS event, ingesting attachments and
+// extracting TTS audio so the web frontend receives content_hash references.
+func (h *LocalChannelHandler) processWSEvent(ctx context.Context, botID string, event json.RawMessage) []json.RawMessage {
+	var envelope wsEventEnvelope
+	if err := json.Unmarshal(event, &envelope); err != nil {
+		return []json.RawMessage{event}
+	}
+
+	h.logger.Debug("ws event", slog.String("type", envelope.Type), slog.String("bot_id", botID))
+
+	switch envelope.Type {
+	case "attachment_delta":
+		h.logger.Info("ws processing attachment_delta", slog.String("bot_id", botID))
+		return h.wsIngestAttachments(ctx, botID, event)
+	case "tool_call_end":
+		h.logger.Info("ws tool_call_end", slog.String("bot_id", botID), slog.String("tool_name", envelope.ToolName))
+		return h.wsExtractTtsVoice(ctx, botID, event, &envelope)
+	default:
+		return []json.RawMessage{event}
+	}
+}
+
+// wsIngestAttachments persists attachment data (container paths / data URLs)
+// and rewrites them with content_hash so the web frontend can resolve them.
+func (h *LocalChannelHandler) wsIngestAttachments(ctx context.Context, botID string, original json.RawMessage) []json.RawMessage {
+	if h.mediaService == nil {
+		return []json.RawMessage{original}
+	}
+
+	var event map[string]any
+	if err := json.Unmarshal(original, &event); err != nil {
+		return []json.RawMessage{original}
+	}
+
+	rawItems, _ := event["attachments"].([]any)
+	if len(rawItems) == 0 {
+		return []json.RawMessage{original}
+	}
+
+	changed := false
+	for i, raw := range rawItems {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if ch, _ := item["content_hash"].(string); strings.TrimSpace(ch) != "" {
+			continue
+		}
+		rawURL, _ := item["url"].(string)
+		if rawURL == "" {
+			rawURL, _ = item["path"].(string)
+		}
+		if rawURL = strings.TrimSpace(rawURL); rawURL == "" {
+			continue
+		}
+		if ingested := h.ingestSingleAttachment(ctx, botID, rawURL, item); ingested != nil {
+			rawItems[i] = ingested
+			changed = true
+		}
+	}
+
+	if !changed {
+		h.logger.Debug("ws attachment_delta: no items needed ingestion", slog.String("bot_id", botID))
+		return []json.RawMessage{original}
+	}
+
+	h.logger.Info("ws attachment_delta: ingested attachments", slog.String("bot_id", botID), slog.Int("count", len(rawItems)))
+
+	out, err := json.Marshal(event)
+	if err != nil {
+		return []json.RawMessage{original}
+	}
+	return []json.RawMessage{out}
+}
+
+func (h *LocalChannelHandler) ingestSingleAttachment(ctx context.Context, botID, rawURL string, item map[string]any) map[string]any {
+	lower := strings.ToLower(rawURL)
+
+	if !strings.HasPrefix(lower, "data:") && !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		asset, err := h.mediaService.IngestContainerFile(ctx, botID, rawURL)
+		if err != nil {
+			h.logger.Warn("ws ingest container file failed", slog.String("path", rawURL), slog.Any("error", err))
+			return nil
+		}
+		return applyAssetToItem(item, botID, asset)
+	}
+
+	if strings.HasPrefix(lower, "data:") {
+		mimeType := attachmentpkg.MimeFromDataURL(rawURL)
+		decoded, err := attachmentpkg.DecodeBase64(rawURL, media.MaxAssetBytes)
+		if err != nil {
+			h.logger.Warn("ws decode data url failed", slog.Any("error", err))
+			return nil
+		}
+		asset, err := h.mediaService.Ingest(ctx, media.IngestInput{
+			BotID:    botID,
+			Mime:     mimeType,
+			Reader:   decoded,
+			MaxBytes: media.MaxAssetBytes,
+		})
+		if err != nil {
+			h.logger.Warn("ws ingest data url failed", slog.Any("error", err))
+			return nil
+		}
+		return applyAssetToItem(item, botID, asset)
+	}
+
+	return nil
+}
+
+// wsExtractTtsVoice intercepts text_to_speech tool results and injects an
+// attachment_delta event with the ingested audio.
+func (h *LocalChannelHandler) wsExtractTtsVoice(ctx context.Context, botID string, original json.RawMessage, envelope *wsEventEnvelope) []json.RawMessage {
+	if h.ttsTempStore == nil || envelope == nil || envelope.ToolName != "text_to_speech" {
+		return []json.RawMessage{original}
+	}
+
+	h.logger.Info("ws tts voice extraction start", slog.String("bot_id", botID))
+
+	raw := envelope.Result
+	if len(raw) == 0 {
+		h.logger.Warn("ws tts tool result is empty", slog.String("bot_id", botID))
+		return []json.RawMessage{original}
+	}
+
+	// MCP ToolExecutor may wrap in structuredContent.
+	var wrapper struct {
+		StructuredContent json.RawMessage `json:"structuredContent"`
+	}
+	if json.Unmarshal(raw, &wrapper) == nil && len(wrapper.StructuredContent) > 0 {
+		raw = wrapper.StructuredContent
+	}
+
+	var result struct {
+		TempID      string `json:"temp_id"`
+		ContentType string `json:"content_type"`
+		Size        int64  `json:"size"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil || result.TempID == "" {
+		h.logger.Warn("ws tts result parse failed or missing temp_id", slog.String("bot_id", botID), slog.String("raw", string(raw)))
+		return []json.RawMessage{original}
+	}
+
+	h.logger.Info("ws tts reading temp audio", slog.String("bot_id", botID), slog.String("temp_id", result.TempID), slog.String("content_type", result.ContentType))
+
+	audioData, err := h.ttsTempStore.ReadAndDelete(result.TempID)
+	if err != nil {
+		h.logger.Warn("ws tts temp read failed", slog.Any("error", err))
+		return []json.RawMessage{original}
+	}
+
+	att := h.buildTtsAttachment(ctx, botID, result.ContentType, audioData)
+
+	attachmentEvent, _ := json.Marshal(map[string]any{
+		"type":        "attachment_delta",
+		"attachments": []any{att},
+	})
+
+	h.logger.Info("ws tts voice attachment injected", slog.String("bot_id", botID), slog.Any("has_content_hash", att["content_hash"] != nil))
+
+	return []json.RawMessage{original, attachmentEvent}
+}
+
+func (h *LocalChannelHandler) buildTtsAttachment(ctx context.Context, botID, contentType string, audioData []byte) map[string]any {
+	att := map[string]any{
+		"type": "voice",
+		"mime": contentType,
+		"size": len(audioData),
+	}
+
+	mimeType := attachmentpkg.NormalizeMime(contentType)
+	if h.mediaService != nil {
+		asset, err := h.mediaService.Ingest(ctx, media.IngestInput{
+			BotID:    botID,
+			Mime:     mimeType,
+			Reader:   bytes.NewReader(audioData),
+			MaxBytes: media.MaxAssetBytes,
+		})
+		if err == nil {
+			applyAssetToMap(att, botID, asset)
+			return att
+		}
+		h.logger.Warn("ws tts ingest failed", slog.Any("error", err))
+	}
+
+	att["url"] = "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(audioData)
+	return att
+}
+
+func applyAssetToItem(item map[string]any, botID string, asset media.Asset) map[string]any {
+	result := maps.Clone(item)
+	delete(result, "path")
+	result["url"] = ""
+	applyAssetToMap(result, botID, asset)
+	return result
+}
+
+func applyAssetToMap(m map[string]any, botID string, asset media.Asset) {
+	m["content_hash"] = asset.ContentHash
+	m["metadata"] = map[string]any{
+		"bot_id":      botID,
+		"storage_key": asset.StorageKey,
+	}
+	if mime, _ := m["mime"].(string); strings.TrimSpace(mime) == "" && asset.Mime != "" {
+		m["mime"] = asset.Mime
+	}
+	if size, _ := m["size"].(float64); size == 0 && asset.SizeBytes > 0 {
+		m["size"] = asset.SizeBytes
+	}
 }

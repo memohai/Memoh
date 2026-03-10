@@ -360,7 +360,15 @@ func discordAttachmentToFile(ctx context.Context, att channel.Attachment, opener
 		}
 	}
 
-	// Fallback to URL
+	// Fallback to data URL in URL field (e.g. TTS voice when media ingestion failed)
+	if reader == nil && att.URL != "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(att.URL)), "data:") {
+		data, err := base64DataURLToBytes(att.URL)
+		if err == nil {
+			reader = bytes.NewReader(data)
+		}
+	}
+
+	// Fallback to HTTP URL
 	if reader == nil && att.URL != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, att.URL, nil)
 		if err == nil {
