@@ -2,7 +2,7 @@ package wecom
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
 	"time"
 
@@ -38,10 +38,10 @@ type WSFrame struct {
 
 func (f WSFrame) DecodeBody(dst any) error {
 	if len(f.Body) == 0 {
-		return fmt.Errorf("wecom frame body is empty")
+		return errors.New("wecom frame body is empty")
 	}
 	if dst == nil {
-		return fmt.Errorf("decode target is nil")
+		return errors.New("decode target is nil")
 	}
 	return json.Unmarshal(f.Body, dst)
 }
@@ -54,7 +54,7 @@ func BuildFrame(cmd, reqID string, body any) (WSFrame, error) {
 		},
 	}
 	if frame.Headers.ReqID == "" {
-		return WSFrame{}, fmt.Errorf("req_id is required")
+		return WSFrame{}, errors.New("req_id is required")
 	}
 	if body == nil {
 		return frame, nil
@@ -76,23 +76,18 @@ func NewReqID(prefix string) string {
 }
 
 type AuthCredentials struct {
-	BotID  string
-	Secret string
+	BotID      string
+	Credential string
 }
 
 func (c AuthCredentials) Validate() error {
 	if strings.TrimSpace(c.BotID) == "" {
-		return fmt.Errorf("wecom bot_id is required")
+		return errors.New("wecom bot_id is required")
 	}
-	if strings.TrimSpace(c.Secret) == "" {
-		return fmt.Errorf("wecom secret is required")
+	if strings.TrimSpace(c.Credential) == "" {
+		return errors.New("wecom secret is required")
 	}
 	return nil
-}
-
-type SubscribeBody struct {
-	BotID  string `json:"bot_id"`
-	Secret string `json:"secret"`
 }
 
 type CallbackFrom struct {
@@ -157,12 +152,12 @@ type MessageCallbackBody struct {
 }
 
 type EventPayload struct {
-	EventType string `json:"event_type,omitempty"`
+	EventType  string `json:"event_type,omitempty"`
 	EventType2 string `json:"eventtype,omitempty"`
-	EventKey  string `json:"event_key,omitempty"`
-	TaskID    string `json:"task_id,omitempty"`
-	Code      string `json:"code,omitempty"`
-	Reason    string `json:"reason,omitempty"`
+	EventKey   string `json:"event_key,omitempty"`
+	TaskID     string `json:"task_id,omitempty"`
+	Code       string `json:"code,omitempty"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 type EventTask struct {
@@ -189,15 +184,15 @@ type StreamReplyBody struct {
 }
 
 type StreamReplyBlock struct {
-	ID       string              `json:"id"`
-	Finish   bool                `json:"finish,omitempty"`
-	Content  string              `json:"content,omitempty"`
-	MsgItems []StreamReplyItem   `json:"msg_item,omitempty"`
+	ID       string               `json:"id"`
+	Finish   bool                 `json:"finish,omitempty"`
+	Content  string               `json:"content,omitempty"`
+	MsgItems []StreamReplyItem    `json:"msg_item,omitempty"`
 	Feedback *StreamReplyFeedback `json:"feedback,omitempty"`
 }
 
 type StreamReplyItem struct {
-	MsgType string           `json:"msgtype"`
+	MsgType string            `json:"msgtype"`
 	Image   *StreamReplyImage `json:"image,omitempty"`
 }
 

@@ -49,4 +49,3 @@ func TestOpenStream_FallbackReplyFromSourceMessageID(t *testing.T) {
 		t.Fatalf("unexpected reply fallback: %+v", ws.reply)
 	}
 }
-

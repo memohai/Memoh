@@ -23,7 +23,7 @@ func TestAuthCredentialsValidate(t *testing.T) {
 	if err := (AuthCredentials{}).Validate(); err == nil {
 		t.Fatal("expected validation error for empty credentials")
 	}
-	if err := (AuthCredentials{BotID: "id", Secret: "sec"}).Validate(); err != nil {
+	if err := (AuthCredentials{BotID: "id", Credential: "sec"}).Validate(); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
 }

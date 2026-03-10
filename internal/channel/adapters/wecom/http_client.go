@@ -2,6 +2,7 @@ package wecom
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -84,17 +85,17 @@ func NewHTTPClient(opts HTTPClientOptions) *HTTPClient {
 func (c *HTTPClient) DownloadFile(ctx context.Context, rawURL string) (DownloadedFile, error) {
 	u := strings.TrimSpace(rawURL)
 	if u == "" {
-		return DownloadedFile{}, fmt.Errorf("download url is required")
+		return DownloadedFile{}, errors.New("download url is required")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return DownloadedFile{}, err
 	}
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) //nolint:gosec // G704: URL is provided by channel payload and consumed as attachment download endpoint
 	if err != nil {
 		return DownloadedFile{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return DownloadedFile{}, fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}

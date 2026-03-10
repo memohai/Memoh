@@ -37,13 +37,13 @@ func NewWeComAdapter(log *slog.Logger) *WeComAdapter {
 		clients:     make(map[string]*WSClient),
 		http:        NewHTTPClient(HTTPClientOptions{Logger: log}),
 		cache:       newCallbackContextCache(24 * time.Hour),
-		newWSClient: func(opts WSClientOptions) *WSClient { return NewWSClient(opts) },
+		newWSClient: NewWSClient,
 	}
 }
 
-func (a *WeComAdapter) Type() channel.ChannelType { return Type }
+func (*WeComAdapter) Type() channel.ChannelType { return Type }
 
-func (a *WeComAdapter) Descriptor() channel.Descriptor {
+func (*WeComAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        Type,
 		DisplayName: "WeCom",
@@ -79,36 +79,36 @@ func (a *WeComAdapter) Descriptor() channel.Descriptor {
 		TargetSpec: channel.TargetSpec{
 			Format: "chat_id:xxx | user_id:xxx",
 			Hints: []channel.TargetHint{
-				{Label: "Chat ID", Example: "chat_id:wrk_abc"},
+				{Label: "Chat ID", Example: "chat_id:work_abc"},
 				{Label: "User ID", Example: "user_id:zhangsan"},
 			},
 		},
 	}
 }
 
-func (a *WeComAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
+func (*WeComAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeConfig(raw)
 }
 
-func (a *WeComAdapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
+func (*WeComAdapter) NormalizeUserConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeUserConfig(raw)
 }
 
-func (a *WeComAdapter) NormalizeTarget(raw string) string { return normalizeTarget(raw) }
+func (*WeComAdapter) NormalizeTarget(raw string) string { return normalizeTarget(raw) }
 
-func (a *WeComAdapter) ResolveTarget(userConfig map[string]any) (string, error) {
+func (*WeComAdapter) ResolveTarget(userConfig map[string]any) (string, error) {
 	return resolveTarget(userConfig)
 }
 
-func (a *WeComAdapter) MatchBinding(config map[string]any, criteria channel.BindingCriteria) bool {
+func (*WeComAdapter) MatchBinding(config map[string]any, criteria channel.BindingCriteria) bool {
 	return matchBinding(config, criteria)
 }
 
-func (a *WeComAdapter) BuildUserConfig(identity channel.Identity) map[string]any {
+func (*WeComAdapter) BuildUserConfig(identity channel.Identity) map[string]any {
 	return buildUserConfig(identity)
 }
 
-func (a *WeComAdapter) DiscoverSelf(ctx context.Context, credentials map[string]any) (map[string]any, string, error) {
+func (*WeComAdapter) DiscoverSelf(ctx context.Context, credentials map[string]any) (map[string]any, string, error) {
 	_ = ctx
 	cfg, err := parseConfig(credentials)
 	if err != nil {
@@ -148,8 +148,8 @@ func (a *WeComAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, h
 	go func() {
 		defer close(done)
 		err := client.Run(connCtx, AuthCredentials{
-			BotID:  parsed.BotID,
-			Secret: parsed.Secret,
+			BotID:      parsed.BotID,
+			Credential: parsed.Credential,
 		}, func(frameCtx context.Context, frame WSFrame) error {
 			return a.handleFrame(frameCtx, cfg, frame, handler)
 		})
@@ -178,7 +178,7 @@ func (a *WeComAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, h
 func (a *WeComAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
 	targetKind, targetID, ok := parseTarget(msg.Target)
 	if !ok {
-		return fmt.Errorf("wecom target is required")
+		return errors.New("wecom target is required")
 	}
 	parsed, err := parseConfig(cfg.Credentials)
 	if err != nil {
@@ -186,10 +186,10 @@ func (a *WeComAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg 
 	}
 	client := a.getClient(parsed.BotID)
 	if client == nil {
-		return fmt.Errorf("wecom connection is not active")
+		return errors.New("wecom connection is not active")
 	}
 	if msg.Message.IsEmpty() {
-		return fmt.Errorf("message is required")
+		return errors.New("message is required")
 	}
 	var (
 		payload  any
@@ -217,9 +217,14 @@ func (a *WeComAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg 
 }
 
 func (a *WeComAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return nil, fmt.Errorf("wecom target is required")
+		return nil, errors.New("wecom target is required")
 	}
 	reply := opts.Reply
 	if reply == nil && strings.TrimSpace(opts.SourceMessageID) != "" {
@@ -410,7 +415,7 @@ func (a *WeComAdapter) sendRespondStream(ctx context.Context, cfg channel.Channe
 	}
 	client := a.getClient(parsed.BotID)
 	if client == nil {
-		return fmt.Errorf("wecom connection is not active")
+		return errors.New("wecom connection is not active")
 	}
 	payload, cmd, ackReqID, err := buildRespondPayloadWithStream(msg, reqID, streamID, finish)
 	if err != nil {

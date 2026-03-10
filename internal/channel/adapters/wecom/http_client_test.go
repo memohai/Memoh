@@ -8,7 +8,7 @@ import (
 )
 
 func TestDownloadFile_ParsesFilename(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''hello%20wecom.txt")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

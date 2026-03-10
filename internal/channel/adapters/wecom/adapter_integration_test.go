@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
 	"github.com/memohai/memoh/internal/channel"
 )
 
@@ -29,7 +30,7 @@ func TestWeComAdapter_ReplyUsesRespondCmd(t *testing.T) {
 			}
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		var subscribeFrame WSFrame
 		if err := conn.ReadJSON(&subscribeFrame); err != nil {
@@ -113,7 +114,7 @@ func TestWeComAdapter_ReplyUsesRespondCmd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect error: %v", err)
 	}
-	defer conn.Stop(context.Background())
+	defer func() { _ = conn.Stop(context.Background()) }()
 
 	select {
 	case inbound := <-inboundCh:
@@ -154,4 +155,3 @@ func TestWeComAdapter_ReplyUsesRespondCmd(t *testing.T) {
 		t.Fatal("timeout waiting respond frame")
 	}
 }
-

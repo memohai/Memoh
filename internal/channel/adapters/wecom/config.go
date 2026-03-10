@@ -1,16 +1,16 @@
 package wecom
 
 import (
-	"fmt"
+	"errors"
 	"strconv"
 	"strings"
 
 	"github.com/memohai/memoh/internal/channel"
 )
 
-type Config struct {
+type adapterConfig struct {
 	BotID               string
-	Secret              string
+	Credential          string
 	WSURL               string
 	HeartbeatSeconds    int
 	AckTimeoutSeconds   int
@@ -30,7 +30,7 @@ func normalizeConfig(raw map[string]any) (map[string]any, error) {
 	}
 	out := map[string]any{
 		"botId":  cfg.BotID,
-		"secret": cfg.Secret,
+		"secret": cfg.Credential,
 	}
 	if cfg.WSURL != "" {
 		out["wsUrl"] = cfg.WSURL
@@ -65,11 +65,11 @@ func normalizeUserConfig(raw map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-func parseConfig(raw map[string]any) (Config, error) {
-	cfg := Config{
-		BotID:  strings.TrimSpace(channel.ReadString(raw, "botId", "bot_id")),
-		Secret: strings.TrimSpace(channel.ReadString(raw, "secret")),
-		WSURL:  strings.TrimSpace(channel.ReadString(raw, "wsUrl", "ws_url")),
+func parseConfig(raw map[string]any) (adapterConfig, error) {
+	cfg := adapterConfig{
+		BotID:      strings.TrimSpace(channel.ReadString(raw, "botId", "bot_id")),
+		Credential: strings.TrimSpace(channel.ReadString(raw, "secret")),
+		WSURL:      strings.TrimSpace(channel.ReadString(raw, "wsUrl", "ws_url")),
 	}
 	if value, ok := readInt(raw, "heartbeatSeconds", "heartbeat_seconds"); ok {
 		cfg.HeartbeatSeconds = value
@@ -83,8 +83,8 @@ func parseConfig(raw map[string]any) (Config, error) {
 	if value, ok := readInt(raw, "readTimeoutSeconds", "read_timeout_seconds"); ok {
 		cfg.ReadTimeoutSeconds = value
 	}
-	if cfg.BotID == "" || cfg.Secret == "" {
-		return Config{}, fmt.Errorf("wecom botId and secret are required")
+	if cfg.BotID == "" || cfg.Credential == "" {
+		return adapterConfig{}, errors.New("wecom botId and secret are required")
 	}
 	return cfg, nil
 }
@@ -95,7 +95,7 @@ func parseUserConfig(raw map[string]any) (UserConfig, error) {
 		UserID: strings.TrimSpace(channel.ReadString(raw, "userId", "user_id")),
 	}
 	if cfg.ChatID == "" && cfg.UserID == "" {
-		return UserConfig{}, fmt.Errorf("wecom user config requires chat_id or user_id")
+		return UserConfig{}, errors.New("wecom user config requires chat_id or user_id")
 	}
 	return cfg, nil
 }

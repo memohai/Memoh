@@ -3,8 +3,9 @@ package wecom
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // WeCom stream image payload requires MD5 checksum field.
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -15,11 +16,11 @@ import (
 func (a *WeComAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
 	_ = cfg
 	if a.http == nil {
-		return channel.AttachmentPayload{}, fmt.Errorf("wecom http client not configured")
+		return channel.AttachmentPayload{}, errors.New("wecom http client not configured")
 	}
 	url := strings.TrimSpace(attachment.URL)
 	if url == "" {
-		return channel.AttachmentPayload{}, fmt.Errorf("wecom attachment url is required")
+		return channel.AttachmentPayload{}, errors.New("wecom attachment url is required")
 	}
 	aesKey := ""
 	if attachment.Metadata != nil {
@@ -51,7 +52,7 @@ type markdownPayload struct {
 
 func buildSendPayload(msg channel.Message, targetID string) (any, string, string, error) {
 	if strings.TrimSpace(targetID) == "" {
-		return nil, "", "", fmt.Errorf("wecom target id is required")
+		return nil, "", "", errors.New("wecom target id is required")
 	}
 	reqID := NewReqID(WSCmdSendMessage)
 	if card, ok := readTemplateCard(msg.Metadata); ok {
@@ -65,12 +66,12 @@ func buildSendPayload(msg channel.Message, targetID string) (any, string, string
 	// aibot_send_msg currently supports markdown/template_card in official SDK.
 	// Attachments should be sent through callback-reply path (aibot_respond_msg).
 	if len(msg.Attachments) > 0 {
-		return nil, "", "", fmt.Errorf("wecom proactive send does not support attachments; use reply flow")
+		return nil, "", "", errors.New("wecom proactive send does not support attachments; use reply flow")
 	}
 
 	text := strings.TrimSpace(msg.PlainText())
 	if text == "" {
-		return nil, "", "", fmt.Errorf("wecom outbound text is required")
+		return nil, "", "", errors.New("wecom outbound text is required")
 	}
 	return SendMessageMarkdownBody{
 		ChatID:  targetID,
@@ -88,7 +89,7 @@ func buildRespondPayload(msg channel.Message, replyReqID string) (any, string, s
 func buildRespondPayloadWithStream(msg channel.Message, replyReqID string, streamID string, finish bool) (any, string, string, error) {
 	reqID := strings.TrimSpace(replyReqID)
 	if reqID == "" {
-		return nil, "", "", fmt.Errorf("reply req_id is required")
+		return nil, "", "", errors.New("reply req_id is required")
 	}
 	if finish {
 		if body, ok := buildWelcomePayload(msg); ok {
@@ -100,10 +101,10 @@ func buildRespondPayloadWithStream(msg channel.Message, replyReqID string, strea
 	}
 	text := strings.TrimSpace(msg.PlainText())
 	if finish && text == "" && len(msg.Attachments) == 0 {
-		return nil, "", "", fmt.Errorf("wecom reply payload is empty")
+		return nil, "", "", errors.New("wecom reply payload is empty")
 	}
 	if !finish && text == "" {
-		return nil, "", "", fmt.Errorf("wecom stream delta content is empty")
+		return nil, "", "", errors.New("wecom stream delta content is empty")
 	}
 	streamID = strings.TrimSpace(streamID)
 	if streamID == "" {
@@ -128,7 +129,7 @@ func buildRespondPayloadWithStream(msg channel.Message, replyReqID string, strea
 						MsgType: "image",
 						Image: &StreamReplyImage{
 							Base64: base64.StdEncoding.EncodeToString(raw),
-							MD5:    fmt.Sprintf("%x", md5.Sum(raw)),
+							MD5:    fmt.Sprintf("%x", md5.Sum(raw)), //nolint:gosec // WeCom protocol mandates md5 field for base64 images.
 						},
 					},
 				}
@@ -298,12 +299,4 @@ func (a *WeComAdapter) lookupCallbackContext(reply *channel.ReplyRef) (callbackC
 		return callbackContext{}, false
 	}
 	return a.cache.Get(messageID)
-}
-
-func (a *WeComAdapter) ensureHTTPClient() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.http == nil {
-		a.http = NewHTTPClient(HTTPClientOptions{Logger: a.logger})
-	}
 }

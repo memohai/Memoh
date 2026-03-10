@@ -3,6 +3,7 @@ package wecom
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -91,7 +92,7 @@ func (c *WSClient) Run(ctx context.Context, auth AuthCredentials, onFrame func(c
 		}
 		if c.opts.MaxReconnectAttempts >= 0 && attempt >= c.opts.MaxReconnectAttempts {
 			if err == nil {
-				return fmt.Errorf("wecom websocket reconnect attempts exceeded")
+				return errors.New("wecom websocket reconnect attempts exceeded")
 			}
 			return err
 		}
@@ -113,16 +114,22 @@ func (c *WSClient) Run(ctx context.Context, auth AuthCredentials, onFrame func(c
 }
 
 func (c *WSClient) runSession(ctx context.Context, auth AuthCredentials, onFrame func(context.Context, WSFrame) error) error {
-	conn, _, err := c.dial(ctx)
+	conn, resp, err := c.dial(ctx)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		return err
+	}
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
 	}
 	c.setConn(conn)
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer func() {
 		cancel()
 		c.clearConn()
-		c.failAllWaiters(fmt.Errorf("wecom websocket disconnected"))
+		c.failAllWaiters(errors.New("wecom websocket disconnected"))
 	}()
 
 	readErrCh := make(chan error, 1)
@@ -155,9 +162,9 @@ func (c *WSClient) dial(ctx context.Context) (*websocket.Conn, *http.Response, e
 }
 
 func (c *WSClient) authenticate(ctx context.Context, auth AuthCredentials) error {
-	frame, err := BuildFrame(WSCmdSubscribe, NewReqID(WSCmdSubscribe), SubscribeBody{
-		BotID:  strings.TrimSpace(auth.BotID),
-		Secret: strings.TrimSpace(auth.Secret),
+	frame, err := BuildFrame(WSCmdSubscribe, NewReqID(WSCmdSubscribe), map[string]string{
+		"bot_id": strings.TrimSpace(auth.BotID),
+		"secret": strings.TrimSpace(auth.Credential),
 	})
 	if err != nil {
 		return err
@@ -200,7 +207,7 @@ func (c *WSClient) heartbeatLoop(ctx context.Context) {
 func (c *WSClient) readLoop(ctx context.Context, onFrame func(context.Context, WSFrame) error, errCh chan<- error) {
 	conn := c.getConn()
 	if conn == nil {
-		errCh <- fmt.Errorf("wecom websocket connection not ready")
+		errCh <- errors.New("wecom websocket connection not ready")
 		return
 	}
 	for {
@@ -230,12 +237,17 @@ func (c *WSClient) readLoop(ctx context.Context, onFrame func(context.Context, W
 }
 
 func (c *WSClient) Send(ctx context.Context, frame WSFrame) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 	if strings.TrimSpace(frame.Headers.ReqID) == "" {
-		return fmt.Errorf("req_id is required")
+		return errors.New("req_id is required")
 	}
 	conn := c.getConn()
 	if conn == nil {
-		return fmt.Errorf("wecom websocket is not connected")
+		return errors.New("wecom websocket is not connected")
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
@@ -251,7 +263,7 @@ func (c *WSClient) Send(ctx context.Context, frame WSFrame) error {
 func (c *WSClient) SendWithAck(ctx context.Context, frame WSFrame) (WSFrame, error) {
 	reqID := strings.TrimSpace(frame.Headers.ReqID)
 	if reqID == "" {
-		return WSFrame{}, fmt.Errorf("req_id is required")
+		return WSFrame{}, errors.New("req_id is required")
 	}
 	wait := make(chan wsAck, 1)
 	c.waitMu.Lock()
@@ -293,7 +305,7 @@ func (c *WSClient) Close() error {
 	conn := c.conn
 	c.conn = nil
 	c.connMu.Unlock()
-	c.failAllWaiters(fmt.Errorf("wecom websocket client closed"))
+	c.failAllWaiters(errors.New("wecom websocket client closed"))
 	if conn == nil {
 		return nil
 	}

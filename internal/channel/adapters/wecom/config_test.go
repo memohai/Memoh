@@ -10,7 +10,7 @@ func TestParseConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseConfig error = %v", err)
 	}
-	if cfg.BotID != "bot-1" || cfg.Secret != "sec-1" {
+	if cfg.BotID != "bot-1" || cfg.Credential != "sec-1" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 }

@@ -3,6 +3,7 @@ package wecom
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,7 +26,7 @@ func TestWSClientRun_ReconnectsAfterDisconnect(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		n := connCount.Add(1)
 
 		var subscribeFrame WSFrame
@@ -64,11 +65,11 @@ func TestWSClientRun_ReconnectsAfterDisconnect(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 	client := NewWSClient(WSClientOptions{
-		URL:                wsURL,
-		AckTimeout:         200 * time.Millisecond,
-		HeartbeatInterval:  10 * time.Second,
-		ReconnectBaseDelay: 10 * time.Millisecond,
-		ReconnectMaxDelay:  20 * time.Millisecond,
+		URL:                  wsURL,
+		AckTimeout:           200 * time.Millisecond,
+		HeartbeatInterval:    10 * time.Second,
+		ReconnectBaseDelay:   10 * time.Millisecond,
+		ReconnectMaxDelay:    20 * time.Millisecond,
 		MaxReconnectAttempts: 5,
 	})
 
@@ -76,7 +77,7 @@ func TestWSClientRun_ReconnectsAfterDisconnect(t *testing.T) {
 	defer cancel()
 	runErrCh := make(chan error, 1)
 	go func() {
-		runErrCh <- client.Run(ctx, AuthCredentials{BotID: "bot", Secret: "sec"}, func(context.Context, WSFrame) error {
+		runErrCh <- client.Run(ctx, AuthCredentials{BotID: "bot", Credential: "sec"}, func(context.Context, WSFrame) error {
 			cancel()
 			return nil
 		})
@@ -89,7 +90,7 @@ func TestWSClientRun_ReconnectsAfterDisconnect(t *testing.T) {
 	}
 	select {
 	case err := <-runErrCh:
-		if err == nil || err != context.Canceled {
+		if err == nil || !errors.Is(err, context.Canceled) {
 			t.Fatalf("unexpected run error: %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -112,7 +113,7 @@ func TestWSClientRun_HeartbeatDoesNotRequireAck(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		n := connCount.Add(1)
 
 		var subscribeFrame WSFrame
@@ -153,7 +154,7 @@ func TestWSClientRun_HeartbeatDoesNotRequireAck(t *testing.T) {
 	defer cancel()
 	runErrCh := make(chan error, 1)
 	go func() {
-		runErrCh <- client.Run(ctx, AuthCredentials{BotID: "bot", Secret: "sec"}, nil)
+		runErrCh <- client.Run(ctx, AuthCredentials{BotID: "bot", Credential: "sec"}, nil)
 	}()
 
 	select {
@@ -165,7 +166,7 @@ func TestWSClientRun_HeartbeatDoesNotRequireAck(t *testing.T) {
 	cancel()
 	select {
 	case err := <-runErrCh:
-		if err == nil || err != context.Canceled {
+		if err == nil || !errors.Is(err, context.Canceled) {
 			t.Fatalf("unexpected run error: %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -175,4 +176,3 @@ func TestWSClientRun_HeartbeatDoesNotRequireAck(t *testing.T) {
 		t.Fatalf("expected at least one session, got %d", connCount.Load())
 	}
 }
-

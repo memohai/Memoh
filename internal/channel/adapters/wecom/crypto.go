@@ -5,12 +5,13 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"errors"
 	"fmt"
 )
 
 func DecryptFileAES256CBC(ciphertext []byte, aesKeyBase64 string) ([]byte, error) {
 	if len(ciphertext) == 0 {
-		return nil, fmt.Errorf("ciphertext is empty")
+		return nil, errors.New("ciphertext is empty")
 	}
 	key, err := base64.StdEncoding.DecodeString(aesKeyBase64)
 	if err != nil {
@@ -24,7 +25,7 @@ func DecryptFileAES256CBC(ciphertext []byte, aesKeyBase64 string) ([]byte, error
 		return nil, err
 	}
 	if len(ciphertext)%aes.BlockSize != 0 {
-		return nil, fmt.Errorf("invalid ciphertext block size")
+		return nil, errors.New("invalid ciphertext block size")
 	}
 	iv := key[:aes.BlockSize]
 	out := make([]byte, len(ciphertext))
@@ -38,15 +39,16 @@ func DecryptFileAES256CBC(ciphertext []byte, aesKeyBase64 string) ([]byte, error
 
 func pkcs7Unpad(data []byte, maxPad int) ([]byte, error) {
 	if len(data) == 0 {
-		return nil, fmt.Errorf("pkcs7 payload is empty")
+		return nil, errors.New("pkcs7 payload is empty")
 	}
-	pad := int(data[len(data)-1])
+	padByte := data[len(data)-1]
+	pad := int(padByte)
 	if pad <= 0 || pad > maxPad || pad > len(data) {
 		return nil, fmt.Errorf("invalid pkcs7 padding length: %d", pad)
 	}
-	padding := bytes.Repeat([]byte{byte(pad)}, pad)
+	padding := bytes.Repeat([]byte{padByte}, pad)
 	if !bytes.Equal(data[len(data)-pad:], padding) {
-		return nil, fmt.Errorf("invalid pkcs7 padding bytes")
+		return nil, errors.New("invalid pkcs7 padding bytes")
 	}
 	return data[:len(data)-pad], nil
 }
