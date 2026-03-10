@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/mcp"
+	adapters "github.com/memohai/memoh/internal/memory/adapters"
 )
 
 const (

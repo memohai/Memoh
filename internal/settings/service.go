@@ -142,7 +142,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
 		ID:                 pgID,
-		MaxContextLoadTime: int32(current.MaxContextLoadTime),
+		MaxContextLoadTime: int32(current.MaxContextLoadTime), //nolint:gosec // range validated above
 		MaxContextTokens:   int32(current.MaxContextTokens),
 		MaxInboxItems:      int32(current.MaxInboxItems),
 		Language:           current.Language,

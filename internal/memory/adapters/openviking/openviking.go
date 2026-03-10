@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/mcp"
+	adapters "github.com/memohai/memoh/internal/memory/adapters"
 )
 
 const (
@@ -17,8 +17,8 @@ const (
 	ovToolSearchMemory = "search_memory"
 	ovDefaultLimit     = 10
 	ovMaxLimit         = 50
-	ovContextMaxItems   = 8
-	ovContextMaxChars   = 220
+	ovContextMaxItems  = 8
+	ovContextMaxChars  = 220
 )
 
 // OpenVikingProvider implements adapters.Provider by delegating to an OpenViking API (self-hosted or SaaS).
@@ -107,7 +107,7 @@ func (p *OpenVikingProvider) OnAfterChat(ctx context.Context, req adapters.After
 
 // --- MCP Tools ---
 
-func (p *OpenVikingProvider) ListTools(_ context.Context, _ mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
+func (*OpenVikingProvider) ListTools(_ context.Context, _ mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
 	return []mcp.ToolDescriptor{
 		{
 			Name:        ovToolSearchMemory,
@@ -277,11 +277,11 @@ func (p *OpenVikingProvider) DeleteAll(ctx context.Context, req adapters.DeleteA
 
 // --- Lifecycle ---
 
-func (p *OpenVikingProvider) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (adapters.CompactResult, error) {
+func (*OpenVikingProvider) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (adapters.CompactResult, error) {
 	return adapters.CompactResult{}, errors.New("compact is not supported by openviking provider")
 }
 
-func (p *OpenVikingProvider) Usage(_ context.Context, _ map[string]any) (adapters.UsageResponse, error) {
+func (*OpenVikingProvider) Usage(_ context.Context, _ map[string]any) (adapters.UsageResponse, error) {
 	return adapters.UsageResponse{}, errors.New("usage is not supported by openviking provider")
 }
 

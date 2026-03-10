@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/mcp"
+	adapters "github.com/memohai/memoh/internal/memory/adapters"
 )
 
 const (
@@ -99,7 +99,7 @@ func (p *Mem0Provider) OnAfterChat(ctx context.Context, req adapters.AfterChatRe
 
 // --- MCP Tools ---
 
-func (p *Mem0Provider) ListTools(_ context.Context, _ mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
+func (*Mem0Provider) ListTools(_ context.Context, _ mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
 	return []mcp.ToolDescriptor{
 		{
 			Name:        mem0ToolSearchMemory,
@@ -272,11 +272,11 @@ func (p *Mem0Provider) DeleteAll(ctx context.Context, req adapters.DeleteAllRequ
 
 // --- Lifecycle ---
 
-func (p *Mem0Provider) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (adapters.CompactResult, error) {
+func (*Mem0Provider) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (adapters.CompactResult, error) {
 	return adapters.CompactResult{}, errors.New("compact is not supported by mem0 provider")
 }
 
-func (p *Mem0Provider) Usage(ctx context.Context, _ map[string]any) (adapters.UsageResponse, error) {
+func (*Mem0Provider) Usage(_ context.Context, _ map[string]any) (adapters.UsageResponse, error) {
 	return adapters.UsageResponse{}, errors.New("usage is not supported by mem0 provider")
 }
 

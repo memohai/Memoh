@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,7 +24,7 @@ type openVikingClient struct {
 func newOpenVikingClient(config map[string]any) (*openVikingClient, error) {
 	baseURL := adapters.StringFromConfig(config, "base_url")
 	if baseURL == "" {
-		return nil, fmt.Errorf("openviking: base_url is required")
+		return nil, errors.New("openviking: base_url is required")
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 	memoryRoot := adapters.StringFromConfig(config, "memory_root")
@@ -139,7 +140,7 @@ func (c *openVikingClient) doJSON(ctx context.Context, method, urlPath string, b
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req) //nolint:gosec // URL is from admin-configured base_url
 	if err != nil {
 		return err
 	}

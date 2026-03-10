@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,7 +25,7 @@ type mem0Client struct {
 func newMem0Client(config map[string]any) (*mem0Client, error) {
 	baseURL := adapters.StringFromConfig(config, "base_url")
 	if baseURL == "" {
-		return nil, fmt.Errorf("mem0: base_url is required")
+		return nil, errors.New("mem0: base_url is required")
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &mem0Client{
@@ -145,7 +146,7 @@ func (c *mem0Client) doJSON(ctx context.Context, method, urlPath string, body an
 	if c.projectID != "" {
 		req.Header.Set("X-Project-Id", c.projectID)
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req) //nolint:gosec // URL is from admin-configured base_url
 	if err != nil {
 		return err
 	}

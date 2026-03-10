@@ -201,7 +201,7 @@ func (c *imapConn) connectAndReceive(ctx context.Context) error {
 	}
 
 	opts := &imapclient.Options{
-		TLSConfig: &tls.Config{ServerName: c.host},
+		TLSConfig: &tls.Config{ServerName: c.host, MinVersion: tls.VersionTLS12},
 		UnilateralDataHandler: &imapclient.UnilateralDataHandler{
 			Mailbox: func(data *imapclient.UnilateralDataMailbox) {
 				if data.NumMessages != nil {
@@ -381,7 +381,7 @@ func (*Adapter) dialIMAP(config map[string]any) (*imapclient.Client, error) {
 	security, _ := config["imap_security"].(string)
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	opts := &imapclient.Options{TLSConfig: &tls.Config{ServerName: host}}
+	opts := &imapclient.Options{TLSConfig: &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}}
 
 	var client *imapclient.Client
 	var err error
@@ -441,7 +441,7 @@ func (a *Adapter) ListMailbox(_ context.Context, config map[string]any, page, pa
 	if start > math.MaxUint32 || end > math.MaxUint32 {
 		return nil, 0, fmt.Errorf("mail sequence range out of bounds: start=%d end=%d", start, end)
 	}
-	seqSet.AddRange(uint32(start), uint32(end))
+	seqSet.AddRange(uint32(start), uint32(end)) //nolint:gosec // bounds checked above
 
 	fetchOpts := &imap.FetchOptions{
 		Envelope: true,
