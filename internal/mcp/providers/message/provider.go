@@ -227,6 +227,16 @@ func (p *Executor) callSend(ctx context.Context, session mcpgw.ToolSessionContex
 		return mcpgw.BuildToolErrorResult("target is required"), nil
 	}
 
+	// Reject send when the destination matches the current conversation.
+	if strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) &&
+		target == strings.TrimSpace(session.ReplyTarget) {
+		return mcpgw.BuildToolErrorResult(
+			"You are trying to send a message to the SAME conversation you are already in. " +
+				"Do NOT use the send tool for this. Instead, write your reply as plain text directly. " +
+				"To include files, use the <attachments> block in your response (e.g. <attachments>[{\"type\":\"image\",\"path\":\"/data/media/file.jpg\"}]</attachments>).",
+		), nil
+	}
+
 	sendReq := channel.SendRequest{
 		Target:  target,
 		Message: outboundMessage,
