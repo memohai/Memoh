@@ -123,7 +123,7 @@ func (h *MemoryHandler) SetMCPClientProvider(p mcpclient.Provider) {
 		h.memoryStore = nil
 		return
 	}
-	h.memoryStore = storefs.New(p)
+	h.memoryStore = storefs.New(h.logger, p)
 }
 
 // Register registers chat-level memory routes.
@@ -631,7 +631,7 @@ func NewBuiltinMemoryRuntime(p mcpclient.Provider) any {
 	if p == nil {
 		return nil
 	}
-	return &fileMemoryRuntime{store: storefs.New(p)}
+	return &fileMemoryRuntime{store: storefs.New(nil, p)}
 }
 
 type fileMemoryRuntime struct {

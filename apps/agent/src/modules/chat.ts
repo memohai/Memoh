@@ -1,6 +1,6 @@
 import { Elysia } from 'elysia'
 import z from 'zod'
-import { createAgent, ModelConfig } from '@memoh/agent'
+import { createAgent, ModelConfig, type AgentStreamAction } from '@memoh/agent'
 import { createAuthFetcher, getBaseUrl } from '../index'
 import { bearerMiddleware } from '../middlewares/bearer'
 import { AgentSkillModel, AttachmentModel, HeartbeatModel, IdentityContextModel, InboxItemModel, LoopDetectionModel, MCPConnectionModel, ModelConfigModel, ScheduleModel } from '../models'
@@ -20,6 +20,37 @@ const AgentModel = z.object({
   inbox: z.array(InboxItemModel).optional().default([]),
   loopDetection: LoopDetectionModel,
 })
+
+const StreamBodyModel = AgentModel.extend({
+  query: z.string().optional().default(''),
+})
+
+function buildAgentAndStream(body: z.infer<typeof StreamBodyModel>, bearer: string, signal?: AbortSignal) {
+  const auth = {
+    bearer,
+    baseUrl: getBaseUrl(),
+  }
+  const authFetcher = createAuthFetcher(auth)
+  const { stream } = createAgent({
+    model: body.model as ModelConfig,
+    activeContextTime: body.activeContextTime,
+    channels: body.channels,
+    currentChannel: body.currentChannel,
+    identity: body.identity,
+    auth,
+    skills: body.usableSkills,
+    mcpConnections: body.mcpConnections,
+    inbox: body.inbox,
+    loopDetection: body.loopDetection,
+  }, authFetcher)
+  return stream({
+    query: body.query,
+    messages: body.messages,
+    skills: body.skills,
+    attachments: body.attachments,
+    signal,
+  })
+}
 
 export const chatModule = new Elysia({ prefix: '/chat' })
   .use(bearerMiddleware)
@@ -55,33 +86,13 @@ export const chatModule = new Elysia({ prefix: '/chat' })
   })
   .post('/stream', async function* ({ body, bearer }) {
     console.log('stream', body)
+    const abortController = new AbortController()
     try {
-      const auth = {
-        bearer: bearer!,
-        baseUrl: getBaseUrl(),
-      }
-      const authFetcher = createAuthFetcher(auth)
-      const { stream } = createAgent({
-        model: body.model as ModelConfig,
-        activeContextTime: body.activeContextTime,
-        channels: body.channels,
-        currentChannel: body.currentChannel,
-        identity: body.identity,
-        auth,
-        skills: body.usableSkills,
-        mcpConnections: body.mcpConnections,
-        inbox: body.inbox,
-        loopDetection: body.loopDetection,
-      }, authFetcher)
-      for await (const action of stream({
-        query: body.query,
-        messages: body.messages,
-        skills: body.skills,
-        attachments: body.attachments,
-      })) {
+      for await (const action of buildAgentAndStream(body, bearer!, abortController.signal)) {
         yield sseChunked(JSON.stringify(action))
       }
     } catch (error) {
+      if (abortController.signal.aborted) return
       console.error(error)
       const message = error instanceof Error && error.message.trim()
         ? error.message
@@ -90,12 +101,70 @@ export const chatModule = new Elysia({ prefix: '/chat' })
         type: 'error',
         message,
       }))
+    } finally {
+      abortController.abort()
     }
   }, {
-    body: AgentModel.extend({
-      query: z.string().optional().default(''),
-    }),
+    body: StreamBodyModel,
   })
+  .ws('/ws', (() => {
+    const sessions = new Map<unknown, { abortController: AbortController | null; streaming: boolean }>()
+    return {
+      open(ws: { raw: unknown }) {
+        sessions.set(ws.raw, { abortController: null, streaming: false })
+      },
+      async message(ws: { raw: unknown; send: (data: string) => void }, raw: unknown) {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+        const session = sessions.get(ws.raw)
+        if (!session) return
+
+        if (parsed.type === 'abort') {
+          session.abortController?.abort()
+          return
+        }
+        if (parsed.type === 'start') {
+          if (session.streaming) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Already streaming' }))
+            return
+          }
+          session.streaming = true
+          const abortController = new AbortController()
+          session.abortController = abortController
+          const bearer = parsed.bearer as string | undefined
+          if (!bearer) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Missing bearer token' }))
+            session.streaming = false
+            return
+          }
+          try {
+            const body = StreamBodyModel.parse(parsed)
+            const streamIter = buildAgentAndStream(body, bearer, abortController.signal)
+            for await (const action of streamIter) {
+              ws.send(JSON.stringify(action))
+            }
+          } catch (error) {
+            if (!abortController.signal.aborted) {
+              console.error(error)
+              const message = error instanceof Error && error.message.trim()
+                ? error.message
+                : 'Internal server error'
+              ws.send(JSON.stringify({ type: 'error', message }))
+            }
+          } finally {
+            session.streaming = false
+            session.abortController = null
+          }
+        }
+      },
+      close(ws: { raw: unknown }) {
+        const session = sessions.get(ws.raw)
+        if (session) {
+          session.abortController?.abort()
+          sessions.delete(ws.raw)
+        }
+      },
+    }
+  })())
   .post('/trigger-schedule', async ({ body, bearer }) => {
     console.log('trigger-schedule', body)
     const auth = {

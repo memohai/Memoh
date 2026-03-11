@@ -110,6 +110,10 @@ export const en = [
         text: 'Discord',
         link: '/channels/discord.md'
       },
+      {
+        text: 'QQ',
+        link: '/channels/qq.md'
+      },
     ]
   },
 ]

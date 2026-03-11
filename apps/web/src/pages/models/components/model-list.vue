@@ -32,7 +32,7 @@
 
       <section class="flex flex-col gap-4">
         <ModelItem
-          v-for="model in filteredModels"
+          v-for="model in displayedModels"
           :key="model.id || `${model.llm_provider_id}:${model.model_id}`"
           :model="model"
           :delete-loading="deleteModelLoading"
@@ -40,6 +40,23 @@
           @delete="(id) => $emit('delete', id)"
         />
       </section>
+
+      <div
+        v-if="hasMore"
+        class="flex flex-col items-center gap-2 pt-4"
+      >
+        <span class="text-xs text-muted-foreground">
+          {{ $t('models.showingCount', { count: displayLimit, total: filteredModels.length }) }}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          class="cursor-pointer"
+          @click="showMore"
+        >
+          {{ $t('models.showMore') }}
+        </Button>
+      </div>
 
       <Empty
         v-if="filteredModels.length === 0"
@@ -71,8 +88,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import {
+  Button,
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -88,6 +106,8 @@ import ImportModelsDialog from '@/components/import-models-dialog/index.vue'
 import ModelItem from './model-item.vue'
 import type { ModelsGetResponse } from '@memoh/sdk'
 
+const PAGE_SIZE = 30
+
 const props = defineProps<{
   providerId: string | undefined
   models: ModelsGetResponse[] | undefined
@@ -100,6 +120,7 @@ defineEmits<{
 }>()
 
 const searchQuery = ref('')
+const displayLimit = ref(PAGE_SIZE)
 
 const filteredModels = computed(() => {
   if (!props.models) return []
@@ -110,5 +131,16 @@ const filteredModels = computed(() => {
     const modelId = (model.model_id ?? '').toLowerCase()
     return name.includes(keyword) || modelId.includes(keyword)
   })
+})
+
+const displayedModels = computed(() => filteredModels.value.slice(0, displayLimit.value))
+const hasMore = computed(() => displayLimit.value < filteredModels.value.length)
+
+function showMore() {
+  displayLimit.value += PAGE_SIZE
+}
+
+watch(searchQuery, () => {
+  displayLimit.value = PAGE_SIZE
 })
 </script>

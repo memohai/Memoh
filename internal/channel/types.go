@@ -101,6 +101,7 @@ const (
 	StreamEventAttachment          StreamEventType = "attachment"
 	StreamEventAgentStart          StreamEventType = "agent_start"
 	StreamEventAgentEnd            StreamEventType = "agent_end"
+	StreamEventReaction            StreamEventType = "reaction"
 	StreamEventProcessingStarted   StreamEventType = "processing_started"
 	StreamEventProcessingCompleted StreamEventType = "processing_completed"
 	StreamEventProcessingFailed    StreamEventType = "processing_failed"
@@ -146,6 +147,7 @@ type StreamEvent struct {
 	ToolCall    *StreamToolCall        `json:"tool_call,omitempty"`
 	Phase       StreamPhase            `json:"phase,omitempty"`
 	Attachments []Attachment           `json:"attachments,omitempty"`
+	Reactions   []ReactRequest         `json:"reactions,omitempty"`
 	Metadata    map[string]any         `json:"metadata,omitempty"`
 }
 

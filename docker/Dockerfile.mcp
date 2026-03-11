@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM alpine:latest
 
 # Base utilities
-RUN apk add --no-cache grep curl bash
+RUN apk add --no-cache grep curl bash dumb-init
 
 # Node.js + npm (provides npx for JS/TS MCP servers)
 RUN apk add --no-cache nodejs npm
@@ -40,4 +40,4 @@ COPY --from=build /out/mcp /opt/mcp
 COPY cmd/mcp/template /opt/mcp-template
 COPY cmd/mcp/entrypoint.sh /opt/entrypoint.sh
 RUN chmod +x /opt/entrypoint.sh
-ENTRYPOINT ["/opt/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/opt/entrypoint.sh"]

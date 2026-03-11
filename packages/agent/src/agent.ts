@@ -4,6 +4,7 @@ import {
   LanguageModelUsage,
   ModelMessage,
   stepCountIs,
+  type StepResult,
   streamText,
   ToolSet,
   UserModelMessage,
@@ -24,11 +25,13 @@ import { system, schedule, heartbeat, subagentSystem } from './prompts'
 import { AuthFetcher } from './types'
 import { createModel } from './model'
 import {
-  extractAttachmentsFromText,
   stripAttachmentsFromMessages,
   dedupeAttachments,
-  AttachmentsStreamExtractor,
+  attachmentsResolver,
 } from './utils/attachments'
+import type { ContainerFileAttachment } from './types/attachment'
+import { reactionsResolver, type ReactionItem } from './utils/reactions'
+import { StreamTagExtractor, extractTagsFromText, type TagEvent } from './utils/tag-extractor'
 import { createImagePartFromAttachment } from './utils/image-parts'
 import type { GatewayInputAttachment } from './types/attachment'
 import { getMCPTools } from './tools/mcp'
@@ -83,6 +86,16 @@ export const buildNativeImageParts = (attachments: GatewayInputAttachment[]): Im
   return attachments
     .map((attachment) => createImagePartFromAttachment(attachment))
     .filter((attachment): attachment is ImagePart => attachment != null)
+}
+
+const rebuildPartialMessages = (steps: StepResult<ToolSet>[]): ModelMessage[] => {
+  const messages: ModelMessage[] = []
+  for (const step of steps) {
+    if (step.response?.messages) {
+      messages.push(...(step.response.messages as ModelMessage[]))
+    }
+  }
+  return messages
 }
 
 export const createAgent = (
@@ -319,10 +332,16 @@ export const createAgent = (
       basePrepareStep: () => ({ system: systemPrompt }),
     })
     const stepUsages = buildStepUsages(steps)
-    const { cleanedText, attachments: textAttachments } =
-      extractAttachmentsFromText(text)
+    const tagResolvers = [attachmentsResolver, reactionsResolver]
+    const { cleanedText, events } = extractTagsFromText(text, tagResolvers)
+    const textAttachments = events
+      .filter((e) => e.tag === 'attachments')
+      .flatMap((e) => e.data as ContainerFileAttachment[])
+    const reactions = events
+      .filter((e) => e.tag === 'reactions')
+      .flatMap((e) => e.data as ReactionItem[])
     const { messages: strippedMessages, attachments: messageAttachments } =
-      stripAttachmentsFromMessages(response.messages)
+      stripAttachmentsFromMessages(response.messages, [reactionsResolver])
     const allAttachments = dedupeAttachments([
       ...textAttachments,
       ...messageAttachments,
@@ -337,6 +356,7 @@ export const createAgent = (
       usage,
       text: cleanedText,
       attachments: allAttachments,
+      reactions,
       skills: getEnabledSkills(),
     }
   }
@@ -461,12 +481,34 @@ export const createAgent = (
     return 'Model stream failed'
   }
 
+  function* emitTagEvents(events: TagEvent[]): Generator<AgentStreamAction> {
+    for (const event of events) {
+      switch (event.tag) {
+        case 'attachments': {
+          const attachments = dedupeAttachments(event.data as ContainerFileAttachment[]) as ContainerFileAttachment[]
+          if (attachments.length) {
+            yield { type: 'attachment_delta', attachments }
+          }
+          break
+        }
+        case 'reactions': {
+          const reactions = event.data as ReactionItem[]
+          if (reactions.length) {
+            yield { type: 'reaction_delta', reactions }
+          }
+          break
+        }
+      }
+    }
+  }
+
   async function* stream(input: AgentInput): AsyncGenerator<AgentStreamAction> {
     const userPrompt = generateUserPrompt(input)
     const messages = [...input.messages, userPrompt]
     input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
-    const attachmentsExtractor = new AttachmentsStreamExtractor()
+    const tagResolvers = [attachmentsResolver, reactionsResolver]
+    const tagExtractor = new StreamTagExtractor(tagResolvers)
     const textLoopGuard = loopDetectionEnabled
       ? createTextLoopGuard({
         consecutiveHitsToAbort: LOOP_DETECTED_STREAK_THRESHOLD,
@@ -508,7 +550,6 @@ export const createAgent = (
       basePrepareStep: () => ({ system: systemPrompt }),
     })
     const tools = { ...baseTools, ...readMediaTools }
-    // Stream path needs deferred abort to keep tool_call_start/tool_call_end event pairing.
     const guardedTools = buildGuardedTools(tools, (toolCallId) => {
       toolLoopAbortCallIds.add(toolCallId)
     })
@@ -519,6 +560,17 @@ export const createAgent = (
       }
       await closePromise
     }
+
+    const abortController = new AbortController()
+    if (input.signal) {
+      if (input.signal.aborted) {
+        abortController.abort(input.signal.reason)
+      } else {
+        input.signal.addEventListener('abort', () => abortController.abort(input.signal!.reason), { once: true })
+      }
+    }
+    const abortedSteps: StepResult<ToolSet>[] = []
+    let wasAborted = false
     let streamError: unknown = null
     try {
       const { fullStream } = streamText({
@@ -529,12 +581,17 @@ export const createAgent = (
         stopWhen: stepCountIs(Infinity),
         prepareStep,
         tools: guardedTools,
+        abortSignal: abortController.signal,
         onFinish: async ({ usage, reasoning, response, steps }) => {
           await closeTools()
           result.usage = usage as never
           result.reasoning = reasoning.map((part) => part.text)
           result.messages = response.messages
           result.usages = buildStepUsages(steps)
+        },
+        onAbort: ({ steps }) => {
+          wasAborted = true
+          abortedSteps.push(...steps)
         },
       })
       yield {
@@ -572,9 +629,7 @@ export const createAgent = (
             }
             break
           case 'text-delta': {
-            const { visibleText, attachments } = attachmentsExtractor.push(
-              chunk.text,
-            )
+            const { visibleText, events } = tagExtractor.push(chunk.text)
             if (visibleText) {
               if (textLoopProbeBuffer) {
                 textLoopProbeBuffer.push(visibleText)
@@ -584,17 +639,11 @@ export const createAgent = (
                 delta: visibleText,
               }
             }
-            if (attachments.length) {
-              yield {
-                type: 'attachment_delta',
-                attachments,
-              }
-            }
+            yield* emitTagEvents(events)
             break
           }
           case 'text-end': {
-            // Flush any remaining buffered content before ending the text stream.
-            const remainder = attachmentsExtractor.flushRemainder()
+            const remainder = tagExtractor.flushRemainder()
             if (remainder.visibleText) {
               if (textLoopProbeBuffer) {
                 textLoopProbeBuffer.push(remainder.visibleText)
@@ -607,21 +656,15 @@ export const createAgent = (
             if (textLoopProbeBuffer) {
               textLoopProbeBuffer.flush()
             }
-            if (remainder.attachments.length) {
-              yield {
-                type: 'attachment_delta',
-                attachments: remainder.attachments,
-              }
-            }
+            yield* emitTagEvents(remainder.events)
             yield {
               type: 'text_end',
               metadata: chunk,
             }
             break
           }
-          case 'tool-call':
-            // Flush any remaining buffered content before ending the text stream.
-            const remainder = attachmentsExtractor.flushRemainder()
+          case 'tool-call': {
+            const remainder = tagExtractor.flushRemainder()
             if (remainder.visibleText) {
               if (textLoopProbeBuffer) {
                 textLoopProbeBuffer.push(remainder.visibleText)
@@ -634,12 +677,7 @@ export const createAgent = (
             if (textLoopProbeBuffer) {
               textLoopProbeBuffer.flush()
             }
-            if (remainder.attachments.length) {
-              yield {
-                type: 'attachment_delta',
-                attachments: remainder.attachments,
-              }
-            }
+            yield* emitTagEvents(remainder.events)
             yield {
               type: 'tool_call_start',
               toolName: chunk.toolName,
@@ -648,9 +686,8 @@ export const createAgent = (
               metadata: chunk,
             }
             break
-          case 'tool-result':
-            // Always emit the terminal tool event first so downstream reducers
-            // can close the in-flight tool block before the stream aborts.
+          }
+          case 'tool-result': {
             const shouldAbortForToolLoop = toolLoopAbortCallIds.delete(chunk.toolCallId)
             yield {
               type: 'tool_call_end',
@@ -669,6 +706,7 @@ export const createAgent = (
               throw new Error(TOOL_LOOP_DETECTED_ABORT_MESSAGE)
             }
             break
+          }
           case 'file':
             yield {
               type: 'attachment_delta',
@@ -688,6 +726,7 @@ export const createAgent = (
   
       const { messages: strippedMessages } = stripAttachmentsFromMessages(
         result.messages,
+        [reactionsResolver],
       )
       yield {
         type: 'agent_end',
@@ -702,8 +741,30 @@ export const createAgent = (
       }
     } catch (error) {
       streamError = error
-      console.error(error)
-      throw error
+
+      if (wasAborted || abortController.signal.aborted) {
+        const partialMessages = rebuildPartialMessages(abortedSteps)
+        const partialUsages = abortedSteps.length > 0
+          ? buildStepUsages(abortedSteps as Parameters<typeof buildStepUsages>[0])
+          : []
+        const partialUsage = abortedSteps.length > 0
+          ? abortedSteps[abortedSteps.length - 1].usage
+          : null
+        const partialReasoning = abortedSteps.flatMap(
+          (s) => (s.reasoning ?? []).map((r: { text: string }) => r.text),
+        )
+        yield {
+          type: 'agent_abort',
+          messages: [userPrompt, ...partialMessages],
+          usages: [null, ...partialUsages],
+          reasoning: partialReasoning,
+          usage: partialUsage as LanguageModelUsage | null,
+          skills: getEnabledSkills(),
+        }
+      } else {
+        console.error(error)
+        throw error
+      }
     } finally {
       try {
         await closeTools()

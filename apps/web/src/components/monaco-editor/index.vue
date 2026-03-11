@@ -52,7 +52,7 @@ onMounted(() => {
     readOnly: props.readonly,
     automaticLayout: true,
     minimap: { enabled: false },
-    scrollBeyondLastLine: false,
+    scrollBeyondLastLine: true,
     fontSize: 13,
     lineNumbers: 'on',
     renderLineHighlight: 'line',

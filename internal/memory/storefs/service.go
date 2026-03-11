@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"path"
 	"sort"
@@ -17,8 +17,6 @@ import (
 	"github.com/memohai/memoh/internal/mcp/mcpclient"
 )
 
-const manifestVersion = 1
-
 const (
 	memoryDateLayout = "2006-01-02"
 	entryStartPrefix = "<!-- MEMOH:ENTRY "
@@ -28,23 +26,14 @@ const (
 
 var ErrNotConfigured = errors.New("memory filesystem not configured")
 
-type Manifest struct {
-	Version   int                      `json:"version"`
-	UpdatedAt string                   `json:"updated_at"`
-	Entries   map[string]ManifestEntry `json:"entries"`
-}
-
-type ManifestEntry struct {
-	Hash      string         `json:"hash"`
-	CreatedAt string         `json:"created_at"`
-	UpdatedAt string         `json:"updated_at,omitempty"`
-	Date      string         `json:"date,omitempty"`
-	FilePath  string         `json:"file_path,omitempty"`
-	Filters   map[string]any `json:"filters,omitempty"`
+// scanEntry maps a memory ID to the file that contains it.
+type scanEntry struct {
+	FilePath string
 }
 
 type Service struct {
 	provider mcpclient.Provider
+	logger   *slog.Logger
 }
 
 type MemoryItem struct {
@@ -60,8 +49,11 @@ type MemoryItem struct {
 	RunID     string         `json:"run_id,omitempty"`
 }
 
-func New(provider mcpclient.Provider) *Service {
-	return &Service{provider: provider}
+func New(log *slog.Logger, provider mcpclient.Provider) *Service {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Service{provider: provider, logger: log.With(slog.String("component", "storefs"))}
 }
 
 func (s *Service) client(ctx context.Context, botID string) (*mcpclient.Client, error) {
@@ -104,14 +96,62 @@ func (s *Service) deleteFile(ctx context.Context, botID, filePath string, recurs
 	return c.DeleteFile(ctx, filePath, recursive)
 }
 
-func (s *Service) PersistMemories(ctx context.Context, botID string, items []MemoryItem, filters map[string]any) error {
+// buildScanIndex scans all daily memory files and builds a map of id -> file path.
+func (s *Service) buildScanIndex(ctx context.Context, botID string) (map[string]scanEntry, error) {
+	c, err := s.client(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := c.ListDir(ctx, memoryDirPath(), false)
+	if err != nil {
+		if isNotFound(err) {
+			return map[string]scanEntry{}, nil
+		}
+		return nil, err
+	}
+	index := make(map[string]scanEntry)
+	for _, entry := range entries {
+		if entry.GetIsDir() || !strings.HasSuffix(entry.GetPath(), ".md") {
+			continue
+		}
+		entryPath := path.Join(memoryDirPath(), entry.GetPath())
+		content, readErr := s.readFile(ctx, botID, entryPath)
+		if readErr != nil {
+			s.logger.Warn("buildScanIndex: failed to read memory file",
+				slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", readErr))
+			continue
+		}
+		parsed, parseErr := parseMemoryDayMD(content)
+		if parseErr != nil {
+			legacy, legacyErr := parseLegacyMemoryMD(content)
+			if legacyErr != nil {
+				s.logger.Warn("buildScanIndex: failed to parse memory file",
+					slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", parseErr))
+				continue
+			}
+			parsed = []MemoryItem{legacy}
+		}
+		for _, item := range parsed {
+			id := strings.TrimSpace(item.ID)
+			if id == "" {
+				continue
+			}
+			if _, ok := index[id]; !ok {
+				index[id] = scanEntry{FilePath: entryPath}
+			}
+		}
+	}
+	return index, nil
+}
+
+func (s *Service) PersistMemories(ctx context.Context, botID string, items []MemoryItem, _ map[string]any) error {
 	if s.provider == nil {
 		return ErrNotConfigured
 	}
 	if len(items) == 0 {
 		return nil
 	}
-	manifest, err := s.ReadManifest(ctx, botID)
+	index, err := s.buildScanIndex(ctx, botID)
 	if err != nil {
 		return err
 	}
@@ -126,7 +166,7 @@ func (s *Service) PersistMemories(ctx context.Context, botID string, items []Mem
 		}
 		date := memoryDateForItem(item, now)
 		filePath := memoryDayPath(date)
-		if current, ok := manifest.Entries[item.ID]; ok && strings.TrimSpace(current.FilePath) != "" && current.FilePath != filePath {
+		if current, ok := index[item.ID]; ok && current.FilePath != filePath {
 			if toRemoveFromOld[current.FilePath] == nil {
 				toRemoveFromOld[current.FilePath] = map[string]struct{}{}
 			}
@@ -136,14 +176,6 @@ func (s *Service) PersistMemories(ctx context.Context, botID string, items []Mem
 			touched[filePath] = make(map[string]MemoryItem)
 		}
 		touched[filePath][item.ID] = item
-		manifest.Entries[item.ID] = ManifestEntry{
-			Hash:      item.Hash,
-			CreatedAt: item.CreatedAt,
-			UpdatedAt: item.UpdatedAt,
-			Date:      date,
-			FilePath:  filePath,
-			Filters:   copyFilters(filters),
-		}
 	}
 
 	for filePath, incoming := range touched {
@@ -160,23 +192,15 @@ func (s *Service) PersistMemories(ctx context.Context, botID string, items []Mem
 	if err := s.removeIDsFromFiles(ctx, botID, toRemoveFromOld); err != nil {
 		return err
 	}
-	if err := s.writeManifest(ctx, botID, manifest); err != nil {
-		return err
-	}
 	return s.SyncOverview(ctx, botID)
 }
 
-func (s *Service) RebuildFiles(ctx context.Context, botID string, items []MemoryItem, filters map[string]any) error {
+func (s *Service) RebuildFiles(ctx context.Context, botID string, items []MemoryItem, _ map[string]any) error {
 	if s.provider == nil {
 		return ErrNotConfigured
 	}
 	if err := s.deleteFile(ctx, botID, memoryDirPath(), true); err != nil && !isNotFound(err) {
 		return err
-	}
-	manifest := &Manifest{
-		Version:   manifestVersion,
-		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		Entries:   make(map[string]ManifestEntry, len(items)),
 	}
 	grouped := make(map[string][]MemoryItem)
 	now := time.Now().UTC()
@@ -189,22 +213,11 @@ func (s *Service) RebuildFiles(ctx context.Context, botID string, items []Memory
 		date := memoryDateForItem(item, now)
 		filePath := memoryDayPath(date)
 		grouped[filePath] = append(grouped[filePath], item)
-		manifest.Entries[item.ID] = ManifestEntry{
-			Hash:      item.Hash,
-			CreatedAt: item.CreatedAt,
-			UpdatedAt: item.UpdatedAt,
-			Date:      date,
-			FilePath:  filePath,
-			Filters:   copyFilters(filters),
-		}
 	}
 	for filePath, dayItems := range grouped {
 		if err := s.writeMemoryDay(ctx, botID, filePath, dayItems); err != nil {
 			return err
 		}
-	}
-	if err := s.writeManifest(ctx, botID, manifest); err != nil {
-		return err
 	}
 	return s.SyncOverview(ctx, botID)
 }
@@ -216,7 +229,7 @@ func (s *Service) RemoveMemories(ctx context.Context, botID string, ids []string
 	if len(ids) == 0 {
 		return nil
 	}
-	manifest, err := s.ReadManifest(ctx, botID)
+	index, err := s.buildScanIndex(ctx, botID)
 	if err != nil {
 		return err
 	}
@@ -226,12 +239,9 @@ func (s *Service) RemoveMemories(ctx context.Context, botID string, ids []string
 		if id == "" {
 			continue
 		}
-		entry := manifest.Entries[id]
 		targets := make([]string, 0, 2)
-		if strings.TrimSpace(entry.FilePath) != "" {
+		if entry, ok := index[id]; ok {
 			targets = append(targets, entry.FilePath)
-		} else if strings.TrimSpace(entry.Date) != "" {
-			targets = append(targets, memoryDayPath(entry.Date))
 		}
 		targets = append(targets, memoryLegacyItemPath(id))
 		for _, target := range targets {
@@ -240,12 +250,8 @@ func (s *Service) RemoveMemories(ctx context.Context, botID string, ids []string
 			}
 			removals[target][id] = struct{}{}
 		}
-		delete(manifest.Entries, id)
 	}
 	if err := s.removeIDsFromFiles(ctx, botID, removals); err != nil {
-		return err
-	}
-	if err := s.writeManifest(ctx, botID, manifest); err != nil {
 		return err
 	}
 	return s.SyncOverview(ctx, botID)
@@ -256,13 +262,6 @@ func (s *Service) RemoveAllMemories(ctx context.Context, botID string) error {
 		return ErrNotConfigured
 	}
 	if err := s.deleteFile(ctx, botID, memoryDirPath(), true); err != nil && !isNotFound(err) {
-		return err
-	}
-	if err := s.writeManifest(ctx, botID, &Manifest{
-		Version:   manifestVersion,
-		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		Entries:   map[string]ManifestEntry{},
-	}); err != nil {
 		return err
 	}
 	return s.SyncOverview(ctx, botID)
@@ -330,61 +329,6 @@ func (s *Service) SyncOverview(ctx context.Context, botID string) error {
 	return s.writeFile(ctx, botID, memoryOverviewPath(), formatMemoryOverviewMD(items))
 }
 
-func (s *Service) ReadManifest(ctx context.Context, botID string) (*Manifest, error) {
-	if s.provider == nil {
-		return nil, ErrNotConfigured
-	}
-	content, err := s.readFile(ctx, botID, memoryManifestPath())
-	if err != nil {
-		if isNotFound(err) {
-			return &Manifest{
-				Version: manifestVersion,
-				Entries: map[string]ManifestEntry{},
-			}, nil
-		}
-		return nil, err
-	}
-	var manifest Manifest
-	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
-	}
-	if manifest.Entries == nil {
-		manifest.Entries = map[string]ManifestEntry{}
-	}
-	if manifest.Version == 0 {
-		manifest.Version = manifestVersion
-	}
-	now := time.Now().UTC()
-	for id, entry := range manifest.Entries {
-		if strings.TrimSpace(entry.Date) == "" {
-			entry.Date = memoryDateFromRaw(entry.CreatedAt, now)
-		}
-		if strings.TrimSpace(entry.FilePath) == "" {
-			entry.FilePath = memoryDayPath(entry.Date)
-		}
-		manifest.Entries[id] = entry
-	}
-	return &manifest, nil
-}
-
-func (s *Service) writeManifest(ctx context.Context, botID string, manifest *Manifest) error {
-	if manifest == nil {
-		manifest = &Manifest{Version: manifestVersion, Entries: map[string]ManifestEntry{}}
-	}
-	if manifest.Entries == nil {
-		manifest.Entries = map[string]ManifestEntry{}
-	}
-	if manifest.Version == 0 {
-		manifest.Version = manifestVersion
-	}
-	manifest.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	data, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal manifest: %w", err)
-	}
-	return s.writeFile(ctx, botID, memoryManifestPath(), string(data))
-}
-
 func (s *Service) readMemoryDay(ctx context.Context, botID, filePath string) ([]MemoryItem, error) {
 	content, err := s.readFile(ctx, botID, filePath)
 	if err != nil {
@@ -443,7 +387,6 @@ func (s *Service) removeIDsFromFiles(ctx context.Context, botID string, removals
 
 // --- path helpers ---
 
-func memoryManifestPath() string { return path.Join(config.DefaultDataMount, "index", "manifest.json") }
 func memoryOverviewPath() string { return path.Join(config.DefaultDataMount, "MEMORY.md") }
 func memoryDirPath() string      { return path.Join(config.DefaultDataMount, "memory") }
 func memoryDayPath(date string) string {
@@ -643,17 +586,6 @@ func mapToItems(m map[string]MemoryItem) []MemoryItem {
 		items = append(items, item)
 	}
 	return items
-}
-
-func copyFilters(filters map[string]any) map[string]any {
-	if len(filters) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(filters))
-	for k, v := range filters {
-		out[k] = v
-	}
-	return out
 }
 
 func memoryDateForItem(item MemoryItem, now time.Time) string {

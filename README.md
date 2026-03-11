@@ -48,11 +48,16 @@ cd Memoh
 sudo docker compose up -d
 ```
 
-> If you experience slow image pulls, use the CN override:
-```bash
-sudo docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml up -d
-```
-
+> **Install a specific version:**
+> ```bash
+> MEMOH_VERSION=v1.0.0 curl -fsSL https://memoh.sh | sudo sh
+> ```
+>
+> **Use CN mirror for slow image pulls:**
+> ```bash
+> USE_CN_MIRROR=true curl -fsSL https://memoh.sh | sudo sh
+> ```
+>
 > On macOS or if your user is in the `docker` group, `sudo` is not required.
 
 Visit <http://localhost:8082> after startup. Default login: `admin` / `admin123`

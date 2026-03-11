@@ -7,6 +7,7 @@ Memoh currently supports the following channels:
 - **[Telegram](./telegram)**: The most feature-rich integration with streaming and attachment support.
 - **[Feishu (Lark)](./feishu)**: Enterprise-ready integration for business workflows.
 - **[Discord](./discord)**: Community-focused integration for servers and direct messages.
+- **[QQ](./qq)**: Quick setup for personal DM bots via the dedicated AI bot registration portal.
 - **Email**: Connect via standard SMTP and IMAP (configured through Email Providers).
 - **Web**: Built-in chat interface for immediate access.
 

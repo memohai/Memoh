@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	stdpath "path"
 	"strings"
 	"time"
 
@@ -30,9 +31,11 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/local"
 	"github.com/memohai/memoh/internal/channel/adapters/qq"
 	"github.com/memohai/memoh/internal/channel/adapters/telegram"
+	"github.com/memohai/memoh/internal/channel/adapters/wecom"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/inbound"
 	"github.com/memohai/memoh/internal/channel/route"
+	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/conversation"
@@ -41,6 +44,7 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	emailgeneric "github.com/memohai/memoh/internal/email/adapters/generic"
+	emailgmail "github.com/memohai/memoh/internal/email/adapters/gmail"
 	emailmailgun "github.com/memohai/memoh/internal/email/adapters/mailgun"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/healthcheck"
@@ -172,6 +176,7 @@ func runServe() {
 			inbox.NewService,
 
 			// email infrastructure
+			emailpkg.NewDBOAuthTokenStore,
 			provideEmailRegistry,
 			emailpkg.NewService,
 			emailpkg.NewOutboxService,
@@ -227,6 +232,7 @@ func runServe() {
 			provideServerHandler(handlers.NewEmailBindingsHandler),
 			provideServerHandler(handlers.NewEmailOutboxHandler),
 			provideServerHandler(handlers.NewEmailWebhookHandler),
+			provideServerHandler(provideEmailOAuthHandler),
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideOAuthService,
@@ -396,7 +402,10 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	qqAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(qqAdapter)
 
-	registry.MustRegister(feishu.NewFeishuAdapter(log))
+	feishuAdapter := feishu.NewFeishuAdapter(log)
+	feishuAdapter.SetAssetOpener(mediaService)
+	registry.MustRegister(feishuAdapter)
+	registry.MustRegister(wecom.NewWeComAdapter(log))
 	registry.MustRegister(local.NewCLIAdapter(hub))
 	registry.MustRegister(local.NewWebAdapter(hub))
 	return registry
@@ -416,6 +425,21 @@ func provideChannelRouter(
 	bindService *bind.Service,
 	mediaService *media.Service,
 	inboxService *inbox.Service,
+	subagentService *subagent.Service,
+	scheduleService *schedule.Service,
+	settingsService *settings.Service,
+	mcpConnService *mcp.ConnectionService,
+	modelsService *models.Service,
+	providersService *providers.Service,
+	memProvService *memprovider.Service,
+	searchProvService *searchproviders.Service,
+	browserCtxService *browsercontexts.Service,
+	emailService *emailpkg.Service,
+	emailOutboxService *emailpkg.OutboxService,
+	heartbeatService *heartbeat.Service,
+	queries *dbsqlc.Queries,
+	containerdHandler *handlers.ContainerdHandler,
+	manager *mcp.Manager,
 	rc *boot.RuntimeConfig,
 ) *inbound.ChannelInboundProcessor {
 	adapter, ok := registry.Get(qq.Type)
@@ -433,6 +457,26 @@ func provideChannelRouter(
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
 	processor.SetInboxService(inboxService)
+	processor.SetCommandHandler(command.NewHandler(
+		log,
+		&command.BotMemberRoleAdapter{BotService: botService},
+		subagentService,
+		scheduleService,
+		settingsService,
+		mcpConnService,
+		inboxService,
+		modelsService,
+		providersService,
+		memProvService,
+		searchProvService,
+		browserCtxService,
+		emailService,
+		emailOutboxService,
+		heartbeatService,
+		queries,
+		&commandSkillLoaderAdapter{handler: containerdHandler},
+		&commandContainerFSAdapter{manager: manager},
+	))
 	return processor
 }
 
@@ -441,6 +485,7 @@ func provideChannelManager(log *slog.Logger, registry *channel.Registry, channel
 	if mw := channelRouter.IdentityMiddleware(); mw != nil {
 		mgr.Use(mw)
 	}
+	channelRouter.SetReactor(mgr)
 	return mgr
 }
 
@@ -533,23 +578,41 @@ func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, ide
 	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelStore, channelLifecycle, channelManager, registry)
 }
 
-func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *handlers.LocalChannelHandler {
-	return handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelStore, chatService, hub, botService, accountService)
+func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver) *handlers.LocalChannelHandler {
+	h := handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelStore, chatService, hub, botService, accountService)
+	h.SetResolver(resolver)
+	return h
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *handlers.LocalChannelHandler {
-	return handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver) *handlers.LocalChannelHandler {
+	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
+	h.SetResolver(resolver)
+	return h
 }
 
 // ---------------------------------------------------------------------------
 // email providers
 // ---------------------------------------------------------------------------
 
-func provideEmailRegistry(log *slog.Logger) *emailpkg.Registry {
+func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenStore) *emailpkg.Registry {
 	reg := emailpkg.NewRegistry()
 	reg.Register(emailgeneric.New(log))
 	reg.Register(emailmailgun.New(log))
+	reg.Register(emailgmail.New(log, tokenStore))
 	return reg
+}
+
+func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, cfg config.Config) *handlers.EmailOAuthHandler {
+	addr := strings.TrimSpace(cfg.Server.Addr)
+	if addr == "" {
+		addr = ":8080"
+	}
+	host := addr
+	if strings.HasPrefix(host, ":") {
+		host = "localhost" + host
+	}
+	callbackURL := "http://" + host + "/email/oauth/callback"
+	return handlers.NewEmailOAuthHandler(log, service, tokenStore, callbackURL)
 }
 
 func provideEmailChatGateway(resolver *flow.Resolver, queries *dbsqlc.Queries, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
@@ -901,4 +964,55 @@ func (a *gatewayAssetLoaderAdapter) OpenForGateway(ctx context.Context, botID, c
 		return nil, "", err
 	}
 	return reader, strings.TrimSpace(asset.Mime), nil
+}
+
+// commandSkillLoaderAdapter bridges handlers.ContainerdHandler to command.SkillLoader.
+type commandSkillLoaderAdapter struct {
+	handler *handlers.ContainerdHandler
+}
+
+func (a *commandSkillLoaderAdapter) LoadSkills(ctx context.Context, botID string) ([]command.Skill, error) {
+	items, err := a.handler.LoadSkills(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	skills := make([]command.Skill, len(items))
+	for i, item := range items {
+		skills[i] = command.Skill{Name: item.Name, Description: item.Description}
+	}
+	return skills, nil
+}
+
+// commandContainerFSAdapter bridges mcp.Manager to command.ContainerFS.
+type commandContainerFSAdapter struct {
+	manager *mcp.Manager
+}
+
+func (a *commandContainerFSAdapter) ListDir(ctx context.Context, botID, dirPath string) ([]command.FSEntry, error) {
+	client, err := a.manager.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := client.ListDir(ctx, dirPath, false)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]command.FSEntry, len(entries))
+	for i, e := range entries {
+		name := stdpath.Base(e.GetPath())
+		result[i] = command.FSEntry{Name: name, IsDir: e.GetIsDir(), Size: e.GetSize()}
+	}
+	return result, nil
+}
+
+func (a *commandContainerFSAdapter) ReadFile(ctx context.Context, botID, filePath string) (string, error) {
+	client, err := a.manager.MCPClient(ctx, botID)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.ReadFile(ctx, filePath, 0, 0)
+	if err != nil {
+		return "", err
+	}
+	return resp.GetContent(), nil
 }

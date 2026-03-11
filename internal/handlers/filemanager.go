@@ -256,15 +256,21 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
 	}
 
-	resp, err := client.ReadFile(ctx, containerPath, 0, 0)
+	rc, err := client.ReadRaw(ctx, containerPath)
 	if err != nil {
 		return fsHTTPError(err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read file")
 	}
 
 	return c.JSON(http.StatusOK, FSReadResponse{
 		Path:    containerPath,
-		Content: resp.GetContent(),
-		Size:    int64(len(resp.GetContent())),
+		Content: string(data),
+		Size:    int64(len(data)),
 	})
 }
 

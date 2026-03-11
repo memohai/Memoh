@@ -1,7 +1,11 @@
 // Package common provides shared utilities for channel adapters.
 package common
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/memohai/memoh/internal/textutil"
+)
 
 // SummarizeText returns a truncated preview of the text, limited to 120 characters.
 func SummarizeText(text string) string {
@@ -10,8 +14,5 @@ func SummarizeText(text string) string {
 		return ""
 	}
 	const limit = 120
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit] + "..."
+	return textutil.TruncateRunesWithSuffix(value, limit, "...")
 }

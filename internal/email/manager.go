@@ -156,6 +156,10 @@ func (m *Manager) SendEmail(ctx context.Context, botID string, providerID string
 	if err != nil {
 		return "", err
 	}
+	if config == nil {
+		config = make(map[string]any)
+	}
+	config["_provider_id"] = providerID
 
 	sender, err := m.service.registry.GetSender(providerName)
 	if err != nil {

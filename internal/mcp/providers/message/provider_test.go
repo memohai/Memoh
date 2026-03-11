@@ -252,13 +252,30 @@ func TestExecutor_CallTool_SendError(t *testing.T) {
 	}
 }
 
-func TestExecutor_CallTool_Success(t *testing.T) {
+func TestExecutor_CallTool_SameRouteRejected(t *testing.T) {
 	sender := &fakeSender{}
 	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
 	exec := NewExecutor(nil, sender, nil, resolver, nil)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "feishu", ReplyTarget: "chat1"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
 		"text": "hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isErr, _ := result["isError"].(bool); !isErr {
+		t.Error("expected error when sending to the same route as current session")
+	}
+}
+
+func TestExecutor_CallTool_Success(t *testing.T) {
+	sender := &fakeSender{}
+	resolver := &fakeResolver{ct: channel.ChannelType("feishu")}
+	exec := NewExecutor(nil, sender, nil, resolver, nil)
+	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "feishu", ReplyTarget: "chat1"}
+	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
+		"target": "chat2",
+		"text":   "hello",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -284,6 +301,7 @@ func TestExecutor_CallTool_ReplyTo(t *testing.T) {
 	exec := NewExecutor(nil, sender, nil, resolver, nil)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "telegram", ReplyTarget: "123"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
+		"target":   "456",
 		"text":     "reply text",
 		"reply_to": "msg-789",
 	})
@@ -307,7 +325,8 @@ func TestExecutor_CallTool_NoReplyTo(t *testing.T) {
 	exec := NewExecutor(nil, sender, nil, resolver, nil)
 	session := mcpgw.ToolSessionContext{BotID: "bot1", CurrentPlatform: "telegram", ReplyTarget: "123"}
 	result, err := exec.CallTool(context.Background(), session, toolSend, map[string]any{
-		"text": "no reply",
+		"target": "456",
+		"text":   "no reply",
 	})
 	if err != nil {
 		t.Fatal(err)

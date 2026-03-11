@@ -3,10 +3,12 @@ set -e
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-REPO="https://github.com/memohai/Memoh.git"
+GITHUB_REPO="memohai/Memoh"
+REPO="https://github.com/${GITHUB_REPO}.git"
 DIR="Memoh"
 SILENT=false
 
@@ -22,10 +24,7 @@ if [ "$SILENT" = false ] && ! [ -e /dev/tty ]; then
   SILENT=true
 fi
 
-echo "${GREEN}========================================${NC}"
-echo "${GREEN}   Memoh One-Click Install${NC}"
-echo "${GREEN}========================================${NC}"
-echo ""
+echo "${PURPLE}Memoh One-Click Install${NC}"
 
 # Check Docker and determine if sudo is needed
 DOCKER="docker"
@@ -49,10 +48,36 @@ if ! $DOCKER compose version >/dev/null 2>&1; then
     exit 1
 fi
 echo "${GREEN}✓ Docker and Docker Compose detected${NC}"
-echo ""
 
-echo "${GREEN}✓ Install mode: latest Docker images${NC}"
-echo ""
+# Resolve version: use MEMOH_VERSION env if set, otherwise fetch latest release
+if [ -n "$MEMOH_VERSION" ]; then
+    echo "${GREEN}✓ Using specified version: ${MEMOH_VERSION}${NC}"
+else
+    fetch_latest_version() {
+      if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null
+      elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null
+      else
+        echo "${RED}Error: curl or wget is required${NC}" >&2
+        exit 1
+      fi
+    }
+    MEMOH_VERSION=$(fetch_latest_version | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+    if [ -n "$MEMOH_VERSION" ]; then
+        echo "${GREEN}✓ Latest release: ${MEMOH_VERSION}${NC}"
+    else
+        echo "${YELLOW}Warning: Failed to fetch latest release tag, falling back to main branch${NC}"
+    fi
+fi
+
+# Docker image tag: strip leading "v", fall back to "latest" only when version is unknown
+if [ -n "$MEMOH_VERSION" ]; then
+    MEMOH_DOCKER_VERSION=$(echo "$MEMOH_VERSION" | sed 's/^v//')
+else
+    MEMOH_DOCKER_VERSION="latest"
+fi
+echo "${GREEN}✓ Docker image version: ${MEMOH_DOCKER_VERSION}${NC}"
 
 # Generate random JWT secret
 gen_secret() {
@@ -72,7 +97,7 @@ JWT_SECRET="$(gen_secret)"
 PG_PASS="memoh123"
 WORKSPACE="$WORKSPACE_DEFAULT"
 MEMOH_DATA_DIR="$MEMOH_DATA_DIR_DEFAULT"
-USE_CN_MIRROR=false
+USE_CN_MIRROR="${USE_CN_MIRROR:-false}"
 
 if [ "$SILENT" = false ]; then
   echo "Configure Memoh (press Enter to use defaults):" > /dev/tty
@@ -116,12 +141,6 @@ if [ "$SILENT" = false ]; then
   read -r input < /dev/tty || true
   [ -n "$input" ] && PG_PASS="$input"
 
-  printf "  Use China mainland mirror? (y/N): " > /dev/tty
-  read -r input < /dev/tty || true
-  case "$input" in
-    [Yy]|[Yy][Ee][Ss]) USE_CN_MIRROR=true ;;
-  esac
-
   echo "" > /dev/tty
 fi
 
@@ -129,19 +148,36 @@ fi
 mkdir -p "$WORKSPACE"
 cd "$WORKSPACE"
 
-# Clone repository or update local checkout
+# Clone or update
 if [ -d "$DIR" ]; then
     echo "Updating existing installation in $WORKSPACE..."
     cd "$DIR"
-    DEFAULT_BRANCH=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
-    [ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH="main"
-    git fetch --depth 1 origin "$DEFAULT_BRANCH" 2>/dev/null || git fetch --depth 1 origin
-    git checkout "$DEFAULT_BRANCH" 2>/dev/null || git checkout -b "$DEFAULT_BRANCH" --track "origin/$DEFAULT_BRANCH"
-    git pull --ff-only origin "$DEFAULT_BRANCH"
+    if [ -n "$MEMOH_VERSION" ]; then
+        git fetch --depth 1 origin tag "$MEMOH_VERSION"
+        git checkout "$MEMOH_VERSION"
+    else
+        git fetch --depth 1 origin main
+        git checkout main 2>/dev/null || git checkout -b main --track origin/main
+        git reset --hard origin/main
+    fi
 else
     echo "Cloning Memoh into $WORKSPACE..."
-    git clone --depth 1 "$REPO" "$DIR"
+    if [ -n "$MEMOH_VERSION" ]; then
+        git clone --depth 1 --branch "$MEMOH_VERSION" "$REPO" "$DIR"
+    else
+        git clone --depth 1 "$REPO" "$DIR"
+    fi
     cd "$DIR"
+fi
+
+# Pin Docker image versions in docker-compose.yml
+if [ "$MEMOH_DOCKER_VERSION" != "latest" ]; then
+    sed -i.bak "s|memohai/server:latest|memohai/server:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
+    sed -i.bak "s|memohai/agent:latest|memohai/agent:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
+    sed -i.bak "s|memohai/web:latest|memohai/web:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
+    sed -i.bak "s|memohai/browser:latest|memohai/browser:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
+    rm -f docker-compose.yml.bak
+    echo "${GREEN}✓ Docker images pinned to ${MEMOH_DOCKER_VERSION}${NC}"
 fi
 
 # Generate config.toml from template
@@ -181,20 +217,19 @@ echo "${GREEN}Starting services (first startup may take a few minutes)...${NC}"
 $DOCKER compose $COMPOSE_FILES up -d
 
 echo ""
-echo "${GREEN}========================================${NC}"
-echo "${GREEN}   Memoh is running!${NC}"
-echo "${GREEN}========================================${NC}"
+echo "${GREEN}✅ Memoh is running!${NC}${NC}"
 echo ""
-echo "  Web UI:          http://localhost:8082"
-echo "  API:             http://localhost:8080"
-echo "  Agent Gateway:   http://localhost:8081"
+echo "  🌐 Web UI:            http://localhost:8082"
+echo "  🔌 API:               http://localhost:8080"
+echo "  🤖 Agent Gateway:     http://localhost:8081"
+echo "  🌍 Browser Gateway:   http://localhost:8083"
 echo ""
-echo "  Admin login:     ${ADMIN_USER} / ${ADMIN_PASS}"
+echo "  🔑 Admin login:       ${ADMIN_USER} / ${ADMIN_PASS}"
 echo ""
 COMPOSE_CMD="$DOCKER compose $COMPOSE_FILES"
-echo "Commands:"
+echo "📋 Commands:"
 echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} ps       # Status"
 echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} logs -f   # Logs"
 echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} down      # Stop"
 echo ""
-echo "${YELLOW}First startup may take 1-2 minutes, please be patient.${NC}"
+echo "${YELLOW}⏳ First startup may take 1-2 minutes, please be patient.${NC}"

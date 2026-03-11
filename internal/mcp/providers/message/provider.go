@@ -214,12 +214,27 @@ func (p *Executor) callSend(ctx context.Context, session mcpgw.ToolSessionContex
 		outboundMessage.Reply = &channel.ReplyRef{MessageID: replyTo}
 	}
 
+	// Auto-detect markdown when format is not explicitly set.
+	if outboundMessage.Format == "" && channel.ContainsMarkdown(outboundMessage.Text) {
+		outboundMessage.Format = channel.MessageFormatMarkdown
+	}
+
 	target := mcpgw.FirstStringArg(arguments, "target")
 	if target == "" {
 		target = strings.TrimSpace(session.ReplyTarget)
 	}
 	if target == "" {
 		return mcpgw.BuildToolErrorResult("target is required"), nil
+	}
+
+	// Reject send when the destination matches the current conversation.
+	if strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) &&
+		target == strings.TrimSpace(session.ReplyTarget) {
+		return mcpgw.BuildToolErrorResult(
+			"You are trying to send a message to the SAME conversation you are already in. " +
+				"Do NOT use the send tool for this. Instead, write your reply as plain text directly. " +
+				"To include files, use the <attachments> block in your response (e.g. <attachments>[{\"type\":\"image\",\"path\":\"/data/media/file.jpg\"}]</attachments>).",
+		), nil
 	}
 
 	sendReq := channel.SendRequest{

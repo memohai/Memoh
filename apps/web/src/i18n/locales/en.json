@@ -145,6 +145,13 @@
     "toolExecExit": "exit: {code}",
     "toolExecError": "Error",
     "toolScheduleItems": "{count} items",
+    "toolMemoryResults": "{count} memories",
+    "toolInboxResults": "{count} messages",
+    "toolWebFetchPreview": "Preview",
+    "toolContactsCount": "{count} contacts",
+    "toolEmailCount": "{count} emails",
+    "toolEmailAccounts": "{count} accounts",
+    "toolSubagentCount": "{count} subagents",
     "unknownUser": "{platform} User",
     "files": "Files"
   },
@@ -185,7 +192,9 @@
     "importSuccess": "Successfully imported {created} models, skipped {skipped}",
     "importFailed": "Failed to import models",
     "importClientType": "Model Client Type",
-    "importClientTypeHint": "Set default client type for imported models"
+    "importClientTypeHint": "Set default client type for imported models",
+    "showingCount": "Showing {count} of {total}",
+    "showMore": "Show More"
   },
   "provider": {
     "add": "Add Provider",
@@ -279,6 +288,24 @@
       "region": "Region",
       "inbound_mode": "Inbound Mode",
       "webhook_signing_key": "Webhook Signing Key"
+    },
+    "oauth": {
+      "title": "OAuth2 Authorization",
+      "description": "Authorize this provider to send emails on your behalf. You will be redirected to the provider's login page.",
+      "authorize": "Authorize",
+      "authorizeOpened": "Authorization page opened in a new tab",
+      "authorizeFailed": "Failed to start authorization",
+      "status": {
+        "checking": "Checking authorization status...",
+        "authorized": "Authorized as {email}",
+        "authorizedUnknown": "Authorized",
+        "expired": "Authorization expired — please re-authorize.",
+        "missing": "Not authorized. Authorize to enable Gmail access.",
+        "notConfigured": "Client ID is missing. Add it before authorizing."
+      },
+      "logout": "Log out",
+      "logoutSuccess": "Authorization revoked",
+      "logoutFailed": "Failed to revoke authorization"
     }
   },
   "browserContext": {
