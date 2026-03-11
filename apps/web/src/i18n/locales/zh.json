@@ -523,7 +523,21 @@
       "skills": "技能",
       "email": "邮件",
       "files": "文件",
+      "terminal": "终端",
       "settings": "设置"
+    },
+    "terminal": {
+      "title": "终端",
+      "reconnect": "重新连接",
+      "newTab": "新建终端",
+      "closeTab": "关闭",
+      "defaultTabLabel": "终端",
+      "status": {
+        "idle": "空闲",
+        "connecting": "连接中...",
+        "connected": "已连接",
+        "disconnected": "已断开"
+      }
     },
     "files": {
       "name": "名称",

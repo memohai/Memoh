@@ -27,7 +27,7 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Spinner } from '@memoh/ui'
-import { client } from '@memoh/sdk/client'
+import { postBotsByBotIdMcpByIdOauthExchange } from '@memoh/sdk'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -66,8 +66,8 @@ onMounted(async () => {
   }
 
   try {
-    await client.post({
-      url: '/bots/-/mcp/-/oauth/exchange',
+    await postBotsByBotIdMcpByIdOauthExchange({
+      path: { bot_id: '-', id: '-' },
       body: { code, state },
       throwOnError: true,
     })

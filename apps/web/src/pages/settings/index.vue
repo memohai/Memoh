@@ -219,7 +219,7 @@ import PasswordSection from './components/password-section.vue'
 import BindCodeSection from './components/bind-code-section.vue'
 import { getUsersMe, putUsersMe, putUsersMePassword, getUsersMeIdentities } from '@memoh/sdk'
 import { client } from '@memoh/sdk/client'
-import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest } from '@memoh/sdk'
+import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest, IdentitiesChannelIdentity } from '@memoh/sdk'
 import { useUserStore } from '@/store/user'
 import { useSettingsStore } from '@/store/settings'
 import type { Locale } from '@/i18n'
@@ -227,17 +227,6 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 import { useClipboard } from '@/composables/useClipboard'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
-
-interface ChannelIdentity {
-  id: string
-  user_id?: string
-  channel: string
-  channel_subject_id: string
-  display_name?: string
-  metadata?: Record<string, unknown>
-  created_at: string
-  updated_at: string
-}
 
 interface IssueBindCodeResponse {
   token: string
@@ -262,7 +251,7 @@ const { setLanguage, setTheme } = settingsStore
 
 // ---- User data ----
 const account = ref<UserAccount | null>(null)
-const identities = ref<ChannelIdentity[]>([])
+const identities = ref<IdentitiesChannelIdentity[]>([])
 const bindCode = ref<IssueBindCodeResponse | null>(null)
 
 const loadingInitial = ref(false)

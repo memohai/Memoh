@@ -765,6 +765,11 @@ export type HandlersSynthesizeResponse = {
     temp_id?: string;
 };
 
+export type HandlersTerminalInfoResponse = {
+    available?: boolean;
+    shell?: string;
+};
+
 export type HeartbeatListLogsResponse = {
     items?: Array<HeartbeatLog>;
 };
@@ -2603,6 +2608,74 @@ export type PostBotsByBotIdContainerStopResponses = {
 };
 
 export type PostBotsByBotIdContainerStopResponse = PostBotsByBotIdContainerStopResponses[keyof PostBotsByBotIdContainerStopResponses];
+
+export type GetBotsByBotIdContainerTerminalData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/terminal';
+};
+
+export type GetBotsByBotIdContainerTerminalErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerTerminalError = GetBotsByBotIdContainerTerminalErrors[keyof GetBotsByBotIdContainerTerminalErrors];
+
+export type GetBotsByBotIdContainerTerminalResponses = {
+    /**
+     * OK
+     */
+    200: HandlersTerminalInfoResponse;
+};
+
+export type GetBotsByBotIdContainerTerminalResponse = GetBotsByBotIdContainerTerminalResponses[keyof GetBotsByBotIdContainerTerminalResponses];
+
+export type GetBotsByBotIdContainerTerminalWsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Initial terminal columns
+         */
+        cols?: number;
+        /**
+         * Initial terminal rows
+         */
+        rows?: number;
+        /**
+         * Auth token
+         */
+        token?: string;
+    };
+    url: '/bots/{bot_id}/container/terminal/ws';
+};
+
+export type GetBotsByBotIdContainerTerminalWsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerTerminalWsError = GetBotsByBotIdContainerTerminalWsErrors[keyof GetBotsByBotIdContainerTerminalWsErrors];
 
 export type GetBotsByBotIdEmailBindingsData = {
     body?: never;

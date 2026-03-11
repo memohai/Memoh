@@ -1259,6 +1259,13 @@ definitions:
       temp_id:
         type: string
     type: object
+  handlers.terminalInfoResponse:
+    properties:
+      available:
+        type: boolean
+      shell:
+        type: string
+    type: object
   heartbeat.ListLogsResponse:
     properties:
       items:
@@ -3299,6 +3306,62 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Stop container task for bot
+      tags:
+      - containerd
+  /bots/{bot_id}/container/terminal:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.terminalInfoResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Check terminal availability for bot container
+      tags:
+      - containerd
+  /bots/{bot_id}/container/terminal/ws:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - default: 80
+        description: Initial terminal columns
+        in: query
+        name: cols
+        type: integer
+      - default: 24
+        description: Initial terminal rows
+        in: query
+        name: rows
+        type: integer
+      - description: Auth token
+        in: query
+        name: token
+        type: string
+      responses:
+        "101":
+          description: WebSocket upgrade
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Interactive WebSocket terminal for bot container
       tags:
       - containerd
   /bots/{bot_id}/email-bindings:

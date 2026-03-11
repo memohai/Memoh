@@ -1420,6 +1420,91 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/container/terminal": {
+            "get": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Check terminal availability for bot container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.terminalInfoResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/terminal/ws": {
+            "get": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Interactive WebSocket terminal for bot container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 80,
+                        "description": "Initial terminal columns",
+                        "name": "cols",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 24,
+                        "description": "Initial terminal rows",
+                        "name": "rows",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Auth token",
+                        "name": "token",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "WebSocket upgrade"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/email-bindings": {
             "get": {
                 "produces": [
@@ -10200,6 +10285,17 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "temp_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.terminalInfoResponse": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "shell": {
                     "type": "string"
                 }
             }
