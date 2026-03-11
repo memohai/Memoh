@@ -678,6 +678,15 @@ export type HandlersTokenUsageResponse = {
     heartbeat?: Array<HandlersDailyTokenUsage>;
 };
 
+export type HandlersEmailOAuthStatusResponse = {
+    configured?: boolean;
+    email_address?: string;
+    expired?: boolean;
+    expires_at?: string;
+    has_token?: boolean;
+    provider?: string;
+};
+
 export type HandlersFsOpResponse = {
     ok?: boolean;
 };
@@ -744,6 +753,11 @@ export type HandlersOauthExchangeRequest = {
 
 export type HandlersSkillsOpResponse = {
     ok?: boolean;
+};
+
+export type HandlersTerminalInfoResponse = {
+    available?: boolean;
+    shell?: string;
 };
 
 export type HeartbeatListLogsResponse = {
@@ -2503,6 +2517,74 @@ export type PostBotsByBotIdContainerStopResponses = {
 };
 
 export type PostBotsByBotIdContainerStopResponse = PostBotsByBotIdContainerStopResponses[keyof PostBotsByBotIdContainerStopResponses];
+
+export type GetBotsByBotIdContainerTerminalData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/terminal';
+};
+
+export type GetBotsByBotIdContainerTerminalErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerTerminalError = GetBotsByBotIdContainerTerminalErrors[keyof GetBotsByBotIdContainerTerminalErrors];
+
+export type GetBotsByBotIdContainerTerminalResponses = {
+    /**
+     * OK
+     */
+    200: HandlersTerminalInfoResponse;
+};
+
+export type GetBotsByBotIdContainerTerminalResponse = GetBotsByBotIdContainerTerminalResponses[keyof GetBotsByBotIdContainerTerminalResponses];
+
+export type GetBotsByBotIdContainerTerminalWsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Initial terminal columns
+         */
+        cols?: number;
+        /**
+         * Initial terminal rows
+         */
+        rows?: number;
+        /**
+         * Auth token
+         */
+        token?: string;
+    };
+    url: '/bots/{bot_id}/container/terminal/ws';
+};
+
+export type GetBotsByBotIdContainerTerminalWsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerTerminalWsError = GetBotsByBotIdContainerTerminalWsErrors[keyof GetBotsByBotIdContainerTerminalWsErrors];
 
 export type GetBotsByBotIdEmailBindingsData = {
     body?: never;
@@ -5976,6 +6058,108 @@ export type PutEmailProvidersByIdResponses = {
 
 export type PutEmailProvidersByIdResponse = PutEmailProvidersByIdResponses[keyof PutEmailProvidersByIdResponses];
 
+export type GetEmailProvidersByIdOauthAuthorizeData = {
+    body?: never;
+    path: {
+        /**
+         * Email provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/email-providers/{id}/oauth/authorize';
+};
+
+export type GetEmailProvidersByIdOauthAuthorizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetEmailProvidersByIdOauthAuthorizeError = GetEmailProvidersByIdOauthAuthorizeErrors[keyof GetEmailProvidersByIdOauthAuthorizeErrors];
+
+export type GetEmailProvidersByIdOauthAuthorizeResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type GetEmailProvidersByIdOauthAuthorizeResponse = GetEmailProvidersByIdOauthAuthorizeResponses[keyof GetEmailProvidersByIdOauthAuthorizeResponses];
+
+export type GetEmailProvidersByIdOauthStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Email provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/email-providers/{id}/oauth/status';
+};
+
+export type GetEmailProvidersByIdOauthStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetEmailProvidersByIdOauthStatusError = GetEmailProvidersByIdOauthStatusErrors[keyof GetEmailProvidersByIdOauthStatusErrors];
+
+export type GetEmailProvidersByIdOauthStatusResponses = {
+    /**
+     * OK
+     */
+    200: HandlersEmailOAuthStatusResponse;
+};
+
+export type GetEmailProvidersByIdOauthStatusResponse = GetEmailProvidersByIdOauthStatusResponses[keyof GetEmailProvidersByIdOauthStatusResponses];
+
+export type DeleteEmailProvidersByIdOauthTokenData = {
+    body?: never;
+    path: {
+        /**
+         * Email provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/email-providers/{id}/oauth/token';
+};
+
+export type DeleteEmailProvidersByIdOauthTokenErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteEmailProvidersByIdOauthTokenError = DeleteEmailProvidersByIdOauthTokenErrors[keyof DeleteEmailProvidersByIdOauthTokenErrors];
+
+export type DeleteEmailProvidersByIdOauthTokenResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
 export type PostEmailMailgunWebhookByConfigIdData = {
     body?: never;
     path: {
@@ -6015,6 +6199,46 @@ export type PostEmailMailgunWebhookByConfigIdResponses = {
 };
 
 export type PostEmailMailgunWebhookByConfigIdResponse = PostEmailMailgunWebhookByConfigIdResponses[keyof PostEmailMailgunWebhookByConfigIdResponses];
+
+export type GetEmailOauthCallbackData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Authorization code
+         */
+        code: string;
+        /**
+         * State parameter
+         */
+        state: string;
+    };
+    url: '/email/oauth/callback';
+};
+
+export type GetEmailOauthCallbackErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetEmailOauthCallbackError = GetEmailOauthCallbackErrors[keyof GetEmailOauthCallbackErrors];
+
+export type GetEmailOauthCallbackResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type GetEmailOauthCallbackResponse = GetEmailOauthCallbackResponses[keyof GetEmailOauthCallbackResponses];
 
 export type GetMemoryProvidersData = {
     body?: never;

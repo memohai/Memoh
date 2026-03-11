@@ -692,16 +692,22 @@ import {
   postBotsByBotIdMcp,
   putBotsByBotIdMcpById,
   deleteBotsByBotIdMcpById,
+  postBotsByBotIdMcpByIdProbe,
+  putBotsByBotIdMcpImport,
+  getBotsByBotIdMcpByIdOauthStatus,
+  postBotsByBotIdMcpByIdOauthDiscover,
+  postBotsByBotIdMcpByIdOauthAuthorize,
+  deleteBotsByBotIdMcpByIdOauthToken,
 } from '@memoh/sdk'
-import type { McpUpsertRequest, McpImportRequest } from '@memoh/sdk'
-import { client } from '@memoh/sdk/client'
+import type {
+  McpUpsertRequest,
+  McpImportRequest,
+  McpToolDescriptor,
+  McpMcpServerEntry,
+  McpOAuthStatus,
+} from '@memoh/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useClipboard } from '@/composables/useClipboard'
-
-interface ToolDescriptor {
-  name: string
-  description: string
-}
 
 interface McpItem {
   id: string
@@ -710,27 +716,10 @@ interface McpItem {
   config: Record<string, unknown>
   is_active: boolean
   status: string
-  tools_cache: ToolDescriptor[]
+  tools_cache: McpToolDescriptor[]
   last_probed_at: string | null
   status_message: string
   auth_type: string
-}
-
-interface McpServerEntry {
-  command?: string
-  args?: string[]
-  env?: Record<string, string>
-  cwd?: string
-  url?: string
-  headers?: Record<string, string>
-  transport?: string
-}
-
-interface ProbeResponse {
-  status: string
-  tools: ToolDescriptor[]
-  error?: string
-  auth_required?: boolean
 }
 
 const DRAFT_ID = ''
@@ -764,23 +753,7 @@ const probeAuthRequired = ref(false)
 const oauthDiscovering = ref(false)
 const oauthAuthorizing = ref(false)
 
-interface OAuthStatusResponse {
-  configured: boolean
-  has_token: boolean
-  expired: boolean
-  scopes?: string
-  expires_at?: string
-  auth_server?: string
-  callback_url?: string
-}
-
-interface OAuthDiscoveryResponse {
-  registration_endpoint?: string
-  authorization_endpoint?: string
-  token_endpoint?: string
-}
-
-const oauthStatus = ref<OAuthStatusResponse | null>(null)
+const oauthStatus = ref<McpOAuthStatus | null>(null)
 const oauthClientId = ref('')
 const oauthClientSecret = ref('')
 const oauthNeedsClientId = ref(false)
@@ -817,7 +790,7 @@ const filteredItems = computed(() => {
   return items.value.filter((i) => i.id === DRAFT_ID || i.name.toLowerCase().includes(kw))
 })
 
-const displayTools = computed<ToolDescriptor[]>(() => {
+const displayTools = computed<McpToolDescriptor[]>(() => {
   if (!selectedItem.value) return []
   return selectedItem.value.tools_cache ?? []
 })
@@ -939,7 +912,7 @@ function handleCreateDraft() {
   createDialogOpen.value = false
 }
 
-function itemToExportEntry(item: McpItem): McpServerEntry {
+function itemToExportEntry(item: McpItem): McpMcpServerEntry {
   const cfg = item.config ?? {}
   if (item.type === 'stdio') {
     return {
@@ -1020,13 +993,12 @@ async function handleProbe(item: McpItem) {
   probing.value = true
   probeAuthRequired.value = false
   try {
-    const { data } = await client.post<ProbeResponse>({
-      url: '/bots/{bot_id}/mcp/{id}/probe',
+    const { data } = await postBotsByBotIdMcpByIdProbe({
       path: { bot_id: props.botId, id: item.id },
       throwOnError: true,
     })
     if (data) {
-      item.status = data.status
+      item.status = data.status ?? item.status
       item.tools_cache = data.tools ?? []
       item.status_message = data.error ?? ''
       item.last_probed_at = new Date().toISOString()
@@ -1111,8 +1083,7 @@ async function handleImportFromDialog() {
     if (!parsed.mcpServers && typeof parsed === 'object') {
       parsed = { mcpServers: parsed as McpImportRequest['mcpServers'] }
     }
-    await client.put({
-      url: '/bots/{bot_id}/mcp-ops/import',
+    await putBotsByBotIdMcpImport({
       path: { bot_id: props.botId },
       body: parsed,
       throwOnError: true,
@@ -1130,7 +1101,7 @@ async function handleImportFromDialog() {
 
 function handleExportSingle() {
   if (!selectedItem.value || !selectedItem.value.id) return
-  const mcpServers: Record<string, McpServerEntry> = {
+  const mcpServers: Record<string, McpMcpServerEntry> = {
     [selectedItem.value.name]: itemToExportEntry(selectedItem.value),
   }
   exportJson.value = JSON.stringify({ mcpServers }, null, 2)
@@ -1148,8 +1119,7 @@ async function loadOAuthStatus(item: McpItem) {
     return
   }
   try {
-    const { data } = await client.get<OAuthStatusResponse>({
-      url: '/bots/{bot_id}/mcp/{id}/oauth/status',
+    const { data } = await getBotsByBotIdMcpByIdOauthStatus({
       path: { bot_id: props.botId, id: item.id },
       throwOnError: true,
     })
@@ -1167,8 +1137,7 @@ async function handleOAuthDiscover() {
   oauthDiscovering.value = true
   oauthNeedsClientId.value = false
   try {
-    const { data } = await client.post<OAuthDiscoveryResponse>({
-      url: '/bots/{bot_id}/mcp/{id}/oauth/discover',
+    const { data } = await postBotsByBotIdMcpByIdOauthDiscover({
       path: { bot_id: props.botId, id: item.id },
       throwOnError: true,
     })
@@ -1200,8 +1169,7 @@ async function handleOAuthFlow() {
 
   oauthAuthorizing.value = true
   try {
-    const { data } = await client.post<{ authorization_url: string }>({
-      url: '/bots/{bot_id}/mcp/{id}/oauth/authorize',
+    const { data } = await postBotsByBotIdMcpByIdOauthAuthorize({
       path: { bot_id: props.botId, id: item.id },
       body: {
         client_id: oauthClientId.value.trim() || undefined,
@@ -1250,8 +1218,7 @@ async function handleOAuthFlow() {
 async function handleOAuthRevoke() {
   if (!selectedItem.value?.id) return
   try {
-    await client.delete({
-      url: '/bots/{bot_id}/mcp/{id}/oauth/token',
+    await deleteBotsByBotIdMcpByIdOauthToken({
       path: { bot_id: props.botId, id: selectedItem.value.id },
       throwOnError: true,
     })

@@ -1,6 +1,6 @@
 {
   "name": "@memoh/sdk",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "",
   "exports": {
     ".": "./src/index.ts",

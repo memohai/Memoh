@@ -93,6 +93,7 @@ tmp/
 # compiled files
 /memoh
 /agent
+/mcp
 
 docs/docs/.vitepress/cache
 .pnpm-store

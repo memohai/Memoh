@@ -1420,6 +1420,91 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/container/terminal": {
+            "get": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Check terminal availability for bot container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.terminalInfoResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/terminal/ws": {
+            "get": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Interactive WebSocket terminal for bot container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 80,
+                        "description": "Initial terminal columns",
+                        "name": "cols",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 24,
+                        "description": "Initial terminal rows",
+                        "name": "rows",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Auth token",
+                        "name": "token",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "WebSocket upgrade"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/email-bindings": {
             "get": {
                 "produces": [
@@ -5677,6 +5762,118 @@ const docTemplate = `{
                 }
             }
         },
+        "/email-providers/{id}/oauth/authorize": {
+            "get": {
+                "description": "Returns the authorization URL to redirect the user to",
+                "tags": [
+                    "email-oauth"
+                ],
+                "summary": "Start OAuth2 authorization for an email provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/email-providers/{id}/oauth/status": {
+            "get": {
+                "tags": [
+                    "email-oauth"
+                ],
+                "summary": "Get OAuth2 status for an email provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.emailOAuthStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/email-providers/{id}/oauth/token": {
+            "delete": {
+                "tags": [
+                    "email-oauth"
+                ],
+                "summary": "Revoke stored OAuth2 tokens for an email provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/email/mailgun/webhook/{config_id}": {
             "post": {
                 "description": "Receives inbound emails from Mailgun",
@@ -5711,6 +5908,54 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/email/oauth/callback": {
+            "get": {
+                "description": "Handles the OAuth2 callback, exchanges the code for tokens",
+                "tags": [
+                    "email-oauth"
+                ],
+                "summary": "OAuth2 callback for email providers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Authorization code",
+                        "name": "code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "State parameter",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -9276,6 +9521,29 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.emailOAuthStatusResponse": {
+            "type": "object",
+            "properties": {
+                "configured": {
+                    "type": "boolean"
+                },
+                "email_address": {
+                    "type": "string"
+                },
+                "expired": {
+                    "type": "boolean"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "has_token": {
+                    "type": "boolean"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.fsOpResponse": {
             "type": "object",
             "properties": {
@@ -9433,6 +9701,17 @@ const docTemplate = `{
             "properties": {
                 "ok": {
                     "type": "boolean"
+                }
+            }
+        },
+        "handlers.terminalInfoResponse": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "shell": {
+                    "type": "string"
                 }
             }
         },
@@ -10910,7 +11189,7 @@ const docTemplate = `{
     }
 }`
 
-// SwaggerInfo holds exported Swagger Info so clients can modify it.
+// SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0.0",
 	Host:             "",

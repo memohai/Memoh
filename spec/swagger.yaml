@@ -1126,6 +1126,21 @@ definitions:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
     type: object
+  handlers.emailOAuthStatusResponse:
+    properties:
+      configured:
+        type: boolean
+      email_address:
+        type: string
+      expired:
+        type: boolean
+      expires_at:
+        type: string
+      has_token:
+        type: boolean
+      provider:
+        type: string
+    type: object
   handlers.fsOpResponse:
     properties:
       ok:
@@ -1229,6 +1244,13 @@ definitions:
     properties:
       ok:
         type: boolean
+    type: object
+  handlers.terminalInfoResponse:
+    properties:
+      available:
+        type: boolean
+      shell:
+        type: string
     type: object
   heartbeat.ListLogsResponse:
     properties:
@@ -3142,6 +3164,62 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Stop container task for bot
+      tags:
+      - containerd
+  /bots/{bot_id}/container/terminal:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.terminalInfoResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Check terminal availability for bot container
+      tags:
+      - containerd
+  /bots/{bot_id}/container/terminal/ws:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - default: 80
+        description: Initial terminal columns
+        in: query
+        name: cols
+        type: integer
+      - default: 24
+        description: Initial terminal rows
+        in: query
+        name: rows
+        type: integer
+      - description: Auth token
+        in: query
+        name: token
+        type: string
+      responses:
+        "101":
+          description: WebSocket upgrade
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Interactive WebSocket terminal for bot container
       tags:
       - containerd
   /bots/{bot_id}/email-bindings:
@@ -5969,6 +6047,79 @@ paths:
       summary: Update an email provider
       tags:
       - email-providers
+  /email-providers/{id}/oauth/authorize:
+    get:
+      description: Returns the authorization URL to redirect the user to
+      parameters:
+      - description: Email provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start OAuth2 authorization for an email provider
+      tags:
+      - email-oauth
+  /email-providers/{id}/oauth/status:
+    get:
+      parameters:
+      - description: Email provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.emailOAuthStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get OAuth2 status for an email provider
+      tags:
+      - email-oauth
+  /email-providers/{id}/oauth/token:
+    delete:
+      parameters:
+      - description: Email provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Revoke stored OAuth2 tokens for an email provider
+      tags:
+      - email-oauth
   /email-providers/meta:
     get:
       description: List available email provider types and config schemas
@@ -6013,6 +6164,38 @@ paths:
       summary: Mailgun inbound email webhook
       tags:
       - email-webhook
+  /email/oauth/callback:
+    get:
+      description: Handles the OAuth2 callback, exchanges the code for tokens
+      parameters:
+      - description: Authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: State parameter
+        in: query
+        name: state
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: OAuth2 callback for email providers
+      tags:
+      - email-oauth
   /memory-providers:
     get:
       description: List configured memory providers

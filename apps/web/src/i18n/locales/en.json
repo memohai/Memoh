@@ -495,7 +495,21 @@
       "skills": "Skills",
       "email": "Email",
       "files": "Files",
+      "terminal": "Terminal",
       "settings": "Settings"
+    },
+    "terminal": {
+      "title": "Terminal",
+      "reconnect": "Reconnect",
+      "newTab": "New Terminal",
+      "closeTab": "Close",
+      "defaultTabLabel": "Terminal",
+      "status": {
+        "idle": "Idle",
+        "connecting": "Connecting...",
+        "connected": "Connected",
+        "disconnected": "Disconnected"
+      }
     },
     "files": {
       "name": "Name",
