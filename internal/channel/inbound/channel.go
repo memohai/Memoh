@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/route"
+	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/inbox"
@@ -39,6 +40,10 @@ type RouteResolver interface {
 	ResolveConversation(ctx context.Context, input route.ResolveInput) (route.ResolveConversationResult, error)
 }
 
+type channelReactor interface {
+	React(ctx context.Context, botID string, channelType channel.ChannelType, req channel.ReactRequest) error
+}
+
 type mediaIngestor interface {
 	Ingest(ctx context.Context, input media.IngestInput) (media.Asset, error)
 	// GetByStorageKey resolves an asset by reading its sidecar JSON.
@@ -51,17 +56,19 @@ type mediaIngestor interface {
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
-	runner        flow.Runner
-	routeResolver RouteResolver
-	message       messagepkg.Writer
-	mediaService  mediaIngestor
-	inboxService  *inbox.Service
-	registry      *channel.Registry
-	logger        *slog.Logger
-	jwtSecret     string
-	tokenTTL      time.Duration
-	identity      *IdentityResolver
-	observer      channel.StreamObserver
+	runner         flow.Runner
+	routeResolver  RouteResolver
+	message        messagepkg.Writer
+	mediaService   mediaIngestor
+	reactor        channelReactor
+	inboxService   *inbox.Service
+	commandHandler *command.Handler
+	registry       *channel.Registry
+	logger         *slog.Logger
+	jwtSecret      string
+	tokenTTL       time.Duration
+	identity       *IdentityResolver
+	observer       channel.StreamObserver
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -114,6 +121,14 @@ func (p *ChannelInboundProcessor) SetMediaService(mediaService mediaIngestor) {
 	p.mediaService = mediaService
 }
 
+// SetReactor configures the channel reactor for handling inline emoji reactions.
+func (p *ChannelInboundProcessor) SetReactor(reactor channelReactor) {
+	if p == nil {
+		return
+	}
+	p.reactor = reactor
+}
+
 // SetStreamObserver configures an observer that receives copies of all stream
 // events produced for non-local channels (e.g. Telegram, Feishu). This enables
 // cross-channel visibility in the WebUI without coupling adapters to the hub.
@@ -131,6 +146,15 @@ func (p *ChannelInboundProcessor) SetInboxService(service *inbox.Service) {
 		return
 	}
 	p.inboxService = service
+}
+
+// SetCommandHandler configures the slash command handler for intercepting
+// /command messages before they reach the LLM.
+func (p *ChannelInboundProcessor) SetCommandHandler(handler *command.Handler) {
+	if p == nil {
+		return
+	}
+	p.commandHandler = handler
 }
 
 // HandleInbound processes an inbound channel message through identity resolution and chat gateway.
@@ -182,6 +206,19 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	identity := state.Identity
+
+	// Intercept slash commands before they reach the LLM.
+	if p.commandHandler != nil && p.commandHandler.IsCommand(text) {
+		reply, err := p.commandHandler.Execute(ctx, strings.TrimSpace(identity.BotID), strings.TrimSpace(identity.ChannelIdentityID), text)
+		if err != nil {
+			reply = "Error: " + err.Error()
+		}
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  strings.TrimSpace(msg.ReplyTarget),
+			Message: channel.Message{Text: reply},
+		})
+	}
+
 	resolvedAttachments := p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Attachments)
 	attachments := mapChannelToChatAttachments(resolvedAttachments)
 	text = buildInboundQuery(msg.Message, attachments)
@@ -382,6 +419,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		RouteID:                 resolved.RouteID,
 		ChatToken:               chatToken,
 		ExternalMessageID:       sourceMessageID,
+		ReplyTarget:             target,
 		ConversationType:        msg.Conversation.Type,
 		ConversationName:        msg.Conversation.Name,
 		Query:                   text,
@@ -393,9 +431,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	})
 
 	var (
-		finalMessages       []conversation.ModelMessage
-		outboundAttachments []channel.Attachment
-		streamErr           error
+		finalMessages []conversation.ModelMessage
+		streamErr     error
 	)
 	for chunkCh != nil || streamErrCh != nil {
 		select {
@@ -421,7 +458,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if event.Type == channel.StreamEventAttachment && len(event.Attachments) > 0 {
 					ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), event.Attachments)
 					events[i].Attachments = ingested
-					outboundAttachments = append(outboundAttachments, ingested...)
 					assetMu.Lock()
 					for _, att := range ingested {
 						contentHash := strings.TrimSpace(att.ContentHash)
@@ -443,6 +479,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 						outboundAssetRefs = append(outboundAssetRefs, ref)
 					}
 					assetMu.Unlock()
+				}
+				if event.Type == channel.StreamEventReaction && len(event.Reactions) > 0 {
+					p.dispatchReactions(ctx, identity.BotID, msg.Channel, target, sourceMessageID, event.Reactions)
+					continue
 				}
 				if pushErr := stream.Push(ctx, events[i]); pushErr != nil {
 					streamErr = pushErr
@@ -505,10 +545,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	outputs := flow.ExtractAssistantOutputs(finalMessages)
-	attachmentsApplied := false
 	for _, output := range outputs {
 		outMessage := buildChannelMessage(output, desc.Capabilities)
-		if outMessage.IsEmpty() && (len(outboundAttachments) == 0 || attachmentsApplied) {
+		if outMessage.IsEmpty() {
 			continue
 		}
 		plainText := strings.TrimSpace(outMessage.PlainText())
@@ -517,10 +556,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		if isMessagingToolDuplicate(plainText, sentTexts) {
 			continue
-		}
-		if !attachmentsApplied && len(outboundAttachments) > 0 {
-			outMessage.Attachments = append(outMessage.Attachments, outboundAttachments...)
-			attachmentsApplied = true
 		}
 		if outMessage.Reply == nil && sourceMessageID != "" {
 			outMessage.Reply = &channel.ReplyRef{
@@ -533,18 +568,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			Final: &channel.StreamFinalizePayload{
 				Message: outMessage,
 			},
-		}); err != nil {
-			return err
-		}
-	}
-	if !attachmentsApplied && len(outboundAttachments) > 0 {
-		attachMsg := channel.Message{Attachments: outboundAttachments}
-		if sourceMessageID != "" {
-			attachMsg.Reply = &channel.ReplyRef{Target: target, MessageID: sourceMessageID}
-		}
-		if err := stream.Push(ctx, channel.StreamEvent{
-			Type:  channel.StreamEventFinal,
-			Final: &channel.StreamFinalizePayload{Message: attachMsg},
 		}); err != nil {
 			return err
 		}
@@ -878,6 +901,7 @@ type gatewayStreamEnvelope struct {
 	Input       json.RawMessage `json:"input"`
 	Result      json.RawMessage `json:"result"`
 	Attachments json.RawMessage `json:"attachments"`
+	Reactions   json.RawMessage `json:"reactions"`
 }
 
 type gatewayStreamDoneData struct {
@@ -970,6 +994,14 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 		}
 		return []channel.StreamEvent{
 			{Type: channel.StreamEventAttachment, Attachments: attachments},
+		}, finalMessages, nil
+	case "reaction_delta":
+		reactions := parseReactionDelta(envelope.Reactions)
+		if len(reactions) == 0 {
+			return nil, finalMessages, nil
+		}
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventReaction, Reactions: reactions},
 		}, finalMessages, nil
 	case "agent_start":
 		return []channel.StreamEvent{
@@ -1748,6 +1780,24 @@ func applyAssetToAttachment(asset media.Asset, botID string, item *channel.Attac
 	if item.Size == 0 && asset.SizeBytes > 0 {
 		item.Size = asset.SizeBytes
 	}
+	// Infer a better attachment type from MIME when the TS side sent a generic "file".
+	if item.Type == channel.AttachmentFile || item.Type == "" {
+		item.Type = inferAttachmentTypeFromMime(strings.TrimSpace(item.Mime))
+	}
+}
+
+func inferAttachmentTypeFromMime(mime string) channel.AttachmentType {
+	mime = strings.ToLower(strings.TrimSpace(mime))
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		return channel.AttachmentImage
+	case strings.HasPrefix(mime, "audio/"):
+		return channel.AttachmentAudio
+	case strings.HasPrefix(mime, "video/"):
+		return channel.AttachmentVideo
+	default:
+		return channel.AttachmentFile
+	}
 }
 
 // extractStorageKey derives the media storage key from a container-internal
@@ -1917,17 +1967,88 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 		if url == "" {
 			url = strings.TrimSpace(item.Path)
 		}
+		name := strings.TrimSpace(item.Name)
+		if name == "" && url != "" && !isDataURL(url) {
+			name = filepath.Base(url)
+		}
 		attachments = append(attachments, channel.Attachment{
 			Type:        channel.AttachmentType(strings.TrimSpace(item.Type)),
 			URL:         url,
 			PlatformKey: strings.TrimSpace(item.PlatformKey),
 			ContentHash: strings.TrimSpace(item.ContentHash),
-			Name:        strings.TrimSpace(item.Name),
+			Name:        name,
 			Mime:        strings.TrimSpace(item.Mime),
 			Size:        item.Size,
 		})
 	}
 	return attachments
+}
+
+// parseReactionDelta converts raw JSON reaction data to channel ReactRequests.
+func parseReactionDelta(raw json.RawMessage) []channel.ReactRequest {
+	if len(raw) == 0 {
+		return nil
+	}
+	var items []struct {
+		Emoji string `json:"emoji"`
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	reactions := make([]channel.ReactRequest, 0, len(items))
+	for _, item := range items {
+		emoji := strings.TrimSpace(item.Emoji)
+		if emoji == "" {
+			continue
+		}
+		reactions = append(reactions, channel.ReactRequest{
+			Emoji: emoji,
+		})
+	}
+	return reactions
+}
+
+// dispatchReactions sends emoji reactions to the channel for the source message.
+func (p *ChannelInboundProcessor) dispatchReactions(
+	ctx context.Context,
+	botID string,
+	channelType channel.ChannelType,
+	target string,
+	sourceMessageID string,
+	reactions []channel.ReactRequest,
+) {
+	if p.reactor == nil {
+		return
+	}
+	target = strings.TrimSpace(target)
+	sourceMessageID = strings.TrimSpace(sourceMessageID)
+	if target == "" || sourceMessageID == "" {
+		if p.logger != nil {
+			p.logger.Warn("cannot dispatch reactions: missing target or source message ID",
+				slog.String("bot_id", botID),
+				slog.String("channel", channelType.String()),
+			)
+		}
+		return
+	}
+	for _, reaction := range reactions {
+		req := channel.ReactRequest{
+			Target:    target,
+			MessageID: sourceMessageID,
+			Emoji:     reaction.Emoji,
+		}
+		if err := p.reactor.React(ctx, strings.TrimSpace(botID), channelType, req); err != nil {
+			if p.logger != nil {
+				p.logger.Warn("inline reaction failed",
+					slog.String("bot_id", botID),
+					slog.String("channel", channelType.String()),
+					slog.String("emoji", reaction.Emoji),
+					slog.String("message_id", sourceMessageID),
+					slog.Any("error", err),
+				)
+			}
+		}
+	}
 }
 
 // buildRouteMetadata extracts user/conversation information for route metadata persistence.

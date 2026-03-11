@@ -141,6 +141,13 @@
     "toolExecExit": "退出: {code}",
     "toolExecError": "错误",
     "toolScheduleItems": "{count} 条",
+    "toolMemoryResults": "{count} 条记忆",
+    "toolInboxResults": "{count} 条消息",
+    "toolWebFetchPreview": "预览",
+    "toolContactsCount": "{count} 个联系人",
+    "toolEmailCount": "{count} 封邮件",
+    "toolEmailAccounts": "{count} 个账户",
+    "toolSubagentCount": "{count} 个子代理",
     "unknownUser": "{platform}用户",
     "files": "文件管理"
   },

@@ -3,9 +3,12 @@ import type {
   AgentAttachment,
   ContainerFileAttachment,
 } from '../types/attachment'
+import type { TagResolver } from './tag-extractor'
+import { StreamTagExtractor, extractTagsFromText } from './tag-extractor'
 
-const ATTACHMENTS_START = '<attachments>'
-const ATTACHMENTS_END = '</attachments>'
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /**
  * Get a unique key for deduplication of attachments.
@@ -39,25 +42,40 @@ export const parseAttachmentPaths = (content: string): string[] => {
     .filter(Boolean)
 }
 
+// ---------------------------------------------------------------------------
+// TagResolver for <attachments>
+// ---------------------------------------------------------------------------
+
+export const attachmentsResolver: TagResolver<ContainerFileAttachment> = {
+  tag: 'attachments',
+  parse(content: string): ContainerFileAttachment[] {
+    const paths = Array.from(new Set(parseAttachmentPaths(content)))
+    return paths.map((path): ContainerFileAttachment => ({ type: 'file', path }))
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Batch extraction (backward-compatible wrapper)
+// ---------------------------------------------------------------------------
+
 /**
  * Extract all `<attachments>...</attachments>` blocks from a text string.
  * Returns the cleaned text (blocks removed) and the parsed file attachments.
  */
 export const extractAttachmentsFromText = (text: string): { cleanedText: string; attachments: ContainerFileAttachment[] } => {
-  const paths: string[] = []
-  const cleanedText = text.replace(
-    /<attachments>([\s\S]*?)<\/attachments>/g,
-    (_match, inner: string) => { 
-      paths.push(...parseAttachmentPaths(inner))
-      return ''
-    }
-  )
-  const uniquePaths = Array.from(new Set(paths))
+  const { cleanedText, events } = extractTagsFromText(text, [attachmentsResolver])
+  const attachments = events
+    .filter((e) => e.tag === 'attachments')
+    .flatMap((e) => e.data as ContainerFileAttachment[])
   return {
-    cleanedText: cleanedText.replace(/\n{3,}/g, '\n\n').trim(),
-    attachments: uniquePaths.map((path): ContainerFileAttachment => ({ type: 'file', path })),
+    cleanedText,
+    attachments: dedupeAttachments(attachments) as ContainerFileAttachment[],
   }
 }
+
+// ---------------------------------------------------------------------------
+// Message-level stripping
+// ---------------------------------------------------------------------------
 
 /**
  * Type guard: checks whether a content part is a TextPart.
@@ -72,13 +90,25 @@ const isTextPart = (part: unknown): part is TextPart => {
 }
 
 /**
- * Strip `<attachments>` blocks from all assistant messages in a message list.
+ * Strip all registered tag blocks from assistant messages in a message list.
+ * Accepts additional resolvers to strip beyond `<attachments>` (e.g. `<reactions>`).
  * Returns the cleaned messages and a deduplicated list of attachments found.
  */
 export const stripAttachmentsFromMessages = (
-  messages: ModelMessage[]
+  messages: ModelMessage[],
+  extraResolvers: TagResolver[] = [],
 ): { messages: ModelMessage[]; attachments: ContainerFileAttachment[] } => {
   const allAttachments: ContainerFileAttachment[] = []
+  const resolvers: TagResolver[] = [attachmentsResolver, ...extraResolvers]
+
+  const cleanText = (text: string): string => {
+    const { cleanedText, events } = extractTagsFromText(text, resolvers)
+    const attachments = events
+      .filter((e) => e.tag === 'attachments')
+      .flatMap((e) => e.data as ContainerFileAttachment[])
+    allAttachments.push(...attachments)
+    return cleanedText
+  }
 
   const stripped = messages.map((msg): ModelMessage => {
     if (msg.role !== 'assistant') return msg
@@ -87,17 +117,13 @@ export const stripAttachmentsFromMessages = (
     const { content } = assistantMsg
 
     if (typeof content === 'string') {
-      const { cleanedText, attachments } = extractAttachmentsFromText(content)
-      allAttachments.push(...attachments)
-      return { ...assistantMsg, content: cleanedText }
+      return { ...assistantMsg, content: cleanText(content) }
     }
 
     if (Array.isArray(content)) {
       const newParts = content.map(part => {
         if (!isTextPart(part)) return part
-        const { cleanedText, attachments } = extractAttachmentsFromText(part.text)
-        allAttachments.push(...attachments)
-        return { ...part, text: cleanedText }
+        return { ...part, text: cleanText(part.text) }
       })
       return { ...assistantMsg, content: newParts }
     }
@@ -112,7 +138,7 @@ export const stripAttachmentsFromMessages = (
 }
 
 // ---------------------------------------------------------------------------
-// Streaming extractor
+// Streaming extractor (backward-compatible wrapper)
 // ---------------------------------------------------------------------------
 
 export interface AttachmentsStreamResult {
@@ -121,81 +147,35 @@ export interface AttachmentsStreamResult {
 }
 
 /**
- * Incremental state-machine that intercepts `<attachments>...</attachments>`
- * blocks from a stream of text deltas. Text outside those blocks is passed
- * through as `visibleText`; completed blocks are emitted as `attachments`.
+ * Backward-compatible streaming extractor that delegates to {@link StreamTagExtractor}.
+ * Intercepts `<attachments>...</attachments>` blocks from a stream of text deltas.
  */
 export class AttachmentsStreamExtractor {
-  private state: 'text' | 'attachments' = 'text'
-  private buffer = ''
-  private attachmentsBuffer = ''
+  private inner: StreamTagExtractor
 
-  /**
-   * Feed a new text delta into the extractor.
-   */
-  push(delta: string): AttachmentsStreamResult {
-    this.buffer += delta
-    let visible = ''
-    const attachments: ContainerFileAttachment[] = []
-
-    while (this.buffer.length > 0) {
-      if (this.state === 'text') {
-        const idx = this.buffer.indexOf(ATTACHMENTS_START)
-        if (idx === -1) {
-          // Emit everything except a small tail that could be the start of the opening tag.
-          const keep = Math.min(this.buffer.length, ATTACHMENTS_START.length - 1)
-          const emit = this.buffer.slice(0, this.buffer.length - keep)
-          visible += emit
-          this.buffer = this.buffer.slice(this.buffer.length - keep)
-          break
-        }
-
-        visible += this.buffer.slice(0, idx)
-        this.buffer = this.buffer.slice(idx + ATTACHMENTS_START.length)
-        this.attachmentsBuffer = ''
-        this.state = 'attachments'
-        continue
-      }
-
-      // state === 'attachments'
-      const endIdx = this.buffer.indexOf(ATTACHMENTS_END)
-      if (endIdx === -1) {
-        const keep = Math.min(this.buffer.length, ATTACHMENTS_END.length - 1)
-        const take = this.buffer.slice(0, this.buffer.length - keep)
-        this.attachmentsBuffer += take
-        this.buffer = this.buffer.slice(this.buffer.length - keep)
-        break
-      }
-
-      this.attachmentsBuffer += this.buffer.slice(0, endIdx)
-      const paths = parseAttachmentPaths(this.attachmentsBuffer)
-      for (const path of paths) {
-        attachments.push({ type: 'file', path })
-      }
-      this.buffer = this.buffer.slice(endIdx + ATTACHMENTS_END.length)
-      this.attachmentsBuffer = ''
-      this.state = 'text'
-    }
-
-    return { visibleText: visible, attachments: dedupeAttachments(attachments) as ContainerFileAttachment[] }
+  constructor() {
+    this.inner = new StreamTagExtractor([attachmentsResolver])
   }
 
-  /**
-   * Flush any remaining buffered content. Call this when the stream ends.
-   * If an `<attachments>` block was not properly closed, the raw text is
-   * returned as `visibleText` to avoid data loss.
-   */
-  flushRemainder(): AttachmentsStreamResult {
-    if (this.state === 'text') {
-      const out = this.buffer
-      this.buffer = ''
-      return { visibleText: out, attachments: [] }
+  push(delta: string): AttachmentsStreamResult {
+    const { visibleText, events } = this.inner.push(delta)
+    const attachments = events
+      .filter((e) => e.tag === 'attachments')
+      .flatMap((e) => e.data as ContainerFileAttachment[])
+    return {
+      visibleText,
+      attachments: dedupeAttachments(attachments) as ContainerFileAttachment[],
     }
-    // Unclosed attachments block — treat it as literal text to avoid data loss.
-    const out = `${ATTACHMENTS_START}${this.attachmentsBuffer}${this.buffer}`
-    this.state = 'text'
-    this.buffer = ''
-    this.attachmentsBuffer = ''
-    return { visibleText: out, attachments: [] }
+  }
+
+  flushRemainder(): AttachmentsStreamResult {
+    const { visibleText, events } = this.inner.flushRemainder()
+    const attachments = events
+      .filter((e) => e.tag === 'attachments')
+      .flatMap((e) => e.data as ContainerFileAttachment[])
+    return {
+      visibleText,
+      attachments: dedupeAttachments(attachments) as ContainerFileAttachment[],
+    }
   }
 }

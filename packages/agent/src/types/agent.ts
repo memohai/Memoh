@@ -9,6 +9,7 @@ export interface IdentityContext {
   channelIdentityId: string
   displayName: string
   currentPlatform?: string
+  replyTarget?: string
   conversationType?: string
   sessionToken?: string
 }

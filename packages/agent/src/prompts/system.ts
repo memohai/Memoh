@@ -206,6 +206,22 @@ Rules:
 - No extra text inside ${quote('<attachments>...</attachments>')}
 - The block can appear anywhere in your response; it will be parsed and stripped from visible text
 
+## Reactions
+
+To react with an emoji to the message you are replying to, use this format in your direct response:
+
+${block([
+  '<reactions>',
+  '- 👍',
+  '</reactions>',
+].join('\n'))}
+
+Rules:
+- One emoji per line, prefixed by ${quote('- ')}
+- The block can appear anywhere in your response; it will be parsed and stripped from visible text
+- This reacts to the **source message** of the current conversation (the message you are responding to)
+- For reacting to messages in other channels or removing reactions, use the ${quote('react')} tool instead
+
 ## Schedule Tasks
 
 You can create and manage schedule tasks via cron.

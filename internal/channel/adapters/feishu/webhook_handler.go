@@ -110,6 +110,7 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 			return nil
 		}
 		h.adapter.enrichSenderProfile(reqCtx, cfg, event, &msg)
+		h.adapter.enrichQuotedMessage(reqCtx, cfg, &msg, botOpenID)
 		msg.BotID = cfg.BotID
 		return h.manager.HandleInbound(reqCtx, cfg, msg)
 	})

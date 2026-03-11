@@ -145,6 +145,13 @@
     "toolExecExit": "exit: {code}",
     "toolExecError": "Error",
     "toolScheduleItems": "{count} items",
+    "toolMemoryResults": "{count} memories",
+    "toolInboxResults": "{count} messages",
+    "toolWebFetchPreview": "Preview",
+    "toolContactsCount": "{count} contacts",
+    "toolEmailCount": "{count} emails",
+    "toolEmailAccounts": "{count} accounts",
+    "toolSubagentCount": "{count} subagents",
     "unknownUser": "{platform} User",
     "files": "Files"
   },

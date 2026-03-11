@@ -50,11 +50,16 @@ export interface ToolCallBlock {
 
 export interface AttachmentItem {
   type: string
-  content_hash: string
-  bot_id: string
-  mime: string
-  size: number
-  storage_key: string
+  path?: string
+  name?: string
+  url?: string
+  base64?: string
+  content_hash?: string
+  bot_id?: string
+  mime?: string
+  size?: number
+  storage_key?: string
+  [key: string]: unknown
 }
 
 export interface AttachmentBlock {

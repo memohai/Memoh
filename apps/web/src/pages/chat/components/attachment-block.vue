@@ -47,6 +47,27 @@
         </span>
       </a>
 
+      <!-- Container file attachment — open in file manager -->
+      <button
+        v-else-if="getContainerPath(att)"
+        type="button"
+        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 hover:bg-muted/60 transition-colors text-sm cursor-pointer"
+        :title="getContainerPath(att)"
+        @click="handleOpenContainerFile(att)"
+      >
+        <FontAwesomeIcon
+          :icon="['fas', fileIcon(att)]"
+          class="size-4 text-muted-foreground"
+        />
+        <span class="truncate max-w-[200px] font-mono text-xs">
+          {{ getDisplayName(att) }}
+        </span>
+        <FontAwesomeIcon
+          :icon="['fas', 'arrow-up-right-from-square']"
+          class="size-3 text-muted-foreground/60 shrink-0"
+        />
+      </button>
+
       <!-- Non-accessible attachment -->
       <div
         v-else
@@ -65,40 +86,62 @@
 </template>
 
 <script setup lang="ts">
-import type { AttachmentBlock } from '@/store/chat-list'
-import { resolveUrl, isMediaType } from '../composables/useMediaGallery'
+import { inject } from 'vue'
+import type { AttachmentBlock, AttachmentItem } from '@/store/chat-list'
+import { resolveUrl } from '../composables/useMediaGallery'
+import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 
 const props = defineProps<{
   block: AttachmentBlock
   onOpenMedia?: (src: string) => void
 }>()
 
-function getUrl(att: Record<string, unknown>): string {
+const openInFileManager = inject(openInFileManagerKey, undefined)
+
+function getUrl(att: AttachmentItem): string {
   return resolveUrl(att)
 }
 
-function isImage(att: Record<string, unknown>): boolean {
+function isImage(att: AttachmentItem): boolean {
   const type = String(att.type ?? '').toLowerCase()
   if (type === 'image' || type === 'gif') return true
   const mime = String(att.mime ?? '').toLowerCase()
   return mime.startsWith('image/')
 }
 
-function isVideo(att: Record<string, unknown>): boolean {
+function isVideo(att: AttachmentItem): boolean {
   const type = String(att.type ?? '').toLowerCase()
   if (type === 'video') return true
   const mime = String(att.mime ?? '').toLowerCase()
   return mime.startsWith('video/')
 }
 
-function handleMediaClick(att: Record<string, unknown>) {
+function getContainerPath(att: AttachmentItem): string {
+  return String(att.path ?? '').trim()
+}
+
+function getDisplayName(att: AttachmentItem): string {
+  if (att.name) return String(att.name)
+  const p = getContainerPath(att)
+  if (p) return p.split('/').pop() || p
+  return 'file'
+}
+
+function handleMediaClick(att: AttachmentItem) {
   const src = getUrl(att)
   if (src && props.onOpenMedia) {
     props.onOpenMedia(src)
   }
 }
 
-function fileIcon(att: Record<string, unknown>): string {
+function handleOpenContainerFile(att: AttachmentItem) {
+  const path = getContainerPath(att)
+  if (path && openInFileManager) {
+    openInFileManager(path, false)
+  }
+}
+
+function fileIcon(att: AttachmentItem): string {
   const type = String(att.type ?? '').toLowerCase()
   if (type === 'audio' || type === 'voice') return 'music'
   if (type === 'video') return 'video'

@@ -186,13 +186,14 @@
             {{ $t('chat.files') }}
           </SheetDescription>
         </SheetHeader>
-        <FileManager
-          v-if="currentBotId"
-          ref="fileManagerRef"
-          :bot-id="currentBotId"
-          :sync-url="false"
-          class="flex-1 min-h-0"
-        />
+        <div class="flex-1 min-h-0 relative">
+          <FileManager
+            v-if="currentBotId"
+            ref="fileManagerRef"
+            :bot-id="currentBotId"
+            :sync-url="false"
+          />
+        </div>
       </SheetContent>
     </Sheet>
   </div>

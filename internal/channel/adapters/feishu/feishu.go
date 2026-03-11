@@ -428,6 +428,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 				return nil
 			}
 			a.enrichSenderProfile(connCtx, cfg, event, &msg)
+			a.enrichQuotedMessage(connCtx, cfg, &msg, botOpenID)
 			msg.BotID = cfg.BotID
 			if a.logger != nil {
 				isMentioned := false

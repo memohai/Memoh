@@ -239,6 +239,104 @@ func (m *Manager) importLegacyDir(ctx context.Context, botID, srcDir string) err
 	return nil
 }
 
+// recoverOrphanedSnapshot detects a snapshot whose container was deleted
+// (e.g. dev image rebuild, containerd metadata loss) and exports /data to a
+// backup archive. The caller should invoke restorePreservedIntoSnapshot after
+// creating the replacement container. Returns true when data was preserved.
+func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) bool {
+	snapshotter := m.cfg.Snapshotter
+	if snapshotter == "" {
+		return false
+	}
+
+	snapshotKey := m.containerID(botID)
+	raw, err := m.service.SnapshotMounts(ctx, snapshotter, snapshotKey)
+	if err != nil {
+		return false
+	}
+
+	mounts := make([]mount.Mount, len(raw))
+	for i, r := range raw {
+		mounts[i] = mount.Mount{Type: r.Type, Source: r.Source, Options: r.Options}
+	}
+
+	backupPath := m.backupPath(botID)
+	if err := os.MkdirAll(filepath.Dir(backupPath), 0o750); err != nil {
+		m.logger.Warn("recover orphaned snapshot: mkdir failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		return false
+	}
+
+	f, err := os.Create(backupPath) //nolint:gosec // G304: operator-controlled path
+	if err != nil {
+		m.logger.Warn("recover orphaned snapshot: create backup failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		return false
+	}
+
+	writeErr := mount.WithReadonlyTempMount(ctx, mounts, func(root string) error {
+		dataDir := mountedDataDir(root)
+		if _, statErr := os.Stat(dataDir); statErr != nil {
+			return nil
+		}
+		return tarGzDir(f, dataDir)
+	})
+
+	closeErr := f.Close()
+	if writeErr != nil {
+		_ = os.Remove(backupPath)
+		m.logger.Warn("recover orphaned snapshot: export failed",
+			slog.String("bot_id", botID), slog.Any("error", writeErr))
+		return false
+	}
+	if closeErr != nil {
+		_ = os.Remove(backupPath)
+		return false
+	}
+
+	m.logger.Info("recovered data from orphaned snapshot",
+		slog.String("bot_id", botID), slog.String("backup", backupPath))
+	return true
+}
+
+// restorePreservedIntoSnapshot restores a preserved backup directly into
+// the container's snapshot before the task is started. This avoids the
+// stop/start cycle that RestorePreservedData (via ImportData) requires.
+func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string) error {
+	bp := m.backupPath(botID)
+	f, err := os.Open(bp) //nolint:gosec // G304: operator-controlled path
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	containerID := m.containerID(botID)
+	info, err := m.service.GetContainer(ctx, containerID)
+	if err != nil {
+		return fmt.Errorf("get container: %w", err)
+	}
+
+	mounts, err := m.snapshotMounts(ctx, info)
+	if err != nil {
+		return err
+	}
+
+	if err := mount.WithTempMount(ctx, mounts, func(root string) error {
+		dataDir := mountedDataDir(root)
+		if err := os.MkdirAll(dataDir, 0o750); err != nil {
+			return err
+		}
+		return untarGzDir(f, dataDir)
+	}); err != nil {
+		return err
+	}
+
+	_ = os.Remove(bp)
+	m.logger.Info("restored preserved data into new container",
+		slog.String("bot_id", botID))
+	return nil
+}
+
 // errMountNotSupported indicates the backend doesn't support snapshot mounts
 // (e.g. Apple Virtualization). Callers fall back to gRPC-based data operations.
 var errMountNotSupported = errors.New("snapshot mount not supported on this backend")
