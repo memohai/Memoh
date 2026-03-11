@@ -499,6 +499,9 @@
     "terminal": {
       "title": "Terminal",
       "reconnect": "Reconnect",
+      "newTab": "New Terminal",
+      "closeTab": "Close",
+      "defaultTabLabel": "Terminal",
       "status": {
         "idle": "Idle",
         "connecting": "Connecting...",
