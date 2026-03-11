@@ -204,9 +204,37 @@ func (s *ExecStream) Recv() (*pb.ExecOutput, error) {
 	return s.stream.Recv()
 }
 
+// Resize sends a terminal resize event to the running process.
+func (s *ExecStream) Resize(cols, rows uint32) error {
+	return s.stream.Send(&pb.ExecInput{
+		Resize: &pb.TerminalResize{Cols: cols, Rows: rows},
+	})
+}
+
 // Close closes the stream.
 func (s *ExecStream) Close() error {
 	return s.stream.CloseSend()
+}
+
+// ExecStreamPTY opens a bidirectional PTY exec stream.
+// The command runs inside a pseudo-terminal with the given initial size.
+func (c *Client) ExecStreamPTY(ctx context.Context, command, workDir string, cols, rows uint32) (*ExecStream, error) {
+	stream, err := c.svc.Exec(ctx)
+	if err != nil {
+		return nil, mapError(err)
+	}
+
+	err = stream.Send(&pb.ExecInput{
+		Command: command,
+		WorkDir: workDir,
+		Pty:     true,
+		Resize:  &pb.TerminalResize{Cols: cols, Rows: rows},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExecStream{stream: stream}, nil
 }
 
 // ReadRaw streams raw file bytes. Caller must consume the returned reader.

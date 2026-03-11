@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/creack/pty"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -171,7 +172,6 @@ func (*containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.
 }
 
 func (*containerServer) Exec(stream pb.ContainerService_ExecServer) error {
-	// Receive first message to get command details
 	firstMsg, err := stream.Recv()
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "failed to receive exec config")
@@ -182,6 +182,77 @@ func (*containerServer) Exec(stream pb.ContainerService_ExecServer) error {
 		return status.Error(codes.InvalidArgument, "command is required")
 	}
 
+	if firstMsg.GetPty() {
+		return execPTY(stream, firstMsg)
+	}
+	return execPipe(stream, firstMsg)
+}
+
+func execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) error {
+	command := firstMsg.GetCommand()
+	workDir := firstMsg.GetWorkDir()
+	if workDir == "" {
+		workDir = defaultWorkDir
+	}
+
+	cmd := exec.CommandContext(stream.Context(), "/bin/sh", "-c", command) //nolint:gosec // G204: intentional
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)
+	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+
+	initialSize := &pty.Winsize{Rows: 24, Cols: 80}
+	if r := firstMsg.GetResize(); r != nil && r.GetCols() > 0 && r.GetRows() > 0 {
+		initialSize.Rows = uint16(r.GetRows()) //nolint:gosec // G115
+		initialSize.Cols = uint16(r.GetCols()) //nolint:gosec // G115
+	}
+
+	ptmx, err := pty.StartWithSize(cmd, initialSize)
+	if err != nil {
+		return status.Errorf(codes.Internal, "pty start: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	// stdin + resize from stream
+	go func() {
+		for {
+			msg, recvErr := stream.Recv()
+			if recvErr != nil {
+				return
+			}
+			if r := msg.GetResize(); r != nil && r.GetCols() > 0 && r.GetRows() > 0 {
+				_ = pty.Setsize(ptmx, &pty.Winsize{
+					Rows: uint16(r.GetRows()), //nolint:gosec // G115
+					Cols: uint16(r.GetCols()), //nolint:gosec // G115
+				})
+			}
+			if data := msg.GetStdinData(); len(data) > 0 {
+				_, _ = ptmx.Write(data)
+			}
+		}
+	}()
+
+	// PTY output -> stream (single fd merges stdout+stderr)
+	streamPipe(stream, ptmx, pb.ExecOutput_STDOUT)
+
+	exitCode := int32(0)
+	if waitErr := cmd.Wait(); waitErr != nil {
+		exitErr := &exec.ExitError{}
+		if errors.As(waitErr, &exitErr) {
+			ec := exitErr.ExitCode()
+			exitCode = int32(max(math.MinInt32, min(math.MaxInt32, ec))) //nolint:gosec // G115
+		} else {
+			exitCode = -1
+		}
+	}
+
+	return stream.Send(&pb.ExecOutput{
+		Stream:   pb.ExecOutput_EXIT,
+		ExitCode: exitCode,
+	})
+}
+
+func execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) error {
+	command := firstMsg.GetCommand()
 	workDir := firstMsg.GetWorkDir()
 	if workDir == "" {
 		workDir = defaultWorkDir
@@ -201,7 +272,6 @@ func (*containerServer) Exec(stream pb.ContainerService_ExecServer) error {
 		cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)
 	}
 
-	// Setup stdin pipe for bidirectional streaming
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		return status.Errorf(codes.Internal, "stdin pipe: %v", err)
@@ -220,11 +290,10 @@ func (*containerServer) Exec(stream pb.ContainerService_ExecServer) error {
 		return status.Errorf(codes.Internal, "start: %v", err)
 	}
 
-	// Handle stdin from stream
 	go func() {
 		for {
-			msg, err := stream.Recv()
-			if err != nil {
+			msg, recvErr := stream.Recv()
+			if recvErr != nil {
 				_ = stdinPipe.Close()
 				return
 			}
@@ -234,7 +303,6 @@ func (*containerServer) Exec(stream pb.ContainerService_ExecServer) error {
 		}
 	}()
 
-	// Stream stdout/stderr to client
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
