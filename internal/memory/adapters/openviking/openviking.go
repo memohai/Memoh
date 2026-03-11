@@ -214,6 +214,8 @@ func (p *OpenVikingProvider) Search(ctx context.Context, req adapters.SearchRequ
 	limit := req.Limit
 	if limit <= 0 {
 		limit = ovDefaultLimit
+	} else if limit > ovMaxLimit {
+		limit = ovMaxLimit
 	}
 	memories, err := p.client.Search(ctx, botID, req.Query, limit)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -17,7 +18,6 @@ import (
 type openVikingClient struct {
 	baseURL    string
 	apiKey     string
-	memoryRoot string
 	httpClient *http.Client
 }
 
@@ -27,14 +27,9 @@ func newOpenVikingClient(config map[string]any) (*openVikingClient, error) {
 		return nil, errors.New("openviking: base_url is required")
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
-	memoryRoot := adapters.StringFromConfig(config, "memory_root")
-	if memoryRoot == "" {
-		memoryRoot = "viking://agent/"
-	}
 	return &openVikingClient{
-		baseURL:    baseURL,
-		apiKey:     adapters.StringFromConfig(config, "api_key"),
-		memoryRoot: strings.TrimRight(memoryRoot, "/"),
+		baseURL: baseURL,
+		apiKey:  adapters.StringFromConfig(config, "api_key"),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -89,12 +84,12 @@ func (c *openVikingClient) Search(ctx context.Context, agentID, query string, li
 }
 
 func (c *openVikingClient) GetAll(ctx context.Context, agentID string, limit int) ([]ovMemory, error) {
-	url := "/memories?agent_id=" + agentID
+	u := "/memories?agent_id=" + url.QueryEscape(agentID)
 	if limit > 0 {
-		url += fmt.Sprintf("&limit=%d", limit)
+		u += fmt.Sprintf("&limit=%d", limit)
 	}
 	var results []ovMemory
-	if err := c.doJSON(ctx, http.MethodGet, url, nil, &results); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, u, nil, &results); err != nil {
 		return nil, fmt.Errorf("openviking get all: %w", err)
 	}
 	return results, nil
@@ -116,8 +111,8 @@ func (c *openVikingClient) Delete(ctx context.Context, memoryID string) error {
 }
 
 func (c *openVikingClient) DeleteAll(ctx context.Context, agentID string) error {
-	url := "/memories?agent_id=" + agentID
-	if err := c.doJSON(ctx, http.MethodDelete, url, nil, nil); err != nil {
+	u := "/memories?agent_id=" + url.QueryEscape(agentID)
+	if err := c.doJSON(ctx, http.MethodDelete, u, nil, nil); err != nil {
 		return fmt.Errorf("openviking delete all: %w", err)
 	}
 	return nil

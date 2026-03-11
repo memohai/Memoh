@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -89,12 +90,12 @@ func (c *mem0Client) Search(ctx context.Context, req mem0SearchRequest) ([]mem0M
 }
 
 func (c *mem0Client) GetAll(ctx context.Context, agentID string, limit int) ([]mem0Memory, error) {
-	url := "/memories?agent_id=" + agentID
+	u := "/memories?agent_id=" + url.QueryEscape(agentID)
 	if limit > 0 {
-		url += fmt.Sprintf("&limit=%d", limit)
+		u += fmt.Sprintf("&limit=%d", limit)
 	}
 	var results []mem0Memory
-	if err := c.doJSON(ctx, http.MethodGet, url, nil, &results); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, u, nil, &results); err != nil {
 		return nil, fmt.Errorf("mem0 get all: %w", err)
 	}
 	return results, nil
@@ -116,8 +117,8 @@ func (c *mem0Client) Delete(ctx context.Context, memoryID string) error {
 }
 
 func (c *mem0Client) DeleteAll(ctx context.Context, agentID string) error {
-	url := "/memories?agent_id=" + agentID
-	if err := c.doJSON(ctx, http.MethodDelete, url, nil, nil); err != nil {
+	u := "/memories?agent_id=" + url.QueryEscape(agentID)
+	if err := c.doJSON(ctx, http.MethodDelete, u, nil, nil); err != nil {
 		return fmt.Errorf("mem0 delete all: %w", err)
 	}
 	return nil

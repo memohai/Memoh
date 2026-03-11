@@ -101,12 +101,6 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 						Description: "API key for OpenViking authentication",
 						Secret:      true,
 					},
-					"memory_root": {
-						Type:        "string",
-						Title:       "Memory Root",
-						Description: "URI root for bot-scoped memory (e.g. viking://agent/)",
-						Example:     "viking://agent/",
-					},
 				},
 			},
 		},

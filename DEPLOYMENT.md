@@ -24,11 +24,7 @@ nano config.toml   # Change passwords and JWT secret
 ### Standard startup (with Qdrant + Browser)
 
 ```bash
-sudo docker compose \
-  -f docker-compose.yml \
-  -f docker/docker-compose.qdrant.yml \
-  -f docker/docker-compose.browser.yml \
-  up -d
+sudo docker compose --profile qdrant --profile browser up -d
 ```
 
 ### Minimal startup (core only)
@@ -44,49 +40,41 @@ Access:
 
 Default credentials: `admin` / `admin123` (change in `config.toml`)
 
-## Docker Compose Overlays
+## Docker Compose Profiles
 
-The base `docker-compose.yml` contains only essential services (postgres, server, agent, web). Optional capabilities are added via overlay files:
+The base `docker-compose.yml` contains all services. Core services (postgres, server, agent, web) always start. Optional services are gated by profiles and only start when explicitly enabled:
 
-| Overlay | File | Description |
-|---------|------|-------------|
-| Qdrant | `docker/docker-compose.qdrant.yml` | Vector database for memory semantic search |
-| Browser | `docker/docker-compose.browser.yml` | Browser automation gateway (Playwright) |
-| Mem0 | `docker/docker-compose.mem0.yml` | Self-hosted Mem0 memory provider |
-| OpenViking | `docker/docker-compose.openviking.yml` | Self-hosted OpenViking memory provider |
+| Profile | Service | Description |
+|---------|---------|-------------|
+| `qdrant` | Qdrant | Vector database for memory semantic search |
+| `browser` | Browser | Browser automation gateway (Playwright) |
+| `mem0` | Mem0 | Self-hosted Mem0 memory provider |
+| `openviking` | OpenViking | Self-hosted OpenViking memory provider |
 
 ### Supported combinations
 
 ```bash
 # Core + Qdrant + Browser (recommended default)
-docker compose -f docker-compose.yml \
-  -f docker/docker-compose.qdrant.yml \
-  -f docker/docker-compose.browser.yml up -d
+docker compose --profile qdrant --profile browser up -d
 
 # Core + Qdrant + Mem0 (self-hosted)
-docker compose -f docker-compose.yml \
-  -f docker/docker-compose.qdrant.yml \
-  -f docker/docker-compose.mem0.yml up -d
+docker compose --profile qdrant --profile mem0 up -d
 
 # Core + Qdrant + OpenViking (self-hosted)
-docker compose -f docker-compose.yml \
-  -f docker/docker-compose.qdrant.yml \
-  -f docker/docker-compose.openviking.yml up -d
+docker compose --profile qdrant --profile openviking up -d
 ```
 
 ### SaaS / external providers
 
-For Mem0 or OpenViking SaaS, no overlay is needed. Configure the provider directly in the Memoh admin UI with the external `base_url` and API key.
+For Mem0 or OpenViking SaaS, no profile is needed. Configure the provider directly in the Memoh admin UI with the external `base_url` and API key.
 
 ### China Mainland Mirror
 
-Uncomment `registry = "memoh.cn"` in `config.toml` under `[mcp]`, then add:
+Uncomment `registry = "memoh.cn"` in `config.toml` under `[mcp]`, then add the CN overlay:
 
 ```bash
-sudo docker compose -f docker-compose.yml \
-  -f docker/docker-compose.qdrant.yml \
-  -f docker/docker-compose.browser.yml \
-  -f docker/docker-compose.cn.yml up -d
+sudo docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
+  --profile qdrant --profile browser up -d
 ```
 
 ## Prerequisites

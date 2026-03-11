@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"maps"
 	"path"
 	"sort"
@@ -32,6 +33,7 @@ type scanEntry struct {
 
 type Service struct {
 	provider mcpclient.Provider
+	logger   *slog.Logger
 }
 
 type MemoryItem struct {
@@ -47,8 +49,11 @@ type MemoryItem struct {
 	RunID     string         `json:"run_id,omitempty"`
 }
 
-func New(provider mcpclient.Provider) *Service {
-	return &Service{provider: provider}
+func New(log *slog.Logger, provider mcpclient.Provider) *Service {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Service{provider: provider, logger: log.With(slog.String("component", "storefs"))}
 }
 
 func (s *Service) client(ctx context.Context, botID string) (*mcpclient.Client, error) {
@@ -112,12 +117,16 @@ func (s *Service) buildScanIndex(ctx context.Context, botID string) (map[string]
 		entryPath := path.Join(memoryDirPath(), entry.GetPath())
 		content, readErr := s.readFile(ctx, botID, entryPath)
 		if readErr != nil {
+			s.logger.Warn("buildScanIndex: failed to read memory file",
+				slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", readErr))
 			continue
 		}
 		parsed, parseErr := parseMemoryDayMD(content)
 		if parseErr != nil {
 			legacy, legacyErr := parseLegacyMemoryMD(content)
 			if legacyErr != nil {
+				s.logger.Warn("buildScanIndex: failed to parse memory file",
+					slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", parseErr))
 				continue
 			}
 			parsed = []MemoryItem{legacy}

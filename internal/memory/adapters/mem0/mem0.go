@@ -204,6 +204,8 @@ func (p *Mem0Provider) Search(ctx context.Context, req adapters.SearchRequest) (
 	limit := req.Limit
 	if limit <= 0 {
 		limit = mem0DefaultLimit
+	} else if limit > mem0MaxLimit {
+		limit = mem0MaxLimit
 	}
 	memories, err := p.client.Search(ctx, mem0SearchRequest{
 		Query:   req.Query,

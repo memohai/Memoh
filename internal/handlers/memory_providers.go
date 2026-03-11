@@ -36,7 +36,7 @@ func (h *MemoryProvidersHandler) Register(e *echo.Echo) {
 // @Summary List memory provider metadata
 // @Description List available memory provider types and config schemas
 // @Tags memory-providers
-// @Success 200 {array} provider.ProviderMeta
+// @Success 200 {array} adapters.ProviderMeta
 // @Router /memory-providers/meta [get].
 func (h *MemoryProvidersHandler) ListMeta(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.service.ListMeta(c.Request().Context()))
@@ -48,8 +48,8 @@ func (h *MemoryProvidersHandler) ListMeta(c echo.Context) error {
 // @Tags memory-providers
 // @Accept json
 // @Produce json
-// @Param request body provider.ProviderCreateRequest true "Memory provider configuration"
-// @Success 201 {object} provider.ProviderGetResponse
+// @Param request body adapters.ProviderCreateRequest true "Memory provider configuration"
+// @Success 201 {object} adapters.ProviderGetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /memory-providers [post].
@@ -76,7 +76,7 @@ func (h *MemoryProvidersHandler) Create(c echo.Context) error {
 // @Description List configured memory providers
 // @Tags memory-providers
 // @Produce json
-// @Success 200 {array} provider.ProviderGetResponse
+// @Success 200 {array} adapters.ProviderGetResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /memory-providers [get].
 func (h *MemoryProvidersHandler) List(c echo.Context) error {
@@ -93,7 +93,7 @@ func (h *MemoryProvidersHandler) List(c echo.Context) error {
 // @Tags memory-providers
 // @Produce json
 // @Param id path string true "Provider ID"
-// @Success 200 {object} provider.ProviderGetResponse
+// @Success 200 {object} adapters.ProviderGetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Router /memory-providers/{id} [get].
@@ -116,8 +116,8 @@ func (h *MemoryProvidersHandler) Get(c echo.Context) error {
 // @Accept json
 // @Produce json
 // @Param id path string true "Provider ID"
-// @Param request body provider.ProviderUpdateRequest true "Updated configuration"
-// @Success 200 {object} provider.ProviderGetResponse
+// @Param request body adapters.ProviderUpdateRequest true "Updated configuration"
+// @Success 200 {object} adapters.ProviderGetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /memory-providers/{id} [put].

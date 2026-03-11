@@ -123,7 +123,7 @@ func (h *MemoryHandler) SetMCPClientProvider(p mcpclient.Provider) {
 		h.memoryStore = nil
 		return
 	}
-	h.memoryStore = storefs.New(p)
+	h.memoryStore = storefs.New(h.logger, p)
 }
 
 // Register registers chat-level memory routes.
@@ -156,7 +156,7 @@ func (h *MemoryHandler) checkService(ctx context.Context, botID string) (memprov
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryAddPayload true "Memory add payload"
-// @Success 200 {object} provider.SearchResponse
+// @Success 200 {object} adapters.SearchResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -214,7 +214,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memorySearchPayload true "Memory search payload"
-// @Success 200 {object} provider.SearchResponse
+// @Success 200 {object} adapters.SearchResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -272,7 +272,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param no_stats query bool false "Skip optional stats in memory search response"
-// @Success 200 {object} provider.SearchResponse
+// @Success 200 {object} adapters.SearchResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -320,7 +320,7 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryDeletePayload false "Optional: specify memory_ids to delete; if omitted, deletes all"
-// @Success 200 {object} provider.DeleteResponse
+// @Success 200 {object} adapters.DeleteResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -369,7 +369,7 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Memory ID"
-// @Success 200 {object} provider.DeleteResponse
+// @Success 200 {object} adapters.DeleteResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -411,7 +411,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryCompactPayload true "ratio (0,1] required; decay_days optional"
-// @Success 200 {object} provider.CompactResult
+// @Success 200 {object} adapters.CompactResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -463,7 +463,7 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 // @Tags memory
 // @Produce json
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} provider.UsageResponse
+// @Success 200 {object} adapters.UsageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -508,7 +508,7 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 // @Tags memory
 // @Produce json
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} provider.RebuildResult
+// @Success 200 {object} adapters.RebuildResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -631,7 +631,7 @@ func NewBuiltinMemoryRuntime(p mcpclient.Provider) any {
 	if p == nil {
 		return nil
 	}
-	return &fileMemoryRuntime{store: storefs.New(p)}
+	return &fileMemoryRuntime{store: storefs.New(nil, p)}
 }
 
 type fileMemoryRuntime struct {

@@ -199,6 +199,7 @@ export MEMOH_DATA_DIR
 mkdir -p "$MEMOH_DATA_DIR"
 
 COMPOSE_FILES="-f docker-compose.yml"
+COMPOSE_PROFILES="--profile qdrant --profile browser"
 if [ "$USE_CN_MIRROR" = true ]; then
   COMPOSE_FILES="$COMPOSE_FILES -f docker/docker-compose.cn.yml"
   echo "${GREEN}✓ Using China mainland mirror (memoh.cn)${NC}"
@@ -210,11 +211,11 @@ echo MEMOH_DATA_DIR="{$MEMOH_DATA_DIR}" >> .env
 
 echo ""
 echo "${GREEN}Pulling latest Docker images...${NC}"
-$DOCKER compose $COMPOSE_FILES pull
+$DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES pull
 
 echo ""
 echo "${GREEN}Starting services (first startup may take a few minutes)...${NC}"
-$DOCKER compose $COMPOSE_FILES up -d
+$DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES up -d
 
 echo ""
 echo "${GREEN}✅ Memoh is running!${NC}${NC}"
@@ -226,7 +227,7 @@ echo "  🌍 Browser Gateway:   http://localhost:8083"
 echo ""
 echo "  🔑 Admin login:       ${ADMIN_USER} / ${ADMIN_PASS}"
 echo ""
-COMPOSE_CMD="$DOCKER compose $COMPOSE_FILES"
+COMPOSE_CMD="$DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES"
 echo "📋 Commands:"
 echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} ps       # Status"
 echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} logs -f   # Logs"
