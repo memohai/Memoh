@@ -50,12 +50,12 @@ sudo docker compose up -d
 
 > **安装指定版本：**
 > ```bash
-> MEMOH_VERSION=v1.0.0 curl -fsSL https://memoh.sh | sudo sh
+> curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v1.0.0 sh
 > ```
 >
 > **使用中国大陆镜像加速：**
 > ```bash
-> USE_CN_MIRROR=true curl -fsSL https://memoh.sh | sudo sh
+> curl -fsSL https://memoh.sh | sudo USE_CN_MIRROR=true sh
 > ```
 >
 > macOS 或用户已在 `docker` 用户组中时，无需 `sudo`。

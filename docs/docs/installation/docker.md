@@ -42,16 +42,16 @@ Defaults when running silently:
 **Install a specific version:**
 
 ```bash
-MEMOH_VERSION=v1.0.0 curl -fsSL https://memoh.sh | sudo sh
+curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v1.0.0 sh
 ```
 
 **Use China mainland mirror** (for slow image pulls):
 
 ```bash
-USE_CN_MIRROR=true curl -fsSL https://memoh.sh | sudo sh
+curl -fsSL https://memoh.sh | sudo USE_CN_MIRROR=true sh
 ```
 
-> Environment variables can be combined, e.g. `MEMOH_VERSION=v1.0.0 USE_CN_MIRROR=true curl -fsSL https://memoh.sh | sudo sh`
+> Environment variables can be combined, e.g. `curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v1.0.0 USE_CN_MIRROR=true sh`
 
 ## Manual Install
 

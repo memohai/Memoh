@@ -50,12 +50,12 @@ sudo docker compose up -d
 
 > **Install a specific version:**
 > ```bash
-> MEMOH_VERSION=v1.0.0 curl -fsSL https://memoh.sh | sudo sh
+> curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v1.0.0 sh
 > ```
 >
 > **Use CN mirror for slow image pulls:**
 > ```bash
-> USE_CN_MIRROR=true curl -fsSL https://memoh.sh | sudo sh
+> curl -fsSL https://memoh.sh | sudo USE_CN_MIRROR=true sh
 > ```
 >
 > On macOS or if your user is in the `docker` group, `sudo` is not required.
