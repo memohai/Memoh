@@ -57,9 +57,14 @@ type mediaIngestor interface {
 	IngestContainerFile(ctx context.Context, botID, containerPath string) (media.Asset, error)
 }
 
-// ttsTempReader provides read-and-delete access to TTS temporary audio files.
-type ttsTempReader interface {
-	ReadAndDelete(id string) ([]byte, error)
+// ttsSynthesizer synthesizes text to speech audio.
+type ttsSynthesizer interface {
+	Synthesize(ctx context.Context, modelID string, text string, overrideCfg map[string]any) ([]byte, string, error)
+}
+
+// ttsModelResolver looks up the TTS model ID configured for a bot.
+type ttsModelResolver interface {
+	ResolveTtsModelID(ctx context.Context, botID string) (string, error)
 }
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
@@ -77,7 +82,8 @@ type ChannelInboundProcessor struct {
 	tokenTTL       time.Duration
 	identity       *IdentityResolver
 	observer       channel.StreamObserver
-	ttsTempStore   ttsTempReader
+	ttsService       ttsSynthesizer
+	ttsModelResolver ttsModelResolver
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -157,13 +163,14 @@ func (p *ChannelInboundProcessor) SetInboxService(service *inbox.Service) {
 	p.inboxService = service
 }
 
-// SetTtsTempStore configures the TTS temp store for resolving voice attachments
-// from text_to_speech tool results.
-func (p *ChannelInboundProcessor) SetTtsTempStore(store ttsTempReader) {
+// SetTtsService configures the TTS synthesizer and settings reader for handling
+// <speech> tag events (speech_delta) that require server-side audio synthesis.
+func (p *ChannelInboundProcessor) SetTtsService(synth ttsSynthesizer, modelResolver ttsModelResolver) {
 	if p == nil {
 		return
 	}
-	p.ttsTempStore = store
+	p.ttsService = synth
+	p.ttsModelResolver = modelResolver
 }
 
 // SetCommandHandler configures the slash command handler for intercepting
@@ -484,24 +491,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 					p.dispatchReactions(ctx, identity.BotID, msg.Channel, target, sourceMessageID, event.Reactions)
 					continue
 				}
+				if event.Type == channel.StreamEventSpeech && len(event.Speeches) > 0 {
+					p.synthesizeAndPushVoice(ctx, strings.TrimSpace(identity.BotID), event.Speeches, stream, &outboundAssetRefs, &assetMu)
+					continue
+				}
 				if pushErr := stream.Push(ctx, events[i]); pushErr != nil {
 					streamErr = pushErr
 					break
-				}
-				if voiceAtt := p.extractTtsVoiceAttachment(event); voiceAtt != nil {
-					voiceEvent := channel.StreamEvent{
-						Type:        channel.StreamEventAttachment,
-						Attachments: []channel.Attachment{*voiceAtt},
-					}
-					ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), voiceEvent.Attachments)
-					voiceEvent.Attachments = ingested
-					assetMu.Lock()
-					outboundAssetRefs = append(outboundAssetRefs, buildAssetRefs(ingested, len(outboundAssetRefs))...)
-					assetMu.Unlock()
-					if pushErr := stream.Push(ctx, voiceEvent); pushErr != nil {
-						streamErr = pushErr
-						break
-					}
 				}
 			}
 			if len(messages) > 0 {
@@ -917,6 +913,7 @@ type gatewayStreamEnvelope struct {
 	Result      json.RawMessage `json:"result"`
 	Attachments json.RawMessage `json:"attachments"`
 	Reactions   json.RawMessage `json:"reactions"`
+	Speeches    json.RawMessage `json:"speeches"`
 }
 
 type gatewayStreamDoneData struct {
@@ -1017,6 +1014,14 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 		}
 		return []channel.StreamEvent{
 			{Type: channel.StreamEventReaction, Reactions: reactions},
+		}, finalMessages, nil
+	case "speech_delta":
+		speeches := parseSpeechDelta(envelope.Speeches)
+		if len(speeches) == 0 {
+			return nil, finalMessages, nil
+		}
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventSpeech, Speeches: speeches},
 		}, finalMessages, nil
 	case "agent_start":
 		return []channel.StreamEvent{
@@ -1999,54 +2004,87 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 	return attachments
 }
 
-// extractTtsVoiceAttachment checks if a stream event is a text_to_speech
-// tool_call_end and, if so, reads the audio from the temp store and returns
-// a voice Attachment. Returns nil for non-TTS events or if no temp store is set.
-func (p *ChannelInboundProcessor) extractTtsVoiceAttachment(event channel.StreamEvent) *channel.Attachment {
-	if p.ttsTempStore == nil {
-		return nil
+// synthesizeAndPushVoice handles speech_delta events by synthesizing audio
+// and pushing the resulting voice attachment into the outbound stream.
+func (p *ChannelInboundProcessor) synthesizeAndPushVoice(
+	ctx context.Context,
+	botID string,
+	speeches []channel.SpeechRequest,
+	stream channel.OutboundStream,
+	outboundAssetRefs *[]conversation.OutboundAssetRef,
+	assetMu *sync.Mutex,
+) {
+	if p.ttsService == nil || p.ttsModelResolver == nil {
+		if p.logger != nil {
+			p.logger.Warn("speech_delta received but TTS service not configured")
+		}
+		return
 	}
-	if event.Type != channel.StreamEventToolCallEnd || event.ToolCall == nil {
-		return nil
+	modelID, err := p.ttsModelResolver.ResolveTtsModelID(ctx, botID)
+	if err != nil || strings.TrimSpace(modelID) == "" {
+		if p.logger != nil {
+			p.logger.Warn("speech_delta: bot has no TTS model configured", slog.String("bot_id", botID))
+		}
+		return
 	}
-	if event.ToolCall.Name != "text_to_speech" {
-		return nil
+	for _, speech := range speeches {
+		text := strings.TrimSpace(speech.Text)
+		if text == "" {
+			continue
+		}
+		audioData, contentType, synthErr := p.ttsService.Synthesize(ctx, modelID, text, nil)
+		if synthErr != nil {
+			if p.logger != nil {
+				p.logger.Warn("speech synthesis failed", slog.String("bot_id", botID), slog.Any("error", synthErr))
+			}
+			continue
+		}
+		dataURL := encodeDataURL(contentType, audioData)
+		voiceEvent := channel.StreamEvent{
+			Type: channel.StreamEventAttachment,
+			Attachments: []channel.Attachment{
+				{
+					Type: channel.AttachmentVoice,
+					URL:  dataURL,
+					Mime: contentType,
+					Size: int64(len(audioData)),
+				},
+			},
+		}
+		ingested := p.ingestOutboundAttachments(ctx, botID, voiceEvent.Attachments)
+		voiceEvent.Attachments = ingested
+		assetMu.Lock()
+		*outboundAssetRefs = append(*outboundAssetRefs, buildAssetRefs(ingested, len(*outboundAssetRefs))...)
+		assetMu.Unlock()
+		if pushErr := stream.Push(ctx, voiceEvent); pushErr != nil {
+			if p.logger != nil {
+				p.logger.Warn("push voice attachment failed", slog.String("bot_id", botID), slog.Any("error", pushErr))
+			}
+			return
+		}
 	}
+}
 
-	var result struct {
-		TempID      string `json:"temp_id"`
-		ContentType string `json:"content_type"`
-		Size        int64  `json:"size"`
-	}
-
-	raw, err := json.Marshal(event.ToolCall.Result)
-	if err != nil || len(raw) == 0 {
+// parseSpeechDelta converts raw JSON speech data to SpeechRequest values.
+func parseSpeechDelta(raw json.RawMessage) []channel.SpeechRequest {
+	if len(raw) == 0 {
 		return nil
 	}
-
-	// MCP ToolExecutor wraps the payload in structuredContent; unwrap if present.
-	var wrapper struct {
-		StructuredContent json.RawMessage `json:"structuredContent"`
+	var items []struct {
+		Text string `json:"text"`
 	}
-	if json.Unmarshal(raw, &wrapper) == nil && len(wrapper.StructuredContent) > 0 {
-		raw = wrapper.StructuredContent
-	}
-
-	if err := json.Unmarshal(raw, &result); err != nil || result.TempID == "" {
+	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil
 	}
-
-	audioData, err := p.ttsTempStore.ReadAndDelete(result.TempID)
-	if err != nil {
-		return nil
+	speeches := make([]channel.SpeechRequest, 0, len(items))
+	for _, item := range items {
+		text := strings.TrimSpace(item.Text)
+		if text == "" {
+			continue
+		}
+		speeches = append(speeches, channel.SpeechRequest{Text: text})
 	}
-	dataURL := encodeDataURL(result.ContentType, audioData)
-	return &channel.Attachment{
-		Type: channel.AttachmentVoice,
-		URL:  dataURL,
-		Mime: result.ContentType,
-		Size: int64(len(audioData)),
-	}
+	return speeches
 }
 
 func buildAssetRefs(attachments []channel.Attachment, startOrdinal int) []conversation.OutboundAssetRef {

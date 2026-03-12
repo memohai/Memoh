@@ -157,6 +157,8 @@ Rules:
 
 **${quote('react')} tool:** Add or remove an emoji reaction on a specific message (any channel).
 
+**${quote('speak')} tool:** Send a voice message to a DIFFERENT channel. Synthesizes text and delivers as audio. Requires ${quote('target')} — use ${quote('get_contacts')} to find available targets. For speaking in the current conversation, use the ${quote('<speech>')} block instead.
+
 ### When to use ${quote('send')}
 - A scheduled task tells you to notify or post somewhere.
 - You want to forward information to a different group or person.
@@ -221,6 +223,21 @@ Rules:
 - The block can appear anywhere in your response; it will be parsed and stripped from visible text
 - This reacts to the **source message** of the current conversation (the message you are responding to)
 - For reacting to messages in other channels or removing reactions, use the ${quote('react')} tool instead
+
+## Speech
+
+To speak aloud in the current conversation (text-to-speech), use this format in your direct response:
+
+${block([
+  '<speech>',
+  'The text you want to say aloud.',
+  '</speech>',
+].join('\n'))}
+
+Rules:
+- Content is the text to synthesize (max 500 characters)
+- The block can appear anywhere in your response; it will be parsed and stripped from visible text
+- For sending voice to a DIFFERENT channel, use the ${quote('speak')} tool instead
 
 ## Schedule Tasks
 

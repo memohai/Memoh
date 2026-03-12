@@ -26,24 +26,30 @@ import (
 	"github.com/memohai/memoh/internal/media"
 )
 
-// ttsTempReader provides read-and-delete access to TTS temporary audio files.
-type ttsTempReader interface {
-	ReadAndDelete(id string) ([]byte, error)
+// localTtsSynthesizer synthesizes text to speech audio.
+type localTtsSynthesizer interface {
+	Synthesize(ctx context.Context, modelID string, text string, overrideCfg map[string]any) ([]byte, string, error)
+}
+
+// localTtsModelResolver resolves TTS model IDs for bots.
+type localTtsModelResolver interface {
+	ResolveTtsModelID(ctx context.Context, botID string) (string, error)
 }
 
 // LocalChannelHandler handles local channel (CLI/Web) routes backed by bot history.
 type LocalChannelHandler struct {
-	channelType    channel.ChannelType
-	channelManager *channel.Manager
-	channelStore   *channel.Store
-	chatService    *conversation.Service
-	routeHub       *local.RouteHub
-	botService     *bots.Service
-	accountService *accounts.Service
-	resolver       *flow.Resolver
-	mediaService   *media.Service
-	ttsTempStore   ttsTempReader
-	logger         *slog.Logger
+	channelType      channel.ChannelType
+	channelManager   *channel.Manager
+	channelStore     *channel.Store
+	chatService      *conversation.Service
+	routeHub         *local.RouteHub
+	botService       *bots.Service
+	accountService   *accounts.Service
+	resolver         *flow.Resolver
+	mediaService     *media.Service
+	ttsService       localTtsSynthesizer
+	ttsModelResolver localTtsModelResolver
+	logger           *slog.Logger
 }
 
 // NewLocalChannelHandler creates a local channel handler.
@@ -70,9 +76,10 @@ func (h *LocalChannelHandler) SetMediaService(svc *media.Service) {
 	h.mediaService = svc
 }
 
-// SetTtsTempStore sets the TTS temp store for extracting voice attachments.
-func (h *LocalChannelHandler) SetTtsTempStore(store ttsTempReader) {
-	h.ttsTempStore = store
+// SetTtsService configures TTS synthesis for handling speech_delta events.
+func (h *LocalChannelHandler) SetTtsService(synth localTtsSynthesizer, resolver localTtsModelResolver) {
+	h.ttsService = synth
+	h.ttsModelResolver = resolver
 }
 
 // Register registers the local channel routes.
@@ -473,9 +480,9 @@ func (h *LocalChannelHandler) processWSEvent(ctx context.Context, botID string, 
 	case "attachment_delta":
 		h.logger.Info("ws processing attachment_delta", slog.String("bot_id", botID))
 		return h.wsIngestAttachments(ctx, botID, event)
-	case "tool_call_end":
-		h.logger.Info("ws tool_call_end", slog.String("bot_id", botID), slog.String("tool_name", envelope.ToolName))
-		return h.wsExtractTtsVoice(ctx, botID, event, &envelope)
+	case "speech_delta":
+		h.logger.Info("ws processing speech_delta", slog.String("bot_id", botID))
+		return h.wsSynthesizeSpeech(ctx, botID, event)
 	default:
 		return []json.RawMessage{event}
 	}
@@ -569,57 +576,50 @@ func (h *LocalChannelHandler) ingestSingleAttachment(ctx context.Context, botID,
 	return nil
 }
 
-// wsExtractTtsVoice intercepts text_to_speech tool results and injects an
-// attachment_delta event with the ingested audio.
-func (h *LocalChannelHandler) wsExtractTtsVoice(ctx context.Context, botID string, original json.RawMessage, envelope *wsEventEnvelope) []json.RawMessage {
-	if h.ttsTempStore == nil || envelope == nil || envelope.ToolName != "text_to_speech" {
-		return []json.RawMessage{original}
+// wsSynthesizeSpeech handles speech_delta events by synthesizing audio and
+// injecting attachment_delta events with the resulting voice attachments.
+func (h *LocalChannelHandler) wsSynthesizeSpeech(ctx context.Context, botID string, original json.RawMessage) []json.RawMessage {
+	if h.ttsService == nil || h.ttsModelResolver == nil {
+		h.logger.Warn("speech_delta received but TTS service not configured")
+		return nil
 	}
 
-	h.logger.Info("ws tts voice extraction start", slog.String("bot_id", botID))
-
-	raw := envelope.Result
-	if len(raw) == 0 {
-		h.logger.Warn("ws tts tool result is empty", slog.String("bot_id", botID))
-		return []json.RawMessage{original}
+	modelID, err := h.ttsModelResolver.ResolveTtsModelID(ctx, botID)
+	if err != nil || strings.TrimSpace(modelID) == "" {
+		h.logger.Warn("speech_delta: bot has no TTS model configured", slog.String("bot_id", botID))
+		return nil
 	}
 
-	// MCP ToolExecutor may wrap in structuredContent.
-	var wrapper struct {
-		StructuredContent json.RawMessage `json:"structuredContent"`
+	var event struct {
+		Speeches []struct {
+			Text string `json:"text"`
+		} `json:"speeches"`
 	}
-	if json.Unmarshal(raw, &wrapper) == nil && len(wrapper.StructuredContent) > 0 {
-		raw = wrapper.StructuredContent
-	}
-
-	var result struct {
-		TempID      string `json:"temp_id"`
-		ContentType string `json:"content_type"`
-		Size        int64  `json:"size"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil || result.TempID == "" {
-		h.logger.Warn("ws tts result parse failed or missing temp_id", slog.String("bot_id", botID), slog.String("raw", string(raw)))
-		return []json.RawMessage{original}
+	if err := json.Unmarshal(original, &event); err != nil || len(event.Speeches) == 0 {
+		return nil
 	}
 
-	h.logger.Info("ws tts reading temp audio", slog.String("bot_id", botID), slog.String("temp_id", result.TempID), slog.String("content_type", result.ContentType))
+	var results []json.RawMessage
+	for _, speech := range event.Speeches {
+		text := strings.TrimSpace(speech.Text)
+		if text == "" {
+			continue
+		}
 
-	audioData, err := h.ttsTempStore.ReadAndDelete(result.TempID)
-	if err != nil {
-		h.logger.Warn("ws tts temp read failed", slog.Any("error", err))
-		return []json.RawMessage{original}
+		audioData, contentType, synthErr := h.ttsService.Synthesize(ctx, modelID, text, nil)
+		if synthErr != nil {
+			h.logger.Warn("speech synthesis failed", slog.String("bot_id", botID), slog.Any("error", synthErr))
+			continue
+		}
+
+		att := h.buildTtsAttachment(ctx, botID, contentType, audioData)
+		attachmentEvent, _ := json.Marshal(map[string]any{
+			"type":        "attachment_delta",
+			"attachments": []any{att},
+		})
+		results = append(results, attachmentEvent)
 	}
-
-	att := h.buildTtsAttachment(ctx, botID, result.ContentType, audioData)
-
-	attachmentEvent, _ := json.Marshal(map[string]any{
-		"type":        "attachment_delta",
-		"attachments": []any{att},
-	})
-
-	h.logger.Info("ws tts voice attachment injected", slog.String("bot_id", botID), slog.Any("has_content_hash", att["content_hash"] != nil))
-
-	return []json.RawMessage{original, attachmentEvent}
+	return results
 }
 
 func (h *LocalChannelHandler) buildTtsAttachment(ctx context.Context, botID, contentType string, audioData []byte) map[string]any {

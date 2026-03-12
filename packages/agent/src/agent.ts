@@ -31,6 +31,7 @@ import {
 } from './utils/attachments'
 import type { ContainerFileAttachment } from './types/attachment'
 import { reactionsResolver, type ReactionItem } from './utils/reactions'
+import { speechResolver, type SpeechItem } from './utils/speech'
 import { StreamTagExtractor, extractTagsFromText, type TagEvent } from './utils/tag-extractor'
 import { createImagePartFromAttachment } from './utils/image-parts'
 import type { GatewayInputAttachment } from './types/attachment'
@@ -332,7 +333,7 @@ export const createAgent = (
       basePrepareStep: () => ({ system: systemPrompt }),
     })
     const stepUsages = buildStepUsages(steps)
-    const tagResolvers = [attachmentsResolver, reactionsResolver]
+    const tagResolvers = [attachmentsResolver, reactionsResolver, speechResolver]
     const { cleanedText, events } = extractTagsFromText(text, tagResolvers)
     const textAttachments = events
       .filter((e) => e.tag === 'attachments')
@@ -340,8 +341,11 @@ export const createAgent = (
     const reactions = events
       .filter((e) => e.tag === 'reactions')
       .flatMap((e) => e.data as ReactionItem[])
+    const speeches = events
+      .filter((e) => e.tag === 'speech')
+      .flatMap((e) => e.data as SpeechItem[])
     const { messages: strippedMessages, attachments: messageAttachments } =
-      stripAttachmentsFromMessages(response.messages, [reactionsResolver])
+      stripAttachmentsFromMessages(response.messages, [reactionsResolver, speechResolver])
     const allAttachments = dedupeAttachments([
       ...textAttachments,
       ...messageAttachments,
@@ -357,6 +361,7 @@ export const createAgent = (
       text: cleanedText,
       attachments: allAttachments,
       reactions,
+      speeches,
       skills: getEnabledSkills(),
     }
   }
@@ -498,6 +503,13 @@ export const createAgent = (
           }
           break
         }
+        case 'speech': {
+          const speeches = event.data as SpeechItem[]
+          if (speeches.length) {
+            yield { type: 'speech_delta', speeches }
+          }
+          break
+        }
       }
     }
   }
@@ -507,7 +519,7 @@ export const createAgent = (
     const messages = [...input.messages, userPrompt]
     input.skills.forEach((skill) => enableSkill(skill))
     const systemPrompt = await generateSystemPrompt()
-    const tagResolvers = [attachmentsResolver, reactionsResolver]
+    const tagResolvers = [attachmentsResolver, reactionsResolver, speechResolver]
     const tagExtractor = new StreamTagExtractor(tagResolvers)
     const textLoopGuard = loopDetectionEnabled
       ? createTextLoopGuard({
@@ -726,7 +738,7 @@ export const createAgent = (
   
       const { messages: strippedMessages } = stripAttachmentsFromMessages(
         result.messages,
-        [reactionsResolver],
+        [reactionsResolver, speechResolver],
       )
       yield {
         type: 'agent_end',

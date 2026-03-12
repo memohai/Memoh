@@ -102,6 +102,7 @@ const (
 	StreamEventAgentStart          StreamEventType = "agent_start"
 	StreamEventAgentEnd            StreamEventType = "agent_end"
 	StreamEventReaction            StreamEventType = "reaction"
+	StreamEventSpeech              StreamEventType = "speech"
 	StreamEventProcessingStarted   StreamEventType = "processing_started"
 	StreamEventProcessingCompleted StreamEventType = "processing_completed"
 	StreamEventProcessingFailed    StreamEventType = "processing_failed"
@@ -148,7 +149,13 @@ type StreamEvent struct {
 	Phase       StreamPhase            `json:"phase,omitempty"`
 	Attachments []Attachment           `json:"attachments,omitempty"`
 	Reactions   []ReactRequest         `json:"reactions,omitempty"`
+	Speeches    []SpeechRequest        `json:"speeches,omitempty"`
 	Metadata    map[string]any         `json:"metadata,omitempty"`
+}
+
+// SpeechRequest carries text-to-speech synthesis text from a speech_delta stream event.
+type SpeechRequest struct {
+	Text string `json:"text"`
 }
 
 // StreamOptions configures how an outbound stream is initialized.
