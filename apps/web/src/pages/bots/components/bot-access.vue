@@ -18,22 +18,25 @@
           <p class="text-sm text-muted-foreground">
             {{ $t('bots.access.allowGuestDescription') }}
           </p>
+          <p
+            v-if="isPersonalBot"
+            class="text-xs text-muted-foreground"
+          >
+            {{ $t('bots.settings.allowGuestPersonalHint') }}
+          </p>
         </div>
         <Switch
           :model-value="allowGuestDraft"
-          :disabled="isSavingGuestAccess"
+          :disabled="isPersonalBot || isSavingGuestAccess"
           @update:model-value="(val) => allowGuestDraft = !!val"
         />
       </div>
       <div class="flex justify-end">
         <Button
-          :disabled="!hasGuestAccessChanges || isSavingGuestAccess"
+          :disabled="isPersonalBot || !hasGuestAccessChanges || isSavingGuestAccess"
           @click="handleSaveGuestAccess"
         >
-          <Spinner
-            v-if="isSavingGuestAccess"
-            class="mr-1.5"
-          />
+          <Spinner v-if="isSavingGuestAccess" class="mr-1.5" />
           {{ $t('bots.access.saveGuestAccess') }}
         </Button>
       </div>
@@ -83,9 +86,7 @@
                   </AvatarFallback>
                 </Avatar>
                 <div class="min-w-0">
-                  <div class="truncate">
-                    {{ option.label }}
-                  </div>
+                  <div class="truncate">{{ option.label }}</div>
                   <div class="truncate text-xs text-muted-foreground">
                     {{ option.description }}
                   </div>
@@ -121,9 +122,7 @@
                   </AvatarFallback>
                 </Avatar>
                 <div class="min-w-0">
-                  <div class="truncate">
-                    {{ option.label }}
-                  </div>
+                  <div class="truncate">{{ option.label }}</div>
                   <div class="truncate text-xs text-muted-foreground">
                     {{ option.description }}
                   </div>
@@ -137,134 +136,15 @@
         </div>
       </div>
 
-      <div class="rounded-md border border-border bg-muted/40 p-4 space-y-3">
-        <div class="space-y-1">
-          <p class="text-sm font-medium text-foreground">
-            {{ $t('bots.access.sourceScopeTitle') }}
-          </p>
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.access.sourceScopeDescription') }}
-          </p>
-        </div>
-
-        <div class="grid gap-3 md:grid-cols-2">
-          <div class="space-y-2">
-            <Label>{{ $t('bots.access.sourceChannel') }}</Label>
-            <div
-              v-if="whitelistSelection.channelIdentityId"
-              class="flex h-9 items-center rounded-md border border-border bg-background px-3 text-sm text-foreground"
-            >
-              {{ whitelistSelection.sourceChannel || $t('bots.access.anyChannel') }}
-            </div>
-            <NativeSelect
-              v-else
-              v-model="whitelistSelection.sourceChannel"
-              class="h-9 w-full text-sm"
-            >
-              <option value="">
-                {{ $t('bots.access.anyChannel') }}
-              </option>
-              <option
-                v-for="channel in knownChannels"
-                :key="channel"
-                :value="channel"
-              >
-                {{ channel }}
-              </option>
-            </NativeSelect>
-          </div>
-
-          <div class="space-y-2">
-            <Label>{{ $t('bots.access.conversationType') }}</Label>
-            <NativeSelect
-              v-model="whitelistSelection.sourceConversationType"
-              class="h-9 w-full text-sm"
-            >
-              <option value="">
-                {{ $t('bots.access.anyConversationType') }}
-              </option>
-              <option value="private">
-                {{ $t('bots.access.privateConversationType') }}
-              </option>
-              <option value="group">
-                {{ $t('bots.access.groupConversationType') }}
-              </option>
-              <option value="thread">
-                {{ $t('bots.access.threadConversationType') }}
-              </option>
-            </NativeSelect>
-          </div>
-
-          <div class="space-y-2 md:col-span-2">
-            <Label>{{ $t('bots.access.observedConversation') }}</Label>
-            <SearchableSelectPopover
-              v-if="whitelistSelection.channelIdentityId"
-              v-model="whitelistSelection.observedConversationRouteId"
-              :options="whitelistObservedConversationOptions"
-              :placeholder="$t('bots.access.selectObservedConversation')"
-              :aria-label="$t('bots.access.selectObservedConversation')"
-              :search-placeholder="$t('bots.access.searchObservedConversation')"
-              :search-aria-label="$t('bots.access.searchObservedConversation')"
-              :empty-text="$t('bots.access.noObservedConversations')"
-            />
-            <div
-              v-else
-              class="flex h-9 items-center rounded-md border border-border bg-background px-3 text-sm text-muted-foreground"
-            >
-              {{ $t('bots.access.selectIdentityFirst') }}
-            </div>
-            <p class="text-xs text-muted-foreground">
-              <template v-if="isLoadingWhitelistObserved">
-                {{ $t('common.loading') }}
-              </template>
-              <template v-else>
-                {{ $t('bots.access.observedConversationHint') }}
-              </template>
-            </p>
-          </div>
-
-          <div class="space-y-2">
-            <Label>{{ $t('bots.access.conversationId') }}</Label>
-            <Input
-              v-model="whitelistSelection.sourceConversationId"
-              :placeholder="$t('bots.access.conversationIdPlaceholder')"
-            />
-          </div>
-
-          <div class="space-y-2">
-            <Label>{{ $t('bots.access.threadId') }}</Label>
-            <Input
-              v-model="whitelistSelection.sourceThreadId"
-              :placeholder="$t('bots.access.threadIdPlaceholder')"
-            />
-          </div>
-        </div>
-
-        <div class="flex justify-end">
-          <Button
-            variant="outline"
-            @click="clearSourceScope(whitelistSelection)"
-          >
-            {{ $t('bots.access.clearScope') }}
-          </Button>
-        </div>
-      </div>
-
       <div class="flex justify-end gap-2">
-        <Button
-          variant="outline"
-          @click="resetSelection(whitelistSelection)"
-        >
+        <Button variant="outline" @click="resetSelection(whitelistSelection)">
           {{ $t('bots.access.clearSelection') }}
         </Button>
         <Button
           :disabled="isSavingWhitelist"
           @click="handleAddWhitelist"
         >
-          <Spinner
-            v-if="isSavingWhitelist"
-            class="mr-1.5"
-          />
+          <Spinner v-if="isSavingWhitelist" class="mr-1.5" />
           {{ $t('bots.access.addWhitelist') }}
         </Button>
       </div>
@@ -283,10 +163,7 @@
       >
         {{ $t('bots.access.whitelistEmpty') }}
       </div>
-      <div
-        v-else
-        class="space-y-2"
-      >
+      <div v-else class="space-y-2">
         <div
           v-for="item in whitelist"
           :key="item.id"
@@ -365,9 +242,7 @@
                   </AvatarFallback>
                 </Avatar>
                 <div class="min-w-0">
-                  <div class="truncate">
-                    {{ option.label }}
-                  </div>
+                  <div class="truncate">{{ option.label }}</div>
                   <div class="truncate text-xs text-muted-foreground">
                     {{ option.description }}
                   </div>
@@ -403,9 +278,7 @@
                   </AvatarFallback>
                 </Avatar>
                 <div class="min-w-0">
-                  <div class="truncate">
-                    {{ option.label }}
-                  </div>
+                  <div class="truncate">{{ option.label }}</div>
                   <div class="truncate text-xs text-muted-foreground">
                     {{ option.description }}
                   </div>
@@ -419,134 +292,15 @@
         </div>
       </div>
 
-      <div class="rounded-md border border-border bg-muted/40 p-4 space-y-3">
-        <div class="space-y-1">
-          <p class="text-sm font-medium text-foreground">
-            {{ $t('bots.access.sourceScopeTitle') }}
-          </p>
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.access.sourceScopeDescription') }}
-          </p>
-        </div>
-
-        <div class="grid gap-3 md:grid-cols-2">
-          <div class="space-y-2">
-            <Label>{{ $t('bots.access.sourceChannel') }}</Label>
-            <div
-              v-if="blacklistSelection.channelIdentityId"
-              class="flex h-9 items-center rounded-md border border-border bg-background px-3 text-sm text-foreground"
-            >
-              {{ blacklistSelection.sourceChannel || $t('bots.access.anyChannel') }}
-            </div>
-            <NativeSelect
-              v-else
-              v-model="blacklistSelection.sourceChannel"
-              class="h-9 w-full text-sm"
-            >
-              <option value="">
-                {{ $t('bots.access.anyChannel') }}
-              </option>
-              <option
-                v-for="channel in knownChannels"
-                :key="channel"
-                :value="channel"
-              >
-                {{ channel }}
-              </option>
-            </NativeSelect>
-          </div>
-
-          <div class="space-y-2">
-            <Label>{{ $t('bots.access.conversationType') }}</Label>
-            <NativeSelect
-              v-model="blacklistSelection.sourceConversationType"
-              class="h-9 w-full text-sm"
-            >
-              <option value="">
-                {{ $t('bots.access.anyConversationType') }}
-              </option>
-              <option value="private">
-                {{ $t('bots.access.privateConversationType') }}
-              </option>
-              <option value="group">
-                {{ $t('bots.access.groupConversationType') }}
-              </option>
-              <option value="thread">
-                {{ $t('bots.access.threadConversationType') }}
-              </option>
-            </NativeSelect>
-          </div>
-
-          <div class="space-y-2 md:col-span-2">
-            <Label>{{ $t('bots.access.observedConversation') }}</Label>
-            <SearchableSelectPopover
-              v-if="blacklistSelection.channelIdentityId"
-              v-model="blacklistSelection.observedConversationRouteId"
-              :options="blacklistObservedConversationOptions"
-              :placeholder="$t('bots.access.selectObservedConversation')"
-              :aria-label="$t('bots.access.selectObservedConversation')"
-              :search-placeholder="$t('bots.access.searchObservedConversation')"
-              :search-aria-label="$t('bots.access.searchObservedConversation')"
-              :empty-text="$t('bots.access.noObservedConversations')"
-            />
-            <div
-              v-else
-              class="flex h-9 items-center rounded-md border border-border bg-background px-3 text-sm text-muted-foreground"
-            >
-              {{ $t('bots.access.selectIdentityFirst') }}
-            </div>
-            <p class="text-xs text-muted-foreground">
-              <template v-if="isLoadingBlacklistObserved">
-                {{ $t('common.loading') }}
-              </template>
-              <template v-else>
-                {{ $t('bots.access.observedConversationHint') }}
-              </template>
-            </p>
-          </div>
-
-          <div class="space-y-2">
-            <Label>{{ $t('bots.access.conversationId') }}</Label>
-            <Input
-              v-model="blacklistSelection.sourceConversationId"
-              :placeholder="$t('bots.access.conversationIdPlaceholder')"
-            />
-          </div>
-
-          <div class="space-y-2">
-            <Label>{{ $t('bots.access.threadId') }}</Label>
-            <Input
-              v-model="blacklistSelection.sourceThreadId"
-              :placeholder="$t('bots.access.threadIdPlaceholder')"
-            />
-          </div>
-        </div>
-
-        <div class="flex justify-end">
-          <Button
-            variant="outline"
-            @click="clearSourceScope(blacklistSelection)"
-          >
-            {{ $t('bots.access.clearScope') }}
-          </Button>
-        </div>
-      </div>
-
       <div class="flex justify-end gap-2">
-        <Button
-          variant="outline"
-          @click="resetSelection(blacklistSelection)"
-        >
+        <Button variant="outline" @click="resetSelection(blacklistSelection)">
           {{ $t('bots.access.clearSelection') }}
         </Button>
         <Button
           :disabled="isSavingBlacklist"
           @click="handleAddBlacklist"
         >
-          <Spinner
-            v-if="isSavingBlacklist"
-            class="mr-1.5"
-          />
+          <Spinner v-if="isSavingBlacklist" class="mr-1.5" />
           {{ $t('bots.access.addBlacklist') }}
         </Button>
       </div>
@@ -565,10 +319,7 @@
       >
         {{ $t('bots.access.blacklistEmpty') }}
       </div>
-      <div
-        v-else
-        class="space-y-2"
-      >
+      <div v-else class="space-y-2">
         <div
           v-for="item in blacklist"
           :key="item.id"
@@ -616,13 +367,12 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Avatar, AvatarFallback, AvatarImage, Button, Input, Label, NativeSelect, Separator, Spinner, Switch } from '@memoh/ui'
+import { Avatar, AvatarFallback, AvatarImage, Button, Label, Separator, Spinner, Switch } from '@memoh/ui'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import {
   getBotsByBotIdAccessChannelIdentities,
-  getBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversations,
   getBotsByBotIdAccessUsers,
   deleteBotsByBotIdBlacklistByRuleId,
   deleteBotsByBotIdWhitelistByRuleId,
@@ -633,22 +383,15 @@ import {
   putBotsByBotIdSettings,
   putBotsByBotIdWhitelist,
 } from '@memoh/sdk'
-import type {
-  AclChannelIdentityCandidate,
-  AclObservedConversationCandidate,
-  AclRule,
-  AclSourceScope,
-  AclUpsertRuleRequest,
-  AclUserCandidate,
-} from '@memoh/sdk'
+import type { AclChannelIdentityCandidate, AclRule, AclUpsertRuleRequest, AclUserCandidate } from '@memoh/sdk'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { formatRelativeTime } from '@/utils/date-time'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 
 const props = defineProps<{
   botId: string
+  botType?: string
 }>()
 
 const { t } = useI18n()
@@ -656,64 +399,30 @@ const queryCache = useQueryCache()
 const deletingRuleId = ref('')
 const allowGuestDraft = ref(false)
 
-type RuleSelection = {
-  userId: string
-  channelIdentityId: string
-  observedConversationRouteId: string
-  sourceChannel: string
-  sourceConversationType: string
-  sourceConversationId: string
-  sourceThreadId: string
-}
+const isPersonalBot = computed(() => props.botType === 'personal')
 
-const commonChannels = ['discord', 'feishu', 'qq', 'telegram', 'wecom', 'web', 'cli']
+const whitelistSelection = reactive({
+  userId: '',
+  channelIdentityId: '',
+})
 
-function createSelection(): RuleSelection {
-  return {
-    userId: '',
-    channelIdentityId: '',
-    observedConversationRouteId: '',
-    sourceChannel: '',
-    sourceConversationType: '',
-    sourceConversationId: '',
-    sourceThreadId: '',
-  }
-}
+const blacklistSelection = reactive({
+  userId: '',
+  channelIdentityId: '',
+})
 
-const whitelistSelection = reactive(createSelection())
-const blacklistSelection = reactive(createSelection())
-
-function identityChannelById(id: string): string {
-  const matched = identities.value.find(item => item.id === id)
-  return matched?.channel || ''
-}
-
-function bindSelectionWatchers(selection: RuleSelection) {
-  watch(() => selection.userId, (value) => {
-    if (value) {
-      selection.channelIdentityId = ''
-      selection.observedConversationRouteId = ''
-      selection.sourceChannel = ''
-    }
-  })
-  watch(() => selection.channelIdentityId, (value, previous) => {
-    if (value) {
-      selection.userId = ''
-      selection.sourceChannel = identityChannelById(value)
-    }
-    else if (previous) {
-      selection.sourceChannel = ''
-    }
-    if (value !== previous) {
-      selection.observedConversationRouteId = ''
-      selection.sourceConversationId = ''
-      selection.sourceThreadId = ''
-    }
-  })
-}
-
-bindSelectionWatchers(whitelistSelection)
-bindSelectionWatchers(blacklistSelection)
+watch(() => whitelistSelection.userId, (value) => {
+  if (value) whitelistSelection.channelIdentityId = ''
+})
+watch(() => whitelistSelection.channelIdentityId, (value) => {
+  if (value) whitelistSelection.userId = ''
+})
+watch(() => blacklistSelection.userId, (value) => {
+  if (value) blacklistSelection.channelIdentityId = ''
+})
+watch(() => blacklistSelection.channelIdentityId, (value) => {
+  if (value) blacklistSelection.userId = ''
+})
 
 const { data: settings } = useQuery({
   key: () => ['bot-settings', props.botId],
@@ -786,42 +495,6 @@ const blacklist = computed(() => blacklistData.value?.items ?? [])
 const users = computed(() => userCandidates.value?.items ?? [])
 const identities = computed(() => identityCandidates.value?.items ?? [])
 
-const whitelistIdentityId = computed(() => whitelistSelection.channelIdentityId.trim())
-const blacklistIdentityId = computed(() => blacklistSelection.channelIdentityId.trim())
-
-const { data: whitelistObservedData, isLoading: isLoadingWhitelistObserved } = useQuery({
-  key: () => ['bot-access-observed-conversations', props.botId, whitelistIdentityId.value],
-  query: async () => {
-    const { data } = await getBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversations({
-      path: {
-        bot_id: props.botId,
-        channel_identity_id: whitelistIdentityId.value,
-      },
-      throwOnError: true,
-    })
-    return data
-  },
-  enabled: () => !!props.botId && !!whitelistIdentityId.value,
-})
-
-const { data: blacklistObservedData, isLoading: isLoadingBlacklistObserved } = useQuery({
-  key: () => ['bot-access-observed-conversations', props.botId, blacklistIdentityId.value],
-  query: async () => {
-    const { data } = await getBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversations({
-      path: {
-        bot_id: props.botId,
-        channel_identity_id: blacklistIdentityId.value,
-      },
-      throwOnError: true,
-    })
-    return data
-  },
-  enabled: () => !!props.botId && !!blacklistIdentityId.value,
-})
-
-const whitelistObservedConversations = computed(() => whitelistObservedData.value?.items ?? [])
-const blacklistObservedConversations = computed(() => blacklistObservedData.value?.items ?? [])
-
 const userOptions = computed<SearchableSelectOption[]>(() =>
   users.value.map(item => ({
     value: item.id || '',
@@ -849,26 +522,6 @@ const identityOptions = computed<SearchableSelectOption[]>(() =>
     meta: item,
   })),
 )
-
-const knownChannels = computed(() => {
-  const values = new Set<string>(commonChannels)
-  for (const item of identities.value) {
-    if (item.channel) values.add(item.channel)
-  }
-  for (const item of whitelist.value) {
-    if (item.source_scope?.channel) values.add(item.source_scope.channel)
-  }
-  for (const item of blacklist.value) {
-    if (item.source_scope?.channel) values.add(item.source_scope.channel)
-  }
-  for (const item of whitelistObservedConversations.value) {
-    if (item.channel) values.add(item.channel)
-  }
-  for (const item of blacklistObservedConversations.value) {
-    if (item.channel) values.add(item.channel)
-  }
-  return Array.from(values).filter(Boolean).sort()
-})
 
 const hasGuestAccessChanges = computed(() =>
   allowGuestDraft.value !== !!settings.value?.allow_guest,
@@ -916,34 +569,14 @@ const { mutateAsync: saveBlacklist, isLoading: isSavingBlacklist } = useMutation
   },
 })
 
-function buildSourceScope(selection: RuleSelection): AclSourceScope | undefined {
-  const channel = selection.sourceChannel.trim()
-  const conversation_type = selection.sourceConversationType.trim()
-  const conversation_id = selection.sourceConversationId.trim()
-  const thread_id = selection.sourceThreadId.trim()
-  if (!channel && !conversation_type && !conversation_id && !thread_id) {
-    return undefined
-  }
-  return { channel, conversation_type, conversation_id, thread_id }
-}
-
-function normalizePayload(selection: RuleSelection): AclUpsertRuleRequest | null {
+function normalizePayload(selection: { userId: string, channelIdentityId: string }): AclUpsertRuleRequest | null {
   const user_id = selection.userId.trim()
   const channel_identity_id = selection.channelIdentityId.trim()
   if ((user_id && channel_identity_id) || (!user_id && !channel_identity_id)) {
     toast.error(t('bots.access.validation'))
     return null
   }
-  if (selection.sourceThreadId.trim() && !selection.sourceConversationId.trim()) {
-    toast.error(t('bots.access.validationThreadRequiresConversation'))
-    return null
-  }
-  if ((selection.sourceConversationId.trim() || selection.sourceThreadId.trim()) && !selection.sourceChannel.trim()) {
-    toast.error(t('bots.access.validationConversationRequiresChannel'))
-    return null
-  }
-  const source_scope = buildSourceScope(selection)
-  return { user_id, channel_identity_id, source_scope }
+  return { user_id, channel_identity_id }
 }
 
 async function handleSaveGuestAccess() {
@@ -1018,16 +651,9 @@ async function handleDeleteBlacklist(ruleId: string) {
   }
 }
 
-function resetSelection(selection: RuleSelection) {
-  Object.assign(selection, createSelection())
-}
-
-function clearSourceScope(selection: RuleSelection) {
-  selection.observedConversationRouteId = ''
-  selection.sourceChannel = selection.channelIdentityId ? identityChannelById(selection.channelIdentityId) : ''
-  selection.sourceConversationType = ''
-  selection.sourceConversationId = ''
-  selection.sourceThreadId = ''
+function resetSelection(selection: { userId: string, channelIdentityId: string }) {
+  selection.userId = ''
+  selection.channelIdentityId = ''
 }
 
 function formatRuleLabel(item: AclRule): string {
@@ -1038,20 +664,17 @@ function formatRuleLabel(item: AclRule): string {
 }
 
 function formatRuleMeta(item: AclRule): string {
-  const scope = formatRuleScope(item.source_scope)
   if (item.subject_kind === 'user') {
-    const base = item.user_username || item.user_id || ''
-    return scope ? `${base} · ${scope}` : base
+    return item.user_username || item.user_id || ''
   }
   const channel = item.channel_type || 'channel'
   const subject = item.channel_subject_id || item.channel_identity_id || ''
   const linked = item.linked_user_display_name || item.linked_user_username
-  const base = linked ? `${channel}: ${subject} · ${linked}` : `${channel}: ${subject}`
-  return scope ? `${base} · ${scope}` : base
+  return linked ? `${channel}: ${subject} · ${linked}` : `${channel}: ${subject}`
 }
 
 function rulePlatform(item: AclRule): string {
-  return item.source_scope?.channel || item.channel_type || ''
+  return item.channel_type || ''
 }
 
 function formatIdentityCandidateMeta(item: AclChannelIdentityCandidate): string {
@@ -1074,80 +697,6 @@ function candidateAvatar(item?: AclUserCandidate): string {
 function identityAvatar(item?: AclChannelIdentityCandidate): string {
   return item?.avatar_url || item?.linked_avatar_url || ''
 }
-
-function formatRuleScope(scope?: AclSourceScope): string {
-  if (!scope) return ''
-  const parts = [
-    scope.channel || '',
-    scope.conversation_type || '',
-    scope.conversation_id || '',
-    scope.thread_id ? `thread:${scope.thread_id}` : '',
-  ].filter(Boolean)
-  return parts.join(' · ')
-}
-
-function formatObservedConversationLabel(item: AclObservedConversationCandidate): string {
-  return item.conversation_name || item.conversation_id || item.thread_id || item.route_id || '-'
-}
-
-function formatObservedConversationMeta(item: AclObservedConversationCandidate): string {
-  const parts = [
-    item.channel || '',
-    item.conversation_type || '',
-    item.conversation_id || '',
-    item.thread_id ? `thread:${item.thread_id}` : '',
-  ].filter(Boolean)
-  const lastObserved = formatRelativeTime(item.last_observed_at, { fallback: '' })
-  if (lastObserved) {
-    parts.push(`${t('bots.access.lastObserved')}: ${lastObserved}`)
-  }
-  return parts.join(' · ')
-}
-
-function toObservedConversationOptions(items: AclObservedConversationCandidate[]): SearchableSelectOption[] {
-  return items.map(item => ({
-    value: item.route_id || '',
-    label: formatObservedConversationLabel(item),
-    description: formatObservedConversationMeta(item),
-    group: item.channel || 'conversation',
-    groupLabel: item.channel || 'conversation',
-    keywords: [
-      item.channel ?? '',
-      item.conversation_name ?? '',
-      item.conversation_id ?? '',
-      item.thread_id ?? '',
-      item.route_id ?? '',
-    ],
-    meta: item,
-  }))
-}
-
-const whitelistObservedConversationOptions = computed(() =>
-  toObservedConversationOptions(whitelistObservedConversations.value),
-)
-
-const blacklistObservedConversationOptions = computed(() =>
-  toObservedConversationOptions(blacklistObservedConversations.value),
-)
-
-function applyObservedConversation(selection: RuleSelection, conversations: AclObservedConversationCandidate[], routeId: string) {
-  const matched = conversations.find(item => item.route_id === routeId)
-  if (!matched) return
-  selection.sourceChannel = matched.channel || ''
-  selection.sourceConversationType = matched.conversation_type || ''
-  selection.sourceConversationId = matched.conversation_id || ''
-  selection.sourceThreadId = matched.thread_id || ''
-}
-
-watch(() => whitelistSelection.observedConversationRouteId, (routeId) => {
-  if (!routeId) return
-  applyObservedConversation(whitelistSelection, whitelistObservedConversations.value, routeId)
-})
-
-watch(() => blacklistSelection.observedConversationRouteId, (routeId) => {
-  if (!routeId) return
-  applyObservedConversation(blacklistSelection, blacklistObservedConversations.value, routeId)
-})
 
 function initials(value: string): string {
   return value

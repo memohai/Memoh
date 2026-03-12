@@ -569,7 +569,7 @@ ORDER BY MAX(m.created_at) DESC
 
 type ListObservedConversationsByChannelIdentityParams struct {
 	BotID             pgtype.UUID `json:"bot_id"`
-	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
+	ChannelIdentityID string      `json:"channel_identity_id"`
 }
 
 type ListObservedConversationsByChannelIdentityRow struct {

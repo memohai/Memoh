@@ -193,39 +193,19 @@ CREATE TABLE IF NOT EXISTS bot_acl_rules (
   subject_kind TEXT NOT NULL,
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
   channel_identity_id UUID REFERENCES channel_identities(id) ON DELETE CASCADE,
-  source_channel TEXT,
-  source_conversation_type TEXT,
-  source_conversation_id TEXT,
-  source_thread_id TEXT,
   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT bot_acl_rules_action_check CHECK (action IN ('chat.trigger')),
   CONSTRAINT bot_acl_rules_effect_check CHECK (effect IN ('allow', 'deny')),
   CONSTRAINT bot_acl_rules_subject_kind_check CHECK (subject_kind IN ('guest_all', 'user', 'channel_identity')),
-  CONSTRAINT bot_acl_rules_source_conversation_type_check CHECK (
-    source_conversation_type IS NULL OR source_conversation_type IN ('private', 'group', 'thread')
-  ),
-  CONSTRAINT bot_acl_rules_source_scope_check CHECK (
-    (source_conversation_id IS NULL AND source_thread_id IS NULL)
-    OR source_channel IS NOT NULL
-  ),
-  CONSTRAINT bot_acl_rules_source_thread_check CHECK (
-    source_thread_id IS NULL OR source_conversation_id IS NOT NULL
-  ),
   CONSTRAINT bot_acl_rules_subject_value_check CHECK (
     (subject_kind = 'guest_all' AND user_id IS NULL AND channel_identity_id IS NULL) OR
     (subject_kind = 'user' AND user_id IS NOT NULL AND channel_identity_id IS NULL) OR
     (subject_kind = 'channel_identity' AND user_id IS NULL AND channel_identity_id IS NOT NULL)
   ),
-  CONSTRAINT bot_acl_rules_unique_user UNIQUE NULLS NOT DISTINCT (
-    bot_id, action, effect, subject_kind, user_id,
-    source_channel, source_conversation_type, source_conversation_id, source_thread_id
-  ),
-  CONSTRAINT bot_acl_rules_unique_channel_identity UNIQUE NULLS NOT DISTINCT (
-    bot_id, action, effect, subject_kind, channel_identity_id,
-    source_channel, source_conversation_type, source_conversation_id, source_thread_id
-  )
+  CONSTRAINT bot_acl_rules_unique_user UNIQUE NULLS NOT DISTINCT (bot_id, action, effect, subject_kind, user_id),
+  CONSTRAINT bot_acl_rules_unique_channel_identity UNIQUE NULLS NOT DISTINCT (bot_id, action, effect, subject_kind, channel_identity_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_bot_id ON bot_acl_rules(bot_id);
@@ -359,8 +339,6 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_source_lookup
   ON bot_history_messages(channel_type, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_reply_lookup
   ON bot_history_messages(channel_type, source_reply_to_message_id);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_identity_route_created
-  ON bot_history_messages(bot_id, sender_channel_identity_id, route_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS containers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

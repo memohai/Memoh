@@ -11,6 +11,7 @@ import (
 type Bot struct {
 	ID                 pgtype.UUID        `json:"id"`
 	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
+	Type               string             `json:"type"`
 	DisplayName        pgtype.Text        `json:"display_name"`
 	AvatarUrl          pgtype.Text        `json:"avatar_url"`
 	IsActive           bool               `json:"is_active"`

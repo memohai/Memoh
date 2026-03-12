@@ -185,7 +185,7 @@ func (s *Service) Delete(ctx context.Context, conversationID string) error {
 }
 
 // AddParticipant is no longer supported after removing bot member sharing.
-func (*Service) AddParticipant(_ context.Context, _, _, _ string) (Participant, error) {
+func (s *Service) AddParticipant(ctx context.Context, conversationID, channelIdentityID, role string) (Participant, error) {
 	return Participant{}, ErrPermissionDenied
 }
 
@@ -241,7 +241,8 @@ func (s *Service) ListParticipants(ctx context.Context, conversationID string) (
 }
 
 // RemoveParticipant is a no-op because only owner participation remains.
-func (*Service) RemoveParticipant(_ context.Context, _, _ string) error {
+func (s *Service) RemoveParticipant(ctx context.Context, conversationID, channelIdentityID string) error {
+	_, _ = ctx, conversationID
 	return ErrPermissionDenied
 }
 
@@ -360,6 +361,15 @@ func toChatListItem(row sqlc.ListVisibleChatsByBotAndUserRow) ConversationListIt
 		AccessMode:      row.AccessMode,
 		ParticipantRole: strings.TrimSpace(row.ParticipantRole),
 		LastObservedAt:  pgTimePtr(row.LastObservedAt),
+	}
+}
+
+func toParticipantFields(conversationID, userID pgtype.UUID, role string, joinedAt pgtype.Timestamptz) Participant {
+	return Participant{
+		ChatID:   conversationID.String(),
+		UserID:   userID.String(),
+		Role:     role,
+		JoinedAt: joinedAt.Time,
 	}
 }
 
