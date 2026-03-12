@@ -664,7 +664,7 @@ func (h *MemoryHandler) requireBotAccess(c echo.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false}); err != nil {
+	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{}); err != nil {
 		return "", err
 	}
 	return botID, nil

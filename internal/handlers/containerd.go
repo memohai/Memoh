@@ -849,11 +849,11 @@ func (*ContainerdHandler) requireChannelIdentityID(c echo.Context) (string, erro
 }
 
 func (h *ContainerdHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{})
 }
 
 // requireBotAccessWithGuest is like requireBotAccess but also allows guest access
-// for public bots that have the allow_guest setting enabled.
+// for public bots when the caller explicitly opts into guest-compatible access.
 func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, error) {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -863,7 +863,7 @@ func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, e
 	if botID == "" {
 		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	policy := bots.AccessPolicy{AllowPublicMember: true, AllowGuest: true}
+	policy := bots.AccessPolicy{AllowGuest: true}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, policy); err != nil {
 		return "", err
 	}

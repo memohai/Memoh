@@ -47,6 +47,10 @@ type channelReactor interface {
 	React(ctx context.Context, botID string, channelType channel.ChannelType, req channel.ReactRequest) error
 }
 
+type chatACL interface {
+	CanPerformChatTrigger(ctx context.Context, botID, userID, channelIdentityID string) (bool, error)
+}
+
 type mediaIngestor interface {
 	Ingest(ctx context.Context, input media.IngestInput) (media.Asset, error)
 	// GetByStorageKey resolves an asset by reading its sidecar JSON.
@@ -81,6 +85,7 @@ type ChannelInboundProcessor struct {
 	jwtSecret        string
 	tokenTTL         time.Duration
 	identity         *IdentityResolver
+	acl              chatACL
 	observer         channel.StreamObserver
 	ttsService       ttsSynthesizer
 	ttsModelResolver ttsModelResolver
@@ -94,9 +99,7 @@ func NewChannelInboundProcessor(
 	messageWriter messagepkg.Writer,
 	runner flow.Runner,
 	channelIdentityService ChannelIdentityService,
-	memberService BotMemberService,
 	policyService PolicyService,
-	preauthService PreauthService,
 	bindService BindService,
 	jwtSecret string,
 	tokenTTL time.Duration,
@@ -107,7 +110,7 @@ func NewChannelInboundProcessor(
 	if tokenTTL <= 0 {
 		tokenTTL = 5 * time.Minute
 	}
-	identityResolver := NewIdentityResolver(log, registry, channelIdentityService, memberService, policyService, preauthService, bindService, "", "")
+	identityResolver := NewIdentityResolver(log, registry, channelIdentityService, policyService, bindService, "")
 	return &ChannelInboundProcessor{
 		runner:        runner,
 		routeResolver: routeResolver,
@@ -118,6 +121,13 @@ func NewChannelInboundProcessor(
 		tokenTTL:      tokenTTL,
 		identity:      identityResolver,
 	}
+}
+
+func (p *ChannelInboundProcessor) SetACLService(service chatACL) {
+	if p == nil {
+		return
+	}
+	p.acl = service
 }
 
 // IdentityMiddleware returns the identity resolution middleware.
@@ -283,6 +293,25 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	inboxAction := inbox.ActionNotify
 	if shouldTriggerAssistantResponse(msg) || identity.ForceReply {
 		inboxAction = inbox.ActionTrigger
+	}
+	if inboxAction == inbox.ActionTrigger && p.acl != nil {
+		allowed, err := p.acl.CanPerformChatTrigger(ctx, identity.BotID, identity.UserID, identity.ChannelIdentityID)
+		if err != nil {
+			return fmt.Errorf("authorize chat trigger: %w", err)
+		}
+		if !allowed {
+			inboxAction = inbox.ActionNotify
+			if p.logger != nil {
+				p.logger.Info(
+					"inbound trigger denied by acl",
+					slog.String("channel", msg.Channel.String()),
+					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+					slog.String("user_id", strings.TrimSpace(identity.UserID)),
+					slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
+					slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
+				)
+			}
+		}
 	}
 
 	// All messages go through inbox first.

@@ -250,6 +250,7 @@ import BotSchedule from './components/bot-schedule.vue'
 import BotContainer from './components/bot-container.vue'
 import BotTerminal from './components/bot-terminal.vue'
 import BotFiles from './components/bot-files.vue'
+import BotAccess from './components/bot-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
@@ -289,6 +290,7 @@ const tabList = computed(() => {
     { value: 'schedule', label: 'bots.tabs.schedule', component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'history', label: 'bots.tabs.history', component: BotHistory, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', component: BotSkills, params: { 'bot-id': bot_id } },
+    { value: 'access', label: 'bots.tabs.access', component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'settings', label: 'bots.tabs.settings', component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } }
   ]
 })

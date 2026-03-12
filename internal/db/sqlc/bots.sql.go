@@ -14,7 +14,7 @@ import (
 const createBot = `-- name: CreateBot :one
 INSERT INTO bots (owner_user_id, type, display_name, avatar_url, is_active, metadata, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type CreateBotParams struct {
@@ -39,7 +39,6 @@ type CreateBotRow struct {
 	MaxContextTokens   int32              `json:"max_context_tokens"`
 	MaxInboxItems      int32              `json:"max_inbox_items"`
 	Language           string             `json:"language"`
-	AllowGuest         bool               `json:"allow_guest"`
 	ReasoningEnabled   bool               `json:"reasoning_enabled"`
 	ReasoningEffort    string             `json:"reasoning_effort"`
 	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
@@ -76,7 +75,6 @@ func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (CreateBot
 		&i.MaxContextTokens,
 		&i.MaxInboxItems,
 		&i.Language,
-		&i.AllowGuest,
 		&i.ReasoningEnabled,
 		&i.ReasoningEffort,
 		&i.ChatModelID,
@@ -101,22 +99,8 @@ func (q *Queries) DeleteBotByID(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
-const deleteBotMember = `-- name: DeleteBotMember :exec
-DELETE FROM bot_members WHERE bot_id = $1 AND user_id = $2
-`
-
-type DeleteBotMemberParams struct {
-	BotID  pgtype.UUID `json:"bot_id"`
-	UserID pgtype.UUID `json:"user_id"`
-}
-
-func (q *Queries) DeleteBotMember(ctx context.Context, arg DeleteBotMemberParams) error {
-	_, err := q.db.Exec(ctx, deleteBotMember, arg.BotID, arg.UserID)
-	return err
-}
-
 const getBotByID = `-- name: GetBotByID :one
-SELECT id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+SELECT id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 FROM bots
 WHERE id = $1
 `
@@ -133,7 +117,6 @@ type GetBotByIDRow struct {
 	MaxContextTokens   int32              `json:"max_context_tokens"`
 	MaxInboxItems      int32              `json:"max_inbox_items"`
 	Language           string             `json:"language"`
-	AllowGuest         bool               `json:"allow_guest"`
 	ReasoningEnabled   bool               `json:"reasoning_enabled"`
 	ReasoningEffort    string             `json:"reasoning_effort"`
 	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
@@ -162,7 +145,6 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (GetBotByIDRow
 		&i.MaxContextTokens,
 		&i.MaxInboxItems,
 		&i.Language,
-		&i.AllowGuest,
 		&i.ReasoningEnabled,
 		&i.ReasoningEffort,
 		&i.ChatModelID,
@@ -178,142 +160,8 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (GetBotByIDRow
 	return i, err
 }
 
-const getBotMember = `-- name: GetBotMember :one
-SELECT bot_id, user_id, role, created_at
-FROM bot_members
-WHERE bot_id = $1 AND user_id = $2
-LIMIT 1
-`
-
-type GetBotMemberParams struct {
-	BotID  pgtype.UUID `json:"bot_id"`
-	UserID pgtype.UUID `json:"user_id"`
-}
-
-func (q *Queries) GetBotMember(ctx context.Context, arg GetBotMemberParams) (BotMember, error) {
-	row := q.db.QueryRow(ctx, getBotMember, arg.BotID, arg.UserID)
-	var i BotMember
-	err := row.Scan(
-		&i.BotID,
-		&i.UserID,
-		&i.Role,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const listBotMembers = `-- name: ListBotMembers :many
-SELECT bot_id, user_id, role, created_at
-FROM bot_members
-WHERE bot_id = $1
-ORDER BY created_at DESC
-`
-
-func (q *Queries) ListBotMembers(ctx context.Context, botID pgtype.UUID) ([]BotMember, error) {
-	rows, err := q.db.Query(ctx, listBotMembers, botID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BotMember
-	for rows.Next() {
-		var i BotMember
-		if err := rows.Scan(
-			&i.BotID,
-			&i.UserID,
-			&i.Role,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listBotsByMember = `-- name: ListBotsByMember :many
-SELECT b.id, b.owner_user_id, b.type, b.display_name, b.avatar_url, b.is_active, b.status, b.max_context_load_time, b.max_context_tokens, b.max_inbox_items, b.language, b.allow_guest, b.reasoning_enabled, b.reasoning_effort, b.chat_model_id, b.search_provider_id, b.memory_provider_id, b.heartbeat_enabled, b.heartbeat_interval, b.heartbeat_prompt, b.metadata, b.created_at, b.updated_at
-FROM bots b
-JOIN bot_members m ON m.bot_id = b.id
-WHERE m.user_id = $1
-ORDER BY b.created_at DESC
-`
-
-type ListBotsByMemberRow struct {
-	ID                 pgtype.UUID        `json:"id"`
-	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
-	Type               string             `json:"type"`
-	DisplayName        pgtype.Text        `json:"display_name"`
-	AvatarUrl          pgtype.Text        `json:"avatar_url"`
-	IsActive           bool               `json:"is_active"`
-	Status             string             `json:"status"`
-	MaxContextLoadTime int32              `json:"max_context_load_time"`
-	MaxContextTokens   int32              `json:"max_context_tokens"`
-	MaxInboxItems      int32              `json:"max_inbox_items"`
-	Language           string             `json:"language"`
-	AllowGuest         bool               `json:"allow_guest"`
-	ReasoningEnabled   bool               `json:"reasoning_enabled"`
-	ReasoningEffort    string             `json:"reasoning_effort"`
-	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
-	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
-	MemoryProviderID   pgtype.UUID        `json:"memory_provider_id"`
-	HeartbeatEnabled   bool               `json:"heartbeat_enabled"`
-	HeartbeatInterval  int32              `json:"heartbeat_interval"`
-	HeartbeatPrompt    string             `json:"heartbeat_prompt"`
-	Metadata           []byte             `json:"metadata"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-}
-
-func (q *Queries) ListBotsByMember(ctx context.Context, userID pgtype.UUID) ([]ListBotsByMemberRow, error) {
-	rows, err := q.db.Query(ctx, listBotsByMember, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListBotsByMemberRow
-	for rows.Next() {
-		var i ListBotsByMemberRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.OwnerUserID,
-			&i.Type,
-			&i.DisplayName,
-			&i.AvatarUrl,
-			&i.IsActive,
-			&i.Status,
-			&i.MaxContextLoadTime,
-			&i.MaxContextTokens,
-			&i.MaxInboxItems,
-			&i.Language,
-			&i.AllowGuest,
-			&i.ReasoningEnabled,
-			&i.ReasoningEffort,
-			&i.ChatModelID,
-			&i.SearchProviderID,
-			&i.MemoryProviderID,
-			&i.HeartbeatEnabled,
-			&i.HeartbeatInterval,
-			&i.HeartbeatPrompt,
-			&i.Metadata,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listBotsByOwner = `-- name: ListBotsByOwner :many
-SELECT id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+SELECT id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 FROM bots
 WHERE owner_user_id = $1
 ORDER BY created_at DESC
@@ -331,7 +179,6 @@ type ListBotsByOwnerRow struct {
 	MaxContextTokens   int32              `json:"max_context_tokens"`
 	MaxInboxItems      int32              `json:"max_inbox_items"`
 	Language           string             `json:"language"`
-	AllowGuest         bool               `json:"allow_guest"`
 	ReasoningEnabled   bool               `json:"reasoning_enabled"`
 	ReasoningEffort    string             `json:"reasoning_effort"`
 	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
@@ -366,7 +213,6 @@ func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID pgtype.UUID) 
 			&i.MaxContextTokens,
 			&i.MaxInboxItems,
 			&i.Language,
-			&i.AllowGuest,
 			&i.ReasoningEnabled,
 			&i.ReasoningEffort,
 			&i.ChatModelID,
@@ -434,7 +280,7 @@ UPDATE bots
 SET owner_user_id = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type UpdateBotOwnerParams struct {
@@ -454,7 +300,6 @@ type UpdateBotOwnerRow struct {
 	MaxContextTokens   int32              `json:"max_context_tokens"`
 	MaxInboxItems      int32              `json:"max_inbox_items"`
 	Language           string             `json:"language"`
-	AllowGuest         bool               `json:"allow_guest"`
 	ReasoningEnabled   bool               `json:"reasoning_enabled"`
 	ReasoningEffort    string             `json:"reasoning_effort"`
 	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
@@ -483,7 +328,6 @@ func (q *Queries) UpdateBotOwner(ctx context.Context, arg UpdateBotOwnerParams) 
 		&i.MaxContextTokens,
 		&i.MaxInboxItems,
 		&i.Language,
-		&i.AllowGuest,
 		&i.ReasoningEnabled,
 		&i.ReasoningEffort,
 		&i.ChatModelID,
@@ -507,7 +351,7 @@ SET display_name = $2,
     metadata = $5,
     updated_at = now()
 WHERE id = $1
-RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, allow_guest, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, max_inbox_items, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type UpdateBotProfileParams struct {
@@ -530,7 +374,6 @@ type UpdateBotProfileRow struct {
 	MaxContextTokens   int32              `json:"max_context_tokens"`
 	MaxInboxItems      int32              `json:"max_inbox_items"`
 	Language           string             `json:"language"`
-	AllowGuest         bool               `json:"allow_guest"`
 	ReasoningEnabled   bool               `json:"reasoning_enabled"`
 	ReasoningEffort    string             `json:"reasoning_effort"`
 	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
@@ -565,7 +408,6 @@ func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfilePara
 		&i.MaxContextTokens,
 		&i.MaxInboxItems,
 		&i.Language,
-		&i.AllowGuest,
 		&i.ReasoningEnabled,
 		&i.ReasoningEffort,
 		&i.ChatModelID,
@@ -596,30 +438,4 @@ type UpdateBotStatusParams struct {
 func (q *Queries) UpdateBotStatus(ctx context.Context, arg UpdateBotStatusParams) error {
 	_, err := q.db.Exec(ctx, updateBotStatus, arg.ID, arg.Status)
 	return err
-}
-
-const upsertBotMember = `-- name: UpsertBotMember :one
-INSERT INTO bot_members (bot_id, user_id, role)
-VALUES ($1, $2, $3)
-ON CONFLICT (bot_id, user_id) DO UPDATE SET
-  role = EXCLUDED.role
-RETURNING bot_id, user_id, role, created_at
-`
-
-type UpsertBotMemberParams struct {
-	BotID  pgtype.UUID `json:"bot_id"`
-	UserID pgtype.UUID `json:"user_id"`
-	Role   string      `json:"role"`
-}
-
-func (q *Queries) UpsertBotMember(ctx context.Context, arg UpsertBotMemberParams) (BotMember, error) {
-	row := q.db.QueryRow(ctx, upsertBotMember, arg.BotID, arg.UserID, arg.Role)
-	var i BotMember
-	err := row.Scan(
-		&i.BotID,
-		&i.UserID,
-		&i.Role,
-		&i.CreatedAt,
-	)
-	return i, err
 }

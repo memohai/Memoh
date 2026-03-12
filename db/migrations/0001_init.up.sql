@@ -163,7 +163,6 @@ CREATE TABLE IF NOT EXISTS bots (
   max_context_load_time INTEGER NOT NULL DEFAULT 1440,
   max_context_tokens INTEGER NOT NULL DEFAULT 0,
   language TEXT NOT NULL DEFAULT 'auto',
-  allow_guest BOOLEAN NOT NULL DEFAULT false,
   reasoning_enabled BOOLEAN NOT NULL DEFAULT false,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   max_inbox_items INTEGER NOT NULL DEFAULT 50,
@@ -186,16 +185,32 @@ CREATE TABLE IF NOT EXISTS bots (
 
 CREATE INDEX IF NOT EXISTS idx_bots_owner_user_id ON bots(owner_user_id);
 
-CREATE TABLE IF NOT EXISTS bot_members (
+CREATE TABLE IF NOT EXISTS bot_acl_rules (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role TEXT NOT NULL DEFAULT 'member',
+  action TEXT NOT NULL,
+  effect TEXT NOT NULL,
+  subject_kind TEXT NOT NULL,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  channel_identity_id UUID REFERENCES channel_identities(id) ON DELETE CASCADE,
+  created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT bot_members_role_check CHECK (role IN ('owner', 'admin', 'member')),
-  CONSTRAINT bot_members_unique UNIQUE (bot_id, user_id)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT bot_acl_rules_action_check CHECK (action IN ('chat.trigger')),
+  CONSTRAINT bot_acl_rules_effect_check CHECK (effect IN ('allow', 'deny')),
+  CONSTRAINT bot_acl_rules_subject_kind_check CHECK (subject_kind IN ('guest_all', 'user', 'channel_identity')),
+  CONSTRAINT bot_acl_rules_subject_value_check CHECK (
+    (subject_kind = 'guest_all' AND user_id IS NULL AND channel_identity_id IS NULL) OR
+    (subject_kind = 'user' AND user_id IS NOT NULL AND channel_identity_id IS NULL) OR
+    (subject_kind = 'channel_identity' AND user_id IS NULL AND channel_identity_id IS NOT NULL)
+  ),
+  CONSTRAINT bot_acl_rules_unique_user UNIQUE NULLS NOT DISTINCT (bot_id, action, effect, subject_kind, user_id),
+  CONSTRAINT bot_acl_rules_unique_channel_identity UNIQUE NULLS NOT DISTINCT (bot_id, action, effect, subject_kind, channel_identity_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_bot_members_user_id ON bot_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_bot_id ON bot_acl_rules(bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_user_id ON bot_acl_rules(user_id);
+CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_channel_identity_id ON bot_acl_rules(channel_identity_id);
 
 CREATE TABLE IF NOT EXISTS mcp_connections (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -265,20 +280,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_channel_external_identity
   ON bot_channel_configs(channel_type, external_identity);
 
 CREATE INDEX IF NOT EXISTS idx_bot_channel_bot_id ON bot_channel_configs(bot_id);
-
-CREATE TABLE IF NOT EXISTS bot_preauth_keys (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  token TEXT NOT NULL,
-  issued_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  expires_at TIMESTAMPTZ,
-  used_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT bot_preauth_keys_unique UNIQUE (token)
-);
-
-CREATE INDEX IF NOT EXISTS idx_bot_preauth_keys_bot_id ON bot_preauth_keys(bot_id);
-CREATE INDEX IF NOT EXISTS idx_bot_preauth_keys_expires ON bot_preauth_keys(expires_at);
 
 -- channel_identity_bind_codes: one-time codes for channel identity->user linking
 CREATE TABLE IF NOT EXISTS channel_identity_bind_codes (

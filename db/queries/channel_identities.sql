@@ -37,6 +37,32 @@ FROM channel_identities
 WHERE user_id = $1
 ORDER BY created_at DESC;
 
+-- name: SearchChannelIdentities :many
+SELECT
+  ci.id,
+  ci.user_id,
+  ci.channel_type,
+  ci.channel_subject_id,
+  ci.display_name,
+  ci.avatar_url,
+  ci.metadata,
+  ci.created_at,
+  ci.updated_at,
+  u.username AS linked_username,
+  u.display_name AS linked_display_name,
+  u.avatar_url AS linked_avatar_url
+FROM channel_identities ci
+LEFT JOIN users u ON u.id = ci.user_id
+WHERE
+  sqlc.arg(query)::text = ''
+  OR ci.channel_type ILIKE '%' || sqlc.arg(query)::text || '%'
+  OR ci.channel_subject_id ILIKE '%' || sqlc.arg(query)::text || '%'
+  OR COALESCE(ci.display_name, '') ILIKE '%' || sqlc.arg(query)::text || '%'
+  OR COALESCE(u.username, '') ILIKE '%' || sqlc.arg(query)::text || '%'
+  OR COALESCE(u.display_name, '') ILIKE '%' || sqlc.arg(query)::text || '%'
+ORDER BY ci.updated_at DESC
+LIMIT sqlc.arg(limit_count);
+
 -- name: SetChannelIdentityLinkedUser :one
 UPDATE channel_identities
 SET user_id = $2, updated_at = now()

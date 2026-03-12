@@ -19,7 +19,6 @@ type Bot struct {
 	MaxContextLoadTime int32              `json:"max_context_load_time"`
 	MaxContextTokens   int32              `json:"max_context_tokens"`
 	Language           string             `json:"language"`
-	AllowGuest         bool               `json:"allow_guest"`
 	ReasoningEnabled   bool               `json:"reasoning_enabled"`
 	ReasoningEffort    string             `json:"reasoning_effort"`
 	MaxInboxItems      int32              `json:"max_inbox_items"`
@@ -35,6 +34,19 @@ type Bot struct {
 	Metadata           []byte             `json:"metadata"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BotAclRule struct {
+	ID                pgtype.UUID        `json:"id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	Action            string             `json:"action"`
+	Effect            string             `json:"effect"`
+	SubjectKind       string             `json:"subject_kind"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	ChannelIdentityID pgtype.UUID        `json:"channel_identity_id"`
+	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotChannelConfig struct {
@@ -127,23 +139,6 @@ type BotInbox struct {
 	IsRead    bool               `json:"is_read"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	ReadAt    pgtype.Timestamptz `json:"read_at"`
-}
-
-type BotMember struct {
-	BotID     pgtype.UUID        `json:"bot_id"`
-	UserID    pgtype.UUID        `json:"user_id"`
-	Role      string             `json:"role"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-type BotPreauthKey struct {
-	ID             pgtype.UUID        `json:"id"`
-	BotID          pgtype.UUID        `json:"bot_id"`
-	Token          string             `json:"token"`
-	IssuedByUserID pgtype.UUID        `json:"issued_by_user_id"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
-	UsedAt         pgtype.Timestamptz `json:"used_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type BotStorageBinding struct {

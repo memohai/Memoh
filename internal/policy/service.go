@@ -7,35 +7,31 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/settings"
 )
 
 type Decision struct {
-	BotID      string
-	BotType    string
-	AllowGuest bool
+	BotID   string
+	BotType string
 }
 
 type Service struct {
-	bots     *bots.Service
-	settings *settings.Service
-	logger   *slog.Logger
+	bots   *bots.Service
+	logger *slog.Logger
 }
 
-func NewService(log *slog.Logger, botsService *bots.Service, settingsService *settings.Service) *Service {
+func NewService(log *slog.Logger, botsService *bots.Service) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Service{
-		bots:     botsService,
-		settings: settingsService,
-		logger:   log.With(slog.String("service", "policy")),
+		bots:   botsService,
+		logger: log.With(slog.String("service", "policy")),
 	}
 }
 
 // Resolve evaluates the full access policy for a bot.
 func (s *Service) Resolve(ctx context.Context, botID string) (Decision, error) {
-	if s == nil || s.bots == nil || s.settings == nil {
+	if s == nil || s.bots == nil {
 		return Decision{}, errors.New("policy service not configured")
 	}
 	botID = strings.TrimSpace(botID)
@@ -46,28 +42,11 @@ func (s *Service) Resolve(ctx context.Context, botID string) (Decision, error) {
 	if err != nil {
 		return Decision{}, err
 	}
-	botSettings, err := s.settings.GetBot(ctx, botID)
-	if err != nil {
-		return Decision{}, err
-	}
 	decision := Decision{
-		BotID:      botID,
-		BotType:    strings.TrimSpace(bot.Type),
-		AllowGuest: botSettings.AllowGuest,
-	}
-	if decision.BotType == bots.BotTypePersonal {
-		decision.AllowGuest = false
+		BotID:   botID,
+		BotType: strings.TrimSpace(bot.Type),
 	}
 	return decision, nil
-}
-
-// AllowGuest checks if the bot allows guest access. Implements router.PolicyService.
-func (s *Service) AllowGuest(ctx context.Context, botID string) (bool, error) {
-	decision, err := s.Resolve(ctx, botID)
-	if err != nil {
-		return false, err
-	}
-	return decision.AllowGuest, nil
 }
 
 // BotType returns the normalized bot type. Implements router.PolicyService.

@@ -21,6 +21,7 @@ import (
 
 	dbembed "github.com/memohai/memoh/db"
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
@@ -79,7 +80,6 @@ import (
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/preauth"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
@@ -168,12 +168,12 @@ func runServe() {
 			models.NewService,
 			bots.NewService,
 			accounts.NewService,
+			acl.NewService,
 			settings.NewService,
 			providers.NewService,
 			searchproviders.NewService,
 			browsercontexts.NewService,
 			policy.NewService,
-			preauth.NewService,
 			mcp.NewConnectionService,
 			subagent.NewService,
 			conversation.NewService,
@@ -231,7 +231,7 @@ func runServe() {
 			provideServerHandler(handlers.NewSearchProvidersHandler),
 			provideServerHandler(handlers.NewModelsHandler),
 			provideServerHandler(handlers.NewSettingsHandler),
-			provideServerHandler(handlers.NewPreauthHandler),
+			provideServerHandler(handlers.NewACLHandler),
 			provideServerHandler(handlers.NewBindHandler),
 			provideServerHandler(handlers.NewScheduleHandler),
 			provideServerHandler(handlers.NewHeartbeatHandler),
@@ -446,8 +446,8 @@ func provideChannelRouter(
 	resolver *flow.Resolver,
 	identityService *identities.Service,
 	botService *bots.Service,
+	aclService *acl.Service,
 	policyService *policy.Service,
-	preauthService *preauth.Service,
 	bindService *bind.Service,
 	mediaService *media.Service,
 	inboxService *inbox.Service,
@@ -480,7 +480,8 @@ func provideChannelRouter(
 	qqAdapter.SetChannelIdentityResolver(identityService)
 	qqAdapter.SetRouteResolver(routeService)
 
-	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, botService, policyService, preauthService, bindService, rc.JwtSecret, 5*time.Minute)
+	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, policyService, bindService, rc.JwtSecret, 5*time.Minute)
+	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
 	processor.SetInboxService(inboxService)

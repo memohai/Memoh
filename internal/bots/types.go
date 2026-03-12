@@ -13,21 +13,12 @@ type Bot struct {
 	DisplayName     string         `json:"display_name"`
 	AvatarURL       string         `json:"avatar_url,omitempty"`
 	IsActive        bool           `json:"is_active"`
-	AllowGuest      bool           `json:"allow_guest"`
 	Status          string         `json:"status"`
 	CheckState      string         `json:"check_state"`
 	CheckIssueCount int32          `json:"check_issue_count"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
-}
-
-// BotMember represents a bot membership record.
-type BotMember struct {
-	BotID     string    `json:"bot_id"`
-	UserID    string    `json:"user_id"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
 }
 
 // BotCheck represents one resource check row for a bot.
@@ -64,20 +55,9 @@ type TransferBotRequest struct {
 	OwnerUserID string `json:"owner_user_id"`
 }
 
-// UpsertMemberRequest is the input for upserting a bot member.
-type UpsertMemberRequest struct {
-	UserID string `json:"user_id"`
-	Role   string `json:"role,omitempty"`
-}
-
 // ListBotsResponse wraps a list of bots.
 type ListBotsResponse struct {
 	Items []Bot `json:"items"`
-}
-
-// ListMembersResponse wraps a list of bot members.
-type ListMembersResponse struct {
-	Items []BotMember `json:"items"`
 }
 
 // ListChecksResponse wraps a list of bot checks.
@@ -129,10 +109,4 @@ const (
 	BotCheckTypeDelete          = "bot.delete"
 	BotCheckTypeMCPConnection   = "mcp.connection"
 	BotCheckTypeChannelConn     = "channel.connection"
-)
-
-const (
-	MemberRoleOwner  = "owner"
-	MemberRoleAdmin  = "admin"
-	MemberRoleMember = "member"
 )

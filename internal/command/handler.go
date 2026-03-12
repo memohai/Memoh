@@ -32,11 +32,14 @@ type BotMemberRoleAdapter struct {
 }
 
 func (a *BotMemberRoleAdapter) GetMemberRole(ctx context.Context, botID, channelIdentityID string) (string, error) {
-	member, err := a.BotService.GetMember(ctx, botID, channelIdentityID)
+	bot, err := a.BotService.Get(ctx, botID)
 	if err != nil {
 		return "", err
 	}
-	return member.Role, nil
+	if bot.OwnerUserID == channelIdentityID {
+		return "owner", nil
+	}
+	return "", nil
 }
 
 // Handler processes slash commands intercepted before they reach the LLM.
@@ -187,7 +190,7 @@ func (h *Handler) Execute(ctx context.Context, botID, channelIdentityID, text st
 		return fmt.Sprintf("Unknown action \"%s\" for /%s.\n\n%s", parsed.Action, parsed.Resource, group.Usage()), nil
 	}
 
-	if sub.IsWrite && role != bots.MemberRoleOwner {
+	if sub.IsWrite && role != "owner" {
 		return "Permission denied: only the bot owner can execute this command.", nil
 	}
 

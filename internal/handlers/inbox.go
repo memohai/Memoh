@@ -252,7 +252,7 @@ func (h *InboxHandler) Count(c echo.Context) error {
 }
 
 func (h *InboxHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{})
 }
 
 func parseIntOr(s string, fallback int) int {

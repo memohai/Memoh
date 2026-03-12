@@ -115,5 +115,5 @@ func (*HeartbeatHandler) requireUserID(c echo.Context) (string, error) {
 }
 
 func (h *HeartbeatHandler) authorizeBotAccess(ctx context.Context, userID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.accountService, userID, botID, bots.AccessPolicy{AllowPublicMember: false})
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, userID, botID, bots.AccessPolicy{})
 }

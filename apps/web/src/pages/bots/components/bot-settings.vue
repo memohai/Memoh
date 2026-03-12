@@ -258,18 +258,6 @@
       </div>
     </template>
 
-    <!-- Allow Guest: only for public bot -->
-    <template v-if="isPublicBot">
-      <div class="flex items-center justify-between">
-        <Label>{{ $t('bots.settings.allowGuest') }}</Label>
-        <Switch
-          :model-value="form.allow_guest"
-          @update:model-value="(val) => form.allow_guest = !!val"
-        />
-      </div>
-      <Separator />
-    </template>
-
     <!-- Save -->
     <div class="flex justify-end">
       <Button
@@ -351,8 +339,6 @@ const props = defineProps<{
   botId: string
   botType?: string
 }>()
-
-const isPublicBot = computed(() => props.botType === 'public')
 
 const { t } = useI18n()
 const router = useRouter()
@@ -567,7 +553,6 @@ const form = reactive({
   max_context_load_time: 0,
   max_context_tokens: 0,
   language: '',
-  allow_guest: false,
   reasoning_enabled: false,
   reasoning_effort: 'medium',
 })
@@ -582,7 +567,6 @@ watch(settings, (val) => {
     form.max_context_load_time = val.max_context_load_time ?? 0
     form.max_context_tokens = val.max_context_tokens ?? 0
     form.language = val.language ?? ''
-    form.allow_guest = val.allow_guest ?? false
     form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
   }
@@ -602,9 +586,6 @@ const hasChanges = computed(() => {
     || form.language !== (s.language ?? '')
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')
-  if (isPublicBot.value) {
-    changed = changed || form.allow_guest !== (s.allow_guest ?? false)
-  }
   return changed
 })
 

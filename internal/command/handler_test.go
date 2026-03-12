@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/schedule"
@@ -78,7 +77,7 @@ func TestIsCommand(t *testing.T) {
 
 func TestExecute_Help(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: bots.MemberRoleOwner})
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/help")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -93,7 +92,7 @@ func TestExecute_Help(t *testing.T) {
 
 func TestExecute_UnknownCommand(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: bots.MemberRoleOwner})
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/foobar")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -105,7 +104,7 @@ func TestExecute_UnknownCommand(t *testing.T) {
 
 func TestExecute_WithMentionPrefix(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: bots.MemberRoleOwner})
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "@BotName /help")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -117,7 +116,7 @@ func TestExecute_WithMentionPrefix(t *testing.T) {
 
 func TestExecute_TelegramBotSuffix(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: bots.MemberRoleOwner})
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/help@MemohBot")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -129,7 +128,7 @@ func TestExecute_TelegramBotSuffix(t *testing.T) {
 
 func TestExecute_UnknownAction(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: bots.MemberRoleOwner})
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/subagent foobar")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -144,7 +143,7 @@ func TestExecute_UnknownAction(t *testing.T) {
 
 func TestExecute_WritePermissionDenied(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: bots.MemberRoleMember})
+	h := newTestHandler(&fakeRoleResolver{role: ""})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/subagent create test desc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -156,7 +155,7 @@ func TestExecute_WritePermissionDenied(t *testing.T) {
 
 func TestExecute_WritePermissionAllowedForOwner(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: bots.MemberRoleOwner})
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/subagent create")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -171,7 +170,7 @@ func TestExecute_WritePermissionAllowedForOwner(t *testing.T) {
 
 func TestExecute_SettingsDefaultAction(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: bots.MemberRoleMember})
+	h := newTestHandler(&fakeRoleResolver{role: ""})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/settings")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -183,7 +182,7 @@ func TestExecute_SettingsDefaultAction(t *testing.T) {
 
 func TestExecute_MissingArgs(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: bots.MemberRoleOwner})
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
 	tests := []struct {
 		cmd      string
 		contains string
@@ -301,7 +300,7 @@ func TestUsage_OwnerTag(t *testing.T) {
 // Verify new commands with nil services return graceful errors, not panics.
 func TestNewCommands_NilServices(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: bots.MemberRoleOwner})
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
 	cmds := []string{
 		"/skill list",
 		"/fs list",

@@ -85,7 +85,7 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID, bots.AccessPolicy{AllowPublicMember: false}); err != nil {
+	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID, bots.AccessPolicy{}); err != nil {
 		return err
 	}
 
