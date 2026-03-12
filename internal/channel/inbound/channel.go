@@ -208,8 +208,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	identity := state.Identity
 
 	// Intercept slash commands before they reach the LLM.
-	if p.commandHandler != nil && p.commandHandler.IsCommand(text) {
-		reply, err := p.commandHandler.Execute(ctx, strings.TrimSpace(identity.BotID), strings.TrimSpace(identity.ChannelIdentityID), text)
+	// Use raw_text (without prepended quote/forward context) so that
+	// quoted content like "[Reply to Bot: /fs list]\n hello" doesn't
+	// accidentally match a command.
+	// In group chats, only process if the message is directed at this bot
+	// (via @mention or reply) to avoid all bots responding to the same command.
+	cmdText := rawTextForCommand(msg, text)
+	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && isDirectedAtBot(msg) {
+		reply, err := p.commandHandler.Execute(ctx, strings.TrimSpace(identity.BotID), strings.TrimSpace(identity.ChannelIdentityID), cmdText)
 		if err != nil {
 			reply = "Error: " + err.Error()
 		}
@@ -594,65 +600,34 @@ func shouldTriggerAssistantResponse(msg channel.InboundMessage) bool {
 	if metadataBool(msg.Metadata, "is_reply_to_bot") {
 		return true
 	}
-	return hasCommandPrefix(msg.Message.PlainText(), msg.Metadata)
+	return false
+}
+
+// isDirectedAtBot reports whether the message is explicitly directed at this bot,
+// either because it's a direct conversation, the bot is @mentioned, or it's a reply
+// to this bot's message.
+func isDirectedAtBot(msg channel.InboundMessage) bool {
+	if isDirectConversationType(msg.Conversation.Type) {
+		return true
+	}
+	return metadataBool(msg.Metadata, "is_mentioned") || metadataBool(msg.Metadata, "is_reply_to_bot")
+}
+
+// rawTextForCommand returns the original user text (without prepended
+// quote/forward context) for slash-command detection. Adapters store the
+// undecorated text as metadata["raw_text"]; this helper falls back to the
+// full decorated text when the key is absent (e.g. direct messages or
+// adapters that don't prepend context).
+func rawTextForCommand(msg channel.InboundMessage, fallback string) string {
+	if raw, ok := msg.Metadata["raw_text"].(string); ok && strings.TrimSpace(raw) != "" {
+		return raw
+	}
+	return fallback
 }
 
 func isDirectConversationType(conversationType string) bool {
 	ct := strings.ToLower(strings.TrimSpace(conversationType))
 	return ct == "" || ct == "p2p" || ct == "private" || ct == "direct"
-}
-
-func hasCommandPrefix(text string, metadata map[string]any) bool {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return false
-	}
-	prefixes := []string{"/"}
-	if metadata != nil {
-		if raw, ok := metadata["command_prefix"]; ok {
-			if value := strings.TrimSpace(fmt.Sprint(raw)); value != "" {
-				prefixes = []string{value}
-			}
-		}
-		if raw, ok := metadata["command_prefixes"]; ok {
-			if parsed := parseCommandPrefixes(raw); len(parsed) > 0 {
-				prefixes = parsed
-			}
-		}
-	}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(trimmed, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func parseCommandPrefixes(raw any) []string {
-	if items, ok := raw.([]string); ok {
-		result := make([]string, 0, len(items))
-		for _, item := range items {
-			value := strings.TrimSpace(item)
-			if value == "" {
-				continue
-			}
-			result = append(result, value)
-		}
-		return result
-	}
-	items, ok := raw.([]any)
-	if !ok {
-		return nil
-	}
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		value := strings.TrimSpace(fmt.Sprint(item))
-		if value == "" {
-			continue
-		}
-		result = append(result, value)
-	}
-	return result
 }
 
 func metadataBool(metadata map[string]any, key string) bool {

@@ -104,6 +104,12 @@ func (a *FeishuAdapter) enrichQuotedMessage(ctx context.Context, cfg channel.Cha
 	}
 
 	current := strings.TrimSpace(msg.Message.Text)
+	if msg.Metadata == nil {
+		msg.Metadata = map[string]any{}
+	}
+	if _, exists := msg.Metadata["raw_text"]; !exists {
+		msg.Metadata["raw_text"] = current
+	}
 	if current != "" {
 		msg.Message.Text = quotedText + "\n" + current
 	} else {

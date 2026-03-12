@@ -48,18 +48,33 @@ func TestIsTelegramBotMentioned(t *testing.T) {
 		}
 	})
 
-	t.Run("entity text mention", func(t *testing.T) {
+	t.Run("entity text mention matching bot", func(t *testing.T) {
 		t.Parallel()
 		msg := &tgbotapi.Message{
 			Entities: []tgbotapi.MessageEntity{
 				{
 					Type: "text_mention",
-					User: &tgbotapi.User{IsBot: true},
+					User: &tgbotapi.User{IsBot: true, UserName: "memohbot"},
 				},
 			},
 		}
-		if !isTelegramBotMentioned(msg, "") {
+		if !isTelegramBotMentioned(msg, "memohbot") {
 			t.Fatalf("expected bot mention from text_mention entity")
+		}
+	})
+
+	t.Run("entity text mention other bot", func(t *testing.T) {
+		t.Parallel()
+		msg := &tgbotapi.Message{
+			Entities: []tgbotapi.MessageEntity{
+				{
+					Type: "text_mention",
+					User: &tgbotapi.User{IsBot: true, UserName: "otherbot"},
+				},
+			},
+		}
+		if isTelegramBotMentioned(msg, "memohbot") {
+			t.Fatalf("expected no mention for different bot")
 		}
 	})
 

@@ -493,6 +493,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	if text == "" && len(attachments) == 0 {
 		return channel.InboundMessage{}, false
 	}
+	rawText := text
 	// Prepend quoted message context so the AI can see what is being replied to,
 	// and include quoted attachments so the LLM can see the actual media.
 	if raw.ReplyToMessage != nil {
@@ -530,6 +531,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	meta := map[string]any{
 		"is_mentioned":    isMentioned,
 		"is_reply_to_bot": isReplyToBot,
+		"raw_text":        rawText,
 	}
 	for key, value := range metadata {
 		meta[key] = value
@@ -1270,7 +1272,9 @@ func isTelegramBotMentioned(msg *tgbotapi.Message, botUsername string) bool {
 	entities = append(entities, msg.CaptionEntities...)
 	for _, entity := range entities {
 		if entity.Type == "text_mention" && entity.User != nil && entity.User.IsBot {
-			return true
+			if normalizedBot != "" && strings.EqualFold(entity.User.UserName, normalizedBot) {
+				return true
+			}
 		}
 	}
 	return false

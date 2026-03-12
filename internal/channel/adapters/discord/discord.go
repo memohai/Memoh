@@ -167,6 +167,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 			return
 		}
 
+		rawText := text
 		attachments := a.collectAttachments(m.Message)
 		chatType := "direct"
 		if m.GuildID != "" {
@@ -223,6 +224,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 				"guild_id":        m.GuildID,
 				"is_mentioned":    isMentioned,
 				"is_reply_to_bot": isReplyToBot,
+				"raw_text":        rawText,
 			},
 		}
 
