@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -85,7 +86,7 @@ func (h *ACLHandler) UpsertWhitelist(c echo.Context) error {
 	}
 	item, err := h.service.AddWhitelistEntry(c.Request().Context(), botID, actorID, req)
 	if err != nil {
-		if err == acl.ErrInvalidRuleSubject {
+		if errors.Is(err, acl.ErrInvalidRuleSubject) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -162,7 +163,7 @@ func (h *ACLHandler) UpsertBlacklist(c echo.Context) error {
 	}
 	item, err := h.service.AddBlacklistEntry(c.Request().Context(), botID, actorID, req)
 	if err != nil {
-		if err == acl.ErrInvalidRuleSubject {
+		if errors.Is(err, acl.ErrInvalidRuleSubject) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

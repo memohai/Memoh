@@ -26,7 +26,7 @@ func (f *fakeDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.Co
 	return pgconn.CommandTag{}, nil
 }
 
-func (f *fakeDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (*fakeDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return nil, nil
 }
 
