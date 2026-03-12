@@ -36,7 +36,10 @@
           :disabled="isPersonalBot || !hasGuestAccessChanges || isSavingGuestAccess"
           @click="handleSaveGuestAccess"
         >
-          <Spinner v-if="isSavingGuestAccess" class="mr-1.5" />
+          <Spinner
+            v-if="isSavingGuestAccess"
+            class="mr-1.5"
+          />
           {{ $t('bots.access.saveGuestAccess') }}
         </Button>
       </div>
@@ -86,7 +89,9 @@
                   </AvatarFallback>
                 </Avatar>
                 <div class="min-w-0">
-                  <div class="truncate">{{ option.label }}</div>
+                  <div class="truncate">
+                    {{ option.label }}
+                  </div>
                   <div class="truncate text-xs text-muted-foreground">
                     {{ option.description }}
                   </div>
@@ -122,7 +127,9 @@
                   </AvatarFallback>
                 </Avatar>
                 <div class="min-w-0">
-                  <div class="truncate">{{ option.label }}</div>
+                  <div class="truncate">
+                    {{ option.label }}
+                  </div>
                   <div class="truncate text-xs text-muted-foreground">
                     {{ option.description }}
                   </div>
@@ -137,14 +144,20 @@
       </div>
 
       <div class="flex justify-end gap-2">
-        <Button variant="outline" @click="resetSelection(whitelistSelection)">
+        <Button
+          variant="outline"
+          @click="resetSelection(whitelistSelection)"
+        >
           {{ $t('bots.access.clearSelection') }}
         </Button>
         <Button
           :disabled="isSavingWhitelist"
           @click="handleAddWhitelist"
         >
-          <Spinner v-if="isSavingWhitelist" class="mr-1.5" />
+          <Spinner
+            v-if="isSavingWhitelist"
+            class="mr-1.5"
+          />
           {{ $t('bots.access.addWhitelist') }}
         </Button>
       </div>
@@ -163,7 +176,10 @@
       >
         {{ $t('bots.access.whitelistEmpty') }}
       </div>
-      <div v-else class="space-y-2">
+      <div
+        v-else
+        class="space-y-2"
+      >
         <div
           v-for="item in whitelist"
           :key="item.id"
@@ -242,7 +258,9 @@
                   </AvatarFallback>
                 </Avatar>
                 <div class="min-w-0">
-                  <div class="truncate">{{ option.label }}</div>
+                  <div class="truncate">
+                    {{ option.label }}
+                  </div>
                   <div class="truncate text-xs text-muted-foreground">
                     {{ option.description }}
                   </div>
@@ -278,7 +296,9 @@
                   </AvatarFallback>
                 </Avatar>
                 <div class="min-w-0">
-                  <div class="truncate">{{ option.label }}</div>
+                  <div class="truncate">
+                    {{ option.label }}
+                  </div>
                   <div class="truncate text-xs text-muted-foreground">
                     {{ option.description }}
                   </div>
@@ -293,14 +313,20 @@
       </div>
 
       <div class="flex justify-end gap-2">
-        <Button variant="outline" @click="resetSelection(blacklistSelection)">
+        <Button
+          variant="outline"
+          @click="resetSelection(blacklistSelection)"
+        >
           {{ $t('bots.access.clearSelection') }}
         </Button>
         <Button
           :disabled="isSavingBlacklist"
           @click="handleAddBlacklist"
         >
-          <Spinner v-if="isSavingBlacklist" class="mr-1.5" />
+          <Spinner
+            v-if="isSavingBlacklist"
+            class="mr-1.5"
+          />
           {{ $t('bots.access.addBlacklist') }}
         </Button>
       </div>
@@ -319,7 +345,10 @@
       >
         {{ $t('bots.access.blacklistEmpty') }}
       </div>
-      <div v-else class="space-y-2">
+      <div
+        v-else
+        class="space-y-2"
+      >
         <div
           v-for="item in blacklist"
           :key="item.id"
