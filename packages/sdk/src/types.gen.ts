@@ -74,6 +74,11 @@ export type AdaptersDeleteResponse = {
     message?: string;
 };
 
+export type AdaptersHealthStatus = {
+    error?: string;
+    ok?: boolean;
+};
+
 export type AdaptersMemoryItem = {
     agent_id?: string;
     bot_id?: string;
@@ -91,9 +96,30 @@ export type AdaptersMemoryItem = {
     updated_at?: string;
 };
 
+export type AdaptersMemoryStatusResponse = {
+    can_manual_sync?: boolean;
+    encoder?: AdaptersHealthStatus;
+    indexed_count?: number;
+    markdown_file_count?: number;
+    memory_mode?: string;
+    overview_path?: string;
+    provider_type?: string;
+    qdrant?: AdaptersHealthStatus;
+    qdrant_collection?: string;
+    source_count?: number;
+    source_dir?: string;
+};
+
 export type AdaptersMessage = {
     content?: string;
     role?: string;
+};
+
+export type AdaptersProviderCollectionStatus = {
+    exists?: boolean;
+    name?: string;
+    points?: number;
+    qdrant?: AdaptersHealthStatus;
 };
 
 export type AdaptersProviderConfigSchema = {
@@ -135,6 +161,13 @@ export type AdaptersProviderMeta = {
     config_schema?: AdaptersProviderConfigSchema;
     display_name?: string;
     provider?: string;
+};
+
+export type AdaptersProviderStatusResponse = {
+    collections?: Array<AdaptersProviderCollectionStatus>;
+    embedding_model_id?: string;
+    memory_mode?: string;
+    provider_type?: string;
 };
 
 export type AdaptersProviderType = 'builtin' | 'mem0' | 'openviking';
@@ -4021,6 +4054,10 @@ export type PostBotsByBotIdMemoryRebuildErrors = {
      */
     403: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -4089,6 +4126,52 @@ export type PostBotsByBotIdMemorySearchResponses = {
 };
 
 export type PostBotsByBotIdMemorySearchResponse = PostBotsByBotIdMemorySearchResponses[keyof PostBotsByBotIdMemorySearchResponses];
+
+export type GetBotsByBotIdMemoryStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/memory/status';
+};
+
+export type GetBotsByBotIdMemoryStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdMemoryStatusError = GetBotsByBotIdMemoryStatusErrors[keyof GetBotsByBotIdMemoryStatusErrors];
+
+export type GetBotsByBotIdMemoryStatusResponses = {
+    /**
+     * OK
+     */
+    200: AdaptersMemoryStatusResponse;
+};
+
+export type GetBotsByBotIdMemoryStatusResponse = GetBotsByBotIdMemoryStatusResponses[keyof GetBotsByBotIdMemoryStatusResponses];
 
 export type GetBotsByBotIdMemoryUsageData = {
     body?: never;
@@ -6553,6 +6636,44 @@ export type PutMemoryProvidersByIdResponses = {
 };
 
 export type PutMemoryProvidersByIdResponse = PutMemoryProvidersByIdResponses[keyof PutMemoryProvidersByIdResponses];
+
+export type GetMemoryProvidersByIdStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/memory-providers/{id}/status';
+};
+
+export type GetMemoryProvidersByIdStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetMemoryProvidersByIdStatusError = GetMemoryProvidersByIdStatusErrors[keyof GetMemoryProvidersByIdStatusErrors];
+
+export type GetMemoryProvidersByIdStatusResponses = {
+    /**
+     * OK
+     */
+    200: AdaptersProviderStatusResponse;
+};
+
+export type GetMemoryProvidersByIdStatusResponse = GetMemoryProvidersByIdStatusResponses[keyof GetMemoryProvidersByIdStatusResponses];
 
 export type GetModelsData = {
     body?: never;

@@ -28,6 +28,7 @@ func (h *MemoryProvidersHandler) Register(e *echo.Echo) {
 	group.POST("", h.Create)
 	group.GET("", h.List)
 	group.GET("/:id", h.Get)
+	group.GET("/:id/status", h.Status)
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
 }
@@ -103,6 +104,29 @@ func (h *MemoryProvidersHandler) Get(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
 	resp, err := h.service.Get(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+// Status godoc
+// @Summary Get memory provider status
+// @Description Get runtime status data for a memory provider
+// @Tags memory-providers
+// @Produce json
+// @Param id path string true "Provider ID"
+// @Success 200 {object} adapters.ProviderStatusResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /memory-providers/{id}/status [get].
+func (h *MemoryProvidersHandler) Status(c echo.Context) error {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	}
+	resp, err := h.service.Status(c.Request().Context(), id)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}

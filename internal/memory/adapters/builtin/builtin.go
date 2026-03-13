@@ -46,6 +46,9 @@ type memoryRuntime interface {
 	DeleteAll(ctx context.Context, req adapters.DeleteAllRequest) (adapters.DeleteResponse, error)
 	Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (adapters.CompactResult, error)
 	Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error)
+	Mode() string
+	Status(ctx context.Context, botID string) (adapters.MemoryStatusResponse, error)
+	Rebuild(ctx context.Context, botID string) (adapters.RebuildResult, error)
 }
 
 // AdminChecker checks whether a channel identity has admin privileges.
@@ -162,9 +165,11 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterCha
 		"scopeId":   botID,
 		"bot_id":    botID,
 	}
+	metadata := adapters.BuildProfileMetadata(req.UserID, req.ChannelIdentityID, req.DisplayName)
 	if _, err := p.service.Add(ctx, adapters.AddRequest{
 		Messages: req.Messages,
 		BotID:    botID,
+		Metadata: metadata,
 		Filters:  filters,
 	}); err != nil {
 		p.logger.Warn("store memory failed", slog.String("bot_id", botID), slog.Any("error", err))
@@ -375,4 +380,18 @@ func (p *BuiltinProvider) Usage(ctx context.Context, filters map[string]any) (ad
 		return adapters.UsageResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Usage(ctx, filters)
+}
+
+func (p *BuiltinProvider) Status(ctx context.Context, botID string) (adapters.MemoryStatusResponse, error) {
+	if p.service == nil {
+		return adapters.MemoryStatusResponse{}, errors.New("memory runtime not configured")
+	}
+	return p.service.Status(ctx, botID)
+}
+
+func (p *BuiltinProvider) Rebuild(ctx context.Context, botID string) (adapters.RebuildResult, error) {
+	if p.service == nil {
+		return adapters.RebuildResult{}, errors.New("memory runtime not configured")
+	}
+	return p.service.Rebuild(ctx, botID)
 }

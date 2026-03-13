@@ -79,6 +79,29 @@ func (c *Client) EncodeDocuments(ctx context.Context, texts []string) ([]SparseV
 	return vectors, nil
 }
 
+func (c *Client) Health(ctx context.Context) error {
+	endpoint, err := joinEndpointURL(c.baseURL, "/health")
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req) //nolint:gosec // G704: URL is validated and derived from operator-configured sparse encoder base URL
+	if err != nil {
+		return fmt.Errorf("sparse health check failed: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("sparse health error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
 func (c *Client) encode(ctx context.Context, path, text string) (*SparseVector, error) {
 	body, err := json.Marshal(map[string]string{"text": text})
 	if err != nil {

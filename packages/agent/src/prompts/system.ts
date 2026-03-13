@@ -131,20 +131,26 @@ Use ${quote('search_memory')} to recall earlier conversations beyond the current
 
 ### Memory Write Rules (IMPORTANT)
 
-For ${quote('memory/YYYY-MM-DD.md')}, use ${quote('write')} with structured JSON:
+For ${quote('memory/YYYY-MM-DD.md')}, use canonical markdown entries:
 
 ${block([
-  '[',
-  '  {',
-  '    "topic": "like Events, Notes, etc.",',
-  '    "memory": "What happened / what to remember",',
-  '  }',
-  ']',
+  '## Entry mem_20260313_001',
+  '',
+  '```yaml',
+  'id: mem_20260313_001',
+  'created_at: 2026-03-13T13:34:49Z',
+  'updated_at: 2026-03-13T13:34:49Z',
+  'metadata:',
+  '  topic: Notes',
+  '```',
+  '',
+  'What happened / what to remember',
 ].join('\n'))}
 
 Rules:
 - Only send NEW memory items (do not re-write old content).
-- Do not invent markdown format for daily memory files.
+- Preserve the canonical entry structure for daily memory files.
+- When a memory is about a known user or group from ${quote('PROFILES.md')}, include a stable profile link in ${quote('metadata')} (for example ${quote('profile_ref')}, plus identity fields when available).
 - Do not provide ${quote('hash')} (backend generates it).
 - If plain text is unavoidable, write concise factual notes only.
 - ${quote('MEMORY.md')} stays human-readable markdown (not JSON).

@@ -42,6 +42,9 @@ base_url = "http://qdrant:6334"
 api_key = ""
 timeout_seconds = 10
 
+[sparse]
+base_url = "http://sparse:8085"
+
 [agent_gateway]
 host = "agent"
 port = 8081

@@ -3,31 +3,41 @@ package mem0
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"path"
 	"sort"
 	"strings"
 
+	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/mcp"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
 const (
 	Mem0Type = "mem0"
 
 	mem0ToolSearchMemory = "search_memory"
-	mem0DefaultLimit     = 10
+	mem0DefaultLimit     = 8
 	mem0MaxLimit         = 50
 	mem0ContextMaxItems  = 8
 	mem0ContextMaxChars  = 220
+
+	mem0SyncMetadataKeySourceEntryID = "source_entry_id"
+	mem0SyncMetadataKeySourceHash    = "source_hash"
+	mem0SyncMetadataKeySourceBotID   = "source_bot_id"
+	mem0SyncMetadataKeySourceManaged = "source_managed"
 )
 
-// Mem0Provider implements adapters.Provider by delegating to a Mem0 API (self-hosted or SaaS).
+// Mem0Provider implements adapters.Provider by delegating to the Mem0 SaaS API.
 type Mem0Provider struct {
 	client *mem0Client
 	logger *slog.Logger
+	store  *storefs.Service
 }
 
-func NewMem0Provider(log *slog.Logger, config map[string]any) (*Mem0Provider, error) {
+func NewMem0Provider(log *slog.Logger, config map[string]any, store *storefs.Service) (*Mem0Provider, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -38,6 +48,7 @@ func NewMem0Provider(log *slog.Logger, config map[string]any) (*Mem0Provider, er
 	return &Mem0Provider{
 		client: c,
 		logger: log.With(slog.String("provider", Mem0Type)),
+		store:  store,
 	}, nil
 }
 
@@ -51,11 +62,7 @@ func (p *Mem0Provider) OnBeforeChat(ctx context.Context, req adapters.BeforeChat
 	if query == "" || botID == "" {
 		return nil, nil
 	}
-	memories, err := p.client.Search(ctx, mem0SearchRequest{
-		Query:   query,
-		AgentID: botID,
-		Limit:   mem0ContextMaxItems,
-	})
+	memories, err := p.searchMemories(ctx, query, botID, mem0ContextMaxItems)
 	if err != nil {
 		p.logger.Warn("mem0 search for context failed", slog.Any("error", err))
 		return nil, nil
@@ -147,11 +154,7 @@ func (p *Mem0Provider) CallTool(ctx context.Context, session mcp.ToolSessionCont
 		limit = mem0MaxLimit
 	}
 
-	memories, err := p.client.Search(ctx, mem0SearchRequest{
-		Query:   query,
-		AgentID: botID,
-		Limit:   limit,
-	})
+	memories, err := p.searchMemories(ctx, query, botID, limit)
 	if err != nil {
 		return mcp.BuildToolErrorResult("memory search failed"), nil
 	}
@@ -161,6 +164,7 @@ func (p *Mem0Provider) CallTool(ctx context.Context, session mcp.ToolSessionCont
 		results = append(results, map[string]any{
 			"id":     mem.ID,
 			"memory": mem.Memory,
+			"score":  mem.Score,
 		})
 	}
 	return mcp.BuildToolSuccessResult(map[string]any{
@@ -173,13 +177,14 @@ func (p *Mem0Provider) CallTool(ctx context.Context, session mcp.ToolSessionCont
 // --- CRUD ---
 
 func (p *Mem0Provider) Add(ctx context.Context, req adapters.AddRequest) (adapters.SearchResponse, error) {
-	botID := strings.TrimSpace(req.BotID)
-	if botID == "" {
-		return adapters.SearchResponse{}, errors.New("bot_id is required")
+	agentID := mem0ScopeID(req.BotID, req.AgentID)
+	if agentID == "" {
+		return adapters.SearchResponse{}, errors.New("bot_id or agent_id is required")
 	}
 	addReq := mem0AddRequest{
-		AgentID: botID,
+		AgentID: agentID,
 		RunID:   req.RunID,
+		Infer:   req.Infer,
 	}
 	if req.Message != "" {
 		addReq.Messages = []adapters.Message{{Role: "user", Content: req.Message}}
@@ -197,9 +202,9 @@ func (p *Mem0Provider) Add(ctx context.Context, req adapters.AddRequest) (adapte
 }
 
 func (p *Mem0Provider) Search(ctx context.Context, req adapters.SearchRequest) (adapters.SearchResponse, error) {
-	botID := strings.TrimSpace(req.BotID)
-	if botID == "" {
-		return adapters.SearchResponse{}, errors.New("bot_id is required")
+	agentID := mem0ScopeID(req.BotID, req.AgentID)
+	if agentID == "" {
+		return adapters.SearchResponse{}, errors.New("bot_id or agent_id is required")
 	}
 	limit := req.Limit
 	if limit <= 0 {
@@ -209,22 +214,29 @@ func (p *Mem0Provider) Search(ctx context.Context, req adapters.SearchRequest) (
 	}
 	memories, err := p.client.Search(ctx, mem0SearchRequest{
 		Query:   req.Query,
-		AgentID: botID,
-		RunID:   req.RunID,
-		Limit:   limit,
+		TopK:    limit,
+		Filters: mem0AgentFilter(agentID, req.RunID),
 	})
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
-	return adapters.SearchResponse{Results: mem0ToItems(memories)}, nil
+	items := mem0ToItems(memories)
+	sort.Slice(items, func(i, j int) bool { return items[i].Score > items[j].Score })
+	return adapters.SearchResponse{Results: adapters.DeduplicateItems(items)}, nil
 }
 
 func (p *Mem0Provider) GetAll(ctx context.Context, req adapters.GetAllRequest) (adapters.SearchResponse, error) {
-	botID := strings.TrimSpace(req.BotID)
-	if botID == "" {
-		return adapters.SearchResponse{}, errors.New("bot_id is required")
+	agentID := mem0ScopeID(req.BotID, req.AgentID)
+	if agentID == "" {
+		return adapters.SearchResponse{}, errors.New("bot_id or agent_id is required")
 	}
-	memories, err := p.client.GetAll(ctx, botID, req.Limit)
+	getReq := mem0GetAllRequest{
+		Filters: mem0AgentFilter(agentID, req.RunID),
+	}
+	if req.Limit > 0 {
+		getReq.PageSize = req.Limit
+	}
+	memories, err := p.client.GetAll(ctx, getReq)
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
@@ -238,7 +250,7 @@ func (p *Mem0Provider) Update(ctx context.Context, req adapters.UpdateRequest) (
 	if memoryID == "" {
 		return adapters.MemoryItem{}, errors.New("memory_id is required")
 	}
-	mem, err := p.client.Update(ctx, memoryID, req.Memory)
+	mem, err := p.client.Update(ctx, memoryID, req.Memory, nil)
 	if err != nil {
 		return adapters.MemoryItem{}, err
 	}
@@ -253,20 +265,18 @@ func (p *Mem0Provider) Delete(ctx context.Context, memoryID string) (adapters.De
 }
 
 func (p *Mem0Provider) DeleteBatch(ctx context.Context, memoryIDs []string) (adapters.DeleteResponse, error) {
-	for _, id := range memoryIDs {
-		if err := p.client.Delete(ctx, strings.TrimSpace(id)); err != nil {
-			return adapters.DeleteResponse{}, err
-		}
+	if err := p.client.BatchDelete(ctx, memoryIDs); err != nil {
+		return adapters.DeleteResponse{}, err
 	}
 	return adapters.DeleteResponse{Message: "Memories deleted successfully"}, nil
 }
 
 func (p *Mem0Provider) DeleteAll(ctx context.Context, req adapters.DeleteAllRequest) (adapters.DeleteResponse, error) {
-	botID := strings.TrimSpace(req.BotID)
-	if botID == "" {
-		return adapters.DeleteResponse{}, errors.New("bot_id is required")
+	agentID := mem0ScopeID(req.BotID, req.AgentID)
+	if agentID == "" {
+		return adapters.DeleteResponse{}, errors.New("bot_id or agent_id is required")
 	}
-	if err := p.client.DeleteAll(ctx, botID); err != nil {
+	if err := p.client.DeleteAll(ctx, agentID); err != nil {
 		return adapters.DeleteResponse{}, err
 	}
 	return adapters.DeleteResponse{Message: "All memories deleted"}, nil
@@ -280,6 +290,48 @@ func (*Mem0Provider) Compact(_ context.Context, _ map[string]any, _ float64, _ i
 
 func (*Mem0Provider) Usage(_ context.Context, _ map[string]any) (adapters.UsageResponse, error) {
 	return adapters.UsageResponse{}, errors.New("usage is not supported by mem0 provider")
+}
+
+func (p *Mem0Provider) Status(ctx context.Context, botID string) (adapters.MemoryStatusResponse, error) {
+	status := adapters.MemoryStatusResponse{
+		ProviderType:  Mem0Type,
+		CanManualSync: p.store != nil,
+		SourceDir:     path.Join(config.DefaultDataMount, "memory"),
+		OverviewPath:  path.Join(config.DefaultDataMount, "MEMORY.md"),
+	}
+	if p.store == nil {
+		return status, nil
+	}
+	fileCount, err := p.store.CountMemoryFiles(ctx, botID)
+	if err != nil {
+		return adapters.MemoryStatusResponse{}, err
+	}
+	items, err := p.store.ReadAllMemoryFiles(ctx, botID)
+	if err != nil {
+		return adapters.MemoryStatusResponse{}, err
+	}
+	status.MarkdownFileCount = fileCount
+	status.SourceCount = len(mem0CanonicalStoreItems(items))
+	remote, err := p.client.ListAllByAgent(ctx, strings.TrimSpace(botID))
+	if err != nil {
+		return adapters.MemoryStatusResponse{}, err
+	}
+	status.IndexedCount = len(remote)
+	return status, nil
+}
+
+func (p *Mem0Provider) Rebuild(ctx context.Context, botID string) (adapters.RebuildResult, error) {
+	if p.store == nil {
+		return adapters.RebuildResult{}, errors.New("memory filesystem not configured")
+	}
+	items, err := p.store.ReadAllMemoryFiles(ctx, botID)
+	if err != nil {
+		return adapters.RebuildResult{}, err
+	}
+	if err := p.store.SyncOverview(ctx, botID); err != nil {
+		return adapters.RebuildResult{}, err
+	}
+	return p.syncSourceItems(ctx, strings.TrimSpace(botID), items)
 }
 
 // --- helpers ---
@@ -299,6 +351,196 @@ func mem0ToItem(m mem0Memory) adapters.MemoryItem {
 		Hash:      m.Hash,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
+		Score:     m.Score,
 		Metadata:  m.Metadata,
+		BotID:     m.AgentID,
+		AgentID:   m.AgentID,
+		RunID:     m.RunID,
 	}
+}
+
+func (p *Mem0Provider) syncSourceItems(ctx context.Context, botID string, items []storefs.MemoryItem) (adapters.RebuildResult, error) {
+	canonical := mem0CanonicalStoreItems(items)
+	existing, err := p.client.ListAllByAgent(ctx, botID)
+	if err != nil {
+		return adapters.RebuildResult{}, err
+	}
+	existingBySource := make(map[string]mem0Memory, len(existing))
+	for _, memory := range existing {
+		sourceID := mem0SourceEntryID(memory.Metadata)
+		if sourceID == "" {
+			continue
+		}
+		existingBySource[sourceID] = memory
+	}
+	sourceIDs := make(map[string]struct{}, len(canonical))
+	missingCount := 0
+	restoredCount := 0
+	for _, item := range canonical {
+		sourceIDs[item.ID] = struct{}{}
+		metadata := mem0SourceMetadata(botID, item)
+		existingMemory, ok := existingBySource[item.ID]
+		if !ok {
+			missingCount++
+			restoredCount++
+			if _, err := p.client.Add(ctx, mem0AddRequest{
+				Messages:  []adapters.Message{{Role: "system", Content: item.Memory}},
+				AgentID:   botID,
+				RunID:     item.RunID,
+				Metadata:  metadata,
+				Infer:     mem0BoolPtr(false),
+				AsyncMode: mem0BoolPtr(false),
+			}); err != nil {
+				return adapters.RebuildResult{}, err
+			}
+			continue
+		}
+		if mem0SourceMemoryMatches(existingMemory, item, botID) {
+			continue
+		}
+		restoredCount++
+		if _, err := p.client.Update(ctx, existingMemory.ID, item.Memory, metadata); err != nil {
+			return adapters.RebuildResult{}, err
+		}
+	}
+	staleIDs := make([]string, 0)
+	for _, memory := range existing {
+		sourceID := mem0SourceEntryID(memory.Metadata)
+		if sourceID == "" {
+			continue
+		}
+		if _, ok := sourceIDs[sourceID]; ok {
+			continue
+		}
+		if strings.TrimSpace(memory.ID) != "" {
+			staleIDs = append(staleIDs, memory.ID)
+		}
+	}
+	for len(staleIDs) > 0 {
+		chunkSize := mem0BatchDeleteMaxSize
+		if len(staleIDs) < chunkSize {
+			chunkSize = len(staleIDs)
+		}
+		if err := p.client.BatchDelete(ctx, staleIDs[:chunkSize]); err != nil {
+			return adapters.RebuildResult{}, err
+		}
+		staleIDs = staleIDs[chunkSize:]
+	}
+	remote, err := p.client.ListAllByAgent(ctx, botID)
+	if err != nil {
+		return adapters.RebuildResult{}, err
+	}
+	return adapters.RebuildResult{
+		FsCount:       len(canonical),
+		StorageCount:  len(remote),
+		MissingCount:  missingCount,
+		RestoredCount: restoredCount,
+	}, nil
+}
+
+func (p *Mem0Provider) searchMemories(ctx context.Context, query, agentID string, limit int) ([]adapters.MemoryItem, error) {
+	memories, err := p.client.Search(ctx, mem0SearchRequest{
+		Query:   query,
+		TopK:    limit,
+		Filters: mem0AgentFilter(agentID, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := mem0ToItems(memories)
+	sort.Slice(items, func(i, j int) bool { return items[i].Score > items[j].Score })
+	return adapters.DeduplicateItems(items), nil
+}
+
+func mem0ScopeID(botID, agentID string) string {
+	if value := strings.TrimSpace(botID); value != "" {
+		return value
+	}
+	return strings.TrimSpace(agentID)
+}
+
+func mem0AgentFilter(agentID, runID string) map[string]any {
+	filter := map[string]any{
+		"agent_id": strings.TrimSpace(agentID),
+	}
+	if strings.TrimSpace(runID) != "" {
+		filter["run_id"] = strings.TrimSpace(runID)
+	}
+	return filter
+}
+
+func mem0CanonicalStoreItems(items []storefs.MemoryItem) []storefs.MemoryItem {
+	result := make([]storefs.MemoryItem, 0, len(items))
+	for _, item := range items {
+		item.ID = strings.TrimSpace(item.ID)
+		item.Memory = strings.TrimSpace(item.Memory)
+		if item.ID == "" || item.Memory == "" {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+func mem0SourceMetadata(botID string, item storefs.MemoryItem) map[string]any {
+	metadata := make(map[string]any, len(item.Metadata)+4)
+	for key, value := range item.Metadata {
+		metadata[key] = value
+	}
+	metadata[mem0SyncMetadataKeySourceEntryID] = item.ID
+	metadata[mem0SyncMetadataKeySourceHash] = strings.TrimSpace(item.Hash)
+	metadata[mem0SyncMetadataKeySourceBotID] = strings.TrimSpace(botID)
+	metadata[mem0SyncMetadataKeySourceManaged] = true
+	return metadata
+}
+
+func mem0SourceEntryID(metadata map[string]any) string {
+	return strings.TrimSpace(mem0MetadataString(metadata, mem0SyncMetadataKeySourceEntryID))
+}
+
+func mem0SourceMemoryMatches(memory mem0Memory, item storefs.MemoryItem, botID string) bool {
+	if strings.TrimSpace(memory.Memory) != strings.TrimSpace(item.Memory) {
+		return false
+	}
+	metadata := memory.Metadata
+	if mem0SourceEntryID(metadata) != strings.TrimSpace(item.ID) {
+		return false
+	}
+	if mem0MetadataString(metadata, mem0SyncMetadataKeySourceHash) != strings.TrimSpace(item.Hash) {
+		return false
+	}
+	if mem0MetadataString(metadata, mem0SyncMetadataKeySourceBotID) != strings.TrimSpace(botID) {
+		return false
+	}
+	return mem0MetadataBool(metadata, mem0SyncMetadataKeySourceManaged)
+}
+
+func mem0MetadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	raw, ok := metadata[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	if value, ok := raw.(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return strings.TrimSpace(strings.Trim(fmt.Sprintf("%v", raw), "\""))
+}
+
+func mem0MetadataBool(metadata map[string]any, key string) bool {
+	if metadata == nil {
+		return false
+	}
+	raw, ok := metadata[key]
+	if !ok || raw == nil {
+		return false
+	}
+	value, ok := raw.(bool)
+	return ok && value
+}
+
+func mem0BoolPtr(v bool) *bool {
+	return &v
 }

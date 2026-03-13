@@ -48,7 +48,6 @@ The base `docker-compose.yml` contains all services. Core services (postgres, se
 |---------|---------|-------------|
 | `qdrant` | Qdrant | Vector database for memory semantic search |
 | `browser` | Browser | Browser automation gateway (Playwright) |
-| `mem0` | Mem0 | Self-hosted Mem0 memory provider |
 | `openviking` | OpenViking | Self-hosted OpenViking memory provider |
 
 ### Supported combinations
@@ -56,9 +55,6 @@ The base `docker-compose.yml` contains all services. Core services (postgres, se
 ```bash
 # Core + Qdrant + Browser (recommended default)
 docker compose --profile qdrant --profile browser up -d
-
-# Core + Qdrant + Mem0 (self-hosted)
-docker compose --profile qdrant --profile mem0 up -d
 
 # Core + Qdrant + OpenViking (self-hosted)
 docker compose --profile qdrant --profile openviking up -d

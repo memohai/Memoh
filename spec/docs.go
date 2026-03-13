@@ -3156,6 +3156,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -3223,6 +3229,65 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/memory/status": {
+            "get": {
+                "description": "Get the resolved memory runtime status for a bot, including index health and source counts",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory"
+                ],
+                "summary": "Get memory runtime status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/adapters.MemoryStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -6240,6 +6305,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/memory-providers/{id}/status": {
+            "get": {
+                "description": "Get runtime status data for a memory provider",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory-providers"
+                ],
+                "summary": "Get memory provider status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/adapters.ProviderStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/models": {
             "get": {
                 "description": "Get a list of all configured models, optionally filtered by type or client type",
@@ -8588,6 +8700,17 @@ const docTemplate = `{
                 }
             }
         },
+        "adapters.HealthStatus": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                }
+            }
+        },
         "adapters.MemoryItem": {
             "type": "object",
             "properties": {
@@ -8636,6 +8759,44 @@ const docTemplate = `{
                 }
             }
         },
+        "adapters.MemoryStatusResponse": {
+            "type": "object",
+            "properties": {
+                "can_manual_sync": {
+                    "type": "boolean"
+                },
+                "encoder": {
+                    "$ref": "#/definitions/adapters.HealthStatus"
+                },
+                "indexed_count": {
+                    "type": "integer"
+                },
+                "markdown_file_count": {
+                    "type": "integer"
+                },
+                "memory_mode": {
+                    "type": "string"
+                },
+                "overview_path": {
+                    "type": "string"
+                },
+                "provider_type": {
+                    "type": "string"
+                },
+                "qdrant": {
+                    "$ref": "#/definitions/adapters.HealthStatus"
+                },
+                "qdrant_collection": {
+                    "type": "string"
+                },
+                "source_count": {
+                    "type": "integer"
+                },
+                "source_dir": {
+                    "type": "string"
+                }
+            }
+        },
         "adapters.Message": {
             "type": "object",
             "properties": {
@@ -8644,6 +8805,23 @@ const docTemplate = `{
                 },
                 "role": {
                     "type": "string"
+                }
+            }
+        },
+        "adapters.ProviderCollectionStatus": {
+            "type": "object",
+            "properties": {
+                "exists": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "points": {
+                    "type": "integer"
+                },
+                "qdrant": {
+                    "$ref": "#/definitions/adapters.HealthStatus"
                 }
             }
         },
@@ -8731,6 +8909,26 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "adapters.ProviderStatusResponse": {
+            "type": "object",
+            "properties": {
+                "collections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/adapters.ProviderCollectionStatus"
+                    }
+                },
+                "embedding_model_id": {
+                    "type": "string"
+                },
+                "memory_mode": {
+                    "type": "string"
+                },
+                "provider_type": {
                     "type": "string"
                 }
             }
@@ -12039,7 +12237,7 @@ const docTemplate = `{
     }
 }`
 
-// SwaggerInfo holds exported Swagger Info so clients can modify it.
+// SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0.0",
 	Host:             "",

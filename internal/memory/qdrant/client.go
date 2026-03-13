@@ -55,11 +55,23 @@ func (c *Client) Close() error {
 	return c.inner.Close()
 }
 
-// EnsureCollection creates the collection with a named sparse vector config if it does not exist.
-func (c *Client) EnsureCollection(ctx context.Context) error {
+func (c *Client) CollectionName() string {
+	return c.collection
+}
+
+func (c *Client) CollectionExists(ctx context.Context) (bool, error) {
 	exists, err := c.inner.CollectionExists(ctx, c.collection)
 	if err != nil {
-		return fmt.Errorf("qdrant: check collection: %w", err)
+		return false, fmt.Errorf("qdrant: check collection: %w", err)
+	}
+	return exists, nil
+}
+
+// EnsureCollection creates the collection with a named sparse vector config if it does not exist.
+func (c *Client) EnsureCollection(ctx context.Context) error {
+	exists, err := c.CollectionExists(ctx)
+	if err != nil {
+		return err
 	}
 	if exists {
 		return nil
@@ -76,10 +88,40 @@ func (c *Client) EnsureCollection(ctx context.Context) error {
 	return nil
 }
 
+// EnsureDenseCollection creates the collection with dense vector config if it
+// does not exist.
+func (c *Client) EnsureDenseCollection(ctx context.Context, dimensions int) error {
+	if dimensions <= 0 {
+		return fmt.Errorf("qdrant: dense dimensions must be positive, got %d", dimensions)
+	}
+	exists, err := c.CollectionExists(ctx)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	err = c.inner.CreateCollection(ctx, &pb.CreateCollection{
+		CollectionName: c.collection,
+		VectorsConfig: pb.NewVectorsConfig(&pb.VectorParams{
+			Size:     uint64(dimensions),
+			Distance: pb.Distance_Cosine,
+		}),
+	})
+	if err != nil {
+		return fmt.Errorf("qdrant: create dense collection: %w", err)
+	}
+	return nil
+}
+
 // SparseVector holds the non-zero components of a sparse text encoding.
 type SparseVector struct {
 	Indices []uint32
 	Values  []float32
+}
+
+type DenseVector struct {
+	Values []float32
 }
 
 // SearchResult is one result from a sparse search or scroll.
@@ -114,6 +156,26 @@ func (c *Client) Upsert(ctx context.Context, id string, vec SparseVector, payloa
 	return nil
 }
 
+// UpsertDense inserts or updates points with dense vectors.
+func (c *Client) UpsertDense(ctx context.Context, id string, vec DenseVector, payload map[string]string) error {
+	wait := true
+	_, err := c.inner.Upsert(ctx, &pb.UpsertPoints{
+		CollectionName: c.collection,
+		Wait:           &wait,
+		Points: []*pb.PointStruct{
+			{
+				Id:      pb.NewID(id),
+				Vectors: pb.NewVectorsDense(vec.Values),
+				Payload: stringPayloadToValueMap(payload),
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("qdrant: upsert dense: %w", err)
+	}
+	return nil
+}
+
 // Search performs a sparse-vector query against the collection, filtered by bot_id.
 func (c *Client) Search(ctx context.Context, vec SparseVector, botID string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
@@ -133,6 +195,28 @@ func (c *Client) Search(ctx context.Context, vec SparseVector, botID string, lim
 	})
 	if err != nil {
 		return nil, fmt.Errorf("qdrant: search: %w", err)
+	}
+	return scoredPointsToResults(scored), nil
+}
+
+// SearchDense performs a dense-vector query against the collection, filtered by bot_id.
+func (c *Client) SearchDense(ctx context.Context, vec DenseVector, botID string, limit int) ([]SearchResult, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	queryLimit, err := intToUint64(limit)
+	if err != nil {
+		return nil, fmt.Errorf("qdrant: invalid dense search limit: %w", err)
+	}
+	scored, err := c.inner.Query(ctx, &pb.QueryPoints{
+		CollectionName: c.collection,
+		Query:          pb.NewQueryDense(vec.Values),
+		Filter:         botFilter(botID),
+		Limit:          uint64Ptr(queryLimit),
+		WithPayload:    pb.NewWithPayload(true),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("qdrant: dense search: %w", err)
 	}
 	return scoredPointsToResults(scored), nil
 }
@@ -192,6 +276,22 @@ func (c *Client) Count(ctx context.Context, botID string) (int, error) {
 	})
 	if err != nil {
 		return 0, fmt.Errorf("qdrant: count: %w", err)
+	}
+	if n > uint64(math.MaxInt) {
+		return 0, fmt.Errorf("qdrant: count overflow: %d", n)
+	}
+	return int(n), nil
+}
+
+// CountAll returns the total number of points in the collection.
+func (c *Client) CountAll(ctx context.Context) (int, error) {
+	exact := true
+	n, err := c.inner.Count(ctx, &pb.CountPoints{
+		CollectionName: c.collection,
+		Exact:          &exact,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("qdrant: count all: %w", err)
 	}
 	if n > uint64(math.MaxInt) {
 		return 0, fmt.Errorf("qdrant: count overflow: %d", n)

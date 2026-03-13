@@ -5,22 +5,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
+	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 )
 
 type Service struct {
 	queries  *sqlc.Queries
 	registry *Registry
 	logger   *slog.Logger
+	cfg      config.Config
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries *sqlc.Queries, cfg config.Config) *Service {
 	return &Service{
 		queries: queries,
 		logger:  log.With(slog.String("service", "memory_providers")),
+		cfg:     cfg,
 	}
 }
 
@@ -40,7 +45,7 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 					"memory_mode": {
 						Type:        "select",
 						Title:       "Memory Mode",
-						Description: "off = file-based, sparse = Qdrant sparse vectors, dense = mem0 SDK",
+						Description: "off = file-based, sparse = Qdrant sparse vectors, dense = embedding API + Qdrant dense vectors",
 						Required:    false,
 					},
 					"embedding_model_id": {
@@ -48,6 +53,13 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 						Title:       "Embedding Model",
 						Description: "Embedding model for dense vector search (dense mode only)",
 						Required:    false,
+					},
+					"qdrant_collection": {
+						Type:        "string",
+						Title:       "Qdrant Collection",
+						Description: "Qdrant collection name for sparse mode. Defaults to memory_sparse.",
+						Required:    false,
+						Example:     "memory_sparse",
 					},
 				},
 			},
@@ -60,25 +72,26 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 					"base_url": {
 						Type:        "string",
 						Title:       "Base URL",
-						Description: "Mem0 API base URL (self-hosted or SaaS)",
-						Required:    true,
-						Example:     "http://mem0:8000",
+						Description: "Mem0 SaaS API base URL. Defaults to https://api.mem0.ai when empty.",
+						Required:    false,
+						Example:     "https://api.mem0.ai",
 					},
 					"api_key": {
 						Type:        "string",
 						Title:       "API Key",
-						Description: "API key for Mem0 authentication",
+						Description: "API key for Mem0 SaaS authentication",
+						Required:    true,
 						Secret:      true,
 					},
 					"org_id": {
 						Type:        "string",
 						Title:       "Organization ID",
-						Description: "Organization ID (SaaS mode only)",
+						Description: "Organization ID for Mem0 SaaS workspace context",
 					},
 					"project_id": {
 						Type:        "string",
 						Title:       "Project ID",
-						Description: "Project ID (SaaS mode only)",
+						Description: "Project ID for Mem0 SaaS workspace context",
 					},
 				},
 			},
@@ -139,6 +152,52 @@ func (s *Service) Get(ctx context.Context, id string) (ProviderGetResponse, erro
 		return ProviderGetResponse{}, fmt.Errorf("get memory provider: %w", err)
 	}
 	return s.toGetResponse(row), nil
+}
+
+func (s *Service) Status(ctx context.Context, id string) (ProviderStatusResponse, error) {
+	resp, err := s.Get(ctx, id)
+	if err != nil {
+		return ProviderStatusResponse{}, err
+	}
+	status := ProviderStatusResponse{
+		ProviderType: resp.Provider,
+	}
+	if resp.Provider != string(ProviderBuiltin) {
+		return status, nil
+	}
+	status.MemoryMode = StringFromConfig(resp.Config, "memory_mode")
+	status.EmbeddingModelID = StringFromConfig(resp.Config, "embedding_model_id")
+	collections := []string{"memory_sparse", "memory_dense"}
+	status.Collections = make([]ProviderCollectionStatus, 0, len(collections))
+	for _, collection := range collections {
+		collStatus := ProviderCollectionStatus{Name: collection}
+		host, port := parseQdrantHostPort(s.cfg.Qdrant.BaseURL)
+		client, err := qdrantclient.NewClient(host, port, s.cfg.Qdrant.APIKey, collection)
+		if err != nil {
+			collStatus.Qdrant.Error = err.Error()
+			status.Collections = append(status.Collections, collStatus)
+			continue
+		}
+		exists, err := client.CollectionExists(ctx)
+		if err != nil {
+			collStatus.Qdrant.Error = err.Error()
+			status.Collections = append(status.Collections, collStatus)
+			continue
+		}
+		collStatus.Qdrant.OK = true
+		collStatus.Exists = exists
+		if exists {
+			points, err := client.CountAll(ctx)
+			if err != nil {
+				collStatus.Qdrant.OK = false
+				collStatus.Qdrant.Error = err.Error()
+			} else {
+				collStatus.Points = points
+			}
+		}
+		status.Collections = append(status.Collections, collStatus)
+	}
+	return status, nil
 }
 
 func (s *Service) List(ctx context.Context) ([]ProviderGetResponse, error) {
@@ -263,4 +322,27 @@ func isValidProviderType(t ProviderType) bool {
 	default:
 		return false
 	}
+}
+
+func parseQdrantHostPort(baseURL string) (string, int) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return "", 0
+	}
+	baseURL = strings.TrimPrefix(baseURL, "http://")
+	baseURL = strings.TrimPrefix(baseURL, "https://")
+	parts := strings.SplitN(baseURL, ":", 2)
+	host := parts[0]
+	if len(parts) == 2 {
+		httpPort, err := strconv.Atoi(strings.TrimRight(parts[1], "/"))
+		if err == nil {
+			switch httpPort {
+			case 6333, 6334:
+				return host, 6334
+			default:
+				return host, httpPort
+			}
+		}
+	}
+	return host, 6334
 }

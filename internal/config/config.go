@@ -38,6 +38,7 @@ type Config struct {
 	MCP            MCPConfig            `toml:"mcp"`
 	Postgres       PostgresConfig       `toml:"postgres"`
 	Qdrant         QdrantConfig         `toml:"qdrant"`
+	Sparse         SparseConfig         `toml:"sparse"`
 	AgentGateway   AgentGatewayConfig   `toml:"agent_gateway"`
 	BrowserGateway BrowserGatewayConfig `toml:"browser_gateway"`
 }
@@ -123,6 +124,10 @@ type QdrantConfig struct {
 	BaseURL        string `toml:"base_url"`
 	APIKey         string `toml:"api_key" json:"-"`
 	TimeoutSeconds int    `toml:"timeout_seconds"`
+}
+
+type SparseConfig struct {
+	BaseURL string `toml:"base_url"`
 }
 
 type AgentGatewayConfig struct {

@@ -38,3 +38,10 @@ type Provider interface {
 	Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (CompactResult, error)
 	Usage(ctx context.Context, filters map[string]any) (UsageResponse, error)
 }
+
+// SourceSyncProvider is implemented by providers that can report runtime status
+// and rebuild derived storage from a canonical source of truth.
+type SourceSyncProvider interface {
+	Status(ctx context.Context, botID string) (MemoryStatusResponse, error)
+	Rebuild(ctx context.Context, botID string) (RebuildResult, error)
+}

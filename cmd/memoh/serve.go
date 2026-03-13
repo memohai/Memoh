@@ -76,6 +76,7 @@ import (
 	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
 	memmem0 "github.com/memohai/memoh/internal/memory/adapters/mem0"
 	memopenviking "github.com/memohai/memoh/internal/memory/adapters/openviking"
+	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
@@ -256,14 +257,19 @@ func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, lo
 	return &lazyLLMClient{modelsService: modelsService, queries: queries, timeout: 30 * time.Second, logger: log}
 }
 
-func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, manager *mcp.Manager) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, manager *mcp.Manager, queries *dbsqlc.Queries, cfg config.Config) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	builtinRuntime := handlers.NewBuiltinMemoryRuntime(manager)
-	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, _ map[string]any) (memprovider.Provider, error) {
-		return membuiltin.NewBuiltinProvider(log, builtinRuntime, chatService, accountService), nil
+	fileStore := storefs.New(log, manager)
+	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
+		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, builtinRuntime, fileStore, queries, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return membuiltin.NewBuiltinProvider(log, runtime, chatService, accountService), nil
 	})
 	registry.RegisterFactory(string(memprovider.ProviderMem0), func(_ string, config map[string]any) (memprovider.Provider, error) {
-		return memmem0.NewMem0Provider(log, config)
+		return memmem0.NewMem0Provider(log, config, fileStore)
 	})
 	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, config map[string]any) (memprovider.Provider, error) {
 		return memopenviking.NewOpenVikingProvider(log, config)

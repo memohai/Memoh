@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/config"
+	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
 // BuiltinMemoryMode represents the operating mode of the built-in memory provider.
@@ -20,7 +22,7 @@ const (
 
 // NewBuiltinRuntimeFromConfig returns the appropriate memoryRuntime based on the
 // provider's persisted config (memory_mode field). Falls back to the file runtime for "off" or unknown.
-func NewBuiltinRuntimeFromConfig(log *slog.Logger, providerConfig map[string]any, fileRuntime any, cfg config.Config) (any, error) {
+func NewBuiltinRuntimeFromConfig(log *slog.Logger, providerConfig map[string]any, fileRuntime any, store *storefs.Service, queries *dbsqlc.Queries, cfg config.Config) (any, error) {
 	mode := BuiltinMemoryMode(strings.TrimSpace(adapters.StringFromConfig(providerConfig, "memory_mode")))
 
 	switch mode {
@@ -36,7 +38,14 @@ func NewBuiltinRuntimeFromConfig(log *slog.Logger, providerConfig map[string]any
 		if collection == "" {
 			collection = "memory_sparse"
 		}
-		rt, err := newSparseRuntime(host, port, cfg.Qdrant.APIKey, collection)
+		rt, err := newSparseRuntime(
+			host,
+			port,
+			cfg.Qdrant.APIKey,
+			collection,
+			strings.TrimSpace(cfg.Sparse.BaseURL),
+			store,
+		)
 		if err != nil {
 			if log != nil {
 				log.Warn("sparse runtime init failed, falling back to file runtime", slog.Any("error", err))
@@ -46,7 +55,7 @@ func NewBuiltinRuntimeFromConfig(log *slog.Logger, providerConfig map[string]any
 		return rt, nil
 
 	case ModeDense:
-		rt, err := newDenseRuntime(providerConfig)
+		rt, err := newDenseRuntime(providerConfig, queries, cfg, store)
 		if err != nil {
 			if log != nil {
 				log.Warn("dense runtime init failed, falling back to file runtime", slog.Any("error", err))
@@ -74,8 +83,15 @@ func parseQdrantHostPort(baseURL string) (string, int) {
 	if len(parts) == 2 {
 		httpPort, err := strconv.Atoi(strings.TrimRight(parts[1], "/"))
 		if err == nil {
-			// gRPC port is typically HTTP port + 1 (6333 → 6334)
-			return host, httpPort + 1
+			switch httpPort {
+			case 6333:
+				return host, 6334
+			case 6334:
+				return host, 6334
+			default:
+				// Common case: operator already configured the intended gRPC port.
+				return host, httpPort
+			}
 		}
 	}
 	return host, 6334

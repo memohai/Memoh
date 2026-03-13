@@ -1516,7 +1516,7 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 	}
 
 	r.storeMessages(ctx, req, fullRound, usage, roundUsages, modelID)
-	go r.storeMemory(context.WithoutCancel(ctx), req.BotID, fullRound)
+	go r.storeMemory(context.WithoutCancel(ctx), req, fullRound)
 	return nil
 }
 
@@ -1771,8 +1771,9 @@ func (r *Resolver) resolveDisplayName(ctx context.Context, req conversation.Chat
 	return "User"
 }
 
-func (r *Resolver) storeMemory(ctx context.Context, botID string, messages []conversation.ModelMessage) {
-	if strings.TrimSpace(botID) == "" {
+func (r *Resolver) storeMemory(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage) {
+	botID := strings.TrimSpace(req.BotID)
+	if botID == "" {
 		return
 	}
 	memMsgs := toProviderMessages(messages)
@@ -1785,8 +1786,11 @@ func (r *Resolver) storeMemory(ctx context.Context, botID string, messages []con
 		return
 	}
 	if err := p.OnAfterChat(ctx, memprovider.AfterChatRequest{
-		BotID:    botID,
-		Messages: memMsgs,
+		BotID:             botID,
+		Messages:          memMsgs,
+		UserID:            strings.TrimSpace(req.UserID),
+		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
+		DisplayName:       r.resolveDisplayName(ctx, req),
 	}); err != nil {
 		r.logger.Warn("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
 	}

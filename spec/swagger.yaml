@@ -103,6 +103,13 @@ definitions:
       message:
         type: string
     type: object
+  adapters.HealthStatus:
+    properties:
+      error:
+        type: string
+      ok:
+        type: boolean
+    type: object
   adapters.MemoryItem:
     properties:
       agent_id:
@@ -135,12 +142,48 @@ definitions:
       updated_at:
         type: string
     type: object
+  adapters.MemoryStatusResponse:
+    properties:
+      can_manual_sync:
+        type: boolean
+      encoder:
+        $ref: '#/definitions/adapters.HealthStatus'
+      indexed_count:
+        type: integer
+      markdown_file_count:
+        type: integer
+      memory_mode:
+        type: string
+      overview_path:
+        type: string
+      provider_type:
+        type: string
+      qdrant:
+        $ref: '#/definitions/adapters.HealthStatus'
+      qdrant_collection:
+        type: string
+      source_count:
+        type: integer
+      source_dir:
+        type: string
+    type: object
   adapters.Message:
     properties:
       content:
         type: string
       role:
         type: string
+    type: object
+  adapters.ProviderCollectionStatus:
+    properties:
+      exists:
+        type: boolean
+      name:
+        type: string
+      points:
+        type: integer
+      qdrant:
+        $ref: '#/definitions/adapters.HealthStatus'
     type: object
   adapters.ProviderConfigSchema:
     properties:
@@ -198,6 +241,19 @@ definitions:
       display_name:
         type: string
       provider:
+        type: string
+    type: object
+  adapters.ProviderStatusResponse:
+    properties:
+      collections:
+        items:
+          $ref: '#/definitions/adapters.ProviderCollectionStatus'
+        type: array
+      embedding_model_id:
+        type: string
+      memory_mode:
+        type: string
+      provider_type:
         type: string
     type: object
   adapters.ProviderType:
@@ -4529,6 +4585,10 @@ paths:
           description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -4585,6 +4645,46 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Search memory
+      tags:
+      - memory
+  /bots/{bot_id}/memory/status:
+    get:
+      description: Get the resolved memory runtime status for a bot, including index
+        health and source counts
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/adapters.MemoryStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get memory runtime status
       tags:
       - memory
   /bots/{bot_id}/memory/usage:
@@ -6521,6 +6621,37 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update a memory provider
+      tags:
+      - memory-providers
+  /memory-providers/{id}/status:
+    get:
+      description: Get runtime status data for a memory provider
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/adapters.ProviderStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get memory provider status
       tags:
       - memory-providers
   /memory-providers/meta:
