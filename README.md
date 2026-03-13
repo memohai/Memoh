@@ -45,6 +45,8 @@ Or manually:
 ```bash
 git clone --depth 1 https://github.com/memohai/Memoh.git
 cd Memoh
+cp conf/app.docker.toml config.toml
+# Edit config.toml
 sudo docker compose up -d
 ```
 
