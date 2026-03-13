@@ -363,6 +363,9 @@
     "timezoneId": "时区",
     "timezonePlaceholder": "例如 Asia/Shanghai",
     "ignoreHTTPSErrors": "忽略 HTTPS 错误",
+    "core": "浏览器内核",
+    "chromium": "Chromium",
+    "firefox": "Firefox",
     "config": "配置"
   },
   "mcp": {

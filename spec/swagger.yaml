@@ -762,6 +762,13 @@ definitions:
           type: string
         type: array
     type: object
+  handlers.BrowserCoresResponse:
+    properties:
+      cores:
+        items:
+          type: string
+        type: array
+    type: object
   handlers.ChannelMeta:
     properties:
       capabilities:
@@ -6070,6 +6077,24 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update a browser context
+      tags:
+      - browser-contexts
+  /browser-contexts/cores:
+    get:
+      description: Get the list of browser cores available in the Browser Gateway
+        container
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.BrowserCoresResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get available browser cores
       tags:
       - browser-contexts
   /channels:

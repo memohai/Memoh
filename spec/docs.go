@@ -5417,6 +5417,32 @@ const docTemplate = `{
                 }
             }
         },
+        "/browser-contexts/cores": {
+            "get": {
+                "description": "Get the list of browser cores available in the Browser Gateway container",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser-contexts"
+                ],
+                "summary": "Get available browser cores",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BrowserCoresResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/browser-contexts/{id}": {
             "get": {
                 "description": "Get browser context by ID",
@@ -9566,6 +9592,17 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.BrowserCoresResponse": {
+            "type": "object",
+            "properties": {
+                "cores": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "handlers.ChannelMeta": {
             "type": "object",
             "properties": {
@@ -12032,7 +12069,7 @@ const docTemplate = `{
     }
 }`
 
-// SwaggerInfo holds exported Swagger Info so clients can modify it.
+// SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0.0",
 	Host:             "",

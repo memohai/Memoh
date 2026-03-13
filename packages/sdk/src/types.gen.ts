@@ -454,6 +454,10 @@ export type HandlersBatchDeleteRequest = {
     ids?: Array<string>;
 };
 
+export type HandlersBrowserCoresResponse = {
+    cores?: Array<string>;
+};
+
 export type HandlersChannelMeta = {
     capabilities?: ChannelChannelCapabilities;
     config_schema?: ChannelConfigSchema;
@@ -5859,6 +5863,31 @@ export type PostBrowserContextsResponses = {
 };
 
 export type PostBrowserContextsResponse = PostBrowserContextsResponses[keyof PostBrowserContextsResponses];
+
+export type GetBrowserContextsCoresData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/browser-contexts/cores';
+};
+
+export type GetBrowserContextsCoresErrors = {
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetBrowserContextsCoresError = GetBrowserContextsCoresErrors[keyof GetBrowserContextsCoresErrors];
+
+export type GetBrowserContextsCoresResponses = {
+    /**
+     * OK
+     */
+    200: HandlersBrowserCoresResponse;
+};
+
+export type GetBrowserContextsCoresResponse = GetBrowserContextsCoresResponses[keyof GetBrowserContextsCoresResponses];
 
 export type DeleteBrowserContextsByIdData = {
     body?: never;

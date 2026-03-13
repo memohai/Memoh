@@ -367,6 +367,9 @@
     "timezoneId": "Timezone",
     "timezonePlaceholder": "e.g. America/New_York",
     "ignoreHTTPSErrors": "Ignore HTTPS Errors",
+    "core": "Browser Core",
+    "chromium": "Chromium",
+    "firefox": "Firefox",
     "config": "Configuration"
   },
   "mcp": {

@@ -98,6 +98,7 @@ PG_PASS="memoh123"
 WORKSPACE="$WORKSPACE_DEFAULT"
 MEMOH_DATA_DIR="$MEMOH_DATA_DIR_DEFAULT"
 USE_CN_MIRROR="${USE_CN_MIRROR:-false}"
+BROWSER_CORES="${BROWSER_CORES:-chromium,firefox}"
 
 if [ "$SILENT" = false ]; then
   echo "Configure Memoh (press Enter to use defaults):" > /dev/tty
@@ -140,6 +141,19 @@ if [ "$SILENT" = false ]; then
   printf "  Postgres password [%s]: " "$PG_PASS" > /dev/tty
   read -r input < /dev/tty || true
   [ -n "$input" ] && PG_PASS="$input"
+
+  echo "" > /dev/tty
+  echo "  Browser core selection:" > /dev/tty
+  echo "    1) Chromium only (smaller image)" > /dev/tty
+  echo "    2) Firefox only" > /dev/tty
+  echo "    3) Both Chromium and Firefox (default)" > /dev/tty
+  printf "  Browser core [3]: " > /dev/tty
+  read -r input < /dev/tty || true
+  case "$input" in
+    1) BROWSER_CORES="chromium" ;;
+    2) BROWSER_CORES="firefox" ;;
+    *) BROWSER_CORES="chromium,firefox" ;;
+  esac
 
   echo "" > /dev/tty
 fi
@@ -207,10 +221,16 @@ fi
 echo POSTGRES_PASSWORD="${PG_PASS}" >> .env
 echo MEMOH_CONFIG=./config.toml >> .env
 echo MEMOH_DATA_DIR="{$MEMOH_DATA_DIR}" >> .env
+echo BROWSER_CORES="${BROWSER_CORES}" >> .env
+echo "${GREEN}✓ Browser cores: ${BROWSER_CORES}${NC}"
 
 echo ""
 echo "${GREEN}Pulling latest Docker images...${NC}"
-$DOCKER compose $COMPOSE_FILES pull
+$DOCKER compose $COMPOSE_FILES pull --ignore-buildable
+
+echo ""
+echo "${GREEN}Building browser image (cores: ${BROWSER_CORES})...${NC}"
+$DOCKER compose $COMPOSE_FILES build browser
 
 echo ""
 echo "${GREEN}Starting services (first startup may take a few minutes)...${NC}"
