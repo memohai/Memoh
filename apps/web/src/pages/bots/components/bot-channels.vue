@@ -199,10 +199,19 @@ const selectedItem = computed(() =>
   allChannels.value.find((c) => c.meta.type === selectedType.value) ?? null,
 )
 
-watch(configuredChannels, (list) => {
-  if (list.length > 0 && !selectedType.value) {
-    selectedType.value = list[0].meta.type
+watch(allChannels, (list) => {
+  if (list.length === 0) {
+    selectedType.value = null
+    return
   }
+
+  const current = selectedType.value
+  if (current && list.some((item) => item.meta.type === current)) {
+    return
+  }
+
+  const configured = list.find((item) => item.configured)
+  selectedType.value = configured?.meta.type ?? list[0].meta.type
 }, { immediate: true })
 
 function addChannel(type: string) {
@@ -214,6 +223,7 @@ function channelIcon(type: string): string {
   const icons: Record<string, string> = {
     qq: 'QQ',
     telegram: 'TG',
+    matrix: 'MX',
     feishu: '飞',
   }
   return icons[type] ?? type.slice(0, 2).toUpperCase()
@@ -223,6 +233,7 @@ function channelBadgeClass(type: string): string {
   const classes: Record<string, string> = {
     qq: 'bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300',
     telegram: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+    matrix: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300',
     feishu: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300',
   }
   return classes[type] ?? 'bg-secondary text-secondary-foreground'

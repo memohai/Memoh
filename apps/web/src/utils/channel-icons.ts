@@ -12,6 +12,7 @@ const LOCAL_CHANNEL_IMAGES: Record<string, string> = {
 const CHANNEL_ICONS: Record<string, [string, string]> = {
   qq: ['fab', 'qq'],
   telegram: ['fab', 'telegram'],
+  matrix: ['fas', 'hashtag'],
   feishu: ['fas', 'comment-dots'],
   web: ['fas', 'globe'],
   slack: ['fab', 'slack'],

@@ -30,6 +30,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/discord"
 	"github.com/memohai/memoh/internal/channel/adapters/feishu"
 	"github.com/memohai/memoh/internal/channel/adapters/local"
+	"github.com/memohai/memoh/internal/channel/adapters/matrix"
 	"github.com/memohai/memoh/internal/channel/adapters/qq"
 	"github.com/memohai/memoh/internal/channel/adapters/telegram"
 	"github.com/memohai/memoh/internal/channel/adapters/wecom"
@@ -427,6 +428,7 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	qqAdapter := qq.NewQQAdapter(log)
 	qqAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(qqAdapter)
+	registry.MustRegister(matrix.NewMatrixAdapter(log))
 
 	feishuAdapter := feishu.NewFeishuAdapter(log)
 	feishuAdapter.SetAssetOpener(mediaService)

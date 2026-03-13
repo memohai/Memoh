@@ -858,6 +858,7 @@
         "feishu": "Feishu",
         "discord": "Discord",
         "qq": "QQ",
+        "matrix": "Matrix",
         "telegram": "Telegram",
         "web": "Web",
         "local": "Local"
@@ -866,6 +867,7 @@
         "feishu": "FS",
         "discord": "DC",
         "qq": "QQ",
+        "matrix": "MX",
         "telegram": "TG",
         "web": "Web",
         "local": "CLI"
