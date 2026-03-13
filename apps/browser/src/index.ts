@@ -7,7 +7,9 @@ import { contextModule } from './modules/context'
 import { devicesModule } from './modules/devices'
 import { coresModule } from './modules/cores'
 
-const config = loadConfig('../../config.toml')
+const configuredPath = process.env.MEMOH_CONFIG_PATH?.trim() || process.env.CONFIG_PATH?.trim()
+const configPath = configuredPath && configuredPath.length > 0 ? configuredPath : '../../config.toml'
+const config = loadConfig(configPath)
 
 await initBrowsers()
 
