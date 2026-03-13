@@ -16,8 +16,15 @@ func ExtractAssistantOutputs(messages []conversation.ModelMessage) []conversatio
 		if msg.Role != "assistant" {
 			continue
 		}
-		content := strings.TrimSpace(msg.TextContent())
-		parts := filterContentParts(msg.ContentParts())
+		if len(msg.ToolCalls) > 0 {
+			continue
+		}
+		rawParts := msg.ContentParts()
+		parts := filterVisibleContentParts(rawParts)
+		content := visibleContentText(parts)
+		if len(rawParts) == 0 {
+			content = strings.TrimSpace(msg.TextContent())
+		}
 		if content == "" && len(parts) == 0 {
 			continue
 		}
@@ -26,15 +33,55 @@ func ExtractAssistantOutputs(messages []conversation.ModelMessage) []conversatio
 	return outputs
 }
 
-func filterContentParts(parts []conversation.ContentPart) []conversation.ContentPart {
+func filterVisibleContentParts(parts []conversation.ContentPart) []conversation.ContentPart {
 	if len(parts) == 0 {
 		return nil
 	}
 	filtered := make([]conversation.ContentPart, 0, len(parts))
 	for _, p := range parts {
-		if p.HasValue() {
+		if isVisibleContentPart(p) {
 			filtered = append(filtered, p)
 		}
 	}
 	return filtered
+}
+
+func isVisibleContentPart(part conversation.ContentPart) bool {
+	if !part.HasValue() {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(part.Type)) {
+	case "reasoning", "tool-call", "tool-result":
+		return false
+	default:
+		return true
+	}
+}
+
+func visibleContentText(parts []conversation.ContentPart) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		text := strings.TrimSpace(visibleContentPartText(part))
+		if text == "" {
+			continue
+		}
+		texts = append(texts, text)
+	}
+	return strings.TrimSpace(strings.Join(texts, "\n"))
+}
+
+func visibleContentPartText(part conversation.ContentPart) string {
+	if strings.TrimSpace(part.Text) != "" {
+		return part.Text
+	}
+	if strings.TrimSpace(part.URL) != "" {
+		return part.URL
+	}
+	if strings.TrimSpace(part.Emoji) != "" {
+		return part.Emoji
+	}
+	return ""
 }

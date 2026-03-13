@@ -22,7 +22,7 @@ type matrixOutboundStream struct {
 
 	roomID          string
 	originalEventID string
-	buffer          strings.Builder
+	rawBuffer       strings.Builder
 	lastText        string
 	lastEditedAt    time.Time
 }
@@ -43,8 +43,6 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.StreamEve
 	switch event.Type {
 	case channel.StreamEventStatus,
 		channel.StreamEventPhaseStart,
-		channel.StreamEventPhaseEnd,
-		channel.StreamEventToolCallStart,
 		channel.StreamEventToolCallEnd,
 		channel.StreamEventAgentStart,
 		channel.StreamEventAgentEnd,
@@ -52,15 +50,25 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		channel.StreamEventProcessingCompleted,
 		channel.StreamEventProcessingFailed:
 		return nil
+	case channel.StreamEventPhaseEnd:
+		if event.Phase != channel.StreamPhaseText {
+			return nil
+		}
+		s.mu.Lock()
+		text := strings.TrimSpace(s.rawBuffer.String())
+		s.mu.Unlock()
+		return s.upsertText(ctx, text, true)
+	case channel.StreamEventToolCallStart:
+		s.resetMessageState()
+		return nil
 	case channel.StreamEventDelta:
 		if event.Phase == channel.StreamPhaseReasoning || event.Delta == "" {
 			return nil
 		}
 		s.mu.Lock()
-		s.buffer.WriteString(event.Delta)
-		text := strings.TrimSpace(s.buffer.String())
+		s.rawBuffer.WriteString(event.Delta)
 		s.mu.Unlock()
-		return s.upsertText(ctx, text, false)
+		return nil
 	case channel.StreamEventError:
 		errText := strings.TrimSpace(event.Error)
 		if errText == "" {
@@ -74,10 +82,14 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		text := strings.TrimSpace(event.Final.Message.PlainText())
 		if text == "" {
 			s.mu.Lock()
-			text = strings.TrimSpace(s.buffer.String())
+			text = strings.TrimSpace(s.rawBuffer.String())
 			s.mu.Unlock()
 		}
-		return s.upsertText(ctx, text, true)
+		if err := s.upsertText(ctx, text, true); err != nil {
+			return err
+		}
+		s.resetMessageState()
+		return nil
 	default:
 		return nil
 	}
@@ -156,4 +168,13 @@ func (s *matrixOutboundStream) upsertText(ctx context.Context, text string, forc
 	s.lastEditedAt = time.Now()
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *matrixOutboundStream) resetMessageState() {
+	s.mu.Lock()
+	s.originalEventID = ""
+	s.rawBuffer.Reset()
+	s.lastText = ""
+	s.lastEditedAt = time.Time{}
+	s.mu.Unlock()
 }
