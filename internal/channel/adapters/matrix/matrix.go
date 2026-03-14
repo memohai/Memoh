@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/channel"
@@ -1146,15 +1148,65 @@ func isMatrixBotMentioned(botUserID string, content map[string]any) bool {
 		localpart = localpart[:idx]
 	}
 	for _, candidate := range []string{botUserID, localpart} {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if strings.Contains(strings.ToLower(body), strings.ToLower(candidate)) {
+		if matrixHasExactMentionToken(body, candidate) {
 			return true
 		}
 	}
 	return false
+}
+
+func matrixHasExactMentionToken(body, candidate string) bool {
+	body = strings.TrimSpace(body)
+	candidate = strings.TrimSpace(candidate)
+	if body == "" || candidate == "" {
+		return false
+	}
+	lowerBody := strings.ToLower(body)
+	lowerCandidate := strings.ToLower(candidate)
+	searchFrom := 0
+	for searchFrom < len(lowerBody) {
+		idx := strings.Index(lowerBody[searchFrom:], lowerCandidate)
+		if idx < 0 {
+			return false
+		}
+		start := searchFrom + idx
+		end := start + len(lowerCandidate)
+		if matrixMentionBoundaryBefore(body, start) && matrixMentionBoundaryAfter(body, end) {
+			return true
+		}
+		searchFrom = start + len(lowerCandidate)
+	}
+	return false
+}
+
+func matrixMentionBoundaryBefore(body string, idx int) bool {
+	if idx <= 0 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(body[:idx])
+	return matrixMentionBoundaryRune(r, true)
+}
+
+func matrixMentionBoundaryAfter(body string, idx int) bool {
+	if idx >= len(body) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(body[idx:])
+	return matrixMentionBoundaryRune(r, false)
+}
+
+func matrixMentionBoundaryRune(r rune, before bool) bool {
+	if unicode.IsSpace(r) {
+		return true
+	}
+	switch r {
+	case '(', '[', '{', '<', '>', ',', ';', '.', '!', '?', '\'', '"', '`':
+		return true
+	case ')', ']', '}':
+		return !before
+	default:
+		return false
+	}
 }
 
 func matrixAttachmentMsgType(attType channel.AttachmentType) string {

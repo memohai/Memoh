@@ -43,6 +43,33 @@ func TestIsMatrixBotMentionedByBodyFallback(t *testing.T) {
 	}
 }
 
+func TestIsMatrixBotMentionedByLocalpartBodyFallback(t *testing.T) {
+	content := map[string]any{
+		"body": "@memoh ping",
+	}
+	if !isMatrixBotMentioned("@memoh:example.com", content) {
+		t.Fatal("expected localpart body fallback mention to be detected")
+	}
+}
+
+func TestIsMatrixBotMentionedDoesNotMatchSubstring(t *testing.T) {
+	content := map[string]any{
+		"body": "@memoh-helper:example.com ping",
+	}
+	if isMatrixBotMentioned("@memoh:example.com", content) {
+		t.Fatal("expected substring match not to count as mention")
+	}
+}
+
+func TestIsMatrixBotMentionedDoesNotMatchPlainMatrixURL(t *testing.T) {
+	content := map[string]any{
+		"body": "see https://matrix.to/#/@memoh:example.com",
+	}
+	if isMatrixBotMentioned("@memoh:example.com", content) {
+		t.Fatal("expected plain Matrix URL not to count as mention")
+	}
+}
+
 func TestMatrixSinceTokenFromRouting(t *testing.T) {
 	routing := map[string]any{
 		matrixRoutingStateKey: map[string]any{"since_token": "s123"},
