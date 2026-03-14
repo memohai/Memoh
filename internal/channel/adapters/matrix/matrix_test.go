@@ -295,6 +295,56 @@ func TestMatrixHandleEventExpandsRepliedImageContext(t *testing.T) {
 	}
 }
 
+func TestMatrixHandleEventUsesImageCaptionAsMessageText(t *testing.T) {
+	adapter := NewMatrixAdapter(nil)
+	adapter.rememberRoomConversationType("cfg-1", "!room:example.com", "group")
+
+	var captured channel.InboundMessage
+	delivered, err := adapter.handleEvent(
+		context.Background(),
+		channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"},
+		Config{HomeserverURL: "https://matrix.example.com", AccessToken: "tok", UserID: "@memoh:example.com"},
+		matrixEvent{
+			EventID: "$evt2",
+			Type:    "m.room.message",
+			Sender:  "@alex:example.com",
+			RoomID:  "!room:example.com",
+			Content: map[string]any{
+				"msgtype":  "m.image",
+				"body":     "A hand-drawn system architecture diagram",
+				"filename": "diagram.png",
+				"url":      "mxc://matrix.example.com/media123",
+				"info": map[string]any{
+					"mimetype": "image/png",
+				},
+			},
+		},
+		func(_ context.Context, _ channel.ChannelConfig, msg channel.InboundMessage) error {
+			captured = msg
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("handleEvent returned error: %v", err)
+	}
+	if !delivered {
+		t.Fatal("expected event to be delivered")
+	}
+	if got := captured.Message.Text; got != "A hand-drawn system architecture diagram" {
+		t.Fatalf("unexpected message text: %q", got)
+	}
+	if len(captured.Message.Attachments) != 1 {
+		t.Fatalf("expected one attachment, got %d", len(captured.Message.Attachments))
+	}
+	att := captured.Message.Attachments[0]
+	if att.Name != "diagram.png" || att.Caption != "A hand-drawn system architecture diagram" {
+		t.Fatalf("unexpected attachment metadata: %#v", att)
+	}
+	if rawText, _ := captured.Metadata["raw_text"].(string); rawText != "A hand-drawn system architecture diagram" {
+		t.Fatalf("unexpected raw_text metadata: %q", rawText)
+	}
+}
+
 func TestMatrixHandleEventMarksDirectConversationFromJoinedMembers(t *testing.T) {
 	joinedMembersRequests := 0
 	adapter := NewMatrixAdapter(nil)
@@ -611,6 +661,34 @@ func TestExtractMatrixInboundContentParsesImageAttachment(t *testing.T) {
 	}
 	if att.Width != 640 || att.Height != 480 || att.Size != 42 {
 		t.Fatalf("unexpected attachment dimensions: %#v", att)
+	}
+	if att.Caption != "" {
+		t.Fatalf("expected empty caption, got %#v", att)
+	}
+}
+
+func TestExtractMatrixInboundContentParsesImageCaption(t *testing.T) {
+	text, attachments := extractMatrixInboundContent(map[string]any{
+		"msgtype":  "m.image",
+		"body":     "System architecture diagram",
+		"filename": "diagram.png",
+		"url":      "mxc://matrix.example.com/media123",
+		"info": map[string]any{
+			"mimetype": "image/png",
+		},
+	})
+	if text != "System architecture diagram" {
+		t.Fatalf("expected caption text, got %q", text)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(attachments))
+	}
+	att := attachments[0]
+	if att.Name != "diagram.png" {
+		t.Fatalf("unexpected attachment name: %#v", att)
+	}
+	if att.Caption != "System architecture diagram" {
+		t.Fatalf("unexpected attachment caption: %#v", att)
 	}
 }
 

@@ -891,7 +891,7 @@ func extractMatrixInboundContent(content map[string]any) (string, []channel.Atta
 	if !ok {
 		return strings.TrimSpace(channel.ReadString(content, "body")), nil
 	}
-	return "", []channel.Attachment{att}
+	return strings.TrimSpace(att.Caption), []channel.Attachment{att}
 }
 
 func matrixAttachmentFromContent(content map[string]any, msgType string) (channel.Attachment, bool) {
@@ -900,15 +900,20 @@ func matrixAttachmentFromContent(content map[string]any, msgType string) (channe
 		return channel.Attachment{}, false
 	}
 	info, _ := content["info"].(map[string]any)
+	body := strings.TrimSpace(channel.ReadString(content, "body"))
 	name := strings.TrimSpace(channel.ReadString(content, "filename"))
+	caption := ""
 	if name == "" {
-		name = strings.TrimSpace(channel.ReadString(content, "body"))
+		name = body
+	} else if body != "" && !strings.EqualFold(body, name) {
+		caption = body
 	}
 	att := channel.Attachment{
 		Type:           matrixAttachmentType(msgType),
 		PlatformKey:    contentURI,
 		SourcePlatform: Type.String(),
 		Name:           name,
+		Caption:        caption,
 		Mime:           strings.TrimSpace(channel.ReadString(info, "mimetype")),
 		Size:           matrixMapInt64(info, "size"),
 		Width:          matrixMapInt(info, "w"),
