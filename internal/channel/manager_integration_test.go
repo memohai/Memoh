@@ -152,7 +152,7 @@ func TestManagerHandleInboundIntegratesAdapter(t *testing.T) {
 		ReplyTarget: "123",
 		Conversation: Conversation{
 			ID:   "chat-1",
-			Type: "p2p",
+			Type: ConversationTypePrivate,
 		},
 	})
 	if err != nil {

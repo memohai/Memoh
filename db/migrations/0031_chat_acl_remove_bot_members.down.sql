@@ -1,5 +1,5 @@
--- 0029_chat_acl
--- Restore allow_guest storage and preauth table, then drop bot ACL rules.
+-- 0031_chat_acl_remove_bot_members
+-- Restore allow_guest, preauth, and bot_members, then drop bot ACL rules.
 
 ALTER TABLE bots ADD COLUMN IF NOT EXISTS allow_guest BOOLEAN NOT NULL DEFAULT false;
 
@@ -28,5 +28,16 @@ CREATE TABLE IF NOT EXISTS bot_preauth_keys (
 
 CREATE INDEX IF NOT EXISTS idx_bot_preauth_keys_bot_id ON bot_preauth_keys(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_preauth_keys_expires ON bot_preauth_keys(expires_at);
+
+CREATE TABLE IF NOT EXISTS bot_members (
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT bot_members_role_check CHECK (role IN ('owner', 'admin', 'member')),
+  CONSTRAINT bot_members_unique UNIQUE (bot_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_members_user_id ON bot_members(user_id);
 
 DROP TABLE IF EXISTS bot_acl_rules;

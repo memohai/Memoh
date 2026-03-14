@@ -17,7 +17,6 @@ SET max_context_load_time = 1440,
     max_context_tokens = 0,
     max_inbox_items = 50,
     language = 'auto',
-    allow_guest = false,
     reasoning_enabled = false,
     reasoning_effort = 'medium',
     heartbeat_enabled = false,
@@ -45,7 +44,6 @@ SELECT
   bots.max_context_tokens,
   bots.max_inbox_items,
   bots.language,
-  bots.allow_guest,
   bots.reasoning_enabled,
   bots.reasoning_effort,
   bots.heartbeat_enabled,
@@ -73,7 +71,6 @@ type GetSettingsByBotIDRow struct {
 	MaxContextTokens   int32       `json:"max_context_tokens"`
 	MaxInboxItems      int32       `json:"max_inbox_items"`
 	Language           string      `json:"language"`
-	AllowGuest         bool        `json:"allow_guest"`
 	ReasoningEnabled   bool        `json:"reasoning_enabled"`
 	ReasoningEffort    string      `json:"reasoning_effort"`
 	HeartbeatEnabled   bool        `json:"heartbeat_enabled"`
@@ -96,7 +93,6 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.MaxContextTokens,
 		&i.MaxInboxItems,
 		&i.Language,
-		&i.AllowGuest,
 		&i.ReasoningEnabled,
 		&i.ReasoningEffort,
 		&i.HeartbeatEnabled,
@@ -119,21 +115,20 @@ WITH updated AS (
       max_context_tokens = $2,
       max_inbox_items = $3,
       language = $4,
-      allow_guest = $5,
-      reasoning_enabled = $6,
-      reasoning_effort = $7,
-      heartbeat_enabled = $8,
-      heartbeat_interval = $9,
-      heartbeat_prompt = $10,
-      chat_model_id = COALESCE($11::uuid, bots.chat_model_id),
-      heartbeat_model_id = COALESCE($12::uuid, bots.heartbeat_model_id),
-      search_provider_id = COALESCE($13::uuid, bots.search_provider_id),
-      memory_provider_id = COALESCE($14::uuid, bots.memory_provider_id),
-      tts_model_id = COALESCE($15::uuid, bots.tts_model_id),
-      browser_context_id = COALESCE($16::uuid, bots.browser_context_id),
+      reasoning_enabled = $5,
+      reasoning_effort = $6,
+      heartbeat_enabled = $7,
+      heartbeat_interval = $8,
+      heartbeat_prompt = $9,
+      chat_model_id = COALESCE($10::uuid, bots.chat_model_id),
+      heartbeat_model_id = COALESCE($11::uuid, bots.heartbeat_model_id),
+      search_provider_id = COALESCE($12::uuid, bots.search_provider_id),
+      memory_provider_id = COALESCE($13::uuid, bots.memory_provider_id),
+      tts_model_id = COALESCE($14::uuid, bots.tts_model_id),
+      browser_context_id = COALESCE($15::uuid, bots.browser_context_id),
       updated_at = now()
-  WHERE bots.id = $17
-  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.allow_guest, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.chat_model_id, bots.heartbeat_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
+  WHERE bots.id = $16
+  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.chat_model_id, bots.heartbeat_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
 )
 SELECT
   updated.id AS bot_id,
@@ -141,7 +136,6 @@ SELECT
   updated.max_context_tokens,
   updated.max_inbox_items,
   updated.language,
-  updated.allow_guest,
   updated.reasoning_enabled,
   updated.reasoning_effort,
   updated.heartbeat_enabled,
@@ -167,7 +161,6 @@ type UpsertBotSettingsParams struct {
 	MaxContextTokens   int32       `json:"max_context_tokens"`
 	MaxInboxItems      int32       `json:"max_inbox_items"`
 	Language           string      `json:"language"`
-	AllowGuest         bool        `json:"allow_guest"`
 	ReasoningEnabled   bool        `json:"reasoning_enabled"`
 	ReasoningEffort    string      `json:"reasoning_effort"`
 	HeartbeatEnabled   bool        `json:"heartbeat_enabled"`
@@ -188,7 +181,6 @@ type UpsertBotSettingsRow struct {
 	MaxContextTokens   int32       `json:"max_context_tokens"`
 	MaxInboxItems      int32       `json:"max_inbox_items"`
 	Language           string      `json:"language"`
-	AllowGuest         bool        `json:"allow_guest"`
 	ReasoningEnabled   bool        `json:"reasoning_enabled"`
 	ReasoningEffort    string      `json:"reasoning_effort"`
 	HeartbeatEnabled   bool        `json:"heartbeat_enabled"`
@@ -208,7 +200,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.MaxContextTokens,
 		arg.MaxInboxItems,
 		arg.Language,
-		arg.AllowGuest,
 		arg.ReasoningEnabled,
 		arg.ReasoningEffort,
 		arg.HeartbeatEnabled,
@@ -229,7 +220,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.MaxContextTokens,
 		&i.MaxInboxItems,
 		&i.Language,
-		&i.AllowGuest,
 		&i.ReasoningEnabled,
 		&i.ReasoningEffort,
 		&i.HeartbeatEnabled,

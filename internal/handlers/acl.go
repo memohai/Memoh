@@ -11,6 +11,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/bots"
+	identitypkg "github.com/memohai/memoh/internal/identity"
 	"github.com/memohai/memoh/internal/channel/identities"
 )
 
@@ -40,6 +41,7 @@ func (h *ACLHandler) Register(e *echo.Echo) {
 	group.DELETE("/blacklist/:rule_id", h.DeleteBlacklist)
 	group.GET("/access/users", h.SearchUsers)
 	group.GET("/access/channel_identities", h.SearchChannelIdentities)
+	group.GET("/access/channel_identities/:channel_identity_id/conversations", h.ListObservedConversationsByChannelIdentity)
 }
 
 // ListWhitelist godoc
@@ -86,7 +88,7 @@ func (h *ACLHandler) UpsertWhitelist(c echo.Context) error {
 	}
 	item, err := h.service.AddWhitelistEntry(c.Request().Context(), botID, actorID, req)
 	if err != nil {
-		if errors.Is(err, acl.ErrInvalidRuleSubject) {
+		if errors.Is(err, acl.ErrInvalidRuleSubject) || errors.Is(err, acl.ErrInvalidSourceScope) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -163,7 +165,7 @@ func (h *ACLHandler) UpsertBlacklist(c echo.Context) error {
 	}
 	item, err := h.service.AddBlacklistEntry(c.Request().Context(), botID, actorID, req)
 	if err != nil {
-		if errors.Is(err, acl.ErrInvalidRuleSubject) {
+		if errors.Is(err, acl.ErrInvalidRuleSubject) || errors.Is(err, acl.ErrInvalidSourceScope) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -264,6 +266,33 @@ func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, acl.ChannelIdentityCandidateListResponse{Items: result})
+}
+
+// ListObservedConversationsByChannelIdentity godoc
+// @Summary List observed conversations for a channel identity
+// @Description List previously observed conversation candidates for a channel identity under a bot
+// @Tags bots
+// @Param bot_id path string true "Bot ID"
+// @Param channel_identity_id path string true "Channel Identity ID"
+// @Success 200 {object} acl.ObservedConversationCandidateListResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/access/channel_identities/{channel_identity_id}/conversations [get].
+func (h *ACLHandler) ListObservedConversationsByChannelIdentity(c echo.Context) error {
+	botID, _, err := h.requireManageAccess(c)
+	if err != nil {
+		return err
+	}
+	channelIdentityID := strings.TrimSpace(c.Param("channel_identity_id"))
+	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	items, err := h.service.ListObservedConversationsByChannelIdentity(c.Request().Context(), botID, channelIdentityID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, acl.ObservedConversationCandidateListResponse{Items: items})
 }
 
 func (h *ACLHandler) requireManageAccess(c echo.Context) (string, string, error) {

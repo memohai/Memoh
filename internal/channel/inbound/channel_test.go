@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/route"
@@ -181,10 +182,12 @@ type fakeChatACL struct {
 	allowed bool
 	err     error
 	calls   int
+	lastReq acl.ChatTriggerRequest
 }
 
-func (f *fakeChatACL) CanPerformChatTrigger(_ context.Context, _, _, _ string) (bool, error) {
+func (f *fakeChatACL) CanPerformChatTrigger(_ context.Context, req acl.ChatTriggerRequest) (bool, error) {
 	f.calls++
+	f.lastReq = req
 	if f.err != nil {
 		return false, f.err
 	}
@@ -355,7 +358,7 @@ func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
 		Conversation: channel.Conversation{
 			ID:   "chat-1",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -394,6 +397,10 @@ func TestChannelInboundProcessorDenied(t *testing.T) {
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "stranger-1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-1",
+			Type: channel.ConversationTypePrivate,
+		},
 	}
 
 	err := processor.HandleInbound(context.Background(), cfg, msg, sender)
@@ -427,7 +434,7 @@ func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "guest-1"},
 		Conversation: channel.Conversation{
 			ID:   "chat-1",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -437,6 +444,11 @@ func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
 	if aclSvc.calls != 1 {
 		t.Fatalf("expected acl to be checked once, got %d", aclSvc.calls)
 	}
+	if aclSvc.lastReq.SourceScope.Channel != "feishu" ||
+		aclSvc.lastReq.SourceScope.ConversationType != channel.ConversationTypePrivate ||
+		aclSvc.lastReq.SourceScope.ConversationID != "chat-1" {
+		t.Fatalf("unexpected acl source scope: %+v", aclSvc.lastReq.SourceScope)
+	}
 	if gateway.gotReq.Query != "" {
 		t.Fatal("ACL denied guest should not trigger chat call")
 	}
@@ -445,6 +457,45 @@ func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
 	}
 	if len(chatSvc.persistedIn) != 0 {
 		t.Fatalf("ACL denied guest should not persist trigger message, got %d", len(chatSvc.persistedIn))
+	}
+}
+
+func TestChannelInboundProcessorACLReceivesThreadScope(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-thread-scope"}}
+	policySvc := &fakePolicyService{botType: "public"}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-thread", RouteID: "route-thread"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
+	aclSvc := &fakeChatACL{allowed: false}
+	processor.SetACLService(aclSvc)
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("discord"),
+		Message:     channel.Message{Text: "hello", Thread: &channel.ThreadRef{ID: "thread-1"}},
+		ReplyTarget: "discord:thread-1",
+		Sender:      channel.Identity{SubjectID: "guest-thread"},
+		Conversation: channel.Conversation{
+			ID:   "guild-chat-1",
+			Type: channel.ConversationTypeThread,
+		},
+		Metadata: map[string]any{
+			"is_mentioned": true,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if aclSvc.calls != 1 {
+		t.Fatalf("expected acl to be checked once, got %d", aclSvc.calls)
+	}
+	if aclSvc.lastReq.SourceScope.Channel != "discord" ||
+		aclSvc.lastReq.SourceScope.ConversationType != channel.ConversationTypeThread ||
+		aclSvc.lastReq.SourceScope.ConversationID != "guild-chat-1" ||
+		aclSvc.lastReq.SourceScope.ThreadID != "thread-1" {
+		t.Fatalf("unexpected thread acl source scope: %+v", aclSvc.lastReq.SourceScope)
 	}
 }
 
@@ -545,7 +596,7 @@ func TestChannelInboundProcessorAttachmentOnlyUsesFallbackQuery(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "ext-1"},
 		Conversation: channel.Conversation{
 			ID:   "conv-1",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -584,7 +635,7 @@ func TestChannelInboundProcessorSilentReply(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "user-1"},
 		Conversation: channel.Conversation{
 			ID:   "conv-1",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -716,7 +767,7 @@ func TestChannelInboundProcessorDoesNotPersistBeforeOpenStream(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "user-1"},
 		Conversation: channel.Conversation{
 			ID:   "conv-openstream",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -767,7 +818,7 @@ func TestChannelInboundProcessorPersistsAttachmentAssetRefs(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "ext-asset"},
 		Conversation: channel.Conversation{
 			ID:   "oc_asset",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -821,7 +872,7 @@ func TestChannelInboundProcessorIngestsPlatformKeyWithResolver(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "resolver-user"},
 		Conversation: channel.Conversation{
 			ID:   "resolver-conv",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -883,7 +934,7 @@ func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
 		},
 		Conversation: channel.Conversation{
 			ID:   "web-conv",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -960,7 +1011,7 @@ func TestChannelInboundProcessorIngestsQQFileAttachmentKeepsOriginalExtWhenMimeG
 		Sender:      channel.Identity{SubjectID: "qq-user"},
 		Conversation: channel.Conversation{
 			ID:   "qq-user",
-			Type: "direct",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -1095,7 +1146,7 @@ func TestChannelInboundProcessorProcessingStatusSuccessLifecycle(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "ext-1"},
 		Conversation: channel.Conversation{
 			ID:   "oc_123",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -1142,7 +1193,7 @@ func TestChannelInboundProcessorProcessingStatusFailureLifecycle(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "ext-2"},
 		Conversation: channel.Conversation{
 			ID:   "oc_456",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -1192,7 +1243,7 @@ func TestChannelInboundProcessorProcessingStatusErrorsAreBestEffort(t *testing.T
 		Sender:      channel.Identity{SubjectID: "ext-3"},
 		Conversation: channel.Conversation{
 			ID:   "oc_789",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -1234,7 +1285,7 @@ func TestChannelInboundProcessorProcessingFailedNotifyErrorDoesNotOverrideChatEr
 		Sender:      channel.Identity{SubjectID: "ext-4"},
 		Conversation: channel.Conversation{
 			ID:   "oc_999",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 

@@ -431,7 +431,7 @@ func eventToInboundMessage(event InboundEvent, botID string) (channel.InboundMes
 			},
 			Conversation: channel.Conversation{
 				ID:   subjectID,
-				Type: "direct",
+				Type: channel.ConversationTypePrivate,
 			},
 			ReceivedAt: parseTimestamp(payload.Timestamp),
 			Source:     "qq",
@@ -468,7 +468,7 @@ func eventToInboundMessage(event InboundEvent, botID string) (channel.InboundMes
 			},
 			Conversation: channel.Conversation{
 				ID:   groupID,
-				Type: "group",
+				Type: channel.ConversationTypeGroup,
 			},
 			ReceivedAt: parseTimestamp(payload.Timestamp),
 			Source:     "qq",
@@ -487,6 +487,15 @@ func eventToInboundMessage(event InboundEvent, botID string) (channel.InboundMes
 		channelID := strings.TrimSpace(payload.ChannelID)
 		if subjectID == "" || channelID == "" {
 			return channel.InboundMessage{}, false
+		}
+		conversationID := channelID
+		conversationType := channel.ConversationTypeGroup
+		threadID := ""
+		guildID := strings.TrimSpace(payload.GuildID)
+		if guildID != "" {
+			conversationID = guildID
+			threadID = channelID
+			conversationType = channel.ConversationTypeThread
 		}
 		return channel.InboundMessage{
 			Channel: Type,
@@ -508,14 +517,15 @@ func eventToInboundMessage(event InboundEvent, botID string) (channel.InboundMes
 				},
 			},
 			Conversation: channel.Conversation{
-				ID:   channelID,
-				Type: "channel",
+				ID:       conversationID,
+				Type:     conversationType,
+				ThreadID: threadID,
 			},
 			ReceivedAt: parseTimestamp(payload.Timestamp),
 			Source:     "qq",
 			Metadata: map[string]any{
 				"is_mentioned": true,
-				"guild_id":     strings.TrimSpace(payload.GuildID),
+				"guild_id":     guildID,
 				"channel_id":   channelID,
 			},
 		}, true

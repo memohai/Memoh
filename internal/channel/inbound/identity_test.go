@@ -471,7 +471,7 @@ func TestIdentityResolverPersonalBotAllowsOwnerDirectWithoutMembership(t *testin
 		Sender:  channel.Identity{SubjectID: "ext-owner-direct"},
 		Conversation: channel.Conversation{
 			ID:   "p2p-1",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -513,7 +513,7 @@ func TestIdentityResolverPersonalBotDoesNotFallbackToFeishuUserID(t *testing.T) 
 		},
 		Conversation: channel.Conversation{
 			ID:   "p2p-1",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -547,7 +547,7 @@ func TestIdentityResolverPersonalBotRejectsNonOwnerDirectEvenIfMember(t *testing
 		Sender:  channel.Identity{SubjectID: "ext-non-owner"},
 		Conversation: channel.Conversation{
 			ID:   "p2p-2",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -721,7 +721,7 @@ func TestIdentityResolverPublicBotDirectGuestPasses(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "stranger-direct"},
 		Conversation: channel.Conversation{
 			ID:   "p2p-1",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)

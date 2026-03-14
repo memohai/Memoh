@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/conversation"
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
@@ -242,11 +243,14 @@ func determineConversationKind(threadID, conversationType string) string {
 	if strings.TrimSpace(threadID) != "" {
 		return conversation.KindThread
 	}
-	ct := strings.ToLower(strings.TrimSpace(conversationType))
-	if ct == "p2p" || ct == "private" || ct == "" {
+	switch channel.NormalizeConversationType(conversationType) {
+	case channel.ConversationTypeThread:
+		return conversation.KindThread
+	case channel.ConversationTypePrivate:
 		return conversation.KindDirect
+	default:
+		return conversation.KindGroup
 	}
-	return conversation.KindGroup
 }
 
 func (s *DBService) resolveConversationCreatorChannelIdentityID(ctx context.Context, botID, fallbackChannelIdentityID, kind string) string {

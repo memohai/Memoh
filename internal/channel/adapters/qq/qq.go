@@ -94,7 +94,7 @@ func (*QQAdapter) Descriptor() channel.Descriptor {
 			Media:          true,
 			Reply:          true,
 			BlockStreaming: true,
-			ChatTypes:      []string{"direct", "group", "channel"},
+			ChatTypes:      []string{channel.ConversationTypePrivate, channel.ConversationTypeGroup, channel.ConversationTypeThread},
 		},
 		OutboundPolicy: channel.OutboundPolicy{
 			TextChunkLimit:      defaultChunkLimit,

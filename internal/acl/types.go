@@ -1,6 +1,11 @@
 package acl
 
-import "time"
+import (
+	"strings"
+	"time"
+
+	"github.com/memohai/memoh/internal/channel"
+)
 
 const (
 	ActionChatTrigger = "chat.trigger"
@@ -21,6 +26,7 @@ type Rule struct {
 	SubjectKind                string    `json:"subject_kind"`
 	UserID                     string    `json:"user_id,omitempty"`
 	ChannelIdentityID          string    `json:"channel_identity_id,omitempty"`
+	SourceScope                *SourceScope `json:"source_scope,omitempty"`
 	UserUsername               string    `json:"user_username,omitempty"`
 	UserDisplayName            string    `json:"user_display_name,omitempty"`
 	UserAvatarURL              string    `json:"user_avatar_url,omitempty"`
@@ -40,9 +46,24 @@ type ListRulesResponse struct {
 	Items []Rule `json:"items"`
 }
 
+type SourceScope struct {
+	Channel          string `json:"channel,omitempty"`
+	ConversationType string `json:"conversation_type,omitempty"`
+	ConversationID   string `json:"conversation_id,omitempty"`
+	ThreadID         string `json:"thread_id,omitempty"`
+}
+
 type UpsertRuleRequest struct {
 	UserID            string `json:"user_id,omitempty"`
 	ChannelIdentityID string `json:"channel_identity_id,omitempty"`
+	SourceScope       *SourceScope `json:"source_scope,omitempty"`
+}
+
+type ChatTriggerRequest struct {
+	BotID             string
+	UserID            string
+	ChannelIdentityID string
+	SourceScope       SourceScope
 }
 
 type UserCandidate struct {
@@ -71,4 +92,40 @@ type ChannelIdentityCandidate struct {
 
 type ChannelIdentityCandidateListResponse struct {
 	Items []ChannelIdentityCandidate `json:"items"`
+}
+
+type ObservedConversationCandidate struct {
+	RouteID           string    `json:"route_id"`
+	Channel           string    `json:"channel"`
+	ConversationType  string    `json:"conversation_type,omitempty"`
+	ConversationID    string    `json:"conversation_id"`
+	ThreadID          string    `json:"thread_id,omitempty"`
+	ConversationName  string    `json:"conversation_name,omitempty"`
+	LastObservedAt    time.Time `json:"last_observed_at"`
+}
+
+type ObservedConversationCandidateListResponse struct {
+	Items []ObservedConversationCandidate `json:"items"`
+}
+
+func (s SourceScope) Normalize() SourceScope {
+	scope := SourceScope{
+		Channel:        strings.TrimSpace(s.Channel),
+		ConversationID: strings.TrimSpace(s.ConversationID),
+		ThreadID:       strings.TrimSpace(s.ThreadID),
+	}
+	if raw := strings.TrimSpace(s.ConversationType); raw != "" {
+		scope.ConversationType = channel.NormalizeConversationType(raw)
+	}
+	if scope.ThreadID != "" && scope.ConversationType == "" {
+		scope.ConversationType = channel.ConversationTypeThread
+	}
+	return scope
+}
+
+func (s SourceScope) IsZero() bool {
+	return strings.TrimSpace(s.Channel) == "" &&
+		strings.TrimSpace(s.ConversationType) == "" &&
+		strings.TrimSpace(s.ConversationID) == "" &&
+		strings.TrimSpace(s.ThreadID) == ""
 }

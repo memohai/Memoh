@@ -76,6 +76,150 @@ definitions:
       display_name:
         type: string
     type: object
+  acl.ChannelIdentityCandidate:
+    properties:
+      avatar_url:
+        type: string
+      channel:
+        type: string
+      channel_subject_id:
+        type: string
+      display_name:
+        type: string
+      id:
+        type: string
+      linked_avatar_url:
+        type: string
+      linked_display_name:
+        type: string
+      linked_username:
+        type: string
+      user_id:
+        type: string
+    type: object
+  acl.ChannelIdentityCandidateListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/acl.ChannelIdentityCandidate'
+        type: array
+    type: object
+  acl.ListRulesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/acl.Rule'
+        type: array
+    type: object
+  acl.ObservedConversationCandidate:
+    properties:
+      channel:
+        type: string
+      conversation_id:
+        type: string
+      conversation_name:
+        type: string
+      conversation_type:
+        type: string
+      last_observed_at:
+        type: string
+      route_id:
+        type: string
+      thread_id:
+        type: string
+    type: object
+  acl.ObservedConversationCandidateListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/acl.ObservedConversationCandidate'
+        type: array
+    type: object
+  acl.Rule:
+    properties:
+      action:
+        type: string
+      bot_id:
+        type: string
+      channel_identity_avatar_url:
+        type: string
+      channel_identity_display_name:
+        type: string
+      channel_identity_id:
+        type: string
+      channel_subject_id:
+        type: string
+      channel_type:
+        type: string
+      created_at:
+        type: string
+      effect:
+        type: string
+      id:
+        type: string
+      linked_user_avatar_url:
+        type: string
+      linked_user_display_name:
+        type: string
+      linked_user_id:
+        type: string
+      linked_user_username:
+        type: string
+      source_scope:
+        $ref: '#/definitions/acl.SourceScope'
+      subject_kind:
+        type: string
+      updated_at:
+        type: string
+      user_avatar_url:
+        type: string
+      user_display_name:
+        type: string
+      user_id:
+        type: string
+      user_username:
+        type: string
+    type: object
+  acl.SourceScope:
+    properties:
+      channel:
+        type: string
+      conversation_id:
+        type: string
+      conversation_type:
+        type: string
+      thread_id:
+        type: string
+    type: object
+  acl.UpsertRuleRequest:
+    properties:
+      channel_identity_id:
+        type: string
+      source_scope:
+        $ref: '#/definitions/acl.SourceScope'
+      user_id:
+        type: string
+    type: object
+  acl.UserCandidate:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      username:
+        type: string
+    type: object
+  acl.UserCandidateListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/acl.UserCandidate'
+        type: array
+    type: object
   adapters.CDFPoint:
     properties:
       cumulative:
@@ -317,8 +461,6 @@ definitions:
     type: object
   bots.Bot:
     properties:
-      allow_guest:
-        type: boolean
       avatar_url:
         type: string
       check_issue_count:
@@ -365,17 +507,6 @@ definitions:
       type:
         type: string
     type: object
-  bots.BotMember:
-    properties:
-      bot_id:
-        type: string
-      created_at:
-        type: string
-      role:
-        type: string
-      user_id:
-        type: string
-    type: object
   bots.CreateBotRequest:
     properties:
       avatar_url:
@@ -404,13 +535,6 @@ definitions:
           $ref: '#/definitions/bots.BotCheck'
         type: array
     type: object
-  bots.ListMembersResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/bots.BotMember'
-        type: array
-    type: object
   bots.TransferBotRequest:
     properties:
       owner_user_id:
@@ -427,13 +551,6 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
-    type: object
-  bots.UpsertMemberRequest:
-    properties:
-      role:
-        type: string
-      user_id:
-        type: string
     type: object
   browsercontexts.BrowserContext:
     properties:
@@ -2567,6 +2684,211 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Create bot user
+      tags:
+      - bots
+  /bots/{bot_id}/access/channel_identities:
+    get:
+      description: Search locally observed channel identity candidates for bot access
+        control
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Max results
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.ChannelIdentityCandidateListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Search access channel identities
+      tags:
+      - bots
+  /bots/{bot_id}/access/channel_identities/{channel_identity_id}/conversations:
+    get:
+      description: List previously observed conversation candidates for a channel
+        identity under a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Channel Identity ID
+        in: path
+        name: channel_identity_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.ObservedConversationCandidateListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List observed conversations for a channel identity
+      tags:
+      - bots
+  /bots/{bot_id}/access/users:
+    get:
+      description: Search user candidates for bot access control
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Max results
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.UserCandidateListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Search access users
+      tags:
+      - bots
+  /bots/{bot_id}/blacklist:
+    get:
+      description: List guest deny rules for chat trigger
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.ListRulesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List bot blacklist
+      tags:
+      - bots
+    put:
+      description: Add a guest deny rule for chat trigger
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Blacklist payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/acl.UpsertRuleRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.Rule'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Upsert bot blacklist entry
+      tags:
+      - bots
+  /bots/{bot_id}/blacklist/{rule_id}:
+    delete:
+      description: Delete a guest deny rule by rule ID
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Rule ID
+        in: path
+        name: rule_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete bot blacklist entry
       tags:
       - bots
   /bots/{bot_id}/cli/messages:
@@ -5522,6 +5844,101 @@ paths:
       summary: WebSocket chat endpoint
       tags:
       - local-channel
+  /bots/{bot_id}/whitelist:
+    get:
+      description: List guest allow rules for chat trigger
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.ListRulesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List bot whitelist
+      tags:
+      - bots
+    put:
+      description: Add a guest allow rule for chat trigger
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Whitelist payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/acl.UpsertRuleRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.Rule'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Upsert bot whitelist entry
+      tags:
+      - bots
+  /bots/{bot_id}/whitelist/{rule_id}:
+    delete:
+      description: Delete a guest allow rule by rule ID
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Rule ID
+        in: path
+        name: rule_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete bot whitelist entry
+      tags:
+      - bots
   /bots/{id}:
     delete:
       description: Delete a bot user (owner/admin only)
@@ -5906,113 +6323,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: List bot runtime checks
-      tags:
-      - bots
-  /bots/{id}/members:
-    get:
-      description: List members for a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/bots.ListMembersResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List bot members
-      tags:
-      - bots
-    put:
-      description: Add or update bot member role
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Member payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/bots.UpsertMemberRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/bots.BotMember'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Upsert bot member
-      tags:
-      - bots
-  /bots/{id}/members/{user_id}:
-    delete:
-      description: Remove a member from a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: User ID
-        in: path
-        name: user_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete bot member
       tags:
       - bots
   /bots/{id}/owner:

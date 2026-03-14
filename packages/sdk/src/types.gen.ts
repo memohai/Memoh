@@ -52,6 +52,89 @@ export type AccountsUpdateProfileRequest = {
     display_name?: string;
 };
 
+export type AclChannelIdentityCandidate = {
+    avatar_url?: string;
+    channel?: string;
+    channel_subject_id?: string;
+    display_name?: string;
+    id?: string;
+    linked_avatar_url?: string;
+    linked_display_name?: string;
+    linked_username?: string;
+    user_id?: string;
+};
+
+export type AclChannelIdentityCandidateListResponse = {
+    items?: Array<AclChannelIdentityCandidate>;
+};
+
+export type AclListRulesResponse = {
+    items?: Array<AclRule>;
+};
+
+export type AclObservedConversationCandidate = {
+    channel?: string;
+    conversation_id?: string;
+    conversation_name?: string;
+    conversation_type?: string;
+    last_observed_at?: string;
+    route_id?: string;
+    thread_id?: string;
+};
+
+export type AclObservedConversationCandidateListResponse = {
+    items?: Array<AclObservedConversationCandidate>;
+};
+
+export type AclRule = {
+    action?: string;
+    bot_id?: string;
+    channel_identity_avatar_url?: string;
+    channel_identity_display_name?: string;
+    channel_identity_id?: string;
+    channel_subject_id?: string;
+    channel_type?: string;
+    created_at?: string;
+    effect?: string;
+    id?: string;
+    linked_user_avatar_url?: string;
+    linked_user_display_name?: string;
+    linked_user_id?: string;
+    linked_user_username?: string;
+    source_scope?: AclSourceScope;
+    subject_kind?: string;
+    updated_at?: string;
+    user_avatar_url?: string;
+    user_display_name?: string;
+    user_id?: string;
+    user_username?: string;
+};
+
+export type AclSourceScope = {
+    channel?: string;
+    conversation_id?: string;
+    conversation_type?: string;
+    thread_id?: string;
+};
+
+export type AclUpsertRuleRequest = {
+    channel_identity_id?: string;
+    source_scope?: AclSourceScope;
+    user_id?: string;
+};
+
+export type AclUserCandidate = {
+    avatar_url?: string;
+    display_name?: string;
+    email?: string;
+    id?: string;
+    username?: string;
+};
+
+export type AclUserCandidateListResponse = {
+    items?: Array<AclUserCandidate>;
+};
+
 export type AdaptersCdfPoint = {
     /**
      * cumulative weight fraction [0.0, 1.0]
@@ -210,7 +293,6 @@ export type AdaptersUsageResponse = {
 };
 
 export type BotsBot = {
-    allow_guest?: boolean;
     avatar_url?: string;
     check_issue_count?: number;
     check_state?: string;
@@ -240,13 +322,6 @@ export type BotsBotCheck = {
     type?: string;
 };
 
-export type BotsBotMember = {
-    bot_id?: string;
-    created_at?: string;
-    role?: string;
-    user_id?: string;
-};
-
 export type BotsCreateBotRequest = {
     avatar_url?: string;
     display_name?: string;
@@ -265,10 +340,6 @@ export type BotsListChecksResponse = {
     items?: Array<BotsBotCheck>;
 };
 
-export type BotsListMembersResponse = {
-    items?: Array<BotsBotMember>;
-};
-
 export type BotsTransferBotRequest = {
     owner_user_id?: string;
 };
@@ -280,11 +351,6 @@ export type BotsUpdateBotRequest = {
     metadata?: {
         [key: string]: unknown;
     };
-};
-
-export type BotsUpsertMemberRequest = {
-    role?: string;
-    user_id?: string;
 };
 
 export type BrowsercontextsBrowserContext = {
@@ -1632,6 +1698,261 @@ export type PostBotsResponses = {
 };
 
 export type PostBotsResponse = PostBotsResponses[keyof PostBotsResponses];
+
+export type GetBotsByBotIdAccessChannelIdentitiesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Max results
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/access/channel_identities';
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesError = GetBotsByBotIdAccessChannelIdentitiesErrors[keyof GetBotsByBotIdAccessChannelIdentitiesErrors];
+
+export type GetBotsByBotIdAccessChannelIdentitiesResponses = {
+    /**
+     * OK
+     */
+    200: AclChannelIdentityCandidateListResponse;
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesResponse = GetBotsByBotIdAccessChannelIdentitiesResponses[keyof GetBotsByBotIdAccessChannelIdentitiesResponses];
+
+export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Channel Identity ID
+         */
+        channel_identity_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/access/channel_identities/{channel_identity_id}/conversations';
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsError = GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsErrors[keyof GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsErrors];
+
+export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponses = {
+    /**
+     * OK
+     */
+    200: AclObservedConversationCandidateListResponse;
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponse = GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponses[keyof GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponses];
+
+export type GetBotsByBotIdAccessUsersData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Max results
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/access/users';
+};
+
+export type GetBotsByBotIdAccessUsersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAccessUsersError = GetBotsByBotIdAccessUsersErrors[keyof GetBotsByBotIdAccessUsersErrors];
+
+export type GetBotsByBotIdAccessUsersResponses = {
+    /**
+     * OK
+     */
+    200: AclUserCandidateListResponse;
+};
+
+export type GetBotsByBotIdAccessUsersResponse = GetBotsByBotIdAccessUsersResponses[keyof GetBotsByBotIdAccessUsersResponses];
+
+export type GetBotsByBotIdBlacklistData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/blacklist';
+};
+
+export type GetBotsByBotIdBlacklistErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdBlacklistError = GetBotsByBotIdBlacklistErrors[keyof GetBotsByBotIdBlacklistErrors];
+
+export type GetBotsByBotIdBlacklistResponses = {
+    /**
+     * OK
+     */
+    200: AclListRulesResponse;
+};
+
+export type GetBotsByBotIdBlacklistResponse = GetBotsByBotIdBlacklistResponses[keyof GetBotsByBotIdBlacklistResponses];
+
+export type PutBotsByBotIdBlacklistData = {
+    /**
+     * Blacklist payload
+     */
+    body: AclUpsertRuleRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/blacklist';
+};
+
+export type PutBotsByBotIdBlacklistErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdBlacklistError = PutBotsByBotIdBlacklistErrors[keyof PutBotsByBotIdBlacklistErrors];
+
+export type PutBotsByBotIdBlacklistResponses = {
+    /**
+     * OK
+     */
+    200: AclRule;
+};
+
+export type PutBotsByBotIdBlacklistResponse = PutBotsByBotIdBlacklistResponses[keyof PutBotsByBotIdBlacklistResponses];
+
+export type DeleteBotsByBotIdBlacklistByRuleIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Rule ID
+         */
+        rule_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/blacklist/{rule_id}';
+};
+
+export type DeleteBotsByBotIdBlacklistByRuleIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdBlacklistByRuleIdError = DeleteBotsByBotIdBlacklistByRuleIdErrors[keyof DeleteBotsByBotIdBlacklistByRuleIdErrors];
+
+export type DeleteBotsByBotIdBlacklistByRuleIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type PostBotsByBotIdCliMessagesData = {
     /**
@@ -5256,6 +5577,125 @@ export type GetBotsByBotIdWebWsErrors = {
 
 export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
 
+export type GetBotsByBotIdWhitelistData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/whitelist';
+};
+
+export type GetBotsByBotIdWhitelistErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdWhitelistError = GetBotsByBotIdWhitelistErrors[keyof GetBotsByBotIdWhitelistErrors];
+
+export type GetBotsByBotIdWhitelistResponses = {
+    /**
+     * OK
+     */
+    200: AclListRulesResponse;
+};
+
+export type GetBotsByBotIdWhitelistResponse = GetBotsByBotIdWhitelistResponses[keyof GetBotsByBotIdWhitelistResponses];
+
+export type PutBotsByBotIdWhitelistData = {
+    /**
+     * Whitelist payload
+     */
+    body: AclUpsertRuleRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/whitelist';
+};
+
+export type PutBotsByBotIdWhitelistErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdWhitelistError = PutBotsByBotIdWhitelistErrors[keyof PutBotsByBotIdWhitelistErrors];
+
+export type PutBotsByBotIdWhitelistResponses = {
+    /**
+     * OK
+     */
+    200: AclRule;
+};
+
+export type PutBotsByBotIdWhitelistResponse = PutBotsByBotIdWhitelistResponses[keyof PutBotsByBotIdWhitelistResponses];
+
+export type DeleteBotsByBotIdWhitelistByRuleIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Rule ID
+         */
+        rule_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/whitelist/{rule_id}';
+};
+
+export type DeleteBotsByBotIdWhitelistByRuleIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdWhitelistByRuleIdError = DeleteBotsByBotIdWhitelistByRuleIdErrors[keyof DeleteBotsByBotIdWhitelistByRuleIdErrors];
+
+export type DeleteBotsByBotIdWhitelistByRuleIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
 export type DeleteBotsByIdData = {
     body?: never;
     path: {
@@ -5714,137 +6154,6 @@ export type GetBotsByIdChecksResponses = {
 };
 
 export type GetBotsByIdChecksResponse = GetBotsByIdChecksResponses[keyof GetBotsByIdChecksResponses];
-
-export type GetBotsByIdMembersData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{id}/members';
-};
-
-export type GetBotsByIdMembersErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByIdMembersError = GetBotsByIdMembersErrors[keyof GetBotsByIdMembersErrors];
-
-export type GetBotsByIdMembersResponses = {
-    /**
-     * OK
-     */
-    200: BotsListMembersResponse;
-};
-
-export type GetBotsByIdMembersResponse = GetBotsByIdMembersResponses[keyof GetBotsByIdMembersResponses];
-
-export type PutBotsByIdMembersData = {
-    /**
-     * Member payload
-     */
-    body: BotsUpsertMemberRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{id}/members';
-};
-
-export type PutBotsByIdMembersErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutBotsByIdMembersError = PutBotsByIdMembersErrors[keyof PutBotsByIdMembersErrors];
-
-export type PutBotsByIdMembersResponses = {
-    /**
-     * OK
-     */
-    200: BotsBotMember;
-};
-
-export type PutBotsByIdMembersResponse = PutBotsByIdMembersResponses[keyof PutBotsByIdMembersResponses];
-
-export type DeleteBotsByIdMembersByUserIdData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        id: string;
-        /**
-         * User ID
-         */
-        user_id: string;
-    };
-    query?: never;
-    url: '/bots/{id}/members/{user_id}';
-};
-
-export type DeleteBotsByIdMembersByUserIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteBotsByIdMembersByUserIdError = DeleteBotsByIdMembersByUserIdErrors[keyof DeleteBotsByIdMembersByUserIdErrors];
-
-export type DeleteBotsByIdMembersByUserIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
 
 export type PutBotsByIdOwnerData = {
     /**

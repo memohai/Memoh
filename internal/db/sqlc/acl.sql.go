@@ -43,17 +43,33 @@ SELECT EXISTS (
     AND effect = $2
     AND subject_kind = 'channel_identity'
     AND channel_identity_id = $3
+    AND (source_channel IS NULL OR source_channel = $4::text)
+    AND (source_conversation_type IS NULL OR source_conversation_type = $5::text)
+    AND (source_conversation_id IS NULL OR source_conversation_id = $6::text)
+    AND (source_thread_id IS NULL OR source_thread_id = $7::text)
 ) AS matched
 `
 
 type HasBotACLChannelIdentityRuleParams struct {
-	BotID             pgtype.UUID `json:"bot_id"`
-	Effect            string      `json:"effect"`
-	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
+	BotID                  pgtype.UUID `json:"bot_id"`
+	Effect                 string      `json:"effect"`
+	ChannelIdentityID      pgtype.UUID `json:"channel_identity_id"`
+	SourceChannel          pgtype.Text `json:"source_channel"`
+	SourceConversationType pgtype.Text `json:"source_conversation_type"`
+	SourceConversationID   pgtype.Text `json:"source_conversation_id"`
+	SourceThreadID         pgtype.Text `json:"source_thread_id"`
 }
 
 func (q *Queries) HasBotACLChannelIdentityRule(ctx context.Context, arg HasBotACLChannelIdentityRuleParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasBotACLChannelIdentityRule, arg.BotID, arg.Effect, arg.ChannelIdentityID)
+	row := q.db.QueryRow(ctx, hasBotACLChannelIdentityRule,
+		arg.BotID,
+		arg.Effect,
+		arg.ChannelIdentityID,
+		arg.SourceChannel,
+		arg.SourceConversationType,
+		arg.SourceConversationID,
+		arg.SourceThreadID,
+	)
 	var matched bool
 	err := row.Scan(&matched)
 	return matched, err
@@ -86,17 +102,33 @@ SELECT EXISTS (
     AND effect = $2
     AND subject_kind = 'user'
     AND user_id = $3
+    AND (source_channel IS NULL OR source_channel = $4::text)
+    AND (source_conversation_type IS NULL OR source_conversation_type = $5::text)
+    AND (source_conversation_id IS NULL OR source_conversation_id = $6::text)
+    AND (source_thread_id IS NULL OR source_thread_id = $7::text)
 ) AS matched
 `
 
 type HasBotACLUserRuleParams struct {
-	BotID  pgtype.UUID `json:"bot_id"`
-	Effect string      `json:"effect"`
-	UserID pgtype.UUID `json:"user_id"`
+	BotID                  pgtype.UUID `json:"bot_id"`
+	Effect                 string      `json:"effect"`
+	UserID                 pgtype.UUID `json:"user_id"`
+	SourceChannel          pgtype.Text `json:"source_channel"`
+	SourceConversationType pgtype.Text `json:"source_conversation_type"`
+	SourceConversationID   pgtype.Text `json:"source_conversation_id"`
+	SourceThreadID         pgtype.Text `json:"source_thread_id"`
 }
 
 func (q *Queries) HasBotACLUserRule(ctx context.Context, arg HasBotACLUserRuleParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasBotACLUserRule, arg.BotID, arg.Effect, arg.UserID)
+	row := q.db.QueryRow(ctx, hasBotACLUserRule,
+		arg.BotID,
+		arg.Effect,
+		arg.UserID,
+		arg.SourceChannel,
+		arg.SourceConversationType,
+		arg.SourceConversationID,
+		arg.SourceThreadID,
+	)
 	var matched bool
 	err := row.Scan(&matched)
 	return matched, err
@@ -111,6 +143,10 @@ SELECT
   r.subject_kind,
   r.user_id,
   r.channel_identity_id,
+  r.source_channel,
+  r.source_conversation_type,
+  r.source_conversation_id,
+  r.source_thread_id,
   r.created_by_user_id,
   r.created_at,
   r.updated_at,
@@ -149,6 +185,10 @@ type ListBotACLSubjectRulesByEffectRow struct {
 	SubjectKind                string             `json:"subject_kind"`
 	UserID                     pgtype.UUID        `json:"user_id"`
 	ChannelIdentityID          pgtype.UUID        `json:"channel_identity_id"`
+	SourceChannel              pgtype.Text        `json:"source_channel"`
+	SourceConversationType     pgtype.Text        `json:"source_conversation_type"`
+	SourceConversationID       pgtype.Text        `json:"source_conversation_id"`
+	SourceThreadID             pgtype.Text        `json:"source_thread_id"`
 	CreatedByUserID            pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
@@ -182,6 +222,10 @@ func (q *Queries) ListBotACLSubjectRulesByEffect(ctx context.Context, arg ListBo
 			&i.SubjectKind,
 			&i.UserID,
 			&i.ChannelIdentityID,
+			&i.SourceChannel,
+			&i.SourceConversationType,
+			&i.SourceConversationID,
+			&i.SourceThreadID,
 			&i.CreatedByUserID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -208,20 +252,35 @@ func (q *Queries) ListBotACLSubjectRulesByEffect(ctx context.Context, arg ListBo
 }
 
 const upsertBotACLChannelIdentityRule = `-- name: UpsertBotACLChannelIdentityRule :one
-INSERT INTO bot_acl_rules (bot_id, action, effect, subject_kind, channel_identity_id, created_by_user_id)
-VALUES ($1, 'chat.trigger', $2, 'channel_identity', $3, $4)
+INSERT INTO bot_acl_rules (
+  bot_id, action, effect, subject_kind, channel_identity_id,
+  source_channel, source_conversation_type, source_conversation_id, source_thread_id,
+  created_by_user_id
+)
+VALUES (
+  $1, 'chat.trigger', $2, 'channel_identity', $3,
+  $5::text,
+  $6::text,
+  $7::text,
+  $8::text,
+  $4
+)
 ON CONFLICT ON CONSTRAINT bot_acl_rules_unique_channel_identity
 DO UPDATE SET
   created_by_user_id = COALESCE(EXCLUDED.created_by_user_id, bot_acl_rules.created_by_user_id),
   updated_at = now()
-RETURNING id, bot_id, action, effect, subject_kind, user_id, channel_identity_id, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, action, effect, subject_kind, user_id, channel_identity_id, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at
 `
 
 type UpsertBotACLChannelIdentityRuleParams struct {
-	BotID             pgtype.UUID `json:"bot_id"`
-	Effect            string      `json:"effect"`
-	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
-	CreatedByUserID   pgtype.UUID `json:"created_by_user_id"`
+	BotID                  pgtype.UUID `json:"bot_id"`
+	Effect                 string      `json:"effect"`
+	ChannelIdentityID      pgtype.UUID `json:"channel_identity_id"`
+	CreatedByUserID        pgtype.UUID `json:"created_by_user_id"`
+	SourceChannel          pgtype.Text `json:"source_channel"`
+	SourceConversationType pgtype.Text `json:"source_conversation_type"`
+	SourceConversationID   pgtype.Text `json:"source_conversation_id"`
+	SourceThreadID         pgtype.Text `json:"source_thread_id"`
 }
 
 func (q *Queries) UpsertBotACLChannelIdentityRule(ctx context.Context, arg UpsertBotACLChannelIdentityRuleParams) (BotAclRule, error) {
@@ -230,6 +289,10 @@ func (q *Queries) UpsertBotACLChannelIdentityRule(ctx context.Context, arg Upser
 		arg.Effect,
 		arg.ChannelIdentityID,
 		arg.CreatedByUserID,
+		arg.SourceChannel,
+		arg.SourceConversationType,
+		arg.SourceConversationID,
+		arg.SourceThreadID,
 	)
 	var i BotAclRule
 	err := row.Scan(
@@ -240,6 +303,10 @@ func (q *Queries) UpsertBotACLChannelIdentityRule(ctx context.Context, arg Upser
 		&i.SubjectKind,
 		&i.UserID,
 		&i.ChannelIdentityID,
+		&i.SourceChannel,
+		&i.SourceConversationType,
+		&i.SourceConversationID,
+		&i.SourceThreadID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -254,7 +321,7 @@ ON CONFLICT ON CONSTRAINT bot_acl_rules_unique_user
 DO UPDATE SET
   created_by_user_id = COALESCE(EXCLUDED.created_by_user_id, bot_acl_rules.created_by_user_id),
   updated_at = now()
-RETURNING id, bot_id, action, effect, subject_kind, user_id, channel_identity_id, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, action, effect, subject_kind, user_id, channel_identity_id, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at
 `
 
 type UpsertBotACLGuestAllAllowRuleParams struct {
@@ -273,6 +340,10 @@ func (q *Queries) UpsertBotACLGuestAllAllowRule(ctx context.Context, arg UpsertB
 		&i.SubjectKind,
 		&i.UserID,
 		&i.ChannelIdentityID,
+		&i.SourceChannel,
+		&i.SourceConversationType,
+		&i.SourceConversationID,
+		&i.SourceThreadID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -281,20 +352,35 @@ func (q *Queries) UpsertBotACLGuestAllAllowRule(ctx context.Context, arg UpsertB
 }
 
 const upsertBotACLUserRule = `-- name: UpsertBotACLUserRule :one
-INSERT INTO bot_acl_rules (bot_id, action, effect, subject_kind, user_id, created_by_user_id)
-VALUES ($1, 'chat.trigger', $2, 'user', $3, $4)
+INSERT INTO bot_acl_rules (
+  bot_id, action, effect, subject_kind, user_id,
+  source_channel, source_conversation_type, source_conversation_id, source_thread_id,
+  created_by_user_id
+)
+VALUES (
+  $1, 'chat.trigger', $2, 'user', $3,
+  $5::text,
+  $6::text,
+  $7::text,
+  $8::text,
+  $4
+)
 ON CONFLICT ON CONSTRAINT bot_acl_rules_unique_user
 DO UPDATE SET
   created_by_user_id = COALESCE(EXCLUDED.created_by_user_id, bot_acl_rules.created_by_user_id),
   updated_at = now()
-RETURNING id, bot_id, action, effect, subject_kind, user_id, channel_identity_id, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, action, effect, subject_kind, user_id, channel_identity_id, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at
 `
 
 type UpsertBotACLUserRuleParams struct {
-	BotID           pgtype.UUID `json:"bot_id"`
-	Effect          string      `json:"effect"`
-	UserID          pgtype.UUID `json:"user_id"`
-	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
+	BotID                  pgtype.UUID `json:"bot_id"`
+	Effect                 string      `json:"effect"`
+	UserID                 pgtype.UUID `json:"user_id"`
+	CreatedByUserID        pgtype.UUID `json:"created_by_user_id"`
+	SourceChannel          pgtype.Text `json:"source_channel"`
+	SourceConversationType pgtype.Text `json:"source_conversation_type"`
+	SourceConversationID   pgtype.Text `json:"source_conversation_id"`
+	SourceThreadID         pgtype.Text `json:"source_thread_id"`
 }
 
 func (q *Queries) UpsertBotACLUserRule(ctx context.Context, arg UpsertBotACLUserRuleParams) (BotAclRule, error) {
@@ -303,6 +389,10 @@ func (q *Queries) UpsertBotACLUserRule(ctx context.Context, arg UpsertBotACLUser
 		arg.Effect,
 		arg.UserID,
 		arg.CreatedByUserID,
+		arg.SourceChannel,
+		arg.SourceConversationType,
+		arg.SourceConversationID,
+		arg.SourceThreadID,
 	)
 	var i BotAclRule
 	err := row.Scan(
@@ -313,6 +403,10 @@ func (q *Queries) UpsertBotACLUserRule(ctx context.Context, arg UpsertBotACLUser
 		&i.SubjectKind,
 		&i.UserID,
 		&i.ChannelIdentityID,
+		&i.SourceChannel,
+		&i.SourceConversationType,
+		&i.SourceConversationID,
+		&i.SourceThreadID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,

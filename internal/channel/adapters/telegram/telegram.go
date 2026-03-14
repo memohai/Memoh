@@ -510,11 +510,13 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	}
 	subjectID, displayName, attrs := resolveTelegramSender(raw)
 	chatID := ""
-	chatType := ""
+	chatTypeRaw := ""
+	chatType := channel.ConversationTypePrivate
 	chatName := ""
 	if raw.Chat != nil {
 		chatID = strconv.FormatInt(raw.Chat.ID, 10)
-		chatType = strings.TrimSpace(raw.Chat.Type)
+		chatTypeRaw = strings.TrimSpace(raw.Chat.Type)
+		chatType = normalizeTelegramConversationType(chatTypeRaw)
 		chatName = strings.TrimSpace(raw.Chat.Title)
 	}
 	replyRef := buildTelegramReplyRef(raw, chatID)
@@ -532,6 +534,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 		"is_mentioned":    isMentioned,
 		"is_reply_to_bot": isReplyToBot,
 		"raw_text":        rawText,
+		"raw_chat_type":   chatTypeRaw,
 	}
 	for key, value := range metadata {
 		meta[key] = value
@@ -732,6 +735,17 @@ func parseReplyToMessageID(reply *channel.ReplyRef) int {
 		return 0
 	}
 	return value
+}
+
+func normalizeTelegramConversationType(chatType string) string {
+	switch strings.ToLower(strings.TrimSpace(chatType)) {
+	case "private":
+		return channel.ConversationTypePrivate
+	case "group", "supergroup", "channel":
+		return channel.ConversationTypeGroup
+	default:
+		return channel.ConversationTypeGroup
+	}
 }
 
 func sendTelegramText(bot *tgbotapi.BotAPI, target string, text string, replyTo int, parseMode string) error {

@@ -282,9 +282,9 @@ func resolveDeliveryTarget(chatID, userID string) string {
 
 func normalizeConversationType(chatType string) string {
 	if strings.EqualFold(strings.TrimSpace(chatType), "group") {
-		return "group"
+		return channel.ConversationTypeGroup
 	}
-	return "private"
+	return channel.ConversationTypePrivate
 }
 
 func parseCreateTime(ts int64) time.Time {

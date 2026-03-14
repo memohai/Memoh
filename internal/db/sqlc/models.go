@@ -37,16 +37,20 @@ type Bot struct {
 }
 
 type BotAclRule struct {
-	ID                pgtype.UUID        `json:"id"`
-	BotID             pgtype.UUID        `json:"bot_id"`
-	Action            string             `json:"action"`
-	Effect            string             `json:"effect"`
-	SubjectKind       string             `json:"subject_kind"`
-	UserID            pgtype.UUID        `json:"user_id"`
-	ChannelIdentityID pgtype.UUID        `json:"channel_identity_id"`
-	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ID                     pgtype.UUID        `json:"id"`
+	BotID                  pgtype.UUID        `json:"bot_id"`
+	Action                 string             `json:"action"`
+	Effect                 string             `json:"effect"`
+	SubjectKind            string             `json:"subject_kind"`
+	UserID                 pgtype.UUID        `json:"user_id"`
+	ChannelIdentityID      pgtype.UUID        `json:"channel_identity_id"`
+	SourceChannel          pgtype.Text        `json:"source_channel"`
+	SourceConversationType pgtype.Text        `json:"source_conversation_type"`
+	SourceConversationID   pgtype.Text        `json:"source_conversation_id"`
+	SourceThreadID         pgtype.Text        `json:"source_thread_id"`
+	CreatedByUserID        pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotChannelConfig struct {

@@ -169,9 +169,9 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 
 		rawText := text
 		attachments := a.collectAttachments(m.Message)
-		chatType := "direct"
+		chatType := channel.ConversationTypePrivate
 		if m.GuildID != "" {
-			chatType = "guild"
+			chatType = channel.ConversationTypeGroup
 		}
 
 		// Prepend quoted message context so the AI can see what is being replied to,

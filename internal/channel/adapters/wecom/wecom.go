@@ -55,7 +55,7 @@ func (*WeComAdapter) Descriptor() channel.Descriptor {
 			Reply:          true,
 			Streaming:      true,
 			BlockStreaming: true,
-			ChatTypes:      []string{"private", "group"},
+			ChatTypes:      []string{channel.ConversationTypePrivate, channel.ConversationTypeGroup},
 		},
 		ConfigSchema: channel.ConfigSchema{
 			Version: 1,

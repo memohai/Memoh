@@ -110,18 +110,20 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string, lo
 		}
 	}
 	chatID := ""
-	chatType := ""
+	chatTypeRaw := ""
+	chatType := channel.ConversationTypePrivate
 	if message.ChatId != nil {
 		chatID = strings.TrimSpace(*message.ChatId)
 	}
 	if message.ChatType != nil {
-		chatType = strings.TrimSpace(*message.ChatType)
+		chatTypeRaw = strings.TrimSpace(*message.ChatType)
+		chatType = normalizeFeishuConversationType(chatTypeRaw)
 	}
 	replyTo := senderOpenID
 	if replyTo == "" {
 		replyTo = senderID
 	}
-	if chatType != "" && chatType != "p2p" && chatID != "" {
+	if chatID != "" && chatType != channel.ConversationTypePrivate {
 		replyTo = "chat_id:" + chatID
 	}
 	attrs := map[string]string{}
@@ -151,7 +153,8 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string, lo
 		ReceivedAt: time.Now().UTC(),
 		Source:     "feishu",
 		Metadata: map[string]any{
-			"is_mentioned": isMentioned,
+			"is_mentioned":  isMentioned,
+			"raw_chat_type": chatTypeRaw,
 		},
 	}
 }
@@ -372,6 +375,17 @@ func stringValue(raw any) string {
 		return value
 	}
 	return fmt.Sprint(raw)
+}
+
+func normalizeFeishuConversationType(chatType string) string {
+	switch strings.ToLower(strings.TrimSpace(chatType)) {
+	case "p2p":
+		return channel.ConversationTypePrivate
+	case "group":
+		return channel.ConversationTypeGroup
+	default:
+		return channel.ConversationTypeGroup
+	}
 }
 
 // resolveFeishuReceiveID parses target (open_id:/user_id:/chat_id: prefix) and returns receiveID and receiveType.

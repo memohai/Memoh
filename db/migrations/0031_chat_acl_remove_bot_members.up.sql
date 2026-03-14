@@ -1,5 +1,5 @@
--- 0029_chat_acl
--- Add bot ACL rules for chat trigger, migrate allow_guest into ACL, and drop preauth.
+-- 0031_chat_acl_remove_bot_members
+-- Add bot ACL rules, migrate allow_guest into ACL, and remove legacy bot sharing tables.
 
 CREATE TABLE IF NOT EXISTS bot_acl_rules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -50,3 +50,4 @@ END $$;
 
 ALTER TABLE bots DROP COLUMN IF EXISTS allow_guest;
 DROP TABLE IF EXISTS bot_preauth_keys;
+DROP TABLE IF EXISTS bot_members;

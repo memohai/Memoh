@@ -445,11 +445,7 @@ func extractThreadID(msg channel.InboundMessage) string {
 }
 
 func isGroupConversationType(conversationType string) bool {
-	ct := strings.ToLower(strings.TrimSpace(conversationType))
-	if ct == "" {
-		return false
-	}
-	return ct != "p2p" && ct != "private" && ct != "direct"
+	return channel.NormalizeConversationType(conversationType) != channel.ConversationTypePrivate
 }
 
 func (r *IdentityResolver) tryLinkConfiglessChannelIdentityToUser(ctx context.Context, msg channel.InboundMessage, channelIdentityID string) string {

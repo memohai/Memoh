@@ -11,58 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const addChatParticipant = `-- name: AddChatParticipant :one
-
-INSERT INTO bot_members (bot_id, user_id, role)
-VALUES ($1, $2, $3)
-ON CONFLICT (bot_id, user_id) DO UPDATE SET role = EXCLUDED.role
-RETURNING bot_id AS chat_id, user_id, role, created_at AS joined_at
-`
-
-type AddChatParticipantParams struct {
-	ChatID pgtype.UUID `json:"chat_id"`
-	UserID pgtype.UUID `json:"user_id"`
-	Role   string      `json:"role"`
-}
-
-type AddChatParticipantRow struct {
-	ChatID   pgtype.UUID        `json:"chat_id"`
-	UserID   pgtype.UUID        `json:"user_id"`
-	Role     string             `json:"role"`
-	JoinedAt pgtype.Timestamptz `json:"joined_at"`
-}
-
-// chat_participants
-func (q *Queries) AddChatParticipant(ctx context.Context, arg AddChatParticipantParams) (AddChatParticipantRow, error) {
-	row := q.db.QueryRow(ctx, addChatParticipant, arg.ChatID, arg.UserID, arg.Role)
-	var i AddChatParticipantRow
-	err := row.Scan(
-		&i.ChatID,
-		&i.UserID,
-		&i.Role,
-		&i.JoinedAt,
-	)
-	return i, err
-}
-
-const copyParticipantsToChat = `-- name: CopyParticipantsToChat :exec
-INSERT INTO bot_members (bot_id, user_id, role)
-SELECT $1, bm.user_id, bm.role
-FROM bot_members bm
-WHERE bm.bot_id = $2
-ON CONFLICT (bot_id, user_id) DO NOTHING
-`
-
-type CopyParticipantsToChatParams struct {
-	ChatID2 pgtype.UUID `json:"chat_id_2"`
-	ChatID  pgtype.UUID `json:"chat_id"`
-}
-
-func (q *Queries) CopyParticipantsToChat(ctx context.Context, arg CopyParticipantsToChatParams) error {
-	_, err := q.db.Exec(ctx, copyParticipantsToChat, arg.ChatID2, arg.ChatID)
-	return err
-}
-
 const createChat = `-- name: CreateChat :one
 SELECT
   b.id AS id,
@@ -191,23 +139,9 @@ func (q *Queries) GetChatByID(ctx context.Context, id pgtype.UUID) (GetChatByIDR
 }
 
 const getChatParticipant = `-- name: GetChatParticipant :one
-WITH owner_participant AS (
-  SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
-  FROM bots b
-  WHERE b.id = $1 AND b.owner_user_id = $2
-),
-member_participant AS (
-  SELECT bm.bot_id AS chat_id, bm.user_id, bm.role, bm.created_at AS joined_at
-  FROM bot_members bm
-  WHERE bm.bot_id = $1 AND bm.user_id = $2
-)
-SELECT chat_id, user_id, role, joined_at
-FROM (
-  SELECT chat_id, user_id, role, joined_at FROM owner_participant
-  UNION ALL
-  SELECT chat_id, user_id, role, joined_at FROM member_participant
-) p
-ORDER BY CASE WHEN role = 'owner' THEN 0 ELSE 1 END
+SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
+FROM bots b
+WHERE b.id = $1 AND b.owner_user_id = $2
 LIMIT 1
 `
 
@@ -238,21 +172,17 @@ func (q *Queries) GetChatParticipant(ctx context.Context, arg GetChatParticipant
 const getChatReadAccessByUser = `-- name: GetChatReadAccessByUser :one
 SELECT
   'participant'::text AS access_mode,
-  (CASE
-    WHEN b.owner_user_id = $1 THEN 'owner'
-    ELSE COALESCE(bm.role, ''::text)
-  END)::text AS participant_role,
+  'owner'::text AS participant_role,
   NULL::timestamptz AS last_observed_at
 FROM bots b
-LEFT JOIN bot_members bm ON bm.bot_id = b.id AND bm.user_id = $1
-WHERE b.id = $2
-  AND (b.owner_user_id = $1 OR bm.user_id IS NOT NULL)
+WHERE b.id = $1
+  AND b.owner_user_id = $2
 LIMIT 1
 `
 
 type GetChatReadAccessByUserParams struct {
-	UserID pgtype.UUID `json:"user_id"`
 	ChatID pgtype.UUID `json:"chat_id"`
+	UserID pgtype.UUID `json:"user_id"`
 }
 
 type GetChatReadAccessByUserRow struct {
@@ -262,7 +192,7 @@ type GetChatReadAccessByUserRow struct {
 }
 
 func (q *Queries) GetChatReadAccessByUser(ctx context.Context, arg GetChatReadAccessByUserParams) (GetChatReadAccessByUserRow, error) {
-	row := q.db.QueryRow(ctx, getChatReadAccessByUser, arg.UserID, arg.ChatID)
+	row := q.db.QueryRow(ctx, getChatReadAccessByUser, arg.ChatID, arg.UserID)
 	var i GetChatReadAccessByUserRow
 	err := row.Scan(&i.AccessMode, &i.ParticipantRole, &i.LastObservedAt)
 	return i, err
@@ -292,23 +222,9 @@ func (q *Queries) GetChatSettings(ctx context.Context, id pgtype.UUID) (GetChatS
 }
 
 const listChatParticipants = `-- name: ListChatParticipants :many
-WITH owner_participant AS (
-  SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
-  FROM bots b
-  WHERE b.id = $1
-),
-member_participant AS (
-  SELECT bm.bot_id AS chat_id, bm.user_id, bm.role, bm.created_at AS joined_at
-  FROM bot_members bm
-  WHERE bm.bot_id = $1
-    AND bm.user_id <> (SELECT owner_user_id FROM bots WHERE id = $1)
-)
-SELECT chat_id, user_id, role, joined_at
-FROM (
-  SELECT chat_id, user_id, role, joined_at FROM owner_participant
-  UNION ALL
-  SELECT chat_id, user_id, role, joined_at FROM member_participant
-) p
+SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
+FROM bots b
+WHERE b.id = $1
 ORDER BY joined_at ASC
 `
 
@@ -357,16 +273,15 @@ SELECT
   b.created_at,
   b.updated_at
 FROM bots b
-LEFT JOIN bot_members bm ON bm.bot_id = b.id AND bm.user_id = $1
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $2
-  AND (b.owner_user_id = $1 OR bm.user_id IS NOT NULL)
+WHERE b.id = $1
+  AND b.owner_user_id = $2
 ORDER BY b.updated_at DESC
 `
 
 type ListChatsByBotAndUserParams struct {
-	UserID pgtype.UUID `json:"user_id"`
 	BotID  pgtype.UUID `json:"bot_id"`
+	UserID pgtype.UUID `json:"user_id"`
 }
 
 type ListChatsByBotAndUserRow struct {
@@ -383,7 +298,7 @@ type ListChatsByBotAndUserRow struct {
 }
 
 func (q *Queries) ListChatsByBotAndUser(ctx context.Context, arg ListChatsByBotAndUserParams) ([]ListChatsByBotAndUserRow, error) {
-	rows, err := q.db.Query(ctx, listChatsByBotAndUser, arg.UserID, arg.BotID)
+	rows, err := q.db.Query(ctx, listChatsByBotAndUser, arg.BotID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -494,10 +409,9 @@ SELECT
   END)::text AS participant_role,
   NULL::timestamptz AS last_observed_at
 FROM bots b
-LEFT JOIN bot_members bm ON bm.bot_id = b.id AND bm.user_id = $1
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = $2
-  AND (b.owner_user_id = $1 OR bm.user_id IS NOT NULL)
+  AND b.owner_user_id = $1
 ORDER BY b.updated_at DESC
 `
 
@@ -557,10 +471,13 @@ func (q *Queries) ListVisibleChatsByBotAndUser(ctx context.Context, arg ListVisi
 }
 
 const removeChatParticipant = `-- name: RemoveChatParticipant :exec
-DELETE FROM bot_members
-WHERE bot_id = $1
-  AND user_id = $2
-  AND user_id <> (SELECT owner_user_id FROM bots WHERE id = $1)
+SELECT 1
+WHERE EXISTS (
+  SELECT 1
+  FROM bots b
+  WHERE b.id = $1
+    AND b.owner_user_id = $2
+)
 `
 
 type RemoveChatParticipantParams struct {
@@ -590,7 +507,7 @@ WITH updated AS (
   SET display_name = $1,
       updated_at = now()
   WHERE bots.id = $2
-  RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, allow_guest, reasoning_enabled, reasoning_effort, max_inbox_items, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id, tts_model_id, browser_context_id, metadata, created_at, updated_at
+  RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, max_inbox_items, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id, tts_model_id, browser_context_id, metadata, created_at, updated_at
 )
 SELECT
   updated.id AS id,

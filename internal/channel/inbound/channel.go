@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/channel"
@@ -48,7 +49,7 @@ type channelReactor interface {
 }
 
 type chatACL interface {
-	CanPerformChatTrigger(ctx context.Context, botID, userID, channelIdentityID string) (bool, error)
+	CanPerformChatTrigger(ctx context.Context, req acl.ChatTriggerRequest) (bool, error)
 }
 
 type mediaIngestor interface {
@@ -263,6 +264,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	resolvedAttachments := p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Attachments)
 	attachments := mapChannelToChatAttachments(resolvedAttachments)
 	text = buildInboundQuery(msg.Message, attachments)
+	threadID := extractThreadID(msg)
 
 	// Resolve or create the route via channel_routes.
 	if p.routeResolver == nil {
@@ -273,7 +275,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		BotID:             identity.BotID,
 		Platform:          msg.Channel.String(),
 		ConversationID:    msg.Conversation.ID,
-		ThreadID:          extractThreadID(msg),
+		ThreadID:          threadID,
 		ConversationType:  msg.Conversation.Type,
 		ChannelIdentityID: identity.UserID,
 		ChannelConfigID:   identity.ChannelConfigID,
@@ -295,7 +297,17 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		inboxAction = inbox.ActionTrigger
 	}
 	if inboxAction == inbox.ActionTrigger && p.acl != nil {
-		allowed, err := p.acl.CanPerformChatTrigger(ctx, identity.BotID, identity.UserID, identity.ChannelIdentityID)
+		allowed, err := p.acl.CanPerformChatTrigger(ctx, acl.ChatTriggerRequest{
+			BotID:             identity.BotID,
+			UserID:            identity.UserID,
+			ChannelIdentityID: identity.ChannelIdentityID,
+			SourceScope: acl.SourceScope{
+				Channel:          msg.Channel.String(),
+				ConversationType: channel.NormalizeConversationType(msg.Conversation.Type),
+				ConversationID:   strings.TrimSpace(msg.Conversation.ID),
+				ThreadID:         threadID,
+			},
+		})
 		if err != nil {
 			return fmt.Errorf("authorize chat trigger: %w", err)
 		}
@@ -666,8 +678,7 @@ func rawTextForCommand(msg channel.InboundMessage, fallback string) string {
 }
 
 func isDirectConversationType(conversationType string) bool {
-	ct := strings.ToLower(strings.TrimSpace(conversationType))
-	return ct == "" || ct == "p2p" || ct == "private" || ct == "direct"
+	return channel.IsPrivateConversationType(conversationType)
 }
 
 func metadataBool(metadata map[string]any, key string) bool {
