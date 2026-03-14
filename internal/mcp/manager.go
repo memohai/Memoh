@@ -195,7 +195,9 @@ func (m *Manager) EnsureBot(ctx context.Context, botID, imageOverride string) er
 	tzMounts, tzEnv := ctr.TimezoneSpec()
 	mounts = append(mounts, tzMounts...)
 
-	env := append(tzEnv, "MCP_SOCKET_PATH=/run/memoh/mcp.sock")
+	env := make([]string, 0, len(tzEnv)+1)
+	env = append(env, tzEnv...)
+	env = append(env, "MCP_SOCKET_PATH=/run/memoh/mcp.sock")
 
 	_, err = m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
 		ID:          m.containerID(botID),

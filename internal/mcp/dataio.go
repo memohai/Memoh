@@ -372,14 +372,16 @@ func (m *Manager) restartContainer(ctx context.Context, botID, containerID strin
 			slog.String("container_id", containerID), slog.Any("error", err))
 		return
 	}
-	// CNI network setup (for outbound connectivity).
+	// CNI network setup — outbound connectivity is required for package
+	// downloads and other network-dependent operations in the container.
 	if _, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
 		ContainerID: containerID,
 		CNIBinDir:   m.cfg.CNIBinaryDir,
 		CNIConfDir:  m.cfg.CNIConfigDir,
 	}); err != nil {
-		m.logger.Warn("network setup after restart failed",
+		m.logger.Error("network setup after restart failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
+		return
 	}
 }
 

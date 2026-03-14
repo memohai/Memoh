@@ -17,7 +17,7 @@ export type ContainerCreateLayerStatus = {
 }
 
 // codesync(container-create-stream): keep these manual SSE payload types in sync
-// with /Users/Menci/Projects/Memoh/internal/handlers/containerd.go.
+// with internal/handlers/containerd.go.
 export type ContainerCreateStreamEvent =
   | { type: 'pulling'; image: string }
   | { type: 'pull_progress'; layers: ContainerCreateLayerStatus[] }

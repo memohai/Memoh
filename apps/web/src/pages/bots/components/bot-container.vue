@@ -27,6 +27,7 @@ import {
 } from '@memoh/sdk/extra'
 import { Button, Input, Label, Separator, Spinner, Switch } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import ContainerCreateProgress from './container-create-progress.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
@@ -668,36 +669,11 @@ watch([activeTab, botId], ([tab]) => {
           v-if="createProgress && (containerAction === 'create')"
           class="space-y-2"
         >
-          <div class="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner class="size-3.5" />
-            <span v-if="createProgress.phase === 'pulling'">
-              {{ $t('bots.container.pullingImage') }}
-              <span
-                v-if="createProgressPercent > 0"
-                class="tabular-nums"
-              >{{ createProgressPercent }}%</span>
-            </span>
-            <span v-else-if="createProgress.phase === 'creating'">
-              {{ $t('bots.container.creatingContainer') }}
-            </span>
-            <span
-              v-else-if="createProgress.phase === 'error'"
-              class="text-destructive"
-            >
-              {{ createProgress.error }}
-            </span>
-          </div>
-          <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              v-if="createProgress.phase === 'pulling'"
-              class="h-full rounded-full bg-primary transition-all duration-300 ease-out"
-              :style="{ width: `${createProgressPercent}%` }"
-            />
-            <div
-              v-else-if="createProgress.phase === 'creating'"
-              class="h-full w-full animate-pulse rounded-full bg-primary/60"
-            />
-          </div>
+          <ContainerCreateProgress
+            :phase="createProgress.phase"
+            :percent="createProgressPercent"
+            :error="createProgress.error"
+          />
         </div>
       </div>
     </div>
@@ -732,36 +708,11 @@ watch([activeTab, botId], ([tab]) => {
         v-if="createProgress && containerAction === 'recreate'"
         class="space-y-2 rounded-md border p-3"
       >
-        <div class="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner class="size-3.5" />
-          <span v-if="createProgress.phase === 'pulling'">
-            {{ $t('bots.container.pullingImage') }}
-            <span
-              v-if="createProgressPercent > 0"
-              class="tabular-nums"
-            >{{ createProgressPercent }}%</span>
-          </span>
-          <span v-else-if="createProgress.phase === 'creating'">
-            {{ $t('bots.container.creatingContainer') }}
-          </span>
-          <span
-            v-else-if="createProgress.phase === 'error'"
-            class="text-destructive"
-          >
-            {{ createProgress.error }}
-          </span>
-        </div>
-        <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            v-if="createProgress.phase === 'pulling'"
-            class="h-full rounded-full bg-primary transition-all duration-300 ease-out"
-            :style="{ width: `${createProgressPercent}%` }"
-          />
-          <div
-            v-else-if="createProgress.phase === 'creating'"
-            class="h-full w-full animate-pulse rounded-full bg-primary/60"
-          />
-        </div>
+        <ContainerCreateProgress
+          :phase="createProgress.phase"
+          :percent="createProgressPercent"
+          :error="createProgress.error"
+        />
       </div>
 
       <div class="rounded-md border p-4">

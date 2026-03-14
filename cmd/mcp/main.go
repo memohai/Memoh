@@ -67,6 +67,8 @@ func main() {
 
 	// PID 1 zombie reaping: when mcp runs as PID 1 inside a container,
 	// orphaned child processes become zombies unless reaped.
+	// On Linux 5.3+, Go's os/exec uses pidfd_open which avoids races between
+	// this reaper and cmd.Wait(). Kernels below 5.3 may see rare ECHILD errors.
 	go func() {
 		var status syscall.WaitStatus
 		for {
