@@ -447,10 +447,15 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 }
 
 func buildMatrixMessageContent(msg channel.Message, edit bool, originalEventID string) map[string]any {
-	body := strings.TrimSpace(msg.PlainText())
+	formatted := formatMatrixMessage(msg)
+	body := formatted.Body
 	content := map[string]any{
 		"msgtype": "m.notice",
 		"body":    body,
+	}
+	if formatted.HasHTML {
+		content["format"] = matrixHTMLFormat
+		content["formatted_body"] = formatted.FormattedBody
 	}
 	if msg.Reply != nil && strings.TrimSpace(msg.Reply.MessageID) != "" && !edit {
 		content["m.relates_to"] = map[string]any{
@@ -463,6 +468,10 @@ func buildMatrixMessageContent(msg channel.Message, edit bool, originalEventID s
 		newContent := map[string]any{
 			"msgtype": "m.notice",
 			"body":    body,
+		}
+		if formatted.HasHTML {
+			newContent["format"] = matrixHTMLFormat
+			newContent["formatted_body"] = formatted.FormattedBody
 		}
 		content["m.new_content"] = newContent
 		content["m.relates_to"] = map[string]any{

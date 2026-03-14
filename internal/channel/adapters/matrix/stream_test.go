@@ -93,3 +93,49 @@ func TestMatrixStreamDropsBufferedTextWhenToolStarts(t *testing.T) {
 		t.Fatalf("expected only final visible message to be sent, got %d", requests)
 	}
 }
+
+func TestMatrixStreamFinalMarkdownUpdatesFormattedContent(t *testing.T) {
+	bodies := make([]string, 0, 2)
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		payload, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		bodies = append(bodies, string(payload))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"event_id":"$evt1"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	stream := &matrixOutboundStream{
+		adapter: adapter,
+		cfg: Config{
+			HomeserverURL: "https://matrix.example.com",
+			AccessToken:   "tok",
+		},
+		target: "!room:example.com",
+	}
+
+	ctx := context.Background()
+	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "**bold**", Phase: channel.StreamPhaseText}); err != nil {
+		t.Fatalf("push delta: %v", err)
+	}
+	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText}); err != nil {
+		t.Fatalf("push phase end: %v", err)
+	}
+	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: "**bold**", Format: channel.MessageFormatMarkdown}}}); err != nil {
+		t.Fatalf("push final: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected two sends, got %d", len(bodies))
+	}
+	if strings.Contains(bodies[0], "formatted_body") {
+		t.Fatalf("expected plain interim send, got %s", bodies[0])
+	}
+	if !strings.Contains(bodies[1], "formatted_body") || !strings.Contains(bodies[1], "org.matrix.custom.html") {
+		t.Fatalf("expected markdown final edit, got %s", bodies[1])
+	}
+}

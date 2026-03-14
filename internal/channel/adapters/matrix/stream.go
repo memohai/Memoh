@@ -24,6 +24,7 @@ type matrixOutboundStream struct {
 	originalEventID string
 	rawBuffer       strings.Builder
 	lastText        string
+	lastFormat      channel.MessageFormat
 	lastEditedAt    time.Time
 }
 
@@ -57,7 +58,7 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		s.mu.Lock()
 		text := strings.TrimSpace(s.rawBuffer.String())
 		s.mu.Unlock()
-		return s.upsertText(ctx, text, true)
+		return s.upsertText(ctx, text, channel.MessageFormatPlain, true)
 	case channel.StreamEventToolCallStart:
 		s.resetMessageState()
 		return nil
@@ -74,18 +75,22 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		if errText == "" {
 			return nil
 		}
-		return s.upsertText(ctx, "Error: "+errText, true)
+		return s.upsertText(ctx, "Error: "+errText, channel.MessageFormatPlain, true)
 	case channel.StreamEventFinal:
 		if event.Final == nil {
 			return errors.New("matrix stream final payload is required")
 		}
 		text := strings.TrimSpace(event.Final.Message.PlainText())
+		format := event.Final.Message.Format
+		if format == "" {
+			format = channel.MessageFormatPlain
+		}
 		if text == "" {
 			s.mu.Lock()
 			text = strings.TrimSpace(s.rawBuffer.String())
 			s.mu.Unlock()
 		}
-		if err := s.upsertText(ctx, text, true); err != nil {
+		if err := s.upsertText(ctx, text, format, true); err != nil {
 			return err
 		}
 		s.resetMessageState()
@@ -108,16 +113,20 @@ func (s *matrixOutboundStream) Close(ctx context.Context) error {
 	return nil
 }
 
-func (s *matrixOutboundStream) upsertText(ctx context.Context, text string, force bool) error {
+func (s *matrixOutboundStream) upsertText(ctx context.Context, text string, format channel.MessageFormat, force bool) error {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil
+	}
+	if format == "" {
+		format = channel.MessageFormatPlain
 	}
 
 	s.mu.Lock()
 	roomID := s.roomID
 	originalEventID := s.originalEventID
 	lastText := s.lastText
+	lastFormat := s.lastFormat
 	lastEditedAt := s.lastEditedAt
 	reply := s.reply
 	s.mu.Unlock()
@@ -136,7 +145,7 @@ func (s *matrixOutboundStream) upsertText(ctx context.Context, text string, forc
 	if originalEventID == "" {
 		eventID, err := s.adapter.sendTextEvent(ctx, s.cfg, roomID, buildMatrixMessageContent(channel.Message{
 			Text:   text,
-			Format: channel.MessageFormatPlain,
+			Format: format,
 			Reply:  reply,
 		}, false, ""))
 		if err != nil {
@@ -145,12 +154,13 @@ func (s *matrixOutboundStream) upsertText(ctx context.Context, text string, forc
 		s.mu.Lock()
 		s.originalEventID = eventID
 		s.lastText = text
+		s.lastFormat = format
 		s.lastEditedAt = time.Now()
 		s.mu.Unlock()
 		return nil
 	}
 
-	if text == lastText {
+	if text == lastText && format == lastFormat {
 		return nil
 	}
 	if !force && time.Since(lastEditedAt) < matrixEditThrottle {
@@ -158,13 +168,14 @@ func (s *matrixOutboundStream) upsertText(ctx context.Context, text string, forc
 	}
 	_, err := s.adapter.sendTextEvent(ctx, s.cfg, roomID, buildMatrixMessageContent(channel.Message{
 		Text:   text,
-		Format: channel.MessageFormatPlain,
+		Format: format,
 	}, true, originalEventID))
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	s.lastText = text
+	s.lastFormat = format
 	s.lastEditedAt = time.Now()
 	s.mu.Unlock()
 	return nil
@@ -175,6 +186,7 @@ func (s *matrixOutboundStream) resetMessageState() {
 	s.originalEventID = ""
 	s.rawBuffer.Reset()
 	s.lastText = ""
+	s.lastFormat = ""
 	s.lastEditedAt = time.Time{}
 	s.mu.Unlock()
 }

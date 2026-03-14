@@ -101,3 +101,40 @@ func TestBootstrapSinceTokenPersistsLatestCursor(t *testing.T) {
 		t.Fatal("expected bootstrap event to be remembered as seen")
 	}
 }
+
+func TestBuildMatrixMessageContentIncludesFormattedHTMLForMarkdown(t *testing.T) {
+	content := buildMatrixMessageContent(channel.Message{
+		Text:   "**bold**\n\n- item",
+		Format: channel.MessageFormatMarkdown,
+	}, false, "")
+
+	if got := content["body"]; got != "**bold**\n\n- item" {
+		t.Fatalf("unexpected body: %#v", got)
+	}
+	if got := content["format"]; got != matrixHTMLFormat {
+		t.Fatalf("unexpected format: %#v", got)
+	}
+	html, ok := content["formatted_body"].(string)
+	if !ok || !strings.Contains(html, "<strong>bold</strong>") || !strings.Contains(html, "<ul>") {
+		t.Fatalf("unexpected formatted body: %#v", content["formatted_body"])
+	}
+}
+
+func TestBuildMatrixMessageContentAddsFormattedHTMLToEdits(t *testing.T) {
+	content := buildMatrixMessageContent(channel.Message{
+		Text:   "`code`",
+		Format: channel.MessageFormatMarkdown,
+	}, true, "$evt1")
+
+	newContent, ok := content["m.new_content"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected m.new_content map, got %#v", content["m.new_content"])
+	}
+	if got := newContent["format"]; got != matrixHTMLFormat {
+		t.Fatalf("unexpected edit format: %#v", got)
+	}
+	html, ok := newContent["formatted_body"].(string)
+	if !ok || !strings.Contains(html, "<code>code</code>") {
+		t.Fatalf("unexpected edit formatted body: %#v", newContent["formatted_body"])
+	}
+}
