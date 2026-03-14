@@ -215,6 +215,25 @@ func (s *Store) ResolveEffectiveConfig(ctx context.Context, botID string, channe
 	return ChannelConfig{}, fmt.Errorf("%w", ErrChannelConfigNotFound)
 }
 
+// GetConfigByID returns a channel configuration by its persisted config ID.
+func (s *Store) GetConfigByID(ctx context.Context, configID string) (ChannelConfig, error) {
+	if s.queries == nil {
+		return ChannelConfig{}, errors.New("channel queries not configured")
+	}
+	pgConfigID, err := db.ParseUUID(configID)
+	if err != nil {
+		return ChannelConfig{}, err
+	}
+	row, err := s.queries.GetBotChannelConfigByID(ctx, pgConfigID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ChannelConfig{}, fmt.Errorf("%w", ErrChannelConfigNotFound)
+		}
+		return ChannelConfig{}, err
+	}
+	return normalizeChannelConfigFromRow(row)
+}
+
 // ListConfigsByType returns all channel configurations of the given type.
 func (s *Store) ListConfigsByType(ctx context.Context, channelType ChannelType) ([]ChannelConfig, error) {
 	if s.queries == nil {

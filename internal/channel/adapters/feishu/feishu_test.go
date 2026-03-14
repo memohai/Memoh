@@ -259,6 +259,50 @@ func TestFeishuResolveAttachmentRequiresPlatformKey(t *testing.T) {
 	}
 }
 
+func TestLoadCachedBotOpenIDRejectsScopeMismatch(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		cached cachedBotOpenID
+		appID  string
+		region string
+	}{
+		{
+			name: "app id",
+			cached: cachedBotOpenID{
+				region: "feishu",
+				appID:  "app-old",
+				openID: "ou_old",
+			},
+			appID:  "app-new",
+			region: "feishu",
+		},
+		{
+			name: "region",
+			cached: cachedBotOpenID{
+				region: "feishu",
+				appID:  "app-same",
+				openID: "ou_old",
+			},
+			appID:  "app-same",
+			region: "lark",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			openID, ok := loadCachedBotOpenID(tc.cached, tc.appID, tc.region)
+			if ok {
+				t.Fatalf("expected cache miss for rotated bot scope, got %q", openID)
+			}
+		})
+	}
+}
+
 func TestFeishuResolveAttachmentRequiresMessageID(t *testing.T) {
 	t.Parallel()
 

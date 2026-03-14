@@ -8,6 +8,12 @@ FROM bot_channel_configs
 WHERE bot_id = $1 AND channel_type = $2
 LIMIT 1;
 
+-- name: GetBotChannelConfigByID :one
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+FROM bot_channel_configs
+WHERE id = $1
+LIMIT 1;
+
 -- name: GetBotChannelConfigByExternalIdentity :one
 SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
 FROM bot_channel_configs
@@ -65,4 +71,3 @@ SELECT id, user_id, channel_type, config, created_at, updated_at
 FROM user_channel_bindings
 WHERE channel_type = $1
 ORDER BY created_at DESC;
-

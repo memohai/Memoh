@@ -3,12 +3,14 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	larkevent "github.com/larksuite/oapi-sdk-go/v3/event"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
@@ -18,7 +20,7 @@ import (
 )
 
 type webhookConfigStore interface {
-	ListConfigsByType(ctx context.Context, channelType channel.ChannelType) ([]channel.ChannelConfig, error)
+	GetConfigByID(ctx context.Context, configID string) (channel.ChannelConfig, error)
 }
 
 type webhookInboundManager interface {
@@ -163,14 +165,18 @@ func validateWebhookCallbackAuth(payload []byte, cfg Config) error {
 }
 
 func (h *WebhookHandler) findConfigByID(ctx context.Context, configID string) (channel.ChannelConfig, error) {
-	items, err := h.store.ListConfigsByType(ctx, Type)
+	if _, err := uuid.Parse(strings.TrimSpace(configID)); err != nil {
+		return channel.ChannelConfig{}, echo.NewHTTPError(http.StatusNotFound, "channel config not found")
+	}
+	item, err := h.store.GetConfigByID(ctx, configID)
 	if err != nil {
+		if errors.Is(err, channel.ErrChannelConfigNotFound) {
+			return channel.ChannelConfig{}, echo.NewHTTPError(http.StatusNotFound, "channel config not found")
+		}
 		return channel.ChannelConfig{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	for _, item := range items {
-		if strings.TrimSpace(item.ID) == configID {
-			return item, nil
-		}
+	if item.ChannelType != Type {
+		return channel.ChannelConfig{}, echo.NewHTTPError(http.StatusNotFound, "channel config not found")
 	}
-	return channel.ChannelConfig{}, echo.NewHTTPError(http.StatusNotFound, "channel config not found")
+	return item, nil
 }
