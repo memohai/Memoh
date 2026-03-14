@@ -335,7 +335,7 @@ func (a *Adapter) ListMailbox(ctx context.Context, config map[string]any, page, 
 	if start > math.MaxUint32 || end > math.MaxUint32 {
 		return nil, 0, fmt.Errorf("mail sequence range out of bounds: start=%d end=%d", start, end)
 	}
-	seqSet.AddRange(uint32(start), uint32(end))
+	seqSet.AddRange(uint32(start), uint32(end)) //nolint:gosec // bounds checked above
 
 	fetchOpts := &imap.FetchOptions{Envelope: true, UID: true}
 	fetchCmd := client.Fetch(seqSet, fetchOpts)
@@ -415,7 +415,7 @@ func (a *Adapter) dialIMAP(ctx context.Context, config map[string]any) (*imapcli
 	}
 
 	opts := &imapclient.Options{
-		TLSConfig: &tls.Config{ServerName: "imap.gmail.com"},
+		TLSConfig: &tls.Config{ServerName: "imap.gmail.com", MinVersion: tls.VersionTLS12},
 	}
 	client, err := imapclient.DialTLS("imap.gmail.com:993", opts)
 	if err != nil {

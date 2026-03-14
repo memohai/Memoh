@@ -264,7 +264,7 @@ func (e *Executor) callRead(ctx context.Context, providerID string, args map[str
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
 	config = ensureProviderID(config, providerID)
-	return e.callReadForProvider(ctx, providerName, config, uint32(uidRaw))
+	return e.callReadForProvider(ctx, providerName, config, uint32(uidRaw)) //nolint:gosec // bounds checked above
 }
 
 func (e *Executor) callReadForProvider(ctx context.Context, providerName email.ProviderName, config map[string]any, uid uint32) (map[string]any, error) {

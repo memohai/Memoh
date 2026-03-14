@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+
+# Sparse encoding service — runs the OpenSearch neural sparse model
+# as a standalone HTTP service (Flask + PyTorch CPU).
+# Used by the Go server's sparse memory runtime via HTTP.
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY internal/memory/sparse/service/requirements.txt requirements.txt
+RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r requirements.txt
+
+COPY internal/memory/sparse/service/main.py main.py
+
+ENV SPARSE_PORT=8085
+ENV SPARSE_CACHE_DIR=/opt/sparse-cache
+
+RUN mkdir -p /opt/sparse-cache
+
+# Pre-download the default sparse model during image build so containers
+# start with a warm cache and do not need to fetch weights on first boot.
+RUN python - <<'PY'
+from pathlib import Path
+from huggingface_hub import hf_hub_download
+from transformers import AutoModelForMaskedLM, AutoTokenizer
+
+model_repo = "opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1"
+cache_dir = "/opt/sparse-cache"
+Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+AutoModelForMaskedLM.from_pretrained(model_repo, cache_dir=cache_dir)
+AutoTokenizer.from_pretrained(model_repo, cache_dir=cache_dir)
+hf_hub_download(repo_id=model_repo, filename="idf.json", cache_dir=cache_dir)
+
+print(f"Pre-downloaded sparse model: {model_repo}")
+PY
+
+EXPOSE 8085
+
+CMD ["python", "main.py"]

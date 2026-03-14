@@ -182,147 +182,38 @@
         </div>
 
         <!-- Charts Section -->
-        <div class="h-[240px] border-t flex flex-col bg-muted/5 shrink-0">
+        <div
+          v-if="showChartSection"
+          class="h-[240px] border-t flex flex-col bg-muted/5 shrink-0"
+        >
           <div class="px-3 py-1.5 border-b bg-muted/10 flex items-center justify-between shrink-0">
             <h5 class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
               Vector Manifold
             </h5>
           </div>
           <div class="flex-1 flex min-h-0 divide-x overflow-hidden">
-            <!-- Top K Buckets (Bar Chart) -->
+            <!-- Sparse: Top K Buckets -->
             <div class="flex-1 flex flex-col p-3 min-w-0">
               <p class="text-[9px] font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">
-                Top-K Bucket
+                {{ chartLeftTitle }}
               </p>
-              <div class="flex-1 flex items-end gap-0.5 relative group min-h-0 pt-2 pb-4">
-                <div
-                  v-for="(bucket, idx) in selectedTopKBuckets"
-                  :key="idx"
-                  class="flex-1 bg-primary/25 hover:bg-primary/50 transition-colors relative group/bar"
-                  :style="{ height: `${topKBarHeights[idx]}%` }"
-                >
-                  <!-- Tooltip for Bar -->
-                  <div class="absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1 bg-popover border text-popover-foreground px-2 py-1 rounded shadow-lg text-[10px] hidden group-hover/bar:block whitespace-nowrap pointer-events-none">
-                    <p class="font-bold text-primary">
-                      Index: {{ bucket.index }}
-                    </p>
-                    <p>Value: {{ bucket.value.toFixed(6) }}</p>
-                  </div>
-                </div>
-                <!-- Axis labels (showing actual range) -->
-                <div class="absolute left-[-2px] top-2 bottom-4 border-l border-muted-foreground/10 flex flex-col justify-between text-[8px] font-mono text-muted-foreground/40 pr-1">
-                  <span>{{ topKMaxValue.toFixed(4) }}</span>
-                  <span>{{ topKMinValue.toFixed(4) }}</span>
-                </div>
-              </div>
+              <VChart
+                class="h-full w-full min-h-0"
+                :option="chartLeftOption"
+                autoresize
+              />
             </div>
 
-            <!-- CDF Curve (Line Chart) -->
+            <!-- Sparse/Dense secondary chart -->
             <div class="flex-1 flex flex-col p-3 min-w-0">
               <p class="text-[9px] font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">
-                Energy Gradient (CDF)
+                {{ chartRightTitle }}
               </p>
-              <div class="flex-1 relative min-h-0 pt-2 pb-4 group/cdf">
-                <svg
-                  class="w-full h-full overflow-visible"
-                  viewBox="0 0 100 100"
-                  preserveAspectRatio="none"
-                >
-                  <!-- Grid lines -->
-                  <line
-                    x1="0"
-                    y1="50"
-                    x2="100"
-                    y2="50"
-                    stroke="currentColor"
-                    class="text-muted-foreground/5"
-                    stroke-width="0.5"
-                  />
-                  
-                  <!-- Area under curve -->
-                  <path
-                    :d="generateSmoothPath(selectedCdfCurve, true)"
-                    fill="currentColor"
-                    class="text-primary/10"
-                  />
-                  <!-- Curve -->
-                  <path
-                    :d="generateSmoothPath(selectedCdfCurve)"
-                    fill="none"
-                    stroke="currentColor"
-                    class="text-primary"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                  />
-                  <!-- Interaction vertical line -->
-                  <line
-                    v-if="hoveredCdfPoint"
-                    :x1="hoveredCdfX"
-                    y1="0"
-                    :x2="hoveredCdfX"
-                    y2="100"
-                    stroke="currentColor"
-                    class="text-primary/20"
-                    stroke-width="0.5"
-                    stroke-dasharray="2,2"
-                  />
-                  <!-- Interaction vertical area (Hit area) -->
-                  <rect
-                    v-for="(point, idx) in selectedCdfCurve"
-                    :key="'hit-' + idx"
-                    :x="(idx / (selectedCdfLength - 1)) * 100 - 2"
-                    y="0"
-                    width="4"
-                    height="100"
-                    fill="transparent"
-                    class="cursor-crosshair pointer-events-auto"
-                    @mouseenter="hoveredCdfPoint = point; hoveredCdfIdx = idx"
-                    @mouseleave="hoveredCdfPoint = null"
-                  />
-                </svg>
-                
-                <!-- Fixed aspect ratio markers overlay -->
-                <div class="absolute inset-0 pointer-events-none pt-2 pb-4">
-                  <div
-                    v-for="(point, idx) in selectedCdfCurve"
-                    :key="'dot-' + idx"
-                    class="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background transition-transform"
-                    :class="hoveredCdfIdx === idx && hoveredCdfPoint ? 'bg-primary scale-125 z-10' : 'bg-primary/60 scale-100'"
-                    :style="{ 
-                      left: `${(idx / (selectedCdfLength - 1)) * 100}%`,
-                      top: `${(100 - 5) - (point.cumulative * 90)}%`
-                    }"
-                  />
-                </div>
-                
-                <!-- Tooltip -->
-                <div
-                  v-if="hoveredCdfPoint"
-                  class="absolute z-30 bg-popover border text-popover-foreground px-2 py-1 rounded shadow-xl text-[10px] pointer-events-none whitespace-nowrap"
-                  :style="{ 
-                    left: `${Math.min(Math.max(hoveredCdfX, 15), 85)}%`, 
-                    top: `${Math.min(Math.max(hoveredCdfY, 15), 85)}%`,
-                    transform: 'translate(-50%, -140%)'
-                  }"
-                >
-                  <p class="font-bold text-primary">
-                    K: {{ hoveredCdfPoint.k }}
-                  </p>
-                  <p class="font-mono">
-                    P: {{ hoveredCdfPoint.cumulative.toFixed(6) }}
-                  </p>
-                </div>
-                
-                <!-- Axis labels -->
-                <div class="absolute left-[-2px] top-2 bottom-4 border-l border-muted-foreground/10 flex flex-col justify-between text-[8px] font-mono text-muted-foreground/40 pr-1">
-                  <span>1.0</span>
-                  <span>0.0</span>
-                </div>
-                <div class="absolute bottom-0 left-0 right-0 flex justify-between text-[8px] font-mono text-muted-foreground/40 px-1">
-                  <span>k=1</span>
-                  <span>k={{ selectedCdfLength }}</span>
-                </div>
-              </div>
+              <VChart
+                class="h-full w-full min-h-0"
+                :option="chartRightOption"
+                autoresize
+              />
             </div>
           </div>
         </div>
@@ -554,6 +445,15 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from 'vue'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { LineChart, BarChart } from 'echarts/charts'
+import {
+  GridComponent,
+  TooltipComponent,
+} from 'echarts/components'
+import VChart from 'vue-echarts'
+import { useColorMode } from '@vueuse/core'
 import {
   Button,
   Input,
@@ -572,17 +472,27 @@ import {
 } from '@memoh/ui'
 import {
   getBotsByBotIdMemory,
+  getBotsByBotIdMemoryStatus,
   postBotsByBotIdMemory,
   deleteBotsByBotIdMemoryById,
   postBotsByBotIdMemoryCompact,
   getBotsByBotIdMessages,
+  postBotsByBotIdMemorySearch,
 } from '@memoh/sdk'
-import type { MemoryCdfPoint, MemoryTopKBucket } from '@memoh/sdk'
+import type {
+  AdaptersCdfPoint as MemoryCdfPoint,
+  AdaptersMemoryItem,
+  AdaptersMemoryStatusResponse,
+  AdaptersTopKBucket as MemoryTopKBucket,
+  MessageMessage,
+} from '@memoh/sdk'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { formatDateTimeSeconds } from '@/utils/date-time'
+
+use([CanvasRenderer, LineChart, BarChart, GridComponent, TooltipComponent])
 
 interface MemoryItem {
   id: string
@@ -620,11 +530,15 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const colorMode = useColorMode()
 const { copyText } = useClipboard()
 const loading = ref(false)
 const actionLoading = ref(false)
 const compactLoading = ref(false)
+const denseSearchLoading = ref(false)
 const memories = ref<MemoryItem[]>([])
+const memoryStatus = ref<AdaptersMemoryStatusResponse | null>(null)
+const denseSearchResults = ref<Array<{ id: string; memory: string; score: number }>>([])
 const searchQuery = ref('')
 const selectedId = ref<string | null>(null)
 const editContent = ref('')
@@ -642,30 +556,367 @@ const compactDialogOpen = ref(false)
 const compactRatio = ref('0.5')
 const compactDecayDate = ref('')
 
-// Hover state for CDF chart
-const hoveredCdfPoint = ref<MemoryCdfPoint | null>(null)
-const hoveredCdfIdx = ref<number>(-1)
-const hoveredCdfX = computed(() => {
-  if (!hoveredCdfPoint.value || !selectedMemory.value) return 0
-  const len = selectedCdfLength.value
-  return (hoveredCdfIdx.value / (len - 1)) * 100
-})
-const hoveredCdfY = computed(() => {
-  if (!hoveredCdfPoint.value) return 0
-  return (100 - 5) - (hoveredCdfPoint.value.cumulative * 90)
-})
-
 const selectedTopKBuckets = computed(() => selectedMemory.value?.top_k_buckets ?? [])
 const selectedCdfCurve = computed(() => selectedMemory.value?.cdf_curve ?? [])
-const selectedCdfLength = computed(() => Math.max(2, selectedCdfCurve.value.length))
+const hasSparseExplain = computed(() =>
+  selectedTopKBuckets.value.length > 0 && selectedCdfCurve.value.length > 0,
+)
+const memoryMode = computed(() => memoryStatus.value?.memory_mode ?? 'off')
+const isDenseMode = computed(() => memoryMode.value === 'dense')
+const hasDenseExplain = computed(() => denseSearchResults.value.length > 0)
+const showChartSection = computed(() =>
+  (isDenseMode.value && hasDenseExplain.value) || (!isDenseMode.value && hasSparseExplain.value),
+)
+const selectedCdfMaxK = computed(() => {
+  const lastPoint = selectedCdfCurve.value[selectedCdfCurve.value.length - 1]
+  return Math.max(1, lastPoint?.k ?? selectedCdfCurve.value.length)
+})
+const selectedDisplayCdfCurve = computed(() =>
+  buildDisplayCdfCurve(selectedCdfCurve.value, 48),
+)
 const topKBucketValues = computed(() => selectedTopKBuckets.value.map((bucket: MemoryTopKBucket) => bucket.value ?? 0))
-const topKMinValue = computed(() => Math.min(...topKBucketValues.value))
-const topKMaxValue = computed(() => Math.max(...topKBucketValues.value))
-const topKRange = computed(() => (topKMaxValue.value - topKMinValue.value) || 1)
-const topKBarHeights = computed(() =>
-  selectedTopKBuckets.value.map(
-    (bucket: MemoryTopKBucket) => ((((bucket.value ?? 0) - topKMinValue.value) / topKRange.value) * 80) + 20,
-  ),
+const topKMinValue = computed(() => topKBucketValues.value.length > 0 ? Math.min(...topKBucketValues.value) : 0)
+const topKMaxValue = computed(() => topKBucketValues.value.length > 0 ? Math.max(...topKBucketValues.value) : 0)
+const denseScores = computed(() => denseSearchResults.value.map((item) => item.score))
+const denseScoreMax = computed(() => denseScores.value.length > 0 ? Math.max(...denseScores.value) : 1)
+const denseCumulativeSeries = computed(() => {
+  if (denseScores.value.length === 0) return []
+  const total = denseScores.value.reduce((sum, score) => sum + score, 0)
+  if (total <= 0) {
+    return denseScores.value.map((_, idx) => [idx + 1, 0])
+  }
+  let running = 0
+  return denseScores.value.map((score, idx) => {
+    running += score
+    return [idx + 1, running / total]
+  })
+})
+
+const chartPalette = computed(() => {
+  // Depend on theme so echarts colors recalculate on light/dark switch.
+  void colorMode.value
+  return {
+    tooltipBackground: resolveCssColor('var(--popover)', '#ffffff'),
+    tooltipBorder: resolveCssColor('var(--border)', 'rgba(0,0,0,0.12)'),
+    tooltipText: resolveCssColor('var(--popover-foreground)', '#111827'),
+    axisText: resolveCssColor('var(--muted-foreground)', 'rgba(107,114,128,0.9)'),
+    splitLine: resolveCssColor('color-mix(in oklab, var(--muted-foreground) 8%, transparent)', 'rgba(107,114,128,0.12)'),
+    topKBar: resolveCssColor('color-mix(in oklab, var(--primary) 16%, transparent)', 'rgba(99,102,241,0.18)'),
+    topKBarHover: resolveCssColor('color-mix(in oklab, var(--primary) 26%, transparent)', 'rgba(99,102,241,0.26)'),
+    cdfLine: resolveCssColor('color-mix(in oklab, var(--primary) 34%, var(--foreground) 12%)', 'rgba(99,102,241,0.46)'),
+    cdfArea: resolveCssColor('color-mix(in oklab, var(--primary) 8%, transparent)', 'rgba(99,102,241,0.09)'),
+    cdfPointer: resolveCssColor('color-mix(in oklab, var(--primary) 30%, transparent)', 'rgba(99,102,241,0.24)'),
+  }
+})
+
+const topKChartOption = computed(() => ({
+  animation: false,
+  grid: {
+    left: 34,
+    right: 8,
+    top: 8,
+    bottom: 18,
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'shadow' },
+    backgroundColor: chartPalette.value.tooltipBackground,
+    borderColor: chartPalette.value.tooltipBorder,
+    textStyle: { color: chartPalette.value.tooltipText, fontSize: 10 },
+    formatter: (params: Array<{ data?: number; dataIndex?: number }>) => {
+      const first = params[0]
+      const dataIndex = first?.dataIndex ?? -1
+      const bucket = selectedTopKBuckets.value[dataIndex]
+      if (!bucket) return ''
+      const value = bucket.value ?? 0
+      return `Index: ${bucket.index ?? dataIndex}<br/>Value: ${Number(value ?? 0).toFixed(6)}`
+    },
+  },
+  xAxis: {
+    type: 'category',
+    axisLabel: { show: false },
+    axisTick: { show: false },
+    axisLine: { show: false },
+    data: selectedTopKBuckets.value.map((bucket) => String(bucket.index ?? '')),
+  },
+  yAxis: {
+    type: 'value',
+    min: topKMinValue.value,
+    max: topKMaxValue.value,
+    splitNumber: 2,
+    axisLabel: {
+      color: chartPalette.value.axisText,
+      fontSize: 8,
+      formatter: (value: number) => Number(value).toFixed(4),
+    },
+    splitLine: {
+      lineStyle: {
+        color: chartPalette.value.splitLine,
+      },
+    },
+  },
+  series: [
+    {
+      type: 'bar',
+      data: selectedTopKBuckets.value.map((bucket) => bucket.value ?? 0),
+      barGap: '10%',
+      barCategoryGap: '20%',
+      itemStyle: {
+        color: chartPalette.value.topKBar,
+        borderRadius: [2, 2, 0, 0],
+      },
+      emphasis: {
+        itemStyle: {
+          color: chartPalette.value.topKBarHover,
+        },
+      },
+    },
+  ],
+}))
+
+const denseSimilarityChartOption = computed(() => ({
+  animation: false,
+  grid: {
+    left: 34,
+    right: 8,
+    top: 8,
+    bottom: 18,
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'shadow' },
+    backgroundColor: chartPalette.value.tooltipBackground,
+    borderColor: chartPalette.value.tooltipBorder,
+    textStyle: { color: chartPalette.value.tooltipText, fontSize: 10 },
+    formatter: (params: Array<{ data?: number; dataIndex?: number }>) => {
+      const first = params[0]
+      const dataIndex = first?.dataIndex ?? -1
+      const item = denseSearchResults.value[dataIndex]
+      if (!item) return ''
+      return `Rank: ${dataIndex + 1}<br/>Score: ${Number(item.score ?? 0).toFixed(6)}`
+    },
+  },
+  xAxis: {
+    type: 'category',
+    axisLabel: {
+      color: chartPalette.value.axisText,
+      fontSize: 8,
+      formatter: (value: string) => value,
+    },
+    axisTick: { show: false },
+    axisLine: { show: false },
+    data: denseSearchResults.value.map((_, idx) => `#${idx + 1}`),
+  },
+  yAxis: {
+    type: 'value',
+    min: 0,
+    max: denseScoreMax.value,
+    splitNumber: 3,
+    axisLabel: {
+      color: chartPalette.value.axisText,
+      fontSize: 8,
+      formatter: (value: number) => Number(value).toFixed(2),
+    },
+    splitLine: {
+      lineStyle: {
+        color: chartPalette.value.splitLine,
+      },
+    },
+  },
+  series: [
+    {
+      type: 'bar',
+      data: denseSearchResults.value.map((item) => item.score),
+      itemStyle: {
+        color: chartPalette.value.topKBarHover,
+        borderRadius: [2, 2, 0, 0],
+      },
+      emphasis: {
+        itemStyle: {
+          color: chartPalette.value.cdfLine,
+        },
+      },
+    },
+  ],
+}))
+
+const cdfChartOption = computed(() => ({
+  animation: false,
+  grid: {
+    left: 32,
+    right: 8,
+    top: 8,
+    bottom: 18,
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: {
+      type: 'line',
+      lineStyle: {
+        color: chartPalette.value.cdfPointer,
+        type: 'dashed',
+      },
+    },
+    backgroundColor: chartPalette.value.tooltipBackground,
+    borderColor: chartPalette.value.tooltipBorder,
+    textStyle: { color: chartPalette.value.tooltipText, fontSize: 10 },
+    formatter: (params: Array<{ data?: [number, number] }>) => {
+      const first = params[0]
+      const point = first?.data
+      if (!point) return ''
+      const [k, cumulative] = point
+      return `K: ${k}<br/>P: ${Number(cumulative ?? 0).toFixed(6)}`
+    },
+  },
+  xAxis: {
+    type: 'value',
+    min: 0,
+    max: selectedCdfMaxK.value,
+    axisLabel: {
+      color: chartPalette.value.axisText,
+      fontSize: 8,
+      formatter: (value: number) => {
+        if (value === 0) return 'k=0'
+        if (value === selectedCdfMaxK.value) return `k=${selectedCdfMaxK.value}`
+        return ''
+      },
+    },
+    splitLine: { show: false },
+  },
+  yAxis: {
+    type: 'value',
+    min: 0,
+    max: 1,
+    splitNumber: 2,
+    axisLabel: {
+      color: chartPalette.value.axisText,
+      fontSize: 8,
+      formatter: (value: number) => Number(value).toFixed(1),
+    },
+    splitLine: {
+      lineStyle: {
+        color: chartPalette.value.splitLine,
+      },
+    },
+  },
+  series: [
+    {
+      type: 'line',
+      smooth: 0.2,
+      smoothMonotone: 'x',
+      connectNulls: true,
+      showSymbol: false,
+      hoverAnimation: false,
+      symbol: 'circle',
+      symbolSize: 6,
+      sampling: 'lttb',
+      data: selectedDisplayCdfCurve.value.map((point) => [point.k ?? 0, point.cumulative ?? 0]),
+      lineStyle: {
+        width: 1.25,
+        color: chartPalette.value.cdfLine,
+      },
+      areaStyle: {
+        color: chartPalette.value.cdfArea,
+      },
+      emphasis: {
+        disabled: true,
+      },
+    },
+  ],
+}))
+
+const denseCumulativeChartOption = computed(() => ({
+  animation: false,
+  grid: {
+    left: 32,
+    right: 8,
+    top: 8,
+    bottom: 18,
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: {
+      type: 'line',
+      lineStyle: {
+        color: chartPalette.value.cdfPointer,
+        type: 'dashed',
+      },
+    },
+    backgroundColor: chartPalette.value.tooltipBackground,
+    borderColor: chartPalette.value.tooltipBorder,
+    textStyle: { color: chartPalette.value.tooltipText, fontSize: 10 },
+    formatter: (params: Array<{ data?: [number, number] }>) => {
+      const first = params[0]
+      const point = first?.data
+      if (!point) return ''
+      const [rank, cumulative] = point
+      return `Rank: ${rank}<br/>Cumulative: ${Number(cumulative ?? 0).toFixed(6)}`
+    },
+  },
+  xAxis: {
+    type: 'value',
+    min: 1,
+    max: Math.max(1, denseSearchResults.value.length),
+    axisLabel: {
+      color: chartPalette.value.axisText,
+      fontSize: 8,
+      formatter: (value: number) => {
+        if (value === 1) return '#1'
+        if (value === denseSearchResults.value.length) return `#${denseSearchResults.value.length}`
+        return ''
+      },
+    },
+    splitLine: { show: false },
+  },
+  yAxis: {
+    type: 'value',
+    min: 0,
+    max: 1,
+    splitNumber: 2,
+    axisLabel: {
+      color: chartPalette.value.axisText,
+      fontSize: 8,
+      formatter: (value: number) => Number(value).toFixed(1),
+    },
+    splitLine: {
+      lineStyle: {
+        color: chartPalette.value.splitLine,
+      },
+    },
+  },
+  series: [
+    {
+      type: 'line',
+      smooth: 0.15,
+      smoothMonotone: 'x',
+      showSymbol: false,
+      hoverAnimation: false,
+      data: denseCumulativeSeries.value,
+      lineStyle: {
+        width: 1.25,
+        color: chartPalette.value.cdfLine,
+      },
+      areaStyle: {
+        color: chartPalette.value.cdfArea,
+      },
+      emphasis: {
+        disabled: true,
+      },
+    },
+  ],
+}))
+
+const chartLeftTitle = computed(() =>
+  isDenseMode.value ? 'Top-K Similarity' : 'Top-K Bucket',
+)
+const chartRightTitle = computed(() =>
+  isDenseMode.value ? 'Cumulative Similarity' : 'Energy Gradient (CDF)',
+)
+const chartLeftOption = computed(() =>
+  isDenseMode.value ? denseSimilarityChartOption.value : topKChartOption.value,
+)
+const chartRightOption = computed(() =>
+  isDenseMode.value ? denseCumulativeChartOption.value : cdfChartOption.value,
 )
 
 const compactDecayDays = computed(() => {
@@ -709,16 +960,72 @@ async function loadMemories() {
       path: { bot_id: props.botId },
       throwOnError: true,
     })
-    memories.value = (data.results ?? []).map((item) => ({
-      ...item,
-      cdf_curve: item.cdf_curve ?? [],
-      top_k_buckets: item.top_k_buckets ?? [],
-    }))
+    memories.value = (data.results ?? [])
+      .filter((item): item is AdaptersMemoryItem & { id: string; memory: string } =>
+        typeof item?.id === 'string' && item.id.length > 0 && typeof item.memory === 'string',
+      )
+      .map((item) => ({
+        id: item.id,
+        memory: item.memory,
+        created_at: item.created_at,
+        updated_at: item.updated_at,
+        hash: item.hash,
+        score: item.score,
+        cdf_curve: item.cdf_curve ?? [],
+        top_k_buckets: item.top_k_buckets ?? [],
+      }))
   } catch (error) {
     console.error('Failed to load memories:', error)
     toast.error(t('common.loadFailed'))
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMemoryStatus() {
+  try {
+    const { data } = await getBotsByBotIdMemoryStatus({
+      path: { bot_id: props.botId },
+      throwOnError: true,
+    })
+    memoryStatus.value = data ?? null
+  } catch (error) {
+    console.error('Failed to load memory status:', error)
+    memoryStatus.value = null
+  }
+}
+
+async function loadDenseSearchDiagnostics(memory: MemoryItem | null) {
+  if (!memory || !isDenseMode.value) {
+    denseSearchResults.value = []
+    return
+  }
+  denseSearchLoading.value = true
+  try {
+    const { data } = await postBotsByBotIdMemorySearch({
+      path: { bot_id: props.botId },
+      body: {
+        query: memory.memory,
+        limit: 8,
+      },
+      throwOnError: true,
+    })
+    denseSearchResults.value = (data.results ?? [])
+      .filter((item): item is AdaptersMemoryItem & { id: string; memory: string; score: number } =>
+        typeof item?.id === 'string'
+        && typeof item.memory === 'string'
+        && typeof item.score === 'number',
+      )
+      .map((item) => ({
+        id: item.id,
+        memory: item.memory,
+        score: item.score,
+      }))
+  } catch (error) {
+    console.error('Failed to load dense diagnostics:', error)
+    denseSearchResults.value = []
+  } finally {
+    denseSearchLoading.value = false
   }
 }
 
@@ -744,7 +1051,11 @@ async function loadHistory() {
       query: { limit: 50 },
       throwOnError: true,
     })
-    historyMessages.value = data.items ?? []
+    historyMessages.value = (data.items ?? []).map((item: MessageMessage) => ({
+      role: item.role ?? 'assistant',
+      content: item.content,
+      created_at: item.created_at,
+    }))
   } catch (error) {
     console.error('Failed to load history:', error)
     toast.error('Failed to load history')
@@ -764,7 +1075,7 @@ function toggleMessageSelection(msg: Message) {
   // Update content
   newMemoryContent.value = selectedHistoryMessages.value
     .map(m => {
-      const text = m.content?.text || (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))
+      const text = extractMessageText(m.content)
       return `[${m.role.toUpperCase()}]: ${text}`
     })
     .join('\n\n')
@@ -775,7 +1086,7 @@ async function handleCreateMemory() {
 
   actionLoading.value = true
   try {
-    const { data } = await postBotsByBotIdMemory({
+    await postBotsByBotIdMemory({
       path: { bot_id: props.botId },
       body: {
         message: newMemoryContent.value,
@@ -787,9 +1098,8 @@ async function handleCreateMemory() {
     newMemoryDialogOpen.value = false
     await loadMemories()
 
-    if (data.results && data.results.length > 0) {
-      selectMemory(data.results[0])
-    }
+    const first = memories.value[0]
+    if (first) selectMemory(first)
   } catch (error) {
     console.error('Failed to create memory:', error)
     toast.error(t('common.saveFailed'))
@@ -810,7 +1120,7 @@ async function handleSave() {
     })
 
     // Add new
-    const { data } = await postBotsByBotIdMemory({
+    await postBotsByBotIdMemory({
       path: { bot_id: props.botId },
       body: {
         message: editContent.value,
@@ -821,9 +1131,8 @@ async function handleSave() {
     toast.success(t('common.save'))
     await loadMemories()
 
-    if (data.results && data.results.length > 0) {
-      selectMemory(data.results[0])
-    }
+    const first = memories.value[0]
+    if (first) selectMemory(first)
   } catch (error) {
     console.error('Failed to save memory:', error)
     toast.error(t('common.saveFailed'))
@@ -900,47 +1209,82 @@ async function copyToClipboard(text: string) {
 
 onMounted(() => {
   loadMemories()
+  loadMemoryStatus()
 })
 
 watch(() => props.botId, () => {
   memories.value = []
   selectedId.value = null
+  denseSearchResults.value = []
   loadMemories()
+  loadMemoryStatus()
 })
 
-// Chart Helper: Generate smooth SVG path
-function generateSmoothPath(data: MemoryCdfPoint[], closePath: boolean = false) {
-  if (!data || data.length < 2) return ''
-  
-  // Use a small margin (2%) to prevent clipping at boundaries
-  const margin = 2
-  const height = 100 - (margin * 2)
-  const points = data.map((p, idx) => ({
-    x: (idx / (data.length - 1)) * 100,
-    y: (100 - margin) - ((p.cumulative ?? 0) * height)
-  }))
+watch([selectedMemory, isDenseMode], ([memory, dense]) => {
+  if (!dense) {
+    denseSearchResults.value = []
+    return
+  }
+  loadDenseSearchDiagnostics(memory)
+})
 
-  let d = `M ${points[0].x},${points[0].y}`
-  
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[i === 0 ? i : i - 1]
-    const p1 = points[i]
-    const p2 = points[i + 1]
-    const p3 = points[i + 2] || p2
+function buildDisplayCdfCurve(data: MemoryCdfPoint[], maxPoints: number) {
+  if (!data || data.length === 0) return []
+  const withOrigin: MemoryCdfPoint[] = [{ k: 0, cumulative: 0 }, ...data]
+  if (withOrigin.length <= maxPoints) return withOrigin
 
-    // Catmull-Rom to Bezier conversion factors
-    const cp1x = p1.x + (p2.x - p0.x) / 6
-    const cp1y = p1.y + (p2.y - p0.y) / 6
-    const cp2x = p2.x - (p3.x - p1.x) / 6
-    const cp2y = p2.y - (p3.y - p1.y) / 6
+  const firstPoint = withOrigin[0]
+  const lastPoint = withOrigin[withOrigin.length - 1]
+  if (!firstPoint || !lastPoint) return []
+  const targets = buildCdfSamplingTargets(maxPoints)
+  const sampled: MemoryCdfPoint[] = []
 
-    d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`
+  let sourceIdx = 0
+  for (const target of targets) {
+    while (sourceIdx < withOrigin.length - 1 && (withOrigin[sourceIdx]?.cumulative ?? 0) < target) {
+      sourceIdx++
+    }
+    const point = withOrigin[sourceIdx]
+    if (!point) continue
+    if (sampled[sampled.length - 1]?.k !== point.k) {
+      sampled.push(point)
+    }
   }
 
-  if (closePath) {
-    d += ' L 100,100 L 0,100 Z'
+  if (sampled[sampled.length - 1]?.k !== lastPoint.k) {
+    sampled.push(lastPoint)
+  }
+  return sampled
+}
+
+function buildCdfSamplingTargets(maxPoints: number) {
+  const clamped = Math.max(8, maxPoints)
+  const targets: number[] = [0]
+  const fineCount = Math.max(4, Math.floor(clamped * 0.45))
+  const mediumCount = Math.max(3, Math.floor(clamped * 0.35))
+  const tailCount = Math.max(2, clamped - fineCount - mediumCount - 1)
+
+  for (let i = 1; i <= fineCount; i++) {
+    targets.push((0.5 * i) / fineCount)
+  }
+  for (let i = 1; i <= mediumCount; i++) {
+    targets.push(0.5 + (0.4 * i) / mediumCount)
+  }
+  for (let i = 1; i <= tailCount; i++) {
+    targets.push(0.9 + (0.1 * i) / tailCount)
   }
 
-  return d
+  return Array.from(new Set(targets.map(target => Number(target.toFixed(6))))).sort((a, b) => a - b)
+}
+
+function resolveCssColor(input: string, fallback: string) {
+  if (typeof document === 'undefined') return fallback
+  const el = document.createElement('span')
+  el.style.color = input
+  el.style.display = 'none'
+  document.body.appendChild(el)
+  const resolved = window.getComputedStyle(el).color
+  el.remove()
+  return resolved && resolved !== input ? resolved : fallback
 }
 </script>

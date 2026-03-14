@@ -43,6 +43,9 @@ base_url = "http://qdrant:6334"
 api_key = ""
 timeout_seconds = 10
 
+[sparse]
+base_url = "http://sparse:8085"
+
 ## Agent Gateway
 [agent_gateway]
 host = "agent"

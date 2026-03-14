@@ -67,7 +67,13 @@ Edit `config.toml` — at minimum change:
 - `auth.jwt_secret` — Generate with `openssl rand -base64 32`
 - `postgres.password` — Database password (also set `POSTGRES_PASSWORD` env var to match)
 
-Then start:
+Then start (recommended — with Qdrant and Browser):
+
+```bash
+sudo POSTGRES_PASSWORD=your-db-password docker compose --profile qdrant --profile browser up -d
+```
+
+Or start core services only (no vector DB or browser automation):
 
 ```bash
 sudo POSTGRES_PASSWORD=your-db-password docker compose up -d
@@ -86,10 +92,11 @@ For users in mainland China who cannot access Docker Hub directly, uncomment the
 registry = "memoh.cn"
 ```
 
-And use the China mirror compose overlay:
+And add the China mirror compose overlay:
 
 ```bash
-sudo docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml up -d
+sudo docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
+  --profile qdrant --profile browser up -d
 ```
 
 The install script handles this automatically when you set `USE_CN_MIRROR=true`.

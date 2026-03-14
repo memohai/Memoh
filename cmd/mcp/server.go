@@ -108,7 +108,7 @@ func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*p
 
 	return &pb.ReadFileResponse{
 		Content:    out.String(),
-		TotalLines: int32(totalLines),
+		TotalLines: int32(totalLines), //nolint:gosec // file line count won't exceed int32
 	}, nil
 }
 

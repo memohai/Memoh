@@ -216,7 +216,7 @@ func (p *Executor) callRead(ctx context.Context, client *mcpclient.Client, args 
 		if n > readMaxLines {
 			n = readMaxLines
 		}
-		nLines = int32(n)
+		nLines = int32(n) //nolint:gosec // bounded by readMaxLines (200)
 	}
 
 	resp, err := client.ReadFile(ctx, filePath, lineOffset, nLines)

@@ -140,8 +140,8 @@ func (s *Service) List(ctx context.Context, botID string, filter ListFilter) ([]
 		BotID:      botUUID,
 		IsRead:     boolOrNull(filter.IsRead),
 		Source:     textOrNull(filter.Source),
-		MaxCount:   int32(limit),
-		ItemOffset: int32(filter.Offset),
+		MaxCount:   int32(limit),         //nolint:gosec // capped to 500 above
+		ItemOffset: int32(filter.Offset), //nolint:gosec // bounds checked above
 	})
 	if err != nil {
 		return nil, err
@@ -157,9 +157,12 @@ func (s *Service) ListUnread(ctx context.Context, botID string, limit int) ([]It
 	if limit <= 0 {
 		limit = 50
 	}
+	if limit > 500 {
+		limit = 500
+	}
 	rows, err := s.queries.ListUnreadInboxItems(ctx, sqlc.ListUnreadInboxItemsParams{
 		BotID:    botUUID,
-		MaxCount: int32(limit),
+		MaxCount: int32(limit), //nolint:gosec // capped to 500 above
 	})
 	if err != nil {
 		return nil, err
@@ -204,7 +207,7 @@ func (s *Service) Search(ctx context.Context, botID string, req SearchRequest) (
 	params := sqlc.SearchInboxItemsParams{
 		BotID:    botUUID,
 		Query:    textOrNull(req.Query),
-		MaxCount: int32(limit),
+		MaxCount: int32(limit), //nolint:gosec // capped to 100 above
 	}
 	if req.StartTime != nil {
 		params.StartTime = pgtype.Timestamptz{Time: *req.StartTime, Valid: true}

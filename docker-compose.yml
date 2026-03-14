@@ -21,23 +21,6 @@ services:
     networks:
       - memoh-network
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: memoh-qdrant
-    volumes:
-      - qdrant_data:/qdrant/storage
-    expose:
-      - "6333"
-      - "6334"
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - memoh-network
-
   migrate:
     image: memohai/server:latest
     container_name: memoh-migrate
@@ -67,8 +50,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      qdrant:
-        condition: service_healthy
     restart: unless-stopped
     networks:
       - memoh-network
@@ -99,6 +80,42 @@ services:
     networks:
       - memoh-network
 
+  sparse:
+    image: memohai/sparse:latest
+    container_name: memoh-sparse
+    profiles: [sparse]
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    expose:
+      - "8085"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/health')\" || exit 1"]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: memoh-qdrant
+    profiles: [qdrant, sparse]
+    volumes:
+      - qdrant_data:/qdrant/storage
+    expose:
+      - "6333"
+      - "6334"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
   browser:
     image: memohai/browser:latest
     build:
@@ -107,6 +124,7 @@ services:
       args:
         BROWSER_CORES: ${BROWSER_CORES:-chromium,firefox}
     container_name: memoh-browser
+    profiles: [browser]
     environment:
       - BROWSER_CORES=${BROWSER_CORES:-chromium,firefox}
     volumes:
@@ -119,16 +137,33 @@ services:
     networks:
       - memoh-network
 
+  openviking:
+    image: volcengine/openviking:latest
+    container_name: memoh-openviking
+    profiles: [openviking]
+    env_file:
+      - path: ${OPENVIKING_ENV_FILE:-.env.openviking}
+        required: false
+    volumes:
+      - openviking_data:/var/lib/openviking
+    expose:
+      - "8088"
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
 volumes:
   postgres_data:
-    driver: local
-  qdrant_data:
     driver: local
   containerd_data:
     driver: local
   memoh_data:
     driver: local
   server_cni_state:
+    driver: local
+  qdrant_data:
+    driver: local
+  openviking_data:
     driver: local
 
 networks:

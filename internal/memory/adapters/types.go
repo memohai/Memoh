@@ -1,4 +1,4 @@
-package provider
+package adapters
 
 import (
 	"context"
@@ -19,8 +19,11 @@ type BeforeChatResult struct {
 
 // AfterChatRequest is passed to OnAfterChat after receiving the gateway response.
 type AfterChatRequest struct {
-	BotID    string
-	Messages []Message
+	BotID             string
+	Messages          []Message
+	UserID            string
+	ChannelIdentityID string
+	DisplayName       string
 }
 
 // LLM is the interface for LLM operations needed by memory service.
@@ -205,16 +208,37 @@ type UsageResponse struct {
 
 type RebuildResult struct {
 	FsCount       int `json:"fs_count"`
-	QdrantCount   int `json:"qdrant_count"`
+	StorageCount  int `json:"storage_count"`
 	MissingCount  int `json:"missing_count"`
 	RestoredCount int `json:"restored_count"`
+}
+
+type HealthStatus struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+type MemoryStatusResponse struct {
+	ProviderType      string       `json:"provider_type,omitempty"`
+	MemoryMode        string       `json:"memory_mode,omitempty"`
+	CanManualSync     bool         `json:"can_manual_sync"`
+	SourceDir         string       `json:"source_dir,omitempty"`
+	OverviewPath      string       `json:"overview_path,omitempty"`
+	MarkdownFileCount int          `json:"markdown_file_count,omitempty"`
+	SourceCount       int          `json:"source_count,omitempty"`
+	IndexedCount      int          `json:"indexed_count,omitempty"`
+	QdrantCollection  string       `json:"qdrant_collection,omitempty"`
+	Encoder           HealthStatus `json:"encoder"`
+	Qdrant            HealthStatus `json:"qdrant"`
 }
 
 // Memory provider admin types.
 type ProviderType string
 
 const (
-	ProviderBuiltin ProviderType = "builtin"
+	ProviderBuiltin    ProviderType = "builtin"
+	ProviderMem0       ProviderType = "mem0"
+	ProviderOpenViking ProviderType = "openviking"
 )
 
 type ProviderCreateRequest struct {
@@ -247,6 +271,7 @@ type ProviderFieldSchema struct {
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	Required    bool   `json:"required,omitempty"`
+	Secret      bool   `json:"secret,omitempty"`
 	Example     any    `json:"example,omitempty"`
 }
 
@@ -254,4 +279,18 @@ type ProviderMeta struct {
 	Provider     string               `json:"provider"`
 	DisplayName  string               `json:"display_name"`
 	ConfigSchema ProviderConfigSchema `json:"config_schema"`
+}
+
+type ProviderCollectionStatus struct {
+	Name   string       `json:"name"`
+	Exists bool         `json:"exists"`
+	Points int          `json:"points"`
+	Qdrant HealthStatus `json:"qdrant"`
+}
+
+type ProviderStatusResponse struct {
+	ProviderType     string                     `json:"provider_type"`
+	MemoryMode       string                     `json:"memory_mode,omitempty"`
+	EmbeddingModelID string                     `json:"embedding_model_id,omitempty"`
+	Collections      []ProviderCollectionStatus `json:"collections,omitempty"`
 }

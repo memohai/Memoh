@@ -123,7 +123,7 @@ func (c *EdgeWsClient) Connect(ctx context.Context) error {
 	c.connID = strings.ReplaceAll(uuid.New().String(), "-", "")
 
 	tlsConfig := &tls.Config{
-		// InsecureSkipVerify: true,
+		MinVersion: tls.VersionTLS12,
 		NextProtos: []string{"http/1.1"},
 	}
 	d := websocket.Dialer{

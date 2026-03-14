@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,8 +17,9 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/mcp/mcpclient"
-	memprovider "github.com/memohai/memoh/internal/memory/provider"
+	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -133,6 +135,7 @@ func (h *MemoryHandler) Register(e *echo.Echo) {
 	chatGroup.POST("/search", h.ChatSearch)
 	chatGroup.POST("/compact", h.ChatCompact)
 	chatGroup.POST("/rebuild", h.ChatRebuild)
+	chatGroup.GET("/status", h.ChatStatus)
 	chatGroup.GET("", h.ChatGetAll)
 	chatGroup.GET("/usage", h.ChatUsage)
 	chatGroup.DELETE("", h.ChatDelete)
@@ -156,7 +159,7 @@ func (h *MemoryHandler) checkService(ctx context.Context, botID string) (memprov
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryAddPayload true "Memory add payload"
-// @Success 200 {object} provider.SearchResponse
+// @Success 200 {object} adapters.SearchResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -184,12 +187,16 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 	}
 
 	filters := buildNamespaceFilters(namespace, scopeID, payload.Filters)
+	channelIdentityID, identityErr := h.requireChannelIdentityID(c)
+	if identityErr != nil {
+		return identityErr
+	}
 	req := memprovider.AddRequest{
 		Message:          payload.Message,
 		Messages:         payload.Messages,
 		BotID:            resolvedBotID,
 		RunID:            payload.RunID,
-		Metadata:         payload.Metadata,
+		Metadata:         memprovider.MergeMetadata(payload.Metadata, memprovider.BuildProfileMetadata("", channelIdentityID, "")),
 		Filters:          filters,
 		Infer:            payload.Infer,
 		EmbeddingEnabled: payload.EmbeddingEnabled,
@@ -214,7 +221,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memorySearchPayload true "Memory search payload"
-// @Success 200 {object} provider.SearchResponse
+// @Success 200 {object} adapters.SearchResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -272,7 +279,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param no_stats query bool false "Skip optional stats in memory search response"
-// @Success 200 {object} provider.SearchResponse
+// @Success 200 {object} adapters.SearchResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -320,7 +327,7 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryDeletePayload false "Optional: specify memory_ids to delete; if omitted, deletes all"
-// @Success 200 {object} provider.DeleteResponse
+// @Success 200 {object} adapters.DeleteResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -369,7 +376,7 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Memory ID"
-// @Success 200 {object} provider.DeleteResponse
+// @Success 200 {object} adapters.DeleteResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -411,7 +418,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryCompactPayload true "ratio (0,1] required; decay_days optional"
-// @Success 200 {object} provider.CompactResult
+// @Success 200 {object} adapters.CompactResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -463,7 +470,7 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 // @Tags memory
 // @Produce json
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} provider.UsageResponse
+// @Success 200 {object} adapters.UsageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -508,34 +515,71 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 // @Tags memory
 // @Produce json
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} provider.RebuildResult
+// @Success 200 {object} adapters.RebuildResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory/rebuild [post].
 func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
-	if h.memoryStore == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "memory filesystem not configured")
-	}
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
 	}
-	fsItems, err := h.memoryStore.ReadAllMemoryFiles(c.Request().Context(), botID)
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+	syncProvider, ok := provider.(memprovider.SourceSyncProvider)
+	if !ok {
+		return echo.NewHTTPError(http.StatusConflict, "selected memory provider does not support rebuild from markdown source")
+	}
+	status, err := syncProvider.Status(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "read memory files failed: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	if err := h.memoryStore.SyncOverview(c.Request().Context(), botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "sync memory overview failed: "+err.Error())
+	if !status.CanManualSync {
+		return echo.NewHTTPError(http.StatusConflict, "manual sync is not available for the selected memory provider")
 	}
+	result, err := syncProvider.Rebuild(c.Request().Context(), botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, result)
+}
 
-	return c.JSON(http.StatusOK, memprovider.RebuildResult{
-		FsCount:       len(fsItems),
-		QdrantCount:   len(fsItems),
-		MissingCount:  0,
-		RestoredCount: 0,
-	})
+// ChatStatus godoc
+// @Summary Get memory runtime status
+// @Description Get the resolved memory runtime status for a bot, including index health and source counts
+// @Tags memory
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} adapters.MemoryStatusResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
+// @Router /bots/{bot_id}/memory/status [get].
+func (h *MemoryHandler) ChatStatus(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+	syncProvider, ok := provider.(memprovider.SourceSyncProvider)
+	if !ok {
+		return echo.NewHTTPError(http.StatusConflict, "selected memory provider does not expose runtime status")
+	}
+	status, err := syncProvider.Status(c.Request().Context(), botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, status)
 }
 
 // --- helpers ---
@@ -669,6 +713,7 @@ func (r *fileMemoryRuntime) Add(ctx context.Context, req memprovider.AddRequest)
 		Hash:      runtimeHash(text),
 		CreatedAt: now,
 		UpdatedAt: now,
+		Metadata:  req.Metadata,
 		BotID:     botID,
 	}
 	itemsToPersist := []storefs.MemoryItem{runtimeToStoreItem(item)}
@@ -862,6 +907,44 @@ func (r *fileMemoryRuntime) Usage(ctx context.Context, filters map[string]any) (
 	}
 	usage.EstimatedStorageBytes = usage.TotalTextBytes
 	return usage, nil
+}
+
+func (*fileMemoryRuntime) Mode() string {
+	return "off"
+}
+
+func (r *fileMemoryRuntime) Status(ctx context.Context, botID string) (memprovider.MemoryStatusResponse, error) {
+	fileCount, err := r.store.CountMemoryFiles(ctx, botID)
+	if err != nil {
+		return memprovider.MemoryStatusResponse{}, err
+	}
+	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
+	if err != nil {
+		return memprovider.MemoryStatusResponse{}, err
+	}
+	return memprovider.MemoryStatusResponse{
+		ProviderType:      "builtin",
+		MemoryMode:        "off",
+		CanManualSync:     false,
+		SourceDir:         path.Join(config.DefaultDataMount, "memory"),
+		OverviewPath:      path.Join(config.DefaultDataMount, "MEMORY.md"),
+		MarkdownFileCount: fileCount,
+		SourceCount:       len(items),
+	}, nil
+}
+
+func (r *fileMemoryRuntime) Rebuild(ctx context.Context, botID string) (memprovider.RebuildResult, error) {
+	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
+	if err != nil {
+		return memprovider.RebuildResult{}, err
+	}
+	if err := r.store.SyncOverview(ctx, botID); err != nil {
+		return memprovider.RebuildResult{}, err
+	}
+	return memprovider.RebuildResult{
+		FsCount:      len(items),
+		StorageCount: len(items),
+	}, nil
 }
 
 func runtimeBotID(botID string, filters map[string]any) (string, error) {

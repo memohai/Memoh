@@ -70,7 +70,11 @@ import (
 	mcpwebfetch "github.com/memohai/memoh/internal/mcp/providers/webfetch"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
 	"github.com/memohai/memoh/internal/media"
-	memprovider "github.com/memohai/memoh/internal/memory/provider"
+	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
+	memmem0 "github.com/memohai/memoh/internal/memory/adapters/mem0"
+	memopenviking "github.com/memohai/memoh/internal/memory/adapters/openviking"
+	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
@@ -349,13 +353,24 @@ func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, lo
 	}
 }
 
-func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, manager *mcp.Manager) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.Service, accountService *accounts.Service, manager *mcp.Manager, queries *dbsqlc.Queries, cfg config.Config) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
-	builtinRuntime := handlers.NewBuiltinMemoryRuntime(manager)
-	registry.RegisterFactory(memprovider.BuiltinType, func(_ string, _ map[string]any) (memprovider.Provider, error) {
-		return memprovider.NewBuiltinProvider(log, builtinRuntime, chatService, accountService), nil
+	fileRuntime := handlers.NewBuiltinMemoryRuntime(manager)
+	fileStore := storefs.New(log, manager)
+	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
+		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileRuntime, fileStore, queries, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return membuiltin.NewBuiltinProvider(log, runtime, chatService, accountService), nil
 	})
-	registry.Register("__builtin_default__", memprovider.NewBuiltinProvider(log, builtinRuntime, chatService, accountService))
+	registry.RegisterFactory(string(memprovider.ProviderMem0), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
+		return memmem0.NewMem0Provider(log, providerConfig, fileStore)
+	})
+	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
+		return memopenviking.NewOpenVikingProvider(log, providerConfig)
+	})
+	registry.Register("__builtin_default__", membuiltin.NewBuiltinProvider(log, fileRuntime, chatService, accountService))
 	return registry
 }
 
@@ -724,6 +739,7 @@ func provideServer(params serverParams) *server.Server {
 // ---------------------------------------------------------------------------
 
 func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *memprovider.Service, registry *memprovider.Registry) {
+	mpService.SetRegistry(registry)
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			resp, err := mpService.EnsureDefault(ctx)
