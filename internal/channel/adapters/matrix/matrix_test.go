@@ -104,6 +104,45 @@ func TestBootstrapSinceTokenPersistsLatestCursor(t *testing.T) {
 	}
 }
 
+func TestBootstrapSinceTokenAutoJoinsInvitedRooms(t *testing.T) {
+	joinRequests := 0
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/_matrix/client/v3/sync":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"next_batch":"s123","rooms":{"invite":{"!room:example.com":{"invite_state":{"events":[{"type":"m.room.member"}]}}}}}`)),
+				Header:     make(http.Header),
+			}, nil
+		case "/_matrix/client/v3/join/!room:example.com":
+			joinRequests++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{}`)),
+				Header:     make(http.Header),
+			}, nil
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	since, err := adapter.bootstrapSinceToken(context.Background(), channel.ChannelConfig{ID: "cfg-1"}, Config{
+		HomeserverURL: "https://matrix.example.com",
+		AccessToken:   "tok",
+	})
+	if err != nil {
+		t.Fatalf("bootstrapSinceToken returned error: %v", err)
+	}
+	if since != "s123" {
+		t.Fatalf("unexpected since token: %q", since)
+	}
+	if joinRequests != 1 {
+		t.Fatalf("expected invited room to be auto-joined once, got %d", joinRequests)
+	}
+}
+
 func TestBuildMatrixMessageContentIncludesFormattedHTMLForMarkdown(t *testing.T) {
 	content := buildMatrixMessageContent(channel.Message{
 		Text:   "**bold**\n\n- item",
@@ -280,6 +319,65 @@ func TestMatrixHandleEventMarksDirectConversationFromJoinedMembers(t *testing.T)
 	}
 	if joinedMembersRequests != 1 {
 		t.Fatalf("expected joined_members lookup to be cached, got %d requests", joinedMembersRequests)
+	}
+}
+
+func TestMatrixSyncOnceAutoJoinsInvitedRooms(t *testing.T) {
+	joinRequests := 0
+	adapter := NewMatrixAdapter(nil)
+	adapter.rememberRoomConversationType("cfg-1", "!joined:example.com", "group")
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/_matrix/client/v3/sync":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`{
+					"next_batch":"s124",
+					"rooms":{
+						"invite":{"!invite:example.com":{"invite_state":{"events":[{"type":"m.room.member"}]}}},
+						"join":{"!joined:example.com":{"timeline":{"events":[{"event_id":"$evt1","type":"m.room.message","sender":"@alex:example.com","content":{"msgtype":"m.text","body":"ping"}}]}}}
+					}
+				}`)),
+				Header: make(http.Header),
+			}, nil
+		case "/_matrix/client/v3/join/!invite:example.com":
+			joinRequests++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{}`)),
+				Header:     make(http.Header),
+			}, nil
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	var captured channel.InboundMessage
+	nextSince, healthy, err := adapter.syncOnce(
+		context.Background(),
+		channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"},
+		Config{HomeserverURL: "https://matrix.example.com", AccessToken: "tok", UserID: "@memoh:example.com", SyncTimeoutSeconds: 30},
+		"s123",
+		func(_ context.Context, _ channel.ChannelConfig, msg channel.InboundMessage) error {
+			captured = msg
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("syncOnce returned error: %v", err)
+	}
+	if nextSince != "s124" {
+		t.Fatalf("unexpected next since token: %q", nextSince)
+	}
+	if !healthy {
+		t.Fatal("expected sync session to be marked healthy")
+	}
+	if joinRequests != 1 {
+		t.Fatalf("expected invited room to be auto-joined once, got %d", joinRequests)
+	}
+	if captured.ReplyTarget != "!joined:example.com" || captured.Message.Text != "ping" {
+		t.Fatalf("unexpected captured message: %#v", captured)
 	}
 }
 

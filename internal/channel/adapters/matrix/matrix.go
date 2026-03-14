@@ -60,7 +60,8 @@ type matrixSyncResponse struct {
 		Events []matrixSyncEvent `json:"events"`
 	} `json:"account_data"`
 	Rooms struct {
-		Join map[string]matrixSyncJoinedRoom `json:"join"`
+		Join   map[string]matrixSyncJoinedRoom  `json:"join"`
+		Invite map[string]matrixSyncInvitedRoom `json:"invite"`
 	} `json:"rooms"`
 }
 
@@ -69,6 +70,12 @@ type matrixSyncJoinedRoom struct {
 		Events []matrixEvent `json:"events"`
 	} `json:"timeline"`
 	Summary matrixRoomSummary `json:"summary"`
+}
+
+type matrixSyncInvitedRoom struct {
+	InviteState struct {
+		Events []matrixEvent `json:"events"`
+	} `json:"invite_state"`
 }
 
 type matrixRoomSummary struct {
@@ -383,6 +390,9 @@ func (a *MatrixAdapter) bootstrapSinceToken(ctx context.Context, cfg channel.Cha
 	if err := a.doJSON(ctx, parsed, http.MethodGet, "/_matrix/client/v3/sync?timeout=0", nil, &resp); err != nil {
 		return "", err
 	}
+	if _, err := a.handleInvites(ctx, cfg, parsed, resp); err != nil {
+		return "", err
+	}
 	a.rememberSyncResponseRoomTypes(cfg.ID, resp)
 	a.rememberSyncResponseEvents(cfg.ID, resp)
 	since := strings.TrimSpace(resp.NextBatch)
@@ -434,6 +444,11 @@ func (a *MatrixAdapter) syncOnce(ctx context.Context, cfg channel.ChannelConfig,
 	}
 	a.rememberSyncResponseRoomTypes(cfg.ID, resp)
 	healthy := false
+	joinedInvite, err := a.handleInvites(ctx, cfg, parsed, resp)
+	if err != nil {
+		return resp.NextBatch, healthy, err
+	}
+	healthy = healthy || joinedInvite
 	for roomID, joined := range resp.Rooms.Join {
 		for _, evt := range joined.Timeline.Events {
 			evt.RoomID = roomID
@@ -445,6 +460,27 @@ func (a *MatrixAdapter) syncOnce(ctx context.Context, cfg channel.ChannelConfig,
 		}
 	}
 	return resp.NextBatch, healthy, nil
+}
+
+func (a *MatrixAdapter) handleInvites(ctx context.Context, cfg channel.ChannelConfig, parsed Config, resp matrixSyncResponse) (bool, error) {
+	joinedAny := false
+	for roomID := range resp.Rooms.Invite {
+		roomID = strings.TrimSpace(roomID)
+		if roomID == "" {
+			continue
+		}
+		if err := a.joinRoom(ctx, parsed, roomID); err != nil {
+			return joinedAny, err
+		}
+		joinedAny = true
+		if a.logger != nil {
+			a.logger.Info("matrix room auto-joined",
+				slog.String("config_id", cfg.ID),
+				slog.String("room_id", roomID),
+			)
+		}
+	}
+	return joinedAny, nil
 }
 
 func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConfig, parsed Config, evt matrixEvent, handler channel.InboundHandler) (bool, error) {
@@ -1287,6 +1323,11 @@ func (a *MatrixAdapter) ensureDirectRoom(ctx context.Context, cfg Config, userID
 		return "", errors.New("matrix createRoom returned empty room_id")
 	}
 	return strings.TrimSpace(resp.RoomID), nil
+}
+
+func (a *MatrixAdapter) joinRoom(ctx context.Context, cfg Config, roomID string) error {
+	path := fmt.Sprintf("/_matrix/client/v3/join/%s", url.PathEscape(strings.TrimSpace(roomID)))
+	return a.doJSON(ctx, cfg, http.MethodPost, path, nil, nil)
 }
 
 func (a *MatrixAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
