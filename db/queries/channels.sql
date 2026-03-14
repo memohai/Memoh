@@ -39,6 +39,14 @@ SET
 WHERE bot_id = $1 AND channel_type = $2
 RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at;
 
+-- name: SaveMatrixSyncSinceToken :execrows
+UPDATE bot_channel_configs
+SET routing = COALESCE(routing, '{}'::jsonb) || jsonb_build_object(
+  '_matrix',
+  COALESCE(routing->'_matrix', '{}'::jsonb) || jsonb_build_object('since_token', sqlc.arg(since_token)::text)
+)
+WHERE id = $1;
+
 -- name: ListBotChannelConfigsByType :many
 SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
 FROM bot_channel_configs
@@ -65,4 +73,3 @@ SELECT id, user_id, channel_type, config, created_at, updated_at
 FROM user_channel_bindings
 WHERE channel_type = $1
 ORDER BY created_at DESC;
-

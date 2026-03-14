@@ -10,7 +10,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1546,6 +1549,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 
 	for i, msg := range messages {
+		msg = normalizeUserMessageContent(msg)
 		content, err := json.Marshal(msg)
 		if err != nil {
 			r.logger.Warn("storeMessages: marshal failed", slog.Any("error", err))
@@ -1986,6 +1990,7 @@ func parseLoopDetectionEnabledFromMetadata(payload []byte) bool {
 func sanitizeMessages(messages []conversation.ModelMessage) []conversation.ModelMessage {
 	cleaned := make([]conversation.ModelMessage, 0, len(messages))
 	for _, msg := range messages {
+		msg = normalizeUserMessageContent(msg)
 		if strings.TrimSpace(msg.Role) == "" {
 			continue
 		}
@@ -1995,6 +2000,141 @@ func sanitizeMessages(messages []conversation.ModelMessage) []conversation.Model
 		cleaned = append(cleaned, msg)
 	}
 	return cleaned
+}
+
+func normalizeUserMessageContent(msg conversation.ModelMessage) conversation.ModelMessage {
+	if !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
+		return msg
+	}
+	normalized, changed := normalizeUserContentParts(msg.Content)
+	if !changed {
+		return msg
+	}
+	msg.Content = normalized
+	return msg
+}
+
+func normalizeUserContentParts(content json.RawMessage) (json.RawMessage, bool) {
+	if len(content) == 0 {
+		return nil, false
+	}
+	var parts []map[string]any
+	if err := json.Unmarshal(content, &parts); err != nil || len(parts) == 0 {
+		return nil, false
+	}
+
+	changed := false
+	rebuilt := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
+		partType := strings.TrimSpace(strings.ToLower(readAnyString(part["type"])))
+		switch partType {
+		case "image":
+			normalized, ok, didChange := normalizeUserImagePart(part)
+			if didChange {
+				changed = true
+			}
+			if ok {
+				rebuilt = append(rebuilt, normalized)
+			}
+		default:
+			rebuilt = append(rebuilt, part)
+		}
+	}
+	if !changed {
+		return nil, false
+	}
+	if len(rebuilt) == 0 {
+		rebuilt = append(rebuilt, map[string]any{
+			"type": "text",
+			"text": "[User sent an attachment]",
+		})
+	}
+	data, err := json.Marshal(rebuilt)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+func normalizeUserImagePart(part map[string]any) (map[string]any, bool, bool) {
+	raw, ok := part["image"]
+	if !ok {
+		return nil, false, true
+	}
+	if image, ok := raw.(string); ok && strings.TrimSpace(image) != "" {
+		return part, true, false
+	}
+	bytes, ok := anyIndexedByteObject(raw)
+	if !ok {
+		return nil, false, true
+	}
+	cloned := cloneAnyMap(part)
+	mediaType := strings.TrimSpace(readAnyString(cloned["mediaType"]))
+	encoded := base64.StdEncoding.EncodeToString(bytes)
+	if mediaType != "" {
+		cloned["image"] = "data:" + mediaType + ";base64," + encoded
+	} else {
+		cloned["image"] = encoded
+	}
+	return cloned, true, true
+}
+
+func cloneAnyMap(input map[string]any) map[string]any {
+	cloned := make(map[string]any, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func readAnyString(value any) string {
+	text, _ := value.(string)
+	return text
+}
+
+func anyIndexedByteObject(value any) ([]byte, bool) {
+	obj, ok := value.(map[string]any)
+	if !ok || len(obj) == 0 {
+		return nil, false
+	}
+	indexes := make([]int, 0, len(obj))
+	values := make(map[int]byte, len(obj))
+	for key, raw := range obj {
+		idx, err := strconv.Atoi(strings.TrimSpace(key))
+		if err != nil || idx < 0 {
+			return nil, false
+		}
+		byteValue, ok := anyNumberToByte(raw)
+		if !ok {
+			return nil, false
+		}
+		indexes = append(indexes, idx)
+		values[idx] = byteValue
+	}
+	sort.Ints(indexes)
+	if indexes[len(indexes)-1]+1 != len(indexes) {
+		return nil, false
+	}
+	bytes := make([]byte, len(indexes))
+	for _, idx := range indexes {
+		bytes[idx] = values[idx]
+	}
+	return bytes, true
+}
+
+func anyNumberToByte(value any) (byte, bool) {
+	floatValue, ok := value.(float64)
+	if !ok || math.IsNaN(floatValue) || math.IsInf(floatValue, 0) {
+		return 0, false
+	}
+	if floatValue < 0 || floatValue > 255 || math.Trunc(floatValue) != floatValue {
+		return 0, false
+	}
+	parsed, err := strconv.ParseUint(strconv.FormatFloat(floatValue, 'f', 0, 64), 10, 8)
+	if err != nil {
+		return 0, false
+	}
+	return byte(parsed), true
 }
 
 func normalizeGatewaySkill(entry SkillEntry) (gatewaySkill, bool) {

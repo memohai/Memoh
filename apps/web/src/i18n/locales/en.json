@@ -847,11 +847,14 @@
       "webhookCallback": "WebHook Callback URL",
       "webhookCallbackHint": "Use this URL as the event subscription request URL in Feishu/Lark.",
       "webhookCallbackPending": "Save this platform configuration to generate the callback URL.",
+      "showSecretField": "Show {field}",
+      "hideSecretField": "Hide {field}",
       "noAvailableTypes": "All platform types have been configured",
       "types": {
         "feishu": "Feishu",
         "discord": "Discord",
         "qq": "QQ",
+        "matrix": "Matrix",
         "telegram": "Telegram",
         "web": "Web",
         "local": "Local"
@@ -860,6 +863,7 @@
         "feishu": "FS",
         "discord": "DC",
         "qq": "QQ",
+        "matrix": "MX",
         "telegram": "TG",
         "web": "Web",
         "local": "CLI"

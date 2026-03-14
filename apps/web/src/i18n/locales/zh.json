@@ -843,11 +843,14 @@
       "webhookCallback": "WebHook 回调地址",
       "webhookCallbackHint": "将该地址配置到飞书/Lark 事件订阅的请求 URL。",
       "webhookCallbackPending": "保存平台配置后会生成回调地址。",
+      "showSecretField": "显示{field}",
+      "hideSecretField": "隐藏{field}",
       "noAvailableTypes": "所有平台类型均已配置",
       "types": {
         "feishu": "飞书",
         "discord": "Discord",
         "qq": "QQ",
+        "matrix": "Matrix",
         "telegram": "Telegram",
         "web": "Web",
         "local": "本地"
@@ -856,6 +859,7 @@
         "feishu": "飞",
         "discord": "DC",
         "qq": "QQ",
+        "matrix": "MX",
         "telegram": "TG",
         "web": "Web",
         "local": "CLI"

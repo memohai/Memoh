@@ -1,17 +1,13 @@
-/**
- * Local channel icons under public/channels/ (only Feishu for now).
- * getChannelImage: URL to local icon when available.
- * getChannelIcon: FontAwesome fallback when no local image.
- */
-
 const LOCAL_CHANNEL_IMAGES: Record<string, string> = {
   feishu: '/channels/feishu.png',
+  matrix: '/channels/matrix.svg',
   telegram: '/channels/telegram.webp',
 }
 
 const CHANNEL_ICONS: Record<string, [string, string]> = {
   qq: ['fab', 'qq'],
   telegram: ['fab', 'telegram'],
+  matrix: ['fas', 'hashtag'],
   feishu: ['fas', 'comment-dots'],
   web: ['fas', 'globe'],
   slack: ['fab', 'slack'],
