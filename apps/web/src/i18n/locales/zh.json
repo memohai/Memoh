@@ -849,6 +849,12 @@
       "webhookCallback": "WebHook 回调地址",
       "webhookCallbackHint": "将该地址配置到飞书/Lark 事件订阅的请求 URL。",
       "webhookCallbackPending": "保存平台配置后会生成回调地址。",
+      "matrixAccessControl": "房间访问控制",
+      "matrixAutoJoinInvites": "自动加入邀请",
+      "matrixAutoJoinInvitesHint": "自动接受房间邀请；配置了白名单后，只会加入命中的房间或别名。",
+      "matrixAllowedRooms": "房间白名单",
+      "matrixAllowedRoomsHint": "只有这些 Matrix 房间可以与 Bot 交互，支持 room ID 和 alias，请按行填写，每行一个；如果为空，则不启用。",
+      "matrixAllowedRoomsPlaceholder": "!room:example.com\n#alias:example.com",
       "noAvailableTypes": "所有平台类型均已配置",
       "types": {
         "feishu": "飞书",

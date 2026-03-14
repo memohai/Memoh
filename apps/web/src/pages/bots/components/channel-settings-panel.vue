@@ -115,9 +115,10 @@
         >
           <Input
             :id="`channel-field-${key}`"
-            v-model="form.credentials[key]"
+            :model-value="credentialStringValue(key)"
             :type="visibleSecrets[key] ? 'text' : 'password'"
             :placeholder="field.example ? String(field.example) : ''"
+            @update:model-value="(val) => setCredentialStringValue(key, val)"
           />
           <button
             type="button"
@@ -144,9 +145,10 @@
         <Input
           v-else-if="field.type === 'number'"
           :id="`channel-field-${key}`"
-          v-model.number="form.credentials[key]"
+          :model-value="credentialNumberValue(key)"
           type="number"
           :placeholder="field.example ? String(field.example) : ''"
+          @update:model-value="(val) => setCredentialNumberValue(key, val)"
         />
 
         <!-- Enum field -->
@@ -173,11 +175,37 @@
         <Input
           v-else
           :id="`channel-field-${key}`"
-          v-model="form.credentials[key]"
+          :model-value="credentialStringValue(key)"
           type="text"
           :placeholder="field.example ? String(field.example) : ''"
+          @update:model-value="(val) => setCredentialStringValue(key, val)"
         />
       </div>
+      <template v-if="isMatrixChannel">
+        <div class="space-y-2">
+          <Label>{{ $t('bots.channels.matrixAutoJoinInvites') }}</Label>
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.channels.matrixAutoJoinInvitesHint') }}
+          </p>
+          <Switch
+            :model-value="matrixAutoJoinInvites"
+            @update:model-value="(val) => matrixAutoJoinInvites = !!val"
+          />
+        </div>
+
+        <div class="space-y-2">
+          <Label>{{ $t('bots.channels.matrixAllowedRooms') }}</Label>
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.channels.matrixAllowedRoomsHint') }}
+          </p>
+          <Textarea
+            :model-value="matrixAllowedRoomsText"
+            :placeholder="$t('bots.channels.matrixAllowedRoomsPlaceholder')"
+            class="min-h-24"
+            @update:model-value="(val) => matrixAllowedRoomsText = String(val || '')"
+          />
+        </div>
+      </template>
     </div>
 
     <Separator />
@@ -230,6 +258,7 @@ import {
   Separator,
   Switch,
   Spinner,
+  Textarea,
   Select,
   SelectTrigger,
   SelectValue,
@@ -262,6 +291,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const botIdRef = computed(() => props.botId)
+const platformType = computed(() => String(props.channelItem.meta.type || '').trim())
 const queryCache = useQueryCache()
 const { mutateAsync: upsertChannel, isLoading } = useMutation({
   mutation: async ({ platform, data }: { platform: string; data: ChannelUpsertConfigRequest }) => {
@@ -301,17 +331,47 @@ const form = reactive<{
 })
 
 const visibleSecrets = reactive<Record<string, boolean>>({})
+const isMatrixChannel = computed(() => platformType.value === 'matrix')
 
 // Schema fields sorted: required first. Exclude "status"/"disabled" from credential form.
 const orderedFields = computed(() => {
   const fields = props.channelItem.meta.config_schema?.fields ?? {}
-  const entries = Object.entries(fields).filter(([key]) => key !== 'status' && key !== 'disabled')
+  const hiddenFields = new Set(['status', 'disabled'])
+  if (isMatrixChannel.value) {
+    hiddenFields.add('autoJoinInvites')
+    hiddenFields.add('allowedRooms')
+  }
+  const entries = Object.entries(fields).filter(([key]) => !hiddenFields.has(key))
   entries.sort(([, a], [, b]) => {
     if (a.required && !b.required) return -1
     if (!a.required && b.required) return 1
     return 0
   })
   return Object.fromEntries(entries) as Record<string, ChannelFieldSchema>
+})
+
+const matrixAutoJoinInvites = computed({
+  get: () => {
+    const value = form.credentials.autoJoinInvites
+    return typeof value === 'boolean' ? value : true
+  },
+  set: (value: boolean) => {
+    form.credentials.autoJoinInvites = value
+  },
+})
+
+const matrixAllowedRooms = computed({
+  get: () => normalizeRoomTags(form.credentials.allowedRooms),
+  set: (value: string[]) => {
+    form.credentials.allowedRooms = normalizeRoomTags(value)
+  },
+})
+
+const matrixAllowedRoomsText = computed({
+  get: () => matrixAllowedRooms.value.join('\n'),
+  set: (value: string) => {
+    matrixAllowedRooms.value = normalizeRoomTags(value)
+  },
 })
 
 const currentInboundMode = computed(() => {
@@ -336,8 +396,31 @@ function initForm() {
   const existingCredentials = props.channelItem.config?.credentials ?? {}
 
   const creds: Record<string, unknown> = {}
-  for (const key of Object.keys(schema)) {
-    creds[key] = existingCredentials[key] ?? ''
+  for (const [key, field] of Object.entries(schema)) {
+    const existingValue = existingCredentials[key]
+    if (existingValue !== undefined) {
+      creds[key] = existingValue
+      continue
+    }
+    if (key === 'autoJoinInvites' && isMatrixChannel.value) {
+      creds[key] = true
+      continue
+    }
+    if (key === 'allowedRooms' && isMatrixChannel.value) {
+      creds[key] = []
+      continue
+    }
+    if (field.type === 'bool') {
+      creds[key] = false
+      continue
+    }
+    creds[key] = ''
+  }
+  if (isMatrixChannel.value) {
+    creds.autoJoinInvites = typeof existingCredentials.autoJoinInvites === 'boolean'
+      ? existingCredentials.autoJoinInvites
+      : true
+    creds.allowedRooms = normalizeRoomTags(existingCredentials.allowedRooms)
   }
   form.credentials = creds
   form.disabled = props.channelItem.config?.disabled ?? false
@@ -368,10 +451,61 @@ function buildCredentials(): Record<string, unknown> {
   const credentials: Record<string, unknown> = {}
   for (const [key, val] of Object.entries(form.credentials)) {
     if (key === 'status' || key === 'disabled') continue
+    if (key === 'allowedRooms') {
+      const rooms = normalizeRoomTags(val)
+      if (rooms.length > 0) {
+        credentials[key] = rooms
+      }
+      continue
+    }
     if (val === '' || val === undefined || val === null) continue
     credentials[key] = val
   }
   return credentials
+}
+
+function credentialStringValue(key: string): string | number | undefined {
+  const value = form.credentials[key]
+  if (typeof value === 'string' || typeof value === 'number') {
+    return value
+  }
+  return undefined
+}
+
+function setCredentialStringValue(key: string, value: string | number) {
+  form.credentials[key] = value
+}
+
+function credentialNumberValue(key: string): string | number | undefined {
+  const value = form.credentials[key]
+  if (typeof value === 'number' || typeof value === 'string') {
+    return value
+  }
+  return undefined
+}
+
+function setCredentialNumberValue(key: string, value: string | number) {
+  if (value === '') {
+    form.credentials[key] = ''
+    return
+  }
+  const numericValue = typeof value === 'number' ? value : Number(value)
+  form.credentials[key] = Number.isNaN(numericValue) ? '' : numericValue
+}
+
+function normalizeRoomTags(value: unknown): string[] {
+  const items = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/\r?\n/)
+      : []
+  const normalized: string[] = []
+  for (const item of items) {
+    const room = String(item || '').trim()
+    if (!room || normalized.includes(room)) continue
+    normalized.push(room)
+  }
+  return normalized
 }
 
 async function saveChannel(disabled: boolean, nextAction: 'save' | 'toggle') {
@@ -379,7 +513,7 @@ async function saveChannel(disabled: boolean, nextAction: 'save' | 'toggle') {
   action.value = nextAction
   try {
     const result = await upsertChannel({
-      platform: props.channelItem.meta.type,
+      platform: platformType.value,
       data: {
         credentials: buildCredentials(),
         disabled,
@@ -417,7 +551,7 @@ async function handleToggleDisabled() {
   try {
     const nextDisabled = !form.disabled
     const result = await updateChannelStatus({
-      platform: props.channelItem.meta.type,
+      platform: platformType.value,
       disabled: nextDisabled,
     })
     form.disabled = !!result?.disabled
@@ -435,7 +569,7 @@ async function handleDelete() {
   action.value = 'delete'
   try {
     await deleteBotsByIdChannelByPlatform({
-      path: { id: botIdRef.value, platform: props.channelItem.meta.type },
+      path: { id: botIdRef.value, platform: platformType.value },
       throwOnError: true,
     })
     lastSavedConfigId.value = ''

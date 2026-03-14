@@ -87,8 +87,9 @@ func TestBootstrapSinceTokenPersistsLatestCursor(t *testing.T) {
 	})
 
 	since, err := adapter.bootstrapSinceToken(context.Background(), channel.ChannelConfig{ID: "cfg-1"}, Config{
-		HomeserverURL: "https://matrix.example.com",
-		AccessToken:   "tok",
+		HomeserverURL:   "https://matrix.example.com",
+		AccessToken:     "tok",
+		AutoJoinInvites: true,
 	})
 	if err != nil {
 		t.Fatalf("bootstrapSinceToken returned error: %v", err)
@@ -129,8 +130,9 @@ func TestBootstrapSinceTokenAutoJoinsInvitedRooms(t *testing.T) {
 	})}
 
 	since, err := adapter.bootstrapSinceToken(context.Background(), channel.ChannelConfig{ID: "cfg-1"}, Config{
-		HomeserverURL: "https://matrix.example.com",
-		AccessToken:   "tok",
+		HomeserverURL:   "https://matrix.example.com",
+		AccessToken:     "tok",
+		AutoJoinInvites: true,
 	})
 	if err != nil {
 		t.Fatalf("bootstrapSinceToken returned error: %v", err)
@@ -140,6 +142,89 @@ func TestBootstrapSinceTokenAutoJoinsInvitedRooms(t *testing.T) {
 	}
 	if joinRequests != 1 {
 		t.Fatalf("expected invited room to be auto-joined once, got %d", joinRequests)
+	}
+}
+
+func TestHandleInvitesSkipsWhenAutoJoinDisabled(t *testing.T) {
+	joinRequests := 0
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/_matrix/client/v3/join/!room:example.com" {
+			joinRequests++
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	joined, err := adapter.handleInvites(
+		context.Background(),
+		channel.ChannelConfig{ID: "cfg-1"},
+		Config{HomeserverURL: "https://matrix.example.com", AccessToken: "tok", AutoJoinInvites: false},
+		matrixSyncResponse{Rooms: struct {
+			Join   map[string]matrixSyncJoinedRoom  `json:"join"`
+			Invite map[string]matrixSyncInvitedRoom `json:"invite"`
+		}{Invite: map[string]matrixSyncInvitedRoom{"!room:example.com": {}}}},
+	)
+	if err != nil {
+		t.Fatalf("handleInvites returned error: %v", err)
+	}
+	if joined {
+		t.Fatal("expected no room to be joined")
+	}
+	if joinRequests != 0 {
+		t.Fatalf("expected no join requests, got %d", joinRequests)
+	}
+}
+
+func TestHandleInvitesHonorsAllowedRoomAliases(t *testing.T) {
+	joinRequests := 0
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/_matrix/client/v3/join/!room:example.com" {
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+		joinRequests++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	joined, err := adapter.handleInvites(
+		context.Background(),
+		channel.ChannelConfig{ID: "cfg-1"},
+		Config{
+			HomeserverURL:   "https://matrix.example.com",
+			AccessToken:     "tok",
+			AutoJoinInvites: true,
+			AllowedRooms:    []string{"#ops:example.com"},
+		},
+		matrixSyncResponse{Rooms: struct {
+			Join   map[string]matrixSyncJoinedRoom  `json:"join"`
+			Invite map[string]matrixSyncInvitedRoom `json:"invite"`
+		}{Invite: map[string]matrixSyncInvitedRoom{
+			"!room:example.com": {
+				InviteState: struct {
+					Events []matrixEvent `json:"events"`
+				}{Events: []matrixEvent{{
+					Type:    "m.room.canonical_alias",
+					Content: map[string]any{"alias": "#ops:example.com"},
+				}}},
+			},
+		}}},
+	)
+	if err != nil {
+		t.Fatalf("handleInvites returned error: %v", err)
+	}
+	if !joined {
+		t.Fatal("expected invited room to be joined")
+	}
+	if joinRequests != 1 {
+		t.Fatalf("expected one join request, got %d", joinRequests)
 	}
 }
 
@@ -357,7 +442,7 @@ func TestMatrixSyncOnceAutoJoinsInvitedRooms(t *testing.T) {
 	nextSince, healthy, err := adapter.syncOnce(
 		context.Background(),
 		channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"},
-		Config{HomeserverURL: "https://matrix.example.com", AccessToken: "tok", UserID: "@memoh:example.com", SyncTimeoutSeconds: 30},
+		Config{HomeserverURL: "https://matrix.example.com", AccessToken: "tok", UserID: "@memoh:example.com", SyncTimeoutSeconds: 30, AutoJoinInvites: true},
 		"s123",
 		func(_ context.Context, _ channel.ChannelConfig, msg channel.InboundMessage) error {
 			captured = msg
@@ -378,6 +463,105 @@ func TestMatrixSyncOnceAutoJoinsInvitedRooms(t *testing.T) {
 	}
 	if captured.ReplyTarget != "!joined:example.com" || captured.Message.Text != "ping" {
 		t.Fatalf("unexpected captured message: %#v", captured)
+	}
+}
+
+func TestMatrixHandleEventSkipsDisallowedRoom(t *testing.T) {
+	adapter := NewMatrixAdapter(nil)
+	delivered, err := adapter.handleEvent(
+		context.Background(),
+		channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"},
+		Config{
+			HomeserverURL: "https://matrix.example.com",
+			AccessToken:   "tok",
+			UserID:        "@memoh:example.com",
+			AllowedRooms:  []string{"!allowed:example.com"},
+		},
+		matrixEvent{
+			EventID: "$evt1",
+			Type:    "m.room.message",
+			Sender:  "@alex:example.com",
+			RoomID:  "!blocked:example.com",
+			Content: map[string]any{"msgtype": "m.text", "body": "ping"},
+		},
+		func(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage) error {
+			t.Fatal("expected handler not to be called")
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("handleEvent returned error: %v", err)
+	}
+	if delivered {
+		t.Fatal("expected event to be skipped")
+	}
+}
+
+func TestMatrixHandleEventAllowsAliasMappedRoom(t *testing.T) {
+	lookupRequests := 0
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/_matrix/client/v3/directory/room/#ops:example.com":
+			lookupRequests++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"room_id":"!room:example.com"}`)),
+				Header:     make(http.Header),
+			}, nil
+		case "/_matrix/client/v3/rooms/!room:example.com/joined_members":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`{
+					"joined": {
+						"@alex:example.com": {"display_name": "Alex"},
+						"@memoh:example.com": {"display_name": "Memoh"},
+						"@sam:example.com": {"display_name": "Sam"}
+					}
+				}`)),
+				Header: make(http.Header),
+			}, nil
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	called := 0
+	for i := 0; i < 2; i++ {
+		delivered, err := adapter.handleEvent(
+			context.Background(),
+			channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"},
+			Config{
+				HomeserverURL: "https://matrix.example.com",
+				AccessToken:   "tok",
+				UserID:        "@memoh:example.com",
+				AllowedRooms:  []string{"#ops:example.com"},
+			},
+			matrixEvent{
+				EventID: fmt.Sprintf("$evt%d", i+1),
+				Type:    "m.room.message",
+				Sender:  "@alex:example.com",
+				RoomID:  "!room:example.com",
+				Content: map[string]any{"msgtype": "m.text", "body": "ping"},
+			},
+			func(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage) error {
+				called++
+				return nil
+			},
+		)
+		if err != nil {
+			t.Fatalf("handleEvent returned error: %v", err)
+		}
+		if !delivered {
+			t.Fatal("expected event to be delivered")
+		}
+	}
+	if called != 2 {
+		t.Fatalf("expected handler to be called twice, got %d", called)
+	}
+	if lookupRequests != 1 {
+		t.Fatalf("expected alias lookup to be cached, got %d requests", lookupRequests)
 	}
 }
 

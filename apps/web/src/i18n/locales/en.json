@@ -853,6 +853,12 @@
       "webhookCallback": "WebHook Callback URL",
       "webhookCallbackHint": "Use this URL as the event subscription request URL in Feishu/Lark.",
       "webhookCallbackPending": "Save this platform configuration to generate the callback URL.",
+      "matrixAccessControl": "Room Access",
+      "matrixAutoJoinInvites": "Auto-join invites",
+      "matrixAutoJoinInvitesHint": "Automatically accept room invites. When a room whitelist is set, only matching rooms or aliases are joined.",
+      "matrixAllowedRooms": "Room whitelist",
+      "matrixAllowedRoomsHint": "Only these Matrix rooms can interact with the bot. Supports room IDs and aliases, one entry per line. Leave empty to disable.",
+      "matrixAllowedRoomsPlaceholder": "!room:example.com\n#alias:example.com",
       "noAvailableTypes": "All platform types have been configured",
       "types": {
         "feishu": "Feishu",

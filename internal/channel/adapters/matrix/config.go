@@ -14,6 +14,8 @@ type Config struct {
 	AccessToken        string
 	UserID             string
 	SyncTimeoutSeconds int
+	AutoJoinInvites    bool
+	AllowedRooms       []string
 }
 
 type UserConfig struct {
@@ -26,12 +28,17 @@ func normalizeConfig(raw map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	out := map[string]any{
 		"homeserverUrl":      cfg.HomeserverURL,
 		"accessToken":        cfg.AccessToken,
 		"userId":             cfg.UserID,
 		"syncTimeoutSeconds": cfg.SyncTimeoutSeconds,
-	}, nil
+		"autoJoinInvites":    cfg.AutoJoinInvites,
+	}
+	if len(cfg.AllowedRooms) > 0 {
+		out["allowedRooms"] = append([]string(nil), cfg.AllowedRooms...)
+	}
+	return out, nil
 }
 
 func normalizeUserConfig(raw map[string]any) (map[string]any, error) {
@@ -102,11 +109,18 @@ func parseConfig(raw map[string]any) (Config, error) {
 	if timeout < 0 {
 		timeout = 0
 	}
+	autoJoinInvites := readBool(raw, true, "autoJoinInvites", "auto_join_invites")
+	allowedRooms, err := readRoomList(raw, "allowedRooms", "allowed_rooms")
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
 		HomeserverURL:      homeserverURL,
 		AccessToken:        accessToken,
 		UserID:             userID,
 		SyncTimeoutSeconds: timeout,
+		AutoJoinInvites:    autoJoinInvites,
+		AllowedRooms:       allowedRooms,
 	}, nil
 }
 
@@ -165,6 +179,84 @@ func readInt(raw map[string]any, fallback int, keys ...string) int {
 		}
 	}
 	return fallback
+}
+
+func readBool(raw map[string]any, fallback bool, keys ...string) bool {
+	for _, key := range keys {
+		value, ok := raw[key]
+		if !ok {
+			continue
+		}
+		switch v := value.(type) {
+		case bool:
+			return v
+		case string:
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "true", "1", "yes", "on":
+				return true
+			case "false", "0", "no", "off":
+				return false
+			}
+		}
+	}
+	return fallback
+}
+
+func readRoomList(raw map[string]any, keys ...string) ([]string, error) {
+	for _, key := range keys {
+		value, ok := raw[key]
+		if !ok {
+			continue
+		}
+		rooms, err := normalizeRoomList(value)
+		if err != nil {
+			return nil, err
+		}
+		return rooms, nil
+	}
+	return nil, nil
+}
+
+func normalizeRoomList(value any) ([]string, error) {
+	var items []string
+	switch v := value.(type) {
+	case nil:
+		return nil, nil
+	case []string:
+		items = append(items, v...)
+	case []any:
+		for _, item := range v {
+			items = append(items, fmt.Sprintf("%v", item))
+		}
+	case string:
+		items = strings.Split(strings.ReplaceAll(v, "\r\n", "\n"), "\n")
+	default:
+		items = []string{fmt.Sprintf("%v", v)}
+	}
+
+	rooms := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		room := normalizeTarget(item)
+		if room == "" {
+			continue
+		}
+		if strings.Contains(room, ",") {
+			return nil, fmt.Errorf("matrix allowedRooms entries must contain one room id or alias per line")
+		}
+		if !strings.HasPrefix(room, "!") && !strings.HasPrefix(room, "#") {
+			return nil, fmt.Errorf("matrix allowedRooms entries must be room ids or aliases")
+		}
+		if _, ok := seen[room]; ok {
+			continue
+		}
+		seen[room] = struct{}{}
+		rooms = append(rooms, room)
+	}
+	if len(rooms) == 0 {
+		return nil, nil
+	}
+	return rooms, nil
 }
 
 func targetKind(target string) string {
