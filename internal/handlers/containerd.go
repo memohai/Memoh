@@ -47,6 +47,7 @@ type ContainerdHandler struct {
 type CreateContainerRequest struct {
 	Snapshotter string `json:"snapshotter,omitempty"`
 	RestoreData bool   `json:"restore_data,omitempty"`
+	Image       string `json:"image,omitempty"`
 }
 
 type CreateContainerResponse struct {
@@ -66,6 +67,7 @@ type GetContainerResponse struct {
 	ContainerPath    string    `json:"container_path"`
 	TaskRunning      bool      `json:"task_running"`
 	HasPreservedData bool      `json:"has_preserved_data"`
+	Legacy           bool      `json:"legacy"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -182,7 +184,12 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}
 	containerID := mcp.ContainerPrefix + botID
 
+	imageOverride := strings.TrimSpace(req.Image)
 	image := h.mcpImageRef()
+	if imageOverride != "" {
+		image = config.NormalizeImageRef(imageOverride)
+	}
+
 	snapshotter := strings.TrimSpace(req.Snapshotter)
 	if snapshotter == "" {
 		snapshotter = h.cfg.Snapshotter
@@ -195,7 +202,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}
 
 	started := false
-	if err := h.manager.Start(ctx, botID); err != nil {
+	if err := h.manager.StartWithImage(ctx, botID, imageOverride); err != nil {
 		h.logger.Error("mcp container start failed",
 			slog.String("container_id", containerID),
 			slog.Any("error", err),
@@ -214,7 +221,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		}
 	}
 
-	h.upsertContainerRecord(ctx, botID, containerID, map[bool]string{true: "running", false: "created"}[started])
+	h.upsertContainerRecord(ctx, botID, containerID, map[bool]string{true: "running", false: "created"}[started], image)
 
 	return c.JSON(http.StatusOK, CreateContainerResponse{
 		ContainerID:      containerID,
@@ -269,12 +276,19 @@ func (h *ContainerdHandler) ensureContainerAndTask(ctx context.Context, containe
 	return h.setupNetworkOrFail(ctx, containerID, botID)
 }
 
-// setupNetworkOrFail attempts CNI network setup with one retry. Returns an error
-// if no usable IP is obtained — callers must not silently ignore this.
-func (h *ContainerdHandler) setupNetworkOrFail(ctx context.Context, containerID, botID string) error {
+// setupNetworkOrFail attempts CNI network setup with one retry. This provides
+// outbound connectivity for container processes (package downloads, etc.).
+// Server communicates with the container via UDS, not IP.
+func (h *ContainerdHandler) setupNetworkOrFail(ctx context.Context, containerID, _ string) error {
+	_, err := h.setupNetworkAndGetIP(ctx, containerID)
+	return err
+}
+
+// setupNetworkAndGetIP performs CNI network setup and returns the assigned IP.
+func (h *ContainerdHandler) setupNetworkAndGetIP(ctx context.Context, containerID string) (string, error) {
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		netResult, err := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+		result, err := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
 			ContainerID: containerID,
 			CNIBinDir:   h.cfg.CNIBinaryDir,
 			CNIConfDir:  h.cfg.CNIConfigDir,
@@ -287,16 +301,9 @@ func (h *ContainerdHandler) setupNetworkOrFail(ctx context.Context, containerID,
 				slog.Any("error", err))
 			continue
 		}
-		if netResult.IP == "" {
-			lastErr = fmt.Errorf("network setup returned no IP for %s", containerID)
-			continue
-		}
-		if h.manager != nil {
-			h.manager.SetContainerIP(botID, netResult.IP)
-		}
-		return nil
+		return result.IP, nil
 	}
-	return fmt.Errorf("network setup failed for container %s: %w", containerID, lastErr)
+	return "", fmt.Errorf("network setup failed for container %s: %w", containerID, lastErr)
 }
 
 // botContainerID resolves container_id for a bot from the database.
@@ -369,6 +376,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 					ContainerPath:    row.ContainerPath,
 					TaskRunning:      taskRunning,
 					HasPreservedData: h.manager.HasPreservedData(botID),
+					Legacy:           h.manager.IsLegacyContainer(ctx, row.ContainerID),
 					CreatedAt:        createdAt,
 					UpdatedAt:        updatedAt,
 				})
@@ -394,6 +402,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 		Namespace:        h.namespace,
 		TaskRunning:      h.isTaskRunning(ctx, containerID),
 		HasPreservedData: h.manager.HasPreservedData(botID),
+		Legacy:           h.manager.IsLegacyContainer(ctx, containerID),
 		CreatedAt:        info.CreatedAt,
 		UpdatedAt:        info.UpdatedAt,
 	})
@@ -886,7 +895,7 @@ func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string)
 		return err
 	}
 
-	h.upsertContainerRecord(ctx, botID, containerID, "running")
+	h.upsertContainerRecord(ctx, botID, containerID, "running", h.mcpImageRef())
 	return nil
 }
 
@@ -973,6 +982,31 @@ func (h *ContainerdHandler) ReconcileContainers(ctx context.Context) {
 			continue
 		}
 
+		// Legacy containers (pre-bridge) use TCP gRPC instead of UDS.
+		// Start them normally and cache their IP for the gRPC pool.
+		if h.manager.IsLegacyContainer(ctx, containerID) {
+			h.logger.Warn("reconcile: legacy container (pre-bridge), using TCP fallback",
+				slog.String("bot_id", botID), slog.String("container_id", containerID))
+
+			running := h.isTaskRunning(ctx, containerID)
+			if !running {
+				if err := h.ensureContainerAndTask(ctx, containerID, botID); err != nil {
+					h.logger.Error("reconcile: failed to start legacy container",
+						slog.String("bot_id", botID), slog.Any("error", err))
+					continue
+				}
+			}
+			if ip, netErr := h.setupNetworkAndGetIP(ctx, containerID); netErr != nil {
+				h.logger.Error("reconcile: network setup failed for legacy container",
+					slog.String("bot_id", botID), slog.Any("error", netErr))
+			} else {
+				h.manager.SetLegacyIP(botID, ip)
+				h.logger.Info("reconcile: legacy container reachable via TCP",
+					slog.String("bot_id", botID), slog.String("ip", ip))
+			}
+			continue
+		}
+
 		// Container exists — ensure the task is running.
 		running := h.isTaskRunning(ctx, containerID)
 		if running {
@@ -1014,7 +1048,7 @@ func (h *ContainerdHandler) ReconcileContainers(ctx context.Context) {
 	h.logger.Info("reconcile: completed")
 }
 
-func (h *ContainerdHandler) upsertContainerRecord(ctx context.Context, botID, containerID, status string) {
+func (h *ContainerdHandler) upsertContainerRecord(ctx context.Context, botID, containerID, status, image string) {
 	if h.queries == nil {
 		return
 	}
@@ -1030,7 +1064,7 @@ func (h *ContainerdHandler) upsertContainerRecord(ctx context.Context, botID, co
 		BotID:         pgBotID,
 		ContainerID:   containerID,
 		ContainerName: containerID,
-		Image:         h.mcpImageRef(),
+		Image:         image,
 		Status:        status,
 		Namespace:     ns,
 		AutoStart:     true,

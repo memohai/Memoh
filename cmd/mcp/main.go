@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -18,8 +19,8 @@ import (
 )
 
 const (
-	defaultListenAddr = ":9090"
-	templateDir       = "/opt/mcp-template"
+	defaultSocketPath = "/run/memoh/mcp.sock"
+	templateDir       = "/opt/memoh/templates"
 )
 
 // initDataDir ensures /data exists and seeds template files on first boot.
@@ -60,14 +61,32 @@ func main() {
 
 	initDataDir()
 
-	addr := os.Getenv("MCP_LISTEN_ADDR")
-	if addr == "" {
-		addr = defaultListenAddr
+	// Append toolkit to PATH so child processes (via /bin/sh -c) can find npx/uvx.
+	// Container-native tools take priority since toolkit is appended at the end.
+	os.Setenv("PATH", os.Getenv("PATH")+":/opt/memoh/toolkit/bin")
+
+	// PID 1 zombie reaping: when mcp runs as PID 1 inside a container,
+	// orphaned child processes become zombies unless reaped.
+	go func() {
+		var status syscall.WaitStatus
+		for {
+			if _, err := syscall.Wait4(-1, &status, 0, nil); err != nil {
+				time.Sleep(time.Second)
+			}
+		}
+	}()
+
+	socketPath := os.Getenv("MCP_SOCKET_PATH")
+	if socketPath == "" {
+		socketPath = defaultSocketPath
 	}
 
-	lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+	// Clean up residual socket from a previous run.
+	os.Remove(socketPath)
+
+	lis, err := (&net.ListenConfig{}).Listen(ctx, "unix", socketPath)
 	if err != nil {
-		logger.Error("failed to listen", slog.String("addr", addr), slog.Any("error", err))
+		logger.Error("failed to listen", slog.String("socket", socketPath), slog.Any("error", err))
 		return
 	}
 
@@ -81,7 +100,7 @@ func main() {
 		srv.GracefulStop()
 	}()
 
-	logger.Info("mcp gRPC server listening", slog.String("addr", addr))
+	logger.Info("mcp gRPC server listening", slog.String("socket", socketPath))
 	if err := srv.Serve(lis); err != nil {
 		logger.Error("gRPC server failed", slog.Any("error", err))
 		return

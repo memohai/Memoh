@@ -43,12 +43,14 @@ type ContainerAction =
   | 'import'
   | 'restore'
   | 'rollback'
+  | 'recreate'
   | ''
 
 const containerLoading = ref(false)
 const containerAction = ref<ContainerAction>('')
 const rollbackVersion = ref<number | null>(null)
 const createRestoreData = ref(false)
+const createImage = ref('')
 const newSnapshotName = ref('')
 const importInputRef = ref<HTMLInputElement | null>(null)
 
@@ -165,14 +167,20 @@ async function handleCreateContainer() {
   await runContainerAction(
     'create',
     async () => {
+      const body: Record<string, unknown> = {
+        restore_data: createRestoreData.value,
+      }
+      const trimmedImage = createImage.value.trim()
+      if (trimmedImage) {
+        body.image = trimmedImage
+      }
       const { data } = await postBotsByBotIdContainer({
         path: { bot_id: botId.value },
-        body: {
-          restore_data: createRestoreData.value,
-        },
+        body,
         throwOnError: true,
       })
       createRestoreData.value = false
+      createImage.value = ''
       await loadContainerData(false)
       return data
     },
@@ -192,6 +200,29 @@ const isContainerTaskRunning = computed(() => {
 })
 
 const hasPreservedData = computed(() => !!containerInfo.value?.has_preserved_data)
+const isLegacy = computed(() => !!containerInfo.value?.legacy)
+
+async function handleRecreateContainer() {
+  if (botLifecyclePending.value || !containerInfo.value) return
+
+  await runContainerAction(
+    'recreate',
+    async () => {
+      await deleteBotsByBotIdContainer({
+        path: { bot_id: botId.value },
+        query: { preserve_data: true },
+        throwOnError: true,
+      })
+      await postBotsByBotIdContainer({
+        path: { bot_id: botId.value },
+        body: { restore_data: true },
+        throwOnError: true,
+      })
+      await loadContainerData(false)
+    },
+    t('bots.container.legacyRecreateSuccess'),
+  )
+}
 
 async function handleStopContainer() {
   if (botLifecyclePending.value || !containerInfo.value) return
@@ -540,6 +571,19 @@ watch([activeTab, botId], ([tab]) => {
           />
         </div>
 
+        <div class="space-y-2">
+          <Label>{{ $t('bots.container.createImageLabel') }}</Label>
+          <Input
+            v-model="createImage"
+            placeholder="debian:bookworm-slim"
+            :disabled="containerBusy || botLifecyclePending"
+            class="font-mono"
+          />
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.container.createImageDescription') }}
+          </p>
+        </div>
+
         <div class="flex justify-end">
           <Button
             :disabled="containerBusy || botLifecyclePending"
@@ -559,6 +603,28 @@ watch([activeTab, botId], ([tab]) => {
       v-else-if="containerInfo"
       class="space-y-5"
     >
+      <div
+        v-if="isLegacy"
+        class="flex items-center justify-between gap-3 rounded-md border border-amber-300/50 bg-amber-50/70 p-3 dark:border-amber-800/50 dark:bg-amber-900/10"
+      >
+        <p class="text-sm text-amber-800 dark:text-amber-200">
+          {{ $t('bots.container.legacyWarning') }}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          class="shrink-0"
+          :disabled="containerBusy || botLifecyclePending"
+          @click="handleRecreateContainer"
+        >
+          <Spinner
+            v-if="containerAction === 'recreate'"
+            class="mr-1.5"
+          />
+          {{ $t('bots.container.legacyRecreate') }}
+        </Button>
+      </div>
+
       <div class="rounded-md border p-4">
         <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
           <div class="space-y-1">

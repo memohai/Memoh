@@ -46,48 +46,44 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -ldflags "-s -w -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH}" \
     -o /out/mcp ./cmd/mcp
 
-# ---- Stage 3: Assemble MCP image rootfs ----
-FROM alpine:latest AS mcp-rootfs
-
-RUN apk add --no-cache grep curl bash
-RUN apk add --no-cache nodejs npm
-RUN apk add --no-cache python3 && \
-    curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ln -sf /root/.local/bin/uv /usr/local/bin/uv && \
-    ln -sf /root/.local/bin/uvx /usr/local/bin/uvx
-
-COPY --from=mcp-builder /out/mcp /opt/mcp
-COPY cmd/mcp/template /opt/mcp-template
-
-RUN printf '#!/bin/sh\n\
-[ -e /app/mcp ] || { mkdir -p /app; [ -f /opt/mcp ] && cp -a /opt/mcp /app/mcp 2>/dev/null || true; }\n\
-if [ -x /app/mcp ]; then exec /app/mcp "$@"; fi\n\
-exec /opt/mcp "$@"\n' > /opt/entrypoint.sh && chmod +x /opt/entrypoint.sh
-
-RUN tar -cf /tmp/rootfs.tar \
-    --exclude='./proc' --exclude='./sys' --exclude='./dev' \
-    --exclude='./tmp' --exclude='./run' \
-    -C / .
-
-# ---- Stage 4: Package rootfs as OCI image tar ----
-FROM alpine:latest AS oci-exporter
-
-COPY --from=mcp-rootfs /tmp/rootfs.tar /tmp/layer.tar
-ARG MCP_IMAGE_TAG=docker.io/library/memoh-mcp:latest
+# ---- Stage 4: Assemble MCP runtime + toolkit ----
+FROM alpine:latest AS toolkit-assembly
 ARG TARGETARCH
 
-RUN set -e \
-    && LAYER_SHA=$(sha256sum /tmp/layer.tar | awk '{print $1}') \
-    && LAYER_SIZE=$(wc -c < /tmp/layer.tar) \
-    && mkdir -p "/tmp/image/${LAYER_SHA}" /out \
-    && mv /tmp/layer.tar "/tmp/image/${LAYER_SHA}/layer.tar" \
-    && printf '{"architecture":"%s","os":"linux","created":"1970-01-01T00:00:00Z","config":{"Entrypoint":["/opt/entrypoint.sh"],"WorkingDir":"/app","Env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]},"rootfs":{"type":"layers","diff_ids":["sha256:%s"]},"history":[{"created":"1970-01-01T00:00:00Z","comment":"memoh-mcp image"}]}' \
-       "${TARGETARCH:-amd64}" "${LAYER_SHA}" > /tmp/config.json \
-    && CONFIG_SHA=$(sha256sum /tmp/config.json | awk '{print $1}') \
-    && mv /tmp/config.json "/tmp/image/${CONFIG_SHA}.json" \
-    && printf '[{"Config":"%s.json","RepoTags":["%s"],"Layers":["%s/layer.tar"]}]' \
-       "${CONFIG_SHA}" "${MCP_IMAGE_TAG}" "${LAYER_SHA}" > /tmp/image/manifest.json \
-    && cd /tmp/image && tar -cf /out/memoh-mcp.tar manifest.json "${CONFIG_SHA}.json" "${LAYER_SHA}/"
+# xz needed to extract Node.js .tar.xz archives
+RUN apk add --no-cache xz
+
+# Download Node.js for both glibc and musl
+RUN set -eux; \
+    NODE_VERSION=22.14.0; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) ARCH=x64 ;; \
+      arm64) ARCH=arm64 ;; \
+      *) echo "unsupported arch: ${TARGETARCH}" && exit 1 ;; \
+    esac; \
+    mkdir -p /assembly/toolkit/node-glibc /assembly/toolkit/node-musl; \
+    wget -qO- "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${ARCH}.tar.xz" \
+      | tar -xJf - --strip-components=1 -C /assembly/toolkit/node-glibc; \
+    wget -qO- "https://unofficial-builds.nodejs.org/download/release/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${ARCH}-musl.tar.xz" \
+      | tar -xJf - --strip-components=1 -C /assembly/toolkit/node-musl
+
+# Download uv (static musl binary, works on all Linux)
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) UV_ARCH=x86_64 ;; \
+      arm64) UV_ARCH=aarch64 ;; \
+      *) echo "unsupported arch: ${TARGETARCH}" && exit 1 ;; \
+    esac; \
+    wget -qO- "https://github.com/astral-sh/uv/releases/latest/download/uv-${UV_ARCH}-unknown-linux-musl.tar.gz" \
+      | tar -xzf - --strip-components=1 -C /tmp; \
+    mv /tmp/uv /assembly/toolkit/uv; \
+    chmod +x /assembly/toolkit/uv
+
+# Assemble runtime directory
+COPY --from=mcp-builder /out/mcp /assembly/mcp
+COPY cmd/mcp/template /assembly/templates
+COPY docker/toolkit/bin /assembly/toolkit/bin
+RUN chmod +x /assembly/toolkit/bin/*
 
 # ---- Stage 5: Final runtime (containerd + server + CNI) ----
 FROM alpine:latest
@@ -131,8 +127,8 @@ RUN apk add --no-cache ca-certificates tzdata wget cni-plugins iptables \
       '  ]' \
       '}' > /etc/cni/net.d/10-memoh.conflist
 
-# MCP image for containerd import
-COPY --from=oci-exporter /out/memoh-mcp.tar /opt/images/memoh-mcp.tar
+# MCP runtime (bind-mounted into bot containers)
+COPY --from=toolkit-assembly /assembly /opt/memoh/runtime
 
 # Server binary and spec
 COPY --from=server-builder /build/memoh-server /app/memoh-server
