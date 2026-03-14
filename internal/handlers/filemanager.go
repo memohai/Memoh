@@ -15,6 +15,8 @@ import (
 	"github.com/memohai/memoh/internal/mcp/mcpclient"
 )
 
+const mediaContainerRoot = "/data/media"
+
 // ---------- request / response types ----------
 
 type FSFileInfo struct {
@@ -81,6 +83,11 @@ func resolveContainerPath(rawPath string) (string, error) {
 		return "", errors.New("invalid path")
 	}
 	return cleaned, nil
+}
+
+func isContainerMediaPath(containerPath string) bool {
+	cleaned := filepath.Clean("/" + strings.TrimSpace(containerPath))
+	return cleaned == mediaContainerRoot || strings.HasPrefix(cleaned, mediaContainerRoot+"/")
 }
 
 // getGRPCClient returns the gRPC client for the bot's container.
@@ -287,10 +294,6 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/download [get].
 func (h *ContainerdHandler) FSDownload(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
-	if err != nil {
-		return err
-	}
 	rawPath := c.QueryParam("path")
 	if strings.TrimSpace(rawPath) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
@@ -299,6 +302,15 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 	containerPath, err := resolveContainerPath(rawPath)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	requireAccess := h.requireBotAccess
+	if isContainerMediaPath(containerPath) {
+		requireAccess = h.requireBotAccessWithGuest
+	}
+	botID, err := requireAccess(c)
+	if err != nil {
+		return err
 	}
 
 	ctx := c.Request().Context()
