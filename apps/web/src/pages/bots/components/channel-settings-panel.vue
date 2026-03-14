@@ -123,7 +123,7 @@
           <button
             type="button"
             class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            :aria-label="`${visibleSecrets[key] ? 'Hide' : 'Show'} ${field.title || key}`"
+            :aria-label="secretToggleLabel(key, field.title || key)"
             :aria-pressed="!!visibleSecrets[key]"
             @click="visibleSecrets[key] = !visibleSecrets[key]"
           >
@@ -183,24 +183,36 @@
       </div>
       <template v-if="isMatrixChannel">
         <div class="space-y-2">
-          <Label>{{ $t('bots.channels.matrixAutoJoinInvites') }}</Label>
-          <p class="text-xs text-muted-foreground">
+          <Label for="matrix-auto-join-invites">{{ $t('bots.channels.matrixAutoJoinInvites') }}</Label>
+          <p
+            id="matrix-auto-join-invites-hint"
+            class="text-xs text-muted-foreground"
+          >
             {{ $t('bots.channels.matrixAutoJoinInvitesHint') }}
           </p>
           <Switch
+            id="matrix-auto-join-invites"
             :model-value="matrixAutoJoinInvites"
+            :aria-label="$t('bots.channels.matrixAutoJoinInvites')"
+            aria-describedby="matrix-auto-join-invites-hint"
             @update:model-value="(val) => matrixAutoJoinInvites = !!val"
           />
         </div>
 
         <div class="space-y-2">
-          <Label>{{ $t('bots.channels.matrixAllowedRooms') }}</Label>
-          <p class="text-xs text-muted-foreground">
+          <Label for="matrix-allowed-rooms">{{ $t('bots.channels.matrixAllowedRooms') }}</Label>
+          <p
+            id="matrix-allowed-rooms-hint"
+            class="text-xs text-muted-foreground"
+          >
             {{ $t('bots.channels.matrixAllowedRoomsHint') }}
           </p>
           <Textarea
+            id="matrix-allowed-rooms"
             :model-value="matrixAllowedRoomsText"
             :placeholder="$t('bots.channels.matrixAllowedRoomsPlaceholder')"
+            :aria-label="$t('bots.channels.matrixAllowedRooms')"
+            aria-describedby="matrix-allowed-rooms-hint"
             class="min-h-24"
             @update:model-value="(val) => matrixAllowedRoomsText = String(val || '')"
           />
@@ -491,6 +503,12 @@ function setCredentialNumberValue(key: string, value: string | number) {
   }
   const numericValue = typeof value === 'number' ? value : Number(value)
   form.credentials[key] = Number.isNaN(numericValue) ? '' : numericValue
+}
+
+function secretToggleLabel(key: string, label: string): string {
+  return visibleSecrets[key]
+    ? t('bots.channels.hideSecretField', { field: label })
+    : t('bots.channels.showSecretField', { field: label })
 }
 
 function normalizeRoomTags(value: unknown): string[] {

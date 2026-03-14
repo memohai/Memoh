@@ -853,6 +853,8 @@
       "webhookCallback": "WebHook Callback URL",
       "webhookCallbackHint": "Use this URL as the event subscription request URL in Feishu/Lark.",
       "webhookCallbackPending": "Save this platform configuration to generate the callback URL.",
+      "showSecretField": "Show {field}",
+      "hideSecretField": "Hide {field}",
       "matrixAccessControl": "Room Access",
       "matrixAutoJoinInvites": "Auto-join invites",
       "matrixAutoJoinInvitesHint": "Automatically accept room invites. When a room whitelist is set, only matching rooms or aliases are joined.",

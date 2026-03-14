@@ -530,11 +530,11 @@ func TestOutboundAssetRefsToMessageRefs_Empty(t *testing.T) {
 	}
 }
 
-func TestSanitizeMessagesDowngradesUserMultipartHistoryToText(t *testing.T) {
+func TestSanitizeMessagesNormalizesUserMultipartImageBytes(t *testing.T) {
 	t.Parallel()
 	content, err := json.Marshal([]map[string]any{
 		{"type": "text", "text": "> quoted reply\n\nWhere is Antelope Canyon?"},
-		{"type": "image", "image": map[string]any{"0": 137, "1": 80}},
+		{"type": "image", "image": map[string]any{"0": 137, "1": 80}, "mediaType": "image/png"},
 	})
 	if err != nil {
 		t.Fatalf("marshal content: %v", err)
@@ -547,15 +547,22 @@ func TestSanitizeMessagesDowngradesUserMultipartHistoryToText(t *testing.T) {
 	if len(cleaned) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(cleaned))
 	}
-	if got := cleaned[0].TextContent(); got != "> quoted reply\n\nWhere is Antelope Canyon?" {
-		t.Fatalf("unexpected sanitized text: %q", got)
+	if bytes.Equal(cleaned[0].Content, content) {
+		t.Fatalf("expected user multipart content to be normalized")
 	}
-	var stored string
-	if err := json.Unmarshal(cleaned[0].Content, &stored); err != nil {
-		t.Fatalf("expected sanitized content to be plain string: %v", err)
+	var parts []map[string]any
+	if err := json.Unmarshal(cleaned[0].Content, &parts); err != nil {
+		t.Fatalf("unmarshal normalized content: %v", err)
 	}
-	if stored != "> quoted reply\n\nWhere is Antelope Canyon?" {
-		t.Fatalf("unexpected stored sanitized text: %q", stored)
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts after normalization, got %d", len(parts))
+	}
+	if got := parts[0]["text"]; got != "> quoted reply\n\nWhere is Antelope Canyon?" {
+		t.Fatalf("unexpected text part: %#v", got)
+	}
+	image, _ := parts[1]["image"].(string)
+	if !strings.HasPrefix(image, "data:image/png;base64,") {
+		t.Fatalf("expected data URL image payload, got %#v", parts[1]["image"])
 	}
 }
 

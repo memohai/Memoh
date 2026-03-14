@@ -587,6 +587,148 @@ func TestExtractMatrixDirectRoomIDs(t *testing.T) {
 	}
 }
 
+func TestExtractMatrixDirectRooms(t *testing.T) {
+	directRooms := extractMatrixDirectRooms(matrixSyncResponse{
+		AccountData: struct {
+			Events []matrixSyncEvent `json:"events"`
+		}{
+			Events: []matrixSyncEvent{{
+				Type: "m.direct",
+				Content: map[string]any{
+					"@alice:example.com": []any{"!dm:example.com", "!ignored:example.com"},
+					"@bob:example.com":   []any{" !bob:example.com "},
+				},
+			}},
+		},
+	})
+
+	if got := directRooms["@alice:example.com"]; got != "!dm:example.com" {
+		t.Fatalf("unexpected Alice direct room: %q", got)
+	}
+	if got := directRooms["@bob:example.com"]; got != "!bob:example.com" {
+		t.Fatalf("unexpected Bob direct room: %q", got)
+	}
+}
+
+func TestEnsureDirectRoomReusesExistingRoom(t *testing.T) {
+	joinedRoomsRequests := 0
+	joinedMembersRequests := 0
+	createRoomRequests := 0
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/_matrix/client/v3/joined_rooms":
+			joinedRoomsRequests++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"joined_rooms":["!dm:example.com"]}`)),
+				Header:     make(http.Header),
+			}, nil
+		case "/_matrix/client/v3/rooms/!dm:example.com/joined_members":
+			joinedMembersRequests++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"joined":{"@memoh:example.com":{},"@alice:example.com":{}}}`)),
+				Header:     make(http.Header),
+			}, nil
+		case "/_matrix/client/v3/createRoom":
+			createRoomRequests++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"room_id":"!new:example.com"}`)),
+				Header:     make(http.Header),
+			}, nil
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	cfg := Config{
+		HomeserverURL: "https://matrix.example.com",
+		AccessToken:   "tok",
+		UserID:        "@memoh:example.com",
+	}
+
+	roomID, err := adapter.ensureDirectRoom(context.Background(), cfg, "@alice:example.com")
+	if err != nil {
+		t.Fatalf("ensureDirectRoom returned error: %v", err)
+	}
+	if roomID != "!dm:example.com" {
+		t.Fatalf("unexpected room id: %q", roomID)
+	}
+	roomID, err = adapter.ensureDirectRoom(context.Background(), cfg, "@alice:example.com")
+	if err != nil {
+		t.Fatalf("ensureDirectRoom second call returned error: %v", err)
+	}
+	if roomID != "!dm:example.com" {
+		t.Fatalf("unexpected cached room id: %q", roomID)
+	}
+	if joinedRoomsRequests != 1 {
+		t.Fatalf("expected joined room lookup once, got %d", joinedRoomsRequests)
+	}
+	if joinedMembersRequests != 1 {
+		t.Fatalf("expected joined members lookup once, got %d", joinedMembersRequests)
+	}
+	if createRoomRequests != 0 {
+		t.Fatalf("expected no createRoom requests, got %d", createRoomRequests)
+	}
+}
+
+func TestEnsureDirectRoomCachesCreatedRoom(t *testing.T) {
+	joinedRoomsRequests := 0
+	createRoomRequests := 0
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/_matrix/client/v3/joined_rooms":
+			joinedRoomsRequests++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"joined_rooms":[]}`)),
+				Header:     make(http.Header),
+			}, nil
+		case "/_matrix/client/v3/createRoom":
+			createRoomRequests++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"room_id":"!new:example.com"}`)),
+				Header:     make(http.Header),
+			}, nil
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	cfg := Config{
+		HomeserverURL: "https://matrix.example.com",
+		AccessToken:   "tok",
+		UserID:        "@memoh:example.com",
+	}
+
+	roomID, err := adapter.ensureDirectRoom(context.Background(), cfg, "@alice:example.com")
+	if err != nil {
+		t.Fatalf("ensureDirectRoom returned error: %v", err)
+	}
+	if roomID != "!new:example.com" {
+		t.Fatalf("unexpected room id: %q", roomID)
+	}
+	roomID, err = adapter.ensureDirectRoom(context.Background(), cfg, "@alice:example.com")
+	if err != nil {
+		t.Fatalf("ensureDirectRoom second call returned error: %v", err)
+	}
+	if roomID != "!new:example.com" {
+		t.Fatalf("unexpected cached room id: %q", roomID)
+	}
+	if joinedRoomsRequests != 1 {
+		t.Fatalf("expected joined room lookup once, got %d", joinedRoomsRequests)
+	}
+	if createRoomRequests != 1 {
+		t.Fatalf("expected createRoom once, got %d", createRoomRequests)
+	}
+}
+
 func TestExtractMatrixInboundContentParsesImageAttachment(t *testing.T) {
 	text, attachments := extractMatrixInboundContent(map[string]any{
 		"msgtype": "m.image",

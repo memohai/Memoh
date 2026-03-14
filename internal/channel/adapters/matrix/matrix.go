@@ -53,6 +53,9 @@ type MatrixAdapter struct {
 	roomTypeMu sync.Mutex
 	roomTypes  map[string]map[string]string
 
+	directRoomMu sync.Mutex
+	directRooms  map[string]map[string]string
+
 	allowedRoomMu sync.Mutex
 	allowedRooms  map[string]map[string]string
 }
@@ -93,6 +96,10 @@ type matrixSyncEvent struct {
 
 type matrixJoinedMembersResponse struct {
 	Joined map[string]matrixJoinedMember `json:"joined"`
+}
+
+type matrixJoinedRoomsResponse struct {
+	JoinedRooms []string `json:"joined_rooms"`
 }
 
 type matrixJoinedMember struct {
@@ -149,6 +156,7 @@ func NewMatrixAdapter(log *slog.Logger) *MatrixAdapter {
 		},
 		seen:         make(map[string]map[string]time.Time),
 		roomTypes:    make(map[string]map[string]string),
+		directRooms:  make(map[string]map[string]string),
 		allowedRooms: make(map[string]map[string]string),
 	}
 }
@@ -409,7 +417,7 @@ func (a *MatrixAdapter) bootstrapSinceToken(ctx context.Context, cfg channel.Cha
 	if _, err := a.handleInvites(ctx, cfg, parsed, resp); err != nil {
 		return "", err
 	}
-	a.rememberSyncResponseRoomTypes(cfg.ID, resp)
+	a.rememberSyncResponseRoomTypes(cfg.ID, parsed, resp)
 	a.rememberSyncResponseEvents(cfg.ID, resp)
 	since := strings.TrimSpace(resp.NextBatch)
 	if since == "" {
@@ -458,7 +466,7 @@ func (a *MatrixAdapter) syncOnce(ctx context.Context, cfg channel.ChannelConfig,
 	if err := a.doJSON(ctx, parsed, http.MethodGet, "/_matrix/client/v3/sync?"+query.Encode(), nil, &resp); err != nil {
 		return since, false, err
 	}
-	a.rememberSyncResponseRoomTypes(cfg.ID, resp)
+	a.rememberSyncResponseRoomTypes(cfg.ID, parsed, resp)
 	healthy := false
 	joinedInvite, err := a.handleInvites(ctx, cfg, parsed, resp)
 	if err != nil {
@@ -683,7 +691,8 @@ func (a *MatrixAdapter) isDirectRoom(ctx context.Context, cfg Config, roomID str
 	return len(resp.Joined) == 2, nil
 }
 
-func (a *MatrixAdapter) rememberSyncResponseRoomTypes(configID string, resp matrixSyncResponse) {
+func (a *MatrixAdapter) rememberSyncResponseRoomTypes(configID string, cfg Config, resp matrixSyncResponse) {
+	a.rememberSyncDirectRooms(cfg, resp)
 	configID = strings.TrimSpace(configID)
 	if configID == "" {
 		return
@@ -704,6 +713,36 @@ func (a *MatrixAdapter) rememberSyncResponseRoomTypes(configID string, resp matr
 	}
 }
 
+func extractMatrixDirectRooms(resp matrixSyncResponse) map[string]string {
+	directRooms := make(map[string]string)
+	for _, evt := range resp.AccountData.Events {
+		if strings.TrimSpace(evt.Type) != "m.direct" {
+			continue
+		}
+		for userID, rawRoomIDs := range evt.Content {
+			userID = strings.TrimSpace(userID)
+			if userID == "" {
+				continue
+			}
+			for _, roomID := range matrixStringList(rawRoomIDs) {
+				roomID = strings.TrimSpace(roomID)
+				if roomID == "" {
+					continue
+				}
+				directRooms[userID] = roomID
+				break
+			}
+		}
+	}
+	return directRooms
+}
+
+func (a *MatrixAdapter) rememberSyncDirectRooms(cfg Config, resp matrixSyncResponse) {
+	for userID, roomID := range extractMatrixDirectRooms(resp) {
+		a.rememberDirectRoomForConfig(cfg, userID, roomID)
+	}
+}
+
 func extractMatrixDirectRoomIDs(resp matrixSyncResponse) map[string]struct{} {
 	directRooms := make(map[string]struct{})
 	for _, evt := range resp.AccountData.Events {
@@ -712,6 +751,7 @@ func extractMatrixDirectRoomIDs(resp matrixSyncResponse) map[string]struct{} {
 		}
 		for _, rawRoomIDs := range evt.Content {
 			for _, roomID := range matrixStringList(rawRoomIDs) {
+				roomID = strings.TrimSpace(roomID)
 				if roomID == "" {
 					continue
 				}
@@ -1377,8 +1417,23 @@ func (a *MatrixAdapter) resolveRoomAlias(ctx context.Context, cfg Config, roomAl
 }
 
 func (a *MatrixAdapter) ensureDirectRoom(ctx context.Context, cfg Config, userID string) (string, error) {
+	userID = strings.TrimSpace(userID)
+	if roomID, ok := a.cachedDirectRoom(cfg, userID); ok {
+		return roomID, nil
+	}
+	if roomID, err := a.findExistingDirectRoom(ctx, cfg, userID); err == nil {
+		if roomID != "" {
+			a.rememberDirectRoomForConfig(cfg, userID, roomID)
+			return roomID, nil
+		}
+	} else if a.logger != nil {
+		a.logger.Warn("matrix direct room lookup failed",
+			slog.String("user_id", userID),
+			slog.Any("error", err),
+		)
+	}
 	req := matrixCreateRoomRequest{
-		Invite:   []string{strings.TrimSpace(userID)},
+		Invite:   []string{userID},
 		IsDirect: true,
 		Preset:   "trusted_private_chat",
 	}
@@ -1389,7 +1444,101 @@ func (a *MatrixAdapter) ensureDirectRoom(ctx context.Context, cfg Config, userID
 	if strings.TrimSpace(resp.RoomID) == "" {
 		return "", errors.New("matrix createRoom returned empty room_id")
 	}
-	return strings.TrimSpace(resp.RoomID), nil
+	roomID := strings.TrimSpace(resp.RoomID)
+	a.rememberDirectRoomForConfig(cfg, userID, roomID)
+	return roomID, nil
+}
+
+func (a *MatrixAdapter) findExistingDirectRoom(ctx context.Context, cfg Config, userID string) (string, error) {
+	var resp matrixJoinedRoomsResponse
+	if err := a.doJSON(ctx, cfg, http.MethodGet, "/_matrix/client/v3/joined_rooms", nil, &resp); err != nil {
+		return "", err
+	}
+	for _, roomID := range resp.JoinedRooms {
+		matched, err := a.isDirectRoomForUser(ctx, cfg, roomID, userID)
+		if err != nil {
+			if a.logger != nil {
+				a.logger.Warn("matrix direct room candidate lookup failed",
+					slog.String("room_id", strings.TrimSpace(roomID)),
+					slog.String("user_id", strings.TrimSpace(userID)),
+					slog.Any("error", err),
+				)
+			}
+			continue
+		}
+		if matched {
+			return strings.TrimSpace(roomID), nil
+		}
+	}
+	return "", nil
+}
+
+func (a *MatrixAdapter) isDirectRoomForUser(ctx context.Context, cfg Config, roomID string, userID string) (bool, error) {
+	path := fmt.Sprintf("/_matrix/client/v3/rooms/%s/joined_members", url.PathEscape(strings.TrimSpace(roomID)))
+	var resp matrixJoinedMembersResponse
+	if err := a.doJSON(ctx, cfg, http.MethodGet, path, nil, &resp); err != nil {
+		return false, err
+	}
+	if len(resp.Joined) != 2 {
+		return false, nil
+	}
+	if _, ok := resp.Joined[strings.TrimSpace(userID)]; !ok {
+		return false, nil
+	}
+	if _, ok := resp.Joined[strings.TrimSpace(cfg.UserID)]; !ok {
+		return false, nil
+	}
+	return true, nil
+}
+
+func directRoomCacheKey(cfg Config) string {
+	return strings.TrimSpace(cfg.HomeserverURL) + "|" + strings.TrimSpace(cfg.UserID)
+}
+
+func (a *MatrixAdapter) cachedDirectRoom(cfg Config, userID string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	cacheKey := directRoomCacheKey(cfg)
+	userID = strings.TrimSpace(userID)
+	if cacheKey == "" || userID == "" {
+		return "", false
+	}
+	a.directRoomMu.Lock()
+	defer a.directRoomMu.Unlock()
+	rooms, ok := a.directRooms[cacheKey]
+	if !ok {
+		return "", false
+	}
+	roomID, ok := rooms[userID]
+	if !ok || strings.TrimSpace(roomID) == "" {
+		return "", false
+	}
+	return roomID, true
+}
+
+func (a *MatrixAdapter) rememberDirectRoomForConfig(cfg Config, userID, roomID string) {
+	a.rememberDirectRoom(directRoomCacheKey(cfg), userID, roomID)
+}
+
+func (a *MatrixAdapter) rememberDirectRoom(cacheKey, userID, roomID string) {
+	if a == nil {
+		return
+	}
+	cacheKey = strings.TrimSpace(cacheKey)
+	userID = strings.TrimSpace(userID)
+	roomID = strings.TrimSpace(roomID)
+	if cacheKey == "" || userID == "" || roomID == "" {
+		return
+	}
+	a.directRoomMu.Lock()
+	defer a.directRoomMu.Unlock()
+	rooms, ok := a.directRooms[cacheKey]
+	if !ok {
+		rooms = make(map[string]string)
+		a.directRooms[cacheKey] = rooms
+	}
+	rooms[userID] = roomID
 }
 
 func (a *MatrixAdapter) joinRoom(ctx context.Context, cfg Config, roomID string) error {

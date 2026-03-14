@@ -849,6 +849,8 @@
       "webhookCallback": "WebHook 回调地址",
       "webhookCallbackHint": "将该地址配置到飞书/Lark 事件订阅的请求 URL。",
       "webhookCallbackPending": "保存平台配置后会生成回调地址。",
+      "showSecretField": "显示{field}",
+      "hideSecretField": "隐藏{field}",
       "matrixAccessControl": "房间访问控制",
       "matrixAutoJoinInvites": "自动加入邀请",
       "matrixAutoJoinInvitesHint": "自动接受房间邀请；配置了白名单后，只会加入命中的房间或别名。",
