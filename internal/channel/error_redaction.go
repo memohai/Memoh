@@ -2,6 +2,7 @@ package channel
 
 import (
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -38,8 +39,14 @@ func SetIMErrorSecrets(key string, secrets ...string) {
 	defer imErrorRedactionRegistry.mu.Unlock()
 
 	if len(variants) == 0 {
+		if _, exists := imErrorRedactionRegistry.groups[key]; !exists {
+			return
+		}
 		delete(imErrorRedactionRegistry.groups, key)
 	} else {
+		if slices.Equal(imErrorRedactionRegistry.groups[key], variants) {
+			return
+		}
 		imErrorRedactionRegistry.groups[key] = variants
 	}
 	imErrorRedactionRegistry.cache = rebuildSecretCache(imErrorRedactionRegistry.groups)
