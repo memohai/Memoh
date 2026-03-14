@@ -15,9 +15,9 @@ import (
 )
 
 type BrowserContextsHandler struct {
-	service            *browsercontexts.Service
-	logger             *slog.Logger
-	browserGatewayURL  string
+	service           *browsercontexts.Service
+	logger            *slog.Logger
+	browserGatewayURL string
 }
 
 func NewBrowserContextsHandler(log *slog.Logger, service *browsercontexts.Service, cfg config.Config) *BrowserContextsHandler {
@@ -157,12 +157,16 @@ func (h *BrowserContextsHandler) Delete(c echo.Context) error {
 // @Router /browser-contexts/cores [get].
 func (h *BrowserContextsHandler) GetCores(c echo.Context) error {
 	url := fmt.Sprintf("%s/cores/", h.browserGatewayURL)
-	resp, err := http.Get(url) //nolint:noctx
+	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, url, nil)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, "failed to create request")
+	}
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is from trusted internal config
 	if err != nil {
 		h.logger.Warn("browser gateway unreachable", slog.String("error", err.Error()))
 		return c.JSON(http.StatusOK, BrowserCoresResponse{Cores: []string{"chromium"}})
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
