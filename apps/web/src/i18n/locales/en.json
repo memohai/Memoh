@@ -669,6 +669,8 @@
       "importSuccess": "Data imported",
       "restoreSuccess": "Preserved data restored",
       "rollbackSuccess": "Snapshot rolled back",
+      "pullingImage": "Pulling image...",
+      "creatingContainer": "Creating container...",
       "snapshotEmpty": "No snapshots found",
       "snapshotLoadFailed": "Failed to load snapshots",
       "snapshotNamePlaceholder": "Snapshot display name (optional)",

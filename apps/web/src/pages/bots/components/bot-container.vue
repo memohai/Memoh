@@ -9,7 +9,6 @@ import {
   getBotsByBotIdContainer,
   getBotsByBotIdContainerSnapshots,
   getBotsById,
-  postBotsByBotIdContainer,
   postBotsByBotIdContainerDataExport,
   postBotsByBotIdContainerDataImport,
   postBotsByBotIdContainerDataRestore,
@@ -27,6 +26,7 @@ import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { formatDateTime } from '@/utils/date-time'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { readSSEStream } from '@/composables/api/useChat.sse'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -53,6 +53,26 @@ const createRestoreData = ref(false)
 const createImage = ref('')
 const newSnapshotName = ref('')
 const importInputRef = ref<HTMLInputElement | null>(null)
+
+interface CreateProgress {
+  phase: 'pulling' | 'creating' | 'complete' | 'error'
+  layers?: { ref: string, offset: number, total: number }[]
+  image?: string
+  error?: string
+}
+const createProgress = ref<CreateProgress | null>(null)
+
+const createProgressPercent = computed(() => {
+  const layers = createProgress.value?.layers
+  if (!layers || layers.length === 0) return 0
+  let totalOffset = 0
+  let totalSize = 0
+  for (const l of layers) {
+    totalOffset += l.offset
+    totalSize += l.total
+  }
+  return totalSize > 0 ? Math.round((totalOffset / totalSize) * 100) : 0
+})
 
 const capabilitiesStore = useCapabilitiesStore()
 const botId = computed(() => route.params.botId as string)
@@ -161,33 +181,90 @@ const { data: bot } = useQuery({
 
 const { isPending: botLifecyclePending } = useBotStatusMeta(bot, t)
 
+async function createContainerSSE(body: Record<string, unknown>): Promise<{ dataRestored: boolean }> {
+  const apiBase = import.meta.env.VITE_API_URL?.trim() || '/api'
+  const token = localStorage.getItem('token')
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'text/event-stream',
+  }
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  const resp = await fetch(`${apiBase}/bots/${botId.value}/container`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  })
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    throw new Error(text || `HTTP ${resp.status}`)
+  }
+
+  if (!resp.body) throw new Error('No response body')
+
+  let dataRestored = false
+  let sseError: string | null = null
+
+  await readSSEStream(resp.body, (payload) => {
+    try {
+      const event = JSON.parse(payload)
+      switch (event.type) {
+        case 'pulling':
+          createProgress.value = { phase: 'pulling', image: event.image }
+          break
+        case 'pull_progress':
+          if (createProgress.value) {
+            createProgress.value = { ...createProgress.value, layers: event.layers }
+          }
+          break
+        case 'creating':
+          createProgress.value = { phase: 'creating' }
+          break
+        case 'complete':
+          createProgress.value = { phase: 'complete' }
+          dataRestored = !!event.container?.data_restored
+          break
+        case 'error':
+          sseError = event.message || 'Unknown error'
+          createProgress.value = { phase: 'error', error: sseError ?? undefined }
+          break
+      }
+    }
+    catch {}
+  })
+
+  if (sseError) throw new Error(sseError)
+  return { dataRestored }
+}
+
 async function handleCreateContainer() {
   if (botLifecyclePending.value) return
 
-  await runContainerAction(
-    'create',
-    async () => {
-      const body: Record<string, unknown> = {
-        restore_data: createRestoreData.value,
-      }
-      const trimmedImage = createImage.value.trim()
-      if (trimmedImage) {
-        body.image = trimmedImage
-      }
-      const { data } = await postBotsByBotIdContainer({
-        path: { bot_id: botId.value },
-        body,
-        throwOnError: true,
-      })
-      createRestoreData.value = false
-      createImage.value = ''
-      await loadContainerData(false)
-      return data
-    },
-    (result) => result.data_restored
+  containerAction.value = 'create'
+  createProgress.value = { phase: 'pulling' }
+  try {
+    const body: Record<string, unknown> = {
+      restore_data: createRestoreData.value,
+    }
+    const trimmedImage = createImage.value.trim()
+    if (trimmedImage) body.image = trimmedImage
+
+    const { dataRestored } = await createContainerSSE(body)
+    createRestoreData.value = false
+    createImage.value = ''
+    await loadContainerData(false)
+    toast.success(dataRestored
       ? t('bots.container.createRestoreSuccess')
-      : t('bots.container.createSuccess'),
-  )
+      : t('bots.container.createSuccess'))
+  }
+  catch (error) {
+    toast.error(resolveErrorMessage(error, t('bots.container.actionFailed')))
+  }
+  finally {
+    containerAction.value = ''
+    createProgress.value = null
+  }
 }
 
 const isContainerTaskRunning = computed(() => {
@@ -205,23 +282,26 @@ const isLegacy = computed(() => !!containerInfo.value?.legacy)
 async function handleRecreateContainer() {
   if (botLifecyclePending.value || !containerInfo.value) return
 
-  await runContainerAction(
-    'recreate',
-    async () => {
-      await deleteBotsByBotIdContainer({
-        path: { bot_id: botId.value },
-        query: { preserve_data: true },
-        throwOnError: true,
-      })
-      await postBotsByBotIdContainer({
-        path: { bot_id: botId.value },
-        body: { restore_data: true },
-        throwOnError: true,
-      })
-      await loadContainerData(false)
-    },
-    t('bots.container.legacyRecreateSuccess'),
-  )
+  containerAction.value = 'recreate'
+  try {
+    await deleteBotsByBotIdContainer({
+      path: { bot_id: botId.value },
+      query: { preserve_data: true },
+      throwOnError: true,
+    })
+
+    createProgress.value = { phase: 'pulling' }
+    await createContainerSSE({ restore_data: true })
+    await loadContainerData(false)
+    toast.success(t('bots.container.legacyRecreateSuccess'))
+  }
+  catch (error) {
+    toast.error(resolveErrorMessage(error, t('bots.container.actionFailed')))
+  }
+  finally {
+    containerAction.value = ''
+    createProgress.value = null
+  }
 }
 
 async function handleStopContainer() {
@@ -596,6 +676,42 @@ watch([activeTab, botId], ([tab]) => {
             {{ $t('bots.container.actions.create') }}
           </Button>
         </div>
+
+        <div
+          v-if="createProgress && (containerAction === 'create')"
+          class="space-y-2"
+        >
+          <div class="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner class="size-3.5" />
+            <span v-if="createProgress.phase === 'pulling'">
+              {{ $t('bots.container.pullingImage') }}
+              <span
+                v-if="createProgressPercent > 0"
+                class="tabular-nums"
+              >{{ createProgressPercent }}%</span>
+            </span>
+            <span v-else-if="createProgress.phase === 'creating'">
+              {{ $t('bots.container.creatingContainer') }}
+            </span>
+            <span
+              v-else-if="createProgress.phase === 'error'"
+              class="text-destructive"
+            >
+              {{ createProgress.error }}
+            </span>
+          </div>
+          <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              v-if="createProgress.phase === 'pulling'"
+              class="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+              :style="{ width: `${createProgressPercent}%` }"
+            />
+            <div
+              v-else-if="createProgress.phase === 'creating'"
+              class="h-full w-full animate-pulse rounded-full bg-primary/60"
+            />
+          </div>
+        </div>
       </div>
     </div>
 
@@ -623,6 +739,42 @@ watch([activeTab, botId], ([tab]) => {
           />
           {{ $t('bots.container.legacyRecreate') }}
         </Button>
+      </div>
+
+      <div
+        v-if="createProgress && containerAction === 'recreate'"
+        class="space-y-2 rounded-md border p-3"
+      >
+        <div class="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner class="size-3.5" />
+          <span v-if="createProgress.phase === 'pulling'">
+            {{ $t('bots.container.pullingImage') }}
+            <span
+              v-if="createProgressPercent > 0"
+              class="tabular-nums"
+            >{{ createProgressPercent }}%</span>
+          </span>
+          <span v-else-if="createProgress.phase === 'creating'">
+            {{ $t('bots.container.creatingContainer') }}
+          </span>
+          <span
+            v-else-if="createProgress.phase === 'error'"
+            class="text-destructive"
+          >
+            {{ createProgress.error }}
+          </span>
+        </div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            v-if="createProgress.phase === 'pulling'"
+            class="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+            :style="{ width: `${createProgressPercent}%` }"
+          />
+          <div
+            v-else-if="createProgress.phase === 'creating'"
+            class="h-full w-full animate-pulse rounded-full bg-primary/60"
+          />
+        </div>
       </div>
 
       <div class="rounded-md border p-4">

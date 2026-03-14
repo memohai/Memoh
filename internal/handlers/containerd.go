@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -201,6 +203,11 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "manager not configured")
 	}
 
+	// Content negotiation: SSE stream vs synchronous JSON.
+	if strings.Contains(c.Request().Header.Get("Accept"), "text/event-stream") {
+		return h.createContainerSSE(c, ctx, botID, containerID, imageOverride, image, snapshotter, req)
+	}
+
 	started := false
 	if err := h.manager.StartWithImage(ctx, botID, imageOverride); err != nil {
 		h.logger.Error("mcp container start failed",
@@ -231,6 +238,97 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		DataRestored:     dataRestored,
 		HasPreservedData: h.manager.HasPreservedData(botID),
 	})
+}
+
+// createContainerSSE handles the SSE streaming variant of container creation,
+// sending pull progress events, phase transitions, and the final result.
+func (h *ContainerdHandler) createContainerSSE(
+	c echo.Context,
+	ctx context.Context,
+	botID, containerID, imageOverride, image, snapshotter string,
+	req CreateContainerRequest,
+) error {
+	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
+	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
+	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+
+	flusher, ok := c.Response().Writer.(http.Flusher)
+	if !ok {
+		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+	}
+	writer := bufio.NewWriter(c.Response().Writer)
+
+	var mu sync.Mutex
+	send := func(payload any) {
+		mu.Lock()
+		defer mu.Unlock()
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		_ = writeSSEData(writer, flusher, string(data))
+	}
+
+	sendError := func(msg string) {
+		send(map[string]string{"type": "error", "message": msg})
+	}
+
+	// Phase 1: Pull image with progress
+	send(map[string]string{"type": "pulling", "image": image})
+
+	_, pullErr := h.service.PullImage(ctx, image, &ctr.PullImageOptions{
+		Unpack:      true,
+		Snapshotter: snapshotter,
+		OnProgress: func(p ctr.PullProgress) {
+			send(map[string]any{"type": "pull_progress", "layers": p.Layers})
+		},
+	})
+	if pullErr != nil {
+		h.logger.Error("sse: image pull failed",
+			slog.String("image", image), slog.Any("error", pullErr))
+		sendError("image pull failed: " + pullErr.Error())
+		return nil
+	}
+
+	// Phase 2: Create container (image is local, should be fast)
+	send(map[string]string{"type": "creating"})
+
+	started := false
+	if err := h.manager.StartWithImage(ctx, botID, imageOverride); err != nil {
+		h.logger.Error("sse: mcp container start failed",
+			slog.String("container_id", containerID), slog.Any("error", err))
+		sendError("container start failed: " + err.Error())
+		return nil
+	}
+	started = true
+
+	dataRestored := false
+	if started && req.RestoreData && h.manager.HasPreservedData(botID) {
+		if err := h.manager.RestorePreservedData(ctx, botID); err != nil {
+			h.logger.Warn("sse: restore preserved data on create failed",
+				slog.String("bot_id", botID), slog.Any("error", err))
+		} else {
+			dataRestored = true
+		}
+	}
+
+	h.upsertContainerRecord(ctx, botID, containerID, map[bool]string{true: "running", false: "created"}[started], image)
+
+	// Phase 3: Complete
+	send(map[string]any{
+		"type": "complete",
+		"container": CreateContainerResponse{
+			ContainerID:      containerID,
+			Image:            image,
+			Snapshotter:      snapshotter,
+			Started:          started,
+			DataRestored:     dataRestored,
+			HasPreservedData: h.manager.HasPreservedData(botID),
+		},
+	})
+
+	return nil
 }
 
 // ensureContainerAndTask verifies the container exists in containerd and its task is
