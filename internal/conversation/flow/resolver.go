@@ -1986,6 +1986,7 @@ func parseLoopDetectionEnabledFromMetadata(payload []byte) bool {
 func sanitizeMessages(messages []conversation.ModelMessage) []conversation.ModelMessage {
 	cleaned := make([]conversation.ModelMessage, 0, len(messages))
 	for _, msg := range messages {
+		msg = normalizeMessageForGateway(msg)
 		if strings.TrimSpace(msg.Role) == "" {
 			continue
 		}
@@ -1995,6 +1996,46 @@ func sanitizeMessages(messages []conversation.ModelMessage) []conversation.Model
 		cleaned = append(cleaned, msg)
 	}
 	return cleaned
+}
+
+func normalizeMessageForGateway(msg conversation.ModelMessage) conversation.ModelMessage {
+	if !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
+		return msg
+	}
+	if !userMessageHasNonTextParts(msg.Content) {
+		return msg
+	}
+	text := strings.TrimSpace(msg.TextContent())
+	if text == "" {
+		text = "[User sent an attachment]"
+	}
+	msg.Content = conversation.NewTextContent(text)
+	return msg
+}
+
+func userMessageHasNonTextParts(content json.RawMessage) bool {
+	if len(content) == 0 {
+		return false
+	}
+	var parts []map[string]json.RawMessage
+	if err := json.Unmarshal(content, &parts); err != nil || len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		rawType, ok := part["type"]
+		if !ok {
+			continue
+		}
+		var partType string
+		if err := json.Unmarshal(rawType, &partType); err != nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(partType), "text") {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func normalizeGatewaySkill(entry SkillEntry) (gatewaySkill, bool) {

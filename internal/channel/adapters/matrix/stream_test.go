@@ -139,3 +139,51 @@ func TestMatrixStreamFinalMarkdownUpdatesFormattedContent(t *testing.T) {
 		t.Fatalf("expected markdown final edit, got %s", bodies[1])
 	}
 }
+
+func TestMatrixStreamFinalSendsAttachments(t *testing.T) {
+	bodies := make([]string, 0, 2)
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		payload, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		bodies = append(bodies, string(payload))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"event_id":"$evt1"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	stream := &matrixOutboundStream{
+		adapter: adapter,
+		cfg: Config{
+			HomeserverURL: "https://matrix.example.com",
+			AccessToken:   "tok",
+		},
+		target: "!room:example.com",
+	}
+
+	ctx := context.Background()
+	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{
+		Text: "done",
+		Attachments: []channel.Attachment{{
+			Type:           channel.AttachmentImage,
+			PlatformKey:    "mxc://matrix.example.com/media123",
+			Name:           "image.png",
+			SourcePlatform: Type.String(),
+		}},
+	}}}); err != nil {
+		t.Fatalf("push final: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected text and attachment sends, got %d", len(bodies))
+	}
+	if !strings.Contains(bodies[0], `"msgtype":"m.notice"`) {
+		t.Fatalf("expected first payload to be text, got %s", bodies[0])
+	}
+	if !strings.Contains(bodies[1], `"msgtype":"m.image"`) || !strings.Contains(bodies[1], `mxc://matrix.example.com/media123`) {
+		t.Fatalf("expected second payload to be attachment, got %s", bodies[1])
+	}
+}

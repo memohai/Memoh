@@ -2,6 +2,7 @@ package matrix
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -136,5 +137,186 @@ func TestBuildMatrixMessageContentAddsFormattedHTMLToEdits(t *testing.T) {
 	html, ok := newContent["formatted_body"].(string)
 	if !ok || !strings.Contains(html, "<code>code</code>") {
 		t.Fatalf("unexpected edit formatted body: %#v", newContent["formatted_body"])
+	}
+}
+
+func TestExtractMatrixInboundContentParsesImageAttachment(t *testing.T) {
+	text, attachments := extractMatrixInboundContent(map[string]any{
+		"msgtype": "m.image",
+		"body":    "diagram.png",
+		"url":     "mxc://matrix.example.com/media123",
+		"info": map[string]any{
+			"mimetype": "image/png",
+			"size":     42,
+			"w":        640,
+			"h":        480,
+		},
+	})
+	if text != "" {
+		t.Fatalf("expected empty text for attachment message, got %q", text)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(attachments))
+	}
+	att := attachments[0]
+	if att.Type != channel.AttachmentImage {
+		t.Fatalf("unexpected attachment type: %s", att.Type)
+	}
+	if att.PlatformKey != "mxc://matrix.example.com/media123" {
+		t.Fatalf("unexpected platform key: %q", att.PlatformKey)
+	}
+	if att.Name != "diagram.png" || att.Mime != "image/png" {
+		t.Fatalf("unexpected attachment metadata: %#v", att)
+	}
+	if att.Width != 640 || att.Height != 480 || att.Size != 42 {
+		t.Fatalf("unexpected attachment dimensions: %#v", att)
+	}
+}
+
+func TestMatrixSendUploadsBase64AttachmentAndSendsMediaEvent(t *testing.T) {
+	requests := make([]string, 0, 2)
+	uploadedContentTypes := make([]string, 0, 1)
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.URL.Path)
+		if strings.Contains(req.URL.Path, "/_matrix/media/v3/upload") {
+			uploadedContentTypes = append(uploadedContentTypes, req.Header.Get("Content-Type"))
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"content_uri":"mxc://matrix.example.com/uploaded1"}`)),
+				Header:     make(http.Header),
+			}, nil
+		}
+		payload, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		var content map[string]any
+		if err := json.Unmarshal(payload, &content); err != nil {
+			return nil, err
+		}
+		if got := content["msgtype"]; got != "m.image" {
+			t.Fatalf("unexpected msgtype: %#v", got)
+		}
+		if got := content["url"]; got != "mxc://matrix.example.com/uploaded1" {
+			t.Fatalf("unexpected uploaded uri: %#v", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"event_id":"$evt1"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	err := adapter.Send(context.Background(), channel.ChannelConfig{
+		BotID: "bot-1",
+		Credentials: map[string]any{
+			"homeserverUrl": "https://matrix.example.com",
+			"userId":        "@memoh:example.com",
+			"accessToken":   "tok",
+		},
+	}, channel.OutboundMessage{
+		Target: "!room:example.com",
+		Message: channel.Message{
+			Attachments: []channel.Attachment{{
+				Type:   channel.AttachmentImage,
+				Name:   "chart.png",
+				Mime:   "image/png",
+				Base64: "data:image/png;base64,aGVsbG8=",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("send returned error: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("expected upload and send requests, got %d", len(requests))
+	}
+	if len(uploadedContentTypes) != 1 || uploadedContentTypes[0] != "image/png" {
+		t.Fatalf("unexpected upload content type: %#v", uploadedContentTypes)
+	}
+}
+
+func TestMatrixResolveAttachmentDownloadsMXC(t *testing.T) {
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.Contains(req.URL.Path, "/_matrix/client/v1/media/download/matrix.example.com/media123/image.png") {
+			t.Fatalf("unexpected download path: %s", req.URL.Path)
+		}
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("file-bytes")),
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Content-Type", "image/png")
+		resp.ContentLength = int64(len("file-bytes"))
+		return resp, nil
+	})}
+
+	payload, err := adapter.ResolveAttachment(context.Background(), channel.ChannelConfig{
+		Credentials: map[string]any{
+			"homeserverUrl": "https://matrix.example.com",
+			"userId":        "@memoh:example.com",
+			"accessToken":   "tok",
+		},
+	}, channel.Attachment{
+		PlatformKey: "mxc://matrix.example.com/media123",
+		Name:        "image.png",
+	})
+	if err != nil {
+		t.Fatalf("ResolveAttachment returned error: %v", err)
+	}
+	defer func() { _ = payload.Reader.Close() }()
+	data, err := io.ReadAll(payload.Reader)
+	if err != nil {
+		t.Fatalf("read payload: %v", err)
+	}
+	if string(data) != "file-bytes" {
+		t.Fatalf("unexpected payload: %q", string(data))
+	}
+	if payload.Mime != "image/png" || payload.Name != "image.png" || payload.Size != int64(len("file-bytes")) {
+		t.Fatalf("unexpected payload metadata: %#v", payload)
+	}
+}
+
+func TestMatrixResolveAttachmentFallsBackToLegacyMediaDownload(t *testing.T) {
+	paths := make([]string, 0, 2)
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		if strings.Contains(req.URL.Path, "/_matrix/client/v1/media/download/") {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       io.NopCloser(strings.NewReader(`{"errcode":"M_NOT_FOUND"}`)),
+				Header:     make(http.Header),
+			}, nil
+		}
+		if !strings.Contains(req.URL.Path, "/_matrix/media/v3/download/matrix.example.com/media123") {
+			t.Fatalf("unexpected fallback path: %s", req.URL.Path)
+		}
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("legacy-file")),
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Content-Type", "application/octet-stream")
+		return resp, nil
+	})}
+
+	payload, err := adapter.ResolveAttachment(context.Background(), channel.ChannelConfig{
+		Credentials: map[string]any{
+			"homeserverUrl": "https://matrix.example.com",
+			"userId":        "@memoh:example.com",
+			"accessToken":   "tok",
+		},
+	}, channel.Attachment{
+		PlatformKey: "mxc://matrix.example.com/media123",
+	})
+	if err != nil {
+		t.Fatalf("ResolveAttachment returned error: %v", err)
+	}
+	defer func() { _ = payload.Reader.Close() }()
+	if len(paths) != 2 {
+		t.Fatalf("expected authenticated and legacy download attempts, got %d", len(paths))
 	}
 }

@@ -428,7 +428,9 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	qqAdapter := qq.NewQQAdapter(log)
 	qqAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(qqAdapter)
-	registry.MustRegister(matrix.NewMatrixAdapter(log))
+	matrixAdapter := matrix.NewMatrixAdapter(log)
+	matrixAdapter.SetAssetOpener(mediaService)
+	registry.MustRegister(matrixAdapter)
 
 	feishuAdapter := feishu.NewFeishuAdapter(log)
 	feishuAdapter.SetAssetOpener(mediaService)

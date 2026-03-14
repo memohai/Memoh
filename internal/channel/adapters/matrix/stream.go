@@ -76,6 +76,8 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.StreamEve
 			return nil
 		}
 		return s.upsertText(ctx, "Error: "+errText, channel.MessageFormatPlain, true)
+	case channel.StreamEventAttachment:
+		return s.pushAttachments(ctx, event.Attachments)
 	case channel.StreamEventFinal:
 		if event.Final == nil {
 			return errors.New("matrix stream final payload is required")
@@ -91,6 +93,9 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.StreamEve
 			s.mu.Unlock()
 		}
 		if err := s.upsertText(ctx, text, format, true); err != nil {
+			return err
+		}
+		if err := s.pushAttachments(ctx, event.Final.Message.Attachments); err != nil {
 			return err
 		}
 		s.resetMessageState()
@@ -189,4 +194,38 @@ func (s *matrixOutboundStream) resetMessageState() {
 	s.lastFormat = ""
 	s.lastEditedAt = time.Time{}
 	s.mu.Unlock()
+}
+
+func (s *matrixOutboundStream) pushAttachments(ctx context.Context, attachments []channel.Attachment) error {
+	if len(attachments) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	roomID := s.roomID
+	originalEventID := s.originalEventID
+	reply := s.reply
+	s.mu.Unlock()
+
+	if roomID == "" {
+		resolvedRoomID, err := s.adapter.resolveRoomTarget(ctx, s.cfg, s.target)
+		if err != nil {
+			return err
+		}
+		roomID = resolvedRoomID
+		s.mu.Lock()
+		s.roomID = resolvedRoomID
+		s.mu.Unlock()
+	}
+
+	for idx, att := range attachments {
+		mediaMsg := channel.Message{}
+		if idx == 0 && originalEventID == "" {
+			mediaMsg.Reply = reply
+		}
+		if err := s.adapter.sendMediaAttachment(ctx, s.cfg, roomID, "", mediaMsg, att); err != nil {
+			return err
+		}
+	}
+	return nil
 }

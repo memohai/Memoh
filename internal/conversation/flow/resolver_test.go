@@ -529,3 +529,54 @@ func TestOutboundAssetRefsToMessageRefs_Empty(t *testing.T) {
 		t.Fatalf("expected nil, got %v", result)
 	}
 }
+
+func TestSanitizeMessagesDowngradesUserMultipartHistoryToText(t *testing.T) {
+	t.Parallel()
+	content, err := json.Marshal([]map[string]any{
+		{"type": "text", "text": "> quoted reply\n\nWhere is Antelope Canyon?"},
+		{"type": "image", "image": map[string]any{"0": 137, "1": 80}},
+	})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+
+	cleaned := sanitizeMessages([]conversation.ModelMessage{{
+		Role:    "user",
+		Content: content,
+	}})
+	if len(cleaned) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(cleaned))
+	}
+	if got := cleaned[0].TextContent(); got != "> quoted reply\n\nWhere is Antelope Canyon?" {
+		t.Fatalf("unexpected sanitized text: %q", got)
+	}
+	var stored string
+	if err := json.Unmarshal(cleaned[0].Content, &stored); err != nil {
+		t.Fatalf("expected sanitized content to be plain string: %v", err)
+	}
+	if stored != "> quoted reply\n\nWhere is Antelope Canyon?" {
+		t.Fatalf("unexpected stored sanitized text: %q", stored)
+	}
+}
+
+func TestSanitizeMessagesKeepsAssistantMultipartMessages(t *testing.T) {
+	t.Parallel()
+	content, err := json.Marshal([]map[string]any{
+		{"type": "text", "text": "answer"},
+		{"type": "image", "image": "data:image/png;base64,aGVsbG8="},
+	})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+
+	cleaned := sanitizeMessages([]conversation.ModelMessage{{
+		Role:    "assistant",
+		Content: content,
+	}})
+	if len(cleaned) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(cleaned))
+	}
+	if !bytes.Equal(cleaned[0].Content, content) {
+		t.Fatalf("assistant multipart content should remain unchanged")
+	}
+}
