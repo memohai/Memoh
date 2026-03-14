@@ -16,9 +16,15 @@ import {
   postBotsByBotIdContainerSnapshotsRollback,
   postBotsByBotIdContainerStart,
   postBotsByBotIdContainerStop,
+  type HandlersCreateContainerRequest,
   type HandlersGetContainerResponse,
   type HandlersListSnapshotsResponse,
 } from '@memoh/sdk'
+import {
+  postBotsByBotIdContainerStream,
+  type ContainerCreateLayerStatus,
+  type ContainerCreateStreamEvent,
+} from '@memoh/sdk/extra'
 import { Button, Input, Label, Separator, Spinner, Switch } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
@@ -26,7 +32,6 @@ import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { formatDateTime } from '@/utils/date-time'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { readSSEStream } from '@/composables/api/useChat.sse'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -56,7 +61,7 @@ const importInputRef = ref<HTMLInputElement | null>(null)
 
 interface CreateProgress {
   phase: 'pulling' | 'creating' | 'complete' | 'error'
-  layers?: { ref: string, offset: number, total: number }[]
+  layers?: ContainerCreateLayerStatus[]
   image?: string
   error?: string
 }
@@ -181,60 +186,42 @@ const { data: bot } = useQuery({
 
 const { isPending: botLifecyclePending } = useBotStatusMeta(bot, t)
 
-async function createContainerSSE(body: Record<string, unknown>): Promise<{ dataRestored: boolean }> {
-  const apiBase = import.meta.env.VITE_API_URL?.trim() || '/api'
-  const token = localStorage.getItem('token')
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Accept': 'text/event-stream',
+function applyCreateContainerEvent(event: ContainerCreateStreamEvent): boolean {
+  switch (event.type) {
+    case 'pulling':
+      createProgress.value = { phase: 'pulling', image: event.image }
+      return false
+    case 'pull_progress':
+      createProgress.value = {
+        phase: 'pulling',
+        image: createProgress.value?.image,
+        layers: event.layers,
+      }
+      return false
+    case 'creating':
+      createProgress.value = { phase: 'creating' }
+      return false
+    case 'complete':
+      createProgress.value = { phase: 'complete' }
+      return !!event.container.data_restored
+    case 'error':
+      createProgress.value = { phase: 'error', error: event.message }
+      throw new Error(event.message || 'Unknown error')
   }
-  if (token) headers.Authorization = `Bearer ${token}`
+}
 
-  const resp = await fetch(`${apiBase}/bots/${botId.value}/container`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
+async function createContainerSSE(body: HandlersCreateContainerRequest): Promise<{ dataRestored: boolean }> {
+  const { stream } = await postBotsByBotIdContainerStream({
+    path: { bot_id: botId.value },
+    body,
+    throwOnError: true,
   })
-
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '')
-    throw new Error(text || `HTTP ${resp.status}`)
-  }
-
-  if (!resp.body) throw new Error('No response body')
 
   let dataRestored = false
-  let sseError: string | null = null
+  for await (const event of stream) {
+    dataRestored = applyCreateContainerEvent(event) || dataRestored
+  }
 
-  await readSSEStream(resp.body, (payload) => {
-    try {
-      const event = JSON.parse(payload)
-      switch (event.type) {
-        case 'pulling':
-          createProgress.value = { phase: 'pulling', image: event.image }
-          break
-        case 'pull_progress':
-          if (createProgress.value) {
-            createProgress.value = { ...createProgress.value, layers: event.layers }
-          }
-          break
-        case 'creating':
-          createProgress.value = { phase: 'creating' }
-          break
-        case 'complete':
-          createProgress.value = { phase: 'complete' }
-          dataRestored = !!event.container?.data_restored
-          break
-        case 'error':
-          sseError = event.message || 'Unknown error'
-          createProgress.value = { phase: 'error', error: sseError ?? undefined }
-          break
-      }
-    }
-    catch {}
-  })
-
-  if (sseError) throw new Error(sseError)
   return { dataRestored }
 }
 
@@ -244,7 +231,7 @@ async function handleCreateContainer() {
   containerAction.value = 'create'
   createProgress.value = { phase: 'pulling' }
   try {
-    const body: Record<string, unknown> = {
+    const body: HandlersCreateContainerRequest = {
       restore_data: createRestoreData.value,
     }
     const trimmedImage = createImage.value.trim()

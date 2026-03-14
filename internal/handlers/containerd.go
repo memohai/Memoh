@@ -61,6 +61,32 @@ type CreateContainerResponse struct {
 	HasPreservedData bool   `json:"has_preserved_data"`
 }
 
+// codesync(container-create-stream): keep these SSE payloads in sync with
+// /Users/Menci/Projects/Memoh/packages/sdk/src/container-stream.ts.
+type createContainerPullingEvent struct {
+	Type  string `json:"type"`
+	Image string `json:"image"`
+}
+
+type createContainerPullProgressEvent struct {
+	Type   string            `json:"type"`
+	Layers []ctr.LayerStatus `json:"layers"`
+}
+
+type createContainerCreatingEvent struct {
+	Type string `json:"type"`
+}
+
+type createContainerCompleteEvent struct {
+	Type      string                  `json:"type"`
+	Container CreateContainerResponse `json:"container"`
+}
+
+type createContainerErrorEvent struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
 type GetContainerResponse struct {
 	ContainerID      string    `json:"container_id"`
 	Image            string    `json:"image"`
@@ -271,17 +297,17 @@ func (h *ContainerdHandler) createContainerSSE(
 	}
 
 	sendError := func(msg string) {
-		send(map[string]string{"type": "error", "message": msg})
+		send(createContainerErrorEvent{Type: "error", Message: msg})
 	}
 
 	// Phase 1: Pull image with progress
-	send(map[string]string{"type": "pulling", "image": image})
+	send(createContainerPullingEvent{Type: "pulling", Image: image})
 
 	_, pullErr := h.service.PullImage(ctx, image, &ctr.PullImageOptions{
 		Unpack:      true,
 		Snapshotter: snapshotter,
 		OnProgress: func(p ctr.PullProgress) {
-			send(map[string]any{"type": "pull_progress", "layers": p.Layers})
+			send(createContainerPullProgressEvent{Type: "pull_progress", Layers: p.Layers})
 		},
 	})
 	if pullErr != nil {
@@ -292,7 +318,7 @@ func (h *ContainerdHandler) createContainerSSE(
 	}
 
 	// Phase 2: Create container (image is local, should be fast)
-	send(map[string]string{"type": "creating"})
+	send(createContainerCreatingEvent{Type: "creating"})
 
 	started := false
 	if err := h.manager.StartWithImage(ctx, botID, imageOverride); err != nil {
@@ -316,9 +342,9 @@ func (h *ContainerdHandler) createContainerSSE(
 	h.upsertContainerRecord(ctx, botID, containerID, map[bool]string{true: "running", false: "created"}[started], image)
 
 	// Phase 3: Complete
-	send(map[string]any{
-		"type": "complete",
-		"container": CreateContainerResponse{
+	send(createContainerCompleteEvent{
+		Type: "complete",
+		Container: CreateContainerResponse{
 			ContainerID:      containerID,
 			Image:            image,
 			Snapshotter:      snapshotter,

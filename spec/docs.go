@@ -10572,6 +10572,9 @@ const docTemplate = `{
         "handlers.CreateContainerRequest": {
             "type": "object",
             "properties": {
+                "image": {
+                    "type": "string"
+                },
                 "restore_data": {
                     "type": "boolean"
                 },
@@ -10788,6 +10791,9 @@ const docTemplate = `{
                 },
                 "image": {
                     "type": "string"
+                },
+                "legacy": {
+                    "type": "boolean"
                 },
                 "namespace": {
                     "type": "string"

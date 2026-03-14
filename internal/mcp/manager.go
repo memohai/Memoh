@@ -117,6 +117,13 @@ func (m *Manager) ClearLegacyIP(botID string) {
 	m.legacyMu.Unlock()
 }
 
+// clearLegacyRoute evicts any stale TCP fallback state for a bot so future
+// gRPC dials use the bridge container's Unix socket.
+func (m *Manager) clearLegacyRoute(botID string) {
+	m.ClearLegacyIP(botID)
+	m.grpcPool.Remove(botID)
+}
+
 // MCPClient returns a gRPC client for the given bot's container.
 // Implements mcpclient.Provider.
 func (m *Manager) MCPClient(ctx context.Context, botID string) (*mcpclient.Client, error) {
@@ -282,6 +289,9 @@ func (m *Manager) StartWithImage(ctx context.Context, botID, imageOverride strin
 		}
 		return err
 	}
+	if !m.IsLegacyContainer(ctx, containerID) {
+		m.clearLegacyRoute(botID)
+	}
 	m.logger.Info("container started", slog.String("bot_id", botID))
 	return nil
 }
@@ -330,7 +340,7 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 		}
 	}
 
-	m.grpcPool.Remove(botID)
+	m.clearLegacyRoute(botID)
 
 	if err := m.service.RemoveNetwork(ctx, ctr.NetworkSetupRequest{
 		ContainerID: containerID,

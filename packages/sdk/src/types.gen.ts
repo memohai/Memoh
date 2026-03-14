@@ -692,6 +692,7 @@ export type HandlersChannelMeta = {
 };
 
 export type HandlersCreateContainerRequest = {
+    image?: string;
     restore_data?: boolean;
     snapshotter?: string;
 };
@@ -782,6 +783,7 @@ export type HandlersGetContainerResponse = {
     created_at?: string;
     has_preserved_data?: boolean;
     image?: string;
+    legacy?: boolean;
     namespace?: string;
     status?: string;
     task_running?: boolean;
