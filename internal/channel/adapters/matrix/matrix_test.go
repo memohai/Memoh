@@ -500,6 +500,50 @@ func TestMatrixSendUploadsBase64AttachmentAndSendsMediaEvent(t *testing.T) {
 	}
 }
 
+func TestMatrixSendResolvesRoomAlias(t *testing.T) {
+	requests := make([]string, 0, 2)
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.URL.Path)
+		switch req.URL.Path {
+		case "/_matrix/client/v3/directory/room/#ops:example.com":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"room_id":"!resolved:example.com"}`)),
+				Header:     make(http.Header),
+			}, nil
+		default:
+			if !strings.Contains(req.URL.Path, "/_matrix/client/v3/rooms/!resolved:example.com/send/m.room.message/") {
+				t.Fatalf("unexpected request path: %s", req.URL.Path)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"event_id":"$evt1"}`)),
+				Header:     make(http.Header),
+			}, nil
+		}
+	})}
+
+	err := adapter.Send(context.Background(), channel.ChannelConfig{
+		Credentials: map[string]any{
+			"homeserverUrl": "https://matrix.example.com",
+			"userId":        "@memoh:example.com",
+			"accessToken":   "tok",
+		},
+	}, channel.OutboundMessage{
+		Target: "#ops:example.com",
+		Message: channel.Message{
+			Text: "ping",
+		},
+	})
+	if err != nil {
+		t.Fatalf("send returned error: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("expected alias lookup and send requests, got %d", len(requests))
+	}
+}
+
 func TestMatrixResolveAttachmentDownloadsMXC(t *testing.T) {
 	adapter := NewMatrixAdapter(nil)
 	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {

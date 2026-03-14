@@ -125,6 +125,10 @@ type matrixCreateRoomResponse struct {
 	RoomID string `json:"room_id"`
 }
 
+type matrixRoomAliasResponse struct {
+	RoomID string `json:"room_id"`
+}
+
 type matrixUploadResponse struct {
 	ContentURI string `json:"content_uri"`
 }
@@ -1304,9 +1308,21 @@ func (a *MatrixAdapter) resolveRoomTarget(ctx context.Context, cfg Config, targe
 		return a.ensureDirectRoom(ctx, cfg, target)
 	}
 	if strings.HasPrefix(target, "#") {
-		return "", fmt.Errorf("matrix room aliases are not supported for outbound send yet: %s", target)
+		return a.resolveRoomAlias(ctx, cfg, target)
 	}
 	return target, nil
+}
+
+func (a *MatrixAdapter) resolveRoomAlias(ctx context.Context, cfg Config, roomAlias string) (string, error) {
+	path := fmt.Sprintf("/_matrix/client/v3/directory/room/%s", url.PathEscape(strings.TrimSpace(roomAlias)))
+	var resp matrixRoomAliasResponse
+	if err := a.doJSON(ctx, cfg, http.MethodGet, path, nil, &resp); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(resp.RoomID) == "" {
+		return "", fmt.Errorf("matrix room alias lookup returned empty room_id: %s", roomAlias)
+	}
+	return strings.TrimSpace(resp.RoomID), nil
 }
 
 func (a *MatrixAdapter) ensureDirectRoom(ctx context.Context, cfg Config, userID string) (string, error) {
