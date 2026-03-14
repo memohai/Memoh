@@ -224,6 +224,7 @@ func (*QQAdapter) ProcessingFailed(context.Context, channel.ChannelConfig, chann
 }
 
 func (a *QQAdapter) getOrCreateClient(cfg channel.ChannelConfig, parsed Config) *qqClient {
+	channel.RegisterIMErrorSecrets(parsed.AppSecret)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

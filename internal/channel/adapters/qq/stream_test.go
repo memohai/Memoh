@@ -2,6 +2,7 @@ package qq
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel"
@@ -167,5 +168,34 @@ func TestQQOutboundStreamRejectsAfterClose(t *testing.T) {
 		Delta: "x",
 	}); err == nil {
 		t.Fatal("expected closed error")
+	}
+}
+
+func TestQQOutboundStreamErrorRedactsRegisteredTokenFragments(t *testing.T) {
+	channel.ResetIMErrorSecretsForTest()
+	t.Cleanup(channel.ResetIMErrorSecretsForTest)
+
+	const token = "qq-token-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	channel.RegisterIMErrorSecrets(token)
+	prefixHalf := token[:len(token)/2]
+
+	var sent []channel.OutboundMessage
+	stream := &qqOutboundStream{
+		target: "c2c:user-openid",
+		send: func(_ context.Context, msg channel.OutboundMessage) error {
+			sent = append(sent, msg)
+			return nil
+		},
+	}
+
+	err := stream.Push(context.Background(), channel.StreamEvent{Type: channel.StreamEventError, Error: "failed: " + prefixHalf})
+	if err != nil {
+		t.Fatalf("push error: %v", err)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("expected one outbound message, got %d", len(sent))
+	}
+	if got := sent[0].Message.PlainText(); strings.Contains(got, prefixHalf) {
+		t.Fatalf("expected redacted token fragment, got %q", got)
 	}
 }

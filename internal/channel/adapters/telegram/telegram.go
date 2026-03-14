@@ -82,6 +82,7 @@ func (a *TelegramAdapter) SetAssetOpener(opener assetOpener) {
 var getOrCreateBotForTest func(a *TelegramAdapter, token, configID string) (*tgbotapi.BotAPI, error)
 
 func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tgbotapi.BotAPI, error) {
+	channel.RegisterIMErrorSecrets(cfg.BotToken)
 	if getOrCreateBotForTest != nil {
 		return getOrCreateBotForTest(a, cfg.BotToken, configID)
 	}
@@ -638,6 +639,9 @@ func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelCon
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return nil, errors.New("telegram target is required")
+	}
+	if telegramCfg, err := parseConfig(cfg.Credentials); err == nil {
+		channel.RegisterIMErrorSecrets(telegramCfg.BotToken)
 	}
 	select {
 	case <-ctx.Done():
