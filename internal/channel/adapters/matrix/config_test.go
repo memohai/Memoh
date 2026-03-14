@@ -9,7 +9,6 @@ func TestParseConfig(t *testing.T) {
 		"userId":             "@memoh:example.com",
 		"syncTimeoutSeconds": 15,
 		"autoJoinInvites":    false,
-		"allowedRooms":       []any{"!ops:example.com", "#alerts:example.com"},
 	})
 	if err != nil {
 		t.Fatalf("parseConfig returned error: %v", err)
@@ -26,9 +25,6 @@ func TestParseConfig(t *testing.T) {
 	if cfg.AutoJoinInvites {
 		t.Fatal("expected autoJoinInvites to be false")
 	}
-	if len(cfg.AllowedRooms) != 2 || cfg.AllowedRooms[0] != "!ops:example.com" || cfg.AllowedRooms[1] != "#alerts:example.com" {
-		t.Fatalf("unexpected allowed rooms: %#v", cfg.AllowedRooms)
-	}
 }
 
 func TestParseConfigDefaultsAutoJoinInvites(t *testing.T) {
@@ -42,30 +38,6 @@ func TestParseConfigDefaultsAutoJoinInvites(t *testing.T) {
 	}
 	if !cfg.AutoJoinInvites {
 		t.Fatal("expected autoJoinInvites default to true")
-	}
-}
-
-func TestParseConfigRejectsInvalidAllowedRoom(t *testing.T) {
-	_, err := parseConfig(map[string]any{
-		"homeserverUrl": "https://matrix.example.com",
-		"accessToken":   "tok",
-		"userId":        "@memoh:example.com",
-		"allowedRooms":  []any{"@alice:example.com"},
-	})
-	if err == nil {
-		t.Fatal("expected parseConfig to fail")
-	}
-}
-
-func TestParseConfigRejectsCommaSeparatedAllowedRooms(t *testing.T) {
-	_, err := parseConfig(map[string]any{
-		"homeserverUrl": "https://matrix.example.com",
-		"accessToken":   "tok",
-		"userId":        "@memoh:example.com",
-		"allowedRooms":  "!ops:example.com, #alerts:example.com",
-	})
-	if err == nil {
-		t.Fatal("expected parseConfig to fail")
 	}
 }
 

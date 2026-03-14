@@ -181,43 +181,6 @@
           @update:model-value="(val) => setCredentialStringValue(key, val)"
         />
       </div>
-      <template v-if="isMatrixChannel">
-        <div class="space-y-2">
-          <Label for="matrix-auto-join-invites">{{ $t('bots.channels.matrixAutoJoinInvites') }}</Label>
-          <p
-            id="matrix-auto-join-invites-hint"
-            class="text-xs text-muted-foreground"
-          >
-            {{ $t('bots.channels.matrixAutoJoinInvitesHint') }}
-          </p>
-          <Switch
-            id="matrix-auto-join-invites"
-            :model-value="matrixAutoJoinInvites"
-            :aria-label="$t('bots.channels.matrixAutoJoinInvites')"
-            aria-describedby="matrix-auto-join-invites-hint"
-            @update:model-value="(val) => matrixAutoJoinInvites = !!val"
-          />
-        </div>
-
-        <div class="space-y-2">
-          <Label for="matrix-allowed-rooms">{{ $t('bots.channels.matrixAllowedRooms') }}</Label>
-          <p
-            id="matrix-allowed-rooms-hint"
-            class="text-xs text-muted-foreground"
-          >
-            {{ $t('bots.channels.matrixAllowedRoomsHint') }}
-          </p>
-          <Textarea
-            id="matrix-allowed-rooms"
-            :model-value="matrixAllowedRoomsText"
-            :placeholder="$t('bots.channels.matrixAllowedRoomsPlaceholder')"
-            :aria-label="$t('bots.channels.matrixAllowedRooms')"
-            aria-describedby="matrix-allowed-rooms-hint"
-            class="min-h-24"
-            @update:model-value="(val) => matrixAllowedRoomsText = String(val || '')"
-          />
-        </div>
-      </template>
     </div>
 
     <Separator />
@@ -270,7 +233,6 @@ import {
   Separator,
   Switch,
   Spinner,
-  Textarea,
   Select,
   SelectTrigger,
   SelectValue,
@@ -343,16 +305,11 @@ const form = reactive<{
 })
 
 const visibleSecrets = reactive<Record<string, boolean>>({})
-const isMatrixChannel = computed(() => platformType.value === 'matrix')
 
 // Schema fields sorted: required first. Exclude "status"/"disabled" from credential form.
 const orderedFields = computed(() => {
   const fields = props.channelItem.meta.config_schema?.fields ?? {}
   const hiddenFields = new Set(['status', 'disabled'])
-  if (isMatrixChannel.value) {
-    hiddenFields.add('autoJoinInvites')
-    hiddenFields.add('allowedRooms')
-  }
   const entries = Object.entries(fields).filter(([key]) => !hiddenFields.has(key))
   entries.sort(([, a], [, b]) => {
     if (a.required && !b.required) return -1
@@ -360,30 +317,6 @@ const orderedFields = computed(() => {
     return 0
   })
   return Object.fromEntries(entries) as Record<string, ChannelFieldSchema>
-})
-
-const matrixAutoJoinInvites = computed({
-  get: () => {
-    const value = form.credentials.autoJoinInvites
-    return typeof value === 'boolean' ? value : true
-  },
-  set: (value: boolean) => {
-    form.credentials.autoJoinInvites = value
-  },
-})
-
-const matrixAllowedRooms = computed({
-  get: () => normalizeRoomTags(form.credentials.allowedRooms),
-  set: (value: string[]) => {
-    form.credentials.allowedRooms = normalizeRoomTags(value)
-  },
-})
-
-const matrixAllowedRoomsText = computed({
-  get: () => matrixAllowedRooms.value.join('\n'),
-  set: (value: string) => {
-    matrixAllowedRooms.value = normalizeRoomTags(value)
-  },
 })
 
 const currentInboundMode = computed(() => {
@@ -414,25 +347,11 @@ function initForm() {
       creds[key] = existingValue
       continue
     }
-    if (key === 'autoJoinInvites' && isMatrixChannel.value) {
-      creds[key] = true
-      continue
-    }
-    if (key === 'allowedRooms' && isMatrixChannel.value) {
-      creds[key] = []
-      continue
-    }
     if (field.type === 'bool') {
       creds[key] = false
       continue
     }
     creds[key] = ''
-  }
-  if (isMatrixChannel.value) {
-    creds.autoJoinInvites = typeof existingCredentials.autoJoinInvites === 'boolean'
-      ? existingCredentials.autoJoinInvites
-      : true
-    creds.allowedRooms = normalizeRoomTags(existingCredentials.allowedRooms)
   }
   form.credentials = creds
   form.disabled = props.channelItem.config?.disabled ?? false
@@ -463,13 +382,6 @@ function buildCredentials(): Record<string, unknown> {
   const credentials: Record<string, unknown> = {}
   for (const [key, val] of Object.entries(form.credentials)) {
     if (key === 'status' || key === 'disabled') continue
-    if (key === 'allowedRooms') {
-      const rooms = normalizeRoomTags(val)
-      if (rooms.length > 0) {
-        credentials[key] = rooms
-      }
-      continue
-    }
     if (val === '' || val === undefined || val === null) continue
     credentials[key] = val
   }
@@ -509,21 +421,6 @@ function secretToggleLabel(key: string, label: string): string {
   return visibleSecrets[key]
     ? t('bots.channels.hideSecretField', { field: label })
     : t('bots.channels.showSecretField', { field: label })
-}
-
-function normalizeRoomTags(value: unknown): string[] {
-  const items = Array.isArray(value)
-    ? value
-    : typeof value === 'string'
-      ? value.split(/\r?\n/)
-      : []
-  const normalized: string[] = []
-  for (const item of items) {
-    const room = String(item || '').trim()
-    if (!room || normalized.includes(room)) continue
-    normalized.push(room)
-  }
-  return normalized
 }
 
 async function saveChannel(disabled: boolean, nextAction: 'save' | 'toggle') {

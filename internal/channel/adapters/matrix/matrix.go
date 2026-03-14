@@ -56,9 +56,6 @@ type MatrixAdapter struct {
 
 	directRoomMu sync.Mutex
 	directRooms  map[string]map[string]string
-
-	allowedRoomMu sync.Mutex
-	allowedRooms  map[string]map[string]string
 }
 
 type matrixSyncResponse struct {
@@ -155,10 +152,9 @@ func NewMatrixAdapter(log *slog.Logger) *MatrixAdapter {
 		httpClient: &http.Client{
 			Timeout: matrixDefaultTimeout,
 		},
-		seen:         make(map[string]map[string]time.Time),
-		roomTypes:    make(map[string]map[string]string),
-		directRooms:  make(map[string]map[string]string),
-		allowedRooms: make(map[string]map[string]string),
+		seen:        make(map[string]map[string]time.Time),
+		roomTypes:   make(map[string]map[string]string),
+		directRooms: make(map[string]map[string]string),
 	}
 }
 
@@ -196,7 +192,7 @@ func (*MatrixAdapter) Descriptor() channel.Descriptor {
 			MediaOrder: channel.OutboundOrderTextFirst,
 		},
 		ConfigSchema: channel.ConfigSchema{
-			Version: 2,
+			Version: 3,
 			Fields: map[string]channel.FieldSchema{
 				"homeserverUrl": {
 					Type:        channel.FieldString,
@@ -224,10 +220,6 @@ func (*MatrixAdapter) Descriptor() channel.Descriptor {
 				"autoJoinInvites": {
 					Type:  channel.FieldBool,
 					Title: "Auto-Join Invites",
-				},
-				"allowedRooms": {
-					Type:  channel.FieldString,
-					Title: "Allowed Rooms",
 				},
 			},
 		},
@@ -489,7 +481,7 @@ func (a *MatrixAdapter) syncOnce(ctx context.Context, cfg channel.ChannelConfig,
 
 func (a *MatrixAdapter) handleInvites(ctx context.Context, cfg channel.ChannelConfig, parsed Config, resp matrixSyncResponse) (bool, error) {
 	joinedAny := false
-	for roomID, invite := range resp.Rooms.Invite {
+	for roomID := range resp.Rooms.Invite {
 		roomID = strings.TrimSpace(roomID)
 		if roomID == "" {
 			continue
@@ -500,20 +492,6 @@ func (a *MatrixAdapter) handleInvites(ctx context.Context, cfg channel.ChannelCo
 					slog.String("config_id", cfg.ID),
 					slog.String("room_id", roomID),
 					slog.String("reason", "auto_join_disabled"),
-				)
-			}
-			continue
-		}
-		allowed, err := a.isAllowedRoom(ctx, cfg.ID, parsed, roomID, matrixInviteAliases(invite))
-		if err != nil {
-			return joinedAny, err
-		}
-		if !allowed {
-			if a.logger != nil {
-				a.logger.Info("matrix invite skipped",
-					slog.String("config_id", cfg.ID),
-					slog.String("room_id", roomID),
-					slog.String("reason", "room_not_allowed"),
 				)
 			}
 			continue
@@ -534,21 +512,6 @@ func (a *MatrixAdapter) handleInvites(ctx context.Context, cfg channel.ChannelCo
 
 func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConfig, parsed Config, evt matrixEvent, handler channel.InboundHandler) (bool, error) {
 	if evt.Type != "m.room.message" {
-		return false, nil
-	}
-	allowed, err := a.isAllowedRoom(ctx, cfg.ID, parsed, evt.RoomID, nil)
-	if err != nil {
-		return false, err
-	}
-	if !allowed {
-		if a.logger != nil {
-			a.logger.Info("matrix event skipped",
-				slog.String("config_id", cfg.ID),
-				slog.String("room_id", strings.TrimSpace(evt.RoomID)),
-				slog.String("event_id", strings.TrimSpace(evt.EventID)),
-				slog.String("reason", "room_not_allowed"),
-			)
-		}
 		return false, nil
 	}
 	if strings.TrimSpace(evt.Sender) == "" || strings.EqualFold(strings.TrimSpace(evt.Sender), parsed.UserID) {
@@ -1612,96 +1575,6 @@ func readMatrixStringList(raw map[string]any, key string) []string {
 		}
 		return []string{trimmed}
 	}
-}
-
-func (a *MatrixAdapter) isAllowedRoom(ctx context.Context, configID string, cfg Config, roomID string, aliases []string) (bool, error) {
-	if len(cfg.AllowedRooms) == 0 {
-		return true, nil
-	}
-	roomID = strings.TrimSpace(roomID)
-	if roomID == "" {
-		return false, nil
-	}
-	for _, allowed := range cfg.AllowedRooms {
-		if allowed == roomID {
-			return true, nil
-		}
-	}
-	aliasSet := make(map[string]struct{}, len(aliases))
-	for _, alias := range aliases {
-		alias = normalizeTarget(alias)
-		if strings.HasPrefix(alias, "#") {
-			aliasSet[alias] = struct{}{}
-		}
-	}
-	for _, allowed := range cfg.AllowedRooms {
-		if !strings.HasPrefix(allowed, "#") {
-			continue
-		}
-		if resolved, ok := a.cachedAllowedRoomAlias(configID, allowed); ok {
-			if resolved == roomID {
-				return true, nil
-			}
-			continue
-		}
-		if _, ok := aliasSet[allowed]; ok {
-			a.rememberAllowedRoomAlias(configID, allowed, roomID)
-			return true, nil
-		}
-		resolved, err := a.resolveRoomAlias(ctx, cfg, allowed)
-		if err != nil {
-			if a.logger != nil {
-				a.logger.Warn("matrix allowed room alias lookup failed",
-					slog.String("config_id", strings.TrimSpace(configID)),
-					slog.String("room_alias", allowed),
-					slog.Any("error", err),
-				)
-			}
-			continue
-		}
-		a.rememberAllowedRoomAlias(configID, allowed, resolved)
-		if resolved == roomID {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func (a *MatrixAdapter) cachedAllowedRoomAlias(configID, roomAlias string) (string, bool) {
-	if a == nil {
-		return "", false
-	}
-	a.allowedRoomMu.Lock()
-	defer a.allowedRoomMu.Unlock()
-	aliases, ok := a.allowedRooms[strings.TrimSpace(configID)]
-	if !ok {
-		return "", false
-	}
-	resolved, ok := aliases[normalizeTarget(roomAlias)]
-	if !ok {
-		return "", false
-	}
-	return resolved, true
-}
-
-func (a *MatrixAdapter) rememberAllowedRoomAlias(configID, roomAlias, roomID string) {
-	if a == nil {
-		return
-	}
-	configID = strings.TrimSpace(configID)
-	roomAlias = normalizeTarget(roomAlias)
-	roomID = strings.TrimSpace(roomID)
-	if configID == "" || !strings.HasPrefix(roomAlias, "#") || roomID == "" {
-		return
-	}
-	a.allowedRoomMu.Lock()
-	defer a.allowedRoomMu.Unlock()
-	aliases, ok := a.allowedRooms[configID]
-	if !ok {
-		aliases = make(map[string]string)
-		a.allowedRooms[configID] = aliases
-	}
-	aliases[roomAlias] = roomID
 }
 
 func (a *MatrixAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
