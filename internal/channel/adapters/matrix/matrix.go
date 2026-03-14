@@ -28,9 +28,10 @@ import (
 const Type channel.ChannelType = "matrix"
 
 const (
-	matrixDefaultTimeout  = 30 * time.Second
-	matrixEditThrottle    = 1200 * time.Millisecond
-	matrixRoutingStateKey = "_matrix"
+	matrixDefaultTimeout   = 30 * time.Second
+	matrixEditThrottle     = 1200 * time.Millisecond
+	matrixRoutingStateKey  = "_matrix"
+	matrixQuotedTextMaxLen = 200
 )
 
 type assetOpener interface {
@@ -434,6 +435,36 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 	}
 	isMentioned := isMatrixBotMentioned(parsed.UserID, evt.Content)
 	replyTo := readReplyToEventID(evt.Content)
+	if replyTo != "" {
+		body = stripMatrixReplyFallback(body)
+	}
+	rawText := body
+	isReplyToBot := false
+	if replyTo != "" {
+		repliedEvent, err := a.fetchRoomEvent(ctx, parsed, evt.RoomID, replyTo)
+		if err != nil {
+			if a.logger != nil {
+				a.logger.Warn("failed to fetch matrix replied event",
+					slog.String("config_id", cfg.ID),
+					slog.String("room_id", evt.RoomID),
+					slog.String("reply_to", replyTo),
+					slog.Any("error", err),
+				)
+			}
+		} else {
+			if quotedText := buildMatrixQuotedText(repliedEvent); quotedText != "" {
+				if body != "" {
+					body = quotedText + "\n" + body
+				} else {
+					body = quotedText
+				}
+			}
+			if quotedAttachments := matrixQuotedAttachments(repliedEvent); len(quotedAttachments) > 0 {
+				attachments = append(attachments, quotedAttachments...)
+			}
+			isReplyToBot = strings.EqualFold(strings.TrimSpace(repliedEvent.Sender), parsed.UserID)
+		}
+	}
 	msg := channel.InboundMessage{
 		Channel:     Type,
 		BotID:       cfg.BotID,
@@ -466,10 +497,10 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 			"event_id":        strings.TrimSpace(evt.EventID),
 			"sender":          strings.TrimSpace(evt.Sender),
 			"msgtype":         channel.ReadString(evt.Content, "msgtype"),
-			"raw_text":        body,
+			"raw_text":        rawText,
 			"attachments":     len(attachments),
 			"is_mentioned":    isMentioned,
-			"is_reply_to_bot": false,
+			"is_reply_to_bot": isReplyToBot,
 		},
 	}
 	if replyTo != "" {
@@ -485,6 +516,16 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 		)
 	}
 	return true, handler(ctx, cfg, msg)
+}
+
+func (a *MatrixAdapter) fetchRoomEvent(ctx context.Context, cfg Config, roomID, eventID string) (matrixEvent, error) {
+	path := fmt.Sprintf("/_matrix/client/v3/rooms/%s/event/%s", url.PathEscape(strings.TrimSpace(roomID)), url.PathEscape(strings.TrimSpace(eventID)))
+	var evt matrixEvent
+	if err := a.doJSON(ctx, cfg, http.MethodGet, path, nil, &evt); err != nil {
+		return matrixEvent{}, err
+	}
+	evt.RoomID = strings.TrimSpace(roomID)
+	return evt, nil
 }
 
 func buildMatrixMessageContent(msg channel.Message, edit bool, originalEventID string) map[string]any {
@@ -627,6 +668,67 @@ func matrixAttachmentType(msgType string) channel.AttachmentType {
 	default:
 		return channel.AttachmentFile
 	}
+}
+
+func buildMatrixQuotedText(replyTo matrixEvent) string {
+	senderName := matrixDisplayName(replyTo)
+	text, attachments := extractMatrixInboundContent(replyTo.Content)
+	text = strings.TrimSpace(text)
+	if text == "" && len(attachments) > 0 {
+		types := make([]string, 0, len(attachments))
+		for _, att := range attachments {
+			types = append(types, string(att.Type))
+		}
+		text = "[" + strings.Join(types, ", ") + "]"
+	}
+	if text == "" {
+		text = strings.TrimSpace(channel.ReadString(replyTo.Content, "body"))
+	}
+	if text == "" {
+		return ""
+	}
+	if len([]rune(text)) > matrixQuotedTextMaxLen {
+		text = string([]rune(text)[:matrixQuotedTextMaxLen]) + "..."
+	}
+	if senderName != "" {
+		return fmt.Sprintf("[Reply to %s: %s]", senderName, text)
+	}
+	return fmt.Sprintf("[Reply to: %s]", text)
+}
+
+func matrixQuotedAttachments(replyTo matrixEvent) []channel.Attachment {
+	_, attachments := extractMatrixInboundContent(replyTo.Content)
+	if len(attachments) == 0 {
+		return nil
+	}
+	return attachments
+}
+
+func stripMatrixReplyFallback(body string) string {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return ""
+	}
+	lines := strings.Split(strings.ReplaceAll(trimmed, "\r\n", "\n"), "\n")
+	idx := 0
+	sawQuote := false
+	for idx < len(lines) {
+		line := lines[idx]
+		if strings.HasPrefix(line, ">") {
+			sawQuote = true
+			idx++
+			continue
+		}
+		if sawQuote && strings.TrimSpace(line) == "" {
+			idx++
+			continue
+		}
+		break
+	}
+	if !sawQuote {
+		return trimmed
+	}
+	return strings.TrimSpace(strings.Join(lines[idx:], "\n"))
 }
 
 func matrixSinceTokenFromRouting(routing map[string]any) string {

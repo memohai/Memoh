@@ -140,6 +140,84 @@ func TestBuildMatrixMessageContentAddsFormattedHTMLToEdits(t *testing.T) {
 	}
 }
 
+func TestStripMatrixReplyFallback(t *testing.T) {
+	body := "> <@memoh:example.com> This looks like Antelope Canyon\n>\nWhere is Antelope Canyon?"
+	if got := stripMatrixReplyFallback(body); got != "Where is Antelope Canyon?" {
+		t.Fatalf("unexpected stripped body: %q", got)
+	}
+}
+
+func TestMatrixHandleEventExpandsRepliedImageContext(t *testing.T) {
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.Contains(req.URL.Path, "/rooms/!room:example.com/event/$img1") {
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(`{
+				"event_id":"$img1",
+				"type":"m.room.message",
+				"sender":"@memoh:example.com",
+				"unsigned":{"displayname":"Memoh"},
+				"content":{
+					"msgtype":"m.image",
+					"body":"canyon.jpg",
+					"url":"mxc://matrix.example.com/media123",
+					"info":{"mimetype":"image/jpeg","w":640,"h":480}
+				}
+			}`)),
+			Header: make(http.Header),
+		}, nil
+	})}
+
+	var captured channel.InboundMessage
+	delivered, err := adapter.handleEvent(
+		context.Background(),
+		channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"},
+		Config{HomeserverURL: "https://matrix.example.com", AccessToken: "tok", UserID: "@memoh:example.com"},
+		matrixEvent{
+			EventID: "$evt2",
+			Type:    "m.room.message",
+			Sender:  "@alex:example.com",
+			RoomID:  "!room:example.com",
+			Content: map[string]any{
+				"msgtype": "m.text",
+				"body":    "> <@memoh:example.com> photo\n>\nWhere is Antelope Canyon?",
+				"m.relates_to": map[string]any{
+					"m.in_reply_to": map[string]any{"event_id": "$img1"},
+				},
+			},
+		},
+		func(_ context.Context, _ channel.ChannelConfig, msg channel.InboundMessage) error {
+			captured = msg
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("handleEvent returned error: %v", err)
+	}
+	if !delivered {
+		t.Fatal("expected event to be delivered")
+	}
+	if got := captured.Message.Text; got != "[Reply to Memoh: [image]]\nWhere is Antelope Canyon?" {
+		t.Fatalf("unexpected message text: %q", got)
+	}
+	if len(captured.Message.Attachments) != 1 {
+		t.Fatalf("expected one quoted attachment, got %d", len(captured.Message.Attachments))
+	}
+	if captured.Message.Attachments[0].PlatformKey != "mxc://matrix.example.com/media123" {
+		t.Fatalf("unexpected quoted attachment: %#v", captured.Message.Attachments[0])
+	}
+	isReplyToBot, _ := captured.Metadata["is_reply_to_bot"].(bool)
+	if !isReplyToBot {
+		t.Fatalf("expected is_reply_to_bot metadata to be true")
+	}
+	if rawText, _ := captured.Metadata["raw_text"].(string); rawText != "Where is Antelope Canyon?" {
+		t.Fatalf("unexpected raw_text metadata: %q", rawText)
+	}
+}
+
 func TestExtractMatrixInboundContentParsesImageAttachment(t *testing.T) {
 	text, attachments := extractMatrixInboundContent(map[string]any{
 		"msgtype": "m.image",
