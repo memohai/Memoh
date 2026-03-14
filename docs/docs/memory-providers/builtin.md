@@ -7,16 +7,25 @@ The built-in memory provider is the standard memory backend shipped with Memoh. 
 - Manual memory creation and editing
 - Memory compaction and rebuild workflows
 
-To configure it well, you usually assign:
+The built-in provider operates in one of three **memory modes**, each with different infrastructure requirements and retrieval capabilities.
 
-- **Memory Model**: The LLM used for memory extraction and decision making
-- **Embedding Model**: The embedding model used for dense vector search
+---
+
+## Memory Modes
+
+| Mode | Index | Requirements | Use Case |
+|------|-------|-------------|----------|
+| **Off** | File-based only | None | Lightweight setup, no vector search |
+| **Sparse** | Neural sparse vectors | Sparse service + Qdrant (`--profile sparse`) | Good retrieval quality without embedding API costs |
+| **Dense** | Dense embeddings | Embedding model + Qdrant (`--profile qdrant`) | Highest-quality semantic search |
+
+### How Sparse Mode Works
+
+Sparse mode uses the [`opensearch-neural-sparse-encoding-multilingual-v1`](https://huggingface.co/opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1) model (from the OpenSearch project) to convert text into sparse vectors — compact lists of token indices with importance weights. Unlike dense mode, which requires an external embedding API, the sparse model runs locally in the `sparse` container with no API key or cost. It supports multiple languages and provides significantly better retrieval quality than keyword-only search.
 
 ---
 
 ## Creating a Built-in Provider
-
-Manage providers from the **Memory Providers** page in the sidebar.
 
 1. Navigate to the **Memory Providers** page.
 2. Click **Add Memory Provider**.
@@ -29,19 +38,59 @@ Manage providers from the **Memory Providers** page in the sidebar.
 
 ## Configuring a Built-in Provider
 
-After creating a provider, select it from the sidebar and configure its settings.
+After creating a provider, select it from the list and configure its settings.
 
 | Field | Description |
 |-------|-------------|
-| **Name** | The display name shown in the UI. |
-| **Provider Type** | The provider implementation. Currently this is `builtin` only. |
-| **Memory Model** | Optional chat model used for memory extraction and memory-related decisions. |
-| **Embedding Model** | Optional embedding model used for semantic vector search. |
+| **Memory Mode** | `off` (default), `sparse`, or `dense`. Controls how memories are indexed and retrieved. |
+| **Embedding Model** | Embedding model for dense vector search. Only used in `dense` mode. |
+| **Qdrant Collection** | Qdrant collection name. Defaults to `memory_sparse`. |
 
 ### Managing Providers
 
-- **Edit**: Select a provider and update its name or model bindings.
+- **Edit**: Select a provider and update its settings.
 - **Delete**: Remove a provider you no longer use.
+
+---
+
+## Infrastructure Requirements
+
+### Off Mode
+
+No additional infrastructure required. Memories are stored and retrieved using file-based indexing only.
+
+### Sparse Mode
+
+Requires the **sparse service** (runs the [`opensearch-neural-sparse-encoding-multilingual-v1`](https://huggingface.co/opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1) model locally) and **Qdrant** vector database. Enable both with Docker Compose profiles:
+
+```bash
+docker compose --profile qdrant --profile sparse up -d
+```
+
+The following sections must be present in `config.toml`:
+
+```toml
+[qdrant]
+base_url = "http://qdrant:6334"
+
+[sparse]
+base_url = "http://sparse:8085"
+```
+
+### Dense Mode
+
+Requires an **embedding model** (configured in the provider settings) and **Qdrant**:
+
+```bash
+docker compose --profile qdrant up -d
+```
+
+The Qdrant section must be present in `config.toml`:
+
+```toml
+[qdrant]
+base_url = "http://qdrant:6334"
+```
 
 ---
 

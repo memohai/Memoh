@@ -20,10 +20,11 @@ Each bot runs in its own isolated container (powered by Containerd) with a separ
 
 ### Memory Engineering
 
-A deeply engineered memory layer:
+A deeply engineered, multi-provider memory layer:
 
+- **Multi-provider architecture**: Built-in (with off/sparse/dense modes), Mem0 (SaaS), and OpenViking (self-hosted or SaaS)
 - Automatically extracts key facts from each conversation turn and stores them as structured memories
-- Hybrid retrieval: semantic search (via Qdrant vector database) + keyword retrieval (BM25)
+- Hybrid retrieval: semantic search (via Qdrant vector database) + keyword retrieval (BM25) + neural sparse vectors
 - Loads the last 24 hours of conversation context by default
 - Automatic memory compaction and rebuild capabilities
 - Multi-language auto-detection
@@ -49,6 +50,7 @@ Bots come with a rich set of built-in tools:
 - **Skills** — Define bot personality via IDENTITY.md, SOUL.md, and modular skill files that bots can enable/disable at runtime
 - **Container Operations** — Read/write files, edit code, and execute commands inside the container
 - **Memory Management** — Search and manage memories
+- **Text-to-Speech** — Synthesize speech via configurable TTS providers (Edge TTS with 256+ voices)
 - **Messaging** — Send messages and reactions to specific users or channels
 
 ### Multi-LLM Provider Support

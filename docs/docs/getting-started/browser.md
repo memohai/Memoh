@@ -39,6 +39,7 @@ After creating a context, select it from the sidebar and update its settings.
 | Field | Description |
 |-------|-------------|
 | **Name** | The display name shown in the UI. |
+| **Core** | Browser engine: `chromium` (default) or `firefox`. |
 | **Viewport Width** | Browser viewport width in pixels. |
 | **Viewport Height** | Browser viewport height in pixels. |
 | **User Agent** | Optional custom browser user agent string. |
@@ -75,6 +76,20 @@ When a browser context is configured, the bot can use built-in browser tools suc
 - `browser_observe`: inspect the current page and gather information for the model
 
 This lets the bot interact with real websites instead of relying only on static HTML or search results.
+
+---
+
+## Browser Core Selection
+
+Memoh's browser image can include Chromium, Firefox, or both. The available cores are determined at build time by the `BROWSER_CORES` build argument.
+
+The install script prompts for browser core selection during setup. To rebuild manually with specific cores:
+
+```bash
+BROWSER_CORES=chromium docker compose --profile browser build browser
+```
+
+Valid values for `BROWSER_CORES`: `chromium`, `firefox`, `chromium,firefox` (default).
 
 ---
 

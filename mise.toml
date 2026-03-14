@@ -27,6 +27,10 @@ description = "Install dependencies"
 env = { CI = "true" }
 run = "pnpm install"
 
+[tasks.docs]
+description = "start documentation"
+run = "pnpm docs:dev"
+
 [tasks.go-install]
 description = "Install Go dependencies"
 run = "go mod download"
@@ -116,6 +120,20 @@ run = "cd packages/cli && npm install -g"
 description = "Install socktainer"
 run = "brew tap socktainer/tap && brew install socktainer"
 
+[tasks.lint]
+description = "Run all linters"
+depends = [
+  "//:lint:go",
+  "//:lint:es",
+]
+
+[tasks."lint:fix"]
+description = "Run all linters with auto-fix"
+depends = [
+  "//:lint:go:fix",
+  "//:lint:es:fix",
+]
+
 [tasks."lint:go"]
 description = "Run Go linter"
 run = "golangci-lint run ./..."
@@ -123,6 +141,14 @@ run = "golangci-lint run ./..."
 [tasks."lint:go:fix"]
 description = "Run Go linter with auto-fix"
 run = "golangci-lint run --fix ./..."
+
+[tasks."lint:es"]
+description = "Run ESLint"
+run = "pnpm lint"
+
+[tasks."lint:es:fix"]
+description = "Run ESLint with auto-fix"
+run = "pnpm lint:fix"
 
 [tasks.setup]
 description = "Setup development environment"
