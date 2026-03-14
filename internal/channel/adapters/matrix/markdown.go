@@ -5,10 +5,11 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/memohai/memoh/internal/channel"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/renderer/html"
+
+	"github.com/memohai/memoh/internal/channel"
 )
 
 const matrixHTMLFormat = "org.matrix.custom.html"

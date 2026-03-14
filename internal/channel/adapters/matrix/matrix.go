@@ -3,12 +3,13 @@ package matrix
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand/v2"
+	"math/big"
 	"net/http"
 	"net/url"
 	pathpkg "path"
@@ -1722,27 +1723,27 @@ func (a *MatrixAdapter) ResolveAttachment(ctx context.Context, cfg channel.Chann
 	if !ok {
 		return channel.AttachmentPayload{}, errors.New("invalid matrix content uri")
 	}
-	resp, err := a.downloadMatrixMedia(ctx, parsed, serverName, mediaID, strings.TrimSpace(attachment.Name))
+	body, header, contentLength, err := a.downloadMatrixMedia(ctx, parsed, serverName, mediaID, strings.TrimSpace(attachment.Name))
 	if err != nil {
 		return channel.AttachmentPayload{}, err
 	}
 	mime := strings.TrimSpace(attachment.Mime)
 	if mime == "" {
-		mime = attachmentpkg.NormalizeMime(resp.Header.Get("Content-Type"))
+		mime = attachmentpkg.NormalizeMime(header.Get("Content-Type"))
 	}
 	size := attachment.Size
-	if size <= 0 && resp.ContentLength > 0 {
-		size = resp.ContentLength
+	if size <= 0 && contentLength > 0 {
+		size = contentLength
 	}
 	return channel.AttachmentPayload{
-		Reader: resp.Body,
+		Reader: body,
 		Mime:   mime,
 		Name:   strings.TrimSpace(attachment.Name),
 		Size:   size,
 	}, nil
 }
 
-func (a *MatrixAdapter) downloadMatrixMedia(ctx context.Context, cfg Config, serverName, mediaID, fileName string) (*http.Response, error) {
+func (a *MatrixAdapter) downloadMatrixMedia(ctx context.Context, cfg Config, serverName, mediaID, fileName string) (io.ReadCloser, http.Header, int64, error) {
 	paths := make([]string, 0, 3)
 	serverName = url.PathEscape(strings.TrimSpace(serverName))
 	mediaID = url.PathEscape(strings.TrimSpace(mediaID))
@@ -1759,16 +1760,16 @@ func (a *MatrixAdapter) downloadMatrixMedia(ctx context.Context, cfg Config, ser
 	for _, path := range paths {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.HomeserverURL+path, nil)
 		if err != nil {
-			return nil, err
+			return nil, nil, 0, err
 		}
 		request.Header.Set("Authorization", "Bearer "+cfg.AccessToken)
-		resp, err := a.httpClient.Do(request)
+		resp, err := a.httpClient.Do(request) //nolint:gosec // G704: URL is derived from operator-configured Matrix homeserver
 		if err != nil {
 			lastErr = fmt.Errorf("download matrix attachment: %w", err)
 			continue
 		}
 		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
-			return resp, nil
+			return resp.Body, resp.Header.Clone(), resp.ContentLength, nil
 		}
 		data, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
@@ -1778,13 +1779,13 @@ func (a *MatrixAdapter) downloadMatrixMedia(ctx context.Context, cfg Config, ser
 		}
 		lastErr = fmt.Errorf("download matrix attachment failed: %s", textutil.TruncateRunes(message, 300))
 		if resp.StatusCode != http.StatusNotFound {
-			return nil, lastErr
+			return nil, nil, 0, lastErr
 		}
 	}
 	if lastErr == nil {
 		lastErr = errors.New("download matrix attachment failed")
 	}
-	return nil, lastErr
+	return nil, nil, 0, lastErr
 }
 
 func (a *MatrixAdapter) doJSON(ctx context.Context, cfg Config, method, path string, reqBody any, respBody any) error {
@@ -1817,7 +1818,7 @@ func (a *MatrixAdapter) doRequest(ctx context.Context, cfg Config, method, path 
 	if strings.TrimSpace(contentType) != "" {
 		request.Header.Set("Content-Type", strings.TrimSpace(contentType))
 	}
-	resp, err := a.httpClient.Do(request)
+	resp, err := a.httpClient.Do(request) //nolint:gosec // G704: URL is derived from operator-configured Matrix homeserver
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1840,7 +1841,11 @@ func (a *MatrixAdapter) nextTxnID() string {
 	a.txnMu.Lock()
 	defer a.txnMu.Unlock()
 	a.txnID++
-	return fmt.Sprintf("memoh-%d-%d-%04d", time.Now().UnixMilli(), a.txnID, rand.IntN(10000))
+	rnd, err := cryptorand.Int(cryptorand.Reader, big.NewInt(10000))
+	if err != nil {
+		return fmt.Sprintf("memoh-%d-%d", time.Now().UnixMilli(), a.txnID)
+	}
+	return fmt.Sprintf("memoh-%d-%d-%04d", time.Now().UnixMilli(), a.txnID, rnd.Int64())
 }
 
 func (a *MatrixAdapter) seenEvent(configID, eventID string) bool {

@@ -19,7 +19,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func TestMatrixStreamDoesNotSendDeltaBeforeTextPhaseEnds(t *testing.T) {
 	requests := 0
 	adapter := NewMatrixAdapter(nil)
-	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		requests++
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -55,7 +55,7 @@ func TestMatrixStreamDoesNotSendDeltaBeforeTextPhaseEnds(t *testing.T) {
 func TestMatrixStreamDropsBufferedTextWhenToolStarts(t *testing.T) {
 	requests := 0
 	adapter := NewMatrixAdapter(nil)
-	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		requests++
 		return &http.Response{
 			StatusCode: http.StatusOK,

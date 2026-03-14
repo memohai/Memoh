@@ -11,7 +11,7 @@ import (
 
 type Config struct {
 	HomeserverURL      string
-	AccessToken        string
+	AccessToken        string //nolint:gosec // intentional: operator-supplied Matrix access token in channel config
 	UserID             string
 	SyncTimeoutSeconds int
 	AutoJoinInvites    bool
@@ -242,10 +242,10 @@ func normalizeRoomList(value any) ([]string, error) {
 			continue
 		}
 		if strings.Contains(room, ",") {
-			return nil, fmt.Errorf("matrix allowedRooms entries must contain one room id or alias per line")
+			return nil, errors.New("matrix allowedRooms entries must contain one room id or alias per line")
 		}
 		if !strings.HasPrefix(room, "!") && !strings.HasPrefix(room, "#") {
-			return nil, fmt.Errorf("matrix allowedRooms entries must be room ids or aliases")
+			return nil, errors.New("matrix allowedRooms entries must be room ids or aliases")
 		}
 		if _, ok := seen[room]; ok {
 			continue
@@ -274,7 +274,7 @@ func targetKind(target string) string {
 func validateTarget(target string) error {
 	kind := targetKind(target)
 	if kind == "" {
-		return fmt.Errorf("matrix target must be a room id/alias or user id")
+		return errors.New("matrix target must be a room id/alias or user id")
 	}
 	return nil
 }

@@ -71,7 +71,7 @@ func TestPersistSinceTokenUsesConfiguredSaver(t *testing.T) {
 
 func TestBootstrapSinceTokenPersistsLatestCursor(t *testing.T) {
 	adapter := NewMatrixAdapter(nil)
-	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(`{"next_batch":"s123","rooms":{"join":{"!room:example.com":{"timeline":{"events":[{"event_id":"$evt1"}]}}}}}`)),
