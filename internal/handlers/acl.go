@@ -11,7 +11,6 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/bots"
-	identitypkg "github.com/memohai/memoh/internal/identity"
 	"github.com/memohai/memoh/internal/channel/identities"
 	identitypkg "github.com/memohai/memoh/internal/identity"
 )
