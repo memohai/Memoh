@@ -319,9 +319,6 @@ func (a *MatrixAdapter) validateConnection(ctx context.Context, cfg Config) erro
 	if !strings.EqualFold(resolvedUserID, strings.TrimSpace(cfg.UserID)) {
 		return fmt.Errorf("matrix access token check failed: token belongs to %s, expected %s", resolvedUserID, strings.TrimSpace(cfg.UserID))
 	}
-	if err := a.validateSyncAccess(ctx, cfg); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -356,22 +353,6 @@ func (a *MatrixAdapter) validateAccessToken(ctx context.Context, cfg Config) (ma
 		return matrixWhoAmIResponse{}, fmt.Errorf("matrix access token check failed: invalid /account/whoami response: %w", err)
 	}
 	return resp, nil
-}
-
-func (a *MatrixAdapter) validateSyncAccess(ctx context.Context, cfg Config) error {
-	path := "/_matrix/client/v3/sync?timeout=0"
-	data, _, statusCode, err := a.performRequest(ctx, http.MethodGet, cfg.HomeserverURL+path, nil, "", cfg.AccessToken)
-	if err != nil {
-		return fmt.Errorf("matrix sync check failed: %w", err)
-	}
-	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("matrix sync check failed: %s", matrixHTTPErrorSummary(statusCode, data))
-	}
-	var resp matrixSyncResponse
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return fmt.Errorf("matrix sync check failed: invalid /sync response: %w", err)
-	}
-	return nil
 }
 
 func matrixHTTPErrorSummary(statusCode int, data []byte) string {
@@ -1622,73 +1603,6 @@ func (a *MatrixAdapter) rememberDirectRoom(cacheKey, userID, roomID string) {
 func (a *MatrixAdapter) joinRoom(ctx context.Context, cfg Config, roomID string) error {
 	path := fmt.Sprintf("/_matrix/client/v3/join/%s", url.PathEscape(strings.TrimSpace(roomID)))
 	return a.doJSON(ctx, cfg, http.MethodPost, path, nil, nil)
-}
-
-func matrixInviteAliases(invite matrixSyncInvitedRoom) []string {
-	aliases := make([]string, 0, len(invite.InviteState.Events))
-	seen := make(map[string]struct{}, len(invite.InviteState.Events))
-	for _, evt := range invite.InviteState.Events {
-		if evt.Type == "m.room.canonical_alias" {
-			for _, alias := range append([]string{channel.ReadString(evt.Content, "alias")}, readMatrixStringList(evt.Content, "alt_aliases")...) {
-				alias = normalizeTarget(alias)
-				if !strings.HasPrefix(alias, "#") {
-					continue
-				}
-				if _, ok := seen[alias]; ok {
-					continue
-				}
-				seen[alias] = struct{}{}
-				aliases = append(aliases, alias)
-			}
-		}
-		if evt.Type == "m.room.aliases" {
-			for _, alias := range readMatrixStringList(evt.Content, "aliases") {
-				alias = normalizeTarget(alias)
-				if !strings.HasPrefix(alias, "#") {
-					continue
-				}
-				if _, ok := seen[alias]; ok {
-					continue
-				}
-				seen[alias] = struct{}{}
-				aliases = append(aliases, alias)
-			}
-		}
-	}
-	return aliases
-}
-
-func readMatrixStringList(raw map[string]any, key string) []string {
-	value, ok := raw[key]
-	if !ok {
-		return nil
-	}
-	switch v := value.(type) {
-	case []string:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			trimmed := strings.TrimSpace(item)
-			if trimmed != "" {
-				out = append(out, trimmed)
-			}
-		}
-		return out
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			trimmed := strings.TrimSpace(fmt.Sprintf("%v", item))
-			if trimmed != "" {
-				out = append(out, trimmed)
-			}
-		}
-		return out
-	default:
-		trimmed := strings.TrimSpace(fmt.Sprintf("%v", v))
-		if trimmed == "" {
-			return nil
-		}
-		return []string{trimmed}
-	}
 }
 
 func (a *MatrixAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {

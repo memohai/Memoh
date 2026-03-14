@@ -348,7 +348,7 @@ function initForm() {
       continue
     }
     if (field.type === 'bool') {
-      creds[key] = false
+      creds[key] = undefined
       continue
     }
     creds[key] = ''

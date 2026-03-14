@@ -211,7 +211,7 @@ func TestValidateConnectionRejectsTokenUserMismatch(t *testing.T) {
 	}
 }
 
-func TestValidateConnectionChecksSyncAccess(t *testing.T) {
+func TestValidateConnectionSkipsSyncProbe(t *testing.T) {
 	requests := make([]string, 0, 3)
 	adapter := NewMatrixAdapter(nil)
 	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -230,11 +230,8 @@ func TestValidateConnectionChecksSyncAccess(t *testing.T) {
 				Header:     make(http.Header),
 			}, nil
 		case "/_matrix/client/v3/sync":
-			return &http.Response{
-				StatusCode: http.StatusForbidden,
-				Body:       io.NopCloser(strings.NewReader(`{"errcode":"M_FORBIDDEN","error":"Missing sync permission"}`)),
-				Header:     make(http.Header),
-			}, nil
+			t.Fatal("did not expect /sync probe during connection validation")
+			return nil, nil
 		default:
 			t.Fatalf("unexpected request path: %s", req.URL.Path)
 			return nil, nil
@@ -246,17 +243,11 @@ func TestValidateConnectionChecksSyncAccess(t *testing.T) {
 		AccessToken:   "tok",
 		UserID:        "@memoh:example.com",
 	})
-	if err == nil {
-		t.Fatal("expected sync validation to fail")
+	if err != nil {
+		t.Fatalf("validateConnection returned error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "matrix sync check failed") || !strings.Contains(err.Error(), "Missing sync permission") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(requests) != 3 {
-		t.Fatalf("expected homeserver, whoami, and sync checks, got %d requests", len(requests))
-	}
-	if requests[2] != "/_matrix/client/v3/sync?timeout=0" {
-		t.Fatalf("unexpected sync request: %s", requests[2])
+	if len(requests) != 2 {
+		t.Fatalf("expected homeserver and whoami checks only, got %d requests", len(requests))
 	}
 }
 
