@@ -12,7 +12,7 @@ func TestRedactIMErrorText_RedactsFullSecretAndBothHalves(t *testing.T) {
 	t.Cleanup(resetIMErrorSecretsForTest)
 
 	const secret = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	RegisterIMErrorSecrets(secret)
+	SetIMErrorSecrets("test", secret)
 
 	runes := []rune(secret)
 	half := len(runes) / 2
@@ -45,7 +45,7 @@ func TestRedactIMErrorText_DoesNotRegisterShortHalfFragments(t *testing.T) {
 	t.Cleanup(resetIMErrorSecretsForTest)
 
 	const secret = "ABCDEFGHIJ"
-	RegisterIMErrorSecrets(secret)
+	SetIMErrorSecrets("test", secret)
 
 	runes := []rune(secret)
 	shortHalf := string(runes[:len(runes)/2])
@@ -66,7 +66,7 @@ func TestRedactIMErrorText_RedactsURLEncodedVariant(t *testing.T) {
 	t.Cleanup(resetIMErrorSecretsForTest)
 
 	const secret = "123456:ABC+DEF/GHI=JKL"
-	RegisterIMErrorSecrets(secret)
+	SetIMErrorSecrets("test", secret)
 
 	encoded := url.QueryEscape(secret)
 	if encoded == secret {
@@ -79,45 +79,48 @@ func TestRedactIMErrorText_RedactsURLEncodedVariant(t *testing.T) {
 	}
 }
 
-func TestUnregisterIMErrorSecrets_RemovesSecret(t *testing.T) {
+func TestSetIMErrorSecrets_ReplacesOnSameKey(t *testing.T) {
 	resetIMErrorSecretsForTest()
 	t.Cleanup(resetIMErrorSecretsForTest)
 
-	const secret = "rotating-token-ABCDEFGHIJKLMNO"
-	RegisterIMErrorSecrets(secret)
+	const oldToken = "old-rotating-token-ABCDEFGHIJKLMNO"
+	const newToken = "new-rotating-token-XYZXYZXYZXYZXYZ"
 
-	got := RedactIMErrorText("err: " + secret)
-	if strings.Contains(got, secret) {
-		t.Fatalf("secret should be redacted before unregister: %q", got)
+	SetIMErrorSecrets("qq-token:app1", oldToken)
+
+	got := RedactIMErrorText("err: " + oldToken)
+	if strings.Contains(got, oldToken) {
+		t.Fatalf("old token should be redacted: %q", got)
 	}
 
-	UnregisterIMErrorSecrets(secret)
+	// Simulate token rotation: same key, new value
+	SetIMErrorSecrets("qq-token:app1", newToken)
 
-	got = RedactIMErrorText("err: " + secret)
-	if !strings.Contains(got, secret) {
-		t.Fatalf("secret should no longer be redacted after unregister: %q", got)
+	got = RedactIMErrorText("err: " + oldToken)
+	if !strings.Contains(got, oldToken) {
+		t.Fatalf("old token should no longer be redacted after replacement: %q", got)
+	}
+	got = RedactIMErrorText("err: " + newToken)
+	if strings.Contains(got, newToken) {
+		t.Fatalf("new token should be redacted: %q", got)
 	}
 }
 
-func TestUnregisterIMErrorSecrets_RefCounted(t *testing.T) {
+func TestSetIMErrorSecrets_IndependentKeys(t *testing.T) {
 	resetIMErrorSecretsForTest()
 	t.Cleanup(resetIMErrorSecretsForTest)
 
-	const secret = "shared-secret-ABCDEFGHIJKLMNO"
-	RegisterIMErrorSecrets(secret)
-	RegisterIMErrorSecrets(secret) // register twice
+	const secretA = "secret-AAAAAAAAAAAAAAAA"
+	const secretB = "secret-BBBBBBBBBBBBBBBB"
 
-	UnregisterIMErrorSecrets(secret) // remove one ref
+	SetIMErrorSecrets("key-a", secretA)
+	SetIMErrorSecrets("key-b", secretB)
 
-	got := RedactIMErrorText("err: " + secret)
-	if strings.Contains(got, secret) {
-		t.Fatalf("secret should still be redacted with remaining ref: %q", got)
-	}
+	// Replacing key-a should not affect key-b
+	SetIMErrorSecrets("key-a", "secret-CCCCCCCCCCCCCCCC")
 
-	UnregisterIMErrorSecrets(secret) // remove last ref
-
-	got = RedactIMErrorText("err: " + secret)
-	if !strings.Contains(got, secret) {
-		t.Fatalf("secret should no longer be redacted after all refs removed: %q", got)
+	got := RedactIMErrorText("err: " + secretB)
+	if strings.Contains(got, secretB) {
+		t.Fatalf("secretB should still be redacted: %q", got)
 	}
 }

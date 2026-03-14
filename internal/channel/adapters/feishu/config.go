@@ -194,7 +194,7 @@ func (c Config) openBaseURL() string {
 }
 
 func (c Config) registerIMErrorSecrets() {
-	channel.RegisterIMErrorSecrets(c.AppSecret, c.EncryptKey, c.VerificationToken)
+	channel.SetIMErrorSecrets("feishu:"+c.AppID, c.AppSecret, c.EncryptKey, c.VerificationToken)
 }
 
 func (c Config) newClient() *lark.Client {

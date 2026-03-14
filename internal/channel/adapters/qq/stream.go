@@ -28,7 +28,7 @@ func (a *QQAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, tar
 	if err != nil {
 		return nil, fmt.Errorf("qq open stream: %w", err)
 	}
-	channel.RegisterIMErrorSecrets(parsed.AppSecret)
+	channel.SetIMErrorSecrets("qq:"+parsed.AppID, parsed.AppSecret)
 	return &qqOutboundStream{
 		target: target,
 		reply:  opts.Reply,

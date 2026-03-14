@@ -9,78 +9,40 @@ import (
 )
 
 var imErrorRedactionRegistry = struct {
-	mu      sync.RWMutex
-	secrets []string
-	refs    map[string]int
+	mu     sync.RWMutex
+	groups map[string][]string // key → variants
+	cache  []string            // deduplicated, sorted longest-first
 }{
-	refs: map[string]int{},
+	groups: map[string][]string{},
 }
 
-// RegisterIMErrorSecrets registers secrets that must be redacted when raw
-// errors are sent back to IM users. This is intentionally scoped to IM error
-// rendering only: logs and normal outbound messages keep their original text
-// so operators can debug issues and user content is not mutated.
-func RegisterIMErrorSecrets(secrets ...string) {
-	variants := make([]string, 0, len(secrets)*4)
+// SetIMErrorSecrets associates a set of secrets with the given key.
+// Calling again with the same key replaces the previous secrets,
+// so rotating credentials (e.g. access tokens) are handled naturally
+// without explicit unregistration.
+//
+// The key should identify the credential scope, e.g. "qq-token:<appID>"
+// or "telegram:<configID>". For multiple instances of the same adapter,
+// include a stable instance identifier in the key.
+//
+// This is intentionally scoped to IM error rendering only: logs and
+// normal outbound messages keep their original text so operators can
+// debug issues and user content is not mutated.
+func SetIMErrorSecrets(key string, secrets ...string) {
+	var variants []string
 	for _, secret := range secrets {
 		variants = append(variants, imErrorRedactionVariants(secret)...)
-	}
-	if len(variants) == 0 {
-		return
 	}
 
 	imErrorRedactionRegistry.mu.Lock()
 	defer imErrorRedactionRegistry.mu.Unlock()
 
-	changed := false
-	for _, v := range variants {
-		imErrorRedactionRegistry.refs[v]++
-		if imErrorRedactionRegistry.refs[v] == 1 {
-			imErrorRedactionRegistry.secrets = append(imErrorRedactionRegistry.secrets, v)
-			changed = true
-		}
-	}
-	if changed {
-		sortSecrets(imErrorRedactionRegistry.secrets)
-	}
-}
-
-// UnregisterIMErrorSecrets removes previously registered secrets from the
-// redaction registry. Reference-counted: a secret is only removed when every
-// corresponding RegisterIMErrorSecrets call has been balanced.
-func UnregisterIMErrorSecrets(secrets ...string) {
-	variants := make([]string, 0, len(secrets)*4)
-	for _, secret := range secrets {
-		variants = append(variants, imErrorRedactionVariants(secret)...)
-	}
 	if len(variants) == 0 {
-		return
+		delete(imErrorRedactionRegistry.groups, key)
+	} else {
+		imErrorRedactionRegistry.groups[key] = variants
 	}
-
-	imErrorRedactionRegistry.mu.Lock()
-	defer imErrorRedactionRegistry.mu.Unlock()
-
-	changed := false
-	for _, v := range variants {
-		if imErrorRedactionRegistry.refs[v] <= 0 {
-			continue
-		}
-		imErrorRedactionRegistry.refs[v]--
-		if imErrorRedactionRegistry.refs[v] == 0 {
-			delete(imErrorRedactionRegistry.refs, v)
-			changed = true
-		}
-	}
-	if !changed {
-		return
-	}
-
-	rebuilt := make([]string, 0, len(imErrorRedactionRegistry.refs))
-	for s := range imErrorRedactionRegistry.refs {
-		rebuilt = append(rebuilt, s)
-	}
-	sortSecrets(rebuilt)
-	imErrorRedactionRegistry.secrets = rebuilt
+	imErrorRedactionRegistry.cache = rebuildSecretCache(imErrorRedactionRegistry.groups)
 }
 
 // RedactIMErrorText masks registered secrets from error text that is about to
@@ -91,11 +53,11 @@ func RedactIMErrorText(text string) string {
 	}
 
 	imErrorRedactionRegistry.mu.RLock()
-	secrets := append([]string(nil), imErrorRedactionRegistry.secrets...)
+	cache := imErrorRedactionRegistry.cache
 	imErrorRedactionRegistry.mu.RUnlock()
 
 	result := text
-	for _, secret := range secrets {
+	for _, secret := range cache {
 		result = strings.ReplaceAll(result, secret, strings.Repeat("*", utf8.RuneCountInString(secret)))
 	}
 	return result
@@ -119,22 +81,34 @@ func imErrorRedactionVariants(secret string) []string {
 	return variants
 }
 
-func sortSecrets(s []string) {
-	sort.Slice(s, func(i, j int) bool {
-		li := utf8.RuneCountInString(s[i])
-		lj := utf8.RuneCountInString(s[j])
+func rebuildSecretCache(groups map[string][]string) []string {
+	seen := make(map[string]struct{})
+	var all []string
+	for _, variants := range groups {
+		for _, v := range variants {
+			if _, ok := seen[v]; ok {
+				continue
+			}
+			seen[v] = struct{}{}
+			all = append(all, v)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		li := utf8.RuneCountInString(all[i])
+		lj := utf8.RuneCountInString(all[j])
 		if li == lj {
-			return s[i] < s[j]
+			return all[i] < all[j]
 		}
 		return li > lj
 	})
+	return all
 }
 
 func resetIMErrorSecretsForTest() {
 	imErrorRedactionRegistry.mu.Lock()
 	defer imErrorRedactionRegistry.mu.Unlock()
-	imErrorRedactionRegistry.secrets = nil
-	imErrorRedactionRegistry.refs = map[string]int{}
+	imErrorRedactionRegistry.groups = map[string][]string{}
+	imErrorRedactionRegistry.cache = nil
 }
 
 // ResetIMErrorSecretsForTest clears the IM error redaction registry.

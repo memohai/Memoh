@@ -176,7 +176,7 @@ func TestQQOutboundStreamErrorRedactsRegisteredTokenFragments(t *testing.T) {
 	t.Cleanup(channel.ResetIMErrorSecretsForTest)
 
 	const token = "qq-token-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	channel.RegisterIMErrorSecrets(token)
+	channel.SetIMErrorSecrets("test", token)
 	prefixHalf := token[:len(token)/2]
 
 	var sent []channel.OutboundMessage

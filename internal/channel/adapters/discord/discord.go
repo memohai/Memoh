@@ -107,7 +107,7 @@ func (*DiscordAdapter) Descriptor() channel.Descriptor {
 }
 
 func (a *DiscordAdapter) getOrCreateSession(token, configID string) (*discordgo.Session, error) {
-	channel.RegisterIMErrorSecrets(token)
+	channel.SetIMErrorSecrets("discord:"+configID, token)
 	a.mu.RLock()
 	session, ok := a.sessions[token]
 	a.mu.RUnlock()

@@ -105,12 +105,9 @@ func (c *qqClient) accessToken(ctx context.Context) (string, error) {
 	if expiresIn <= 0 {
 		expiresIn = 7200
 	}
-	if c.token != "" {
-		channel.UnregisterIMErrorSecrets(c.token)
-	}
 	c.token = token
 	c.expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
-	channel.RegisterIMErrorSecrets(c.clientSecret, c.token)
+	channel.SetIMErrorSecrets("qq-token:"+c.appID, c.clientSecret, c.token)
 	return c.token, nil
 }
 
