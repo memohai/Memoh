@@ -3,6 +3,7 @@ package matrix
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -149,6 +150,7 @@ func TestStripMatrixReplyFallback(t *testing.T) {
 
 func TestMatrixHandleEventExpandsRepliedImageContext(t *testing.T) {
 	adapter := NewMatrixAdapter(nil)
+	adapter.rememberRoomConversationType("cfg-1", "!room:example.com", "group")
 	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if !strings.Contains(req.URL.Path, "/rooms/!room:example.com/event/$img1") {
 			t.Fatalf("unexpected request path: %s", req.URL.Path)
@@ -215,6 +217,91 @@ func TestMatrixHandleEventExpandsRepliedImageContext(t *testing.T) {
 	}
 	if rawText, _ := captured.Metadata["raw_text"].(string); rawText != "Where is Antelope Canyon?" {
 		t.Fatalf("unexpected raw_text metadata: %q", rawText)
+	}
+}
+
+func TestMatrixHandleEventMarksDirectConversationFromJoinedMembers(t *testing.T) {
+	joinedMembersRequests := 0
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/_matrix/client/v3/rooms/!room:example.com/joined_members":
+			joinedMembersRequests++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`{
+					"joined": {
+						"@alex:example.com": {"display_name": "Alex"},
+						"@memoh:example.com": {"display_name": "Memoh"}
+					}
+				}`)),
+				Header: make(http.Header),
+			}, nil
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	var captured []channel.InboundMessage
+	for i := 0; i < 2; i++ {
+		delivered, err := adapter.handleEvent(
+			context.Background(),
+			channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"},
+			Config{HomeserverURL: "https://matrix.example.com", AccessToken: "tok", UserID: "@memoh:example.com"},
+			matrixEvent{
+				EventID: fmt.Sprintf("$evt%d", i+1),
+				Type:    "m.room.message",
+				Sender:  "@alex:example.com",
+				RoomID:  "!room:example.com",
+				Content: map[string]any{
+					"msgtype": "m.text",
+					"body":    "ping",
+				},
+			},
+			func(_ context.Context, _ channel.ChannelConfig, msg channel.InboundMessage) error {
+				captured = append(captured, msg)
+				return nil
+			},
+		)
+		if err != nil {
+			t.Fatalf("handleEvent returned error: %v", err)
+		}
+		if !delivered {
+			t.Fatal("expected event to be delivered")
+		}
+	}
+
+	if len(captured) != 2 {
+		t.Fatalf("expected two captured messages, got %d", len(captured))
+	}
+	if captured[0].Conversation.Type != "direct" {
+		t.Fatalf("expected direct conversation type, got %q", captured[0].Conversation.Type)
+	}
+	if joinedMembersRequests != 1 {
+		t.Fatalf("expected joined_members lookup to be cached, got %d requests", joinedMembersRequests)
+	}
+}
+
+func TestExtractMatrixDirectRoomIDs(t *testing.T) {
+	roomIDs := extractMatrixDirectRoomIDs(matrixSyncResponse{
+		AccountData: struct {
+			Events []matrixSyncEvent `json:"events"`
+		}{
+			Events: []matrixSyncEvent{{
+				Type: "m.direct",
+				Content: map[string]any{
+					"@alice:example.com": []any{"!dm:example.com", " !dm2:example.com "},
+				},
+			}},
+		},
+	})
+
+	if _, ok := roomIDs["!dm:example.com"]; !ok {
+		t.Fatal("expected first direct room id to be extracted")
+	}
+	if _, ok := roomIDs["!dm2:example.com"]; !ok {
+		t.Fatal("expected second direct room id to be extracted")
 	}
 }
 

@@ -49,17 +49,45 @@ type MatrixAdapter struct {
 
 	seenMu sync.Mutex
 	seen   map[string]map[string]time.Time
+
+	roomTypeMu sync.Mutex
+	roomTypes  map[string]map[string]string
 }
 
 type matrixSyncResponse struct {
-	NextBatch string `json:"next_batch"`
-	Rooms     struct {
-		Join map[string]struct {
-			Timeline struct {
-				Events []matrixEvent `json:"events"`
-			} `json:"timeline"`
-		} `json:"join"`
+	NextBatch   string `json:"next_batch"`
+	AccountData struct {
+		Events []matrixSyncEvent `json:"events"`
+	} `json:"account_data"`
+	Rooms struct {
+		Join map[string]matrixSyncJoinedRoom `json:"join"`
 	} `json:"rooms"`
+}
+
+type matrixSyncJoinedRoom struct {
+	Timeline struct {
+		Events []matrixEvent `json:"events"`
+	} `json:"timeline"`
+	Summary matrixRoomSummary `json:"summary"`
+}
+
+type matrixRoomSummary struct {
+	JoinedMemberCount  int `json:"m.joined_member_count"`
+	InvitedMemberCount int `json:"m.invited_member_count"`
+}
+
+type matrixSyncEvent struct {
+	Type    string         `json:"type"`
+	Content map[string]any `json:"content"`
+}
+
+type matrixJoinedMembersResponse struct {
+	Joined map[string]matrixJoinedMember `json:"joined"`
+}
+
+type matrixJoinedMember struct {
+	DisplayName string `json:"display_name,omitempty"`
+	AvatarURL   string `json:"avatar_url,omitempty"`
 }
 
 type matrixEvent struct {
@@ -105,7 +133,8 @@ func NewMatrixAdapter(log *slog.Logger) *MatrixAdapter {
 		httpClient: &http.Client{
 			Timeout: matrixDefaultTimeout,
 		},
-		seen: make(map[string]map[string]time.Time),
+		seen:      make(map[string]map[string]time.Time),
+		roomTypes: make(map[string]map[string]string),
 	}
 }
 
@@ -354,6 +383,7 @@ func (a *MatrixAdapter) bootstrapSinceToken(ctx context.Context, cfg channel.Cha
 	if err := a.doJSON(ctx, parsed, http.MethodGet, "/_matrix/client/v3/sync?timeout=0", nil, &resp); err != nil {
 		return "", err
 	}
+	a.rememberSyncResponseRoomTypes(cfg.ID, resp)
 	a.rememberSyncResponseEvents(cfg.ID, resp)
 	since := strings.TrimSpace(resp.NextBatch)
 	if since == "" {
@@ -402,6 +432,7 @@ func (a *MatrixAdapter) syncOnce(ctx context.Context, cfg channel.ChannelConfig,
 	if err := a.doJSON(ctx, parsed, http.MethodGet, "/_matrix/client/v3/sync?"+query.Encode(), nil, &resp); err != nil {
 		return since, false, err
 	}
+	a.rememberSyncResponseRoomTypes(cfg.ID, resp)
 	healthy := false
 	for roomID, joined := range resp.Rooms.Join {
 		for _, evt := range joined.Timeline.Events {
@@ -465,6 +496,7 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 			isReplyToBot = strings.EqualFold(strings.TrimSpace(repliedEvent.Sender), parsed.UserID)
 		}
 	}
+	conversationType := a.resolveConversationType(ctx, cfg.ID, parsed, evt.RoomID)
 	msg := channel.InboundMessage{
 		Channel:     Type,
 		BotID:       cfg.BotID,
@@ -485,7 +517,7 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 		},
 		Conversation: channel.Conversation{
 			ID:   strings.TrimSpace(evt.RoomID),
-			Type: "group",
+			Type: conversationType,
 			Metadata: map[string]any{
 				"room_id": strings.TrimSpace(evt.RoomID),
 			},
@@ -526,6 +558,149 @@ func (a *MatrixAdapter) fetchRoomEvent(ctx context.Context, cfg Config, roomID, 
 	}
 	evt.RoomID = strings.TrimSpace(roomID)
 	return evt, nil
+}
+
+func (a *MatrixAdapter) resolveConversationType(ctx context.Context, configID string, cfg Config, roomID string) string {
+	if conversationType, ok := a.cachedRoomConversationType(configID, roomID); ok {
+		return conversationType
+	}
+	isDirect, err := a.isDirectRoom(ctx, cfg, roomID)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Warn("failed to resolve matrix room type",
+				slog.String("config_id", configID),
+				slog.String("room_id", strings.TrimSpace(roomID)),
+				slog.Any("error", err),
+			)
+		}
+		return "group"
+	}
+	conversationType := "group"
+	if isDirect {
+		conversationType = "direct"
+	}
+	a.rememberRoomConversationType(configID, roomID, conversationType)
+	return conversationType
+}
+
+func (a *MatrixAdapter) isDirectRoom(ctx context.Context, cfg Config, roomID string) (bool, error) {
+	path := fmt.Sprintf("/_matrix/client/v3/rooms/%s/joined_members", url.PathEscape(strings.TrimSpace(roomID)))
+	var resp matrixJoinedMembersResponse
+	if err := a.doJSON(ctx, cfg, http.MethodGet, path, nil, &resp); err != nil {
+		return false, err
+	}
+	return len(resp.Joined) == 2, nil
+}
+
+func (a *MatrixAdapter) rememberSyncResponseRoomTypes(configID string, resp matrixSyncResponse) {
+	configID = strings.TrimSpace(configID)
+	if configID == "" {
+		return
+	}
+	directRooms := extractMatrixDirectRoomIDs(resp)
+	for roomID, joined := range resp.Rooms.Join {
+		roomID = strings.TrimSpace(roomID)
+		if roomID == "" {
+			continue
+		}
+		if _, ok := directRooms[roomID]; ok {
+			a.rememberRoomConversationType(configID, roomID, "direct")
+			continue
+		}
+		if conversationType := matrixConversationTypeFromSummary(joined.Summary); conversationType != "" {
+			a.rememberRoomConversationType(configID, roomID, conversationType)
+		}
+	}
+}
+
+func extractMatrixDirectRoomIDs(resp matrixSyncResponse) map[string]struct{} {
+	directRooms := make(map[string]struct{})
+	for _, evt := range resp.AccountData.Events {
+		if strings.TrimSpace(evt.Type) != "m.direct" {
+			continue
+		}
+		for _, rawRoomIDs := range evt.Content {
+			for _, roomID := range matrixStringList(rawRoomIDs) {
+				if roomID == "" {
+					continue
+				}
+				directRooms[roomID] = struct{}{}
+			}
+		}
+	}
+	return directRooms
+}
+
+func matrixConversationTypeFromSummary(summary matrixRoomSummary) string {
+	totalMembers := summary.JoinedMemberCount + summary.InvitedMemberCount
+	switch {
+	case totalMembers == 2:
+		return "direct"
+	case totalMembers > 2:
+		return "group"
+	default:
+		return ""
+	}
+}
+
+func matrixStringList(raw any) []string {
+	switch value := raw.(type) {
+	case []string:
+		result := make([]string, 0, len(value))
+		for _, item := range value {
+			trimmed := strings.TrimSpace(item)
+			if trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		return result
+	case []any:
+		result := make([]string, 0, len(value))
+		for _, item := range value {
+			text, ok := item.(string)
+			if !ok {
+				continue
+			}
+			trimmed := strings.TrimSpace(text)
+			if trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func (a *MatrixAdapter) cachedRoomConversationType(configID, roomID string) (string, bool) {
+	a.roomTypeMu.Lock()
+	defer a.roomTypeMu.Unlock()
+	rooms, ok := a.roomTypes[strings.TrimSpace(configID)]
+	if !ok {
+		return "", false
+	}
+	conversationType, ok := rooms[strings.TrimSpace(roomID)]
+	if !ok || strings.TrimSpace(conversationType) == "" {
+		return "", false
+	}
+	return conversationType, true
+}
+
+func (a *MatrixAdapter) rememberRoomConversationType(configID, roomID, conversationType string) {
+	configID = strings.TrimSpace(configID)
+	roomID = strings.TrimSpace(roomID)
+	conversationType = strings.TrimSpace(conversationType)
+	if configID == "" || roomID == "" || conversationType == "" {
+		return
+	}
+	a.roomTypeMu.Lock()
+	defer a.roomTypeMu.Unlock()
+	rooms, ok := a.roomTypes[configID]
+	if !ok {
+		rooms = make(map[string]string)
+		a.roomTypes[configID] = rooms
+	}
+	rooms[roomID] = conversationType
 }
 
 func buildMatrixMessageContent(msg channel.Message, edit bool, originalEventID string) map[string]any {
