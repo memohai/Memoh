@@ -141,6 +141,21 @@ type matrixUploadResponse struct {
 	ContentURI string `json:"content_uri"`
 }
 
+type matrixVersionsResponse struct {
+	Versions []string `json:"versions"`
+}
+
+type matrixWhoAmIResponse struct {
+	UserID   string `json:"user_id"`
+	DeviceID string `json:"device_id,omitempty"`
+	IsGuest  bool   `json:"is_guest,omitempty"`
+}
+
+type matrixErrorResponse struct {
+	ErrCode string `json:"errcode"`
+	Error   string `json:"error"`
+}
+
 var matrixMentionHrefPattern = regexp.MustCompile(`https://matrix\.to/#/(@[^"'<\s]+)`)
 
 func NewMatrixAdapter(log *slog.Logger) *MatrixAdapter {
@@ -278,12 +293,106 @@ func (a *MatrixAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 	if err != nil {
 		return nil, err
 	}
+	if err := a.validateConnection(ctx, parsed); err != nil {
+		return nil, err
+	}
 	connCtx, cancel := context.WithCancel(ctx)
 	go a.runSyncLoop(connCtx, cfg, parsed, handler)
 	return channel.NewConnection(cfg, func(context.Context) error {
 		cancel()
 		return nil
 	}), nil
+}
+
+func (a *MatrixAdapter) validateConnection(ctx context.Context, cfg Config) error {
+	if err := a.validateHomeserver(ctx, cfg); err != nil {
+		return err
+	}
+	whoami, err := a.validateAccessToken(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	resolvedUserID := strings.TrimSpace(whoami.UserID)
+	if resolvedUserID == "" {
+		return errors.New("matrix access token check failed: homeserver returned empty user_id")
+	}
+	if !strings.EqualFold(resolvedUserID, strings.TrimSpace(cfg.UserID)) {
+		return fmt.Errorf("matrix access token check failed: token belongs to %s, expected %s", resolvedUserID, strings.TrimSpace(cfg.UserID))
+	}
+	if err := a.validateSyncAccess(ctx, cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *MatrixAdapter) validateHomeserver(ctx context.Context, cfg Config) error {
+	data, _, statusCode, err := a.performRequest(ctx, http.MethodGet, cfg.HomeserverURL+"/_matrix/client/versions", nil, "", "")
+	if err != nil {
+		return fmt.Errorf("matrix homeserver check failed: %w", err)
+	}
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("matrix homeserver check failed: %s", matrixHTTPErrorSummary(statusCode, data))
+	}
+	var resp matrixVersionsResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return fmt.Errorf("matrix homeserver check failed: invalid /versions response: %w", err)
+	}
+	if len(resp.Versions) == 0 {
+		return errors.New("matrix homeserver check failed: /_matrix/client/versions returned no supported versions")
+	}
+	return nil
+}
+
+func (a *MatrixAdapter) validateAccessToken(ctx context.Context, cfg Config) (matrixWhoAmIResponse, error) {
+	data, _, statusCode, err := a.performRequest(ctx, http.MethodGet, cfg.HomeserverURL+"/_matrix/client/v3/account/whoami", nil, "", cfg.AccessToken)
+	if err != nil {
+		return matrixWhoAmIResponse{}, fmt.Errorf("matrix access token check failed: %w", err)
+	}
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return matrixWhoAmIResponse{}, fmt.Errorf("matrix access token check failed: %s", matrixHTTPErrorSummary(statusCode, data))
+	}
+	var resp matrixWhoAmIResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return matrixWhoAmIResponse{}, fmt.Errorf("matrix access token check failed: invalid /account/whoami response: %w", err)
+	}
+	return resp, nil
+}
+
+func (a *MatrixAdapter) validateSyncAccess(ctx context.Context, cfg Config) error {
+	path := "/_matrix/client/v3/sync?timeout=0"
+	data, _, statusCode, err := a.performRequest(ctx, http.MethodGet, cfg.HomeserverURL+path, nil, "", cfg.AccessToken)
+	if err != nil {
+		return fmt.Errorf("matrix sync check failed: %w", err)
+	}
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("matrix sync check failed: %s", matrixHTTPErrorSummary(statusCode, data))
+	}
+	var resp matrixSyncResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return fmt.Errorf("matrix sync check failed: invalid /sync response: %w", err)
+	}
+	return nil
+}
+
+func matrixHTTPErrorSummary(statusCode int, data []byte) string {
+	var resp matrixErrorResponse
+	if err := json.Unmarshal(data, &resp); err == nil {
+		message := strings.TrimSpace(resp.Error)
+		errCode := strings.TrimSpace(resp.ErrCode)
+		switch {
+		case message != "" && errCode != "":
+			return fmt.Sprintf("%s (%s, HTTP %d)", message, errCode, statusCode)
+		case message != "":
+			return fmt.Sprintf("%s (HTTP %d)", message, statusCode)
+		case errCode != "":
+			return fmt.Sprintf("%s (HTTP %d)", errCode, statusCode)
+		}
+	}
+	message := strings.TrimSpace(string(data))
+	if message == "" {
+		return fmt.Sprintf("HTTP %d", statusCode)
+	}
+	return fmt.Sprintf("%s (HTTP %d)", textutil.TruncateRunes(message, 300), statusCode)
 }
 
 func (a *MatrixAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
@@ -1688,31 +1797,37 @@ func (a *MatrixAdapter) doJSON(ctx context.Context, cfg Config, method, path str
 }
 
 func (a *MatrixAdapter) doRequest(ctx context.Context, cfg Config, method, path string, body io.Reader, contentType string) ([]byte, http.Header, error) {
-	request, err := http.NewRequestWithContext(ctx, method, cfg.HomeserverURL+path, body)
+	data, header, statusCode, err := a.performRequest(ctx, method, cfg.HomeserverURL+path, body, contentType, cfg.AccessToken)
 	if err != nil {
 		return nil, nil, err
 	}
-	request.Header.Set("Authorization", "Bearer "+cfg.AccessToken)
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return nil, header, fmt.Errorf("matrix %s %s failed: %s", method, path, matrixHTTPErrorSummary(statusCode, data))
+	}
+	return data, header, nil
+}
+
+func (a *MatrixAdapter) performRequest(ctx context.Context, method string, requestURL string, body io.Reader, contentType string, accessToken string) ([]byte, http.Header, int, error) {
+	request, err := http.NewRequestWithContext(ctx, method, requestURL, body)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if strings.TrimSpace(accessToken) != "" {
+		request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
+	}
 	if strings.TrimSpace(contentType) != "" {
 		request.Header.Set("Content-Type", strings.TrimSpace(contentType))
 	}
 	resp, err := a.httpClient.Do(request) //nolint:gosec // G704: URL is derived from operator-configured Matrix homeserver
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, resp.Header, err
+		return nil, resp.Header.Clone(), resp.StatusCode, err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		message := strings.TrimSpace(string(data))
-		if message == "" {
-			message = resp.Status
-		}
-		return nil, resp.Header, fmt.Errorf("matrix %s %s failed: %s", method, path, textutil.TruncateRunes(message, 300))
-	}
-	return data, resp.Header, nil
+	return data, resp.Header.Clone(), resp.StatusCode, nil
 }
 
 func (a *MatrixAdapter) nextTxnID() string {

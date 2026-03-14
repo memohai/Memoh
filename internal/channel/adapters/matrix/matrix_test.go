@@ -145,6 +145,121 @@ func TestBootstrapSinceTokenAutoJoinsInvitedRooms(t *testing.T) {
 	}
 }
 
+func TestValidateConnectionChecksHomeserverVersions(t *testing.T) {
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/_matrix/client/versions" {
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       io.NopCloser(strings.NewReader("not found")),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	err := adapter.validateConnection(context.Background(), Config{
+		HomeserverURL: "https://matrix.example.com",
+		AccessToken:   "tok",
+		UserID:        "@memoh:example.com",
+	})
+	if err == nil {
+		t.Fatal("expected homeserver validation to fail")
+	}
+	if !strings.Contains(err.Error(), "homeserver check failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateConnectionRejectsTokenUserMismatch(t *testing.T) {
+	requests := make([]string, 0, 2)
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.URL.Path)
+		switch req.URL.Path {
+		case "/_matrix/client/versions":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"versions":["v1.11"]}`)),
+				Header:     make(http.Header),
+			}, nil
+		case "/_matrix/client/v3/account/whoami":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"user_id":"@alice:example.com"}`)),
+				Header:     make(http.Header),
+			}, nil
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	err := adapter.validateConnection(context.Background(), Config{
+		HomeserverURL: "https://matrix.example.com",
+		AccessToken:   "tok",
+		UserID:        "@memoh:example.com",
+	})
+	if err == nil {
+		t.Fatal("expected token mismatch validation to fail")
+	}
+	if !strings.Contains(err.Error(), "token belongs to @alice:example.com, expected @memoh:example.com") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("expected homeserver and whoami checks, got %d requests", len(requests))
+	}
+}
+
+func TestValidateConnectionChecksSyncAccess(t *testing.T) {
+	requests := make([]string, 0, 3)
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.URL.RequestURI())
+		switch req.URL.Path {
+		case "/_matrix/client/versions":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"versions":["v1.11"]}`)),
+				Header:     make(http.Header),
+			}, nil
+		case "/_matrix/client/v3/account/whoami":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"user_id":"@memoh:example.com"}`)),
+				Header:     make(http.Header),
+			}, nil
+		case "/_matrix/client/v3/sync":
+			return &http.Response{
+				StatusCode: http.StatusForbidden,
+				Body:       io.NopCloser(strings.NewReader(`{"errcode":"M_FORBIDDEN","error":"Missing sync permission"}`)),
+				Header:     make(http.Header),
+			}, nil
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	err := adapter.validateConnection(context.Background(), Config{
+		HomeserverURL: "https://matrix.example.com",
+		AccessToken:   "tok",
+		UserID:        "@memoh:example.com",
+	})
+	if err == nil {
+		t.Fatal("expected sync validation to fail")
+	}
+	if !strings.Contains(err.Error(), "matrix sync check failed") || !strings.Contains(err.Error(), "Missing sync permission") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(requests) != 3 {
+		t.Fatalf("expected homeserver, whoami, and sync checks, got %d requests", len(requests))
+	}
+	if requests[2] != "/_matrix/client/v3/sync?timeout=0" {
+		t.Fatalf("unexpected sync request: %s", requests[2])
+	}
+}
+
 func TestHandleInvitesSkipsWhenAutoJoinDisabled(t *testing.T) {
 	joinRequests := 0
 	adapter := NewMatrixAdapter(nil)
