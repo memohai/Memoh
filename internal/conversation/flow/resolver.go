@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -2103,12 +2104,12 @@ func anyIndexedByteObject(value any) ([]byte, bool) {
 		if err != nil || idx < 0 {
 			return nil, false
 		}
-		floatValue, ok := raw.(float64)
-		if !ok || floatValue < 0 || floatValue > 255 || floatValue != float64(int(floatValue)) {
+		byteValue, ok := anyNumberToByte(raw)
+		if !ok {
 			return nil, false
 		}
 		indexes = append(indexes, idx)
-		values[idx] = byte(int(floatValue))
+		values[idx] = byteValue
 	}
 	sort.Ints(indexes)
 	if indexes[len(indexes)-1]+1 != len(indexes) {
@@ -2119,6 +2120,21 @@ func anyIndexedByteObject(value any) ([]byte, bool) {
 		bytes[idx] = values[idx]
 	}
 	return bytes, true
+}
+
+func anyNumberToByte(value any) (byte, bool) {
+	floatValue, ok := value.(float64)
+	if !ok || math.IsNaN(floatValue) || math.IsInf(floatValue, 0) {
+		return 0, false
+	}
+	if floatValue < 0 || floatValue > 255 || math.Trunc(floatValue) != floatValue {
+		return 0, false
+	}
+	parsed, err := strconv.ParseUint(strconv.FormatFloat(floatValue, 'f', 0, 64), 10, 8)
+	if err != nil {
+		return 0, false
+	}
+	return byte(parsed), true
 }
 
 func normalizeGatewaySkill(entry SkillEntry) (gatewaySkill, bool) {
