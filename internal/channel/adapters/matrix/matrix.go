@@ -25,13 +25,15 @@ import (
 const Type channel.ChannelType = "matrix"
 
 const (
-	matrixDefaultTimeout = 30 * time.Second
-	matrixEditThrottle   = 1200 * time.Millisecond
+	matrixDefaultTimeout  = 30 * time.Second
+	matrixEditThrottle    = 1200 * time.Millisecond
+	matrixRoutingStateKey = "_matrix"
 )
 
 type MatrixAdapter struct {
 	logger     *slog.Logger
 	httpClient *http.Client
+	saveSince  func(context.Context, string, string) error
 
 	txnMu sync.Mutex
 	txnID uint64
@@ -92,6 +94,13 @@ func NewMatrixAdapter(log *slog.Logger) *MatrixAdapter {
 		},
 		seen: make(map[string]map[string]time.Time),
 	}
+}
+
+func (a *MatrixAdapter) SetSyncStateSaver(fn func(context.Context, string, string) error) {
+	if a == nil {
+		return
+	}
+	a.saveSince = fn
 }
 
 func (*MatrixAdapter) Type() channel.ChannelType {
@@ -258,11 +267,32 @@ func (*MatrixAdapter) Unsend(context.Context, channel.ChannelConfig, string, str
 func (a *MatrixAdapter) runSyncLoop(ctx context.Context, cfg channel.ChannelConfig, parsed Config, handler channel.InboundHandler) {
 	backoffs := []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second}
 	attempt := 0
-	var since string
+	since := matrixSinceTokenFromRouting(cfg.Routing)
+	persistedSince := since
+	if strings.TrimSpace(since) == "" {
+		bootstrapSince, err := a.bootstrapSinceToken(ctx, cfg, parsed)
+		if err != nil {
+			if a.logger != nil {
+				a.logger.Warn("matrix sync bootstrap failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			}
+		} else if bootstrapSince != "" {
+			since = bootstrapSince
+			persistedSince = bootstrapSince
+		}
+	}
 	for ctx.Err() == nil {
 		nextSince, healthy, err := a.syncOnce(ctx, cfg, parsed, since, handler)
 		if strings.TrimSpace(nextSince) != "" {
 			since = nextSince
+		}
+		if err == nil && strings.TrimSpace(since) != "" && since != persistedSince {
+			if saveErr := a.persistSinceToken(ctx, cfg.ID, since); saveErr != nil {
+				if a.logger != nil {
+					a.logger.Warn("matrix sync cursor persist failed", slog.String("config_id", cfg.ID), slog.Bool("healthy", healthy), slog.Any("error", saveErr))
+				}
+			} else {
+				persistedSince = since
+			}
 		}
 		if err == nil || ctx.Err() != nil {
 			attempt = 0
@@ -277,6 +307,49 @@ func (a *MatrixAdapter) runSyncLoop(ctx context.Context, cfg channel.ChannelConf
 			return
 		}
 	}
+}
+
+func (a *MatrixAdapter) bootstrapSinceToken(ctx context.Context, cfg channel.ChannelConfig, parsed Config) (string, error) {
+	var resp matrixSyncResponse
+	if err := a.doJSON(ctx, parsed, http.MethodGet, "/_matrix/client/v3/sync?timeout=0", nil, &resp); err != nil {
+		return "", err
+	}
+	a.rememberSyncResponseEvents(cfg.ID, resp)
+	since := strings.TrimSpace(resp.NextBatch)
+	if since == "" {
+		return "", nil
+	}
+	if err := a.persistSinceToken(ctx, cfg.ID, since); err != nil {
+		return "", err
+	}
+	if a.logger != nil {
+		a.logger.Info("matrix sync cursor bootstrapped", slog.String("config_id", cfg.ID))
+	}
+	return since, nil
+}
+
+func (a *MatrixAdapter) rememberSyncResponseEvents(configID string, resp matrixSyncResponse) {
+	configID = strings.TrimSpace(configID)
+	if configID == "" {
+		return
+	}
+	for _, joined := range resp.Rooms.Join {
+		for _, evt := range joined.Timeline.Events {
+			a.seenEvent(configID, evt.EventID)
+		}
+	}
+}
+
+func (a *MatrixAdapter) persistSinceToken(ctx context.Context, configID string, since string) error {
+	if a == nil || a.saveSince == nil {
+		return nil
+	}
+	configID = strings.TrimSpace(configID)
+	since = strings.TrimSpace(since)
+	if configID == "" || since == "" {
+		return nil
+	}
+	return a.saveSince(ctx, configID, since)
 }
 
 func (a *MatrixAdapter) syncOnce(ctx context.Context, cfg channel.ChannelConfig, parsed Config, since string, handler channel.InboundHandler) (string, bool, error) {
@@ -422,6 +495,24 @@ func readReplyToEventID(content map[string]any) string {
 		return ""
 	}
 	return strings.TrimSpace(channel.ReadString(inReplyTo, "event_id"))
+}
+
+func matrixSinceTokenFromRouting(routing map[string]any) string {
+	if len(routing) == 0 {
+		return ""
+	}
+	state, ok := routing[matrixRoutingStateKey]
+	if !ok || state == nil {
+		return strings.TrimSpace(channel.ReadString(routing, "matrix_since_token", "since_token"))
+	}
+	switch value := state.(type) {
+	case map[string]any:
+		return strings.TrimSpace(channel.ReadString(value, "since_token", "sinceToken"))
+	case map[string]string:
+		return strings.TrimSpace(value["since_token"])
+	default:
+		return ""
+	}
 }
 
 func isMatrixBotMentioned(botUserID string, content map[string]any) bool {

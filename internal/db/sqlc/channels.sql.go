@@ -190,6 +190,28 @@ func (q *Queries) ListUserChannelBindingsByPlatform(ctx context.Context, channel
 	return items, nil
 }
 
+const saveMatrixSyncSinceToken = `-- name: SaveMatrixSyncSinceToken :execrows
+UPDATE bot_channel_configs
+SET routing = COALESCE(routing, '{}'::jsonb) || jsonb_build_object(
+  '_matrix',
+  COALESCE(routing->'_matrix', '{}'::jsonb) || jsonb_build_object('since_token', $2::text)
+)
+WHERE id = $1
+`
+
+type SaveMatrixSyncSinceTokenParams struct {
+	ID         pgtype.UUID `json:"id"`
+	SinceToken string      `json:"since_token"`
+}
+
+func (q *Queries) SaveMatrixSyncSinceToken(ctx context.Context, arg SaveMatrixSyncSinceTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, saveMatrixSyncSinceToken, arg.ID, arg.SinceToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateBotChannelConfigDisabled = `-- name: UpdateBotChannelConfigDisabled :one
 UPDATE bot_channel_configs
 SET

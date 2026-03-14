@@ -385,6 +385,11 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 }
 
 func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor) *channel.Manager {
+	if adapter, ok := registry.Get(matrix.Type); ok {
+		if matrixAdapter, ok := adapter.(*matrix.MatrixAdapter); ok {
+			matrixAdapter.SetSyncStateSaver(channelStore.SaveMatrixSyncSinceToken)
+		}
+	}
 	mgr := channel.NewManager(log, registry, channelStore, channelRouter)
 	if mw := channelRouter.IdentityMiddleware(); mw != nil {
 		mgr.Use(mw)

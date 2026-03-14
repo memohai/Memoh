@@ -151,6 +151,28 @@ func (s *Store) UpdateConfigDisabled(ctx context.Context, botID string, channelT
 	return normalizeChannelConfigFromRow(row)
 }
 
+// SaveMatrixSyncSinceToken persists the Matrix /sync cursor without mutating channel config updated_at.
+func (s *Store) SaveMatrixSyncSinceToken(ctx context.Context, configID string, since string) error {
+	if s.queries == nil {
+		return errors.New("channel queries not configured")
+	}
+	pgConfigID, err := db.ParseUUID(configID)
+	if err != nil {
+		return err
+	}
+	rows, err := s.queries.SaveMatrixSyncSinceToken(ctx, sqlc.SaveMatrixSyncSinceTokenParams{
+		ID:         pgConfigID,
+		SinceToken: strings.TrimSpace(since),
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w", ErrChannelConfigNotFound)
+	}
+	return nil
+}
+
 // UpsertChannelIdentityConfig creates or updates a channel identity's channel binding.
 func (s *Store) UpsertChannelIdentityConfig(ctx context.Context, channelIdentityID string, channelType ChannelType, req UpsertChannelIdentityConfigRequest) (ChannelIdentityBinding, error) {
 	if s.queries == nil {
