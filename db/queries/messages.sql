@@ -164,23 +164,54 @@ DELETE FROM bot_history_messages
 WHERE bot_id = sqlc.arg(bot_id);
 
 -- name: ListObservedConversationsByChannelIdentity :many
+WITH observed_routes AS (
+  SELECT
+    (i.header->>'route_id')::uuid AS route_id,
+    MAX(i.created_at)::timestamptz AS last_observed_at
+  FROM bot_inbox i
+  WHERE i.bot_id = sqlc.arg(bot_id)
+    AND i.header->>'channel-identity-id' = sqlc.arg(channel_identity_id)::text
+    AND COALESCE(i.header->>'route_id', '') != ''
+  GROUP BY (i.header->>'route_id')::uuid
+
+  UNION ALL
+
+  SELECT
+    m.route_id,
+    MAX(m.created_at)::timestamptz AS last_observed_at
+  FROM bot_history_messages m
+  WHERE m.bot_id = sqlc.arg(bot_id)
+    AND m.sender_channel_identity_id = sqlc.arg(channel_identity_id)::uuid
+    AND m.route_id IS NOT NULL
+  GROUP BY m.route_id
+),
+ranked_routes AS (
+  SELECT
+    route_id,
+    MAX(last_observed_at)::timestamptz AS last_observed_at
+  FROM observed_routes
+  GROUP BY route_id
+)
 SELECT
   r.id AS route_id,
   r.channel_type AS channel,
-  COALESCE(r.conversation_type, '') AS conversation_type,
+  CASE
+    WHEN LOWER(COALESCE(r.conversation_type, '')) IN ('thread', 'topic') THEN 'thread'
+    ELSE 'group'
+  END AS conversation_type,
   r.external_conversation_id AS conversation_id,
   COALESCE(r.external_thread_id, '') AS thread_id,
   COALESCE(r.metadata->>'conversation_name', '')::text AS conversation_name,
-  MAX(m.created_at)::timestamptz AS last_observed_at
-FROM bot_history_messages m
-JOIN bot_channel_routes r ON r.id = m.route_id
-WHERE m.bot_id = sqlc.arg(bot_id)
-  AND m.sender_channel_identity_id = sqlc.arg(channel_identity_id)
+  rr.last_observed_at
+FROM ranked_routes rr
+JOIN bot_channel_routes r ON r.id = rr.route_id
+WHERE LOWER(COALESCE(r.conversation_type, '')) NOT IN ('', 'p2p', 'private', 'direct', 'dm')
 GROUP BY
   r.id,
   r.channel_type,
   r.conversation_type,
   r.external_conversation_id,
   r.external_thread_id,
-  r.metadata
-ORDER BY MAX(m.created_at) DESC;
+  r.metadata,
+  rr.last_observed_at
+ORDER BY rr.last_observed_at DESC;
