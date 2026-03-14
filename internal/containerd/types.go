@@ -94,6 +94,16 @@ type ContainerSpec struct {
 	TTY     bool
 }
 
+type LayerStatus struct {
+	Ref    string `json:"ref"`
+	Offset int64  `json:"offset"`
+	Total  int64  `json:"total"`
+}
+
+type PullProgress struct {
+	Layers []LayerStatus `json:"layers"`
+}
+
 type NetworkSetupRequest struct {
 	ContainerID string
 	PID         uint32

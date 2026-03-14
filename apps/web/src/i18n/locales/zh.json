@@ -665,6 +665,8 @@
       "importSuccess": "数据导入成功",
       "restoreSuccess": "已恢复保留数据",
       "rollbackSuccess": "快照回滚成功",
+      "pullingImage": "正在拉取镜像...",
+      "creatingContainer": "正在创建容器...",
       "snapshotEmpty": "暂无快照",
       "snapshotLoadFailed": "加载快照失败",
       "snapshotNamePlaceholder": "快照显示名称（可选）",
