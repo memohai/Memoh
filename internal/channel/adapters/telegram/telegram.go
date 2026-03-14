@@ -640,9 +640,11 @@ func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelCon
 	if target == "" {
 		return nil, errors.New("telegram target is required")
 	}
-	if telegramCfg, err := parseConfig(cfg.Credentials); err == nil {
-		channel.RegisterIMErrorSecrets(telegramCfg.BotToken)
+	telegramCfg, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return nil, fmt.Errorf("telegram open stream: %w", err)
 	}
+	channel.RegisterIMErrorSecrets(telegramCfg.BotToken)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
