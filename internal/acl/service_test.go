@@ -94,15 +94,15 @@ func makeBoolRow(value bool) *fakeRow {
 }
 
 type fakeRows struct {
-	rows     []func(dest ...any) error
-	idx      int
-	lastErr  error
+	rows    []func(dest ...any) error
+	idx     int
+	lastErr error
 }
 
-func (r *fakeRows) Close() {}
-func (r *fakeRows) Err() error { return r.lastErr }
-func (r *fakeRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
-func (r *fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (*fakeRows) Close()                                       {}
+func (r *fakeRows) Err() error                                 { return r.lastErr }
+func (*fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (*fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *fakeRows) Next() bool {
 	if r.idx >= len(r.rows) {
 		return false
@@ -110,6 +110,7 @@ func (r *fakeRows) Next() bool {
 	r.idx++
 	return true
 }
+
 func (r *fakeRows) Scan(dest ...any) error {
 	if r.idx == 0 || r.idx > len(r.rows) {
 		return errors.New("scan called without next")
@@ -120,9 +121,9 @@ func (r *fakeRows) Scan(dest ...any) error {
 	}
 	return scan(dest...)
 }
-func (r *fakeRows) Values() ([]any, error) { return nil, nil }
-func (r *fakeRows) RawValues() [][]byte { return nil }
-func (r *fakeRows) Conn() *pgx.Conn { return nil }
+func (*fakeRows) Values() ([]any, error) { return nil, nil }
+func (*fakeRows) RawValues() [][]byte    { return nil }
+func (*fakeRows) Conn() *pgx.Conn        { return nil }
 
 func textFromArg(value any) string {
 	switch v := value.(type) {
@@ -175,34 +176,34 @@ func TestCanPerformChatTrigger(t *testing.T) {
 		{name: "deny channel wins", channelIdentityID: channelIdentityUUID.String(), denyChannelScope: &SourceScope{}, allowGuestAll: true, wantAllowed: false},
 		{name: "allow channel identity", channelIdentityID: channelIdentityUUID.String(), allowChannelScope: &SourceScope{}, wantAllowed: true},
 		{
-			name:          "scoped allow user private",
-			userID:        userUUID.String(),
-			sourceScope:   SourceScope{Channel: "feishu", ConversationType: "private", ConversationID: "chat-1"},
+			name:           "scoped allow user private",
+			userID:         userUUID.String(),
+			sourceScope:    SourceScope{Channel: "feishu", ConversationType: "private", ConversationID: "chat-1"},
 			allowUserScope: &SourceScope{Channel: "feishu", ConversationType: "private", ConversationID: "chat-1"},
-			wantAllowed:   true,
+			wantAllowed:    true,
 		},
 		{
-			name:          "scoped allow user does not match other conversation",
-			userID:        userUUID.String(),
-			sourceScope:   SourceScope{Channel: "feishu", ConversationType: "private", ConversationID: "chat-2"},
+			name:           "scoped allow user does not match other conversation",
+			userID:         userUUID.String(),
+			sourceScope:    SourceScope{Channel: "feishu", ConversationType: "private", ConversationID: "chat-2"},
 			allowUserScope: &SourceScope{Channel: "feishu", ConversationType: "private", ConversationID: "chat-1"},
-			wantAllowed:   false,
+			wantAllowed:    false,
 		},
 		{
-			name:            "scoped deny overrides guest fallback",
+			name:              "scoped deny overrides guest fallback",
 			channelIdentityID: channelIdentityUUID.String(),
-			sourceScope:     SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-1"},
-			denyChannelScope: &SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-1"},
-			allowGuestAll:   true,
-			wantAllowed:     false,
+			sourceScope:       SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-1"},
+			denyChannelScope:  &SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-1"},
+			allowGuestAll:     true,
+			wantAllowed:       false,
 		},
 		{
-			name:            "scoped deny does not block different source",
+			name:              "scoped deny does not block different source",
 			channelIdentityID: channelIdentityUUID.String(),
-			sourceScope:     SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-2"},
-			denyChannelScope: &SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-1"},
-			allowGuestAll:   true,
-			wantAllowed:     true,
+			sourceScope:       SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-2"},
+			denyChannelScope:  &SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-1"},
+			allowGuestAll:     true,
+			wantAllowed:       true,
 		},
 		{name: "guest_all fallback", allowGuestAll: true, wantAllowed: true},
 		{name: "default deny", wantAllowed: false},
@@ -275,7 +276,7 @@ func TestListObservedConversationsByChannelIdentity(t *testing.T) {
 	now := time.Now().UTC()
 
 	db := &fakeDBTX{
-		queryFunc: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			if !strings.Contains(sql, "ListObservedConversationsByChannelIdentity") &&
 				!strings.Contains(sql, "FROM bot_history_messages m") {
 				return &fakeRows{}, nil

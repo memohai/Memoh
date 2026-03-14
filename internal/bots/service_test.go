@@ -79,10 +79,6 @@ func makeBotRow(botID, ownerUserID pgtype.UUID, botType string, allowGuest bool)
 	}
 }
 
-func makeNoRow() *fakeRow {
-	return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
-}
-
 func mustParseUUID(s string) pgtype.UUID {
 	var u pgtype.UUID
 	_ = u.Scan(s)
