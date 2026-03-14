@@ -27,7 +27,7 @@ jwt_expires_in = "168h"
 # binary_path = "/opt/homebrew/bin/socktainer"
 
 [mcp]
-image = "memohai/mcp:latest"
+image = "debian:bookworm-slim"
 data_root = "data"
 
 [postgres]

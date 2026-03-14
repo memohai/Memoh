@@ -13,7 +13,6 @@ const (
 	DefaultHTTPAddr         = ":8080"
 	DefaultNamespace        = "default"
 	DefaultSocketPath       = "/run/containerd/containerd.sock"
-	DefaultMCPImage         = "memohai/mcp:latest"
 	DefaultDataRoot         = "data"
 	DefaultDataMount        = "/data"
 	DefaultCNIBinaryDir     = "/opt/cni/bin"
@@ -26,7 +25,8 @@ const (
 	DefaultPGSSLMode        = "disable"
 	DefaultQdrantURL        = "http://127.0.0.1:6334"
 	DefaultQdrantCollection = "memory"
-	MCPGRPCPort             = 9090
+	DefaultRuntimeDir       = "/opt/memoh/runtime"
+	DefaultBaseImage        = "debian:bookworm-slim"
 )
 
 type Config struct {
@@ -81,21 +81,29 @@ type MCPConfig struct {
 	DataRoot     string `toml:"data_root"`
 	CNIBinaryDir string `toml:"cni_bin_dir"`
 	CNIConfigDir string `toml:"cni_conf_dir"`
+	RuntimeDir   string `toml:"runtime_dir"`
 }
 
-// ImageRef returns the fully qualified image reference, prepending the
-// registry mirror when configured and normalizing for containerd compatibility.
-// Containerd requires a fully-qualified domain in image references — short
-// Docker Hub names like "memohai/mcp:latest" are misinterpreted as hosts.
+// ImageRef returns the fully qualified image reference for the base image,
+// prepending the registry mirror when configured and normalizing for containerd
+// compatibility.
 func (c MCPConfig) ImageRef() string {
 	img := c.Image
 	if img == "" {
-		img = DefaultMCPImage
+		img = DefaultBaseImage
 	}
 	if c.Registry != "" {
 		return c.Registry + "/" + img
 	}
 	return NormalizeImageRef(img)
+}
+
+// RuntimePath returns the path to the MCP runtime directory.
+func (c MCPConfig) RuntimePath() string {
+	if c.RuntimeDir != "" {
+		return c.RuntimeDir
+	}
+	return DefaultRuntimeDir
 }
 
 // NormalizeImageRef ensures an image reference is fully qualified for containerd.
@@ -186,7 +194,7 @@ func Load(path string) (Config, error) {
 			Namespace:  DefaultNamespace,
 		},
 		MCP: MCPConfig{
-			Image:        DefaultMCPImage,
+			Image:        DefaultBaseImage,
 			DataRoot:     DefaultDataRoot,
 			CNIBinaryDir: DefaultCNIBinaryDir,
 			CNIConfigDir: DefaultCNIConfigDir,

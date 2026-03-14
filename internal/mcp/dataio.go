@@ -372,17 +372,15 @@ func (m *Manager) restartContainer(ctx context.Context, botID, containerID strin
 			slog.String("container_id", containerID), slog.Any("error", err))
 		return
 	}
-	netResult, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+	// CNI network setup (for outbound connectivity).
+	if _, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
 		ContainerID: containerID,
 		CNIBinDir:   m.cfg.CNIBinaryDir,
 		CNIConfDir:  m.cfg.CNIConfigDir,
-	})
-	if err != nil {
+	}); err != nil {
 		m.logger.Warn("network setup after restart failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
-		return
 	}
-	m.SetContainerIP(botID, netResult.IP)
 }
 
 func mountedDataDir(root string) string {

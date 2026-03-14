@@ -72,7 +72,7 @@ description = "Restart a service (usage: mise run dev:restart -- server)"
 run = "docker compose -f devenv/docker-compose.yml restart $@"
 
 [tasks."mcp:build"]
-description = "Manually build MCP dev binary (normally auto-triggered by air)"
+description = "Manually rebuild MCP binary in dev container (normally auto-triggered by air)"
 run = """
 #!/bin/bash
 set -e
