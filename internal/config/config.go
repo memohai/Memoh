@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -227,7 +228,26 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return cfg, err
+	}
+
+	var raw struct {
+		Workspace map[string]any `toml:"workspace"`
+		MCP       map[string]any `toml:"mcp"`
+	}
+	if _, err := toml.Decode(string(data), &raw); err != nil {
+		return cfg, err
+	}
+	if raw.MCP != nil {
+		if raw.Workspace != nil {
+			return cfg, fmt.Errorf("config uses both [mcp] and [workspace]; remove [mcp] and keep only [workspace]")
+		}
+		return cfg, fmt.Errorf("config section [mcp] has been renamed to [workspace]; update your config.toml and restart")
+	}
+
+	if _, err := toml.Decode(string(data), &cfg); err != nil {
 		return cfg, err
 	}
 

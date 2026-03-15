@@ -27,9 +27,8 @@ export const ModelConfigModel = z.object({
 
 export const IdentityContextModel = z.object({
   botId: z.string().min(1, 'Bot ID is required'),
-  containerId: z.string().optional().default(''),
-  channelIdentityId: z.string().optional().default(''),
-  displayName: z.string().optional().default(''),
+  channelIdentityId: z.string().min(1, 'Channel identity ID is required'),
+  displayName: z.string().min(1, 'Display name is required'),
   currentPlatform: z.string().optional(),
   replyTarget: z.string().optional(),
   conversationType: z.string().optional(),
