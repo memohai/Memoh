@@ -305,7 +305,6 @@ export type BotsBot = {
     };
     owner_user_id?: string;
     status?: string;
-    type?: string;
     updated_at?: string;
 };
 
@@ -329,7 +328,6 @@ export type BotsCreateBotRequest = {
     metadata?: {
         [key: string]: unknown;
     };
-    type?: string;
 };
 
 export type BotsListBotsResponse = {

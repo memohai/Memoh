@@ -29,6 +29,10 @@ export const en = [
         link: '/getting-started/bot.md'
       },
       {
+        text: 'Bot Access Control',
+        link: '/getting-started/access.md'
+      },
+      {
         text: 'Container Management',
         link: '/getting-started/container.md'
       },
@@ -88,6 +92,27 @@ export const en = [
       {
         text: 'Built-in',
         link: '/memory-providers/builtin.md'
+      },
+      {
+        text: 'Mem0',
+        link: '/memory-providers/mem0.md'
+      },
+      {
+        text: 'OpenViking',
+        link: '/memory-providers/openviking.md'
+      },
+    ]
+  },
+  {
+    text: 'TTS Providers',
+    items: [
+      {
+        text: 'Overview',
+        link: '/tts-providers/index.md'
+      },
+      {
+        text: 'Edge TTS',
+        link: '/tts-providers/edge.md'
       },
     ]
   },

@@ -10,8 +10,7 @@ import (
 )
 
 type Decision struct {
-	BotID   string
-	BotType string
+	BotID string
 }
 
 type Service struct {
@@ -38,24 +37,10 @@ func (s *Service) Resolve(ctx context.Context, botID string) (Decision, error) {
 	if botID == "" {
 		return Decision{}, errors.New("bot id is required")
 	}
-	bot, err := s.bots.Get(ctx, botID)
-	if err != nil {
+	if _, err := s.bots.Get(ctx, botID); err != nil {
 		return Decision{}, err
 	}
-	decision := Decision{
-		BotID:   botID,
-		BotType: strings.TrimSpace(bot.Type),
-	}
-	return decision, nil
-}
-
-// BotType returns the normalized bot type. Implements router.PolicyService.
-func (s *Service) BotType(ctx context.Context, botID string) (string, error) {
-	decision, err := s.Resolve(ctx, botID)
-	if err != nil {
-		return "", err
-	}
-	return decision.BotType, nil
+	return Decision{BotID: botID}, nil
 }
 
 // BotOwnerUserID returns bot owner's user id. Implements router.PolicyService.

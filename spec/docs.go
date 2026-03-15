@@ -9589,9 +9589,6 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
-                "type": {
-                    "type": "string"
-                },
                 "updated_at": {
                     "type": "string"
                 }
@@ -9642,9 +9639,6 @@ const docTemplate = `{
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
-                },
-                "type": {
-                    "type": "string"
                 }
             }
         },

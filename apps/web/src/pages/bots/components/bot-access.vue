@@ -18,22 +18,16 @@
           <p class="text-sm text-muted-foreground">
             {{ $t('bots.access.allowGuestDescription') }}
           </p>
-          <p
-            v-if="isPersonalBot"
-            class="text-xs text-muted-foreground"
-          >
-            {{ $t('bots.settings.allowGuestPersonalHint') }}
-          </p>
         </div>
         <Switch
           :model-value="allowGuestDraft"
-          :disabled="isPersonalBot || isSavingGuestAccess"
+          :disabled="isSavingGuestAccess"
           @update:model-value="(val) => allowGuestDraft = !!val"
         />
       </div>
       <div class="flex justify-end">
         <Button
-          :disabled="isPersonalBot || !hasGuestAccessChanges || isSavingGuestAccess"
+          :disabled="!hasGuestAccessChanges || isSavingGuestAccess"
           @click="handleSaveGuestAccess"
         >
           <Spinner
@@ -655,15 +649,12 @@ import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 
 const props = defineProps<{
   botId: string
-  botType?: string
 }>()
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
 const deletingRuleId = ref('')
 const allowGuestDraft = ref(false)
-
-const isPersonalBot = computed(() => props.botType === 'personal')
 
 type RuleSelection = {
   userId: string

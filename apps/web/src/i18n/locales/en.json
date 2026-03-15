@@ -501,11 +501,6 @@
     "editAvatarDescription": "Set the image URL for the bot avatar.",
     "avatarUpdateSuccess": "Avatar updated",
     "avatarUpdateFailed": "Failed to update avatar",
-    "typePlaceholder": "Select bot type",
-    "types": {
-      "personal": "Personal",
-      "public": "Public"
-    },
     "active": "Active",
     "inactive": "Inactive",
     "lifecycle": {
@@ -758,7 +753,6 @@
       "browserContext": "Browser Context",
       "browserContextPlaceholder": "Select browser context (disabled if empty)",
       "allowGuest": "Allow Guest Access",
-      "allowGuestPersonalHint": "Personal bots do not support guest access. Use a public bot instead.",
       "loopDetectionTitle": "Detect and auto-block output loops",
       "searchModel": "Search models…",
       "noModel": "No models available",

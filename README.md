@@ -79,7 +79,7 @@ Memoh Bot can distinguish and remember requests from multiple humans and bots, w
 - 🤖 **Multi-Bot Management**: Create multiple bots; humans and bots, or bots with each other, can chat privately, in groups, or collaborate. Supports role-based access control (owner / admin / member) with ownership transfer.
 - 👥 **Multi-User & Identity Recognition**: Bots can distinguish individual users in group chats, remember each person's context separately, and send direct messages to specific users. Cross-platform identity binding unifies the same person across Telegram, Discord, Lark, and Web.
 - 📦 **Containerized**: Each bot runs in its own isolated containerd container. Bots can freely execute commands, edit files, and access the network within their containers — like having their own computer. Supports container snapshots for save/restore.
-- 🧠 **Memory Engineering**: Hybrid retrieval (dense vector search + BM25 keyword search) with LLM-driven fact extraction. Last 24 hours of context loaded by default, with memory compaction and rebuild capabilities.
+- 🧠 **Memory Engineering**: Multi-provider memory architecture — Built-in (off / sparse / dense modes), [Mem0](https://mem0.ai), and OpenViking. LLM-driven fact extraction, hybrid retrieval (dense semantic search + BM25 keyword + neural sparse vectors), 24-hour context loading, memory compaction & rebuild, and multi-language auto-detection.
 - 💬 **Multi-Platform**: Supports Telegram, Discord, Lark (Feishu), Email, and built-in Web/CLI. Unified message format with rich text, media attachments, reactions, and streaming across all platforms. Cross-platform identity binding.
 - 📧 **Email**: Multi-adapter email service (Mailgun, generic SMTP) with per-bot binding and outbound audit log. Bots can send and receive emails as a channel.
 - 🔧 **MCP (Model Context Protocol)**: Full MCP support (HTTP / SSE / Stdio). Built-in tools for container operations, memory search, web search, scheduling, messaging, and more. Connect external MCP servers for extensibility.
@@ -94,6 +94,20 @@ Memoh Bot can distinguish and remember requests from multiple humans and bots, w
 - 🧪 **Multi-Model**: Works with any OpenAI-compatible, Anthropic, or Google Generative AI provider. Per-bot model assignment for chat, memory, and embedding.
 - 🖥️ **Web UI**: Modern dashboard (Vue 3 + Tailwind CSS) with real-time streaming chat, tool call visualization, in-chat file manager, container filesystem browser, and visual configuration for all settings. Dark/light theme, i18n.
 - 🚀 **One-Click Deploy**: Docker Compose with automatic migration, containerd setup, and CNI networking. Interactive install script included.
+
+## Memory System
+
+Memoh's memory system is built around **Memory Providers** — pluggable backends that control how a bot stores, retrieves, and manages long-term memory.
+
+| Provider | Description |
+|----------|-------------|
+| **Built-in** | Self-hosted, ships with Memoh. Three modes: **Off** (file-based, no vector search), **Sparse** (neural sparse vectors via local model, no API cost), **Dense** (embedding-based semantic search via Qdrant). |
+| **Mem0** | SaaS memory via the [Mem0](https://mem0.ai) API. |
+| **OpenViking** | Self-hosted or SaaS memory with its own API. |
+
+Each bot binds one provider. During chat, the bot automatically extracts key facts from every conversation turn and stores them as structured memories. On each new message, the most relevant memories are retrieved via hybrid search and injected into the bot's context — giving it personalized, long-term recall across conversations.
+
+Additional capabilities include memory compaction (merge redundant entries), rebuild, manual creation/editing, and vector manifold visualization (Top-K distribution & CDF curves). See the [documentation](https://docs.memoh.ai/memory-providers/) for setup details.
 
 ## Gallery
 

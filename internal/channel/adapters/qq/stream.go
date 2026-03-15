@@ -3,6 +3,7 @@ package qq
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,11 @@ type qqOutboundStream struct {
 }
 
 func (a *QQAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+	parsed, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return nil, fmt.Errorf("qq open stream: %w", err)
+	}
+	channel.SetIMErrorSecrets("qq:"+parsed.AppID, parsed.AppSecret)
 	return &qqOutboundStream{
 		target: target,
 		reply:  opts.Reply,
@@ -80,7 +86,7 @@ func (s *qqOutboundStream) Push(ctx context.Context, event channel.StreamEvent) 
 		s.mu.Unlock()
 		return nil
 	case channel.StreamEventError:
-		errText := strings.TrimSpace(event.Error)
+		errText := channel.RedactIMErrorText(strings.TrimSpace(event.Error))
 		if errText == "" {
 			return nil
 		}

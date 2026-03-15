@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
@@ -487,7 +488,14 @@ func FetchProviderByID(ctx context.Context, queries *sqlc.Queries, providerID st
 	if err != nil {
 		return sqlc.LlmProvider{}, err
 	}
-	return queries.GetLlmProviderByID(ctx, parsed)
+	provider, err := queries.GetLlmProviderByID(ctx, parsed)
+	if err != nil {
+		return sqlc.LlmProvider{}, err
+	}
+	if strings.TrimSpace(provider.ApiKey) != "" {
+		channel.SetIMErrorSecrets("llm-provider:"+providerID, provider.ApiKey)
+	}
+	return provider, nil
 }
 
 func intToInt4(value int, name string) (pgtype.Int4, error) {

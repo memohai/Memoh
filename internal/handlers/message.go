@@ -354,11 +354,11 @@ func (*MessageHandler) requireChannelIdentityID(c echo.Context) (string, error) 
 }
 
 func (h *MessageHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowGuest: true})
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID)
 }
 
 func (h *MessageHandler) authorizeBotManage(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{})
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID)
 }
 
 func (h *MessageHandler) requireReadable(ctx context.Context, conversationID, channelIdentityID string) error {

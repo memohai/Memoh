@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/db/sqlc"
 	mcpgw "github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
@@ -87,6 +89,7 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 	if err != nil {
 		return mcpgw.BuildToolErrorResult(err.Error()), nil
 	}
+	registerSearchProviderSecrets(provider)
 
 	switch toolName {
 	case toolWebSearch:
@@ -1144,4 +1147,20 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// searchProviderSecretFields are config keys known to hold credentials.
+var searchProviderSecretFields = []string{"api_key", "secret_id", "secret_key"}
+
+func registerSearchProviderSecrets(provider sqlc.SearchProvider) {
+	cfg := parseConfig(provider.Config)
+	var secrets []string
+	for _, key := range searchProviderSecretFields {
+		if v := stringValue(cfg[key]); v != "" {
+			secrets = append(secrets, v)
+		}
+	}
+	if len(secrets) > 0 {
+		channel.SetIMErrorSecrets("search:"+provider.ID.String(), secrets...)
+	}
 }

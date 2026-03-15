@@ -192,3 +192,12 @@ func (c Config) openBaseURL() string {
 	}
 	return lark.FeishuBaseUrl
 }
+
+func (c Config) registerIMErrorSecrets() {
+	channel.SetIMErrorSecrets("feishu:"+c.AppID, c.AppSecret, c.EncryptKey, c.VerificationToken)
+}
+
+func (c Config) newClient() *lark.Client {
+	c.registerIMErrorSecrets()
+	return lark.NewClient(c.AppID, c.AppSecret, lark.WithOpenBaseUrl(c.openBaseURL()))
+}

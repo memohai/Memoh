@@ -337,7 +337,6 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{
   botId: string
-  botType?: string
 }>()
 
 const { t } = useI18n()

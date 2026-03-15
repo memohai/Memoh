@@ -24,9 +24,8 @@ type Service struct {
 }
 
 var (
-	ErrPersonalBotGuestAccessUnsupported = errors.New("personal bots do not support guest access")
-	ErrModelIDAmbiguous                  = errors.New("model_id is ambiguous across providers")
-	ErrInvalidModelRef                   = errors.New("invalid model reference")
+	ErrModelIDAmbiguous = errors.New("model_id is ambiguous across providers")
+	ErrInvalidModelRef  = errors.New("invalid model reference")
 )
 
 func NewService(log *slog.Logger, queries *sqlc.Queries, aclService *acl.Service) *Service {
@@ -67,8 +66,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	isPersonalBot := strings.EqualFold(strings.TrimSpace(botRow.Type), "personal")
-
 	allowGuest, err := s.allowGuestEnabled(ctx, botID)
 	if err != nil {
 		return Settings{}, err
@@ -86,12 +83,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if strings.TrimSpace(req.Language) != "" {
 		current.Language = strings.TrimSpace(req.Language)
 	}
-	if isPersonalBot {
-		if req.AllowGuest != nil && *req.AllowGuest {
-			return Settings{}, ErrPersonalBotGuestAccessUnsupported
-		}
-		current.AllowGuest = false
-	} else if req.AllowGuest != nil {
+	if req.AllowGuest != nil {
 		current.AllowGuest = *req.AllowGuest
 	}
 	if req.ReasoningEnabled != nil {

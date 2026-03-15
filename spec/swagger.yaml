@@ -482,8 +482,6 @@ definitions:
         type: string
       status:
         type: string
-      type:
-        type: string
       updated_at:
         type: string
     type: object
@@ -518,8 +516,6 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
-      type:
-        type: string
     type: object
   bots.ListBotsResponse:
     properties:

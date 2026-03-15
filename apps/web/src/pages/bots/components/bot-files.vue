@@ -3,7 +3,6 @@ import FileManager from '@/components/file-manager/index.vue'
 
 defineProps<{
   botId: string
-  botType?: string
 }>()
 </script>
 
