@@ -220,7 +220,6 @@ type ChatRequest struct {
 	Token                   string `json:"-"`
 	UserID                  string `json:"-"`
 	SourceChannelIdentityID string `json:"-"`
-	ContainerID             string `json:"-"`
 	DisplayName             string `json:"-"`
 	RouteID                 string `json:"-"`
 	ChatToken               string `json:"-"`

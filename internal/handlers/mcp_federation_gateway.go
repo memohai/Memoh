@@ -296,7 +296,7 @@ func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, 
 		Env:     normalizeStringMap(connection.Config["env"]),
 		Cwd:     strings.TrimSpace(anyToString(connection.Config["cwd"])),
 	}
-	return g.handler.startContainerdMCPCommandSession(ctx, containerID, request)
+	return g.handler.startContainerdMCPCommandSession(ctx, botID, containerID, request)
 }
 
 func parseGatewayToolsListPayload(payload map[string]any) ([]mcpgw.ToolDescriptor, error) {

@@ -57,7 +57,6 @@ func TestPostTriggerSchedule_Endpoint(t *testing.T) {
 			Skills:            []string{},
 			Identity: gatewayIdentity{
 				BotID:             "bot-123",
-				ContainerID:       "mcp-bot-123",
 				ChannelIdentityID: "owner-user-1",
 				DisplayName:       "Scheduler",
 			},

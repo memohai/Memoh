@@ -422,9 +422,30 @@ func (h *ContainerdHandler) botContainerID(ctx context.Context, botID string) (s
 	if err != nil {
 		return "", err
 	}
-	if len(containers) == 0 {
-		return "", echo.NewHTTPError(http.StatusNotFound, "container not found")
+	if containerID, ok := newestContainerID(containers); ok {
+		return containerID, nil
 	}
+
+	containers, err = h.service.ListContainers(ctx)
+	if err != nil {
+		return "", err
+	}
+	matched := make([]ctr.ContainerInfo, 0, len(containers))
+	for _, info := range containers {
+		resolvedBotID, ok := workspace.BotIDFromContainerInfo(info)
+		if !ok || resolvedBotID != botID {
+			continue
+		}
+		matched = append(matched, info)
+	}
+	if containerID, ok := newestContainerID(matched); ok {
+		return containerID, nil
+	}
+
+	return "", echo.NewHTTPError(http.StatusNotFound, "container not found")
+}
+
+func newestContainerID(containers []ctr.ContainerInfo) (string, bool) {
 	bestID := ""
 	var bestUpdated time.Time
 	for _, info := range containers {
@@ -433,7 +454,7 @@ func (h *ContainerdHandler) botContainerID(ctx context.Context, botID string) (s
 			bestUpdated = info.UpdatedAt
 		}
 	}
-	return bestID, nil
+	return bestID, bestID != ""
 }
 
 // GetContainer godoc

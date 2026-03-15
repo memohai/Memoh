@@ -234,10 +234,8 @@ func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 
 	botIDs := make([]string, 0, len(containers))
 	for _, info := range containers {
-		if botID, ok := info.Labels[BotLabelKey]; ok {
+		if botID, ok := BotIDFromContainerInfo(info); ok {
 			botIDs = append(botIDs, botID)
-		} else if strings.HasPrefix(info.ID, LegacyContainerPrefix) {
-			botIDs = append(botIDs, strings.TrimPrefix(info.ID, LegacyContainerPrefix))
 		}
 	}
 	return botIDs, nil
