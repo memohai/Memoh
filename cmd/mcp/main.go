@@ -63,7 +63,7 @@ func main() {
 
 	// Append toolkit to PATH so child processes (via /bin/sh -c) can find npx/uvx.
 	// Container-native tools take priority since toolkit is appended at the end.
-	os.Setenv("PATH", os.Getenv("PATH")+":/opt/memoh/toolkit/bin")
+	_ = os.Setenv("PATH", os.Getenv("PATH")+":/opt/memoh/toolkit/bin")
 
 	// PID 1 zombie reaping: when mcp runs as PID 1 inside a container,
 	// orphaned child processes become zombies unless reaped.
@@ -84,7 +84,7 @@ func main() {
 	}
 
 	// Clean up residual socket from a previous run.
-	os.Remove(socketPath)
+	_ = os.Remove(socketPath)
 
 	lis, err := (&net.ListenConfig{}).Listen(ctx, "unix", socketPath)
 	if err != nil {
