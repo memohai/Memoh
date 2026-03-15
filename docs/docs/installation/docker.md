@@ -134,7 +134,7 @@ sudo POSTGRES_PASSWORD=your-db-password docker compose up -d
 For users in mainland China who cannot access Docker Hub directly, uncomment the `registry` line in `config.toml`:
 
 ```toml
-[mcp]
+[workspace]
 registry = "memoh.cn"
 ```
 

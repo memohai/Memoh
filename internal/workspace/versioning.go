@@ -1,4 +1,4 @@
-package mcp
+package workspace
 
 import (
 	"context"
@@ -436,10 +436,10 @@ func (m *Manager) buildVersionSpec(botID string) (ctr.ContainerSpec, error) {
 
 	env := make([]string, 0, len(tzEnv)+1)
 	env = append(env, tzEnv...)
-	env = append(env, "MCP_SOCKET_PATH=/run/memoh/mcp.sock")
+	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
 
 	return ctr.ContainerSpec{
-		Cmd:    []string{"/opt/memoh/mcp"},
+		Cmd:    []string{"/opt/memoh/bridge"},
 		Mounts: mounts,
 		Env:    env,
 	}, nil

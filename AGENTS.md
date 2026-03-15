@@ -141,7 +141,7 @@ Memoh/
 │   ├── migrations/             #   SQL migration files
 │   └── queries/                #   SQL query files (sqlc input)
 ├── conf/                       # Configuration templates (app.example.toml, app.docker.toml, app.apple.toml, app.windows.toml)
-├── devenv/                     # Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, mcp-build.sh, server-entrypoint.sh)
+├── devenv/                     # Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, bridge-build.sh, server-entrypoint.sh)
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, docker-compose.yml, docker-compose.cn.yml)
 ├── docs/                       # Documentation site
 ├── scripts/                    # Utility scripts (db, release, install)
@@ -291,7 +291,7 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[admin]` — Admin account credentials
 - `[auth]` — JWT authentication settings
 - `[containerd]` — Container runtime configuration (socket path, namespace)
-- `[mcp]` — MCP image and data configuration
+- `[workspace]` — Workspace image and data configuration
 - `[postgres]` — PostgreSQL connection
 - `[qdrant]` — Qdrant vector database connection
 - `[agent_gateway]` — Agent Gateway address

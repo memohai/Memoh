@@ -49,10 +49,10 @@ if ! ctr version >/dev/null 2>&1; then
 fi
 echo "containerd is running (pid $CONTAINERD_PID)"
 
-# Build MCP binary into runtime directory (first boot)
-echo "Building MCP binary..."
-(cd /workspace && go build -o /opt/memoh/runtime/mcp ./cmd/mcp)
-echo "MCP binary ready."
+# Build bridge binary into runtime directory (first boot)
+echo "Building bridge binary..."
+(cd /workspace && go build -o /opt/memoh/runtime/bridge ./cmd/bridge)
+echo "Bridge binary ready."
 
 echo "Starting server..."
 

@@ -60,7 +60,7 @@ mise run dev:restart -- server  # Restart a specific service
 
 ```
 conf/       — Configuration templates (app.example.toml, app.docker.toml)
-devenv/     — Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, mcp-build.sh)
+devenv/     — Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, bridge-build.sh)
 docker/     — Production Docker build & runtime (Dockerfiles, entrypoints)
 cmd/        — Go application entry points
 internal/   — Go backend core code

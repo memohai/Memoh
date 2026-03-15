@@ -1,4 +1,4 @@
-package mcpclient
+package bridge
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
 const testBufSize = 1 << 20

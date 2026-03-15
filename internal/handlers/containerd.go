@@ -28,12 +28,13 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 type ContainerdHandler struct {
 	service          ctr.Service
-	manager          *mcp.Manager
-	cfg              config.MCPConfig
+	manager          *workspace.Manager
+	cfg              config.WorkspaceConfig
 	namespace        string
 	containerBackend string
 	logger           *slog.Logger
@@ -139,7 +140,7 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.MCPConfig, namespace string, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *workspace.Manager, cfg config.WorkspaceConfig, namespace string, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *ContainerdHandler {
 	h := &ContainerdHandler{
 		service:          service,
 		manager:          manager,
@@ -211,7 +212,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	containerID := mcp.ContainerPrefix + botID
+	containerID := workspace.ContainerPrefix + botID
 
 	// Image override lets administrators specify a custom base image.
 	// NOTE(saas): if this becomes a multi-tenant SaaS, image override must be
@@ -417,7 +418,7 @@ func (h *ContainerdHandler) botContainerID(ctx context.Context, botID string) (s
 			}
 		}
 	}
-	containers, err := h.service.ListContainersByLabel(ctx, mcp.BotLabelKey, botID)
+	containers, err := h.service.ListContainersByLabel(ctx, workspace.BotLabelKey, botID)
 	if err != nil {
 		return "", err
 	}
@@ -620,7 +621,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	created, err := h.manager.CreateSnapshot(c.Request().Context(), botID, req.SnapshotName, mcp.SnapshotSourceManual)
+	created, err := h.manager.CreateSnapshot(c.Request().Context(), botID, req.SnapshotName, workspace.SnapshotSourceManual)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "container not found")
@@ -634,7 +635,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 		DisplayName:         created.DisplayName,
 		Snapshotter:         created.Snapshotter,
 		Version:             created.Version,
-		Source:              mcp.SnapshotSourceManual,
+		Source:              workspace.SnapshotSourceManual,
 	})
 }
 
@@ -695,7 +696,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 
 	items := make([]SnapshotInfo, 0, len(lineage)+len(data.ManagedMeta))
 	seen := make(map[string]struct{}, len(lineage)+len(data.ManagedMeta))
-	appendRuntime := func(runtimeInfo ctr.SnapshotInfo, fallbackSource string, meta *mcp.ManagedSnapshotMeta) {
+	appendRuntime := func(runtimeInfo ctr.SnapshotInfo, fallbackSource string, meta *workspace.ManagedSnapshotMeta) {
 		source := fallbackSource
 		managed := false
 		var version *int
@@ -976,7 +977,7 @@ func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, e
 
 // SetupBotContainer creates and starts the MCP container for a bot.
 func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string) error {
-	containerID := mcp.ContainerPrefix + botID
+	containerID := workspace.ContainerPrefix + botID
 
 	if h.manager == nil {
 		return errors.New("manager not configured")

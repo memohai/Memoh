@@ -12,7 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/mcp/mcpclient"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 // ---------- request / response types ----------
@@ -84,7 +84,7 @@ func resolveContainerPath(rawPath string) (string, error) {
 }
 
 // getGRPCClient returns the gRPC client for the bot's container.
-func (h *ContainerdHandler) getGRPCClient(ctx context.Context, botID string) (*mcpclient.Client, error) {
+func (h *ContainerdHandler) getGRPCClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	return h.manager.MCPClient(ctx, botID)
 }
 
@@ -103,13 +103,13 @@ func fsFileInfoFromEntry(containerPath, name string, isDir bool, size int64, mod
 // fsHTTPError maps mcpclient domain errors to HTTP status codes.
 func fsHTTPError(err error) *echo.HTTPError {
 	switch {
-	case errors.Is(err, mcpclient.ErrNotFound):
+	case errors.Is(err, bridge.ErrNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	case errors.Is(err, mcpclient.ErrBadRequest):
+	case errors.Is(err, bridge.ErrBadRequest):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	case errors.Is(err, mcpclient.ErrForbidden):
+	case errors.Is(err, bridge.ErrForbidden):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
-	case errors.Is(err, mcpclient.ErrUnavailable):
+	case errors.Is(err, bridge.ErrUnavailable):
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
