@@ -1,6 +1,6 @@
 <template>
-  <FontAwesomeIcon
-    :icon="icon"
+  <component
+    :is="iconComponent"
     class="shrink-0"
     :class="sizeClass"
   />
@@ -8,12 +8,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { getSearchProviderIcon } from './icons'
+import { searchProviderIconMap } from '@memoh/icon'
+import { GlobeIcon } from 'lucide-vue-next'
 
 const props = withDefaults(defineProps<{
-  /** The provider key, e.g. 'brave' */
   provider: string
-  /** Size preset */
   size?: 'xs' | 'sm' | 'md' | 'lg'
 }>(), {
   size: 'sm',
@@ -29,5 +28,8 @@ const sizeClass = computed(() => {
   }
 })
 
-const icon = computed(() => getSearchProviderIcon(props.provider))
+const iconComponent = computed(() => {
+  const key = (props.provider ?? '').trim().toLowerCase()
+  return searchProviderIconMap[key] ?? GlobeIcon
+})
 </script>
