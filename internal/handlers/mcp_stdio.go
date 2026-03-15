@@ -588,12 +588,12 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "command is required")
 	}
 	ctx := c.Request().Context()
-	containerID, err := h.botContainerID(ctx, botID)
+	if err := h.manager.EnsureRunning(ctx, botID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	containerID, err := h.manager.ContainerID(ctx, botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
-	}
-	if err := h.ensureContainerAndTask(ctx, containerID, botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	sess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req)

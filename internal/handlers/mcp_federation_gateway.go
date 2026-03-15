@@ -277,11 +277,11 @@ func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, 
 	if g.handler == nil {
 		return nil, errors.New("containerd handler not configured")
 	}
-	containerID, err := g.handler.botContainerID(ctx, botID)
-	if err != nil {
+	if err := g.handler.manager.EnsureRunning(ctx, botID); err != nil {
 		return nil, err
 	}
-	if err := g.handler.ensureContainerAndTask(ctx, containerID, botID); err != nil {
+	containerID, err := g.handler.manager.ContainerID(ctx, botID)
+	if err != nil {
 		return nil, err
 	}
 

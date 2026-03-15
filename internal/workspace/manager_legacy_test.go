@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/containerd/errdefs"
 
@@ -18,6 +19,7 @@ import (
 type legacyRouteTestService struct {
 	container ctr.ContainerInfo
 	created   bool
+	byLabel   []ctr.ContainerInfo
 
 	createCalls int
 	startCalls  int
@@ -84,8 +86,8 @@ func (s *legacyRouteTestService) DeleteContainer(context.Context, string, *ctr.D
 	return nil
 }
 
-func (*legacyRouteTestService) ListContainersByLabel(context.Context, string, string) ([]ctr.ContainerInfo, error) {
-	return nil, nil
+func (s *legacyRouteTestService) ListContainersByLabel(context.Context, string, string) ([]ctr.ContainerInfo, error) {
+	return s.byLabel, nil
 }
 
 func (s *legacyRouteTestService) StartContainer(context.Context, string, *ctr.StartTaskOptions) error {
@@ -211,5 +213,49 @@ func TestDeleteClearsLegacyRoute(t *testing.T) {
 	}
 	if svc.removeNet != 1 || svc.deleteTask != 1 || svc.deleteCalls != 1 {
 		t.Fatalf("expected delete cleanup once, got removeNet=%d deleteTask=%d delete=%d", svc.removeNet, svc.deleteTask, svc.deleteCalls)
+	}
+}
+
+func TestContainerIDPrefersCurrentLabelSearch(t *testing.T) {
+	t.Parallel()
+
+	botID := "00000000-0000-0000-0000-000000000001"
+	svc := &legacyRouteTestService{
+		byLabel: []ctr.ContainerInfo{{
+			ID:        "workspace-from-label",
+			Labels:    map[string]string{BotLabelKey: botID},
+			UpdatedAt: time.Now(),
+		}},
+	}
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{})
+
+	containerID, err := m.ContainerID(context.Background(), botID)
+	if err != nil {
+		t.Fatalf("ContainerID failed: %v", err)
+	}
+	if containerID != "workspace-from-label" {
+		t.Fatalf("expected label-resolved container ID, got %q", containerID)
+	}
+}
+
+func TestContainerIDFallsBackToNameInference(t *testing.T) {
+	t.Parallel()
+
+	botID := "00000000-0000-0000-0000-000000000001"
+	svc := &legacyRouteTestService{
+		created: true,
+		container: ctr.ContainerInfo{
+			ID:        ContainerPrefix + botID,
+			UpdatedAt: time.Now(),
+		},
+	}
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{})
+
+	containerID, err := m.ContainerID(context.Background(), botID)
+	if err != nil {
+		t.Fatalf("ContainerID failed: %v", err)
+	}
+	if containerID != ContainerPrefix+botID {
+		t.Fatalf("expected inferred container ID, got %q", containerID)
 	}
 }
