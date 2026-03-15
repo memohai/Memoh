@@ -89,7 +89,7 @@ services:
       # Toolkit: run ./docker/toolkit/install.sh once before first use
       - ../.toolkit:/opt/memoh/runtime/toolkit
       - ../docker/toolkit/bin:/opt/memoh/runtime/toolkit/bin
-      - ../cmd/mcp/template:/opt/memoh/runtime/templates
+      - ../cmd/bridge/template:/opt/memoh/runtime/templates
       - /etc/localtime:/etc/localtime:ro
     ports:
       - "8080:8080"

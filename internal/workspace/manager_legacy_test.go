@@ -1,4 +1,4 @@
-package mcp
+package workspace
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
-	"github.com/memohai/memoh/internal/mcp/mcpclient"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 type legacyRouteTestService struct {
@@ -139,7 +139,7 @@ func (*legacyRouteTestService) SnapshotMounts(context.Context, string, string) (
 	return nil, ctr.ErrNotSupported
 }
 
-func newLegacyRouteTestManager(t *testing.T, svc ctr.Service, cfg config.MCPConfig) *Manager {
+func newLegacyRouteTestManager(t *testing.T, svc ctr.Service, cfg config.WorkspaceConfig) *Manager {
 	t.Helper()
 	logger := slog.New(slog.DiscardHandler)
 	m := &Manager{
@@ -151,7 +151,7 @@ func newLegacyRouteTestManager(t *testing.T, svc ctr.Service, cfg config.MCPConf
 		logger:         logger,
 	}
 	m.containerID = func(botID string) string { return ContainerPrefix + botID }
-	m.grpcPool = mcpclient.NewPool(m.dialTarget)
+	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
 }
 
@@ -163,7 +163,7 @@ func TestStartWithImageClearsLegacyRouteForBridgeContainer(t *testing.T) {
 	}
 
 	svc := &legacyRouteTestService{}
-	m := newLegacyRouteTestManager(t, svc, config.MCPConfig{
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
 		DataRoot:     dataRoot,
 		RuntimeDir:   runtimeDir,
 		Snapshotter:  "overlayfs",
@@ -182,7 +182,7 @@ func TestStartWithImageClearsLegacyRouteForBridgeContainer(t *testing.T) {
 		t.Fatalf("StartWithImage failed: %v", err)
 	}
 
-	if got := m.dialTarget(botID); got != "unix://"+filepath.Join(dataRoot, "run", botID, "mcp.sock") {
+	if got := m.dialTarget(botID); got != "unix://"+filepath.Join(dataRoot, "run", botID, "bridge.sock") {
 		t.Fatalf("expected unix dial target after bridge start, got %q", got)
 	}
 	if svc.createCalls != 1 || svc.startCalls != 1 {
@@ -191,8 +191,8 @@ func TestStartWithImageClearsLegacyRouteForBridgeContainer(t *testing.T) {
 }
 
 func TestDeleteClearsLegacyRoute(t *testing.T) {
-	svc := &legacyRouteTestService{created: true, container: ctr.ContainerInfo{ID: "mcp-00000000-0000-0000-0000-000000000001"}}
-	m := newLegacyRouteTestManager(t, svc, config.MCPConfig{
+	svc := &legacyRouteTestService{created: true, container: ctr.ContainerInfo{ID: "workspace-00000000-0000-0000-0000-000000000001"}}
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
 		DataRoot:     t.TempDir(),
 		Snapshotter:  "overlayfs",
 		CNIBinaryDir: "/opt/cni/bin",

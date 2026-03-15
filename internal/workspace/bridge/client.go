@@ -1,8 +1,8 @@
-// Package mcpclient provides a gRPC client for the MCP container service.
+// Package bridge provides a gRPC client for the workspace container bridge service.
 // Each bot container runs a gRPC server listening on a Unix domain socket.
 // This client wraps the generated gRPC stubs with connection pooling and a
 // simplified API for callers.
-package mcpclient
+package bridge
 
 import (
 	"bytes"
@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
 const connectingTimeout = 30 * time.Second

@@ -2,9 +2,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.34.0
-// source: internal/mcp/mcpcontainer/mcpcontainer.proto
+// source: internal/workspace/bridgepb/bridge.proto
 
-package mcpcontainer
+package bridgepb
 
 import (
 	reflect "reflect"

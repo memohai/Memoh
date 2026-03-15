@@ -35,7 +35,7 @@ type Config struct {
 	Admin          AdminConfig          `toml:"admin"`
 	Auth           AuthConfig           `toml:"auth"`
 	Containerd     ContainerdConfig     `toml:"containerd"`
-	MCP            MCPConfig            `toml:"mcp"`
+	Workspace      WorkspaceConfig      `toml:"workspace"`
 	Postgres       PostgresConfig       `toml:"postgres"`
 	Qdrant         QdrantConfig         `toml:"qdrant"`
 	Sparse         SparseConfig         `toml:"sparse"`
@@ -74,7 +74,7 @@ type SocktainerConfig struct {
 	BinaryPath string `toml:"binary_path"`
 }
 
-type MCPConfig struct {
+type WorkspaceConfig struct {
 	Registry     string `toml:"registry"`
 	Image        string `toml:"image"`
 	Snapshotter  string `toml:"snapshotter"`
@@ -87,7 +87,7 @@ type MCPConfig struct {
 // ImageRef returns the fully qualified image reference for the base image,
 // prepending the registry mirror when configured and normalizing for containerd
 // compatibility.
-func (c MCPConfig) ImageRef() string {
+func (c WorkspaceConfig) ImageRef() string {
 	img := c.Image
 	if img == "" {
 		img = DefaultBaseImage
@@ -98,8 +98,8 @@ func (c MCPConfig) ImageRef() string {
 	return NormalizeImageRef(img)
 }
 
-// RuntimePath returns the path to the MCP runtime directory.
-func (c MCPConfig) RuntimePath() string {
+// RuntimePath returns the path to the workspace runtime directory.
+func (c WorkspaceConfig) RuntimePath() string {
 	if c.RuntimeDir != "" {
 		return c.RuntimeDir
 	}
@@ -193,7 +193,7 @@ func Load(path string) (Config, error) {
 			SocketPath: DefaultSocketPath,
 			Namespace:  DefaultNamespace,
 		},
-		MCP: MCPConfig{
+		Workspace: WorkspaceConfig{
 			Image:        DefaultBaseImage,
 			DataRoot:     DefaultDataRoot,
 			CNIBinaryDir: DefaultCNIBinaryDir,

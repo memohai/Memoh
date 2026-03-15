@@ -15,11 +15,11 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/memohai/memoh/internal/logger"
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
 const (
-	defaultSocketPath = "/run/memoh/mcp.sock"
+	defaultSocketPath = "/run/memoh/bridge.sock"
 	templateDir       = "/opt/memoh/templates"
 )
 
@@ -65,7 +65,7 @@ func main() {
 	// Container-native tools take priority since toolkit is appended at the end.
 	_ = os.Setenv("PATH", os.Getenv("PATH")+":/opt/memoh/toolkit/bin")
 
-	// PID 1 zombie reaping: when mcp runs as PID 1 inside a container,
+	// PID 1 zombie reaping: when bridge runs as PID 1 inside a container,
 	// orphaned child processes become zombies unless reaped.
 	// On Linux 5.3+, Go's os/exec uses pidfd_open which avoids races between
 	// this reaper and cmd.Wait(). Kernels below 5.3 may see rare ECHILD errors.
@@ -78,12 +78,12 @@ func main() {
 		}
 	}()
 
-	socketPath := os.Getenv("MCP_SOCKET_PATH")
+	socketPath := os.Getenv("BRIDGE_SOCKET_PATH")
 	if socketPath == "" {
 		socketPath = defaultSocketPath
 	}
 	// Clean up residual socket from a previous run.
-	_ = os.Remove(filepath.Clean(socketPath)) //nolint:gosec // G703: socketPath is from MCP_SOCKET_PATH env or a compiled-in default, not end-user input
+	_ = os.Remove(filepath.Clean(socketPath)) //nolint:gosec // G703: socketPath is from BRIDGE_SOCKET_PATH env or a compiled-in default, not end-user input
 
 	lis, err := (&net.ListenConfig{}).Listen(ctx, "unix", socketPath)
 	if err != nil {
@@ -101,7 +101,7 @@ func main() {
 		srv.GracefulStop()
 	}()
 
-	logger.Info("mcp gRPC server listening", slog.String("socket", socketPath))
+	logger.Info("bridge gRPC server listening", slog.String("socket", socketPath))
 	if err := srv.Serve(lis); err != nil {
 		logger.Error("gRPC server failed", slog.Any("error", err))
 		return

@@ -1,4 +1,4 @@
-package mcp
+package workspace
 
 import (
 	"archive/tar"

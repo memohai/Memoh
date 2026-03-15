@@ -35,8 +35,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
     -o memoh-server ./cmd/agent/main.go
 
-# ---- Stage 3: Build MCP binary ----
-FROM build-base AS mcp-builder
+# ---- Stage 3: Build bridge binary ----
+FROM build-base AS bridge-builder
 ARG TARGETARCH
 ARG COMMIT_HASH=unknown
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -44,9 +44,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath \
     -ldflags "-s -w -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH}" \
-    -o /out/mcp ./cmd/mcp
+    -o /out/bridge ./cmd/bridge
 
-# ---- Stage 4: Assemble MCP runtime + toolkit ----
+# ---- Stage 4: Assemble workspace runtime + toolkit ----
 FROM alpine:latest AS toolkit-assembly
 ARG TARGETARCH
 
@@ -55,8 +55,8 @@ COPY docker/toolkit/install.sh /tmp/install.sh
 RUN /tmp/install.sh /assembly/toolkit "${TARGETARCH:-amd64}"
 
 # Assemble runtime directory
-COPY --from=mcp-builder /out/mcp /assembly/mcp
-COPY cmd/mcp/template /assembly/templates
+COPY --from=bridge-builder /out/bridge /assembly/bridge
+COPY cmd/bridge/template /assembly/templates
 COPY docker/toolkit/bin /assembly/toolkit/bin
 RUN chmod +x /assembly/toolkit/bin/*
 
@@ -68,7 +68,7 @@ WORKDIR /app
 # containerd runtime
 RUN apk add --no-cache containerd containerd-ctr
 
-# CNI plugins + iptables (for MCP container networking)
+# CNI plugins + iptables (for workspace container networking)
 RUN apk add --no-cache ca-certificates tzdata wget cni-plugins iptables \
     && mkdir -p /opt/cni/bin \
     && (cp -a /usr/lib/cni/. /opt/cni/bin/ 2>/dev/null || true) \
@@ -102,7 +102,7 @@ RUN apk add --no-cache ca-certificates tzdata wget cni-plugins iptables \
       '  ]' \
       '}' > /etc/cni/net.d/10-memoh.conflist
 
-# MCP runtime (bind-mounted into bot containers)
+# Workspace runtime (bind-mounted into bot containers)
 COPY --from=toolkit-assembly /assembly /opt/memoh/runtime
 
 # Server binary and spec

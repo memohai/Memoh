@@ -1,4 +1,4 @@
-package mcp
+package workspace
 
 import (
 	"context"
@@ -18,21 +18,23 @@ import (
 	ctr "github.com/memohai/memoh/internal/containerd"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/identity"
-	"github.com/memohai/memoh/internal/mcp/mcpclient"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
-	BotLabelKey      = "mcp.bot_id"
-	BridgeLabelKey   = "memoh.bridge"
-	BridgeLabelValue = "v3"
-	ContainerPrefix  = "mcp-"
+	BotLabelKey           = "memoh.bot_id"
+	LegacyBotLabelKey     = "mcp.bot_id"
+	WorkspaceLabelKey     = "memoh.workspace"
+	WorkspaceLabelValue   = "v1"
+	ContainerPrefix       = "workspace-"
+	LegacyContainerPrefix = "mcp-"
 
 	legacyGRPCPort = 9090
 )
 
 type Manager struct {
 	service         ctr.Service
-	cfg             config.MCPConfig
+	cfg             config.WorkspaceConfig
 	namespace       string
 	containerID     func(string) string
 	db              *pgxpool.Pool
@@ -40,12 +42,12 @@ type Manager struct {
 	logger          *slog.Logger
 	containerLockMu sync.Mutex
 	containerLocks  map[string]*sync.Mutex
-	grpcPool        *mcpclient.Pool
+	grpcPool        *bridge.Pool
 	legacyMu        sync.RWMutex
 	legacyIPs       map[string]string // botID → IP for pre-bridge containers
 }
 
-func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string, conn *pgxpool.Pool) *Manager {
+func NewManager(log *slog.Logger, service ctr.Service, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool) *Manager {
 	if namespace == "" {
 		namespace = config.DefaultNamespace
 	}
@@ -55,14 +57,14 @@ func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, nam
 		namespace:      namespace,
 		db:             conn,
 		queries:        dbsqlc.New(conn),
-		logger:         log.With(slog.String("component", "mcp")),
+		logger:         log.With(slog.String("component", "workspace")),
 		containerLocks: make(map[string]*sync.Mutex),
 		legacyIPs:      make(map[string]string),
 		containerID: func(botID string) string {
 			return ContainerPrefix + botID
 		},
 	}
-	m.grpcPool = mcpclient.NewPool(m.dialTarget)
+	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
 }
 
@@ -87,7 +89,7 @@ func (m *Manager) socketDir(botID string) string {
 
 // socketPath returns the path to the UDS socket file for a bot's container.
 func (m *Manager) socketPath(botID string) string {
-	return filepath.Join(m.socketDir(botID), "mcp.sock")
+	return filepath.Join(m.socketDir(botID), "bridge.sock")
 }
 
 // dialTarget returns the gRPC dial target for a bot. Legacy containers
@@ -125,8 +127,8 @@ func (m *Manager) clearLegacyRoute(botID string) {
 }
 
 // MCPClient returns a gRPC client for the given bot's container.
-// Implements mcpclient.Provider.
-func (m *Manager) MCPClient(ctx context.Context, botID string) (*mcpclient.Client, error) {
+// Implements bridge.Provider.
+func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	return m.grpcPool.Get(ctx, botID)
 }
 
@@ -136,7 +138,7 @@ func (m *Manager) Init(ctx context.Context) error {
 	// Pre-pull the default base image so container creation doesn't block
 	// on a network download. If the image is already present, this is a no-op.
 	if _, err := m.service.GetImage(ctx, image); err != nil {
-		m.logger.Info("pulling base image for MCP containers", slog.String("image", image))
+		m.logger.Info("pulling base image for workspace containers", slog.String("image", image))
 		if _, pullErr := m.service.PullImage(ctx, image, &ctr.PullImageOptions{
 			Unpack:      true,
 			Snapshotter: m.cfg.Snapshotter,
@@ -148,9 +150,9 @@ func (m *Manager) Init(ctx context.Context) error {
 	return nil
 }
 
-// EnsureBot creates the MCP container for a bot if it does not exist.
+// EnsureBot creates the workspace container for a bot if it does not exist.
 // Bot data lives in the container's writable layer (snapshot), not bind mounts.
-// The Memoh runtime (mcp binary + toolkit) is injected via read-only bind mount.
+// The Memoh runtime (bridge binary + toolkit) is injected via read-only bind mount.
 // If imageOverride is non-empty, it is used instead of the configured default.
 func (m *Manager) EnsureBot(ctx context.Context, botID, imageOverride string) error {
 	if err := validateBotID(botID); err != nil {
@@ -197,18 +199,18 @@ func (m *Manager) EnsureBot(ctx context.Context, botID, imageOverride string) er
 
 	env := make([]string, 0, len(tzEnv)+1)
 	env = append(env, tzEnv...)
-	env = append(env, "MCP_SOCKET_PATH=/run/memoh/mcp.sock")
+	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
 
 	_, err = m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
 		ID:          m.containerID(botID),
 		ImageRef:    image,
 		Snapshotter: m.cfg.Snapshotter,
 		Labels: map[string]string{
-			BotLabelKey:    botID,
-			BridgeLabelKey: BridgeLabelValue,
+			BotLabelKey:       botID,
+			WorkspaceLabelKey: WorkspaceLabelValue,
 		},
 		Spec: ctr.ContainerSpec{
-			Cmd:    []string{"/opt/memoh/mcp"},
+			Cmd:    []string{"/opt/memoh/bridge"},
 			Mounts: mounts,
 			Env:    env,
 		},
@@ -224,7 +226,7 @@ func (m *Manager) EnsureBot(ctx context.Context, botID, imageOverride string) er
 	return nil
 }
 
-// ListBots returns the bot IDs that have MCP containers.
+// ListBots returns the bot IDs that have workspace containers.
 func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 	containers, err := m.service.ListContainers(ctx)
 	if err != nil {
@@ -233,10 +235,13 @@ func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 
 	botIDs := make([]string, 0, len(containers))
 	for _, info := range containers {
-		if strings.HasPrefix(info.ID, ContainerPrefix) {
-			if botID, ok := info.Labels[BotLabelKey]; ok {
-				botIDs = append(botIDs, botID)
-			}
+		if !strings.HasPrefix(info.ID, ContainerPrefix) && !strings.HasPrefix(info.ID, LegacyContainerPrefix) {
+			continue
+		}
+		if botID, ok := info.Labels[BotLabelKey]; ok {
+			botIDs = append(botIDs, botID)
+		} else if botID, ok := info.Labels[LegacyBotLabelKey]; ok {
+			botIDs = append(botIDs, botID)
 		}
 	}
 	return botIDs, nil
@@ -371,15 +376,11 @@ func (m *Manager) imageRef() string {
 }
 
 // IsLegacyContainer returns true if the container was created before the
-// bridge runtime injection architecture (lacks the memoh.bridge label).
+// bridge runtime injection architecture (uses the legacy "mcp-" prefix).
 // Legacy containers are functional but unreachable from the server (they
 // use TCP gRPC instead of UDS). Users should delete and recreate them.
-func (m *Manager) IsLegacyContainer(ctx context.Context, containerID string) bool {
-	info, err := m.service.GetContainer(ctx, containerID)
-	if err != nil {
-		return false
-	}
-	return info.Labels[BridgeLabelKey] != BridgeLabelValue
+func (m *Manager) IsLegacyContainer(_ context.Context, containerID string) bool {
+	return strings.HasPrefix(containerID, LegacyContainerPrefix)
 }
 
 func validateBotID(botID string) error {

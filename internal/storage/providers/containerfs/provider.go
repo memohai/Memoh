@@ -11,18 +11,18 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/memohai/memoh/internal/mcp/mcpclient"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const containerMediaRoot = "media"
 
 // Provider stores media assets inside bot containers via gRPC.
 type Provider struct {
-	clients mcpclient.Provider
+	clients bridge.Provider
 }
 
 // New creates a container-based storage provider.
-func New(clients mcpclient.Provider) *Provider {
+func New(clients bridge.Provider) *Provider {
 	return &Provider{clients: clients}
 }
 
