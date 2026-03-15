@@ -203,7 +203,8 @@ function applyCreateContainerEvent(event: ContainerCreateStreamEvent): boolean {
       createProgress.value = { phase: 'creating' }
       return false
     case 'complete':
-      createProgress.value = { phase: 'complete' }
+      // Keep the last visible progress state until the container detail view loads.
+      // Rendering a separate "complete" phase here looks like the bar jumped back to 0.
       return !!event.container.data_restored
     case 'error':
       createProgress.value = { phase: 'error', error: event.message }
