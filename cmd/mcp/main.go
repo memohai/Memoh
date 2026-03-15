@@ -82,6 +82,7 @@ func main() {
 	if socketPath == "" {
 		socketPath = defaultSocketPath
 	}
+	socketPath = filepath.Clean(socketPath)
 
 	// Clean up residual socket from a previous run.
 	_ = os.Remove(socketPath)
