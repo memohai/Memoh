@@ -489,7 +489,7 @@ func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Read
 	tr := tar.NewReader(gr)
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {
@@ -597,33 +597,44 @@ func untarGzDir(r io.Reader, dst string) error {
 	}
 	defer func() { _ = gr.Close() }()
 	tr := tar.NewReader(gr)
+	root, err := os.OpenRoot(dst)
+	if err != nil {
+		return fmt.Errorf("open root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
 
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("tar next: %w", err)
 		}
 
-		target := filepath.Join(dst, filepath.FromSlash(header.Name)) //nolint:gosec // G305: paths are from operator-created backup archives
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dst)+string(os.PathSeparator)) {
-			return fmt.Errorf("tar path traversal: %s", header.Name)
+		target, err := sanitizeArchivePath(header.Name)
+		if err != nil {
+			return err
+		}
+		if target == "" {
+			continue
 		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:
 			mode := header.FileInfo().Mode().Perm()
-			if err := os.MkdirAll(target, mode); err != nil {
+			if err := root.MkdirAll(target, mode); err != nil {
 				return err
 			}
 		case tar.TypeReg:
 			mode := header.FileInfo().Mode().Perm()
-			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
-				return err
+			parent := filepath.Dir(target)
+			if parent != "." && parent != "" {
+				if err := root.MkdirAll(parent, 0o750); err != nil {
+					return err
+				}
 			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode) //nolint:gosec // G304: extracted from operator-created archive
+			f, err := root.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 			if err != nil {
 				return err
 			}
@@ -670,4 +681,20 @@ func copyDirContents(src, dst string) error {
 		_, err = io.Copy(out, in)
 		return err
 	})
+}
+
+// sanitizeArchivePath converts a tar header path into a safe relative path.
+// Empty or "." paths are ignored.
+func sanitizeArchivePath(name string) (string, error) {
+	clean := filepath.Clean(filepath.FromSlash(name))
+	if clean == "." || clean == "" {
+		return "", nil
+	}
+	if filepath.IsAbs(clean) {
+		return "", fmt.Errorf("tar absolute path is not allowed: %s", name)
+	}
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("tar path traversal: %s", name)
+	}
+	return clean, nil
 }

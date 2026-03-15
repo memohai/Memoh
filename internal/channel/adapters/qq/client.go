@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/memohai/memoh/internal/channel"
 )
 
 type qqClient struct {
@@ -105,6 +107,7 @@ func (c *qqClient) accessToken(ctx context.Context) (string, error) {
 	}
 	c.token = token
 	c.expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
+	channel.SetIMErrorSecrets("qq-token:"+c.appID, c.clientSecret, c.token)
 	return c.token, nil
 }
 

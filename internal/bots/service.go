@@ -36,12 +36,6 @@ var (
 	ErrOwnerUserNotFound = errors.New("owner user not found")
 )
 
-// AccessPolicy controls bot access behavior.
-type AccessPolicy struct {
-	AllowPublicMember bool
-	AllowGuest        bool
-}
-
 // NewService creates a new bot service.
 func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	if log == nil {
@@ -71,8 +65,8 @@ func (s *Service) AddRuntimeChecker(c RuntimeChecker) {
 	}
 }
 
-// AuthorizeAccess checks whether userID may access the given bot.
-func (s *Service) AuthorizeAccess(ctx context.Context, userID, botID string, isAdmin bool, policy AccessPolicy) (Bot, error) {
+// AuthorizeAccess checks whether userID may access the given bot (owner or admin only).
+func (s *Service) AuthorizeAccess(ctx context.Context, userID, botID string, isAdmin bool) (Bot, error) {
 	if s.queries == nil {
 		return Bot{}, errors.New("bot queries not configured")
 	}
@@ -85,16 +79,6 @@ func (s *Service) AuthorizeAccess(ctx context.Context, userID, botID string, isA
 	}
 	if isAdmin || bot.OwnerUserID == userID {
 		return bot, nil
-	}
-	if bot.Type == BotTypePublic {
-		if policy.AllowPublicMember {
-			if _, err := s.GetMember(ctx, botID, userID); err == nil {
-				return bot, nil
-			}
-		}
-		if policy.AllowGuest && bot.AllowGuest {
-			return bot, nil
-		}
 	}
 	return Bot{}, ErrBotAccessDenied
 }
@@ -113,10 +97,6 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 		return Bot{}, err
 	}
 	if err := s.ensureUserExists(ctx, ownerUUID); err != nil {
-		return Bot{}, err
-	}
-	normalizedType, err := normalizeBotType(req.Type)
-	if err != nil {
 		return Bot{}, err
 	}
 	displayName := strings.TrimSpace(req.DisplayName)
@@ -138,7 +118,6 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	}
 	row, err := s.queries.CreateBot(ctx, sqlc.CreateBotParams{
 		OwnerUserID: ownerUUID,
-		Type:        normalizedType,
 		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
 		AvatarUrl:   pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
 		IsActive:    isActive,
@@ -209,57 +188,9 @@ func (s *Service) ListByOwner(ctx context.Context, ownerUserID string) ([]Bot, e
 	return items, nil
 }
 
-// ListByMember returns bots where the user is a member.
-func (s *Service) ListByMember(ctx context.Context, channelIdentityID string) ([]Bot, error) {
-	if s.queries == nil {
-		return nil, errors.New("bot queries not configured")
-	}
-	memberUUID, err := db.ParseUUID(channelIdentityID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListBotsByMember(ctx, memberUUID)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]Bot, 0, len(rows))
-	for _, row := range rows {
-		item, err := toBot(asSQLCBot(row))
-		if err != nil {
-			return nil, err
-		}
-		if err := s.attachCheckSummary(ctx, &item, asSQLCBot(row)); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, nil
-}
-
-// ListAccessible returns all bots the user can access (owned or member).
+// ListAccessible returns all bots owned by the user.
 func (s *Service) ListAccessible(ctx context.Context, channelIdentityID string) ([]Bot, error) {
-	owned, err := s.ListByOwner(ctx, channelIdentityID)
-	if err != nil {
-		return nil, err
-	}
-	members, err := s.ListByMember(ctx, channelIdentityID)
-	if err != nil {
-		return nil, err
-	}
-	seen := map[string]Bot{}
-	for _, item := range owned {
-		seen[item.ID] = item
-	}
-	for _, item := range members {
-		if _, ok := seen[item.ID]; !ok {
-			seen[item.ID] = item
-		}
-	}
-	items := make([]Bot, 0, len(seen))
-	for _, item := range seen {
-		items = append(items, item)
-	}
-	return items, nil
+	return s.ListByOwner(ctx, channelIdentityID)
 }
 
 // Update updates bot profile fields.
@@ -485,160 +416,20 @@ func (s *Service) ensureUserExists(ctx context.Context, userID pgtype.UUID) erro
 	return nil
 }
 
-// UpsertMember creates or updates a bot membership.
-func (s *Service) UpsertMember(ctx context.Context, botID string, req UpsertMemberRequest) (BotMember, error) {
-	if s.queries == nil {
-		return BotMember{}, errors.New("bot queries not configured")
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return BotMember{}, err
-	}
-	memberUUID, err := db.ParseUUID(req.UserID)
-	if err != nil {
-		return BotMember{}, err
-	}
-	role, err := normalizeMemberRole(req.Role)
-	if err != nil {
-		return BotMember{}, err
-	}
-	row, err := s.queries.UpsertBotMember(ctx, sqlc.UpsertBotMemberParams{
-		BotID:  botUUID,
-		UserID: memberUUID,
-		Role:   role,
-	})
-	if err != nil {
-		return BotMember{}, err
-	}
-	return toBotMember(row), nil
-}
-
-// ListMembers returns all members of a bot.
-func (s *Service) ListMembers(ctx context.Context, botID string) ([]BotMember, error) {
-	if s.queries == nil {
-		return nil, errors.New("bot queries not configured")
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListBotMembers(ctx, botUUID)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]BotMember, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, toBotMember(row))
-	}
-	return items, nil
-}
-
-// GetMember returns a specific bot member.
-func (s *Service) GetMember(ctx context.Context, botID, channelIdentityID string) (BotMember, error) {
-	if s.queries == nil {
-		return BotMember{}, errors.New("bot queries not configured")
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return BotMember{}, err
-	}
-	memberUUID, err := db.ParseUUID(channelIdentityID)
-	if err != nil {
-		return BotMember{}, err
-	}
-	row, err := s.queries.GetBotMember(ctx, sqlc.GetBotMemberParams{
-		BotID:  botUUID,
-		UserID: memberUUID,
-	})
-	if err != nil {
-		return BotMember{}, err
-	}
-	return toBotMember(row), nil
-}
-
-// DeleteMember removes a member from a bot.
-func (s *Service) DeleteMember(ctx context.Context, botID, channelIdentityID string) error {
-	if s.queries == nil {
-		return errors.New("bot queries not configured")
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return err
-	}
-	memberUUID, err := db.ParseUUID(channelIdentityID)
-	if err != nil {
-		return err
-	}
-	return s.queries.DeleteBotMember(ctx, sqlc.DeleteBotMemberParams{
-		BotID:  botUUID,
-		UserID: memberUUID,
-	})
-}
-
-// UpsertMemberSimple creates or updates a bot membership with a direct channel identity ID and role.
-// This satisfies the router.BotMemberService interface.
-func (s *Service) UpsertMemberSimple(ctx context.Context, botID, channelIdentityID, role string) error {
-	_, err := s.UpsertMember(ctx, botID, UpsertMemberRequest{
-		UserID: channelIdentityID,
-		Role:   role,
-	})
-	return err
-}
-
-// IsMember checks if a user is a member of a bot.
-func (s *Service) IsMember(ctx context.Context, botID, channelIdentityID string) (bool, error) {
-	_, err := s.GetMember(ctx, botID, channelIdentityID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-func normalizeBotType(raw string) (string, error) {
-	normalized := strings.ToLower(strings.TrimSpace(raw))
-	if normalized == "" {
-		return BotTypePersonal, nil
-	}
-	switch normalized {
-	case BotTypePersonal, BotTypePublic:
-		return normalized, nil
-	default:
-		return "", fmt.Errorf("invalid bot type: %s", raw)
-	}
-}
-
-func normalizeMemberRole(raw string) (string, error) {
-	role := strings.ToLower(strings.TrimSpace(raw))
-	if role == "" {
-		return MemberRoleMember, nil
-	}
-	switch role {
-	case MemberRoleOwner, MemberRoleAdmin, MemberRoleMember:
-		return role, nil
-	default:
-		return "", fmt.Errorf("invalid member role: %s", raw)
-	}
-}
-
 func asSQLCBot(v any) sqlc.Bot {
 	switch r := v.(type) {
 	case sqlc.Bot:
 		return r
 	case sqlc.CreateBotRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.GetBotByIDRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.ListBotsByOwnerRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
-	case sqlc.ListBotsByMemberRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.UpdateBotProfileRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.UpdateBotOwnerRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Type: r.Type, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, AllowGuest: r.AllowGuest, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, MaxInboxItems: r.MaxInboxItems, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	default:
 		return sqlc.Bot{}
 	}
@@ -668,11 +459,9 @@ func toBot(row sqlc.Bot) (Bot, error) {
 	return Bot{
 		ID:              row.ID.String(),
 		OwnerUserID:     row.OwnerUserID.String(),
-		Type:            row.Type,
 		DisplayName:     displayName,
 		AvatarURL:       avatarURL,
 		IsActive:        row.IsActive,
-		AllowGuest:      row.AllowGuest,
 		Status:          strings.TrimSpace(row.Status),
 		CheckState:      BotCheckStateUnknown,
 		CheckIssueCount: 0,
@@ -680,19 +469,6 @@ func toBot(row sqlc.Bot) (Bot, error) {
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
 	}, nil
-}
-
-func toBotMember(row sqlc.BotMember) BotMember {
-	createdAt := time.Time{}
-	if row.CreatedAt.Valid {
-		createdAt = row.CreatedAt.Time
-	}
-	return BotMember{
-		BotID:     row.BotID.String(),
-		UserID:    row.UserID.String(),
-		Role:      row.Role,
-		CreatedAt: createdAt,
-	}
 }
 
 func decodeMetadata(payload []byte) (map[string]any, error) {

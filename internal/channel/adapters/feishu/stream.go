@@ -133,7 +133,7 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		}
 		return nil
 	case channel.StreamEventError:
-		errText := strings.TrimSpace(event.Error)
+		errText := channel.RedactIMErrorText(strings.TrimSpace(event.Error))
 		if errText == "" {
 			return nil
 		}

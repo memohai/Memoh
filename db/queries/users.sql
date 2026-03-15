@@ -64,6 +64,19 @@ SELECT * FROM users
 WHERE username IS NOT NULL
 ORDER BY created_at DESC;
 
+-- name: SearchAccounts :many
+SELECT *
+FROM users
+WHERE username IS NOT NULL
+  AND (
+    sqlc.arg(query)::text = ''
+    OR username ILIKE '%' || sqlc.arg(query)::text || '%'
+    OR COALESCE(display_name, '') ILIKE '%' || sqlc.arg(query)::text || '%'
+    OR COALESCE(email, '') ILIKE '%' || sqlc.arg(query)::text || '%'
+  )
+ORDER BY last_login_at DESC NULLS LAST, created_at DESC
+LIMIT sqlc.arg(limit_count);
+
 -- name: UpdateAccountProfile :one
 UPDATE users
 SET display_name = $2,

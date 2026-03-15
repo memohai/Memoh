@@ -41,6 +41,7 @@ linters:
     - usestdlibvars
     - whitespace
   exclusions:
+    generated: lax
     paths:
       - internal/db/sqlc
       - ^.*\.(pb|l|y)\.go$

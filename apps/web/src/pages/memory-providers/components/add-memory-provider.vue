@@ -35,6 +35,12 @@
                 <SelectItem value="builtin">
                   {{ $t('memoryProvider.providerNames.builtin') }}
                 </SelectItem>
+                <SelectItem value="mem0">
+                  {{ $t('memoryProvider.providerNames.mem0') }}
+                </SelectItem>
+                <SelectItem value="openviking">
+                  {{ $t('memoryProvider.providerNames.openviking') }}
+                </SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>

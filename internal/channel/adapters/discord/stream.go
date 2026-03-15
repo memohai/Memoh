@@ -76,7 +76,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.StreamEv
 		return nil
 
 	case channel.StreamEventError:
-		errText := strings.TrimSpace(event.Error)
+		errText := channel.RedactIMErrorText(strings.TrimSpace(event.Error))
 		if errText == "" {
 			return nil
 		}

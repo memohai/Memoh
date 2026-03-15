@@ -52,8 +52,247 @@ export type AccountsUpdateProfileRequest = {
     display_name?: string;
 };
 
+export type AclChannelIdentityCandidate = {
+    avatar_url?: string;
+    channel?: string;
+    channel_subject_id?: string;
+    display_name?: string;
+    id?: string;
+    linked_avatar_url?: string;
+    linked_display_name?: string;
+    linked_username?: string;
+    user_id?: string;
+};
+
+export type AclChannelIdentityCandidateListResponse = {
+    items?: Array<AclChannelIdentityCandidate>;
+};
+
+export type AclListRulesResponse = {
+    items?: Array<AclRule>;
+};
+
+export type AclObservedConversationCandidate = {
+    channel?: string;
+    conversation_id?: string;
+    conversation_name?: string;
+    conversation_type?: string;
+    last_observed_at?: string;
+    route_id?: string;
+    thread_id?: string;
+};
+
+export type AclObservedConversationCandidateListResponse = {
+    items?: Array<AclObservedConversationCandidate>;
+};
+
+export type AclRule = {
+    action?: string;
+    bot_id?: string;
+    channel_identity_avatar_url?: string;
+    channel_identity_display_name?: string;
+    channel_identity_id?: string;
+    channel_subject_id?: string;
+    channel_type?: string;
+    created_at?: string;
+    effect?: string;
+    id?: string;
+    linked_user_avatar_url?: string;
+    linked_user_display_name?: string;
+    linked_user_id?: string;
+    linked_user_username?: string;
+    source_scope?: AclSourceScope;
+    subject_kind?: string;
+    updated_at?: string;
+    user_avatar_url?: string;
+    user_display_name?: string;
+    user_id?: string;
+    user_username?: string;
+};
+
+export type AclSourceScope = {
+    channel?: string;
+    conversation_id?: string;
+    conversation_type?: string;
+    thread_id?: string;
+};
+
+export type AclUpsertRuleRequest = {
+    channel_identity_id?: string;
+    source_scope?: AclSourceScope;
+    user_id?: string;
+};
+
+export type AclUserCandidate = {
+    avatar_url?: string;
+    display_name?: string;
+    email?: string;
+    id?: string;
+    username?: string;
+};
+
+export type AclUserCandidateListResponse = {
+    items?: Array<AclUserCandidate>;
+};
+
+export type AdaptersCdfPoint = {
+    /**
+     * cumulative weight fraction [0.0, 1.0]
+     */
+    cumulative?: number;
+    /**
+     * rank position (1-based, sorted by value desc)
+     */
+    k?: number;
+};
+
+export type AdaptersCompactResult = {
+    after_count?: number;
+    before_count?: number;
+    ratio?: number;
+    results?: Array<AdaptersMemoryItem>;
+};
+
+export type AdaptersDeleteResponse = {
+    message?: string;
+};
+
+export type AdaptersHealthStatus = {
+    error?: string;
+    ok?: boolean;
+};
+
+export type AdaptersMemoryItem = {
+    agent_id?: string;
+    bot_id?: string;
+    cdf_curve?: Array<AdaptersCdfPoint>;
+    created_at?: string;
+    hash?: string;
+    id?: string;
+    memory?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    run_id?: string;
+    score?: number;
+    top_k_buckets?: Array<AdaptersTopKBucket>;
+    updated_at?: string;
+};
+
+export type AdaptersMemoryStatusResponse = {
+    can_manual_sync?: boolean;
+    encoder?: AdaptersHealthStatus;
+    indexed_count?: number;
+    markdown_file_count?: number;
+    memory_mode?: string;
+    overview_path?: string;
+    provider_type?: string;
+    qdrant?: AdaptersHealthStatus;
+    qdrant_collection?: string;
+    source_count?: number;
+    source_dir?: string;
+};
+
+export type AdaptersMessage = {
+    content?: string;
+    role?: string;
+};
+
+export type AdaptersProviderCollectionStatus = {
+    exists?: boolean;
+    name?: string;
+    points?: number;
+    qdrant?: AdaptersHealthStatus;
+};
+
+export type AdaptersProviderConfigSchema = {
+    fields?: {
+        [key: string]: AdaptersProviderFieldSchema;
+    };
+};
+
+export type AdaptersProviderCreateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    provider?: AdaptersProviderType;
+};
+
+export type AdaptersProviderFieldSchema = {
+    description?: string;
+    example?: unknown;
+    required?: boolean;
+    secret?: boolean;
+    title?: string;
+    type?: string;
+};
+
+export type AdaptersProviderGetResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    is_default?: boolean;
+    name?: string;
+    provider?: string;
+    updated_at?: string;
+};
+
+export type AdaptersProviderMeta = {
+    config_schema?: AdaptersProviderConfigSchema;
+    display_name?: string;
+    provider?: string;
+};
+
+export type AdaptersProviderStatusResponse = {
+    collections?: Array<AdaptersProviderCollectionStatus>;
+    embedding_model_id?: string;
+    memory_mode?: string;
+    provider_type?: string;
+};
+
+export type AdaptersProviderType = 'builtin' | 'mem0' | 'openviking';
+
+export type AdaptersProviderUpdateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+};
+
+export type AdaptersRebuildResult = {
+    fs_count?: number;
+    missing_count?: number;
+    restored_count?: number;
+    storage_count?: number;
+};
+
+export type AdaptersSearchResponse = {
+    relations?: Array<unknown>;
+    results?: Array<AdaptersMemoryItem>;
+};
+
+export type AdaptersTopKBucket = {
+    /**
+     * sparse dimension index (term hash)
+     */
+    index?: number;
+    /**
+     * weight (term frequency)
+     */
+    value?: number;
+};
+
+export type AdaptersUsageResponse = {
+    avg_text_bytes?: number;
+    count?: number;
+    estimated_storage_bytes?: number;
+    total_text_bytes?: number;
+};
+
 export type BotsBot = {
-    allow_guest?: boolean;
     avatar_url?: string;
     check_issue_count?: number;
     check_state?: string;
@@ -66,7 +305,6 @@ export type BotsBot = {
     };
     owner_user_id?: string;
     status?: string;
-    type?: string;
     updated_at?: string;
 };
 
@@ -83,13 +321,6 @@ export type BotsBotCheck = {
     type?: string;
 };
 
-export type BotsBotMember = {
-    bot_id?: string;
-    created_at?: string;
-    role?: string;
-    user_id?: string;
-};
-
 export type BotsCreateBotRequest = {
     avatar_url?: string;
     display_name?: string;
@@ -97,7 +328,6 @@ export type BotsCreateBotRequest = {
     metadata?: {
         [key: string]: unknown;
     };
-    type?: string;
 };
 
 export type BotsListBotsResponse = {
@@ -106,10 +336,6 @@ export type BotsListBotsResponse = {
 
 export type BotsListChecksResponse = {
     items?: Array<BotsBotCheck>;
-};
-
-export type BotsListMembersResponse = {
-    items?: Array<BotsBotMember>;
 };
 
 export type BotsTransferBotRequest = {
@@ -123,11 +349,6 @@ export type BotsUpdateBotRequest = {
     metadata?: {
         [key: string]: unknown;
     };
-};
-
-export type BotsUpsertMemberRequest = {
-    role?: string;
-    user_id?: string;
 };
 
 export type BrowsercontextsBrowserContext = {
@@ -454,6 +675,10 @@ export type HandlersBatchDeleteRequest = {
     ids?: Array<string>;
 };
 
+export type HandlersBrowserCoresResponse = {
+    cores?: Array<string>;
+};
+
 export type HandlersChannelMeta = {
     capabilities?: ChannelChannelCapabilities;
     config_schema?: ChannelConfigSchema;
@@ -678,6 +903,15 @@ export type HandlersTokenUsageResponse = {
     heartbeat?: Array<HandlersDailyTokenUsage>;
 };
 
+export type HandlersEmailOAuthStatusResponse = {
+    configured?: boolean;
+    email_address?: string;
+    expired?: boolean;
+    expires_at?: string;
+    has_token?: boolean;
+    provider?: string;
+};
+
 export type HandlersFsOpResponse = {
     ok?: boolean;
 };
@@ -698,7 +932,7 @@ export type HandlersMemoryAddPayload = {
     };
     infer?: boolean;
     message?: string;
-    messages?: Array<ProviderMessage>;
+    messages?: Array<AdaptersMessage>;
     metadata?: {
         [key: string]: unknown;
     };
@@ -744,6 +978,21 @@ export type HandlersOauthExchangeRequest = {
 
 export type HandlersSkillsOpResponse = {
     ok?: boolean;
+};
+
+export type HandlersSynthesizeRequest = {
+    text?: string;
+};
+
+export type HandlersSynthesizeResponse = {
+    content_type?: string;
+    size?: number;
+    temp_id?: string;
+};
+
+export type HandlersTerminalInfoResponse = {
+    available?: boolean;
+    shell?: string;
 };
 
 export type HeartbeatListLogsResponse = {
@@ -969,129 +1218,6 @@ export type ModelsUpdateRequest = {
     type?: ModelsModelType;
 };
 
-export type ProviderCdfPoint = {
-    /**
-     * cumulative weight fraction [0.0, 1.0]
-     */
-    cumulative?: number;
-    /**
-     * rank position (1-based, sorted by value desc)
-     */
-    k?: number;
-};
-
-export type ProviderCompactResult = {
-    after_count?: number;
-    before_count?: number;
-    ratio?: number;
-    results?: Array<ProviderMemoryItem>;
-};
-
-export type ProviderDeleteResponse = {
-    message?: string;
-};
-
-export type ProviderMemoryItem = {
-    agent_id?: string;
-    bot_id?: string;
-    cdf_curve?: Array<ProviderCdfPoint>;
-    created_at?: string;
-    hash?: string;
-    id?: string;
-    memory?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    run_id?: string;
-    score?: number;
-    top_k_buckets?: Array<ProviderTopKBucket>;
-    updated_at?: string;
-};
-
-export type ProviderMessage = {
-    content?: string;
-    role?: string;
-};
-
-export type ProviderProviderConfigSchema = {
-    fields?: {
-        [key: string]: ProviderProviderFieldSchema;
-    };
-};
-
-export type ProviderProviderCreateRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    name?: string;
-    provider?: ProviderProviderType;
-};
-
-export type ProviderProviderFieldSchema = {
-    description?: string;
-    example?: unknown;
-    required?: boolean;
-    title?: string;
-    type?: string;
-};
-
-export type ProviderProviderGetResponse = {
-    config?: {
-        [key: string]: unknown;
-    };
-    created_at?: string;
-    id?: string;
-    is_default?: boolean;
-    name?: string;
-    provider?: string;
-    updated_at?: string;
-};
-
-export type ProviderProviderMeta = {
-    config_schema?: ProviderProviderConfigSchema;
-    display_name?: string;
-    provider?: string;
-};
-
-export type ProviderProviderType = 'builtin';
-
-export type ProviderProviderUpdateRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    name?: string;
-};
-
-export type ProviderRebuildResult = {
-    fs_count?: number;
-    missing_count?: number;
-    qdrant_count?: number;
-    restored_count?: number;
-};
-
-export type ProviderSearchResponse = {
-    relations?: Array<unknown>;
-    results?: Array<ProviderMemoryItem>;
-};
-
-export type ProviderTopKBucket = {
-    /**
-     * sparse dimension index (term hash)
-     */
-    index?: number;
-    /**
-     * weight (term frequency)
-     */
-    value?: number;
-};
-
-export type ProviderUsageResponse = {
-    avg_text_bytes?: number;
-    count?: number;
-    estimated_storage_bytes?: number;
-    total_text_bytes?: number;
-};
-
 export type ProvidersCountResponse = {
     count?: number;
 };
@@ -1248,6 +1374,7 @@ export type SettingsSettings = {
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
+    tts_model_id?: string;
 };
 
 export type SettingsUpsertRequest = {
@@ -1265,6 +1392,7 @@ export type SettingsUpsertRequest = {
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
+    tts_model_id?: string;
 };
 
 export type SubagentAddSkillsRequest = {
@@ -1340,6 +1468,94 @@ export type SubagentUpdateRequest = {
 
 export type SubagentUpdateSkillsRequest = {
     skills?: Array<string>;
+};
+
+export type TtsCreateModelRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    model_id?: string;
+    name?: string;
+    tts_provider_id?: string;
+};
+
+export type TtsCreateProviderRequest = {
+    name?: string;
+    provider?: string;
+};
+
+export type TtsModelCapabilities = {
+    formats?: Array<string>;
+    pitch?: TtsParamConstraint;
+    speed?: TtsParamConstraint;
+    voices?: Array<TtsVoiceInfo>;
+};
+
+export type TtsModelInfo = {
+    capabilities?: TtsModelCapabilities;
+    description?: string;
+    id?: string;
+    name?: string;
+};
+
+export type TtsModelResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    model_id?: string;
+    name?: string;
+    provider_type?: string;
+    tts_provider_id?: string;
+    updated_at?: string;
+};
+
+export type TtsParamConstraint = {
+    default?: number;
+    max?: number;
+    min?: number;
+    options?: Array<number>;
+};
+
+export type TtsProviderMetaResponse = {
+    default_model?: string;
+    description?: string;
+    display_name?: string;
+    models?: Array<TtsModelInfo>;
+    provider?: string;
+};
+
+export type TtsProviderResponse = {
+    created_at?: string;
+    id?: string;
+    name?: string;
+    provider?: string;
+    updated_at?: string;
+};
+
+export type TtsTestSynthesizeRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    text?: string;
+};
+
+export type TtsUpdateModelRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+};
+
+export type TtsUpdateProviderRequest = {
+    name?: string;
+};
+
+export type TtsVoiceInfo = {
+    id?: string;
+    lang?: string;
+    name?: string;
 };
 
 export type PostAuthLoginData = {
@@ -1480,6 +1696,261 @@ export type PostBotsResponses = {
 };
 
 export type PostBotsResponse = PostBotsResponses[keyof PostBotsResponses];
+
+export type GetBotsByBotIdAccessChannelIdentitiesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Max results
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/access/channel_identities';
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesError = GetBotsByBotIdAccessChannelIdentitiesErrors[keyof GetBotsByBotIdAccessChannelIdentitiesErrors];
+
+export type GetBotsByBotIdAccessChannelIdentitiesResponses = {
+    /**
+     * OK
+     */
+    200: AclChannelIdentityCandidateListResponse;
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesResponse = GetBotsByBotIdAccessChannelIdentitiesResponses[keyof GetBotsByBotIdAccessChannelIdentitiesResponses];
+
+export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Channel Identity ID
+         */
+        channel_identity_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/access/channel_identities/{channel_identity_id}/conversations';
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsError = GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsErrors[keyof GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsErrors];
+
+export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponses = {
+    /**
+     * OK
+     */
+    200: AclObservedConversationCandidateListResponse;
+};
+
+export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponse = GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponses[keyof GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponses];
+
+export type GetBotsByBotIdAccessUsersData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Max results
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/access/users';
+};
+
+export type GetBotsByBotIdAccessUsersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAccessUsersError = GetBotsByBotIdAccessUsersErrors[keyof GetBotsByBotIdAccessUsersErrors];
+
+export type GetBotsByBotIdAccessUsersResponses = {
+    /**
+     * OK
+     */
+    200: AclUserCandidateListResponse;
+};
+
+export type GetBotsByBotIdAccessUsersResponse = GetBotsByBotIdAccessUsersResponses[keyof GetBotsByBotIdAccessUsersResponses];
+
+export type GetBotsByBotIdBlacklistData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/blacklist';
+};
+
+export type GetBotsByBotIdBlacklistErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdBlacklistError = GetBotsByBotIdBlacklistErrors[keyof GetBotsByBotIdBlacklistErrors];
+
+export type GetBotsByBotIdBlacklistResponses = {
+    /**
+     * OK
+     */
+    200: AclListRulesResponse;
+};
+
+export type GetBotsByBotIdBlacklistResponse = GetBotsByBotIdBlacklistResponses[keyof GetBotsByBotIdBlacklistResponses];
+
+export type PutBotsByBotIdBlacklistData = {
+    /**
+     * Blacklist payload
+     */
+    body: AclUpsertRuleRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/blacklist';
+};
+
+export type PutBotsByBotIdBlacklistErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdBlacklistError = PutBotsByBotIdBlacklistErrors[keyof PutBotsByBotIdBlacklistErrors];
+
+export type PutBotsByBotIdBlacklistResponses = {
+    /**
+     * OK
+     */
+    200: AclRule;
+};
+
+export type PutBotsByBotIdBlacklistResponse = PutBotsByBotIdBlacklistResponses[keyof PutBotsByBotIdBlacklistResponses];
+
+export type DeleteBotsByBotIdBlacklistByRuleIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Rule ID
+         */
+        rule_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/blacklist/{rule_id}';
+};
+
+export type DeleteBotsByBotIdBlacklistByRuleIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdBlacklistByRuleIdError = DeleteBotsByBotIdBlacklistByRuleIdErrors[keyof DeleteBotsByBotIdBlacklistByRuleIdErrors];
+
+export type DeleteBotsByBotIdBlacklistByRuleIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type PostBotsByBotIdCliMessagesData = {
     /**
@@ -2503,6 +2974,74 @@ export type PostBotsByBotIdContainerStopResponses = {
 };
 
 export type PostBotsByBotIdContainerStopResponse = PostBotsByBotIdContainerStopResponses[keyof PostBotsByBotIdContainerStopResponses];
+
+export type GetBotsByBotIdContainerTerminalData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/terminal';
+};
+
+export type GetBotsByBotIdContainerTerminalErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerTerminalError = GetBotsByBotIdContainerTerminalErrors[keyof GetBotsByBotIdContainerTerminalErrors];
+
+export type GetBotsByBotIdContainerTerminalResponses = {
+    /**
+     * OK
+     */
+    200: HandlersTerminalInfoResponse;
+};
+
+export type GetBotsByBotIdContainerTerminalResponse = GetBotsByBotIdContainerTerminalResponses[keyof GetBotsByBotIdContainerTerminalResponses];
+
+export type GetBotsByBotIdContainerTerminalWsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Initial terminal columns
+         */
+        cols?: number;
+        /**
+         * Initial terminal rows
+         */
+        rows?: number;
+        /**
+         * Auth token
+         */
+        token?: string;
+    };
+    url: '/bots/{bot_id}/container/terminal/ws';
+};
+
+export type GetBotsByBotIdContainerTerminalWsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerTerminalWsError = GetBotsByBotIdContainerTerminalWsErrors[keyof GetBotsByBotIdContainerTerminalWsErrors];
 
 export type GetBotsByBotIdEmailBindingsData = {
     body?: never;
@@ -3674,7 +4213,7 @@ export type DeleteBotsByBotIdMemoryResponses = {
     /**
      * OK
      */
-    200: ProviderDeleteResponse;
+    200: AdaptersDeleteResponse;
 };
 
 export type DeleteBotsByBotIdMemoryResponse = DeleteBotsByBotIdMemoryResponses[keyof DeleteBotsByBotIdMemoryResponses];
@@ -3721,7 +4260,7 @@ export type GetBotsByBotIdMemoryResponses = {
     /**
      * OK
      */
-    200: ProviderSearchResponse;
+    200: AdaptersSearchResponse;
 };
 
 export type GetBotsByBotIdMemoryResponse = GetBotsByBotIdMemoryResponses[keyof GetBotsByBotIdMemoryResponses];
@@ -3766,7 +4305,7 @@ export type PostBotsByBotIdMemoryResponses = {
     /**
      * OK
      */
-    200: ProviderSearchResponse;
+    200: AdaptersSearchResponse;
 };
 
 export type PostBotsByBotIdMemoryResponse = PostBotsByBotIdMemoryResponses[keyof PostBotsByBotIdMemoryResponses];
@@ -3811,7 +4350,7 @@ export type PostBotsByBotIdMemoryCompactResponses = {
     /**
      * OK
      */
-    200: ProviderCompactResult;
+    200: AdaptersCompactResult;
 };
 
 export type PostBotsByBotIdMemoryCompactResponse = PostBotsByBotIdMemoryCompactResponses[keyof PostBotsByBotIdMemoryCompactResponses];
@@ -3838,6 +4377,10 @@ export type PostBotsByBotIdMemoryRebuildErrors = {
      */
     403: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -3853,7 +4396,7 @@ export type PostBotsByBotIdMemoryRebuildResponses = {
     /**
      * OK
      */
-    200: ProviderRebuildResult;
+    200: AdaptersRebuildResult;
 };
 
 export type PostBotsByBotIdMemoryRebuildResponse = PostBotsByBotIdMemoryRebuildResponses[keyof PostBotsByBotIdMemoryRebuildResponses];
@@ -3902,10 +4445,56 @@ export type PostBotsByBotIdMemorySearchResponses = {
     /**
      * OK
      */
-    200: ProviderSearchResponse;
+    200: AdaptersSearchResponse;
 };
 
 export type PostBotsByBotIdMemorySearchResponse = PostBotsByBotIdMemorySearchResponses[keyof PostBotsByBotIdMemorySearchResponses];
+
+export type GetBotsByBotIdMemoryStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/memory/status';
+};
+
+export type GetBotsByBotIdMemoryStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdMemoryStatusError = GetBotsByBotIdMemoryStatusErrors[keyof GetBotsByBotIdMemoryStatusErrors];
+
+export type GetBotsByBotIdMemoryStatusResponses = {
+    /**
+     * OK
+     */
+    200: AdaptersMemoryStatusResponse;
+};
+
+export type GetBotsByBotIdMemoryStatusResponse = GetBotsByBotIdMemoryStatusResponses[keyof GetBotsByBotIdMemoryStatusResponses];
 
 export type GetBotsByBotIdMemoryUsageData = {
     body?: never;
@@ -3944,7 +4533,7 @@ export type GetBotsByBotIdMemoryUsageResponses = {
     /**
      * OK
      */
-    200: ProviderUsageResponse;
+    200: AdaptersUsageResponse;
 };
 
 export type GetBotsByBotIdMemoryUsageResponse = GetBotsByBotIdMemoryUsageResponses[keyof GetBotsByBotIdMemoryUsageResponses];
@@ -3990,7 +4579,7 @@ export type DeleteBotsByBotIdMemoryByIdResponses = {
     /**
      * OK
      */
-    200: ProviderDeleteResponse;
+    200: AdaptersDeleteResponse;
 };
 
 export type DeleteBotsByBotIdMemoryByIdResponse = DeleteBotsByBotIdMemoryByIdResponses[keyof DeleteBotsByBotIdMemoryByIdResponses];
@@ -4839,6 +5428,43 @@ export type PostBotsByBotIdToolsResponses = {
 
 export type PostBotsByBotIdToolsResponse = PostBotsByBotIdToolsResponses[keyof PostBotsByBotIdToolsResponses];
 
+export type PostBotsByBotIdTtsSynthesizeData = {
+    /**
+     * Text to synthesize
+     */
+    body: HandlersSynthesizeRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/tts/synthesize';
+};
+
+export type PostBotsByBotIdTtsSynthesizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdTtsSynthesizeError = PostBotsByBotIdTtsSynthesizeErrors[keyof PostBotsByBotIdTtsSynthesizeErrors];
+
+export type PostBotsByBotIdTtsSynthesizeResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSynthesizeResponse;
+};
+
+export type PostBotsByBotIdTtsSynthesizeResponse = PostBotsByBotIdTtsSynthesizeResponses[keyof PostBotsByBotIdTtsSynthesizeResponses];
+
 export type PostBotsByBotIdWebMessagesData = {
     /**
      * Message payload
@@ -4948,6 +5574,125 @@ export type GetBotsByBotIdWebWsErrors = {
 };
 
 export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
+
+export type GetBotsByBotIdWhitelistData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/whitelist';
+};
+
+export type GetBotsByBotIdWhitelistErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdWhitelistError = GetBotsByBotIdWhitelistErrors[keyof GetBotsByBotIdWhitelistErrors];
+
+export type GetBotsByBotIdWhitelistResponses = {
+    /**
+     * OK
+     */
+    200: AclListRulesResponse;
+};
+
+export type GetBotsByBotIdWhitelistResponse = GetBotsByBotIdWhitelistResponses[keyof GetBotsByBotIdWhitelistResponses];
+
+export type PutBotsByBotIdWhitelistData = {
+    /**
+     * Whitelist payload
+     */
+    body: AclUpsertRuleRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/whitelist';
+};
+
+export type PutBotsByBotIdWhitelistErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdWhitelistError = PutBotsByBotIdWhitelistErrors[keyof PutBotsByBotIdWhitelistErrors];
+
+export type PutBotsByBotIdWhitelistResponses = {
+    /**
+     * OK
+     */
+    200: AclRule;
+};
+
+export type PutBotsByBotIdWhitelistResponse = PutBotsByBotIdWhitelistResponses[keyof PutBotsByBotIdWhitelistResponses];
+
+export type DeleteBotsByBotIdWhitelistByRuleIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Rule ID
+         */
+        rule_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/whitelist/{rule_id}';
+};
+
+export type DeleteBotsByBotIdWhitelistByRuleIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdWhitelistByRuleIdError = DeleteBotsByBotIdWhitelistByRuleIdErrors[keyof DeleteBotsByBotIdWhitelistByRuleIdErrors];
+
+export type DeleteBotsByBotIdWhitelistByRuleIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type DeleteBotsByIdData = {
     body?: never;
@@ -5408,137 +6153,6 @@ export type GetBotsByIdChecksResponses = {
 
 export type GetBotsByIdChecksResponse = GetBotsByIdChecksResponses[keyof GetBotsByIdChecksResponses];
 
-export type GetBotsByIdMembersData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{id}/members';
-};
-
-export type GetBotsByIdMembersErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByIdMembersError = GetBotsByIdMembersErrors[keyof GetBotsByIdMembersErrors];
-
-export type GetBotsByIdMembersResponses = {
-    /**
-     * OK
-     */
-    200: BotsListMembersResponse;
-};
-
-export type GetBotsByIdMembersResponse = GetBotsByIdMembersResponses[keyof GetBotsByIdMembersResponses];
-
-export type PutBotsByIdMembersData = {
-    /**
-     * Member payload
-     */
-    body: BotsUpsertMemberRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{id}/members';
-};
-
-export type PutBotsByIdMembersErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutBotsByIdMembersError = PutBotsByIdMembersErrors[keyof PutBotsByIdMembersErrors];
-
-export type PutBotsByIdMembersResponses = {
-    /**
-     * OK
-     */
-    200: BotsBotMember;
-};
-
-export type PutBotsByIdMembersResponse = PutBotsByIdMembersResponses[keyof PutBotsByIdMembersResponses];
-
-export type DeleteBotsByIdMembersByUserIdData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        id: string;
-        /**
-         * User ID
-         */
-        user_id: string;
-    };
-    query?: never;
-    url: '/bots/{id}/members/{user_id}';
-};
-
-export type DeleteBotsByIdMembersByUserIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteBotsByIdMembersByUserIdError = DeleteBotsByIdMembersByUserIdErrors[keyof DeleteBotsByIdMembersByUserIdErrors];
-
-export type DeleteBotsByIdMembersByUserIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
 export type PutBotsByIdOwnerData = {
     /**
      * Transfer payload
@@ -5640,6 +6254,31 @@ export type PostBrowserContextsResponses = {
 };
 
 export type PostBrowserContextsResponse = PostBrowserContextsResponses[keyof PostBrowserContextsResponses];
+
+export type GetBrowserContextsCoresData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/browser-contexts/cores';
+};
+
+export type GetBrowserContextsCoresErrors = {
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetBrowserContextsCoresError = GetBrowserContextsCoresErrors[keyof GetBrowserContextsCoresErrors];
+
+export type GetBrowserContextsCoresResponses = {
+    /**
+     * OK
+     */
+    200: HandlersBrowserCoresResponse;
+};
+
+export type GetBrowserContextsCoresResponse = GetBrowserContextsCoresResponses[keyof GetBrowserContextsCoresResponses];
 
 export type DeleteBrowserContextsByIdData = {
     body?: never;
@@ -5976,6 +6615,108 @@ export type PutEmailProvidersByIdResponses = {
 
 export type PutEmailProvidersByIdResponse = PutEmailProvidersByIdResponses[keyof PutEmailProvidersByIdResponses];
 
+export type GetEmailProvidersByIdOauthAuthorizeData = {
+    body?: never;
+    path: {
+        /**
+         * Email provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/email-providers/{id}/oauth/authorize';
+};
+
+export type GetEmailProvidersByIdOauthAuthorizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetEmailProvidersByIdOauthAuthorizeError = GetEmailProvidersByIdOauthAuthorizeErrors[keyof GetEmailProvidersByIdOauthAuthorizeErrors];
+
+export type GetEmailProvidersByIdOauthAuthorizeResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type GetEmailProvidersByIdOauthAuthorizeResponse = GetEmailProvidersByIdOauthAuthorizeResponses[keyof GetEmailProvidersByIdOauthAuthorizeResponses];
+
+export type GetEmailProvidersByIdOauthStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Email provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/email-providers/{id}/oauth/status';
+};
+
+export type GetEmailProvidersByIdOauthStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetEmailProvidersByIdOauthStatusError = GetEmailProvidersByIdOauthStatusErrors[keyof GetEmailProvidersByIdOauthStatusErrors];
+
+export type GetEmailProvidersByIdOauthStatusResponses = {
+    /**
+     * OK
+     */
+    200: HandlersEmailOAuthStatusResponse;
+};
+
+export type GetEmailProvidersByIdOauthStatusResponse = GetEmailProvidersByIdOauthStatusResponses[keyof GetEmailProvidersByIdOauthStatusResponses];
+
+export type DeleteEmailProvidersByIdOauthTokenData = {
+    body?: never;
+    path: {
+        /**
+         * Email provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/email-providers/{id}/oauth/token';
+};
+
+export type DeleteEmailProvidersByIdOauthTokenErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteEmailProvidersByIdOauthTokenError = DeleteEmailProvidersByIdOauthTokenErrors[keyof DeleteEmailProvidersByIdOauthTokenErrors];
+
+export type DeleteEmailProvidersByIdOauthTokenResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
 export type PostEmailMailgunWebhookByConfigIdData = {
     body?: never;
     path: {
@@ -6016,6 +6757,46 @@ export type PostEmailMailgunWebhookByConfigIdResponses = {
 
 export type PostEmailMailgunWebhookByConfigIdResponse = PostEmailMailgunWebhookByConfigIdResponses[keyof PostEmailMailgunWebhookByConfigIdResponses];
 
+export type GetEmailOauthCallbackData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Authorization code
+         */
+        code: string;
+        /**
+         * State parameter
+         */
+        state: string;
+    };
+    url: '/email/oauth/callback';
+};
+
+export type GetEmailOauthCallbackErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetEmailOauthCallbackError = GetEmailOauthCallbackErrors[keyof GetEmailOauthCallbackErrors];
+
+export type GetEmailOauthCallbackResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type GetEmailOauthCallbackResponse = GetEmailOauthCallbackResponses[keyof GetEmailOauthCallbackResponses];
+
 export type GetMemoryProvidersData = {
     body?: never;
     path?: never;
@@ -6036,7 +6817,7 @@ export type GetMemoryProvidersResponses = {
     /**
      * OK
      */
-    200: Array<ProviderProviderGetResponse>;
+    200: Array<AdaptersProviderGetResponse>;
 };
 
 export type GetMemoryProvidersResponse = GetMemoryProvidersResponses[keyof GetMemoryProvidersResponses];
@@ -6045,7 +6826,7 @@ export type PostMemoryProvidersData = {
     /**
      * Memory provider configuration
      */
-    body: ProviderProviderCreateRequest;
+    body: AdaptersProviderCreateRequest;
     path?: never;
     query?: never;
     url: '/memory-providers';
@@ -6068,7 +6849,7 @@ export type PostMemoryProvidersResponses = {
     /**
      * Created
      */
-    201: ProviderProviderGetResponse;
+    201: AdaptersProviderGetResponse;
 };
 
 export type PostMemoryProvidersResponse = PostMemoryProvidersResponses[keyof PostMemoryProvidersResponses];
@@ -6084,7 +6865,7 @@ export type GetMemoryProvidersMetaResponses = {
     /**
      * OK
      */
-    200: Array<ProviderProviderMeta>;
+    200: Array<AdaptersProviderMeta>;
 };
 
 export type GetMemoryProvidersMetaResponse = GetMemoryProvidersMetaResponses[keyof GetMemoryProvidersMetaResponses];
@@ -6150,7 +6931,7 @@ export type GetMemoryProvidersByIdResponses = {
     /**
      * OK
      */
-    200: ProviderProviderGetResponse;
+    200: AdaptersProviderGetResponse;
 };
 
 export type GetMemoryProvidersByIdResponse = GetMemoryProvidersByIdResponses[keyof GetMemoryProvidersByIdResponses];
@@ -6159,7 +6940,7 @@ export type PutMemoryProvidersByIdData = {
     /**
      * Updated configuration
      */
-    body: ProviderProviderUpdateRequest;
+    body: AdaptersProviderUpdateRequest;
     path: {
         /**
          * Provider ID
@@ -6187,10 +6968,48 @@ export type PutMemoryProvidersByIdResponses = {
     /**
      * OK
      */
-    200: ProviderProviderGetResponse;
+    200: AdaptersProviderGetResponse;
 };
 
 export type PutMemoryProvidersByIdResponse = PutMemoryProvidersByIdResponses[keyof PutMemoryProvidersByIdResponses];
+
+export type GetMemoryProvidersByIdStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/memory-providers/{id}/status';
+};
+
+export type GetMemoryProvidersByIdStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetMemoryProvidersByIdStatusError = GetMemoryProvidersByIdStatusErrors[keyof GetMemoryProvidersByIdStatusErrors];
+
+export type GetMemoryProvidersByIdStatusResponses = {
+    /**
+     * OK
+     */
+    200: AdaptersProviderStatusResponse;
+};
+
+export type GetMemoryProvidersByIdStatusResponse = GetMemoryProvidersByIdStatusResponses[keyof GetMemoryProvidersByIdStatusResponses];
 
 export type GetModelsData = {
     body?: never;
@@ -7117,6 +7936,456 @@ export type PutSearchProvidersByIdResponses = {
 };
 
 export type PutSearchProvidersByIdResponse = PutSearchProvidersByIdResponses[keyof PutSearchProvidersByIdResponses];
+
+export type GetTtsModelsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/tts-models';
+};
+
+export type GetTtsModelsErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetTtsModelsError = GetTtsModelsErrors[keyof GetTtsModelsErrors];
+
+export type GetTtsModelsResponses = {
+    /**
+     * OK
+     */
+    200: Array<TtsModelResponse>;
+};
+
+export type GetTtsModelsResponse = GetTtsModelsResponses[keyof GetTtsModelsResponses];
+
+export type PostTtsModelsData = {
+    /**
+     * TTS model configuration
+     */
+    body: TtsCreateModelRequest;
+    path?: never;
+    query?: never;
+    url: '/tts-models';
+};
+
+export type PostTtsModelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostTtsModelsError = PostTtsModelsErrors[keyof PostTtsModelsErrors];
+
+export type PostTtsModelsResponses = {
+    /**
+     * Created
+     */
+    201: TtsModelResponse;
+};
+
+export type PostTtsModelsResponse = PostTtsModelsResponses[keyof PostTtsModelsResponses];
+
+export type DeleteTtsModelsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Model ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-models/{id}';
+};
+
+export type DeleteTtsModelsByIdErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteTtsModelsByIdError = DeleteTtsModelsByIdErrors[keyof DeleteTtsModelsByIdErrors];
+
+export type DeleteTtsModelsByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetTtsModelsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Model ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-models/{id}';
+};
+
+export type GetTtsModelsByIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetTtsModelsByIdError = GetTtsModelsByIdErrors[keyof GetTtsModelsByIdErrors];
+
+export type GetTtsModelsByIdResponses = {
+    /**
+     * OK
+     */
+    200: TtsModelResponse;
+};
+
+export type GetTtsModelsByIdResponse = GetTtsModelsByIdResponses[keyof GetTtsModelsByIdResponses];
+
+export type PutTtsModelsByIdData = {
+    /**
+     * Updated configuration
+     */
+    body: TtsUpdateModelRequest;
+    path: {
+        /**
+         * Model ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-models/{id}';
+};
+
+export type PutTtsModelsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutTtsModelsByIdError = PutTtsModelsByIdErrors[keyof PutTtsModelsByIdErrors];
+
+export type PutTtsModelsByIdResponses = {
+    /**
+     * OK
+     */
+    200: TtsModelResponse;
+};
+
+export type PutTtsModelsByIdResponse = PutTtsModelsByIdResponses[keyof PutTtsModelsByIdResponses];
+
+export type GetTtsModelsByIdCapabilitiesData = {
+    body?: never;
+    path: {
+        /**
+         * Model ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-models/{id}/capabilities';
+};
+
+export type GetTtsModelsByIdCapabilitiesErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetTtsModelsByIdCapabilitiesError = GetTtsModelsByIdCapabilitiesErrors[keyof GetTtsModelsByIdCapabilitiesErrors];
+
+export type GetTtsModelsByIdCapabilitiesResponses = {
+    /**
+     * OK
+     */
+    200: TtsModelCapabilities;
+};
+
+export type GetTtsModelsByIdCapabilitiesResponse = GetTtsModelsByIdCapabilitiesResponses[keyof GetTtsModelsByIdCapabilitiesResponses];
+
+export type PostTtsModelsByIdTestData = {
+    /**
+     * Text to synthesize
+     */
+    body: TtsTestSynthesizeRequest;
+    path: {
+        /**
+         * Model ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-models/{id}/test';
+};
+
+export type PostTtsModelsByIdTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostTtsModelsByIdTestError = PostTtsModelsByIdTestErrors[keyof PostTtsModelsByIdTestErrors];
+
+export type PostTtsModelsByIdTestResponses = {
+    /**
+     * Audio data
+     */
+    200: unknown;
+};
+
+export type GetTtsProvidersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Provider type filter
+         */
+        provider?: string;
+    };
+    url: '/tts-providers';
+};
+
+export type GetTtsProvidersErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetTtsProvidersError = GetTtsProvidersErrors[keyof GetTtsProvidersErrors];
+
+export type GetTtsProvidersResponses = {
+    /**
+     * OK
+     */
+    200: Array<TtsProviderResponse>;
+};
+
+export type GetTtsProvidersResponse = GetTtsProvidersResponses[keyof GetTtsProvidersResponses];
+
+export type PostTtsProvidersData = {
+    /**
+     * TTS provider configuration
+     */
+    body: TtsCreateProviderRequest;
+    path?: never;
+    query?: never;
+    url: '/tts-providers';
+};
+
+export type PostTtsProvidersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostTtsProvidersError = PostTtsProvidersErrors[keyof PostTtsProvidersErrors];
+
+export type PostTtsProvidersResponses = {
+    /**
+     * Created
+     */
+    201: TtsProviderResponse;
+};
+
+export type PostTtsProvidersResponse = PostTtsProvidersResponses[keyof PostTtsProvidersResponses];
+
+export type GetTtsProvidersMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/tts-providers/meta';
+};
+
+export type GetTtsProvidersMetaResponses = {
+    /**
+     * OK
+     */
+    200: Array<TtsProviderMetaResponse>;
+};
+
+export type GetTtsProvidersMetaResponse = GetTtsProvidersMetaResponses[keyof GetTtsProvidersMetaResponses];
+
+export type DeleteTtsProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-providers/{id}';
+};
+
+export type DeleteTtsProvidersByIdErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteTtsProvidersByIdError = DeleteTtsProvidersByIdErrors[keyof DeleteTtsProvidersByIdErrors];
+
+export type DeleteTtsProvidersByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetTtsProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-providers/{id}';
+};
+
+export type GetTtsProvidersByIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetTtsProvidersByIdError = GetTtsProvidersByIdErrors[keyof GetTtsProvidersByIdErrors];
+
+export type GetTtsProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: TtsProviderResponse;
+};
+
+export type GetTtsProvidersByIdResponse = GetTtsProvidersByIdResponses[keyof GetTtsProvidersByIdResponses];
+
+export type PutTtsProvidersByIdData = {
+    /**
+     * Updated configuration
+     */
+    body: TtsUpdateProviderRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-providers/{id}';
+};
+
+export type PutTtsProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutTtsProvidersByIdError = PutTtsProvidersByIdErrors[keyof PutTtsProvidersByIdErrors];
+
+export type PutTtsProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: TtsProviderResponse;
+};
+
+export type PutTtsProvidersByIdResponse = PutTtsProvidersByIdResponses[keyof PutTtsProvidersByIdResponses];
+
+export type PostTtsProvidersByIdImportModelsData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-providers/{id}/import-models';
+};
+
+export type PostTtsProvidersByIdImportModelsErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostTtsProvidersByIdImportModelsError = PostTtsProvidersByIdImportModelsErrors[keyof PostTtsProvidersByIdImportModelsErrors];
+
+export type PostTtsProvidersByIdImportModelsResponses = {
+    /**
+     * OK
+     */
+    200: Array<TtsModelResponse>;
+};
+
+export type PostTtsProvidersByIdImportModelsResponse = PostTtsProvidersByIdImportModelsResponses[keyof PostTtsProvidersByIdImportModelsResponses];
+
+export type GetTtsProvidersByIdModelsData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/tts-providers/{id}/models';
+};
+
+export type GetTtsProvidersByIdModelsErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetTtsProvidersByIdModelsError = GetTtsProvidersByIdModelsErrors[keyof GetTtsProvidersByIdModelsErrors];
+
+export type GetTtsProvidersByIdModelsResponses = {
+    /**
+     * OK
+     */
+    200: Array<TtsModelResponse>;
+};
+
+export type GetTtsProvidersByIdModelsResponse = GetTtsProvidersByIdModelsResponses[keyof GetTtsProvidersByIdModelsResponses];
 
 export type GetUsersData = {
     body?: never;

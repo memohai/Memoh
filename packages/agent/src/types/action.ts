@@ -2,6 +2,7 @@ import { LanguageModelUsage, ModelMessage } from 'ai'
 import { AgentInput } from './agent'
 import { AgentAttachment } from './attachment'
 import { ReactionItem } from '../utils/reactions'
+import { SpeechItem } from '../utils/speech'
 
 export interface BaseAction {
   type: string
@@ -43,6 +44,11 @@ export interface AttachmentDeltaAction extends BaseAction {
 export interface ReactionDeltaAction extends BaseAction {
   type: 'reaction_delta'
   reactions: ReactionItem[]
+}
+
+export interface SpeechDeltaAction extends BaseAction {
+  type: 'speech_delta'
+  speeches: SpeechItem[]
 }
 
 export interface TextEndAction extends BaseAction {
@@ -91,6 +97,7 @@ export type AgentStreamAction =
   | TextDeltaAction
   | AttachmentDeltaAction
   | ReactionDeltaAction
+  | SpeechDeltaAction
   | TextEndAction
   | ToolCallStartAction
   | ToolCallEndAction

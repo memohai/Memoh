@@ -99,7 +99,7 @@ func (s *DBOAuthTokenStore) Delete(ctx context.Context, providerID string) error
 	return s.queries.DeleteEmailOAuthToken(ctx, pgID)
 }
 
-func (*DBOAuthTokenStore) toOAuthToken(row sqlc.EmailOAuthToken) *OAuthToken {
+func (*DBOAuthTokenStore) toOAuthToken(row sqlc.EmailOauthToken) *OAuthToken {
 	t := &OAuthToken{
 		ProviderID:   row.EmailProviderID.String(),
 		EmailAddress: row.EmailAddress,

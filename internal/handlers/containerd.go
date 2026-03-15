@@ -142,6 +142,9 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group.GET("/skills", h.ListSkills)
 	group.POST("/skills", h.UpsertSkills)
 	group.DELETE("/skills", h.DeleteSkills)
+	// Terminal routes
+	group.GET("/terminal", h.GetTerminalInfo)
+	group.GET("/terminal/ws", h.HandleTerminalWS)
 	// File manager routes
 	group.GET("/fs", h.FSStat)
 	group.GET("/fs/list", h.FSList)
@@ -846,11 +849,11 @@ func (*ContainerdHandler) requireChannelIdentityID(c echo.Context) (string, erro
 }
 
 func (h *ContainerdHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID)
 }
 
 // requireBotAccessWithGuest is like requireBotAccess but also allows guest access
-// for public bots that have the allow_guest setting enabled.
+// via ACL when the caller explicitly opts into guest-compatible access.
 func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, error) {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -860,8 +863,7 @@ func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, e
 	if botID == "" {
 		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	policy := bots.AccessPolicy{AllowPublicMember: true, AllowGuest: true}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, policy); err != nil {
+	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
 		return "", err
 	}
 	return botID, nil

@@ -12,24 +12,26 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
 type Service struct {
 	queries *sqlc.Queries
+	acl     *acl.Service
 	logger  *slog.Logger
 }
 
 var (
-	ErrPersonalBotGuestAccessUnsupported = errors.New("personal bots do not support guest access")
-	ErrModelIDAmbiguous                  = errors.New("model_id is ambiguous across providers")
-	ErrInvalidModelRef                   = errors.New("invalid model reference")
+	ErrModelIDAmbiguous = errors.New("model_id is ambiguous across providers")
+	ErrInvalidModelRef  = errors.New("invalid model reference")
 )
 
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries *sqlc.Queries, aclService *acl.Service) *Service {
 	return &Service{
 		queries: queries,
+		acl:     aclService,
 		logger:  log.With(slog.String("service", "settings")),
 	}
 }
@@ -43,7 +45,13 @@ func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	return normalizeBotSettingsReadRow(row), nil
+	settings := normalizeBotSettingsReadRow(row)
+	allowGuest, err := s.allowGuestEnabled(ctx, botID)
+	if err != nil {
+		return Settings{}, err
+	}
+	settings.AllowGuest = allowGuest
+	return settings, nil
 }
 
 func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest) (Settings, error) {
@@ -58,9 +66,11 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	isPersonalBot := strings.EqualFold(strings.TrimSpace(botRow.Type), "personal")
-
-	current := normalizeBotSetting(botRow.MaxContextLoadTime, botRow.MaxContextTokens, botRow.MaxInboxItems, botRow.Language, botRow.AllowGuest, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval)
+	allowGuest, err := s.allowGuestEnabled(ctx, botID)
+	if err != nil {
+		return Settings{}, err
+	}
+	current := normalizeBotSetting(botRow.MaxContextLoadTime, botRow.MaxContextTokens, botRow.MaxInboxItems, botRow.Language, allowGuest, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval)
 	if req.MaxContextLoadTime != nil && *req.MaxContextLoadTime > 0 {
 		current.MaxContextLoadTime = *req.MaxContextLoadTime
 	}
@@ -73,12 +83,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if strings.TrimSpace(req.Language) != "" {
 		current.Language = strings.TrimSpace(req.Language)
 	}
-	if isPersonalBot {
-		if req.AllowGuest != nil && *req.AllowGuest {
-			return Settings{}, ErrPersonalBotGuestAccessUnsupported
-		}
-		current.AllowGuest = false
-	} else if req.AllowGuest != nil {
+	if req.AllowGuest != nil {
 		current.AllowGuest = *req.AllowGuest
 	}
 	if req.ReasoningEnabled != nil {
@@ -125,6 +130,14 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		memoryProviderUUID = providerID
 	}
+	ttsModelUUID := pgtype.UUID{}
+	if value := strings.TrimSpace(req.TtsModelID); value != "" {
+		modelID, err := db.ParseUUID(value)
+		if err != nil {
+			return Settings{}, err
+		}
+		ttsModelUUID = modelID
+	}
 	browserContextUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.BrowserContextID); value != "" {
 		ctxID, err := db.ParseUUID(value)
@@ -142,11 +155,10 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
 		ID:                 pgID,
-		MaxContextLoadTime: int32(current.MaxContextLoadTime),
+		MaxContextLoadTime: int32(current.MaxContextLoadTime), //nolint:gosec // range validated above
 		MaxContextTokens:   int32(current.MaxContextTokens),
 		MaxInboxItems:      int32(current.MaxInboxItems),
 		Language:           current.Language,
-		AllowGuest:         current.AllowGuest,
 		ReasoningEnabled:   current.ReasoningEnabled,
 		ReasoningEffort:    current.ReasoningEffort,
 		HeartbeatEnabled:   current.HeartbeatEnabled,
@@ -156,12 +168,22 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		HeartbeatModelID:   heartbeatModelUUID,
 		SearchProviderID:   searchProviderUUID,
 		MemoryProviderID:   memoryProviderUUID,
+		TtsModelID:         ttsModelUUID,
 		BrowserContextID:   browserContextUUID,
 	})
 	if err != nil {
 		return Settings{}, err
 	}
-	return normalizeBotSettingsWriteRow(updated), nil
+	createdByUserID := ""
+	if botRow.OwnerUserID.Valid {
+		createdByUserID = uuid.UUID(botRow.OwnerUserID.Bytes).String()
+	}
+	if err := s.setAllowGuest(ctx, botID, createdByUserID, current.AllowGuest); err != nil {
+		return Settings{}, err
+	}
+	settings := normalizeBotSettingsWriteRow(updated)
+	settings.AllowGuest = current.AllowGuest
+	return settings, nil
 }
 
 func (s *Service) Delete(ctx context.Context, botID string) error {
@@ -172,7 +194,10 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteSettingsByBotID(ctx, pgID)
+	if err := s.queries.DeleteSettingsByBotID(ctx, pgID); err != nil {
+		return err
+	}
+	return s.setAllowGuest(ctx, botID, "", false)
 }
 
 func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, maxInboxItems int32, language string, allowGuest bool, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32) Settings {
@@ -223,7 +248,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.MaxContextTokens,
 		row.MaxInboxItems,
 		row.Language,
-		row.AllowGuest,
 		row.ReasoningEnabled,
 		row.ReasoningEffort,
 		row.HeartbeatEnabled,
@@ -232,6 +256,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.HeartbeatModelID,
 		row.SearchProviderID,
 		row.MemoryProviderID,
+		row.TtsModelID,
 		row.BrowserContextID,
 	)
 }
@@ -242,7 +267,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.MaxContextTokens,
 		row.MaxInboxItems,
 		row.Language,
-		row.AllowGuest,
 		row.ReasoningEnabled,
 		row.ReasoningEffort,
 		row.HeartbeatEnabled,
@@ -251,6 +275,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.HeartbeatModelID,
 		row.SearchProviderID,
 		row.MemoryProviderID,
+		row.TtsModelID,
 		row.BrowserContextID,
 	)
 }
@@ -260,7 +285,6 @@ func normalizeBotSettingsFields(
 	maxContextTokens int32,
 	maxInboxItems int32,
 	language string,
-	allowGuest bool,
 	reasoningEnabled bool,
 	reasoningEffort string,
 	heartbeatEnabled bool,
@@ -269,9 +293,10 @@ func normalizeBotSettingsFields(
 	heartbeatModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 	memoryProviderID pgtype.UUID,
+	ttsModelID pgtype.UUID,
 	browserContextID pgtype.UUID,
 ) Settings {
-	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, maxInboxItems, language, allowGuest, reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval)
+	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, maxInboxItems, language, false, reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval)
 	if chatModelID.Valid {
 		settings.ChatModelID = uuid.UUID(chatModelID.Bytes).String()
 	}
@@ -284,10 +309,27 @@ func normalizeBotSettingsFields(
 	if memoryProviderID.Valid {
 		settings.MemoryProviderID = uuid.UUID(memoryProviderID.Bytes).String()
 	}
+	if ttsModelID.Valid {
+		settings.TtsModelID = uuid.UUID(ttsModelID.Bytes).String()
+	}
 	if browserContextID.Valid {
 		settings.BrowserContextID = uuid.UUID(browserContextID.Bytes).String()
 	}
 	return settings
+}
+
+func (s *Service) allowGuestEnabled(ctx context.Context, botID string) (bool, error) {
+	if s.acl == nil {
+		return false, nil
+	}
+	return s.acl.AllowGuestEnabled(ctx, botID)
+}
+
+func (s *Service) setAllowGuest(ctx context.Context, botID, createdByUserID string, enabled bool) error {
+	if s.acl == nil {
+		return nil
+	}
+	return s.acl.SetAllowGuest(ctx, botID, createdByUserID, enabled)
 }
 
 func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.UUID, error) {

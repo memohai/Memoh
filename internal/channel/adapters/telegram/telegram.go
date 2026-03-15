@@ -82,6 +82,7 @@ func (a *TelegramAdapter) SetAssetOpener(opener assetOpener) {
 var getOrCreateBotForTest func(a *TelegramAdapter, token, configID string) (*tgbotapi.BotAPI, error)
 
 func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tgbotapi.BotAPI, error) {
+	channel.SetIMErrorSecrets("telegram:"+configID, cfg.BotToken)
 	if getOrCreateBotForTest != nil {
 		return getOrCreateBotForTest(a, cfg.BotToken, configID)
 	}
@@ -493,6 +494,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	if text == "" && len(attachments) == 0 {
 		return channel.InboundMessage{}, false
 	}
+	rawText := text
 	// Prepend quoted message context so the AI can see what is being replied to,
 	// and include quoted attachments so the LLM can see the actual media.
 	if raw.ReplyToMessage != nil {
@@ -509,11 +511,13 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	}
 	subjectID, displayName, attrs := resolveTelegramSender(raw)
 	chatID := ""
-	chatType := ""
+	chatTypeRaw := ""
+	chatType := channel.ConversationTypePrivate
 	chatName := ""
 	if raw.Chat != nil {
 		chatID = strconv.FormatInt(raw.Chat.ID, 10)
-		chatType = strings.TrimSpace(raw.Chat.Type)
+		chatTypeRaw = strings.TrimSpace(raw.Chat.Type)
+		chatType = normalizeTelegramConversationType(chatTypeRaw)
 		chatName = strings.TrimSpace(raw.Chat.Title)
 	}
 	replyRef := buildTelegramReplyRef(raw, chatID)
@@ -530,6 +534,8 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	meta := map[string]any{
 		"is_mentioned":    isMentioned,
 		"is_reply_to_bot": isReplyToBot,
+		"raw_text":        rawText,
+		"raw_chat_type":   chatTypeRaw,
 	}
 	for key, value := range metadata {
 		meta[key] = value
@@ -639,6 +645,11 @@ func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelCon
 	if target == "" {
 		return nil, errors.New("telegram target is required")
 	}
+	telegramCfg, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return nil, fmt.Errorf("telegram open stream: %w", err)
+	}
+	channel.SetIMErrorSecrets("telegram:"+cfg.ID, telegramCfg.BotToken)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -730,6 +741,17 @@ func parseReplyToMessageID(reply *channel.ReplyRef) int {
 		return 0
 	}
 	return value
+}
+
+func normalizeTelegramConversationType(chatType string) string {
+	switch strings.ToLower(strings.TrimSpace(chatType)) {
+	case "private":
+		return channel.ConversationTypePrivate
+	case "group", "supergroup", "channel":
+		return channel.ConversationTypeGroup
+	default:
+		return channel.ConversationTypeGroup
+	}
 }
 
 func sendTelegramText(bot *tgbotapi.BotAPI, target string, text string, replyTo int, parseMode string) error {
@@ -1270,7 +1292,9 @@ func isTelegramBotMentioned(msg *tgbotapi.Message, botUsername string) bool {
 	entities = append(entities, msg.CaptionEntities...)
 	for _, entity := range entities {
 		if entity.Type == "text_mention" && entity.User != nil && entity.User.IsBot {
-			return true
+			if normalizedBot != "" && strings.EqualFold(entity.User.UserName, normalizedBot) {
+				return true
+			}
 		}
 	}
 	return false

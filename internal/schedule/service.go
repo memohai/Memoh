@@ -82,7 +82,7 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 		if *req.MaxCalls.Value < math.MinInt32 || *req.MaxCalls.Value > math.MaxInt32 {
 			return Schedule{}, fmt.Errorf("max_calls out of range: %d", *req.MaxCalls.Value)
 		}
-		maxCalls = pgtype.Int4{Int32: int32(*req.MaxCalls.Value), Valid: true}
+		maxCalls = pgtype.Int4{Int32: int32(*req.MaxCalls.Value), Valid: true} //nolint:gosec // bounds checked above
 	}
 	enabled := true
 	if req.Enabled != nil {
@@ -175,7 +175,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 			if *req.MaxCalls.Value < math.MinInt32 || *req.MaxCalls.Value > math.MaxInt32 {
 				return Schedule{}, fmt.Errorf("max_calls out of range: %d", *req.MaxCalls.Value)
 			}
-			maxCalls = pgtype.Int4{Int32: int32(*req.MaxCalls.Value), Valid: true}
+			maxCalls = pgtype.Int4{Int32: int32(*req.MaxCalls.Value), Valid: true} //nolint:gosec // bounds checked above
 		}
 	}
 	enabled := existing.Enabled

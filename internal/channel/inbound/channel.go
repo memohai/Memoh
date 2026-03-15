@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/channel"
@@ -26,6 +28,8 @@ import (
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
+
+var base64Std = base64.StdEncoding
 
 const (
 	silentReplyToken        = "NO_REPLY"
@@ -44,6 +48,10 @@ type channelReactor interface {
 	React(ctx context.Context, botID string, channelType channel.ChannelType, req channel.ReactRequest) error
 }
 
+type chatACL interface {
+	CanPerformChatTrigger(ctx context.Context, req acl.ChatTriggerRequest) (bool, error)
+}
+
 type mediaIngestor interface {
 	Ingest(ctx context.Context, input media.IngestInput) (media.Asset, error)
 	// GetByStorageKey resolves an asset by reading its sidecar JSON.
@@ -54,21 +62,34 @@ type mediaIngestor interface {
 	IngestContainerFile(ctx context.Context, botID, containerPath string) (media.Asset, error)
 }
 
+// ttsSynthesizer synthesizes text to speech audio.
+type ttsSynthesizer interface {
+	Synthesize(ctx context.Context, modelID string, text string, overrideCfg map[string]any) ([]byte, string, error)
+}
+
+// ttsModelResolver looks up the TTS model ID configured for a bot.
+type ttsModelResolver interface {
+	ResolveTtsModelID(ctx context.Context, botID string) (string, error)
+}
+
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
-	runner         flow.Runner
-	routeResolver  RouteResolver
-	message        messagepkg.Writer
-	mediaService   mediaIngestor
-	reactor        channelReactor
-	inboxService   *inbox.Service
-	commandHandler *command.Handler
-	registry       *channel.Registry
-	logger         *slog.Logger
-	jwtSecret      string
-	tokenTTL       time.Duration
-	identity       *IdentityResolver
-	observer       channel.StreamObserver
+	runner           flow.Runner
+	routeResolver    RouteResolver
+	message          messagepkg.Writer
+	mediaService     mediaIngestor
+	reactor          channelReactor
+	inboxService     *inbox.Service
+	commandHandler   *command.Handler
+	registry         *channel.Registry
+	logger           *slog.Logger
+	jwtSecret        string
+	tokenTTL         time.Duration
+	identity         *IdentityResolver
+	acl              chatACL
+	observer         channel.StreamObserver
+	ttsService       ttsSynthesizer
+	ttsModelResolver ttsModelResolver
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -79,9 +100,7 @@ func NewChannelInboundProcessor(
 	messageWriter messagepkg.Writer,
 	runner flow.Runner,
 	channelIdentityService ChannelIdentityService,
-	memberService BotMemberService,
 	policyService PolicyService,
-	preauthService PreauthService,
 	bindService BindService,
 	jwtSecret string,
 	tokenTTL time.Duration,
@@ -92,7 +111,7 @@ func NewChannelInboundProcessor(
 	if tokenTTL <= 0 {
 		tokenTTL = 5 * time.Minute
 	}
-	identityResolver := NewIdentityResolver(log, registry, channelIdentityService, memberService, policyService, preauthService, bindService, "", "")
+	identityResolver := NewIdentityResolver(log, registry, channelIdentityService, policyService, bindService, "")
 	return &ChannelInboundProcessor{
 		runner:        runner,
 		routeResolver: routeResolver,
@@ -103,6 +122,13 @@ func NewChannelInboundProcessor(
 		tokenTTL:      tokenTTL,
 		identity:      identityResolver,
 	}
+}
+
+func (p *ChannelInboundProcessor) SetACLService(service chatACL) {
+	if p == nil {
+		return
+	}
+	p.acl = service
 }
 
 // IdentityMiddleware returns the identity resolution middleware.
@@ -146,6 +172,16 @@ func (p *ChannelInboundProcessor) SetInboxService(service *inbox.Service) {
 		return
 	}
 	p.inboxService = service
+}
+
+// SetTtsService configures the TTS synthesizer and settings reader for handling
+// <speech> tag events (speech_delta) that require server-side audio synthesis.
+func (p *ChannelInboundProcessor) SetTtsService(synth ttsSynthesizer, modelResolver ttsModelResolver) {
+	if p == nil {
+		return
+	}
+	p.ttsService = synth
+	p.ttsModelResolver = modelResolver
 }
 
 // SetCommandHandler configures the slash command handler for intercepting
@@ -208,8 +244,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	identity := state.Identity
 
 	// Intercept slash commands before they reach the LLM.
-	if p.commandHandler != nil && p.commandHandler.IsCommand(text) {
-		reply, err := p.commandHandler.Execute(ctx, strings.TrimSpace(identity.BotID), strings.TrimSpace(identity.ChannelIdentityID), text)
+	// Use raw_text (without prepended quote/forward context) so that
+	// quoted content like "[Reply to Bot: /fs list]\n hello" doesn't
+	// accidentally match a command.
+	// In group chats, only process if the message is directed at this bot
+	// (via @mention or reply) to avoid all bots responding to the same command.
+	cmdText := rawTextForCommand(msg, text)
+	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && isDirectedAtBot(msg) {
+		reply, err := p.commandHandler.Execute(ctx, strings.TrimSpace(identity.BotID), strings.TrimSpace(identity.ChannelIdentityID), cmdText)
 		if err != nil {
 			reply = "Error: " + err.Error()
 		}
@@ -222,6 +264,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	resolvedAttachments := p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Attachments)
 	attachments := mapChannelToChatAttachments(resolvedAttachments)
 	text = buildInboundQuery(msg.Message, attachments)
+	threadID := extractThreadID(msg)
 
 	// Resolve or create the route via channel_routes.
 	if p.routeResolver == nil {
@@ -232,7 +275,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		BotID:             identity.BotID,
 		Platform:          msg.Channel.String(),
 		ConversationID:    msg.Conversation.ID,
-		ThreadID:          extractThreadID(msg),
+		ThreadID:          threadID,
 		ConversationType:  msg.Conversation.Type,
 		ChannelIdentityID: identity.UserID,
 		ChannelConfigID:   identity.ChannelConfigID,
@@ -252,6 +295,35 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	inboxAction := inbox.ActionNotify
 	if shouldTriggerAssistantResponse(msg) || identity.ForceReply {
 		inboxAction = inbox.ActionTrigger
+	}
+	if inboxAction == inbox.ActionTrigger && p.acl != nil {
+		allowed, err := p.acl.CanPerformChatTrigger(ctx, acl.ChatTriggerRequest{
+			BotID:             identity.BotID,
+			UserID:            identity.UserID,
+			ChannelIdentityID: identity.ChannelIdentityID,
+			SourceScope: acl.SourceScope{
+				Channel:          msg.Channel.String(),
+				ConversationType: channel.NormalizeConversationType(msg.Conversation.Type),
+				ConversationID:   strings.TrimSpace(msg.Conversation.ID),
+				ThreadID:         threadID,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("authorize chat trigger: %w", err)
+		}
+		if !allowed {
+			inboxAction = inbox.ActionNotify
+			if p.logger != nil {
+				p.logger.Info(
+					"inbound trigger denied by acl",
+					slog.String("channel", msg.Channel.String()),
+					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+					slog.String("user_id", strings.TrimSpace(identity.UserID)),
+					slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
+					slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
+				)
+			}
+		}
 	}
 
 	// All messages go through inbox first.
@@ -278,8 +350,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if inboxItem.ID != "" {
 		p.markInboxItemRead(ctx, inboxItem)
 	}
-
-	userMessagePersisted := p.persistInboundUser(ctx, resolved.RouteID, identity, msg, text, attachments, "active_chat")
 
 	// Issue chat token for reply routing.
 	chatToken := ""
@@ -425,7 +495,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		Query:                   text,
 		CurrentChannel:          msg.Channel.String(),
 		Channels:                []string{msg.Channel.String()},
-		UserMessagePersisted:    userMessagePersisted,
+		UserMessagePersisted:    false,
 		Attachments:             attachments,
 		OutboundAssetCollector:  assetCollector,
 	})
@@ -459,29 +529,15 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 					ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), event.Attachments)
 					events[i].Attachments = ingested
 					assetMu.Lock()
-					for _, att := range ingested {
-						contentHash := strings.TrimSpace(att.ContentHash)
-						if contentHash == "" {
-							continue
-						}
-						ref := conversation.OutboundAssetRef{
-							ContentHash: contentHash,
-							Role:        "attachment",
-							Ordinal:     len(outboundAssetRefs),
-							Mime:        strings.TrimSpace(att.Mime),
-							SizeBytes:   att.Size,
-						}
-						if att.Metadata != nil {
-							if sk, ok := att.Metadata["storage_key"].(string); ok {
-								ref.StorageKey = sk
-							}
-						}
-						outboundAssetRefs = append(outboundAssetRefs, ref)
-					}
+					outboundAssetRefs = append(outboundAssetRefs, buildAssetRefs(ingested, len(outboundAssetRefs))...)
 					assetMu.Unlock()
 				}
 				if event.Type == channel.StreamEventReaction && len(event.Reactions) > 0 {
 					p.dispatchReactions(ctx, identity.BotID, msg.Channel, target, sourceMessageID, event.Reactions)
+					continue
+				}
+				if event.Type == channel.StreamEventSpeech && len(event.Speeches) > 0 {
+					p.synthesizeAndPushVoice(ctx, strings.TrimSpace(identity.BotID), event.Speeches, stream, &outboundAssetRefs, &assetMu)
 					continue
 				}
 				if pushErr := stream.Push(ctx, events[i]); pushErr != nil {
@@ -596,65 +652,33 @@ func shouldTriggerAssistantResponse(msg channel.InboundMessage) bool {
 	if metadataBool(msg.Metadata, "is_reply_to_bot") {
 		return true
 	}
-	return hasCommandPrefix(msg.Message.PlainText(), msg.Metadata)
-}
-
-func isDirectConversationType(conversationType string) bool {
-	ct := strings.ToLower(strings.TrimSpace(conversationType))
-	return ct == "" || ct == "p2p" || ct == "private" || ct == "direct"
-}
-
-func hasCommandPrefix(text string, metadata map[string]any) bool {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return false
-	}
-	prefixes := []string{"/"}
-	if metadata != nil {
-		if raw, ok := metadata["command_prefix"]; ok {
-			if value := strings.TrimSpace(fmt.Sprint(raw)); value != "" {
-				prefixes = []string{value}
-			}
-		}
-		if raw, ok := metadata["command_prefixes"]; ok {
-			if parsed := parseCommandPrefixes(raw); len(parsed) > 0 {
-				prefixes = parsed
-			}
-		}
-	}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(trimmed, prefix) {
-			return true
-		}
-	}
 	return false
 }
 
-func parseCommandPrefixes(raw any) []string {
-	if items, ok := raw.([]string); ok {
-		result := make([]string, 0, len(items))
-		for _, item := range items {
-			value := strings.TrimSpace(item)
-			if value == "" {
-				continue
-			}
-			result = append(result, value)
-		}
-		return result
+// isDirectedAtBot reports whether the message is explicitly directed at this bot,
+// either because it's a direct conversation, the bot is @mentioned, or it's a reply
+// to this bot's message.
+func isDirectedAtBot(msg channel.InboundMessage) bool {
+	if isDirectConversationType(msg.Conversation.Type) {
+		return true
 	}
-	items, ok := raw.([]any)
-	if !ok {
-		return nil
+	return metadataBool(msg.Metadata, "is_mentioned") || metadataBool(msg.Metadata, "is_reply_to_bot")
+}
+
+// rawTextForCommand returns the original user text (without prepended
+// quote/forward context) for slash-command detection. Adapters store the
+// undecorated text as metadata["raw_text"]; this helper falls back to the
+// full decorated text when the key is absent (e.g. direct messages or
+// adapters that don't prepend context).
+func rawTextForCommand(msg channel.InboundMessage, fallback string) string {
+	if raw, ok := msg.Metadata["raw_text"].(string); ok && strings.TrimSpace(raw) != "" {
+		return raw
 	}
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		value := strings.TrimSpace(fmt.Sprint(item))
-		if value == "" {
-			continue
-		}
-		result = append(result, value)
-	}
-	return result
+	return fallback
+}
+
+func isDirectConversationType(conversationType string) bool {
+	return channel.IsPrivateConversationType(conversationType)
 }
 
 func metadataBool(metadata map[string]any, key string) bool {
@@ -678,71 +702,6 @@ func metadataBool(metadata map[string]any, key string) bool {
 	default:
 		return false
 	}
-}
-
-func (p *ChannelInboundProcessor) persistInboundUser(
-	ctx context.Context,
-	routeID string,
-	identity InboundIdentity,
-	msg channel.InboundMessage,
-	query string,
-	attachments []conversation.ChatAttachment,
-	triggerMode string,
-) bool {
-	if p.message == nil {
-		return false
-	}
-	botID := strings.TrimSpace(identity.BotID)
-	if botID == "" {
-		return false
-	}
-	var attachmentPaths []string
-	for _, att := range attachments {
-		if ap := strings.TrimSpace(att.Path); ap != "" {
-			attachmentPaths = append(attachmentPaths, ap)
-		}
-	}
-	headerifiedQuery := flow.FormatUserHeader(
-		strings.TrimSpace(msg.Message.ID),
-		strings.TrimSpace(identity.ChannelIdentityID),
-		strings.TrimSpace(identity.DisplayName),
-		msg.Channel.String(),
-		strings.TrimSpace(msg.Conversation.Type),
-		strings.TrimSpace(msg.Conversation.Name),
-		attachmentPaths,
-		query,
-	)
-	payload, err := json.Marshal(conversation.ModelMessage{
-		Role:    "user",
-		Content: conversation.NewTextContent(headerifiedQuery),
-	})
-	if err != nil {
-		if p.logger != nil {
-			p.logger.Warn("marshal inbound user message failed", slog.Any("error", err))
-		}
-		return false
-	}
-	meta := map[string]any{
-		"route_id":     strings.TrimSpace(routeID),
-		"platform":     msg.Channel.String(),
-		"trigger_mode": strings.TrimSpace(triggerMode),
-	}
-	if _, err := p.message.Persist(ctx, messagepkg.PersistInput{
-		BotID:                   botID,
-		RouteID:                 strings.TrimSpace(routeID),
-		SenderChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
-		SenderUserID:            strings.TrimSpace(identity.UserID),
-		Platform:                msg.Channel.String(),
-		ExternalMessageID:       strings.TrimSpace(msg.Message.ID),
-		Role:                    "user",
-		Content:                 payload,
-		Metadata:                meta,
-		Assets:                  chatAttachmentsToAssetRefs(attachments),
-	}); err != nil && p.logger != nil {
-		p.logger.Warn("persist inbound user message failed", slog.Any("error", err))
-		return false
-	}
-	return true
 }
 
 func (p *ChannelInboundProcessor) createInboxItem(
@@ -902,6 +861,7 @@ type gatewayStreamEnvelope struct {
 	Result      json.RawMessage `json:"result"`
 	Attachments json.RawMessage `json:"attachments"`
 	Reactions   json.RawMessage `json:"reactions"`
+	Speeches    json.RawMessage `json:"speeches"`
 }
 
 type gatewayStreamDoneData struct {
@@ -1002,6 +962,14 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 		}
 		return []channel.StreamEvent{
 			{Type: channel.StreamEventReaction, Reactions: reactions},
+		}, finalMessages, nil
+	case "speech_delta":
+		speeches := parseSpeechDelta(envelope.Speeches)
+		if len(speeches) == 0 {
+			return nil, finalMessages, nil
+		}
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventSpeech, Speeches: speeches},
 		}, finalMessages, nil
 	case "agent_start":
 		return []channel.StreamEvent{
@@ -1887,36 +1855,6 @@ func channelAttachmentsToAssetRefs(attachments []channel.Attachment, role string
 	return refs
 }
 
-func chatAttachmentsToAssetRefs(attachments []conversation.ChatAttachment) []messagepkg.AssetRef {
-	if len(attachments) == 0 {
-		return nil
-	}
-	refs := make([]messagepkg.AssetRef, 0, len(attachments))
-	for idx, att := range attachments {
-		contentHash := strings.TrimSpace(att.ContentHash)
-		if contentHash == "" {
-			continue
-		}
-		ref := messagepkg.AssetRef{
-			ContentHash: contentHash,
-			Role:        "attachment",
-			Ordinal:     idx,
-			Mime:        strings.TrimSpace(att.Mime),
-			SizeBytes:   att.Size,
-		}
-		if att.Metadata != nil {
-			if sk, ok := att.Metadata["storage_key"].(string); ok {
-				ref.StorageKey = sk
-			}
-		}
-		refs = append(refs, ref)
-	}
-	if len(refs) == 0 {
-		return nil
-	}
-	return refs
-}
-
 func mapChannelToChatAttachments(attachments []channel.Attachment) []conversation.ChatAttachment {
 	if len(attachments) == 0 {
 		return nil
@@ -1982,6 +1920,122 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 		})
 	}
 	return attachments
+}
+
+// synthesizeAndPushVoice handles speech_delta events by synthesizing audio
+// and pushing the resulting voice attachment into the outbound stream.
+func (p *ChannelInboundProcessor) synthesizeAndPushVoice(
+	ctx context.Context,
+	botID string,
+	speeches []channel.SpeechRequest,
+	stream channel.OutboundStream,
+	outboundAssetRefs *[]conversation.OutboundAssetRef,
+	assetMu *sync.Mutex,
+) {
+	if p.ttsService == nil || p.ttsModelResolver == nil {
+		if p.logger != nil {
+			p.logger.Warn("speech_delta received but TTS service not configured")
+		}
+		return
+	}
+	modelID, err := p.ttsModelResolver.ResolveTtsModelID(ctx, botID)
+	if err != nil || strings.TrimSpace(modelID) == "" {
+		if p.logger != nil {
+			p.logger.Warn("speech_delta: bot has no TTS model configured", slog.String("bot_id", botID))
+		}
+		return
+	}
+	for _, speech := range speeches {
+		text := strings.TrimSpace(speech.Text)
+		if text == "" {
+			continue
+		}
+		audioData, contentType, synthErr := p.ttsService.Synthesize(ctx, modelID, text, nil)
+		if synthErr != nil {
+			if p.logger != nil {
+				p.logger.Warn("speech synthesis failed", slog.String("bot_id", botID), slog.Any("error", synthErr))
+			}
+			continue
+		}
+		dataURL := encodeDataURL(contentType, audioData)
+		voiceEvent := channel.StreamEvent{
+			Type: channel.StreamEventAttachment,
+			Attachments: []channel.Attachment{
+				{
+					Type: channel.AttachmentVoice,
+					URL:  dataURL,
+					Mime: contentType,
+					Size: int64(len(audioData)),
+				},
+			},
+		}
+		ingested := p.ingestOutboundAttachments(ctx, botID, voiceEvent.Attachments)
+		voiceEvent.Attachments = ingested
+		assetMu.Lock()
+		*outboundAssetRefs = append(*outboundAssetRefs, buildAssetRefs(ingested, len(*outboundAssetRefs))...)
+		assetMu.Unlock()
+		if pushErr := stream.Push(ctx, voiceEvent); pushErr != nil {
+			if p.logger != nil {
+				p.logger.Warn("push voice attachment failed", slog.String("bot_id", botID), slog.Any("error", pushErr))
+			}
+			return
+		}
+	}
+}
+
+// parseSpeechDelta converts raw JSON speech data to SpeechRequest values.
+func parseSpeechDelta(raw json.RawMessage) []channel.SpeechRequest {
+	if len(raw) == 0 {
+		return nil
+	}
+	var items []struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	speeches := make([]channel.SpeechRequest, 0, len(items))
+	for _, item := range items {
+		text := strings.TrimSpace(item.Text)
+		if text == "" {
+			continue
+		}
+		speeches = append(speeches, channel.SpeechRequest{Text: text})
+	}
+	return speeches
+}
+
+func buildAssetRefs(attachments []channel.Attachment, startOrdinal int) []conversation.OutboundAssetRef {
+	var refs []conversation.OutboundAssetRef
+	for _, att := range attachments {
+		contentHash := strings.TrimSpace(att.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		ref := conversation.OutboundAssetRef{
+			ContentHash: contentHash,
+			Role:        "attachment",
+			Ordinal:     startOrdinal + len(refs),
+			Mime:        strings.TrimSpace(att.Mime),
+			SizeBytes:   att.Size,
+		}
+		if att.Metadata != nil {
+			if sk, ok := att.Metadata["storage_key"].(string); ok {
+				ref.StorageKey = sk
+			}
+		}
+		refs = append(refs, ref)
+	}
+	return refs
+}
+
+func encodeDataURL(mime string, data []byte) string {
+	encoded := base64Encode(data)
+	return "data:" + mime + ";base64," + encoded
+}
+
+func base64Encode(data []byte) string {
+	return base64Std.EncodeToString(data)
 }
 
 // parseReactionDelta converts raw JSON reaction data to channel ReactRequests.

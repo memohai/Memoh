@@ -3,5 +3,5 @@
 [files]
 extend-exclude = [
   "**/node_modules/**",
-
+  "**/voices.json",
 ]

@@ -131,20 +131,26 @@ Use ${quote('search_memory')} to recall earlier conversations beyond the current
 
 ### Memory Write Rules (IMPORTANT)
 
-For ${quote('memory/YYYY-MM-DD.md')}, use ${quote('write')} with structured JSON:
+For ${quote('memory/YYYY-MM-DD.md')}, use canonical markdown entries:
 
 ${block([
-  '[',
-  '  {',
-  '    "topic": "like Events, Notes, etc.",',
-  '    "memory": "What happened / what to remember",',
-  '  }',
-  ']',
+  '## Entry mem_20260313_001',
+  '',
+  '```yaml',
+  'id: mem_20260313_001',
+  'created_at: 2026-03-13T13:34:49Z',
+  'updated_at: 2026-03-13T13:34:49Z',
+  'metadata:',
+  '  topic: Notes',
+  '```',
+  '',
+  'What happened / what to remember',
 ].join('\n'))}
 
 Rules:
 - Only send NEW memory items (do not re-write old content).
-- Do not invent markdown format for daily memory files.
+- Preserve the canonical entry structure for daily memory files.
+- When a memory is about a known user or group from ${quote('PROFILES.md')}, include a stable profile link in ${quote('metadata')} (for example ${quote('profile_ref')}, plus identity fields when available).
 - Do not provide ${quote('hash')} (backend generates it).
 - If plain text is unavoidable, write concise factual notes only.
 - ${quote('MEMORY.md')} stays human-readable markdown (not JSON).
@@ -156,6 +162,8 @@ Rules:
 **${quote('send')} tool:** ONLY for reaching out to a DIFFERENT channel or conversation — e.g. posting to another group, messaging a different person, or replying to an inbox item from another platform. Requires a ${quote('target')} — use ${quote('get_contacts')} to find available targets.
 
 **${quote('react')} tool:** Add or remove an emoji reaction on a specific message (any channel).
+
+**${quote('speak')} tool:** Send a voice message to a DIFFERENT channel. Synthesizes text and delivers as audio. Requires ${quote('target')} — use ${quote('get_contacts')} to find available targets. For speaking in the current conversation, use the ${quote('<speech>')} block instead.
 
 ### When to use ${quote('send')}
 - A scheduled task tells you to notify or post somewhere.
@@ -221,6 +229,21 @@ Rules:
 - The block can appear anywhere in your response; it will be parsed and stripped from visible text
 - This reacts to the **source message** of the current conversation (the message you are responding to)
 - For reacting to messages in other channels or removing reactions, use the ${quote('react')} tool instead
+
+## Speech
+
+To speak aloud in the current conversation (text-to-speech), use this format in your direct response:
+
+${block([
+  '<speech>',
+  'The text you want to say aloud.',
+  '</speech>',
+].join('\n'))}
+
+Rules:
+- Content is the text to synthesize (max 500 characters)
+- The block can appear anywhere in your response; it will be parsed and stripped from visible text
+- For sending voice to a DIFFERENT channel, use the ${quote('speak')} tool instead
 
 ## Schedule Tasks
 

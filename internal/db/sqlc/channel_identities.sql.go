@@ -162,6 +162,86 @@ func (q *Queries) ListChannelIdentitiesByUserID(ctx context.Context, userID pgty
 	return items, nil
 }
 
+const searchChannelIdentities = `-- name: SearchChannelIdentities :many
+SELECT
+  ci.id,
+  ci.user_id,
+  ci.channel_type,
+  ci.channel_subject_id,
+  ci.display_name,
+  ci.avatar_url,
+  ci.metadata,
+  ci.created_at,
+  ci.updated_at,
+  u.username AS linked_username,
+  u.display_name AS linked_display_name,
+  u.avatar_url AS linked_avatar_url
+FROM channel_identities ci
+LEFT JOIN users u ON u.id = ci.user_id
+WHERE
+  $1::text = ''
+  OR ci.channel_type ILIKE '%' || $1::text || '%'
+  OR ci.channel_subject_id ILIKE '%' || $1::text || '%'
+  OR COALESCE(ci.display_name, '') ILIKE '%' || $1::text || '%'
+  OR COALESCE(u.username, '') ILIKE '%' || $1::text || '%'
+  OR COALESCE(u.display_name, '') ILIKE '%' || $1::text || '%'
+ORDER BY ci.updated_at DESC
+LIMIT $2
+`
+
+type SearchChannelIdentitiesParams struct {
+	Query      string `json:"query"`
+	LimitCount int32  `json:"limit_count"`
+}
+
+type SearchChannelIdentitiesRow struct {
+	ID                pgtype.UUID        `json:"id"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	ChannelType       string             `json:"channel_type"`
+	ChannelSubjectID  string             `json:"channel_subject_id"`
+	DisplayName       pgtype.Text        `json:"display_name"`
+	AvatarUrl         pgtype.Text        `json:"avatar_url"`
+	Metadata          []byte             `json:"metadata"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LinkedUsername    pgtype.Text        `json:"linked_username"`
+	LinkedDisplayName pgtype.Text        `json:"linked_display_name"`
+	LinkedAvatarUrl   pgtype.Text        `json:"linked_avatar_url"`
+}
+
+func (q *Queries) SearchChannelIdentities(ctx context.Context, arg SearchChannelIdentitiesParams) ([]SearchChannelIdentitiesRow, error) {
+	rows, err := q.db.Query(ctx, searchChannelIdentities, arg.Query, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchChannelIdentitiesRow
+	for rows.Next() {
+		var i SearchChannelIdentitiesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ChannelType,
+			&i.ChannelSubjectID,
+			&i.DisplayName,
+			&i.AvatarUrl,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LinkedUsername,
+			&i.LinkedDisplayName,
+			&i.LinkedAvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setChannelIdentityLinkedUser = `-- name: SetChannelIdentityLinkedUser :one
 UPDATE channel_identities
 SET user_id = $2, updated_at = now()

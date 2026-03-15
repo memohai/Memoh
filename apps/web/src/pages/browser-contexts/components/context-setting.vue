@@ -41,6 +41,31 @@
           {{ $t('browserContext.config') }}
         </h3>
 
+        <FormField
+          v-slot="{ value, handleChange }"
+          name="core"
+        >
+          <FormItem>
+            <Label>{{ $t('browserContext.core') }}</Label>
+            <FormControl>
+              <div class="flex gap-3">
+                <button
+                  v-for="c in availableCores"
+                  :key="c"
+                  type="button"
+                  class="flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm transition-colors"
+                  :class="value === c
+                    ? 'border-primary bg-primary/10 text-primary font-medium'
+                    : 'border-border bg-card text-muted-foreground hover:bg-accent'"
+                  @click="handleChange(c)"
+                >
+                  {{ $t(`browserContext.${c}`) }}
+                </button>
+              </div>
+            </FormControl>
+          </FormItem>
+        </FormField>
+
         <div class="grid grid-cols-2 gap-4">
           <FormField
             v-slot="{ componentField }"
@@ -212,10 +237,11 @@ import {
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
-import { useMutation, useQueryCache } from '@pinia/colada'
+import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { putBrowserContextsById, deleteBrowserContextsById } from '@memoh/sdk'
+import { getBrowserContextsCoresQuery } from '@memoh/sdk/colada'
 import type { BrowsercontextsBrowserContext } from '@memoh/sdk'
-import { inject, watch, type Ref } from 'vue'
+import { inject, watch, computed, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { useDialogMutation } from '@/composables/useDialogMutation'
@@ -228,7 +254,11 @@ const queryCache = useQueryCache()
 
 const curContext = inject<Ref<BrowsercontextsBrowserContext | undefined>>('curBrowserContext')
 
+const { data: coresData } = useQuery(getBrowserContextsCoresQuery())
+const availableCores = computed(() => coresData.value?.cores ?? ['chromium'])
+
 interface ConfigShape {
+  core?: string
   viewport?: { width?: number; height?: number }
   userAgent?: string
   deviceScaleFactor?: number
@@ -251,6 +281,7 @@ function parseConfig(ctx: BrowsercontextsBrowserContext | undefined): ConfigShap
 
 const schema = toTypedSchema(z.object({
   name: z.string().min(1),
+  core: z.enum(['chromium', 'firefox']).optional(),
   viewportWidth: z.coerce.number().optional(),
   viewportHeight: z.coerce.number().optional(),
   userAgent: z.string().optional(),
@@ -269,6 +300,7 @@ watch(() => curContext?.value, (ctx) => {
   form.resetForm({
     values: {
       name: ctx.name || '',
+      core: (cfg.core as 'chromium' | 'firefox') ?? 'chromium',
       viewportWidth: cfg.viewport?.width ?? 1280,
       viewportHeight: cfg.viewport?.height ?? 720,
       userAgent: cfg.userAgent ?? '',
@@ -307,7 +339,9 @@ const handleSave = form.handleSubmit(async (values) => {
   const id = curContext?.value?.id
   if (!id) return
 
-  const config: Record<string, any> = {}
+  const config: Record<string, any> = {
+    core: values.core ?? 'chromium',
+  }
   if (values.viewportWidth || values.viewportHeight) {
     config.viewport = {
       width: values.viewportWidth || 1280,

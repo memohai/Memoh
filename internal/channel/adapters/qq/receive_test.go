@@ -45,7 +45,7 @@ func TestEventToInboundMessageC2C(t *testing.T) {
 	if msg.ReplyTarget != "c2c:user-openid" {
 		t.Fatalf("unexpected reply target: %s", msg.ReplyTarget)
 	}
-	if msg.Conversation.Type != "direct" {
+	if msg.Conversation.Type != channel.ConversationTypePrivate {
 		t.Fatalf("unexpected conversation type: %s", msg.Conversation.Type)
 	}
 	if msg.Sender.SubjectID != "user-openid" {
@@ -90,7 +90,7 @@ func TestEventToInboundMessageGroupAt(t *testing.T) {
 	if msg.Conversation.ID != "group-openid" {
 		t.Fatalf("unexpected conversation id: %s", msg.Conversation.ID)
 	}
-	if msg.Conversation.Type != "group" {
+	if msg.Conversation.Type != channel.ConversationTypeGroup {
 		t.Fatalf("unexpected conversation type: %s", msg.Conversation.Type)
 	}
 	if msg.Sender.SubjectID != "member-openid" {
@@ -124,8 +124,14 @@ func TestEventToInboundMessageChannelAt(t *testing.T) {
 	if msg.ReplyTarget != "channel:channel-1" {
 		t.Fatalf("unexpected reply target: %s", msg.ReplyTarget)
 	}
-	if msg.Conversation.Type != "channel" {
+	if msg.Conversation.Type != channel.ConversationTypeThread {
 		t.Fatalf("unexpected conversation type: %s", msg.Conversation.Type)
+	}
+	if msg.Conversation.ID != "guild-1" {
+		t.Fatalf("unexpected conversation id: %s", msg.Conversation.ID)
+	}
+	if msg.Conversation.ThreadID != "channel-1" {
+		t.Fatalf("unexpected thread id: %s", msg.Conversation.ThreadID)
 	}
 	if msg.Sender.DisplayName != "alice" {
 		t.Fatalf("unexpected sender display name: %s", msg.Sender.DisplayName)

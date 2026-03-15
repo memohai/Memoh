@@ -104,6 +104,28 @@ func (s *Service) ListAccounts(ctx context.Context) ([]Account, error) {
 	return items, nil
 }
 
+// SearchAccounts returns account candidates for UI search.
+func (s *Service) SearchAccounts(ctx context.Context, query string, limit int) ([]Account, error) {
+	if s.queries == nil {
+		return nil, errors.New("account queries not configured")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.queries.SearchAccounts(ctx, sqlc.SearchAccountsParams{
+		Query:      strings.TrimSpace(query),
+		LimitCount: int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]Account, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toAccount(row))
+	}
+	return items, nil
+}
+
 // IsAdmin checks if the user has admin role.
 func (s *Service) IsAdmin(ctx context.Context, userID string) (bool, error) {
 	if s.queries == nil {

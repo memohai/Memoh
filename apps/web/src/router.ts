@@ -76,6 +76,14 @@ const routes = [
         },
       },
       {
+        name: 'tts-providers',
+        path: '/tts-providers',
+        component: () => import('@/pages/tts-providers/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.ttsProvider'),
+        },
+      },
+      {
         name: 'email-providers',
         path: '/email-providers',
         component: () => import('@/pages/email-providers/index.vue'),

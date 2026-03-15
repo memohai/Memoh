@@ -7,6 +7,7 @@ export interface Config {
   mcp: McpConfig;
   postgres: PostgresConfig;
   qdrant: QdrantConfig;
+  sparse: SparseConfig;
   agent_gateway: AgentGatewayConfig;
   browser_gateway: BrowserGatewayConfig;
   web: WebConfig;
@@ -57,6 +58,10 @@ export interface QdrantConfig {
   api_key: string;
   collection: string;
   timeout_seconds: number;
+}
+
+export interface SparseConfig {
+  base_url: string;
 }
 
 export interface AgentGatewayConfig {

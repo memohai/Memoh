@@ -88,27 +88,6 @@ func (s *Service) Create(ctx context.Context, botID, channelIdentityID string, r
 		return Conversation{}, fmt.Errorf("create conversation: %w", err)
 	}
 
-	// Add creator as owner when the channel identity is available.
-	if pgChannelIdentityID.Valid {
-		if _, err := s.queries.AddChatParticipant(ctx, sqlc.AddChatParticipantParams{
-			ChatID: row.ID,
-			UserID: pgChannelIdentityID,
-			Role:   RoleOwner,
-		}); err != nil {
-			return Conversation{}, fmt.Errorf("add owner participant: %w", err)
-		}
-	}
-
-	// For threads, copy parent participants.
-	if kind == KindThread && pgParent.Valid {
-		if err := s.queries.CopyParticipantsToChat(ctx, sqlc.CopyParticipantsToChatParams{
-			ChatID:  pgParent,
-			ChatID2: row.ID,
-		}); err != nil {
-			s.logger.Warn("copy parent participants failed", slog.Any("error", err))
-		}
-	}
-
 	return toChatFromCreate(row), nil
 }
 
@@ -205,51 +184,34 @@ func (s *Service) Delete(ctx context.Context, conversationID string) error {
 	return s.queries.DeleteChat(ctx, pgID)
 }
 
-// AddParticipant adds a channel identity to a conversation.
-func (s *Service) AddParticipant(ctx context.Context, conversationID, channelIdentityID, role string) (Participant, error) {
-	pgConversationID, err := parseUUID(conversationID)
-	if err != nil {
-		return Participant{}, err
-	}
-	pgChannelIdentityID, err := parseUUID(channelIdentityID)
-	if err != nil {
-		return Participant{}, err
-	}
-	if role == "" {
-		role = RoleMember
-	}
-	row, err := s.queries.AddChatParticipant(ctx, sqlc.AddChatParticipantParams{
-		ChatID: pgConversationID,
-		UserID: pgChannelIdentityID,
-		Role:   role,
-	})
-	if err != nil {
-		return Participant{}, err
-	}
-	return toParticipantFromAdd(row), nil
+// AddParticipant is no longer supported after removing bot member sharing.
+func (*Service) AddParticipant(_ context.Context, _, _, _ string) (Participant, error) {
+	return Participant{}, ErrPermissionDenied
 }
 
-// GetParticipant returns a conversation participant.
+// GetParticipant returns the owner participant only.
 func (s *Service) GetParticipant(ctx context.Context, conversationID, channelIdentityID string) (Participant, error) {
-	pgConversationID, err := parseUUID(conversationID)
-	if err != nil {
+	conversationID = strings.TrimSpace(conversationID)
+	channelIdentityID = strings.TrimSpace(channelIdentityID)
+	if conversationID == "" || channelIdentityID == "" {
 		return Participant{}, ErrNotParticipant
 	}
-	pgChannelIdentityID, err := parseUUID(channelIdentityID)
+	chat, err := s.Get(ctx, conversationID)
 	if err != nil {
-		return Participant{}, ErrNotParticipant
-	}
-	row, err := s.queries.GetChatParticipant(ctx, sqlc.GetChatParticipantParams{
-		ChatID: pgConversationID,
-		UserID: pgChannelIdentityID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, ErrChatNotFound) {
 			return Participant{}, ErrNotParticipant
 		}
 		return Participant{}, err
 	}
-	return toParticipantFromGet(row), nil
+	if strings.TrimSpace(chat.CreatedBy) != channelIdentityID {
+		return Participant{}, ErrNotParticipant
+	}
+	return Participant{
+		ChatID:   chat.ID,
+		UserID:   strings.TrimSpace(chat.CreatedBy),
+		Role:     RoleOwner,
+		JoinedAt: chat.CreatedAt,
+	}, nil
 }
 
 // IsParticipant checks whether a channel identity is a participant.
@@ -261,37 +223,26 @@ func (s *Service) IsParticipant(ctx context.Context, conversationID, channelIden
 	return err == nil, err
 }
 
-// ListParticipants returns all participants for a conversation.
+// ListParticipants returns the owner as the sole participant.
 func (s *Service) ListParticipants(ctx context.Context, conversationID string) ([]Participant, error) {
-	pgID, err := parseUUID(conversationID)
+	chat, err := s.Get(ctx, conversationID)
 	if err != nil {
+		if errors.Is(err, ErrChatNotFound) {
+			return nil, err
+		}
 		return nil, err
 	}
-	rows, err := s.queries.ListChatParticipants(ctx, pgID)
-	if err != nil {
-		return nil, err
-	}
-	participants := make([]Participant, 0, len(rows))
-	for _, row := range rows {
-		participants = append(participants, toParticipantFromList(row))
-	}
-	return participants, nil
+	return []Participant{{
+		ChatID:   chat.ID,
+		UserID:   strings.TrimSpace(chat.CreatedBy),
+		Role:     RoleOwner,
+		JoinedAt: chat.CreatedAt,
+	}}, nil
 }
 
-// RemoveParticipant removes a participant from a conversation.
-func (s *Service) RemoveParticipant(ctx context.Context, conversationID, channelIdentityID string) error {
-	pgConversationID, err := parseUUID(conversationID)
-	if err != nil {
-		return err
-	}
-	pgChannelIdentityID, err := parseUUID(channelIdentityID)
-	if err != nil {
-		return err
-	}
-	return s.queries.RemoveChatParticipant(ctx, sqlc.RemoveChatParticipantParams{
-		ChatID: pgConversationID,
-		UserID: pgChannelIdentityID,
-	})
+// RemoveParticipant is a no-op because only owner participation remains.
+func (*Service) RemoveParticipant(_ context.Context, _, _ string) error {
+	return ErrPermissionDenied
 }
 
 // GetSettings returns conversation settings and falls back to defaults when missing.
@@ -409,27 +360,6 @@ func toChatListItem(row sqlc.ListVisibleChatsByBotAndUserRow) ConversationListIt
 		AccessMode:      row.AccessMode,
 		ParticipantRole: strings.TrimSpace(row.ParticipantRole),
 		LastObservedAt:  pgTimePtr(row.LastObservedAt),
-	}
-}
-
-func toParticipantFromAdd(row sqlc.AddChatParticipantRow) Participant {
-	return toParticipantFields(row.ChatID, row.UserID, row.Role, row.JoinedAt)
-}
-
-func toParticipantFromGet(row sqlc.GetChatParticipantRow) Participant {
-	return toParticipantFields(row.ChatID, row.UserID, row.Role, row.JoinedAt)
-}
-
-func toParticipantFromList(row sqlc.ListChatParticipantsRow) Participant {
-	return toParticipantFields(row.ChatID, row.UserID, row.Role, row.JoinedAt)
-}
-
-func toParticipantFields(conversationID, userID pgtype.UUID, role string, joinedAt pgtype.Timestamptz) Participant {
-	return Participant{
-		ChatID:   conversationID.String(),
-		UserID:   userID.String(),
-		Role:     role,
-		JoinedAt: joinedAt.Time,
 	}
 }
 

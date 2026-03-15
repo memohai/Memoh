@@ -91,7 +91,6 @@
             />
             {{ statusLabel }}
           </Badge>
-          <span v-if="bot?.type">{{ botTypeLabel }}</span>
         </div>
       </div>
     </div>
@@ -248,7 +247,9 @@ import BotSubagents from './components/bot-subagents.vue'
 import BotOverview from './components/bot-overview.vue'
 import BotSchedule from './components/bot-schedule.vue'
 import BotContainer from './components/bot-container.vue'
+import BotTerminal from './components/bot-terminal.vue'
 import BotFiles from './components/bot-files.vue'
+import BotAccess from './components/bot-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
@@ -280,14 +281,16 @@ const tabList = computed(() => {
     { value: 'channels', label: 'bots.tabs.channels', component: BotChannels, params: { 'bot-id': bot_id } },
     { value: 'email', label: 'bots.tabs.email', component: BotEmail, params: { 'bot-id': bot_id } },
     { value: 'container', label: 'bots.tabs.container', component: BotContainer, params: {} },
-    { value: 'files', label: 'bots.tabs.files', component: BotFiles, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
+    { value: 'terminal', label: 'bots.tabs.terminal', component: BotTerminal, params: { 'bot-id': bot_id } },
+    { value: 'files', label: 'bots.tabs.files', component: BotFiles, params: { 'bot-id': bot_id } },
     { value: 'mcp', label: 'bots.tabs.mcp', component: BotMcp, params: { 'bot-id': bot_id } },
     { value: 'subagents', label: 'bots.tabs.subagents', component: BotSubagents, params: { 'bot-id': bot_id } },
     { value: 'heartbeat', label: 'bots.tabs.heartbeat', component: BotHeartbeat, params: { 'bot-id': bot_id } },
     { value: 'schedule', label: 'bots.tabs.schedule', component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'history', label: 'bots.tabs.history', component: BotHistory, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', component: BotSkills, params: { 'bot-id': bot_id } },
-    { value: 'settings', label: 'bots.tabs.settings', component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } }
+    { value: 'access', label: 'bots.tabs.access', component: BotAccess, params: { 'bot-id': bot_id } },
+    { value: 'settings', label: 'bots.tabs.settings', component: BotSettings, params: { 'bot-id': bot_id } }
   ]
 })
 
@@ -364,12 +367,6 @@ const {
   statusLabel,
   statusVariant,
 } = useBotStatusMeta(bot, t)
-
-const botTypeLabel = computed(() => {
-  const type = bot.value?.type
-  if (type === 'personal' || type === 'public') return t('bots.types.' + type)
-  return type ?? ''
-})
 
 const checks = ref<BotCheck[]>([])
 const checksLoading = ref(false)

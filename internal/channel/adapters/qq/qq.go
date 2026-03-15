@@ -94,7 +94,7 @@ func (*QQAdapter) Descriptor() channel.Descriptor {
 			Media:          true,
 			Reply:          true,
 			BlockStreaming: true,
-			ChatTypes:      []string{"direct", "group", "channel"},
+			ChatTypes:      []string{channel.ConversationTypePrivate, channel.ConversationTypeGroup, channel.ConversationTypeThread},
 		},
 		OutboundPolicy: channel.OutboundPolicy{
 			TextChunkLimit:      defaultChunkLimit,
@@ -224,6 +224,7 @@ func (*QQAdapter) ProcessingFailed(context.Context, channel.ChannelConfig, chann
 }
 
 func (a *QQAdapter) getOrCreateClient(cfg channel.ChannelConfig, parsed Config) *qqClient {
+	channel.SetIMErrorSecrets("qq:"+parsed.AppID, parsed.AppSecret)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

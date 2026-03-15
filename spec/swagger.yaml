@@ -76,10 +76,391 @@ definitions:
       display_name:
         type: string
     type: object
+  acl.ChannelIdentityCandidate:
+    properties:
+      avatar_url:
+        type: string
+      channel:
+        type: string
+      channel_subject_id:
+        type: string
+      display_name:
+        type: string
+      id:
+        type: string
+      linked_avatar_url:
+        type: string
+      linked_display_name:
+        type: string
+      linked_username:
+        type: string
+      user_id:
+        type: string
+    type: object
+  acl.ChannelIdentityCandidateListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/acl.ChannelIdentityCandidate'
+        type: array
+    type: object
+  acl.ListRulesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/acl.Rule'
+        type: array
+    type: object
+  acl.ObservedConversationCandidate:
+    properties:
+      channel:
+        type: string
+      conversation_id:
+        type: string
+      conversation_name:
+        type: string
+      conversation_type:
+        type: string
+      last_observed_at:
+        type: string
+      route_id:
+        type: string
+      thread_id:
+        type: string
+    type: object
+  acl.ObservedConversationCandidateListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/acl.ObservedConversationCandidate'
+        type: array
+    type: object
+  acl.Rule:
+    properties:
+      action:
+        type: string
+      bot_id:
+        type: string
+      channel_identity_avatar_url:
+        type: string
+      channel_identity_display_name:
+        type: string
+      channel_identity_id:
+        type: string
+      channel_subject_id:
+        type: string
+      channel_type:
+        type: string
+      created_at:
+        type: string
+      effect:
+        type: string
+      id:
+        type: string
+      linked_user_avatar_url:
+        type: string
+      linked_user_display_name:
+        type: string
+      linked_user_id:
+        type: string
+      linked_user_username:
+        type: string
+      source_scope:
+        $ref: '#/definitions/acl.SourceScope'
+      subject_kind:
+        type: string
+      updated_at:
+        type: string
+      user_avatar_url:
+        type: string
+      user_display_name:
+        type: string
+      user_id:
+        type: string
+      user_username:
+        type: string
+    type: object
+  acl.SourceScope:
+    properties:
+      channel:
+        type: string
+      conversation_id:
+        type: string
+      conversation_type:
+        type: string
+      thread_id:
+        type: string
+    type: object
+  acl.UpsertRuleRequest:
+    properties:
+      channel_identity_id:
+        type: string
+      source_scope:
+        $ref: '#/definitions/acl.SourceScope'
+      user_id:
+        type: string
+    type: object
+  acl.UserCandidate:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      username:
+        type: string
+    type: object
+  acl.UserCandidateListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/acl.UserCandidate'
+        type: array
+    type: object
+  adapters.CDFPoint:
+    properties:
+      cumulative:
+        description: cumulative weight fraction [0.0, 1.0]
+        type: number
+      k:
+        description: rank position (1-based, sorted by value desc)
+        type: integer
+    type: object
+  adapters.CompactResult:
+    properties:
+      after_count:
+        type: integer
+      before_count:
+        type: integer
+      ratio:
+        type: number
+      results:
+        items:
+          $ref: '#/definitions/adapters.MemoryItem'
+        type: array
+    type: object
+  adapters.DeleteResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  adapters.HealthStatus:
+    properties:
+      error:
+        type: string
+      ok:
+        type: boolean
+    type: object
+  adapters.MemoryItem:
+    properties:
+      agent_id:
+        type: string
+      bot_id:
+        type: string
+      cdf_curve:
+        items:
+          $ref: '#/definitions/adapters.CDFPoint'
+        type: array
+      created_at:
+        type: string
+      hash:
+        type: string
+      id:
+        type: string
+      memory:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      run_id:
+        type: string
+      score:
+        type: number
+      top_k_buckets:
+        items:
+          $ref: '#/definitions/adapters.TopKBucket'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  adapters.MemoryStatusResponse:
+    properties:
+      can_manual_sync:
+        type: boolean
+      encoder:
+        $ref: '#/definitions/adapters.HealthStatus'
+      indexed_count:
+        type: integer
+      markdown_file_count:
+        type: integer
+      memory_mode:
+        type: string
+      overview_path:
+        type: string
+      provider_type:
+        type: string
+      qdrant:
+        $ref: '#/definitions/adapters.HealthStatus'
+      qdrant_collection:
+        type: string
+      source_count:
+        type: integer
+      source_dir:
+        type: string
+    type: object
+  adapters.Message:
+    properties:
+      content:
+        type: string
+      role:
+        type: string
+    type: object
+  adapters.ProviderCollectionStatus:
+    properties:
+      exists:
+        type: boolean
+      name:
+        type: string
+      points:
+        type: integer
+      qdrant:
+        $ref: '#/definitions/adapters.HealthStatus'
+    type: object
+  adapters.ProviderConfigSchema:
+    properties:
+      fields:
+        additionalProperties:
+          $ref: '#/definitions/adapters.ProviderFieldSchema'
+        type: object
+    type: object
+  adapters.ProviderCreateRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      provider:
+        $ref: '#/definitions/adapters.ProviderType'
+    type: object
+  adapters.ProviderFieldSchema:
+    properties:
+      description:
+        type: string
+      example: {}
+      required:
+        type: boolean
+      secret:
+        type: boolean
+      title:
+        type: string
+      type:
+        type: string
+    type: object
+  adapters.ProviderGetResponse:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      is_default:
+        type: boolean
+      name:
+        type: string
+      provider:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  adapters.ProviderMeta:
+    properties:
+      config_schema:
+        $ref: '#/definitions/adapters.ProviderConfigSchema'
+      display_name:
+        type: string
+      provider:
+        type: string
+    type: object
+  adapters.ProviderStatusResponse:
+    properties:
+      collections:
+        items:
+          $ref: '#/definitions/adapters.ProviderCollectionStatus'
+        type: array
+      embedding_model_id:
+        type: string
+      memory_mode:
+        type: string
+      provider_type:
+        type: string
+    type: object
+  adapters.ProviderType:
+    enum:
+    - builtin
+    - mem0
+    - openviking
+    type: string
+    x-enum-varnames:
+    - ProviderBuiltin
+    - ProviderMem0
+    - ProviderOpenViking
+  adapters.ProviderUpdateRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+    type: object
+  adapters.RebuildResult:
+    properties:
+      fs_count:
+        type: integer
+      missing_count:
+        type: integer
+      restored_count:
+        type: integer
+      storage_count:
+        type: integer
+    type: object
+  adapters.SearchResponse:
+    properties:
+      relations:
+        items: {}
+        type: array
+      results:
+        items:
+          $ref: '#/definitions/adapters.MemoryItem'
+        type: array
+    type: object
+  adapters.TopKBucket:
+    properties:
+      index:
+        description: sparse dimension index (term hash)
+        type: integer
+      value:
+        description: weight (term frequency)
+        type: number
+    type: object
+  adapters.UsageResponse:
+    properties:
+      avg_text_bytes:
+        type: integer
+      count:
+        type: integer
+      estimated_storage_bytes:
+        type: integer
+      total_text_bytes:
+        type: integer
+    type: object
   bots.Bot:
     properties:
-      allow_guest:
-        type: boolean
       avatar_url:
         type: string
       check_issue_count:
@@ -100,8 +481,6 @@ definitions:
       owner_user_id:
         type: string
       status:
-        type: string
-      type:
         type: string
       updated_at:
         type: string
@@ -126,17 +505,6 @@ definitions:
       type:
         type: string
     type: object
-  bots.BotMember:
-    properties:
-      bot_id:
-        type: string
-      created_at:
-        type: string
-      role:
-        type: string
-      user_id:
-        type: string
-    type: object
   bots.CreateBotRequest:
     properties:
       avatar_url:
@@ -148,8 +516,6 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
-      type:
-        type: string
     type: object
   bots.ListBotsResponse:
     properties:
@@ -163,13 +529,6 @@ definitions:
       items:
         items:
           $ref: '#/definitions/bots.BotCheck'
-        type: array
-    type: object
-  bots.ListMembersResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/bots.BotMember'
         type: array
     type: object
   bots.TransferBotRequest:
@@ -188,13 +547,6 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
-    type: object
-  bots.UpsertMemberRequest:
-    properties:
-      role:
-        type: string
-      user_id:
-        type: string
     type: object
   browsercontexts.BrowserContext:
     properties:
@@ -762,6 +1114,13 @@ definitions:
           type: string
         type: array
     type: object
+  handlers.BrowserCoresResponse:
+    properties:
+      cores:
+        items:
+          type: string
+        type: array
+    type: object
   handlers.ChannelMeta:
     properties:
       capabilities:
@@ -1126,6 +1485,21 @@ definitions:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
     type: object
+  handlers.emailOAuthStatusResponse:
+    properties:
+      configured:
+        type: boolean
+      email_address:
+        type: string
+      expired:
+        type: boolean
+      expires_at:
+        type: string
+      has_token:
+        type: boolean
+      provider:
+        type: string
+    type: object
   handlers.fsOpResponse:
     properties:
       ok:
@@ -1160,7 +1534,7 @@ definitions:
         type: string
       messages:
         items:
-          $ref: '#/definitions/provider.Message'
+          $ref: '#/definitions/adapters.Message'
         type: array
       metadata:
         additionalProperties: {}
@@ -1229,6 +1603,27 @@ definitions:
     properties:
       ok:
         type: boolean
+    type: object
+  handlers.synthesizeRequest:
+    properties:
+      text:
+        type: string
+    type: object
+  handlers.synthesizeResponse:
+    properties:
+      content_type:
+        type: string
+      size:
+        type: integer
+      temp_id:
+        type: string
+    type: object
+  handlers.terminalInfoResponse:
+    properties:
+      available:
+        type: boolean
+      shell:
+        type: string
     type: object
   heartbeat.ListLogsResponse:
     properties:
@@ -1619,183 +2014,6 @@ definitions:
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
-  provider.CDFPoint:
-    properties:
-      cumulative:
-        description: cumulative weight fraction [0.0, 1.0]
-        type: number
-      k:
-        description: rank position (1-based, sorted by value desc)
-        type: integer
-    type: object
-  provider.CompactResult:
-    properties:
-      after_count:
-        type: integer
-      before_count:
-        type: integer
-      ratio:
-        type: number
-      results:
-        items:
-          $ref: '#/definitions/provider.MemoryItem'
-        type: array
-    type: object
-  provider.DeleteResponse:
-    properties:
-      message:
-        type: string
-    type: object
-  provider.MemoryItem:
-    properties:
-      agent_id:
-        type: string
-      bot_id:
-        type: string
-      cdf_curve:
-        items:
-          $ref: '#/definitions/provider.CDFPoint'
-        type: array
-      created_at:
-        type: string
-      hash:
-        type: string
-      id:
-        type: string
-      memory:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      run_id:
-        type: string
-      score:
-        type: number
-      top_k_buckets:
-        items:
-          $ref: '#/definitions/provider.TopKBucket'
-        type: array
-      updated_at:
-        type: string
-    type: object
-  provider.Message:
-    properties:
-      content:
-        type: string
-      role:
-        type: string
-    type: object
-  provider.ProviderConfigSchema:
-    properties:
-      fields:
-        additionalProperties:
-          $ref: '#/definitions/provider.ProviderFieldSchema'
-        type: object
-    type: object
-  provider.ProviderCreateRequest:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-      provider:
-        $ref: '#/definitions/provider.ProviderType'
-    type: object
-  provider.ProviderFieldSchema:
-    properties:
-      description:
-        type: string
-      example: {}
-      required:
-        type: boolean
-      title:
-        type: string
-      type:
-        type: string
-    type: object
-  provider.ProviderGetResponse:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      created_at:
-        type: string
-      id:
-        type: string
-      is_default:
-        type: boolean
-      name:
-        type: string
-      provider:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  provider.ProviderMeta:
-    properties:
-      config_schema:
-        $ref: '#/definitions/provider.ProviderConfigSchema'
-      display_name:
-        type: string
-      provider:
-        type: string
-    type: object
-  provider.ProviderType:
-    enum:
-    - builtin
-    type: string
-    x-enum-varnames:
-    - ProviderBuiltin
-  provider.ProviderUpdateRequest:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-    type: object
-  provider.RebuildResult:
-    properties:
-      fs_count:
-        type: integer
-      missing_count:
-        type: integer
-      qdrant_count:
-        type: integer
-      restored_count:
-        type: integer
-    type: object
-  provider.SearchResponse:
-    properties:
-      relations:
-        items: {}
-        type: array
-      results:
-        items:
-          $ref: '#/definitions/provider.MemoryItem'
-        type: array
-    type: object
-  provider.TopKBucket:
-    properties:
-      index:
-        description: sparse dimension index (term hash)
-        type: integer
-      value:
-        description: weight (term frequency)
-        type: number
-    type: object
-  provider.UsageResponse:
-    properties:
-      avg_text_bytes:
-        type: integer
-      count:
-        type: integer
-      estimated_storage_bytes:
-        type: integer
-      total_text_bytes:
-        type: integer
-    type: object
   providers.CountResponse:
     properties:
       count:
@@ -2066,6 +2284,8 @@ definitions:
         type: boolean
       search_provider_id:
         type: string
+      tts_model_id:
+        type: string
     type: object
   settings.UpsertRequest:
     properties:
@@ -2096,6 +2316,8 @@ definitions:
       reasoning_enabled:
         type: boolean
       search_provider_id:
+        type: string
+      tts_model_id:
         type: string
     type: object
   subagent.AddSkillsRequest:
@@ -2211,6 +2433,142 @@ definitions:
           type: string
         type: array
     type: object
+  tts.CreateModelRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      model_id:
+        type: string
+      name:
+        type: string
+      tts_provider_id:
+        type: string
+    type: object
+  tts.CreateProviderRequest:
+    properties:
+      name:
+        type: string
+      provider:
+        type: string
+    type: object
+  tts.ModelCapabilities:
+    properties:
+      formats:
+        items:
+          type: string
+        type: array
+      pitch:
+        $ref: '#/definitions/tts.ParamConstraint'
+      speed:
+        $ref: '#/definitions/tts.ParamConstraint'
+      voices:
+        items:
+          $ref: '#/definitions/tts.VoiceInfo'
+        type: array
+    type: object
+  tts.ModelInfo:
+    properties:
+      capabilities:
+        $ref: '#/definitions/tts.ModelCapabilities'
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  tts.ModelResponse:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      model_id:
+        type: string
+      name:
+        type: string
+      provider_type:
+        type: string
+      tts_provider_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  tts.ParamConstraint:
+    properties:
+      default:
+        type: number
+      max:
+        type: number
+      min:
+        type: number
+      options:
+        items:
+          type: number
+        type: array
+    type: object
+  tts.ProviderMetaResponse:
+    properties:
+      default_model:
+        type: string
+      description:
+        type: string
+      display_name:
+        type: string
+      models:
+        items:
+          $ref: '#/definitions/tts.ModelInfo'
+        type: array
+      provider:
+        type: string
+    type: object
+  tts.ProviderResponse:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      provider:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  tts.TestSynthesizeRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      text:
+        type: string
+    type: object
+  tts.UpdateModelRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+    type: object
+  tts.UpdateProviderRequest:
+    properties:
+      name:
+        type: string
+    type: object
+  tts.VoiceInfo:
+    properties:
+      id:
+        type: string
+      lang:
+        type: string
+      name:
+        type: string
+    type: object
 info:
   contact: {}
   title: Memoh API
@@ -2322,6 +2680,211 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Create bot user
+      tags:
+      - bots
+  /bots/{bot_id}/access/channel_identities:
+    get:
+      description: Search locally observed channel identity candidates for bot access
+        control
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Max results
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.ChannelIdentityCandidateListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Search access channel identities
+      tags:
+      - bots
+  /bots/{bot_id}/access/channel_identities/{channel_identity_id}/conversations:
+    get:
+      description: List previously observed conversation candidates for a channel
+        identity under a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Channel Identity ID
+        in: path
+        name: channel_identity_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.ObservedConversationCandidateListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List observed conversations for a channel identity
+      tags:
+      - bots
+  /bots/{bot_id}/access/users:
+    get:
+      description: Search user candidates for bot access control
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Max results
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.UserCandidateListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Search access users
+      tags:
+      - bots
+  /bots/{bot_id}/blacklist:
+    get:
+      description: List guest deny rules for chat trigger
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.ListRulesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List bot blacklist
+      tags:
+      - bots
+    put:
+      description: Add a guest deny rule for chat trigger
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Blacklist payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/acl.UpsertRuleRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.Rule'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Upsert bot blacklist entry
+      tags:
+      - bots
+  /bots/{bot_id}/blacklist/{rule_id}:
+    delete:
+      description: Delete a guest deny rule by rule ID
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Rule ID
+        in: path
+        name: rule_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete bot blacklist entry
       tags:
       - bots
   /bots/{bot_id}/cli/messages:
@@ -3142,6 +3705,62 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Stop container task for bot
+      tags:
+      - containerd
+  /bots/{bot_id}/container/terminal:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.terminalInfoResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Check terminal availability for bot container
+      tags:
+      - containerd
+  /bots/{bot_id}/container/terminal/ws:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - default: 80
+        description: Initial terminal columns
+        in: query
+        name: cols
+        type: integer
+      - default: 24
+        description: Initial terminal rows
+        in: query
+        name: rows
+        type: integer
+      - description: Auth token
+        in: query
+        name: token
+        type: string
+      responses:
+        "101":
+          description: WebSocket upgrade
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Interactive WebSocket terminal for bot container
       tags:
       - containerd
   /bots/{bot_id}/email-bindings:
@@ -4075,7 +4694,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.DeleteResponse'
+            $ref: '#/definitions/adapters.DeleteResponse'
         "400":
           description: Bad Request
           schema:
@@ -4113,7 +4732,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.SearchResponse'
+            $ref: '#/definitions/adapters.SearchResponse'
         "400":
           description: Bad Request
           schema:
@@ -4155,7 +4774,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.SearchResponse'
+            $ref: '#/definitions/adapters.SearchResponse'
         "400":
           description: Bad Request
           schema:
@@ -4195,7 +4814,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.DeleteResponse'
+            $ref: '#/definitions/adapters.DeleteResponse'
         "400":
           description: Bad Request
           schema:
@@ -4246,7 +4865,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.CompactResult'
+            $ref: '#/definitions/adapters.CompactResult'
         "400":
           description: Bad Request
           schema:
@@ -4282,13 +4901,17 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.RebuildResult'
+            $ref: '#/definitions/adapters.RebuildResult'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "403":
           description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
@@ -4325,7 +4948,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.SearchResponse'
+            $ref: '#/definitions/adapters.SearchResponse'
         "400":
           description: Bad Request
           schema:
@@ -4349,6 +4972,46 @@ paths:
       summary: Search memory
       tags:
       - memory
+  /bots/{bot_id}/memory/status:
+    get:
+      description: Get the resolved memory runtime status for a bot, including index
+        health and source counts
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/adapters.MemoryStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get memory runtime status
+      tags:
+      - memory
   /bots/{bot_id}/memory/usage:
     get:
       description: Query the estimated storage usage of current memories
@@ -4364,7 +5027,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.UsageResponse'
+            $ref: '#/definitions/adapters.UsageResponse'
         "400":
           description: Bad Request
           schema:
@@ -5037,6 +5700,42 @@ paths:
       summary: Unified MCP tools gateway
       tags:
       - containerd
+  /bots/{bot_id}/tts/synthesize:
+    post:
+      consumes:
+      - application/json
+      description: Stream-synthesize text using the bot's configured TTS model, write
+        to temp file
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Text to synthesize
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.synthesizeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.synthesizeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Synthesize speech for a bot
+      tags:
+      - bots
   /bots/{bot_id}/web/messages:
     post:
       consumes:
@@ -5141,6 +5840,101 @@ paths:
       summary: WebSocket chat endpoint
       tags:
       - local-channel
+  /bots/{bot_id}/whitelist:
+    get:
+      description: List guest allow rules for chat trigger
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.ListRulesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List bot whitelist
+      tags:
+      - bots
+    put:
+      description: Add a guest allow rule for chat trigger
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Whitelist payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/acl.UpsertRuleRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.Rule'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Upsert bot whitelist entry
+      tags:
+      - bots
+  /bots/{bot_id}/whitelist/{rule_id}:
+    delete:
+      description: Delete a guest allow rule by rule ID
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Rule ID
+        in: path
+        name: rule_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete bot whitelist entry
+      tags:
+      - bots
   /bots/{id}:
     delete:
       description: Delete a bot user (owner/admin only)
@@ -5527,113 +6321,6 @@ paths:
       summary: List bot runtime checks
       tags:
       - bots
-  /bots/{id}/members:
-    get:
-      description: List members for a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/bots.ListMembersResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List bot members
-      tags:
-      - bots
-    put:
-      description: Add or update bot member role
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Member payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/bots.UpsertMemberRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/bots.BotMember'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Upsert bot member
-      tags:
-      - bots
-  /bots/{id}/members/{user_id}:
-    delete:
-      description: Remove a member from a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: User ID
-        in: path
-        name: user_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete bot member
-      tags:
-      - bots
   /bots/{id}/owner:
     put:
       description: Transfer bot ownership to another human user
@@ -5804,6 +6491,24 @@ paths:
       summary: Update a browser context
       tags:
       - browser-contexts
+  /browser-contexts/cores:
+    get:
+      description: Get the list of browser cores available in the Browser Gateway
+        container
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.BrowserCoresResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get available browser cores
+      tags:
+      - browser-contexts
   /channels:
     get:
       description: List channel meta information including capabilities and schemas
@@ -5969,6 +6674,79 @@ paths:
       summary: Update an email provider
       tags:
       - email-providers
+  /email-providers/{id}/oauth/authorize:
+    get:
+      description: Returns the authorization URL to redirect the user to
+      parameters:
+      - description: Email provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start OAuth2 authorization for an email provider
+      tags:
+      - email-oauth
+  /email-providers/{id}/oauth/status:
+    get:
+      parameters:
+      - description: Email provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.emailOAuthStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get OAuth2 status for an email provider
+      tags:
+      - email-oauth
+  /email-providers/{id}/oauth/token:
+    delete:
+      parameters:
+      - description: Email provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Revoke stored OAuth2 tokens for an email provider
+      tags:
+      - email-oauth
   /email-providers/meta:
     get:
       description: List available email provider types and config schemas
@@ -6013,6 +6791,38 @@ paths:
       summary: Mailgun inbound email webhook
       tags:
       - email-webhook
+  /email/oauth/callback:
+    get:
+      description: Handles the OAuth2 callback, exchanges the code for tokens
+      parameters:
+      - description: Authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: State parameter
+        in: query
+        name: state
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: OAuth2 callback for email providers
+      tags:
+      - email-oauth
   /memory-providers:
     get:
       description: List configured memory providers
@@ -6023,7 +6833,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/provider.ProviderGetResponse'
+              $ref: '#/definitions/adapters.ProviderGetResponse'
             type: array
         "500":
           description: Internal Server Error
@@ -6042,14 +6852,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/provider.ProviderCreateRequest'
+          $ref: '#/definitions/adapters.ProviderCreateRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/provider.ProviderGetResponse'
+            $ref: '#/definitions/adapters.ProviderGetResponse'
         "400":
           description: Bad Request
           schema:
@@ -6098,7 +6908,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.ProviderGetResponse'
+            $ref: '#/definitions/adapters.ProviderGetResponse'
         "400":
           description: Bad Request
           schema:
@@ -6125,14 +6935,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/provider.ProviderUpdateRequest'
+          $ref: '#/definitions/adapters.ProviderUpdateRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.ProviderGetResponse'
+            $ref: '#/definitions/adapters.ProviderGetResponse'
         "400":
           description: Bad Request
           schema:
@@ -6144,6 +6954,37 @@ paths:
       summary: Update a memory provider
       tags:
       - memory-providers
+  /memory-providers/{id}/status:
+    get:
+      description: Get runtime status data for a memory provider
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/adapters.ProviderStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get memory provider status
+      tags:
+      - memory-providers
   /memory-providers/meta:
     get:
       description: List available memory provider types and config schemas
@@ -6152,7 +6993,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/provider.ProviderMeta'
+              $ref: '#/definitions/adapters.ProviderMeta'
             type: array
       summary: List memory provider metadata
       tags:
@@ -6928,6 +7769,368 @@ paths:
       summary: List search provider metadata
       tags:
       - search-providers
+  /tts-models:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ModelResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List all TTS models
+      tags:
+      - tts-models
+    post:
+      consumes:
+      - application/json
+      description: Manually create a TTS model under a specific provider
+      parameters:
+      - description: TTS model configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.CreateModelRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/tts.ModelResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a TTS model
+      tags:
+      - tts-models
+  /tts-models/{id}:
+    delete:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a TTS model
+      tags:
+      - tts-models
+    get:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ModelResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a TTS model
+      tags:
+      - tts-models
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.UpdateModelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ModelResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a TTS model
+      tags:
+      - tts-models
+  /tts-models/{id}/capabilities:
+    get:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ModelCapabilities'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get TTS model capabilities
+      tags:
+      - tts-models
+  /tts-models/{id}/test:
+    post:
+      consumes:
+      - application/json
+      description: Synthesize text using a specific model's config and return audio
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Text to synthesize
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.TestSynthesizeRequest'
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Audio data
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Test TTS model synthesis
+      tags:
+      - tts-models
+  /tts-providers:
+    get:
+      parameters:
+      - description: Provider type filter
+        in: query
+        name: provider
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ProviderResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List TTS providers
+      tags:
+      - tts-providers
+    post:
+      consumes:
+      - application/json
+      description: Create a TTS provider and auto-import its available models
+      parameters:
+      - description: TTS provider configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.CreateProviderRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/tts.ProviderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a TTS provider
+      tags:
+      - tts-providers
+  /tts-providers/{id}:
+    delete:
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a TTS provider
+      tags:
+      - tts-providers
+    get:
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ProviderResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a TTS provider
+      tags:
+      - tts-providers
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.UpdateProviderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ProviderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a TTS provider
+      tags:
+      - tts-providers
+  /tts-providers/{id}/import-models:
+    post:
+      description: Discover and import available models from the TTS adapter
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ModelResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Import models for a TTS provider
+      tags:
+      - tts-providers
+  /tts-providers/{id}/models:
+    get:
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ModelResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List models for a TTS provider
+      tags:
+      - tts-providers
+  /tts-providers/meta:
+    get:
+      description: List available TTS provider types with their models and capabilities
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ProviderMetaResponse'
+            type: array
+      summary: List TTS provider metadata
+      tags:
+      - tts-providers
   /users:
     get:
       description: List users

@@ -232,6 +232,59 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const searchAccounts = `-- name: SearchAccounts :many
+SELECT id, username, email, password_hash, role, display_name, avatar_url, data_root, last_login_at, is_active, metadata, created_at, updated_at
+FROM users
+WHERE username IS NOT NULL
+  AND (
+    $1::text = ''
+    OR username ILIKE '%' || $1::text || '%'
+    OR COALESCE(display_name, '') ILIKE '%' || $1::text || '%'
+    OR COALESCE(email, '') ILIKE '%' || $1::text || '%'
+  )
+ORDER BY last_login_at DESC NULLS LAST, created_at DESC
+LIMIT $2
+`
+
+type SearchAccountsParams struct {
+	Query      string `json:"query"`
+	LimitCount int32  `json:"limit_count"`
+}
+
+func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) ([]User, error) {
+	rows, err := q.db.Query(ctx, searchAccounts, arg.Query, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []User
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.Email,
+			&i.PasswordHash,
+			&i.Role,
+			&i.DisplayName,
+			&i.AvatarUrl,
+			&i.DataRoot,
+			&i.LastLoginAt,
+			&i.IsActive,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateAccountAdmin = `-- name: UpdateAccountAdmin :one
 UPDATE users
 SET role = $1::user_role,

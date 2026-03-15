@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/conversation"
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
@@ -18,8 +19,6 @@ import (
 // ConversationService contains the minimal conversation behavior required by route resolution.
 type ConversationService interface {
 	Create(ctx context.Context, botID, channelIdentityID string, req conversation.CreateRequest) (conversation.Conversation, error)
-	IsParticipant(ctx context.Context, conversationID, channelIdentityID string) (bool, error)
-	AddParticipant(ctx context.Context, conversationID, channelIdentityID, role string) (conversation.Participant, error)
 }
 
 // DBService manages channel routes and route-to-conversation resolution.
@@ -170,17 +169,6 @@ func (s *DBService) UpdateMetadata(ctx context.Context, routeID string, metadata
 func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput) (ResolveConversationResult, error) {
 	route, err := s.Find(ctx, input.BotID, input.Platform, input.ConversationID, input.ThreadID)
 	if err == nil {
-		if strings.TrimSpace(input.ChannelIdentityID) != "" && s.conversation != nil {
-			ok, checkErr := s.conversation.IsParticipant(ctx, route.ChatID, input.ChannelIdentityID)
-			if checkErr != nil {
-				return ResolveConversationResult{}, fmt.Errorf("check conversation participant: %w", checkErr)
-			}
-			if !ok {
-				if _, addErr := s.conversation.AddParticipant(ctx, route.ChatID, input.ChannelIdentityID, conversation.RoleMember); addErr != nil && s.logger != nil {
-					s.logger.Warn("auto-add participant failed", slog.Any("error", addErr))
-				}
-			}
-		}
 		if strings.TrimSpace(input.ReplyTarget) != "" && input.ReplyTarget != route.ReplyTarget {
 			if updateErr := s.UpdateReplyTarget(ctx, route.ID, input.ReplyTarget); updateErr != nil && s.logger != nil {
 				s.logger.Warn("update route reply target failed", slog.Any("error", updateErr))
@@ -225,12 +213,6 @@ func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput)
 		return ResolveConversationResult{}, fmt.Errorf("create conversation: %w", err)
 	}
 
-	if strings.TrimSpace(input.ChannelIdentityID) != "" && strings.TrimSpace(input.ChannelIdentityID) != strings.TrimSpace(creatorChannelIdentityID) {
-		if _, addErr := s.conversation.AddParticipant(ctx, createdConversation.ID, input.ChannelIdentityID, conversation.RoleMember); addErr != nil && s.logger != nil {
-			s.logger.Warn("auto-add creator participant failed", slog.Any("error", addErr))
-		}
-	}
-
 	newRoute, err := s.Create(ctx, CreateInput{
 		ChatID:           createdConversation.ID,
 		BotID:            input.BotID,
@@ -261,11 +243,14 @@ func determineConversationKind(threadID, conversationType string) string {
 	if strings.TrimSpace(threadID) != "" {
 		return conversation.KindThread
 	}
-	ct := strings.ToLower(strings.TrimSpace(conversationType))
-	if ct == "p2p" || ct == "private" || ct == "" {
+	switch channel.NormalizeConversationType(conversationType) {
+	case channel.ConversationTypeThread:
+		return conversation.KindThread
+	case channel.ConversationTypePrivate:
 		return conversation.KindDirect
+	default:
+		return conversation.KindGroup
 	}
-	return conversation.KindGroup
 }
 
 func (s *DBService) resolveConversationCreatorChannelIdentityID(ctx context.Context, botID, fallbackChannelIdentityID, kind string) string {

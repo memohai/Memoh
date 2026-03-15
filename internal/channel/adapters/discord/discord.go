@@ -108,6 +108,7 @@ func (*DiscordAdapter) Descriptor() channel.Descriptor {
 }
 
 func (a *DiscordAdapter) getOrCreateSession(token, configID string) (*discordgo.Session, error) {
+	channel.SetIMErrorSecrets("discord:"+configID, token)
 	a.mu.RLock()
 	session, ok := a.sessions[token]
 	a.mu.RUnlock()
@@ -167,10 +168,11 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 			return
 		}
 
+		rawText := text
 		attachments := a.collectAttachments(m.Message)
-		chatType := "direct"
+		chatType := channel.ConversationTypePrivate
 		if m.GuildID != "" {
-			chatType = "guild"
+			chatType = channel.ConversationTypeGroup
 		}
 
 		// Prepend quoted message context so the AI can see what is being replied to,
@@ -223,6 +225,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 				"guild_id":        m.GuildID,
 				"is_mentioned":    isMentioned,
 				"is_reply_to_bot": isReplyToBot,
+				"raw_text":        rawText,
 			},
 		}
 
@@ -378,7 +381,15 @@ func discordAttachmentToFile(ctx context.Context, att channel.Attachment, opener
 		}
 	}
 
-	// Fallback to URL
+	// Fallback to data URL in URL field (e.g. TTS voice when media ingestion failed)
+	if reader == nil && att.URL != "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(att.URL)), "data:") {
+		data, err := base64DataURLToBytes(att.URL)
+		if err == nil {
+			reader = bytes.NewReader(data)
+		}
+	}
+
+	// Fallback to HTTP URL
 	if reader == nil && att.URL != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, att.URL, nil)
 		if err == nil {

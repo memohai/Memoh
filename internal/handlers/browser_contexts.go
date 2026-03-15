@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -8,17 +11,20 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/browsercontexts"
+	"github.com/memohai/memoh/internal/config"
 )
 
 type BrowserContextsHandler struct {
-	service *browsercontexts.Service
-	logger  *slog.Logger
+	service           *browsercontexts.Service
+	logger            *slog.Logger
+	browserGatewayURL string
 }
 
-func NewBrowserContextsHandler(log *slog.Logger, service *browsercontexts.Service) *BrowserContextsHandler {
+func NewBrowserContextsHandler(log *slog.Logger, service *browsercontexts.Service, cfg config.Config) *BrowserContextsHandler {
 	return &BrowserContextsHandler{
-		service: service,
-		logger:  log.With(slog.String("handler", "browser_contexts")),
+		service:           service,
+		logger:            log.With(slog.String("handler", "browser_contexts")),
+		browserGatewayURL: cfg.BrowserGateway.BaseURL(),
 	}
 }
 
@@ -26,6 +32,7 @@ func (h *BrowserContextsHandler) Register(e *echo.Echo) {
 	group := e.Group("/browser-contexts")
 	group.POST("", h.Create)
 	group.GET("", h.List)
+	group.GET("/cores", h.GetCores)
 	group.GET("/:id", h.Get)
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
@@ -138,4 +145,42 @@ func (h *BrowserContextsHandler) Delete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// GetCores godoc
+// @Summary Get available browser cores
+// @Description Get the list of browser cores available in the Browser Gateway container
+// @Tags browser-contexts
+// @Produce json
+// @Success 200 {object} BrowserCoresResponse
+// @Failure 502 {object} ErrorResponse
+// @Router /browser-contexts/cores [get].
+func (h *BrowserContextsHandler) GetCores(c echo.Context) error {
+	url := fmt.Sprintf("%s/cores/", h.browserGatewayURL)
+	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, url, nil)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, "failed to create request")
+	}
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is from trusted internal config
+	if err != nil {
+		h.logger.Warn("browser gateway unreachable", slog.String("error", err.Error()))
+		return c.JSON(http.StatusOK, BrowserCoresResponse{Cores: []string{"chromium"}})
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, "failed to read browser gateway response")
+	}
+
+	var result BrowserCoresResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, "failed to parse browser gateway response")
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// BrowserCoresResponse is the response for the GetCores endpoint.
+type BrowserCoresResponse struct {
+	Cores []string `json:"cores"`
 }

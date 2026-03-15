@@ -18,6 +18,7 @@ import (
 type feishuSenderProfile struct {
 	displayName string
 	username    string
+	avatarURL   string
 }
 
 const feishuChatMembersPageSize = 100
@@ -63,7 +64,7 @@ func (a *FeishuAdapter) enrichSenderProfile(ctx context.Context, cfg channel.Cha
 			)
 		}
 	}
-	if strings.TrimSpace(profile.displayName) == "" && strings.TrimSpace(profile.username) == "" {
+	if strings.TrimSpace(profile.displayName) == "" && strings.TrimSpace(profile.username) == "" && strings.TrimSpace(profile.avatarURL) == "" {
 		profile = fallbackSenderProfile(openID, userID)
 	}
 	applySenderProfile(msg, profile)
@@ -74,7 +75,7 @@ func (*FeishuAdapter) lookupSenderProfile(ctx context.Context, cfg channel.Chann
 	if err != nil {
 		return feishuSenderProfile{}, err
 	}
-	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret, lark.WithOpenBaseUrl(feishuCfg.openBaseURL()))
+	client := feishuCfg.newClient()
 
 	var lastErr error
 	chatID = strings.TrimSpace(chatID)
@@ -152,6 +153,7 @@ func lookupSenderProfileFromContact(ctx context.Context, client *lark.Client, op
 	return feishuSenderProfile{
 		displayName: displayName,
 		username:    username,
+		avatarURL:   feishuAvatarURL(resp.Data.User.Avatar),
 	}, nil
 }
 
@@ -269,5 +271,10 @@ func applySenderProfile(msg *channel.InboundMessage, profile feishuSenderProfile
 	}
 	if username != "" && strings.TrimSpace(msg.Sender.Attributes["username"]) == "" {
 		msg.Sender.Attributes["username"] = username
+	}
+	if avatarURL := strings.TrimSpace(profile.avatarURL); avatarURL != "" {
+		if strings.TrimSpace(msg.Sender.Attributes["avatar_url"]) == "" {
+			msg.Sender.Attributes["avatar_url"] = avatarURL
+		}
 	}
 }

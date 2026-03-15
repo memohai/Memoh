@@ -13,15 +13,17 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/mcp/mcpclient"
 )
 
 const (
-	memoryDateLayout = "2006-01-02"
-	entryStartPrefix = "<!-- MEMOH:ENTRY "
-	entryStartSuffix = " -->"
-	entryEndMarker   = "<!-- /MEMOH:ENTRY -->"
+	memoryDateLayout   = "2006-01-02"
+	entryHeadingPrefix = "## Entry "
+	yamlFence          = "```yaml"
+	codeFence          = "```"
 )
 
 var ErrNotConfigured = errors.New("memory filesystem not configured")
@@ -47,6 +49,14 @@ type MemoryItem struct {
 	BotID     string         `json:"bot_id,omitempty"`
 	AgentID   string         `json:"agent_id,omitempty"`
 	RunID     string         `json:"run_id,omitempty"`
+}
+
+type memoryEntryMeta struct {
+	ID        string         `yaml:"id"`
+	Hash      string         `yaml:"hash,omitempty"`
+	CreatedAt string         `yaml:"created_at,omitempty"`
+	UpdatedAt string         `yaml:"updated_at,omitempty"`
+	Metadata  map[string]any `yaml:"metadata,omitempty"`
 }
 
 func New(log *slog.Logger, provider mcpclient.Provider) *Service {
@@ -123,13 +133,16 @@ func (s *Service) buildScanIndex(ctx context.Context, botID string) (map[string]
 		}
 		parsed, parseErr := parseMemoryDayMD(content)
 		if parseErr != nil {
-			legacy, legacyErr := parseLegacyMemoryMD(content)
-			if legacyErr != nil {
+			jsonItems, jsonErr := parseJSONMemoryItems(content)
+			if jsonErr != nil {
 				s.logger.Warn("buildScanIndex: failed to parse memory file",
 					slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", parseErr))
 				continue
 			}
-			parsed = []MemoryItem{legacy}
+			if err := s.writeMemoryDay(ctx, botID, entryPath, jsonItems); err != nil {
+				return nil, err
+			}
+			parsed = jsonItems
 		}
 		for _, item := range parsed {
 			id := strings.TrimSpace(item.ID)
@@ -239,11 +252,10 @@ func (s *Service) RemoveMemories(ctx context.Context, botID string, ids []string
 		if id == "" {
 			continue
 		}
-		targets := make([]string, 0, 2)
+		targets := make([]string, 0, 1)
 		if entry, ok := index[id]; ok {
 			targets = append(targets, entry.FilePath)
 		}
-		targets = append(targets, memoryLegacyItemPath(id))
 		for _, target := range targets {
 			if removals[target] == nil {
 				removals[target] = map[string]struct{}{}
@@ -295,11 +307,14 @@ func (s *Service) ReadAllMemoryFiles(ctx context.Context, botID string) ([]Memor
 		}
 		parsed, parseErr := parseMemoryDayMD(content)
 		if parseErr != nil {
-			legacy, legacyErr := parseLegacyMemoryMD(content)
-			if legacyErr != nil {
+			jsonItems, jsonErr := parseJSONMemoryItems(content)
+			if jsonErr != nil {
 				continue
 			}
-			parsed = []MemoryItem{legacy}
+			if err := s.writeMemoryDay(ctx, botID, entryPath, jsonItems); err != nil {
+				return nil, err
+			}
+			parsed = jsonItems
 		}
 		for _, item := range parsed {
 			if strings.TrimSpace(item.ID) == "" {
@@ -316,6 +331,31 @@ func (s *Service) ReadAllMemoryFiles(ctx context.Context, botID string) ([]Memor
 		return memoryTime(items[i]).Before(memoryTime(items[j]))
 	})
 	return items, nil
+}
+
+func (s *Service) CountMemoryFiles(ctx context.Context, botID string) (int, error) {
+	if s.provider == nil {
+		return 0, ErrNotConfigured
+	}
+	c, err := s.client(ctx, botID)
+	if err != nil {
+		return 0, err
+	}
+	entries, err := c.ListDir(ctx, memoryDirPath(), false)
+	if err != nil {
+		if isNotFound(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	count := 0
+	for _, entry := range entries {
+		if entry.GetIsDir() || !strings.HasSuffix(entry.GetPath(), ".md") {
+			continue
+		}
+		count++
+	}
+	return count, nil
 }
 
 func (s *Service) SyncOverview(ctx context.Context, botID string) error {
@@ -341,11 +381,14 @@ func (s *Service) readMemoryDay(ctx context.Context, botID, filePath string) ([]
 	if parseErr == nil {
 		return items, nil
 	}
-	legacy, legacyErr := parseLegacyMemoryMD(content)
-	if legacyErr != nil {
+	jsonItems, jsonErr := parseJSONMemoryItems(content)
+	if jsonErr != nil {
 		return []MemoryItem{}, nil
 	}
-	return []MemoryItem{legacy}, nil
+	if err := s.writeMemoryDay(ctx, botID, filePath, jsonItems); err != nil {
+		return nil, err
+	}
+	return jsonItems, nil
 }
 
 func (s *Service) writeMemoryDay(ctx context.Context, botID, filePath string, items []MemoryItem) error {
@@ -393,10 +436,6 @@ func memoryDayPath(date string) string {
 	return path.Join(memoryDirPath(), strings.TrimSpace(date)+".md")
 }
 
-func memoryLegacyItemPath(id string) string {
-	return path.Join(memoryDirPath(), strings.TrimSpace(id)+".md")
-}
-
 // --- format / parse helpers ---
 
 func formatMemoryDayMD(date string, items []MemoryItem) string {
@@ -417,24 +456,24 @@ func formatMemoryDayMD(date string, items []MemoryItem) string {
 		if item.ID == "" || item.Memory == "" {
 			continue
 		}
-		meta := map[string]string{"id": item.ID}
-		if item.Hash != "" {
-			meta["hash"] = item.Hash
+		meta := memoryEntryMeta{
+			ID:        item.ID,
+			Hash:      item.Hash,
+			CreatedAt: item.CreatedAt,
+			UpdatedAt: item.UpdatedAt,
+			Metadata:  item.Metadata,
 		}
-		if item.CreatedAt != "" {
-			meta["created_at"] = item.CreatedAt
-		}
-		if item.UpdatedAt != "" {
-			meta["updated_at"] = item.UpdatedAt
-		}
-		rawMeta, _ := json.Marshal(meta)
-		b.WriteString(entryStartPrefix)
-		b.Write(rawMeta)
-		b.WriteString(entryStartSuffix)
+		rawMeta, _ := yaml.Marshal(meta)
+		b.WriteString(entryHeadingPrefix)
+		b.WriteString(item.ID)
+		b.WriteString("\n\n")
+		b.WriteString(yamlFence)
 		b.WriteString("\n")
+		b.WriteString(strings.TrimSpace(string(rawMeta)))
+		b.WriteString("\n")
+		b.WriteString(codeFence)
+		b.WriteString("\n\n")
 		b.WriteString(item.Memory)
-		b.WriteString("\n")
-		b.WriteString(entryEndMarker)
 		b.WriteString("\n\n")
 	}
 	return b.String()
@@ -449,35 +488,52 @@ func parseMemoryDayMD(content string) ([]MemoryItem, error) {
 	items := make([]MemoryItem, 0, 8)
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
-		if !strings.HasPrefix(line, entryStartPrefix) || !strings.HasSuffix(line, entryStartSuffix) {
+		if !strings.HasPrefix(line, entryHeadingPrefix) {
 			continue
 		}
-		metaJSON := strings.TrimSuffix(strings.TrimPrefix(line, entryStartPrefix), entryStartSuffix)
-		var meta map[string]string
-		if err := json.Unmarshal([]byte(metaJSON), &meta); err != nil {
+		entryID := strings.TrimSpace(strings.TrimPrefix(line, entryHeadingPrefix))
+		j := i + 1
+		for ; j < len(lines) && strings.TrimSpace(lines[j]) == ""; j++ {
+		}
+		if j >= len(lines) || strings.TrimSpace(lines[j]) != yamlFence {
 			continue
 		}
-		start := i + 1
-		end := start
-		for ; end < len(lines); end++ {
-			if strings.TrimSpace(lines[end]) == entryEndMarker {
+		metaStart := j + 1
+		metaEnd := metaStart
+		for ; metaEnd < len(lines); metaEnd++ {
+			if strings.TrimSpace(lines[metaEnd]) == codeFence {
 				break
 			}
 		}
-		if end >= len(lines) {
+		if metaEnd >= len(lines) {
 			break
 		}
+		var meta memoryEntryMeta
+		if err := yaml.Unmarshal([]byte(strings.Join(lines[metaStart:metaEnd], "\n")), &meta); err != nil {
+			continue
+		}
+		bodyStart := metaEnd + 1
+		if bodyStart < len(lines) && strings.TrimSpace(lines[bodyStart]) == "" {
+			bodyStart++
+		}
+		bodyEnd := bodyStart
+		for ; bodyEnd < len(lines); bodyEnd++ {
+			if strings.HasPrefix(strings.TrimSpace(lines[bodyEnd]), entryHeadingPrefix) {
+				break
+			}
+		}
 		item := MemoryItem{
-			ID:        strings.TrimSpace(meta["id"]),
-			Hash:      strings.TrimSpace(meta["hash"]),
-			CreatedAt: strings.TrimSpace(meta["created_at"]),
-			UpdatedAt: strings.TrimSpace(meta["updated_at"]),
-			Memory:    strings.TrimSpace(strings.Join(lines[start:end], "\n")),
+			ID:        firstNonEmpty(meta.ID, entryID),
+			Hash:      strings.TrimSpace(meta.Hash),
+			CreatedAt: strings.TrimSpace(meta.CreatedAt),
+			UpdatedAt: strings.TrimSpace(meta.UpdatedAt),
+			Metadata:  meta.Metadata,
+			Memory:    strings.TrimSpace(strings.Join(lines[bodyStart:bodyEnd], "\n")),
 		}
 		if item.ID != "" && item.Memory != "" {
 			items = append(items, item)
 		}
-		i = end
+		i = bodyEnd - 1
 	}
 	if len(items) == 0 {
 		return nil, errors.New("no memory entries found")
@@ -485,36 +541,78 @@ func parseMemoryDayMD(content string) ([]MemoryItem, error) {
 	return items, nil
 }
 
-func parseLegacyMemoryMD(content string) (MemoryItem, error) {
+type jsonMemoryRecord struct {
+	Topic     string `json:"topic"`
+	ID        string `json:"id"`
+	Memory    string `json:"memory"`
+	Text      string `json:"text"`
+	Content   string `json:"content"`
+	Hash      string `json:"hash"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func parseJSONMemoryItems(content string) ([]MemoryItem, error) {
 	content = strings.TrimSpace(content)
-	if !strings.HasPrefix(content, "---") {
-		return MemoryItem{}, errors.New("missing frontmatter")
+	if content == "" {
+		return nil, errors.New("empty memory file")
 	}
-	parts := strings.SplitN(content[3:], "---", 2)
-	if len(parts) < 2 {
-		return MemoryItem{}, errors.New("incomplete frontmatter")
+	var list []jsonMemoryRecord
+	if err := json.Unmarshal([]byte(content), &list); err == nil {
+		return normalizeJSONMemoryItems(list), nil
 	}
-	item := MemoryItem{Memory: strings.TrimSpace(parts[1])}
-	for _, line := range strings.Split(strings.TrimSpace(parts[0]), "\n") {
-		key, value, found := strings.Cut(strings.TrimSpace(line), ":")
-		if !found {
+	var obj jsonMemoryRecord
+	if err := json.Unmarshal([]byte(content), &obj); err == nil {
+		return normalizeJSONMemoryItems([]jsonMemoryRecord{obj}), nil
+	}
+	var wrapped struct {
+		Items []jsonMemoryRecord `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(content), &wrapped); err == nil {
+		return normalizeJSONMemoryItems(wrapped.Items), nil
+	}
+	return nil, errors.New("not json memory format")
+}
+
+func normalizeJSONMemoryItems(records []jsonMemoryRecord) []MemoryItem {
+	now := time.Now().UTC()
+	items := make([]MemoryItem, 0, len(records))
+	for _, record := range records {
+		text := strings.TrimSpace(record.Memory)
+		if text == "" {
+			text = strings.TrimSpace(record.Content)
+		}
+		if text == "" {
+			text = strings.TrimSpace(record.Text)
+		}
+		if text == "" {
 			continue
 		}
-		switch strings.TrimSpace(key) {
-		case "id":
-			item.ID = strings.TrimSpace(value)
-		case "hash":
-			item.Hash = strings.TrimSpace(value)
-		case "created_at":
-			item.CreatedAt = strings.TrimSpace(value)
-		case "updated_at":
-			item.UpdatedAt = strings.TrimSpace(value)
+		item := MemoryItem{
+			ID:        strings.TrimSpace(record.ID),
+			Hash:      strings.TrimSpace(record.Hash),
+			CreatedAt: strings.TrimSpace(record.CreatedAt),
+			UpdatedAt: strings.TrimSpace(record.UpdatedAt),
+			Memory:    text,
 		}
+		if item.ID == "" {
+			item.ID = "mem_" + strconv.FormatInt(now.UnixNano(), 10)
+		}
+		if item.CreatedAt == "" {
+			item.CreatedAt = now.Format(time.RFC3339)
+		}
+		if item.UpdatedAt == "" {
+			item.UpdatedAt = item.CreatedAt
+		}
+		if item.Hash == "" {
+			item.Hash = "json_" + strconv.FormatInt(now.UnixNano(), 10)
+		}
+		if topic := strings.TrimSpace(record.Topic); topic != "" {
+			item.Metadata = map[string]any{"topic": topic}
+		}
+		items = append(items, item)
 	}
-	if item.ID == "" {
-		return MemoryItem{}, errors.New("missing id in frontmatter")
-	}
-	return item, nil
+	return items
 }
 
 func formatMemoryOverviewMD(items []MemoryItem) string {
@@ -637,4 +735,14 @@ func memoryTime(item MemoryItem) time.Time {
 		return t
 	}
 	return time.Time{}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

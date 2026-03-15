@@ -1,7 +1,17 @@
-FROM mcr.microsoft.com/playwright:v1.50.0-noble
+FROM ubuntu:noble
 
-RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://bun.sh/install | bash
+ARG BROWSER_CORES=chromium,firefox
+ENV BROWSER_CORES=$BROWSER_CORES
+
+RUN apt-get update && apt-get install -y --no-install-recommends unzip curl nodejs npm && \
+    curl -fsSL https://bun.sh/install | bash && \
+    npm install -g playwright@1.50.0 && \
+    for core in $(echo "$BROWSER_CORES" | tr ',' ' '); do \
+      npx playwright install --with-deps "$core"; \
+    done && \
+    npm uninstall -g playwright && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 ENV PATH="/root/.bun/bin:${PATH}"
 
 WORKDIR /workspace

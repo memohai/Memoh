@@ -11,7 +11,6 @@ import (
 type Bot struct {
 	ID                 pgtype.UUID        `json:"id"`
 	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
-	Type               string             `json:"type"`
 	DisplayName        pgtype.Text        `json:"display_name"`
 	AvatarUrl          pgtype.Text        `json:"avatar_url"`
 	IsActive           bool               `json:"is_active"`
@@ -19,7 +18,6 @@ type Bot struct {
 	MaxContextLoadTime int32              `json:"max_context_load_time"`
 	MaxContextTokens   int32              `json:"max_context_tokens"`
 	Language           string             `json:"language"`
-	AllowGuest         bool               `json:"allow_guest"`
 	ReasoningEnabled   bool               `json:"reasoning_enabled"`
 	ReasoningEffort    string             `json:"reasoning_effort"`
 	MaxInboxItems      int32              `json:"max_inbox_items"`
@@ -30,10 +28,28 @@ type Bot struct {
 	HeartbeatInterval  int32              `json:"heartbeat_interval"`
 	HeartbeatPrompt    string             `json:"heartbeat_prompt"`
 	HeartbeatModelID   pgtype.UUID        `json:"heartbeat_model_id"`
+	TtsModelID         pgtype.UUID        `json:"tts_model_id"`
 	BrowserContextID   pgtype.UUID        `json:"browser_context_id"`
 	Metadata           []byte             `json:"metadata"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BotAclRule struct {
+	ID                     pgtype.UUID        `json:"id"`
+	BotID                  pgtype.UUID        `json:"bot_id"`
+	Action                 string             `json:"action"`
+	Effect                 string             `json:"effect"`
+	SubjectKind            string             `json:"subject_kind"`
+	UserID                 pgtype.UUID        `json:"user_id"`
+	ChannelIdentityID      pgtype.UUID        `json:"channel_identity_id"`
+	SourceChannel          pgtype.Text        `json:"source_channel"`
+	SourceConversationType pgtype.Text        `json:"source_conversation_type"`
+	SourceConversationID   pgtype.Text        `json:"source_conversation_id"`
+	SourceThreadID         pgtype.Text        `json:"source_thread_id"`
+	CreatedByUserID        pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotChannelConfig struct {
@@ -128,23 +144,6 @@ type BotInbox struct {
 	ReadAt    pgtype.Timestamptz `json:"read_at"`
 }
 
-type BotMember struct {
-	BotID     pgtype.UUID        `json:"bot_id"`
-	UserID    pgtype.UUID        `json:"user_id"`
-	Role      string             `json:"role"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-type BotPreauthKey struct {
-	ID             pgtype.UUID        `json:"id"`
-	BotID          pgtype.UUID        `json:"bot_id"`
-	Token          string             `json:"token"`
-	IssuedByUserID pgtype.UUID        `json:"issued_by_user_id"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
-	UsedAt         pgtype.Timestamptz `json:"used_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
 type BotStorageBinding struct {
 	ID                pgtype.UUID        `json:"id"`
 	BotID             pgtype.UUID        `json:"bot_id"`
@@ -209,6 +208,19 @@ type ContainerVersion struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type EmailOauthToken struct {
+	ID              pgtype.UUID        `json:"id"`
+	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
+	EmailAddress    string             `json:"email_address"`
+	AccessToken     string             `json:"access_token"`
+	RefreshToken    string             `json:"refresh_token"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	Scope           string             `json:"scope"`
+	State           string             `json:"state"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type EmailOutbox struct {
 	ID          pgtype.UUID        `json:"id"`
 	ProviderID  pgtype.UUID        `json:"provider_id"`
@@ -233,19 +245,6 @@ type EmailProvider struct {
 	Config    []byte             `json:"config"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-type EmailOAuthToken struct {
-	ID              pgtype.UUID        `json:"id"`
-	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
-	EmailAddress    string             `json:"email_address"`
-	AccessToken     string             `json:"access_token"`
-	RefreshToken    string             `json:"refresh_token"`
-	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
-	Scope           string             `json:"scope"`
-	State           string             `json:"state"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type LifecycleEvent struct {
@@ -413,6 +412,25 @@ type Subagent struct {
 	Metadata    []byte             `json:"metadata"`
 	Skills      []byte             `json:"skills"`
 	Usage       []byte             `json:"usage"`
+}
+
+type TtsModel struct {
+	ID            pgtype.UUID        `json:"id"`
+	ModelID       string             `json:"model_id"`
+	Name          pgtype.Text        `json:"name"`
+	TtsProviderID pgtype.UUID        `json:"tts_provider_id"`
+	Config        []byte             `json:"config"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TtsProvider struct {
+	ID        pgtype.UUID        `json:"id"`
+	Name      string             `json:"name"`
+	Provider  string             `json:"provider"`
+	Config    []byte             `json:"config"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {

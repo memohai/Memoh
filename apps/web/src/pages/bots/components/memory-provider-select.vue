@@ -62,6 +62,7 @@ interface MemoryProviderItem {
   id: string
   name: string
   provider: string
+  config?: Record<string, string>
 }
 
 const props = defineProps<{
@@ -81,8 +82,14 @@ const options = computed<SearchableSelectOption[]>(() => {
   const providerOptions = props.providers.map((provider) => ({
     value: provider.id || '',
     label: provider.name || provider.id || '',
-    description: provider.provider,
-    keywords: [provider.name ?? '', provider.provider ?? ''],
+    description: provider.provider === 'builtin'
+      ? t(`memoryProvider.modeNames.${provider.config?.memory_mode || 'off'}`)
+      : provider.provider,
+    keywords: [
+      provider.name ?? '',
+      provider.provider ?? '',
+      provider.config?.memory_mode ?? '',
+    ],
   }))
   return [noneOption, ...providerOptions]
 })

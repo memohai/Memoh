@@ -39,6 +39,32 @@ type Conversation struct {
 	Metadata map[string]any
 }
 
+const (
+	ConversationTypePrivate = "private"
+	ConversationTypeGroup   = "group"
+	ConversationTypeThread  = "thread"
+)
+
+// NormalizeConversationType normalizes conversation type values within the
+// channel abstraction domain: private/group/thread.
+func NormalizeConversationType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case ConversationTypePrivate:
+		return ConversationTypePrivate
+	case ConversationTypeThread:
+		return ConversationTypeThread
+	case ConversationTypeGroup:
+		return ConversationTypeGroup
+	default:
+		return ConversationTypeGroup
+	}
+}
+
+// IsPrivateConversationType reports whether the conversation is private.
+func IsPrivateConversationType(raw string) bool {
+	return NormalizeConversationType(raw) == ConversationTypePrivate
+}
+
 // InboundMessage is a message received from an external channel.
 type InboundMessage struct {
 	Channel      ChannelType
@@ -70,8 +96,7 @@ func (m InboundMessage) RoutingKey() string {
 // For group chats, the sender ID is appended to provide per-user context.
 func GenerateRoutingKey(platform, botID, conversationID, conversationType, senderID string) string {
 	parts := []string{platform, botID, conversationID}
-	ct := strings.ToLower(strings.TrimSpace(conversationType))
-	if ct != "" && ct != "p2p" && ct != "private" {
+	if !IsPrivateConversationType(conversationType) {
 		senderID = strings.TrimSpace(senderID)
 		if senderID != "" {
 			parts = append(parts, senderID)
@@ -102,6 +127,7 @@ const (
 	StreamEventAgentStart          StreamEventType = "agent_start"
 	StreamEventAgentEnd            StreamEventType = "agent_end"
 	StreamEventReaction            StreamEventType = "reaction"
+	StreamEventSpeech              StreamEventType = "speech"
 	StreamEventProcessingStarted   StreamEventType = "processing_started"
 	StreamEventProcessingCompleted StreamEventType = "processing_completed"
 	StreamEventProcessingFailed    StreamEventType = "processing_failed"
@@ -148,7 +174,13 @@ type StreamEvent struct {
 	Phase       StreamPhase            `json:"phase,omitempty"`
 	Attachments []Attachment           `json:"attachments,omitempty"`
 	Reactions   []ReactRequest         `json:"reactions,omitempty"`
+	Speeches    []SpeechRequest        `json:"speeches,omitempty"`
 	Metadata    map[string]any         `json:"metadata,omitempty"`
+}
+
+// SpeechRequest carries text-to-speech synthesis text from a speech_delta stream event.
+type SpeechRequest struct {
+	Text string `json:"text"`
 }
 
 // StreamOptions configures how an outbound stream is initialized.

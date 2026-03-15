@@ -240,18 +240,15 @@ import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import { putEmailProvidersById, deleteEmailProvidersById, getEmailProvidersMeta } from '@memoh/sdk'
-import { client } from '@memoh/sdk/client'
-import type { EmailProviderResponse, EmailFieldSchema } from '@memoh/sdk'
-
-interface EmailOAuthStatusResponse {
-  provider: string
-  configured: boolean
-  has_token: boolean
-  expired: boolean
-  email_address?: string
-  expires_at?: string
-}
+import {
+  putEmailProvidersById,
+  deleteEmailProvidersById,
+  getEmailProvidersMeta,
+  getEmailProvidersByIdOauthAuthorize,
+  getEmailProvidersByIdOauthStatus,
+  deleteEmailProvidersByIdOauthToken,
+} from '@memoh/sdk'
+import type { EmailProviderResponse, EmailFieldSchema, HandlersEmailOAuthStatusResponse } from '@memoh/sdk'
 
 const OAUTH_PROVIDERS = ['gmail']
 
@@ -282,7 +279,7 @@ const isOAuthProvider = computed(() =>
   OAUTH_PROVIDERS.includes(curProvider.value?.provider ?? ''),
 )
 
-const oauthStatus = ref<EmailOAuthStatusResponse | null>(null)
+const oauthStatus = ref<HandlersEmailOAuthStatusResponse | null>(null)
 const oauthStatusLoading = ref(false)
 const revokeLoading = ref(false)
 
@@ -377,8 +374,8 @@ async function handleAuthorize() {
   if (!curProviderId.value) return
   authorizeLoading.value = true
   try {
-    const { data, error } = await client.get<{ auth_url: string }, unknown>({
-      url: `/email-providers/${curProviderId.value}/oauth/authorize`,
+    const { data, error } = await getEmailProvidersByIdOauthAuthorize({
+      path: { id: curProviderId.value },
     })
     if (error || !data?.auth_url) {
       throw new Error(t('emailProvider.oauth.authorizeFailed'))
@@ -399,8 +396,8 @@ async function fetchOAuthStatus() {
   }
   oauthStatusLoading.value = true
   try {
-    const { data, error } = await client.get<EmailOAuthStatusResponse, unknown>({
-      url: `/email-providers/${curProviderId.value}/oauth/status`,
+    const { data, error } = await getEmailProvidersByIdOauthStatus({
+      path: { id: curProviderId.value },
     })
     if (error) {
       throw error
@@ -418,8 +415,8 @@ async function handleRevoke() {
   if (!curProviderId.value) return
   revokeLoading.value = true
   try {
-    const { error } = await client.delete({
-      url: `/email-providers/${curProviderId.value}/oauth/token`,
+    const { error } = await deleteEmailProvidersByIdOauthToken({
+      path: { id: curProviderId.value },
     })
     if (error) throw error
     toast.success(t('emailProvider.oauth.logoutSuccess'))

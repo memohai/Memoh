@@ -14,3 +14,10 @@ type ChannelIdentity struct {
 	CreatedAt        time.Time      `json:"created_at"`
 	UpdatedAt        time.Time      `json:"updated_at"`
 }
+
+type SearchResult struct {
+	ChannelIdentity
+	LinkedUsername    string `json:"linked_username,omitempty"`
+	LinkedDisplayName string `json:"linked_display_name,omitempty"`
+	LinkedAvatarURL   string `json:"linked_avatar_url,omitempty"`
+}

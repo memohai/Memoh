@@ -1,7 +1,7 @@
 {
   "name": "@memoh/web",
   "private": true,
-  "version": "0.4.3",
+  "version": "0.5.0-beta.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -23,6 +23,9 @@
     "@tanstack/vue-table": "^8.21.3",
     "@vee-validate/zod": "^4.15.1",
     "@vueuse/core": "^14.1.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/xterm": "^6.0.0",
     "dotenv": "^17.2.3",
     "echarts": "^6.0.0",
     "katex": "^0.16.28",

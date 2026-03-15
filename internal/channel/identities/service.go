@@ -191,6 +191,44 @@ func (s *Service) ListCanonicalChannelIdentities(ctx context.Context, channelIde
 	return result, nil
 }
 
+// Search returns locally observed channel identities for UI search.
+func (s *Service) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	if s.queries == nil {
+		return nil, errors.New("channel identity queries not configured")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.queries.SearchChannelIdentities(ctx, sqlc.SearchChannelIdentitiesParams{
+		Query:      strings.TrimSpace(query),
+		LimitCount: int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]SearchResult, 0, len(rows))
+	for _, row := range rows {
+		item := SearchResult{
+			ChannelIdentity: toChannelIdentity(sqlc.ChannelIdentity{
+				ID:               row.ID,
+				UserID:           row.UserID,
+				ChannelType:      row.ChannelType,
+				ChannelSubjectID: row.ChannelSubjectID,
+				DisplayName:      row.DisplayName,
+				AvatarUrl:        row.AvatarUrl,
+				Metadata:         row.Metadata,
+				CreatedAt:        row.CreatedAt,
+				UpdatedAt:        row.UpdatedAt,
+			}),
+			LinkedUsername:    strings.TrimSpace(row.LinkedUsername.String),
+			LinkedDisplayName: strings.TrimSpace(row.LinkedDisplayName.String),
+			LinkedAvatarURL:   strings.TrimSpace(row.LinkedAvatarUrl.String),
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 // ListUserChannelIdentities lists all channel identities linked to a user.
 func (s *Service) ListUserChannelIdentities(ctx context.Context, userID string) ([]ChannelIdentity, error) {
 	if s.queries == nil {

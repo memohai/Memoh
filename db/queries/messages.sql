@@ -162,3 +162,25 @@ LIMIT sqlc.arg(max_count);
 -- name: DeleteMessagesByBot :exec
 DELETE FROM bot_history_messages
 WHERE bot_id = sqlc.arg(bot_id);
+
+-- name: ListObservedConversationsByChannelIdentity :many
+SELECT
+  r.id AS route_id,
+  r.channel_type AS channel,
+  COALESCE(r.conversation_type, '') AS conversation_type,
+  r.external_conversation_id AS conversation_id,
+  COALESCE(r.external_thread_id, '') AS thread_id,
+  COALESCE(r.metadata->>'conversation_name', '')::text AS conversation_name,
+  MAX(m.created_at)::timestamptz AS last_observed_at
+FROM bot_history_messages m
+JOIN bot_channel_routes r ON r.id = m.route_id
+WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.sender_channel_identity_id = sqlc.arg(channel_identity_id)
+GROUP BY
+  r.id,
+  r.channel_type,
+  r.conversation_type,
+  r.external_conversation_id,
+  r.external_thread_id,
+  r.metadata
+ORDER BY MAX(m.created_at) DESC;

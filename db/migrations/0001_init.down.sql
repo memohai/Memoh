@@ -12,6 +12,7 @@ DROP TABLE IF EXISTS bot_history_messages;
 DROP TABLE IF EXISTS bot_channel_routes;
 DROP TABLE IF EXISTS channel_identity_bind_codes;
 DROP TABLE IF EXISTS bot_preauth_keys;
+DROP TABLE IF EXISTS bot_acl_rules;
 DROP TABLE IF EXISTS bot_channel_configs;
 DROP TABLE IF EXISTS mcp_connections;
 DROP TABLE IF EXISTS bot_members;

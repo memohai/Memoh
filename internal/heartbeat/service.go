@@ -165,7 +165,7 @@ func (s *Service) ListLogs(ctx context.Context, botID string, before *time.Time,
 	rows, err := s.queries.ListHeartbeatLogsByBot(ctx, sqlc.ListHeartbeatLogsByBotParams{
 		BotID:   pgBotID,
 		Column2: beforeTS,
-		Limit:   int32(limit),
+		Limit:   int32(limit), //nolint:gosec // capped to 100 above
 	})
 	if err != nil {
 		return nil, err

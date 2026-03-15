@@ -75,9 +75,6 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	botGroup.PUT("/:id", h.UpdateBot)
 	botGroup.PUT("/:id/owner", h.TransferBotOwner)
 	botGroup.DELETE("/:id", h.DeleteBot)
-	botGroup.GET("/:id/members", h.ListBotMembers)
-	botGroup.PUT("/:id/members", h.UpsertBotMember)
-	botGroup.DELETE("/:id/members/:user_id", h.DeleteBotMember)
 	botGroup.GET("/:id/channel/:platform", h.GetBotChannelConfig)
 	botGroup.PUT("/:id/channel/:platform", h.UpsertBotChannelConfig)
 	botGroup.PATCH("/:id/channel/:platform/status", h.UpdateBotChannelStatus)
@@ -662,109 +659,6 @@ func (h *UsersHandler) DeleteBot(c echo.Context) error {
 	})
 }
 
-// ListBotMembers godoc
-// @Summary List bot members
-// @Description List members for a bot
-// @Tags bots
-// @Param id path string true "Bot ID"
-// @Success 200 {object} bots.ListMembersResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/members [get].
-func (h *UsersHandler) ListBotMembers(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
-		return err
-	}
-	items, err := h.botService.ListMembers(c.Request().Context(), botID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, bots.ListMembersResponse{Items: items})
-}
-
-// UpsertBotMember godoc
-// @Summary Upsert bot member
-// @Description Add or update bot member role
-// @Tags bots
-// @Param id path string true "Bot ID"
-// @Param payload body bots.UpsertMemberRequest true "Member payload"
-// @Success 200 {object} bots.BotMember
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/members [put].
-func (h *UsersHandler) UpsertBotMember(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
-		return err
-	}
-	var req bots.UpsertMemberRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	req.UserID = strings.TrimSpace(req.UserID)
-	if req.UserID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "user_id is required")
-	}
-	resp, err := h.botService.UpsertMember(c.Request().Context(), botID, req)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, resp)
-}
-
-// DeleteBotMember godoc
-// @Summary Delete bot member
-// @Description Remove a member from a bot
-// @Tags bots
-// @Param id path string true "Bot ID"
-// @Param user_id path string true "User ID"
-// @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{id}/members/{user_id} [delete].
-func (h *UsersHandler) DeleteBotMember(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	memberUserID := strings.TrimSpace(c.Param("user_id"))
-	if memberUserID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "user id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
-		return err
-	}
-	if err := h.botService.DeleteMember(c.Request().Context(), botID, memberUserID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.NoContent(http.StatusNoContent)
-}
-
 // GetBotChannelConfig godoc
 // @Summary Get bot channel config
 // @Description Get bot channel configuration
@@ -1044,7 +938,7 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 }
 
 func (h *UsersHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.service, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
+	return AuthorizeBotAccess(ctx, h.botService, h.service, channelIdentityID, botID)
 }
 
 func (*UsersHandler) requireChannelIdentityID(c echo.Context) (string, error) {

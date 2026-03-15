@@ -128,7 +128,7 @@ func TestManager_handleInbound(t *testing.T) {
 			ReplyTarget: "target-id",
 			Conversation: Conversation{
 				ID:   "chat-1",
-				Type: "p2p",
+				Type: ConversationTypePrivate,
 			},
 		}
 
@@ -199,7 +199,7 @@ func TestManager_handleInbound(t *testing.T) {
 			ReplyTarget: "stream-target",
 			Conversation: Conversation{
 				ID:   "chat-1",
-				Type: "p2p",
+				Type: ConversationTypePrivate,
 			},
 		}
 		if err := m.handleInbound(context.Background(), cfg, msg); err != nil {

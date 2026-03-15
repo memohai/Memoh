@@ -410,5 +410,5 @@ func (*MCPHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 }
 
 func (h *MCPHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID)
 }

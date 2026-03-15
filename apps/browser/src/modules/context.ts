@@ -2,7 +2,7 @@ import { Elysia } from 'elysia'
 import { storage } from '../storage'
 import { z } from 'zod'
 import { BrowserContextConfigModel } from '../models'
-import { browser } from '..'
+import { getBrowser } from '../browser'
 import { actionModule } from './action'
 
 export const contextModule = new Elysia({ prefix: '/context' })
@@ -14,7 +14,7 @@ export const contextModule = new Elysia({ prefix: '/context' })
     const { id } = query
     const entry = storage.get(id)
     if (!entry) return null
-    return { id: entry.id, name: entry.name, config: entry.config }
+    return { id: entry.id, name: entry.name, core: entry.core, config: entry.config }
   }, {
     query: z.object({
       id: z.string(),
@@ -24,6 +24,8 @@ export const contextModule = new Elysia({ prefix: '/context' })
     '/',
     async ({ body }) => {
       const { name, config, id } = body
+      const core = config.core ?? 'chromium'
+      const browser = getBrowser(core)
       const context = await browser.newContext({
         viewport: config.viewport,
         userAgent: config.userAgent,
@@ -37,8 +39,8 @@ export const contextModule = new Elysia({ prefix: '/context' })
         ignoreHTTPSErrors: config.ignoreHTTPSErrors,
         proxy: config.proxy,
       })
-      storage.set(id, { id, name, context, config })
-      return { id, name, config }
+      storage.set(id, { id, name, core, context, config })
+      return { id, name, core, config }
     },
     {
       body: z.object({

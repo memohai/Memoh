@@ -105,6 +105,56 @@ func TestTelegramOutboundStream_PushErrorEventEmptyNoOp(t *testing.T) {
 	}
 }
 
+func TestTelegramOutboundStream_PushErrorEventRedactsRegisteredTokenFragments(t *testing.T) {
+	channel.ResetIMErrorSecretsForTest()
+	t.Cleanup(channel.ResetIMErrorSecretsForTest)
+
+	const botToken = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	var sentText string
+
+	adapter := NewTelegramAdapter(nil)
+	stream, err := adapter.OpenStream(context.Background(), channel.ChannelConfig{
+		ID:          "cfg-1",
+		Credentials: map[string]any{"botToken": botToken},
+	}, "12345", channel.StreamOptions{Metadata: map[string]any{"conversation_type": "private"}})
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	s, ok := stream.(*telegramOutboundStream)
+	if !ok {
+		t.Fatalf("unexpected stream type %T", stream)
+	}
+
+	origGetBot := getOrCreateBotForTest
+	origSendText := sendTextForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+		return &tgbotapi.BotAPI{Token: botToken}, nil
+	}
+	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, text string, _ int, _ string) (int64, int, error) {
+		sentText = text
+		return 1, 1, nil
+	}
+	defer func() {
+		getOrCreateBotForTest = origGetBot
+		sendTextForTest = origSendText
+	}()
+
+	prefixHalf := botToken[:len(botToken)/2]
+	err = s.Push(context.Background(), channel.StreamEvent{Type: channel.StreamEventError, Error: "request failed: " + prefixHalf})
+	if err != nil {
+		t.Fatalf("push error event: %v", err)
+	}
+	if strings.Contains(sentText, prefixHalf) {
+		t.Fatalf("expected prefix half to be redacted, got %q", sentText)
+	}
+	if !strings.Contains(sentText, "Error: ") {
+		t.Fatalf("expected error prefix, got %q", sentText)
+	}
+	if !strings.Contains(sentText, strings.Repeat("*", len(prefixHalf))) {
+		t.Fatalf("expected redaction mask, got %q", sentText)
+	}
+}
+
 func TestTelegramOutboundStream_CloseContextCanceled(t *testing.T) {
 	t.Parallel()
 

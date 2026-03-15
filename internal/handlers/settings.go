@@ -96,9 +96,6 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 	}
 	resp, err := h.service.UpsertBot(c.Request().Context(), botID, req)
 	if err != nil {
-		if errors.Is(err, settings.ErrPersonalBotGuestAccessUnsupported) {
-			return echo.NewHTTPError(http.StatusBadRequest, "personal bot does not support guest access")
-		}
 		if errors.Is(err, settings.ErrInvalidModelRef) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
@@ -148,5 +145,5 @@ func (*SettingsHandler) requireChannelIdentityID(c echo.Context) (string, error)
 }
 
 func (h *SettingsHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID)
 }

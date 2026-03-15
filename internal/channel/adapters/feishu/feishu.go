@@ -227,7 +227,7 @@ func (*FeishuAdapter) processingReactionGateway(cfg channel.ChannelConfig) (proc
 	if err != nil {
 		return nil, err
 	}
-	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret, lark.WithOpenBaseUrl(feishuCfg.openBaseURL()))
+	client := feishuCfg.newClient()
 	gateway := &larkProcessingReactionGateway{api: client.Im.MessageReaction}
 	return gateway, nil
 }
@@ -291,7 +291,7 @@ func (*FeishuAdapter) DiscoverSelf(ctx context.Context, credentials map[string]a
 	if err != nil {
 		return nil, "", err
 	}
-	client := lark.NewClient(cfg.AppID, cfg.AppSecret, lark.WithOpenBaseUrl(cfg.openBaseURL()))
+	client := cfg.newClient()
 	resp, err := client.Get(ctx, "/open-apis/bot/v3/info", nil, larkcore.AccessTokenTypeTenant)
 	if err != nil {
 		return nil, "", fmt.Errorf("feishu discover self: %w", err)
@@ -466,6 +466,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 		eventDispatcher.OnP2MessageReactionDeletedV1(func(_ context.Context, _ *larkim.P2MessageReactionDeletedV1) error {
 			return nil
 		})
+		feishuCfg.registerIMErrorSecrets()
 		return larkws.NewClient(
 			feishuCfg.AppID,
 			feishuCfg.AppSecret,
@@ -526,7 +527,7 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 		return err
 	}
 
-	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret, lark.WithOpenBaseUrl(feishuCfg.openBaseURL()))
+	client := feishuCfg.newClient()
 
 	if len(msg.Message.Attachments) > 0 {
 		for _, att := range msg.Message.Attachments {
@@ -603,7 +604,7 @@ func (a *FeishuAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfi
 	if err != nil {
 		return nil, err
 	}
-	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret, lark.WithOpenBaseUrl(feishuCfg.openBaseURL()))
+	client := feishuCfg.newClient()
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -855,7 +856,7 @@ func (*FeishuAdapter) ResolveAttachment(ctx context.Context, cfg channel.Channel
 	if err != nil {
 		return channel.AttachmentPayload{}, err
 	}
-	client := lark.NewClient(feishuCfg.AppID, feishuCfg.AppSecret, lark.WithOpenBaseUrl(feishuCfg.openBaseURL()))
+	client := feishuCfg.newClient()
 
 	resourceType := "file"
 	if isFeishuImageAttachment(attachment) {

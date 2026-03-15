@@ -2,13 +2,18 @@ import { Elysia } from 'elysia'
 import { loadConfig } from '@memoh/config'
 import { corsMiddleware } from './middlewares/cors'
 import { errorMiddleware } from './middlewares/error'
-import { initBrowser } from './browser'
+import { initBrowsers, browsers } from './browser'
 import { contextModule } from './modules/context'
 import { devicesModule } from './modules/devices'
+import { coresModule } from './modules/cores'
 
-const config = loadConfig('../../config.toml')
+const configuredPath = process.env.MEMOH_CONFIG_PATH?.trim() || process.env.CONFIG_PATH?.trim()
+const configPath = configuredPath && configuredPath.length > 0 ? configuredPath : '../../config.toml'
+const config = loadConfig(configPath)
 
-export const browser = await initBrowser()
+await initBrowsers()
+
+export { browsers }
 
 const app = new Elysia()
   .use(corsMiddleware)
@@ -16,10 +21,13 @@ const app = new Elysia()
   .get('/health', () => ({
     status: 'ok',
   }))
+  .use(coresModule)
   .use(contextModule)
   .use(devicesModule)
   .onStop(async () => {
-    await browser.close()
+    for (const browser of browsers.values()) {
+      await browser.close()
+    }
   })
   .listen({
     port: config.browser_gateway.port ?? 8083,
@@ -28,4 +36,3 @@ const app = new Elysia()
   })
 
 console.log(`🌐 Browser Gateway is running at ${app.server!.url}`)
-

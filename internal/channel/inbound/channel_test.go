@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/route"
@@ -177,6 +178,22 @@ type fakeChatService struct {
 	persistedIn   []messagepkg.PersistInput
 }
 
+type fakeChatACL struct {
+	allowed bool
+	err     error
+	calls   int
+	lastReq acl.ChatTriggerRequest
+}
+
+func (f *fakeChatACL) CanPerformChatTrigger(_ context.Context, req acl.ChatTriggerRequest) (bool, error) {
+	f.calls++
+	f.lastReq = req
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.allowed, nil
+}
+
 type fakeMediaIngestor struct {
 	nextID          string
 	nextMime        string
@@ -320,8 +337,7 @@ func (f *fakeChatService) Persist(_ context.Context, input messagepkg.PersistInp
 
 func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
-	memberSvc := &fakeMemberService{isMember: true}
-	policySvc := &fakePolicyService{allow: false}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -330,7 +346,7 @@ func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 			},
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, policySvc, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
@@ -342,7 +358,7 @@ func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
 		Conversation: channel.Conversation{
 			ID:   "chat-1",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -367,13 +383,14 @@ func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 	}
 }
 
-func TestChannelInboundProcessorDenied(t *testing.T) {
+func TestChannelInboundProcessorDeniedByACL(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-2"}}
-	memberSvc := &fakeMemberService{isMember: false}
-	policySvc := &fakePolicyService{allow: false}
-	chatSvc := &fakeChatService{}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-denied", RouteID: "route-denied"}}
 	gateway := &fakeChatGateway{}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, policySvc, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
+	aclSvc := &fakeChatACL{allowed: false}
+	processor.SetACLService(aclSvc)
 	sender := &fakeReplySender{}
 
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
@@ -383,27 +400,111 @@ func TestChannelInboundProcessorDenied(t *testing.T) {
 		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "stranger-1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-1",
+			Type: channel.ConversationTypePrivate,
+		},
 	}
 
 	err := processor.HandleInbound(context.Background(), cfg, msg, sender)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "denied") {
-		t.Fatalf("expected access denied reply, got: %+v", sender.sent)
-	}
 	if gateway.gotReq.Query != "" {
 		t.Error("denied user should not trigger chat call")
 	}
 }
 
+func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-acl-deny"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acl", RouteID: "route-acl"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
+	aclSvc := &fakeChatACL{allowed: false}
+	processor.SetACLService(aclSvc)
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("feishu"),
+		Message:     channel.Message{Text: "hello"},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "guest-1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if aclSvc.calls != 1 {
+		t.Fatalf("expected acl to be checked once, got %d", aclSvc.calls)
+	}
+	if aclSvc.lastReq.SourceScope.Channel != "feishu" ||
+		aclSvc.lastReq.SourceScope.ConversationType != channel.ConversationTypePrivate ||
+		aclSvc.lastReq.SourceScope.ConversationID != "chat-1" {
+		t.Fatalf("unexpected acl source scope: %+v", aclSvc.lastReq.SourceScope)
+	}
+	if gateway.gotReq.Query != "" {
+		t.Fatal("ACL denied guest should not trigger chat call")
+	}
+	if len(sender.sent) != 0 {
+		t.Fatalf("ACL denied guest should not send reply, got %+v", sender.sent)
+	}
+	if len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("ACL denied guest should not persist trigger message, got %d", len(chatSvc.persistedIn))
+	}
+}
+
+func TestChannelInboundProcessorACLReceivesThreadScope(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-thread-scope"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-thread", RouteID: "route-thread"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
+	aclSvc := &fakeChatACL{allowed: false}
+	processor.SetACLService(aclSvc)
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("discord"),
+		Message:     channel.Message{Text: "hello", Thread: &channel.ThreadRef{ID: "thread-1"}},
+		ReplyTarget: "discord:thread-1",
+		Sender:      channel.Identity{SubjectID: "guest-thread"},
+		Conversation: channel.Conversation{
+			ID:   "guild-chat-1",
+			Type: channel.ConversationTypeThread,
+		},
+		Metadata: map[string]any{
+			"is_mentioned": true,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if aclSvc.calls != 1 {
+		t.Fatalf("expected acl to be checked once, got %d", aclSvc.calls)
+	}
+	if aclSvc.lastReq.SourceScope.Channel != "discord" ||
+		aclSvc.lastReq.SourceScope.ConversationType != channel.ConversationTypeThread ||
+		aclSvc.lastReq.SourceScope.ConversationID != "guild-chat-1" ||
+		aclSvc.lastReq.SourceScope.ThreadID != "thread-1" {
+		t.Fatalf("unexpected thread acl source scope: %+v", aclSvc.lastReq.SourceScope)
+	}
+}
+
 func TestChannelInboundProcessorIgnoreEmpty(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-3"}}
-	memberSvc := &fakeMemberService{isMember: true}
-	policySvc := &fakePolicyService{allow: false}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{}
 	gateway := &fakeChatGateway{}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, policySvc, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 
 	cfg := channel.ChannelConfig{ID: "cfg-1"}
@@ -469,7 +570,7 @@ func TestBuildInboundQueryAttachmentFallbackWithContainerRefs(t *testing.T) {
 
 func TestChannelInboundProcessorAttachmentOnlyUsesFallbackQuery(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-fallback"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-fallback", RouteID: "route-fallback"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -478,7 +579,7 @@ func TestChannelInboundProcessorAttachmentOnlyUsesFallbackQuery(t *testing.T) {
 			},
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}
@@ -495,7 +596,7 @@ func TestChannelInboundProcessorAttachmentOnlyUsesFallbackQuery(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "ext-1"},
 		Conversation: channel.Conversation{
 			ID:   "conv-1",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -513,7 +614,7 @@ func TestChannelInboundProcessorAttachmentOnlyUsesFallbackQuery(t *testing.T) {
 
 func TestChannelInboundProcessorSilentReply(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-4"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-4", RouteID: "route-4"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -522,7 +623,7 @@ func TestChannelInboundProcessorSilentReply(t *testing.T) {
 			},
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}
@@ -534,7 +635,7 @@ func TestChannelInboundProcessorSilentReply(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "user-1"},
 		Conversation: channel.Conversation{
 			ID:   "conv-1",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -549,7 +650,7 @@ func TestChannelInboundProcessorSilentReply(t *testing.T) {
 
 func TestChannelInboundProcessorGroupPassiveSync(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-5"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-5", RouteID: "route-5"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -558,7 +659,7 @@ func TestChannelInboundProcessorGroupPassiveSync(t *testing.T) {
 			},
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}
@@ -591,7 +692,7 @@ func TestChannelInboundProcessorGroupPassiveSync(t *testing.T) {
 
 func TestChannelInboundProcessorGroupMentionTriggersReply(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-6"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-6", RouteID: "route-6"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -600,7 +701,7 @@ func TestChannelInboundProcessorGroupMentionTriggersReply(t *testing.T) {
 			},
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}
@@ -629,8 +730,8 @@ func TestChannelInboundProcessorGroupMentionTriggersReply(t *testing.T) {
 	if len(sender.sent) != 1 {
 		t.Fatalf("expected one outbound reply, got %d", len(sender.sent))
 	}
-	if !gateway.gotReq.UserMessagePersisted {
-		t.Fatalf("expected UserMessagePersisted=true for pre-persisted inbound message")
+	if gateway.gotReq.UserMessagePersisted {
+		t.Fatalf("expected UserMessagePersisted=false: user message persistence is deferred to storeRound")
 	}
 }
 
@@ -649,12 +750,12 @@ func (s *failingOpenStreamSender) OpenStream(_ context.Context, _ string, _ chan
 	return nil, errors.New("open stream failed")
 }
 
-func TestChannelInboundProcessorPersistsActiveChatBeforeOpenStream(t *testing.T) {
+func TestChannelInboundProcessorDoesNotPersistBeforeOpenStream(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-openstream"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-openstream", RouteID: "route-openstream"}}
 	gateway := &fakeChatGateway{}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &failingOpenStreamSender{err: errors.New("stream unavailable")}
 
 	cfg := channel.ChannelConfig{ID: "cfg-openstream", BotID: "bot-1", ChannelType: channel.ChannelType("qq")}
@@ -666,7 +767,7 @@ func TestChannelInboundProcessorPersistsActiveChatBeforeOpenStream(t *testing.T)
 		Sender:      channel.Identity{SubjectID: "user-1"},
 		Conversation: channel.Conversation{
 			ID:   "conv-openstream",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -674,11 +775,8 @@ func TestChannelInboundProcessorPersistsActiveChatBeforeOpenStream(t *testing.T)
 	if err == nil || err.Error() != "stream unavailable" {
 		t.Fatalf("expected open stream error, got: %v", err)
 	}
-	if len(chatSvc.persistedIn) != 1 {
-		t.Fatalf("expected active-chat user turn to be persisted before stream open, got %d", len(chatSvc.persistedIn))
-	}
-	if got := chatSvc.persistedIn[0].ExternalMessageID; got != "msg-openstream-1" {
-		t.Fatalf("unexpected persisted external_message_id: %q", got)
+	if len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("user message persistence is deferred to storeRound; expected 0 persisted, got %d", len(chatSvc.persistedIn))
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatalf("runner should not be called when stream open fails")
@@ -687,7 +785,7 @@ func TestChannelInboundProcessorPersistsActiveChatBeforeOpenStream(t *testing.T)
 
 func TestChannelInboundProcessorPersistsAttachmentAssetRefs(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-asset"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-asset", RouteID: "route-asset"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -696,7 +794,7 @@ func TestChannelInboundProcessorPersistsAttachmentAssetRefs(t *testing.T) {
 			},
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 
 	cfg := channel.ChannelConfig{ID: "cfg-asset", BotID: "bot-1"}
@@ -720,21 +818,15 @@ func TestChannelInboundProcessorPersistsAttachmentAssetRefs(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "ext-asset"},
 		Conversation: channel.Conversation{
 			ID:   "oc_asset",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
 	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(chatSvc.persistedIn) != 1 {
-		t.Fatalf("expected one persisted input, got %d", len(chatSvc.persistedIn))
-	}
-	if len(chatSvc.persistedIn[0].Assets) != 1 {
-		t.Fatalf("expected one persisted asset ref, got %d", len(chatSvc.persistedIn[0].Assets))
-	}
-	if got := chatSvc.persistedIn[0].Assets[0].ContentHash; got != "asset-1" {
-		t.Fatalf("expected persisted content_hash asset-1, got %q", got)
+	if len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("user message persistence is deferred to storeRound; expected 0 persisted, got %d", len(chatSvc.persistedIn))
 	}
 	if len(gateway.gotReq.Attachments) != 1 {
 		t.Fatalf("expected one gateway attachment, got %d", len(gateway.gotReq.Attachments))
@@ -746,7 +838,7 @@ func TestChannelInboundProcessorPersistsAttachmentAssetRefs(t *testing.T) {
 
 func TestChannelInboundProcessorIngestsPlatformKeyWithResolver(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-resolver"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-resolver", RouteID: "route-resolver"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -757,7 +849,7 @@ func TestChannelInboundProcessorIngestsPlatformKeyWithResolver(t *testing.T) {
 	}
 	registry := channel.NewRegistry()
 	registry.MustRegister(&fakeAttachmentResolverAdapter{})
-	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	mediaSvc := &fakeMediaIngestor{nextID: "asset-resolved-1", nextMime: "application/octet-stream"}
 	processor.SetMediaService(mediaSvc)
 	sender := &fakeReplySender{}
@@ -780,7 +872,7 @@ func TestChannelInboundProcessorIngestsPlatformKeyWithResolver(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "resolver-user"},
 		Conversation: channel.Conversation{
 			ID:   "resolver-conv",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -796,17 +888,14 @@ func TestChannelInboundProcessorIngestsPlatformKeyWithResolver(t *testing.T) {
 	if got := gateway.gotReq.Attachments[0].ContentHash; got != "asset-resolved-1" {
 		t.Fatalf("expected resolved asset id, got %q", got)
 	}
-	if len(chatSvc.persistedIn) != 1 || len(chatSvc.persistedIn[0].Assets) != 1 {
-		t.Fatalf("expected one persisted asset ref, got %+v", chatSvc.persistedIn)
-	}
-	if got := chatSvc.persistedIn[0].Assets[0].ContentHash; got != "asset-resolved-1" {
-		t.Fatalf("expected persisted content_hash asset-resolved-1, got %q", got)
+	if len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("user message persistence is deferred to storeRound; expected 0 persisted, got %d", len(chatSvc.persistedIn))
 	}
 }
 
 func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-base64"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-base64", RouteID: "route-base64"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -815,7 +904,7 @@ func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
 			},
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	mediaSvc := &fakeMediaIngestor{nextID: "asset-base64-1", nextMime: "image/png"}
 	processor.SetMediaService(mediaSvc)
 	sender := &fakeReplySender{}
@@ -845,7 +934,7 @@ func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
 		},
 		Conversation: channel.Conversation{
 			ID:   "web-conv",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -871,17 +960,14 @@ func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
 	if !strings.HasPrefix(gotAttachment.Path, "/data/media/") {
 		t.Fatalf("expected attachment path under /data/media/, got %q", gotAttachment.Path)
 	}
-	if len(chatSvc.persistedIn) != 1 || len(chatSvc.persistedIn[0].Assets) != 1 {
-		t.Fatalf("expected one persisted asset ref, got %+v", chatSvc.persistedIn)
-	}
-	if got := chatSvc.persistedIn[0].Assets[0].ContentHash; got != "asset-base64-1" {
-		t.Fatalf("expected persisted content_hash asset-base64-1, got %q", got)
+	if len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("user message persistence is deferred to storeRound; expected 0 persisted, got %d", len(chatSvc.persistedIn))
 	}
 }
 
 func TestChannelInboundProcessorIngestsQQFileAttachmentKeepsOriginalExtWhenMimeGeneric(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-qq-file"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-qq-file", RouteID: "route-qq-file"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -899,7 +985,7 @@ func TestChannelInboundProcessorIngestsQQFileAttachmentKeepsOriginalExtWhenMimeG
 			Size:   5,
 		},
 	})
-	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	storage := &fakeStorageProvider{}
 	mediaSvc := media.NewService(slog.Default(), storage)
 	processor.SetMediaService(mediaSvc)
@@ -925,7 +1011,7 @@ func TestChannelInboundProcessorIngestsQQFileAttachmentKeepsOriginalExtWhenMimeG
 		Sender:      channel.Identity{SubjectID: "qq-user"},
 		Conversation: channel.Conversation{
 			ID:   "qq-user",
-			Type: "direct",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -946,8 +1032,7 @@ func TestChannelInboundProcessorIngestsQQFileAttachmentKeepsOriginalExtWhenMimeG
 
 func TestChannelInboundProcessorPersonalGroupNonOwnerIgnored(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-member"}}
-	memberSvc := &fakeMemberService{isMember: true}
-	policySvc := &fakePolicyService{allow: false, botType: "personal", ownerUserID: "channelIdentity-owner"}
+	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner"}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-personal-1", RouteID: "route-personal-1"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -956,7 +1041,7 @@ func TestChannelInboundProcessorPersonalGroupNonOwnerIgnored(t *testing.T) {
 			},
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, policySvc, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}
@@ -989,8 +1074,7 @@ func TestChannelInboundProcessorPersonalGroupNonOwnerIgnored(t *testing.T) {
 
 func TestChannelInboundProcessorPersonalGroupOwnerWithoutMentionUsesPassivePersistence(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-owner"}}
-	memberSvc := &fakeMemberService{isMember: true}
-	policySvc := &fakePolicyService{allow: false, botType: "personal", ownerUserID: "channelIdentity-owner"}
+	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner"}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-personal-2", RouteID: "route-personal-2"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -999,7 +1083,7 @@ func TestChannelInboundProcessorPersonalGroupOwnerWithoutMentionUsesPassivePersi
 			},
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, policySvc, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}
@@ -1037,7 +1121,7 @@ func TestChannelInboundProcessorProcessingStatusSuccessLifecycle(t *testing.T) {
 	registry := channel.NewRegistry()
 	registry.MustRegister(&fakeProcessingStatusAdapter{notifier: notifier})
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -1051,7 +1135,7 @@ func TestChannelInboundProcessorProcessingStatusSuccessLifecycle(t *testing.T) {
 			}
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
 	msg := channel.InboundMessage{
@@ -1062,7 +1146,7 @@ func TestChannelInboundProcessorProcessingStatusSuccessLifecycle(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "ext-1"},
 		Conversation: channel.Conversation{
 			ID:   "oc_123",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -1094,11 +1178,11 @@ func TestChannelInboundProcessorProcessingStatusFailureLifecycle(t *testing.T) {
 	registry := channel.NewRegistry()
 	registry.MustRegister(&fakeProcessingStatusAdapter{notifier: notifier})
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-2"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-2", RouteID: "route-2"}}
 	chatErr := errors.New("chat gateway unavailable")
 	gateway := &fakeChatGateway{err: chatErr}
-	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
 	msg := channel.InboundMessage{
@@ -1109,7 +1193,7 @@ func TestChannelInboundProcessorProcessingStatusFailureLifecycle(t *testing.T) {
 		Sender:      channel.Identity{SubjectID: "ext-2"},
 		Conversation: channel.Conversation{
 			ID:   "oc_456",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -1139,7 +1223,7 @@ func TestChannelInboundProcessorProcessingStatusErrorsAreBestEffort(t *testing.T
 	registry := channel.NewRegistry()
 	registry.MustRegister(&fakeProcessingStatusAdapter{notifier: notifier})
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-3"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-3", RouteID: "route-3"}}
 	gateway := &fakeChatGateway{
 		resp: conversation.ChatResponse{
@@ -1148,7 +1232,7 @@ func TestChannelInboundProcessorProcessingStatusErrorsAreBestEffort(t *testing.T
 			},
 		},
 	}
-	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
 	msg := channel.InboundMessage{
@@ -1159,7 +1243,7 @@ func TestChannelInboundProcessorProcessingStatusErrorsAreBestEffort(t *testing.T
 		Sender:      channel.Identity{SubjectID: "ext-3"},
 		Conversation: channel.Conversation{
 			ID:   "oc_789",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 
@@ -1186,11 +1270,11 @@ func TestChannelInboundProcessorProcessingFailedNotifyErrorDoesNotOverrideChatEr
 	registry := channel.NewRegistry()
 	registry.MustRegister(&fakeProcessingStatusAdapter{notifier: notifier})
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-4"}}
-	memberSvc := &fakeMemberService{isMember: true}
+	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-4", RouteID: "route-4"}}
 	chatErr := errors.New("chat failed")
 	gateway := &fakeChatGateway{err: chatErr}
-	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, memberSvc, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	sender := &fakeReplySender{}
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
 	msg := channel.InboundMessage{
@@ -1201,7 +1285,7 @@ func TestChannelInboundProcessorProcessingFailedNotifyErrorDoesNotOverrideChatEr
 		Sender:      channel.Identity{SubjectID: "ext-4"},
 		Conversation: channel.Conversation{
 			ID:   "oc_999",
-			Type: "p2p",
+			Type: channel.ConversationTypePrivate,
 		},
 	}
 

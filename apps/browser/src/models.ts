@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 export const BrowserContextConfigModel = z.object({
+  core: z.enum(['chromium', 'firefox']).optional().default('chromium'),
   viewport: z.object({
     width: z.number(),
     height: z.number(),

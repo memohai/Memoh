@@ -59,6 +59,13 @@ message ExecInput {
   repeated string env = 3;
   int32 timeout_seconds = 4;
   bytes stdin_data = 5;
+  bool pty = 6;
+  TerminalResize resize = 7;
+}
+
+message TerminalResize {
+  uint32 cols = 1;
+  uint32 rows = 2;
 }
 
 message ExecOutput {
