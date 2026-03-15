@@ -25,7 +25,7 @@ const (
 	BotLabelKey           = "memoh.bot_id"
 	LegacyBotLabelKey     = "mcp.bot_id"
 	WorkspaceLabelKey     = "memoh.workspace"
-	WorkspaceLabelValue   = "v1"
+	WorkspaceLabelValue   = "v3"
 	ContainerPrefix       = "workspace-"
 	LegacyContainerPrefix = "mcp-"
 
