@@ -45,9 +45,16 @@ echo "Downloading Node.js v${NODE_VERSION} (glibc, ${NODE_ARCH})..."
 wget -qO- "${NODEJS_MIRROR}/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
   | tar -xJf - --strip-components=1 -C "$OUTDIR/node-glibc"
 
+# ARM64 musl builds are not available from unofficial-builds.nodejs.org.
+# On ARM64 Alpine containers the glibc build works via musl's glibc compat layer.
+MUSL_URL="${NODEJS_MUSL_MIRROR}/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}-musl.tar.xz"
 echo "Downloading Node.js v${NODE_VERSION} (musl, ${NODE_ARCH})..."
-wget -qO- "${NODEJS_MUSL_MIRROR}/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}-musl.tar.xz" \
-  | tar -xJf - --strip-components=1 -C "$OUTDIR/node-musl"
+if wget -q --spider "$MUSL_URL" 2>/dev/null; then
+  wget -qO- "$MUSL_URL" | tar -xJf - --strip-components=1 -C "$OUTDIR/node-musl"
+else
+  echo "  musl build not available for ${NODE_ARCH}, using glibc build as fallback"
+  cp -a "$OUTDIR/node-glibc/." "$OUTDIR/node-musl/"
+fi
 
 echo "Downloading uv (${UV_ARCH})..."
 wget -qO- "${UV_MIRROR}/uv-${UV_ARCH}-unknown-linux-musl.tar.gz" \
