@@ -486,6 +486,7 @@
     "title": "Bots",
     "searchPlaceholder": "Search bots…",
     "createBot": "New Bot",
+    "createBotWaitHint": "Creating a bot may need to pull the base image on first use. Please wait a moment after submission.",
     "editBot": "Edit Bot",
     "deleteConfirm": "Are you sure you want to delete this bot?",
     "renameSuccess": "Bot name updated",

@@ -482,6 +482,7 @@
     "title": "Bots",
     "searchPlaceholder": "搜索 Bot…",
     "createBot": "新建 Bot",
+    "createBotWaitHint": "首次创建时可能需要拉取基础镜像，提交后请耐心等待片刻。",
     "editBot": "编辑 Bot",
     "deleteConfirm": "确定要删除这个 Bot 吗？",
     "renameSuccess": "Bot 名称已更新",
