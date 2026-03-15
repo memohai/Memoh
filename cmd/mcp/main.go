@@ -82,10 +82,8 @@ func main() {
 	if socketPath == "" {
 		socketPath = defaultSocketPath
 	}
-	socketPath = filepath.Clean(socketPath)
-
 	// Clean up residual socket from a previous run.
-	_ = os.Remove(socketPath)
+	_ = os.Remove(filepath.Clean(socketPath)) //nolint:gosec // G703: socketPath is from MCP_SOCKET_PATH env or a compiled-in default, not end-user input
 
 	lis, err := (&net.ListenConfig{}).Listen(ctx, "unix", socketPath)
 	if err != nil {
