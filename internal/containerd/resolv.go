@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	systemdResolvConf = "/run/systemd/resolve/resolv.conf"
-	fallbackResolv    = "nameserver 1.1.1.1\nnameserver 8.8.8.8\n"
+	systemdResolvConf  = "/run/systemd/resolve/resolv.conf"
+	fallbackResolv     = "nameserver 1.1.1.1\nnameserver 8.8.8.8\n"
+	fallbackResolvPerm = 0o644
 )
 
 // ResolveConfSource returns a host path to mount as /etc/resolv.conf.
@@ -27,11 +28,14 @@ func ResolveConfSource(dataDir string) (string, error) {
 	}
 	fallbackPath := filepath.Join(dataDir, "resolv.conf")
 	if _, err := os.Stat(fallbackPath); err == nil {
+		if err := os.Chmod(fallbackPath, fallbackResolvPerm); err != nil {
+			return "", err
+		}
 		return fallbackPath, nil
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
-	if err := os.WriteFile(fallbackPath, []byte(fallbackResolv), 0o600); err != nil {
+	if err := os.WriteFile(fallbackPath, []byte(fallbackResolv), fallbackResolvPerm); err != nil {
 		return "", err
 	}
 	return fallbackPath, nil
