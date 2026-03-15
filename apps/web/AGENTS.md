@@ -319,7 +319,7 @@ Chat responses are streamed via Server-Sent Events:
 - Dev server port: 8082 (from `config.toml`)
 - Proxy: `/api` → backend (default `http://localhost:8080`)
 - Aliases: `@` → `./src`, `#` → `../ui/src`
-- Config: reads from `../../config.toml` via `@memoh/config`
+- Config: reads from `MEMOH_CONFIG_PATH` / `CONFIG_PATH` when provided, otherwise `../../config.toml`, via `@memoh/config`
 
 ## Development Rules
 

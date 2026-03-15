@@ -59,7 +59,6 @@ description = "Start development environment"
 run = """
 #!/bin/bash
 set -e
-cp devenv/app.dev.toml config.toml
 docker compose -f devenv/docker-compose.yml up --build
 """
 
@@ -161,6 +160,6 @@ depends = [
 run = """
 #!/bin/bash
 set -e
-cp devenv/app.dev.toml config.toml
 echo '✓ Setup complete! Run: mise run dev'
+echo '  Dev web UI will be available at http://localhost:18082'
 """

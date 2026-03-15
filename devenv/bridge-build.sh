@@ -23,12 +23,4 @@ fi
 mv -f "$STAGING" "$BRIDGE_BINARY"
 chmod +x "$BRIDGE_BINARY"
 
-echo "[bridge-dev] Binary updated, stopping workspace container tasks..."
-
-# Stop running workspace container tasks so they restart with new binary on next access.
-for c in $(ctr -n default containers ls -q 2>/dev/null | grep "^workspace-"); do
-  ctr -n default tasks kill "$c" 2>/dev/null || true
-  ctr -n default tasks delete "$c" 2>/dev/null || true
-done
-
 echo "[bridge-dev] Done. Containers will restart with new binary on next access."

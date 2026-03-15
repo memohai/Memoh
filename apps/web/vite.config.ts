@@ -10,10 +10,13 @@ export default defineConfig(({ command }) => {
   const defaultPort = 8082
   const defaultHost = '127.0.0.1'
   const defaultApiBaseUrl = process.env.VITE_API_URL ?? 'http://localhost:8080'
+  const configuredProxyTarget = process.env.MEMOH_WEB_PROXY_TARGET?.trim()
+  const configuredPath = process.env.MEMOH_CONFIG_PATH?.trim() || process.env.CONFIG_PATH?.trim()
+  const configPath = configuredPath && configuredPath.length > 0 ? configuredPath : '../../config.toml'
 
   let port = defaultPort
   let host = defaultHost
-  let baseUrl = defaultApiBaseUrl
+  let baseUrl = configuredProxyTarget || defaultApiBaseUrl
 
   if (command !== 'build') {
     try {
@@ -25,13 +28,13 @@ export default defineConfig(({ command }) => {
       }
       let config
       try {
-        config = loadConfig('../../config.toml')
+        config = loadConfig(configPath)
       } catch {
         config = loadConfig('../../conf/app.docker.toml')
       }
       port = config.web?.port ?? defaultPort
       host = config.web?.host ?? defaultHost
-      baseUrl = getBaseUrl(config)
+      baseUrl = configuredProxyTarget || getBaseUrl(config)
     } catch {
       // Fall back to env/default values when config.toml is unavailable.
     }
