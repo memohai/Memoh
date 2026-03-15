@@ -60,7 +60,7 @@ Infrastructure dependencies:
 Memoh/
 ├── cmd/                        # Go application entry points
 │   ├── agent/                  #   Main backend server (main.go)
-│   ├── mcp/                    #   MCP server binary (stdio transport, template/, entrypoint.sh)
+│   ├── bridge/                 #   Bridge server binary (in-container gRPC, template/)
 │   └── memoh/                  #   Unified binary wrapper (Cobra CLI)
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
@@ -86,7 +86,8 @@ Memoh/
 │   ├── identity/               #   Identity type utilities (human vs bot)
 │   ├── inbox/                  #   Bot inbox service (notifications, triggers)
 │   ├── logger/                 #   Structured logging (slog)
-│   ├── mcp/                    #   MCP protocol manager (container lifecycle, tool gateway)
+│   ├── mcp/                    #   MCP protocol manager (connections, OAuth, tool gateway)
+│   ├── workspace/              #   Workspace container lifecycle (bridge client, protobuf)
 │   ├── media/                  #   Content-addressed media asset service
 │   ├── memory/                 #   Long-term memory system (Qdrant, BM25, LLM extraction)
 │   ├── message/                #   Message persistence and event publishing
@@ -141,7 +142,7 @@ Memoh/
 │   ├── migrations/             #   SQL migration files
 │   └── queries/                #   SQL query files (sqlc input)
 ├── conf/                       # Configuration templates (app.example.toml, app.docker.toml, app.apple.toml, app.windows.toml)
-├── devenv/                     # Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, mcp-build.sh, server-entrypoint.sh)
+├── devenv/                     # Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, bridge-build.sh, server-entrypoint.sh)
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, docker-compose.yml, docker-compose.cn.yml)
 ├── docs/                       # Documentation site
 ├── scripts/                    # Utility scripts (db, release, install)
@@ -291,7 +292,7 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[admin]` — Admin account credentials
 - `[auth]` — JWT authentication settings
 - `[containerd]` — Container runtime configuration (socket path, namespace)
-- `[mcp]` — MCP image and data configuration
+- `[workspace]` — Workspace image and data configuration
 - `[postgres]` — PostgreSQL connection
 - `[qdrant]` — Qdrant vector database connection
 - `[agent_gateway]` — Agent Gateway address

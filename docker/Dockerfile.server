@@ -35,8 +35,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
     -o memoh-server ./cmd/agent/main.go
 
-# ---- Stage 3: Build MCP binary ----
-FROM build-base AS mcp-builder
+# ---- Stage 3: Build bridge binary ----
+FROM build-base AS bridge-builder
 ARG TARGETARCH
 ARG COMMIT_HASH=unknown
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -44,50 +44,21 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath \
     -ldflags "-s -w -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH}" \
-    -o /out/mcp ./cmd/mcp
+    -o /out/bridge ./cmd/bridge
 
-# ---- Stage 3: Assemble MCP image rootfs ----
-FROM alpine:latest AS mcp-rootfs
-
-RUN apk add --no-cache grep curl bash
-RUN apk add --no-cache nodejs npm
-RUN apk add --no-cache python3 && \
-    curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ln -sf /root/.local/bin/uv /usr/local/bin/uv && \
-    ln -sf /root/.local/bin/uvx /usr/local/bin/uvx
-
-COPY --from=mcp-builder /out/mcp /opt/mcp
-COPY cmd/mcp/template /opt/mcp-template
-
-RUN printf '#!/bin/sh\n\
-[ -e /app/mcp ] || { mkdir -p /app; [ -f /opt/mcp ] && cp -a /opt/mcp /app/mcp 2>/dev/null || true; }\n\
-if [ -x /app/mcp ]; then exec /app/mcp "$@"; fi\n\
-exec /opt/mcp "$@"\n' > /opt/entrypoint.sh && chmod +x /opt/entrypoint.sh
-
-RUN tar -cf /tmp/rootfs.tar \
-    --exclude='./proc' --exclude='./sys' --exclude='./dev' \
-    --exclude='./tmp' --exclude='./run' \
-    -C / .
-
-# ---- Stage 4: Package rootfs as OCI image tar ----
-FROM alpine:latest AS oci-exporter
-
-COPY --from=mcp-rootfs /tmp/rootfs.tar /tmp/layer.tar
-ARG MCP_IMAGE_TAG=docker.io/library/memoh-mcp:latest
+# ---- Stage 4: Assemble workspace runtime + toolkit ----
+FROM alpine:latest AS toolkit-assembly
 ARG TARGETARCH
 
-RUN set -e \
-    && LAYER_SHA=$(sha256sum /tmp/layer.tar | awk '{print $1}') \
-    && LAYER_SIZE=$(wc -c < /tmp/layer.tar) \
-    && mkdir -p "/tmp/image/${LAYER_SHA}" /out \
-    && mv /tmp/layer.tar "/tmp/image/${LAYER_SHA}/layer.tar" \
-    && printf '{"architecture":"%s","os":"linux","created":"1970-01-01T00:00:00Z","config":{"Entrypoint":["/opt/entrypoint.sh"],"WorkingDir":"/app","Env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]},"rootfs":{"type":"layers","diff_ids":["sha256:%s"]},"history":[{"created":"1970-01-01T00:00:00Z","comment":"memoh-mcp image"}]}' \
-       "${TARGETARCH:-amd64}" "${LAYER_SHA}" > /tmp/config.json \
-    && CONFIG_SHA=$(sha256sum /tmp/config.json | awk '{print $1}') \
-    && mv /tmp/config.json "/tmp/image/${CONFIG_SHA}.json" \
-    && printf '[{"Config":"%s.json","RepoTags":["%s"],"Layers":["%s/layer.tar"]}]' \
-       "${CONFIG_SHA}" "${MCP_IMAGE_TAG}" "${LAYER_SHA}" > /tmp/image/manifest.json \
-    && cd /tmp/image && tar -cf /out/memoh-mcp.tar manifest.json "${CONFIG_SHA}.json" "${LAYER_SHA}/"
+RUN apk add --no-cache xz
+COPY docker/toolkit/install.sh /tmp/install.sh
+RUN /tmp/install.sh /assembly/toolkit "${TARGETARCH:-amd64}"
+
+# Assemble runtime directory
+COPY --from=bridge-builder /out/bridge /assembly/bridge
+COPY cmd/bridge/template /assembly/templates
+COPY docker/toolkit/bin /assembly/toolkit/bin
+RUN chmod +x /assembly/toolkit/bin/*
 
 # ---- Stage 5: Final runtime (containerd + server + CNI) ----
 FROM alpine:latest
@@ -97,7 +68,7 @@ WORKDIR /app
 # containerd runtime
 RUN apk add --no-cache containerd containerd-ctr
 
-# CNI plugins + iptables (for MCP container networking)
+# CNI plugins + iptables (for workspace container networking)
 RUN apk add --no-cache ca-certificates tzdata wget cni-plugins iptables \
     && mkdir -p /opt/cni/bin \
     && (cp -a /usr/lib/cni/. /opt/cni/bin/ 2>/dev/null || true) \
@@ -131,8 +102,8 @@ RUN apk add --no-cache ca-certificates tzdata wget cni-plugins iptables \
       '  ]' \
       '}' > /etc/cni/net.d/10-memoh.conflist
 
-# MCP image for containerd import
-COPY --from=oci-exporter /out/memoh-mcp.tar /opt/images/memoh-mcp.tar
+# Workspace runtime (bind-mounted into bot containers)
+COPY --from=toolkit-assembly /assembly /opt/memoh/runtime
 
 # Server binary and spec
 COPY --from=server-builder /build/memoh-server /app/memoh-server

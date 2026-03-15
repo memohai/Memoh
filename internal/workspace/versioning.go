@@ -1,4 +1,4 @@
-package mcp
+package workspace
 
 import (
 	"context"
@@ -391,26 +391,26 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	// unconditionally so the next call dials fresh to the new process.
 	m.grpcPool.Remove(botID)
 
-	netResult, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+	// CNI network setup (for outbound connectivity).
+	if _, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
 		ContainerID: containerID,
 		CNIBinDir:   m.cfg.CNIBinaryDir,
 		CNIConfDir:  m.cfg.CNIConfigDir,
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("network setup after snapshot replace: %w", err)
 	}
-	if netResult.IP == "" {
-		return fmt.Errorf("network setup returned no IP after snapshot replace for %s", containerID)
-	}
-	m.SetContainerIP(botID, netResult.IP)
 	return nil
 }
 
-func (m *Manager) buildVersionSpec(_ string) (ctr.ContainerSpec, error) {
+func (m *Manager) buildVersionSpec(botID string) (ctr.ContainerSpec, error) {
 	resolvPath, err := ctr.ResolveConfSource(m.dataRoot())
 	if err != nil {
 		return ctr.ContainerSpec{}, err
 	}
+
+	runtimeDir := m.cfg.RuntimePath()
+	sockDir := m.socketDir(botID)
+
 	mounts := []ctr.MountSpec{
 		{
 			Destination: "/etc/resolv.conf",
@@ -418,12 +418,30 @@ func (m *Manager) buildVersionSpec(_ string) (ctr.ContainerSpec, error) {
 			Source:      resolvPath,
 			Options:     []string{"rbind", "ro"},
 		},
+		{
+			Destination: "/opt/memoh",
+			Type:        "bind",
+			Source:      runtimeDir,
+			Options:     []string{"rbind", "ro"},
+		},
+		{
+			Destination: "/run/memoh",
+			Type:        "bind",
+			Source:      sockDir,
+			Options:     []string{"rbind", "rw"},
+		},
 	}
 	tzMounts, tzEnv := ctr.TimezoneSpec()
 	mounts = append(mounts, tzMounts...)
+
+	env := make([]string, 0, len(tzEnv)+1)
+	env = append(env, tzEnv...)
+	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
+
 	return ctr.ContainerSpec{
+		Cmd:    []string{"/opt/memoh/bridge"},
 		Mounts: mounts,
-		Env:    tzEnv,
+		Env:    env,
 	}, nil
 }
 

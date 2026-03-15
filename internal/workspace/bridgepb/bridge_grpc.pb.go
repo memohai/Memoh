@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.0
-// source: internal/mcp/mcpcontainer/mcpcontainer.proto
+// source: internal/workspace/bridgepb/bridge.proto
 
-package mcpcontainer
+package bridgepb
 
 import (
 	context "context"
@@ -451,5 +451,5 @@ var ContainerService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "internal/mcp/mcpcontainer/mcpcontainer.proto",
+	Metadata: "internal/workspace/bridgepb/bridge.proto",
 }

@@ -1,0 +1,8 @@
+#!/bin/sh
+TOOLKIT=/opt/memoh/toolkit
+if [ -f /lib/ld-musl-*.so.1 ] 2>/dev/null; then
+  NODEDIR="$TOOLKIT/node-musl"
+else
+  NODEDIR="$TOOLKIT/node-glibc"
+fi
+exec "$NODEDIR/bin/node" "$@"

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -13,7 +14,6 @@ const (
 	DefaultHTTPAddr         = ":8080"
 	DefaultNamespace        = "default"
 	DefaultSocketPath       = "/run/containerd/containerd.sock"
-	DefaultMCPImage         = "memohai/mcp:latest"
 	DefaultDataRoot         = "data"
 	DefaultDataMount        = "/data"
 	DefaultCNIBinaryDir     = "/opt/cni/bin"
@@ -26,7 +26,8 @@ const (
 	DefaultPGSSLMode        = "disable"
 	DefaultQdrantURL        = "http://127.0.0.1:6334"
 	DefaultQdrantCollection = "memory"
-	MCPGRPCPort             = 9090
+	DefaultRuntimeDir       = "/opt/memoh/runtime"
+	DefaultBaseImage        = "debian:bookworm-slim"
 )
 
 type Config struct {
@@ -35,7 +36,7 @@ type Config struct {
 	Admin          AdminConfig          `toml:"admin"`
 	Auth           AuthConfig           `toml:"auth"`
 	Containerd     ContainerdConfig     `toml:"containerd"`
-	MCP            MCPConfig            `toml:"mcp"`
+	Workspace      WorkspaceConfig      `toml:"workspace"`
 	Postgres       PostgresConfig       `toml:"postgres"`
 	Qdrant         QdrantConfig         `toml:"qdrant"`
 	Sparse         SparseConfig         `toml:"sparse"`
@@ -74,28 +75,36 @@ type SocktainerConfig struct {
 	BinaryPath string `toml:"binary_path"`
 }
 
-type MCPConfig struct {
+type WorkspaceConfig struct {
 	Registry     string `toml:"registry"`
 	Image        string `toml:"image"`
 	Snapshotter  string `toml:"snapshotter"`
 	DataRoot     string `toml:"data_root"`
 	CNIBinaryDir string `toml:"cni_bin_dir"`
 	CNIConfigDir string `toml:"cni_conf_dir"`
+	RuntimeDir   string `toml:"runtime_dir"`
 }
 
-// ImageRef returns the fully qualified image reference, prepending the
-// registry mirror when configured and normalizing for containerd compatibility.
-// Containerd requires a fully-qualified domain in image references — short
-// Docker Hub names like "memohai/mcp:latest" are misinterpreted as hosts.
-func (c MCPConfig) ImageRef() string {
+// ImageRef returns the fully qualified image reference for the base image,
+// prepending the registry mirror when configured and normalizing for containerd
+// compatibility.
+func (c WorkspaceConfig) ImageRef() string {
 	img := c.Image
 	if img == "" {
-		img = DefaultMCPImage
+		img = DefaultBaseImage
 	}
 	if c.Registry != "" {
 		return c.Registry + "/" + img
 	}
 	return NormalizeImageRef(img)
+}
+
+// RuntimePath returns the path to the workspace runtime directory.
+func (c WorkspaceConfig) RuntimePath() string {
+	if c.RuntimeDir != "" {
+		return c.RuntimeDir
+	}
+	return DefaultRuntimeDir
 }
 
 // NormalizeImageRef ensures an image reference is fully qualified for containerd.
@@ -185,8 +194,8 @@ func Load(path string) (Config, error) {
 			SocketPath: DefaultSocketPath,
 			Namespace:  DefaultNamespace,
 		},
-		MCP: MCPConfig{
-			Image:        DefaultMCPImage,
+		Workspace: WorkspaceConfig{
+			Image:        DefaultBaseImage,
 			DataRoot:     DefaultDataRoot,
 			CNIBinaryDir: DefaultCNIBinaryDir,
 			CNIConfigDir: DefaultCNIConfigDir,
@@ -219,7 +228,26 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return cfg, err
+	}
+
+	var raw struct {
+		Workspace map[string]any `toml:"workspace"`
+		MCP       map[string]any `toml:"mcp"`
+	}
+	if _, err := toml.Decode(string(data), &raw); err != nil {
+		return cfg, err
+	}
+	if raw.MCP != nil {
+		if raw.Workspace != nil {
+			return cfg, fmt.Errorf("config uses both [mcp] and [workspace]; remove [mcp] and keep only [workspace]")
+		}
+		return cfg, fmt.Errorf("config section [mcp] has been renamed to [workspace]; update your config.toml and restart")
+	}
+
+	if _, err := toml.Decode(string(data), &cfg); err != nil {
 		return cfg, err
 	}
 

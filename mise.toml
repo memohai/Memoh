@@ -75,13 +75,13 @@ run = "docker compose -f devenv/docker-compose.yml logs -f"
 description = "Restart a service (usage: mise run dev:restart -- server)"
 run = "docker compose -f devenv/docker-compose.yml restart $@"
 
-[tasks."mcp:build"]
-description = "Manually build MCP dev binary (normally auto-triggered by air)"
+[tasks."bridge:build"]
+description = "Manually rebuild bridge binary in dev container (normally auto-triggered by air)"
 run = """
 #!/bin/bash
 set -e
 docker compose -f devenv/docker-compose.yml exec server \
-  sh -c 'cd /workspace && sh devenv/mcp-build.sh'
+  sh -c 'cd /workspace && sh devenv/bridge-build.sh'
 """
 
 [tasks.db-up]

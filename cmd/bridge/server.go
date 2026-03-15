@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
 const (

@@ -1,10 +1,12 @@
-package mcp
+package workspace
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -16,17 +18,39 @@ import (
 	ctr "github.com/memohai/memoh/internal/containerd"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/identity"
-	"github.com/memohai/memoh/internal/mcp/mcpclient"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
-	BotLabelKey     = "mcp.bot_id"
-	ContainerPrefix = "mcp-"
+	BotLabelKey           = "memoh.bot_id"
+	WorkspaceLabelKey     = "memoh.workspace"
+	WorkspaceLabelValue   = "v3"
+	ContainerPrefix       = "workspace-"
+	LegacyContainerPrefix = "mcp-"
+
+	legacyGRPCPort = 9090
 )
+
+// ErrContainerNotFound is returned when no container exists for a bot.
+var ErrContainerNotFound = errors.New("container not found for bot")
+
+// ContainerStatus combines DB records with live containerd state.
+type ContainerStatus struct {
+	ContainerID      string    `json:"container_id"`
+	Image            string    `json:"image"`
+	Status           string    `json:"status"`
+	Namespace        string    `json:"namespace"`
+	ContainerPath    string    `json:"container_path"`
+	TaskRunning      bool      `json:"task_running"`
+	HasPreservedData bool      `json:"has_preserved_data"`
+	Legacy           bool      `json:"legacy"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
 
 type Manager struct {
 	service         ctr.Service
-	cfg             config.MCPConfig
+	cfg             config.WorkspaceConfig
 	namespace       string
 	containerID     func(string) string
 	db              *pgxpool.Pool
@@ -34,12 +58,12 @@ type Manager struct {
 	logger          *slog.Logger
 	containerLockMu sync.Mutex
 	containerLocks  map[string]*sync.Mutex
-	mu              sync.RWMutex
-	containerIPs    map[string]string
-	grpcPool        *mcpclient.Pool
+	grpcPool        *bridge.Pool
+	legacyMu        sync.RWMutex
+	legacyIPs       map[string]string // botID → IP for pre-bridge containers
 }
 
-func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, namespace string, conn *pgxpool.Pool) *Manager {
+func NewManager(log *slog.Logger, service ctr.Service, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool) *Manager {
 	if namespace == "" {
 		namespace = config.DefaultNamespace
 	}
@@ -49,14 +73,14 @@ func NewManager(log *slog.Logger, service ctr.Service, cfg config.MCPConfig, nam
 		namespace:      namespace,
 		db:             conn,
 		queries:        dbsqlc.New(conn),
-		logger:         log.With(slog.String("component", "mcp")),
+		logger:         log.With(slog.String("component", "workspace")),
 		containerLocks: make(map[string]*sync.Mutex),
-		containerIPs:   make(map[string]string),
+		legacyIPs:      make(map[string]string),
 		containerID: func(botID string) string {
 			return ContainerPrefix + botID
 		},
 	}
-	m.grpcPool = mcpclient.NewPool(m.ContainerIP)
+	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
 }
 
@@ -73,160 +97,97 @@ func (m *Manager) lockContainer(containerID string) func() {
 	return lock.Unlock
 }
 
-// ContainerIP returns the cached IP address for a bot's container.
-// If not cached, it attempts to recover the IP by re-running CNI setup.
-func (m *Manager) ContainerIP(botID string) string {
-	m.mu.RLock()
-	if ip, ok := m.containerIPs[botID]; ok {
-		m.mu.RUnlock()
-		return ip
-	}
-	m.mu.RUnlock()
-
-	// Cache miss - try to recover IP via CNI setup (idempotent)
-	ip, err := m.recoverContainerIP(botID)
-	if err != nil {
-		m.logger.Warn("container IP recovery failed", slog.String("bot_id", botID), slog.Any("error", err))
-		return ""
-	}
-	if ip != "" {
-		m.mu.Lock()
-		m.containerIPs[botID] = ip
-		m.mu.Unlock()
-		m.logger.Info("container IP recovered", slog.String("bot_id", botID), slog.String("ip", ip))
-	}
-	return ip
+// socketDir returns the host-side directory that is bind-mounted into the
+// container at /run/memoh, holding the UDS socket file.
+func (m *Manager) socketDir(botID string) string {
+	return filepath.Join(m.dataRoot(), "run", botID)
 }
 
-// SetContainerIP stores the container IP in the cache.
-// If the IP changed, the stale gRPC connection is evicted from the pool.
-func (m *Manager) SetContainerIP(botID, ip string) {
-	if ip == "" {
-		return
-	}
-	m.mu.Lock()
-	old := m.containerIPs[botID]
-	m.containerIPs[botID] = ip
-	m.mu.Unlock()
-
-	if old != "" && old != ip {
-		m.grpcPool.Remove(botID)
-		m.logger.Info("evicted stale gRPC connection", slog.String("bot_id", botID), slog.String("old_ip", old), slog.String("new_ip", ip))
-	}
+// socketPath returns the path to the UDS socket file for a bot's container.
+func (m *Manager) socketPath(botID string) string {
+	return filepath.Join(m.socketDir(botID), "bridge.sock")
 }
 
-// recoverContainerIP attempts to restore the container IP by re-running CNI setup.
-// CNI plugins are idempotent — calling Setup again returns the existing IP allocation.
-// Retries up to 2 times to tolerate transient CNI failures (IPAM lock contention, etc.).
-func (m *Manager) recoverContainerIP(botID string) (string, error) {
-	ctx := context.Background()
-	containerID := m.containerID(botID)
-
-	info, err := m.service.GetContainer(ctx, containerID)
-	if err != nil {
-		return "", err
+// dialTarget returns the gRPC dial target for a bot. Legacy containers
+// (pre-bridge) are reached via TCP; bridge containers use UDS.
+func (m *Manager) dialTarget(botID string) string {
+	m.legacyMu.RLock()
+	ip, legacy := m.legacyIPs[botID]
+	m.legacyMu.RUnlock()
+	if legacy {
+		return fmt.Sprintf("%s:%d", ip, legacyGRPCPort)
 	}
+	return "unix://" + m.socketPath(botID)
+}
 
-	if ip, ok := info.Labels["mcp.container_ip"]; ok {
-		return ip, nil
-	}
+// SetLegacyIP records the IP address of a legacy (pre-bridge) container
+// so the gRPC pool can reach it via TCP.
+func (m *Manager) SetLegacyIP(botID, ip string) {
+	m.legacyMu.Lock()
+	m.legacyIPs[botID] = ip
+	m.legacyMu.Unlock()
+}
 
-	const maxAttempts = 2
-	var lastErr error
-	for i := 0; i < maxAttempts; i++ {
-		netResult, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-			ContainerID: containerID,
-			CNIBinDir:   m.cfg.CNIBinaryDir,
-			CNIConfDir:  m.cfg.CNIConfigDir,
-		})
-		if err != nil {
-			lastErr = err
-			m.logger.Warn("IP recovery attempt failed",
-				slog.String("bot_id", botID), slog.Int("attempt", i+1), slog.Any("error", err))
-			time.Sleep(time.Duration(i+1) * 500 * time.Millisecond)
-			continue
-		}
-		return netResult.IP, nil
-	}
-	return "", fmt.Errorf("network setup for IP recovery after %d attempts: %w", maxAttempts, lastErr)
+// ClearLegacyIP removes a cached legacy IP (e.g. when the container is deleted).
+func (m *Manager) ClearLegacyIP(botID string) {
+	m.legacyMu.Lock()
+	delete(m.legacyIPs, botID)
+	m.legacyMu.Unlock()
+}
+
+// clearLegacyRoute evicts any stale TCP fallback state for a bot so future
+// gRPC dials use the bridge container's Unix socket.
+func (m *Manager) clearLegacyRoute(botID string) {
+	m.ClearLegacyIP(botID)
+	m.grpcPool.Remove(botID)
 }
 
 // MCPClient returns a gRPC client for the given bot's container.
-// Implements mcpclient.Provider.
-func (m *Manager) MCPClient(ctx context.Context, botID string) (*mcpclient.Client, error) {
+// Implements bridge.Provider.
+func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	return m.grpcPool.Get(ctx, botID)
 }
 
 func (m *Manager) Init(ctx context.Context) error {
 	image := m.imageRef()
 
-	needsPull, remoteErr := m.checkImageUpgrade(ctx, image)
-	if remoteErr != nil {
-		// Remote check failed (network unavailable, registry down, etc.).
-		// Fall back to local image if available; fail only when nothing is cached.
-		m.logger.Warn("image upgrade check failed, falling back to local",
-			slog.String("image", image), slog.Any("error", remoteErr))
-		if _, err := m.service.GetImage(ctx, image); err != nil {
-			_, err = m.service.PullImage(ctx, image, &ctr.PullImageOptions{
-				Unpack:      true,
-				Snapshotter: m.cfg.Snapshotter,
-			})
-			return err
+	// Pre-pull the default base image so container creation doesn't block
+	// on a network download. If the image is already present, this is a no-op.
+	if _, err := m.service.GetImage(ctx, image); err != nil {
+		m.logger.Info("pulling base image for workspace containers", slog.String("image", image))
+		if _, pullErr := m.service.PullImage(ctx, image, &ctr.PullImageOptions{
+			Unpack:      true,
+			Snapshotter: m.cfg.Snapshotter,
+		}); pullErr != nil {
+			m.logger.Warn("base image pull failed", slog.String("image", image), slog.Any("error", pullErr))
+			return pullErr
 		}
-		return nil
 	}
-
-	if !needsPull {
-		return nil
-	}
-
-	m.logger.Info("pulling updated MCP image", slog.String("image", image))
-	if _, err := m.service.PullImage(ctx, image, &ctr.PullImageOptions{
-		Unpack:      true,
-		Snapshotter: m.cfg.Snapshotter,
-	}); err != nil {
-		m.logger.Warn("image pull failed, using existing version", slog.Any("error", err))
-		if _, err2 := m.service.GetImage(ctx, image); err2 != nil {
-			return err
-		}
-		return nil
-	}
-
-	// Existing bot containers keep running with their current image.
-	// New containers created after this point will use the updated image.
 	return nil
 }
 
-// checkImageUpgrade compares the local image digest against the remote registry.
-// Returns (true, nil) when a newer image is available or no local image exists.
-// Returns (false, err) when the remote cannot be reached.
-func (m *Manager) checkImageUpgrade(ctx context.Context, image string) (needsPull bool, _ error) {
-	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	remoteDigest, err := m.service.ResolveRemoteDigest(checkCtx, image)
-	if err != nil {
-		return false, err
-	}
-
-	localImg, err := m.service.GetImage(ctx, image)
-	if err != nil {
-		return true, nil // no local image
-	}
-	return localImg.ID != remoteDigest, nil
-}
-
-// EnsureBot creates the MCP container for a bot if it does not exist.
+// EnsureBot creates the workspace container for a bot if it does not exist.
 // Bot data lives in the container's writable layer (snapshot), not bind mounts.
-func (m *Manager) EnsureBot(ctx context.Context, botID string) error {
+// The Memoh runtime (bridge binary + toolkit) is injected via read-only bind mount.
+// If imageOverride is non-empty, it is used instead of the configured default.
+func (m *Manager) EnsureBot(ctx context.Context, botID, imageOverride string) error {
 	if err := validateBotID(botID); err != nil {
 		return err
 	}
 
 	image := m.imageRef()
+	if imageOverride != "" {
+		image = config.NormalizeImageRef(imageOverride)
+	}
 	resolvPath, err := ctr.ResolveConfSource(m.dataRoot())
 	if err != nil {
 		return err
+	}
+
+	runtimeDir := m.cfg.RuntimePath()
+	sockDir := m.socketDir(botID)
+	if err := os.MkdirAll(sockDir, 0o750); err != nil {
+		return fmt.Errorf("create socket dir: %w", err)
 	}
 
 	mounts := []ctr.MountSpec{
@@ -236,20 +197,38 @@ func (m *Manager) EnsureBot(ctx context.Context, botID string) error {
 			Source:      resolvPath,
 			Options:     []string{"rbind", "ro"},
 		},
+		{
+			Destination: "/opt/memoh",
+			Type:        "bind",
+			Source:      runtimeDir,
+			Options:     []string{"rbind", "ro"},
+		},
+		{
+			Destination: "/run/memoh",
+			Type:        "bind",
+			Source:      sockDir,
+			Options:     []string{"rbind", "rw"},
+		},
 	}
 	tzMounts, tzEnv := ctr.TimezoneSpec()
 	mounts = append(mounts, tzMounts...)
+
+	env := make([]string, 0, len(tzEnv)+1)
+	env = append(env, tzEnv...)
+	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
 
 	_, err = m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
 		ID:          m.containerID(botID),
 		ImageRef:    image,
 		Snapshotter: m.cfg.Snapshotter,
 		Labels: map[string]string{
-			BotLabelKey: botID,
+			BotLabelKey:       botID,
+			WorkspaceLabelKey: WorkspaceLabelValue,
 		},
 		Spec: ctr.ContainerSpec{
+			Cmd:    []string{"/opt/memoh/bridge"},
 			Mounts: mounts,
-			Env:    tzEnv,
+			Env:    env,
 		},
 	})
 	if err == nil {
@@ -263,7 +242,7 @@ func (m *Manager) EnsureBot(ctx context.Context, botID string) error {
 	return nil
 }
 
-// ListBots returns the bot IDs that have MCP containers.
+// ListBots returns the bot IDs that have workspace containers.
 func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 	containers, err := m.service.ListContainers(ctx)
 	if err != nil {
@@ -272,16 +251,21 @@ func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 
 	botIDs := make([]string, 0, len(containers))
 	for _, info := range containers {
-		if strings.HasPrefix(info.ID, ContainerPrefix) {
-			if botID, ok := info.Labels[BotLabelKey]; ok {
-				botIDs = append(botIDs, botID)
-			}
+		if botID, ok := BotIDFromContainerInfo(info); ok {
+			botIDs = append(botIDs, botID)
 		}
 	}
 	return botIDs, nil
 }
 
 func (m *Manager) Start(ctx context.Context, botID string) error {
+	return m.StartWithImage(ctx, botID, "")
+}
+
+// StartWithImage creates and starts the MCP container for a bot.
+// If imageOverride is non-empty, it is used as the base image instead of the
+// configured default. The override only applies when creating a new container.
+func (m *Manager) StartWithImage(ctx context.Context, botID, imageOverride string) error {
 	containerID := m.containerID(botID)
 
 	// Before creating a new container, check for an orphaned snapshot
@@ -293,7 +277,7 @@ func (m *Manager) Start(ctx context.Context, botID string) error {
 		m.recoverOrphanedSnapshot(ctx, botID)
 	}
 
-	if err := m.EnsureBot(ctx, botID); err != nil {
+	if err := m.EnsureBot(ctx, botID, imageOverride); err != nil {
 		return err
 	}
 
@@ -310,25 +294,23 @@ func (m *Manager) Start(ctx context.Context, botID string) error {
 	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
 		return err
 	}
-	netResult, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+
+	// CNI network setup (for outbound connectivity — container processes
+	// may need to download packages). Server communicates via UDS, not IP.
+	if _, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
 		ContainerID: containerID,
 		CNIBinDir:   m.cfg.CNIBinaryDir,
 		CNIConfDir:  m.cfg.CNIConfigDir,
-	})
-	if err != nil {
+	}); err != nil {
 		if stopErr := m.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{Force: true}); stopErr != nil {
 			m.logger.Warn("cleanup: stop task failed", slog.String("container_id", containerID), slog.Any("error", stopErr))
 		}
 		return err
 	}
-	if netResult.IP == "" {
-		if stopErr := m.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{Force: true}); stopErr != nil {
-			m.logger.Warn("cleanup: stop task failed", slog.String("container_id", containerID), slog.Any("error", stopErr))
-		}
-		return fmt.Errorf("network setup returned no IP for bot %s", botID)
+	if !m.IsLegacyContainer(ctx, containerID) {
+		m.clearLegacyRoute(botID)
 	}
-	m.SetContainerIP(botID, netResult.IP)
-	m.logger.Info("container network ready", slog.String("bot_id", botID), slog.String("ip", netResult.IP))
+	m.logger.Info("container started", slog.String("bot_id", botID))
 	return nil
 }
 
@@ -376,7 +358,7 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 		}
 	}
 
-	m.grpcPool.Remove(botID)
+	m.clearLegacyRoute(botID)
 
 	if err := m.service.RemoveNetwork(ctx, ctr.NetworkSetupRequest{
 		ContainerID: containerID,
@@ -402,6 +384,14 @@ func (m *Manager) dataRoot() string {
 
 func (m *Manager) imageRef() string {
 	return m.cfg.ImageRef()
+}
+
+// IsLegacyContainer returns true if the container was created before the
+// bridge runtime injection architecture (uses the legacy "mcp-" prefix).
+// Legacy containers are functional but unreachable from the server (they
+// use TCP gRPC instead of UDS). Users should delete and recreate them.
+func (m *Manager) IsLegacyContainer(_ context.Context, containerID string) bool {
+	return strings.HasPrefix(containerID, LegacyContainerPrefix)
 }
 
 func validateBotID(botID string) error {

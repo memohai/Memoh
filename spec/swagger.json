@@ -10557,6 +10557,9 @@
         "handlers.CreateContainerRequest": {
             "type": "object",
             "properties": {
+                "image": {
+                    "type": "string"
+                },
                 "restore_data": {
                     "type": "boolean"
                 },
@@ -10773,6 +10776,9 @@
                 },
                 "image": {
                     "type": "string"
+                },
+                "legacy": {
+                    "type": "boolean"
                 },
                 "namespace": {
                     "type": "string"

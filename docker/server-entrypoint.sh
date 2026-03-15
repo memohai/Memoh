@@ -1,8 +1,6 @@
 #!/bin/sh
 set -e
 
-MCP_IMAGE="${MCP_IMAGE:-docker.io/library/memoh-mcp:latest}"
-
 # ---- Clean up stale CNI state from previous runs ----
 # After a container restart the cni0 bridge may linger with a zeroed MAC
 # (00:00:00:00:00:00), causing "could not set bridge's mac: invalid argument".
@@ -45,23 +43,6 @@ if ! ctr version >/dev/null 2>&1; then
   exit 1
 fi
 echo "containerd is running (pid $CONTAINERD_PID)"
-
-# ---- Import MCP image if not already present ----
-if ! ctr -n default images check "name==${MCP_IMAGE}" 2>/dev/null | grep -q "${MCP_IMAGE}"; then
-  echo "Importing MCP image into containerd..."
-  for tar in /opt/images/*.tar; do
-    if [ -f "$tar" ]; then
-      ctr -n default images import --all-platforms "$tar" 2>&1 || true
-    fi
-  done
-  if ctr -n default images check "name==${MCP_IMAGE}" 2>/dev/null | grep -q "${MCP_IMAGE}"; then
-    echo "MCP image ready: ${MCP_IMAGE}"
-  else
-    echo "WARNING: MCP image not available after import, will try pull at runtime"
-  fi
-else
-  echo "MCP image already present: ${MCP_IMAGE}"
-fi
 
 echo "containerd is ready, starting memoh-server..."
 

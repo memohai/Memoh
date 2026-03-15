@@ -277,11 +277,11 @@ func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, 
 	if g.handler == nil {
 		return nil, errors.New("containerd handler not configured")
 	}
-	containerID, err := g.handler.botContainerID(ctx, botID)
-	if err != nil {
+	if err := g.handler.manager.EnsureRunning(ctx, botID); err != nil {
 		return nil, err
 	}
-	if err := g.handler.ensureContainerAndTask(ctx, containerID, botID); err != nil {
+	containerID, err := g.handler.manager.ContainerID(ctx, botID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -296,7 +296,7 @@ func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, 
 		Env:     normalizeStringMap(connection.Config["env"]),
 		Cwd:     strings.TrimSpace(anyToString(connection.Config["cwd"])),
 	}
-	return g.handler.startContainerdMCPCommandSession(ctx, containerID, request)
+	return g.handler.startContainerdMCPCommandSession(ctx, botID, containerID, request)
 }
 
 func parseGatewayToolsListPayload(payload map[string]any) ([]mcpgw.ToolDescriptor, error) {

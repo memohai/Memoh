@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/mcp/mcpclient"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -34,7 +34,7 @@ type scanEntry struct {
 }
 
 type Service struct {
-	provider mcpclient.Provider
+	provider bridge.Provider
 	logger   *slog.Logger
 }
 
@@ -59,14 +59,14 @@ type memoryEntryMeta struct {
 	Metadata  map[string]any `yaml:"metadata,omitempty"`
 }
 
-func New(log *slog.Logger, provider mcpclient.Provider) *Service {
+func New(log *slog.Logger, provider bridge.Provider) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Service{provider: provider, logger: log.With(slog.String("component", "storefs"))}
 }
 
-func (s *Service) client(ctx context.Context, botID string) (*mcpclient.Client, error) {
+func (s *Service) client(ctx context.Context, botID string) (*bridge.Client, error) {
 	if s.provider == nil {
 		return nil, ErrNotConfigured
 	}
@@ -665,7 +665,7 @@ func formatMemoryOverviewMD(items []MemoryItem) string {
 // --- utility helpers ---
 
 func isNotFound(err error) bool {
-	return errors.Is(err, mcpclient.ErrNotFound)
+	return errors.Is(err, bridge.ErrNotFound)
 }
 
 func toItemMap(items []MemoryItem) map[string]MemoryItem {

@@ -1,28 +1,9 @@
 # syntax=docker/dockerfile:1
 
-# ---- Stage 1: Assemble MCP image rootfs (runtime deps only, no Go binary) ----
-FROM alpine:latest AS mcp-rootfs
+# Dev server image: Go + containerd + CNI.
+# Toolkit (Node.js, uv) is NOT baked in — it is volume-mounted from the host.
+# Run ./docker/toolkit/install.sh once before first use.
 
-RUN apk add --no-cache grep curl bash
-RUN apk add --no-cache nodejs npm
-RUN apk add --no-cache python3 && \
-    curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ln -sf /root/.local/bin/uv /usr/local/bin/uv && \
-    ln -sf /root/.local/bin/uvx /usr/local/bin/uvx
-
-COPY cmd/mcp/template /opt/mcp-template
-
-RUN printf '#!/bin/sh\n\
-[ -e /app/mcp ] || { mkdir -p /app; [ -f /opt/mcp ] && cp -a /opt/mcp /app/mcp 2>/dev/null || true; }\n\
-if [ -x /app/mcp ]; then exec /app/mcp "$@"; fi\n\
-exec /opt/mcp "$@"\n' > /opt/entrypoint.sh && chmod +x /opt/entrypoint.sh
-
-RUN tar -cf /tmp/rootfs.tar \
-    --exclude='./proc' --exclude='./sys' --exclude='./dev' \
-    --exclude='./tmp' --exclude='./run' \
-    -C / .
-
-# ---- Stage 2: Dev server image ----
 FROM golang:1.25-alpine
 
 WORKDIR /workspace
@@ -43,7 +24,7 @@ RUN apk add --no-cache \
   && mkdir -p /opt/cni/bin \
   && (cp -a /usr/lib/cni/. /opt/cni/bin/ 2>/dev/null || true) \
   && (cp -a /usr/libexec/cni/. /opt/cni/bin/ 2>/dev/null || true) \
-  && mkdir -p /etc/cni/net.d /var/lib/cni /run/containerd /var/lib/containerd /opt/memoh/data
+  && mkdir -p /etc/cni/net.d /var/lib/cni /run/containerd /var/lib/containerd /opt/memoh/data /opt/memoh/runtime
 
 RUN printf '%s\n' \
   '{' \
@@ -72,9 +53,6 @@ RUN printf '%s\n' \
   '    }' \
   '  ]' \
   '}' > /etc/cni/net.d/10-memoh.conflist
-
-# Raw MCP rootfs for mcp-build.sh to package with compiled binary
-COPY --from=mcp-rootfs /tmp/rootfs.tar /opt/images/memoh-mcp-rootfs.tar
 
 COPY devenv/server-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

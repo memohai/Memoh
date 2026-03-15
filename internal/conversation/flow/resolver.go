@@ -157,7 +157,6 @@ type gatewayModelConfig struct {
 
 type gatewayIdentity struct {
 	BotID             string `json:"botId"`
-	ContainerID       string `json:"containerId"`
 	ChannelIdentityID string `json:"channelIdentityId"`
 	DisplayName       string `json:"displayName"`
 	CurrentPlatform   string `json:"currentPlatform,omitempty"`
@@ -379,8 +378,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	messages = append(messages, reqMessages...)
 	messages = sanitizeMessages(messages)
 	skills := dedup(req.Skills)
-	containerID := r.resolveContainerID(ctx, req.BotID, req.ContainerID)
-
 	var usableSkills []gatewaySkill
 	if r.skillLoader != nil {
 		entries, err := r.skillLoader.LoadSkills(ctx, req.BotID)
@@ -467,7 +464,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		Query:             headerifiedQuery,
 		Identity: gatewayIdentity{
 			BotID:             req.BotID,
-			ContainerID:       containerID,
 			ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 			DisplayName:       displayName,
 			CurrentPlatform:   req.CurrentChannel,
@@ -1273,25 +1269,6 @@ func encodeReaderAsDataURL(reader io.Reader, maxBytes int64, attachmentType, fal
 		)
 	}
 	return encoded.String(), mime, nil
-}
-
-// --- container resolution ---
-
-func (r *Resolver) resolveContainerID(ctx context.Context, botID, explicit string) string {
-	if strings.TrimSpace(explicit) != "" {
-		return explicit
-	}
-	if r.queries != nil {
-		pgBotID, err := parseResolverUUID(botID)
-		if err == nil {
-			row, err := r.queries.GetContainerByBotID(ctx, pgBotID)
-			if err == nil && strings.TrimSpace(row.ContainerID) != "" {
-				return row.ContainerID
-			}
-		}
-	}
-	r.logger.Warn("no container found for bot, using fallback", slog.String("bot_id", botID))
-	return "mcp-" + botID
 }
 
 // --- message loading ---
