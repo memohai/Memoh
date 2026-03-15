@@ -30,15 +30,24 @@ func (a *FeishuAdapter) resolveBotOpenID(ctx context.Context, cfg channel.Channe
 	if openID := resolveConfiguredBotOpenID(cfg); openID != "" {
 		return openID
 	}
+	if cfg.ID != "" {
+		if v, ok := a.botOpenIDs.Load(cfg.ID); ok {
+			return v.(string)
+		}
+	}
 	discovered, externalID, err := a.DiscoverSelf(ctx, cfg.Credentials)
 	if err != nil {
-		if a != nil && a.logger != nil {
+		if a.logger != nil {
 			a.logger.Warn("discover self fallback failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 		return ""
 	}
-	if discoveredOpenID := strings.TrimSpace(channel.ReadString(discovered, "open_id", "openId")); discoveredOpenID != "" {
-		return discoveredOpenID
+	openID := strings.TrimSpace(channel.ReadString(discovered, "open_id", "openId"))
+	if openID == "" {
+		openID = resolveConfiguredBotOpenID(channel.ChannelConfig{ExternalIdentity: externalID})
 	}
-	return resolveConfiguredBotOpenID(channel.ChannelConfig{ExternalIdentity: externalID})
+	if openID != "" && cfg.ID != "" {
+		a.botOpenIDs.Store(cfg.ID, openID)
+	}
+	return openID
 }

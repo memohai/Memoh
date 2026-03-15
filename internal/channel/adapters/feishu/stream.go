@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	lark "github.com/larksuite/oapi-sdk-go/v3"
+	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 
 	"github.com/memohai/memoh/internal/channel"
@@ -29,7 +29,7 @@ type feishuOutboundStream struct {
 	cfg           channel.ChannelConfig
 	target        string
 	reply         *channel.ReplyRef
-	client        *lark.Client
+	messageAPI    feishuStreamMessageAPI
 	receiveID     string
 	receiveType   string
 	cardMessageID string
@@ -38,6 +38,12 @@ type feishuOutboundStream struct {
 	lastPatched   string
 	patchInterval time.Duration
 	closed        atomic.Bool
+}
+
+type feishuStreamMessageAPI interface {
+	Create(ctx context.Context, req *larkim.CreateMessageReq, options ...larkcore.RequestOptionFunc) (*larkim.CreateMessageResp, error)
+	Reply(ctx context.Context, req *larkim.ReplyMessageReq, options ...larkcore.RequestOptionFunc) (*larkim.ReplyMessageResp, error)
+	Patch(ctx context.Context, req *larkim.PatchMessageReq, options ...larkcore.RequestOptionFunc) (*larkim.PatchMessageResp, error)
 }
 
 func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
@@ -75,16 +81,10 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		if s.cardMessageID != "" && bufText != "" {
 			_ = s.patchCard(ctx, bufText)
 		}
-		s.cardMessageID = ""
-		s.lastPatched = ""
-		s.lastPatchedAt = time.Time{}
-		s.textBuffer.Reset()
+		s.resetDraftBuffer()
 		return nil
 	case channel.StreamEventToolCallEnd:
-		s.cardMessageID = ""
-		s.lastPatched = ""
 		s.lastPatchedAt = time.Time{}
-		s.textBuffer.Reset()
 		return nil
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
@@ -163,8 +163,8 @@ func (s *feishuOutboundStream) ensureCard(ctx context.Context, text string) erro
 	if strings.TrimSpace(s.cardMessageID) != "" {
 		return nil
 	}
-	if s.client == nil {
-		return errors.New("feishu client not configured")
+	if s.messageAPI == nil {
+		return errors.New("feishu message api not configured")
 	}
 	content, err := buildFeishuStreamCardContent(text)
 	if err != nil {
@@ -179,7 +179,7 @@ func (s *feishuOutboundStream) ensureCard(ctx context.Context, text string) erro
 				Uuid(uuid.NewString()).
 				Build()).
 			Build()
-		replyResp, err := s.client.Im.Message.Reply(ctx, replyReq)
+		replyResp, err := s.messageAPI.Reply(ctx, replyReq)
 		if err != nil {
 			return err
 		}
@@ -207,7 +207,7 @@ func (s *feishuOutboundStream) ensureCard(ctx context.Context, text string) erro
 			Uuid(uuid.NewString()).
 			Build()).
 		Build()
-	createResp, err := s.client.Im.Message.Create(ctx, createReq)
+	createResp, err := s.messageAPI.Create(ctx, createReq)
 	if err != nil {
 		return err
 	}
@@ -245,7 +245,7 @@ func (s *feishuOutboundStream) patchCard(ctx context.Context, text string) error
 			Content(content).
 			Build()).
 		Build()
-	patchResp, err := s.client.Im.Message.Patch(ctx, patchReq)
+	patchResp, err := s.messageAPI.Patch(ctx, patchReq)
 	if err != nil {
 		return err
 	}
@@ -259,6 +259,11 @@ func (s *feishuOutboundStream) patchCard(ctx context.Context, text string) error
 	s.lastPatched = contentText
 	s.lastPatchedAt = time.Now()
 	return nil
+}
+
+func (s *feishuOutboundStream) resetDraftBuffer() {
+	s.textBuffer.Reset()
+	s.lastPatchedAt = time.Time{}
 }
 
 // extractReadableFromJSON tries to extract human-readable text from JSON-like content.

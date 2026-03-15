@@ -90,6 +90,33 @@ func (q *Queries) GetBotChannelConfigByExternalIdentity(ctx context.Context, arg
 	return i, err
 }
 
+const getBotChannelConfigByID = `-- name: GetBotChannelConfigByID :one
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+FROM bot_channel_configs
+WHERE id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetBotChannelConfigByID(ctx context.Context, id pgtype.UUID) (BotChannelConfig, error) {
+	row := q.db.QueryRow(ctx, getBotChannelConfigByID, id)
+	var i BotChannelConfig
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.ChannelType,
+		&i.Credentials,
+		&i.ExternalIdentity,
+		&i.SelfIdentity,
+		&i.Routing,
+		&i.Capabilities,
+		&i.Disabled,
+		&i.VerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserChannelBinding = `-- name: GetUserChannelBinding :one
 SELECT id, user_id, channel_type, config, created_at, updated_at
 FROM user_channel_bindings

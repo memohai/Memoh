@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,8 +32,12 @@ type assetOpener interface {
 
 // FeishuAdapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Feishu.
 type FeishuAdapter struct {
-	logger *slog.Logger
-	assets assetOpener
+	logger               *slog.Logger
+	assets               assetOpener
+	senderProfiles       sync.Map
+	senderProfileSweepMu sync.Mutex
+	senderProfileSweepAt time.Time
+	botOpenIDs           sync.Map
 }
 
 const processingBusyReactionType = "Typing"
@@ -615,7 +620,7 @@ func (a *FeishuAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfi
 		cfg:           cfg,
 		target:        target,
 		reply:         opts.Reply,
-		client:        client,
+		messageAPI:    client.Im.Message,
 		receiveID:     receiveID,
 		receiveType:   receiveType,
 		patchInterval: feishuStreamPatchInterval,

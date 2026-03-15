@@ -21,11 +21,37 @@ type feishuSenderProfile struct {
 	avatarURL   string
 }
 
-const feishuChatMembersPageSize = 100
+const (
+	feishuChatMembersPageSize = 100
+	senderProfileCacheTTL     = 5 * time.Minute
+	senderProfileSweepWindow  = 1 * time.Minute
+)
+
+type feishuSenderProfileLookup interface {
+	LookupContact(ctx context.Context, openID, userID string) (feishuSenderProfile, error)
+	LookupGroupMember(ctx context.Context, chatID, memberIDType, memberID string) (feishuSenderProfile, error)
+}
+
+type larkSenderProfileLookup struct {
+	client *lark.Client
+}
+
+func (l larkSenderProfileLookup) LookupContact(ctx context.Context, openID, userID string) (feishuSenderProfile, error) {
+	return lookupSenderProfileFromContact(ctx, l.client, openID, userID)
+}
+
+func (l larkSenderProfileLookup) LookupGroupMember(ctx context.Context, chatID, memberIDType, memberID string) (feishuSenderProfile, error) {
+	return lookupSenderProfileFromGroupMember(ctx, l.client, chatID, memberIDType, memberID)
+}
+
+type cachedSenderProfile struct {
+	profile   feishuSenderProfile
+	expiresAt time.Time
+}
 
 // enrichSenderProfile fills sender display name / username for inbound messages.
-// It first tries Contact.User.Get (open_id/user_id), then falls back to group member
-// lookup when permissions are limited.
+// In group chats it prefers chat-specific aliases, then falls back to the global
+// contact profile when no group-scoped name is available.
 func (a *FeishuAdapter) enrichSenderProfile(ctx context.Context, cfg channel.ChannelConfig, event *larkim.P2MessageReceiveV1, msg *channel.InboundMessage) {
 	if msg == nil {
 		return
@@ -49,70 +75,126 @@ func (a *FeishuAdapter) enrichSenderProfile(ctx context.Context, cfg channel.Cha
 		chatID = strings.TrimSpace(*event.Event.Message.ChatId)
 	}
 
+	cacheKey := strings.Join([]string{cfg.ID, strings.TrimPrefix(chatID, "chat_id:"), openID, userID}, "|")
+	if cached, ok := a.loadCachedSenderProfile(cacheKey); ok {
+		applySenderProfile(msg, cached)
+		return
+	}
+
 	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	profile, err := a.lookupSenderProfile(lookupCtx, cfg, openID, userID, chatID)
-	if err != nil {
-		if a.logger != nil {
-			a.logger.Debug("feishu sender profile lookup failed",
-				slog.String("config_id", cfg.ID),
-				slog.String("open_id", openID),
-				slog.String("user_id", userID),
-				slog.String("chat_id", chatID),
-				slog.Any("error", err),
-			)
-		}
-	}
-	if strings.TrimSpace(profile.displayName) == "" && strings.TrimSpace(profile.username) == "" && strings.TrimSpace(profile.avatarURL) == "" {
-		profile = fallbackSenderProfile(openID, userID)
-	}
-	applySenderProfile(msg, profile)
-}
-
-func (*FeishuAdapter) lookupSenderProfile(ctx context.Context, cfg channel.ChannelConfig, openID, userID, chatID string) (feishuSenderProfile, error) {
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		return feishuSenderProfile{}, err
+		applySenderProfile(msg, fallbackSenderProfile(openID, userID))
+		return
 	}
-	client := feishuCfg.newClient()
+	profile, err := lookupSenderProfileWithLookup(lookupCtx, larkSenderProfileLookup{client: feishuCfg.newClient()}, openID, userID, chatID)
+	if err != nil && a.logger != nil {
+		a.logger.Debug("feishu sender profile lookup failed",
+			slog.String("config_id", cfg.ID),
+			slog.String("open_id", openID),
+			slog.String("user_id", userID),
+			slog.String("chat_id", chatID),
+			slog.Any("error", err),
+		)
+	}
+	if profile.displayName != "" || profile.username != "" || profile.avatarURL != "" {
+		a.storeCachedSenderProfile(cacheKey, profile)
+		applySenderProfile(msg, profile)
+	} else {
+		applySenderProfile(msg, fallbackSenderProfile(openID, userID))
+	}
+}
+
+func lookupSenderProfileWithLookup(ctx context.Context, lookup feishuSenderProfileLookup, openID, userID, chatID string) (feishuSenderProfile, error) {
+	if lookup == nil {
+		return feishuSenderProfile{}, errors.New("sender profile lookup not configured")
+	}
+	chatID = strings.TrimPrefix(strings.TrimSpace(chatID), "chat_id:")
 
 	var lastErr error
-	chatID = strings.TrimSpace(chatID)
-	chatID = strings.TrimPrefix(chatID, "chat_id:")
-
-	// Group scene: chat members has the highest chance to return a human-readable name.
-	if chatID != "" && openID != "" {
-		if profile, err := lookupSenderProfileFromGroupMember(ctx, client, chatID, "open_id", openID); err == nil {
-			if strings.TrimSpace(profile.displayName) != "" || strings.TrimSpace(profile.username) != "" {
-				return profile, nil
+	if chatID != "" {
+		if openID != "" {
+			if p, err := lookup.LookupGroupMember(ctx, chatID, "open_id", openID); err == nil {
+				if p.displayName != "" || p.username != "" || p.avatarURL != "" {
+					return p, nil
+				}
+			} else {
+				lastErr = err
 			}
-		} else {
-			lastErr = err
 		}
-	}
-	if chatID != "" && userID != "" {
-		if profile, err := lookupSenderProfileFromGroupMember(ctx, client, chatID, "user_id", userID); err == nil {
-			if strings.TrimSpace(profile.displayName) != "" || strings.TrimSpace(profile.username) != "" {
-				return profile, nil
+		if userID != "" {
+			if p, err := lookup.LookupGroupMember(ctx, chatID, "user_id", userID); err == nil {
+				if p.displayName != "" || p.username != "" || p.avatarURL != "" {
+					return p, nil
+				}
+			} else {
+				lastErr = err
 			}
-		} else {
-			lastErr = err
 		}
 	}
 
-	if profile, err := lookupSenderProfileFromContact(ctx, client, openID, userID); err == nil {
-		if strings.TrimSpace(profile.displayName) != "" || strings.TrimSpace(profile.username) != "" {
-			return profile, nil
+	if p, err := lookup.LookupContact(ctx, openID, userID); err == nil {
+		if p.displayName != "" || p.username != "" || p.avatarURL != "" {
+			return p, nil
 		}
 	} else {
 		lastErr = err
 	}
 
-	if lastErr != nil {
-		return feishuSenderProfile{}, lastErr
+	return feishuSenderProfile{}, lastErr
+}
+
+func (a *FeishuAdapter) loadCachedSenderProfile(key string) (feishuSenderProfile, bool) {
+	if a == nil || strings.TrimSpace(key) == "" {
+		return feishuSenderProfile{}, false
 	}
-	return feishuSenderProfile{}, nil
+	raw, ok := a.senderProfiles.Load(key)
+	if !ok {
+		return feishuSenderProfile{}, false
+	}
+	entry, ok := raw.(cachedSenderProfile)
+	if !ok {
+		a.senderProfiles.Delete(key)
+		return feishuSenderProfile{}, false
+	}
+	if time.Now().After(entry.expiresAt) {
+		a.senderProfiles.Delete(key)
+		return feishuSenderProfile{}, false
+	}
+	return entry.profile, true
+}
+
+func (a *FeishuAdapter) storeCachedSenderProfile(key string, profile feishuSenderProfile) {
+	if a == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	now := time.Now()
+	a.senderProfiles.Store(key, cachedSenderProfile{
+		profile:   profile,
+		expiresAt: now.Add(senderProfileCacheTTL),
+	})
+	a.maybeSweepExpiredSenderProfiles(now)
+}
+
+func (a *FeishuAdapter) maybeSweepExpiredSenderProfiles(now time.Time) {
+	if a == nil {
+		return
+	}
+	a.senderProfileSweepMu.Lock()
+	defer a.senderProfileSweepMu.Unlock()
+	if !a.senderProfileSweepAt.IsZero() && now.Sub(a.senderProfileSweepAt) < senderProfileSweepWindow {
+		return
+	}
+	a.senderProfileSweepAt = now
+	a.senderProfiles.Range(func(key, value any) bool {
+		entry, ok := value.(cachedSenderProfile)
+		if !ok || now.After(entry.expiresAt) {
+			a.senderProfiles.Delete(key)
+		}
+		return true
+	})
 }
 
 func lookupSenderProfileFromContact(ctx context.Context, client *lark.Client, openID, userID string) (feishuSenderProfile, error) {
@@ -227,9 +309,8 @@ func fallbackSenderProfile(openID, userID string) feishuSenderProfile {
 	if username == "" {
 		return feishuSenderProfile{}
 	}
-	displayName := username
 	return feishuSenderProfile{
-		displayName: displayName,
+		displayName: username,
 		username:    username,
 	}
 }

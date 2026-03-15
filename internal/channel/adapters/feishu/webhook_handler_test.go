@@ -14,18 +14,23 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 )
 
-const testWebhookConfigID = "cfg-1"
+const (
+	testWebhookConfigID      = "550e8400-e29b-41d4-a716-446655440000"
+	testOtherWebhookConfigID = "550e8400-e29b-41d4-a716-446655440001"
+)
 
 type fakeWebhookStore struct {
-	configs []channel.ChannelConfig
-	err     error
+	config   channel.ChannelConfig
+	getCalls []string
+	getErr   error
 }
 
-func (s *fakeWebhookStore) ListConfigsByType(_ context.Context, _ channel.ChannelType) ([]channel.ChannelConfig, error) {
-	if s.err != nil {
-		return nil, s.err
+func (s *fakeWebhookStore) GetConfigByID(_ context.Context, configID string) (channel.ChannelConfig, error) {
+	s.getCalls = append(s.getCalls, configID)
+	if s.getErr != nil {
+		return channel.ChannelConfig{}, s.getErr
 	}
-	return s.configs, nil
+	return s.config, nil
 }
 
 type fakeWebhookManager struct {
@@ -84,13 +89,11 @@ func TestWebhookHandler_URLVerification(t *testing.T) {
 			t.Parallel()
 
 			store := &fakeWebhookStore{
-				configs: []channel.ChannelConfig{
-					{
-						ID:          testWebhookConfigID,
-						BotID:       "bot-1",
-						ChannelType: Type,
-						Credentials: tc.credentials,
-					},
+				config: channel.ChannelConfig{
+					ID:          testWebhookConfigID,
+					BotID:       "bot-1",
+					ChannelType: Type,
+					Credentials: tc.credentials,
 				},
 			}
 			manager := &fakeWebhookManager{}
@@ -142,17 +145,15 @@ func TestWebhookHandler_URLVerificationWithEncryptKeyWithoutVerificationToken(t 
 	t.Parallel()
 
 	store := &fakeWebhookStore{
-		configs: []channel.ChannelConfig{
-			{
-				ID:          testWebhookConfigID,
-				BotID:       "bot-1",
-				ChannelType: Type,
-				Credentials: map[string]any{
-					"app_id":       "app",
-					"app_secret":   "secret",
-					"encrypt_key":  "encrypt-key",
-					"inbound_mode": "webhook",
-				},
+		config: channel.ChannelConfig{
+			ID:          testWebhookConfigID,
+			BotID:       "bot-1",
+			ChannelType: Type,
+			Credentials: map[string]any{
+				"app_id":       "app",
+				"app_secret":   "secret",
+				"encrypt_key":  "encrypt-key",
+				"inbound_mode": "webhook",
 			},
 		},
 	}
@@ -209,30 +210,70 @@ func TestWebhookHandler_Probe(t *testing.T) {
 	}
 }
 
-func TestWebhookHandler_ConfigLookupRejectsNotFound(t *testing.T) {
+func TestWebhookHandler_ConfigLookupRejectsNotFoundCases(t *testing.T) {
 	t.Parallel()
 
-	store := &fakeWebhookStore{}
-	h := NewWebhookHandler(nil, store, &fakeWebhookManager{})
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/channels/feishu/webhook/not-found", strings.NewReader(`{}`))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetParamNames("config_id")
-	c.SetParamValues("not-found")
-
-	err := h.Handle(c)
-	if err == nil {
-		t.Fatal("expected not found error")
+	cases := []struct {
+		name      string
+		configID  string
+		store     *fakeWebhookStore
+		wantCalls []string
+	}{
+		{
+			name:      "invalid uuid",
+			configID:  "not-a-uuid",
+			store:     &fakeWebhookStore{},
+			wantCalls: nil,
+		},
+		{
+			name:     "other channel type",
+			configID: testOtherWebhookConfigID,
+			store: &fakeWebhookStore{
+				config: channel.ChannelConfig{
+					ID:          testOtherWebhookConfigID,
+					BotID:       "bot-1",
+					ChannelType: channel.ChannelType("telegram"),
+				},
+			},
+			wantCalls: []string{testOtherWebhookConfigID},
+		},
 	}
-	he := &echo.HTTPError{}
-	if !errors.As(err, &he) {
-		t.Fatalf("expected HTTPError, got %T", err)
-	}
-	if he.Code != http.StatusNotFound {
-		t.Fatalf("unexpected status code: %d", he.Code)
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := NewWebhookHandler(nil, tc.store, &fakeWebhookManager{})
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/channels/feishu/webhook/"+tc.configID, strings.NewReader(`{}`))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("config_id")
+			c.SetParamValues(tc.configID)
+
+			err := h.Handle(c)
+			if err == nil {
+				t.Fatal("expected not found error")
+			}
+			he := &echo.HTTPError{}
+			if !errors.As(err, &he) {
+				t.Fatalf("expected HTTPError, got %T", err)
+			}
+			if he.Code != http.StatusNotFound {
+				t.Fatalf("unexpected status code: %d", he.Code)
+			}
+			if len(tc.store.getCalls) != len(tc.wantCalls) {
+				t.Fatalf("unexpected store lookup calls: %#v", tc.store.getCalls)
+			}
+			for i, want := range tc.wantCalls {
+				if tc.store.getCalls[i] != want {
+					t.Fatalf("unexpected store lookup calls: %#v", tc.store.getCalls)
+				}
+			}
+		})
 	}
 }
 
@@ -240,20 +281,18 @@ func TestWebhookHandler_EventCallbackDispatchesInbound(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeWebhookStore{
-		configs: []channel.ChannelConfig{
-			{
-				ID:          testWebhookConfigID,
-				BotID:       "bot-1",
-				ChannelType: Type,
-				SelfIdentity: map[string]any{
-					"open_id": "ou_bot_1",
-				},
-				Credentials: map[string]any{
-					"app_id":             "app",
-					"app_secret":         "secret",
-					"verification_token": "verify-token",
-					"inbound_mode":       "webhook",
-				},
+		config: channel.ChannelConfig{
+			ID:          testWebhookConfigID,
+			BotID:       "bot-1",
+			ChannelType: Type,
+			SelfIdentity: map[string]any{
+				"open_id": "ou_bot_1",
+			},
+			Credentials: map[string]any{
+				"app_id":             "app",
+				"app_secret":         "secret",
+				"verification_token": "verify-token",
+				"inbound_mode":       "webhook",
 			},
 		},
 	}
@@ -278,6 +317,9 @@ func TestWebhookHandler_EventCallbackDispatchesInbound(t *testing.T) {
 	if len(manager.calls) != 1 {
 		t.Fatalf("expected one inbound call, got %d", len(manager.calls))
 	}
+	if len(store.getCalls) != 1 || store.getCalls[0] != testWebhookConfigID {
+		t.Fatalf("expected direct config lookup by id, got %#v", store.getCalls)
+	}
 	got := manager.calls[0].msg
 	if got.BotID != "bot-1" {
 		t.Fatalf("unexpected bot id: %s", got.BotID)
@@ -291,18 +333,16 @@ func TestWebhookHandler_EventCallbackUsesExternalIdentityForMentionFilter(t *tes
 	t.Parallel()
 
 	store := &fakeWebhookStore{
-		configs: []channel.ChannelConfig{
-			{
-				ID:               testWebhookConfigID,
-				BotID:            "bot-1",
-				ChannelType:      Type,
-				ExternalIdentity: "open_id:ou_bot_1",
-				Credentials: map[string]any{
-					"app_id":             "app",
-					"app_secret":         "secret",
-					"verification_token": "verify-token",
-					"inbound_mode":       "webhook",
-				},
+		config: channel.ChannelConfig{
+			ID:               testWebhookConfigID,
+			BotID:            "bot-1",
+			ChannelType:      Type,
+			ExternalIdentity: "open_id:ou_bot_1",
+			Credentials: map[string]any{
+				"app_id":             "app",
+				"app_secret":         "secret",
+				"verification_token": "verify-token",
+				"inbound_mode":       "webhook",
 			},
 		},
 	}
@@ -333,26 +373,28 @@ func TestWebhookHandler_EventCallbackUsesExternalIdentityForMentionFilter(t *tes
 	}
 }
 
-func TestWebhookHandler_EventCallbackRejectsInvalidTokenWhenEncryptKeyMissing(t *testing.T) {
+func TestWebhookHandler_EventCallbackRejectsInvalidAuth(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name        string
 		credentials map[string]any
 		body        string
+		wantStatus  int
 	}{
 		{
-			name: "plaintext callback",
+			name: "invalid verification token",
 			credentials: map[string]any{
 				"app_id":             "app",
 				"app_secret":         "secret",
 				"verification_token": "verify-token",
 				"inbound_mode":       "webhook",
 			},
-			body: `{"schema":"2.0","header":{"event_id":"evt_1","event_type":"im.message.receive_v1","token":"forged-token"},"event":{"sender":{"sender_id":{"open_id":"ou_user_1"}},"message":{"message_id":"om_1","chat_id":"oc_1","chat_type":"p2p","message_type":"text","content":"{\"text\":\"hello\"}"}},"type":"event_callback"}`,
+			body:       `{"schema":"2.0","header":{"event_id":"evt_1","event_type":"im.message.receive_v1","token":"forged-token"},"event":{"sender":{"sender_id":{"open_id":"ou_user_1"}},"message":{"message_id":"om_1","chat_id":"oc_1","chat_type":"p2p","message_type":"text","content":"{\"text\":\"hello\"}"}},"type":"event_callback"}`,
+			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name: "encrypted callback",
+			name: "encrypted callback with invalid verification token",
 			credentials: map[string]any{
 				"app_id":             "app",
 				"app_secret":         "secret",
@@ -367,6 +409,17 @@ func TestWebhookHandler_EventCallbackRejectsInvalidTokenWhenEncryptKeyMissing(t 
 				}
 				return `{"encrypt":"` + encrypt + `"}`
 			}(),
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "missing webhook secrets",
+			credentials: map[string]any{
+				"app_id":       "app",
+				"app_secret":   "secret",
+				"inbound_mode": "webhook",
+			},
+			body:       `{"schema":"2.0","header":{"event_id":"evt_1","event_type":"im.message.receive_v1","token":"verify-token"},"event":{"sender":{"sender_id":{"open_id":"ou_user_1"}},"message":{"message_id":"om_1","chat_id":"oc_1","chat_type":"p2p","message_type":"text","content":"{\"text\":\"hello\"}"}},"type":"event_callback"}`,
+			wantStatus: http.StatusBadRequest,
 		},
 	}
 
@@ -376,13 +429,11 @@ func TestWebhookHandler_EventCallbackRejectsInvalidTokenWhenEncryptKeyMissing(t 
 			t.Parallel()
 
 			store := &fakeWebhookStore{
-				configs: []channel.ChannelConfig{
-					{
-						ID:          testWebhookConfigID,
-						BotID:       "bot-1",
-						ChannelType: Type,
-						Credentials: tc.credentials,
-					},
+				config: channel.ChannelConfig{
+					ID:          testWebhookConfigID,
+					BotID:       "bot-1",
+					ChannelType: Type,
+					Credentials: tc.credentials,
 				},
 			}
 			manager := &fakeWebhookManager{}
@@ -398,13 +449,13 @@ func TestWebhookHandler_EventCallbackRejectsInvalidTokenWhenEncryptKeyMissing(t 
 
 			err := h.Handle(c)
 			if err == nil {
-				t.Fatal("expected unauthorized error")
+				t.Fatal("expected auth error")
 			}
 			he := &echo.HTTPError{}
 			if !errors.As(err, &he) {
 				t.Fatalf("expected HTTPError, got %T", err)
 			}
-			if he.Code != http.StatusUnauthorized {
+			if he.Code != tc.wantStatus {
 				t.Fatalf("unexpected status code: %d", he.Code)
 			}
 			if len(manager.calls) != 0 {
@@ -418,17 +469,15 @@ func TestWebhookHandler_RejectsOversizedBody(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeWebhookStore{
-		configs: []channel.ChannelConfig{
-			{
-				ID:          testWebhookConfigID,
-				BotID:       "bot-1",
-				ChannelType: Type,
-				Credentials: map[string]any{
-					"app_id":             "app",
-					"app_secret":         "secret",
-					"verification_token": "verify-token",
-					"inbound_mode":       "webhook",
-				},
+		config: channel.ChannelConfig{
+			ID:          testWebhookConfigID,
+			BotID:       "bot-1",
+			ChannelType: Type,
+			Credentials: map[string]any{
+				"app_id":             "app",
+				"app_secret":         "secret",
+				"verification_token": "verify-token",
+				"inbound_mode":       "webhook",
 			},
 		},
 	}
