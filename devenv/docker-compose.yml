@@ -86,6 +86,10 @@ services:
       - containerd_data:/var/lib/containerd
       - server_cni_state:/var/lib/cni
       - memoh_data:/opt/memoh/data
+      # Toolkit: run ./docker/toolkit/install.sh once before first use
+      - ../.toolkit:/opt/memoh/runtime/toolkit
+      - ../docker/toolkit/bin:/opt/memoh/runtime/toolkit/bin
+      - ../cmd/mcp/template:/opt/memoh/runtime/templates
       - /etc/localtime:/etc/localtime:ro
     ports:
       - "8080:8080"
