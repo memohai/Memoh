@@ -66,7 +66,7 @@ For Mem0 or OpenViking SaaS, no profile is needed. Configure the provider direct
 
 ### China Mainland Mirror
 
-Uncomment `registry = "memoh.cn"` in `config.toml` under `[mcp]`, then add the CN overlay:
+Uncomment `registry = "memoh.cn"` in `config.toml` under `[workspace]`, then add the CN overlay:
 
 ```bash
 sudo docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
