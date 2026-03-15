@@ -527,8 +527,8 @@ func provideChannelLifecycleService(channelStore *channel.Store, channelManager 
 // containerd handler & tool gateway
 // ---------------------------------------------------------------------------
 
-func provideContainerdHandler(log *slog.Logger, service ctr.Service, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *handlers.ContainerdHandler {
-	return handlers.NewContainerdHandler(log, service, manager, cfg.Workspace, cfg.Containerd.Namespace, rc.ContainerBackend, botService, accountService, policyService, queries)
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *handlers.ContainerdHandler {
+	return handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
 }
 
 func provideFederationGateway(log *slog.Logger, containerdHandler *handlers.ContainerdHandler) *handlers.MCPFederationGateway {
@@ -789,16 +789,16 @@ func startChannelManager(lc fx.Lifecycle, channelManager *channel.Manager) {
 	})
 }
 
-func startContainerReconciliation(lc fx.Lifecycle, containerdHandler *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
+func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			go containerdHandler.ReconcileContainers(ctx)
+			go manager.ReconcileContainers(ctx)
 			return nil
 		},
 	})
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, containerdHandler *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
@@ -806,7 +806,7 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 			if err := ensureAdminUser(ctx, logger, queries, cfg); err != nil {
 				return err
 			}
-			botService.SetContainerLifecycle(containerdHandler)
+			botService.SetContainerLifecycle(manager)
 			botService.SetContainerReachability(func(ctx context.Context, botID string) error {
 				_, err := manager.MCPClient(ctx, botID)
 				return err

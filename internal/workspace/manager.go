@@ -31,6 +31,23 @@ const (
 	legacyGRPCPort = 9090
 )
 
+// ErrContainerNotFound is returned when no container exists for a bot.
+var ErrContainerNotFound = errors.New("container not found for bot")
+
+// ContainerStatus combines DB records with live containerd state.
+type ContainerStatus struct {
+	ContainerID      string    `json:"container_id"`
+	Image            string    `json:"image"`
+	Status           string    `json:"status"`
+	Namespace        string    `json:"namespace"`
+	ContainerPath    string    `json:"container_path"`
+	TaskRunning      bool      `json:"task_running"`
+	HasPreservedData bool      `json:"has_preserved_data"`
+	Legacy           bool      `json:"legacy"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
 type Manager struct {
 	service         ctr.Service
 	cfg             config.WorkspaceConfig
