@@ -23,7 +23,6 @@ import (
 
 const (
 	BotLabelKey           = "memoh.bot_id"
-	LegacyBotLabelKey     = "mcp.bot_id"
 	WorkspaceLabelKey     = "memoh.workspace"
 	WorkspaceLabelValue   = "v3"
 	ContainerPrefix       = "workspace-"
@@ -235,13 +234,10 @@ func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 
 	botIDs := make([]string, 0, len(containers))
 	for _, info := range containers {
-		if !strings.HasPrefix(info.ID, ContainerPrefix) && !strings.HasPrefix(info.ID, LegacyContainerPrefix) {
-			continue
-		}
 		if botID, ok := info.Labels[BotLabelKey]; ok {
 			botIDs = append(botIDs, botID)
-		} else if botID, ok := info.Labels[LegacyBotLabelKey]; ok {
-			botIDs = append(botIDs, botID)
+		} else if strings.HasPrefix(info.ID, LegacyContainerPrefix) {
+			botIDs = append(botIDs, strings.TrimPrefix(info.ID, LegacyContainerPrefix))
 		}
 	}
 	return botIDs, nil
