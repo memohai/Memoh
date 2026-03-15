@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -29,23 +28,23 @@ type legacyRouteTestService struct {
 	getContainerBeforeCreateErr error
 }
 
-func (s *legacyRouteTestService) PullImage(context.Context, string, *ctr.PullImageOptions) (ctr.ImageInfo, error) {
+func (_ *legacyRouteTestService) PullImage(context.Context, string, *ctr.PullImageOptions) (ctr.ImageInfo, error) {
 	return ctr.ImageInfo{}, nil
 }
 
-func (s *legacyRouteTestService) GetImage(context.Context, string) (ctr.ImageInfo, error) {
+func (_ *legacyRouteTestService) GetImage(context.Context, string) (ctr.ImageInfo, error) {
 	return ctr.ImageInfo{}, nil
 }
 
-func (s *legacyRouteTestService) ListImages(context.Context) ([]ctr.ImageInfo, error) {
+func (_ *legacyRouteTestService) ListImages(context.Context) ([]ctr.ImageInfo, error) {
 	return nil, nil
 }
 
-func (s *legacyRouteTestService) DeleteImage(context.Context, string, *ctr.DeleteImageOptions) error {
+func (_ *legacyRouteTestService) DeleteImage(context.Context, string, *ctr.DeleteImageOptions) error {
 	return nil
 }
 
-func (s *legacyRouteTestService) ResolveRemoteDigest(context.Context, string) (string, error) {
+func (_ *legacyRouteTestService) ResolveRemoteDigest(context.Context, string) (string, error) {
 	return "", nil
 }
 
@@ -85,7 +84,7 @@ func (s *legacyRouteTestService) DeleteContainer(context.Context, string, *ctr.D
 	return nil
 }
 
-func (s *legacyRouteTestService) ListContainersByLabel(context.Context, string, string) ([]ctr.ContainerInfo, error) {
+func (_ *legacyRouteTestService) ListContainersByLabel(context.Context, string, string) ([]ctr.ContainerInfo, error) {
 	return nil, nil
 }
 
@@ -94,7 +93,7 @@ func (s *legacyRouteTestService) StartContainer(context.Context, string, *ctr.St
 	return nil
 }
 
-func (s *legacyRouteTestService) StopContainer(context.Context, string, *ctr.StopTaskOptions) error {
+func (_ *legacyRouteTestService) StopContainer(context.Context, string, *ctr.StopTaskOptions) error {
 	return nil
 }
 
@@ -103,15 +102,15 @@ func (s *legacyRouteTestService) DeleteTask(context.Context, string, *ctr.Delete
 	return nil
 }
 
-func (s *legacyRouteTestService) GetTaskInfo(context.Context, string) (ctr.TaskInfo, error) {
+func (_ *legacyRouteTestService) GetTaskInfo(context.Context, string) (ctr.TaskInfo, error) {
 	return ctr.TaskInfo{}, errdefs.ErrNotFound
 }
 
-func (s *legacyRouteTestService) ListTasks(context.Context, *ctr.ListTasksOptions) ([]ctr.TaskInfo, error) {
+func (_ *legacyRouteTestService) ListTasks(context.Context, *ctr.ListTasksOptions) ([]ctr.TaskInfo, error) {
 	return nil, nil
 }
 
-func (s *legacyRouteTestService) SetupNetwork(context.Context, ctr.NetworkSetupRequest) (ctr.NetworkResult, error) {
+func (_ *legacyRouteTestService) SetupNetwork(context.Context, ctr.NetworkSetupRequest) (ctr.NetworkResult, error) {
 	return ctr.NetworkResult{IP: "10.0.0.2"}, nil
 }
 
@@ -120,29 +119,29 @@ func (s *legacyRouteTestService) RemoveNetwork(context.Context, ctr.NetworkSetup
 	return nil
 }
 
-func (s *legacyRouteTestService) CommitSnapshot(context.Context, string, string, string) error {
+func (_ *legacyRouteTestService) CommitSnapshot(context.Context, string, string, string) error {
 	return nil
 }
 
-func (s *legacyRouteTestService) ListSnapshots(context.Context, string) ([]ctr.SnapshotInfo, error) {
+func (_ *legacyRouteTestService) ListSnapshots(context.Context, string) ([]ctr.SnapshotInfo, error) {
 	return nil, nil
 }
 
-func (s *legacyRouteTestService) PrepareSnapshot(context.Context, string, string, string) error {
+func (_ *legacyRouteTestService) PrepareSnapshot(context.Context, string, string, string) error {
 	return nil
 }
 
-func (s *legacyRouteTestService) CreateContainerFromSnapshot(context.Context, ctr.CreateContainerRequest) (ctr.ContainerInfo, error) {
+func (_ *legacyRouteTestService) CreateContainerFromSnapshot(context.Context, ctr.CreateContainerRequest) (ctr.ContainerInfo, error) {
 	return ctr.ContainerInfo{}, nil
 }
 
-func (s *legacyRouteTestService) SnapshotMounts(context.Context, string, string) ([]ctr.MountInfo, error) {
+func (_ *legacyRouteTestService) SnapshotMounts(context.Context, string, string) ([]ctr.MountInfo, error) {
 	return nil, ctr.ErrNotSupported
 }
 
 func newLegacyRouteTestManager(t *testing.T, svc ctr.Service, cfg config.MCPConfig) *Manager {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	m := &Manager{
 		service:        svc,
 		cfg:            cfg,
