@@ -416,7 +416,7 @@ func (m *Manager) imageRef() string {
 // bridge runtime injection architecture (uses the legacy "mcp-" prefix).
 // Legacy containers are functional but unreachable from the server (they
 // use TCP gRPC instead of UDS). Users should delete and recreate them.
-func (m *Manager) IsLegacyContainer(_ context.Context, containerID string) bool {
+func (*Manager) IsLegacyContainer(_ context.Context, containerID string) bool {
 	return strings.HasPrefix(containerID, LegacyContainerPrefix)
 }
 

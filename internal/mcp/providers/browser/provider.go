@@ -15,8 +15,8 @@ import (
 	"github.com/memohai/memoh/internal/browsercontexts"
 	"github.com/memohai/memoh/internal/config"
 	mcpgw "github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/workspace/bridge"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (

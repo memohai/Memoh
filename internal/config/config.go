@@ -1,8 +1,9 @@
 package config
 
 import (
-	"fmt"
+	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -220,6 +221,7 @@ func Load(path string) (Config, error) {
 	if path == "" {
 		path = DefaultConfigPath
 	}
+	path = filepath.Clean(path)
 
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
@@ -228,6 +230,7 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 
+	//nolint:gosec // config path is intentionally user-configurable
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, err
@@ -242,9 +245,9 @@ func Load(path string) (Config, error) {
 	}
 	if raw.MCP != nil {
 		if raw.Workspace != nil {
-			return cfg, fmt.Errorf("config uses both [mcp] and [workspace]; remove [mcp] and keep only [workspace]")
+			return cfg, errors.New("config uses both [mcp] and [workspace]; remove [mcp] and keep only [workspace]")
 		}
-		return cfg, fmt.Errorf("config section [mcp] has been renamed to [workspace]; update your config.toml and restart")
+		return cfg, errors.New("config section [mcp] has been renamed to [workspace]; update your config.toml and restart")
 	}
 
 	if _, err := toml.Decode(string(data), &cfg); err != nil {

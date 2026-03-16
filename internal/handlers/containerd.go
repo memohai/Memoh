@@ -753,10 +753,6 @@ func snapshotLineage(root string, all []ctr.SnapshotInfo) ([]ctr.SnapshotInfo, b
 
 // ---------- auth helpers ----------
 
-func (h *ContainerdHandler) mcpImageRef() string {
-	return h.cfg.ImageRef()
-}
-
 // requireBotAccess extracts bot_id from path, validates user auth, and authorizes bot access.
 func (h *ContainerdHandler) requireBotAccess(c echo.Context) (string, error) {
 	channelIdentityID, err := h.requireChannelIdentityID(c)

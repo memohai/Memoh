@@ -56,7 +56,6 @@ import (
 	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/workspace"
 	mcpbrowser "github.com/memohai/memoh/internal/mcp/providers/browser"
 	mcpcontacts "github.com/memohai/memoh/internal/mcp/providers/contacts"
 	mcpcontainer "github.com/memohai/memoh/internal/mcp/providers/container"
@@ -91,6 +90,7 @@ import (
 	ttspkg "github.com/memohai/memoh/internal/tts"
 	ttsedge "github.com/memohai/memoh/internal/tts/adapter/edge"
 	"github.com/memohai/memoh/internal/version"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 func migrationsFS() fs.FS {

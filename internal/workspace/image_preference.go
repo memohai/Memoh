@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -90,7 +91,7 @@ func (m *Manager) botWorkspaceImagePreference(ctx context.Context, botID string)
 	}
 	row, err := m.queries.GetBotByID(ctx, botUUID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil
 		}
 		return "", err
@@ -102,7 +103,7 @@ func (m *Manager) botWorkspaceImagePreference(ctx context.Context, botID string)
 	return workspaceImageFromMetadata(metadata), nil
 }
 
-func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, image string, clear bool) error {
+func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, image string, clearPreference bool) error {
 	if m.queries == nil {
 		return nil
 	}
@@ -118,7 +119,7 @@ func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, 
 	if err != nil {
 		return err
 	}
-	if clear {
+	if clearPreference {
 		metadata = withoutWorkspaceImagePreference(metadata)
 	} else {
 		metadata = withWorkspaceImagePreference(metadata, image)
@@ -157,7 +158,7 @@ func (m *Manager) resolveWorkspaceImage(ctx context.Context, botID string) (stri
 			if dbErr == nil && strings.TrimSpace(row.Image) != "" {
 				return config.NormalizeImageRef(strings.TrimSpace(row.Image)), nil
 			}
-			if dbErr != nil && dbErr != pgx.ErrNoRows {
+			if dbErr != nil && !errors.Is(dbErr, pgx.ErrNoRows) {
 				return "", dbErr
 			}
 		}

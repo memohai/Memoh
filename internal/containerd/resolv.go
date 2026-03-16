@@ -1,6 +1,7 @@
 package containerd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,11 +17,19 @@ const (
 // If systemd-resolved config is available, use it. Otherwise write a fallback
 // resolv.conf under dataDir and return that path.
 func ResolveConfSource(dataDir string) (string, error) {
+	return resolveConfSource(dataDir, systemdResolvConf)
+}
+
+func resolveConfSource(dataDir, preferredPath string) (string, error) {
 	if strings.TrimSpace(dataDir) == "" {
 		return "", ErrInvalidArgument
 	}
-	if _, err := os.Stat(systemdResolvConf); err == nil {
-		return systemdResolvConf, nil
+	if strings.TrimSpace(preferredPath) != "" {
+		if _, err := os.Stat(preferredPath); err == nil {
+			return preferredPath, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
 	}
 
 	if err := os.MkdirAll(dataDir, 0o750); err != nil {
@@ -32,7 +41,7 @@ func ResolveConfSource(dataDir string) (string, error) {
 			return "", err
 		}
 		return fallbackPath, nil
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
 	if err := os.WriteFile(fallbackPath, []byte(fallbackResolv), fallbackResolvPerm); err != nil {

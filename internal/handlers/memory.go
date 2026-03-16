@@ -18,10 +18,10 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/workspace/bridge"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 // MemoryHandler handles memory CRUD operations scoped by bot.
