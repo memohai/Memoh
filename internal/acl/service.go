@@ -199,13 +199,9 @@ func (s *Service) ListObservedConversationsByChannelIdentity(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	pgChannelIdentityID, err := db.ParseUUID(channelIdentityID)
-	if err != nil {
-		return nil, err
-	}
 	rows, err := s.queries.ListObservedConversationsByChannelIdentity(ctx, sqlc.ListObservedConversationsByChannelIdentityParams{
 		BotID:             pgBotID,
-		ChannelIdentityID: pgChannelIdentityID,
+		ChannelIdentityID: strings.TrimSpace(channelIdentityID),
 	})
 	if err != nil {
 		return nil, err
