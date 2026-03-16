@@ -27,7 +27,7 @@ jwt_expires_in = "168h"
 # binary_path = "/opt/homebrew/bin/socktainer"
 
 [workspace]
-image = "debian:bookworm-slim"
+default_image = "debian:bookworm-slim"
 data_root = "data"
 
 [postgres]

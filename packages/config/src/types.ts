@@ -40,7 +40,7 @@ export interface ContainerdConfig {
 
 export interface WorkspaceConfig {
   registry?: string;
-  image: string;
+  default_image: string;
   snapshotter: string;
   data_root: string;
   cni_bin_dir?: string;

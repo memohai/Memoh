@@ -11,7 +11,7 @@ func TestLoadRejectsLegacyMCPSection(t *testing.T) {
 	t.Parallel()
 
 	configPath := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(configPath, []byte("[mcp]\nimage = \"debian:bookworm-slim\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("[mcp]\nfoo = \"legacy\"\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -28,7 +28,7 @@ func TestLoadRejectsMixedMCPAndWorkspaceSections(t *testing.T) {
 	t.Parallel()
 
 	configPath := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(configPath, []byte("[mcp]\nimage = \"legacy\"\n[workspace]\nimage = \"current\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("[mcp]\nfoo = \"legacy\"\n[workspace]\ndefault_image = \"current\"\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -38,5 +38,22 @@ func TestLoadRejectsMixedMCPAndWorkspaceSections(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "both [mcp] and [workspace]") {
 		t.Fatalf("expected mixed-section error, got %v", err)
+	}
+}
+
+func TestLoadReadsWorkspaceDefaultImage(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte("[workspace]\ndefault_image = \"alpine:3.22\"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Workspace.DefaultImage != "alpine:3.22" {
+		t.Fatalf("expected default_image to load, got %q", cfg.Workspace.DefaultImage)
 	}
 }

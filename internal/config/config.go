@@ -78,7 +78,7 @@ type SocktainerConfig struct {
 
 type WorkspaceConfig struct {
 	Registry     string `toml:"registry"`
-	Image        string `toml:"image"`
+	DefaultImage string `toml:"default_image"`
 	Snapshotter  string `toml:"snapshotter"`
 	DataRoot     string `toml:"data_root"`
 	CNIBinaryDir string `toml:"cni_bin_dir"`
@@ -90,7 +90,7 @@ type WorkspaceConfig struct {
 // prepending the registry mirror when configured and normalizing for containerd
 // compatibility.
 func (c WorkspaceConfig) ImageRef() string {
-	img := c.Image
+	img := c.DefaultImage
 	if img == "" {
 		img = DefaultBaseImage
 	}
@@ -196,7 +196,7 @@ func Load(path string) (Config, error) {
 			Namespace:  DefaultNamespace,
 		},
 		Workspace: WorkspaceConfig{
-			Image:        DefaultBaseImage,
+			DefaultImage: DefaultBaseImage,
 			DataRoot:     DefaultDataRoot,
 			CNIBinaryDir: DefaultCNIBinaryDir,
 			CNIConfigDir: DefaultCNIConfigDir,

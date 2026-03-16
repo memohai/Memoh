@@ -25,7 +25,7 @@ namespace = "default"
 
 [workspace]
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
-image = "debian:bookworm-slim"
+default_image = "debian:bookworm-slim"
 snapshotter = "overlayfs"
 data_root = "data"
 
