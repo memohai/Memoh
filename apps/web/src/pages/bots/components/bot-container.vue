@@ -32,6 +32,7 @@ import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { formatDateTime } from '@/utils/date-time'
+import { shortenImageRef } from '@/utils/image-ref'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const route = useRoute()
@@ -190,10 +191,11 @@ function rememberedWorkspaceImage(metadata: Record<string, unknown> | undefined)
   const workspace = metadata?.workspace
   if (!workspace || typeof workspace !== 'object' || Array.isArray(workspace)) return ''
   const image = (workspace as Record<string, unknown>).image
-  return typeof image === 'string' ? image.trim() : ''
+  return typeof image === 'string' ? shortenImageRef(image) : ''
 }
 
 const rememberedCreateImage = computed(() => rememberedWorkspaceImage(bot.value?.metadata as Record<string, unknown> | undefined))
+const displayedContainerImage = computed(() => shortenImageRef(containerInfo.value?.image))
 
 const { isPending: botLifecyclePending } = useBotStatusMeta(bot, t)
 
@@ -336,7 +338,7 @@ async function handleDeleteContainer(preserveData: boolean) {
   const successMessage = preserveData
     ? t('bots.container.deletePreserveSuccess')
     : t('bots.container.deleteSuccess')
-  const lastImage = containerInfo.value.image?.trim() ?? ''
+  const lastImage = shortenImageRef(containerInfo.value.image)
 
   await runContainerAction(
     action,
@@ -775,7 +777,7 @@ watch([activeTab, botId], ([tab]) => {
               {{ $t('bots.container.fields.image') }}
             </dt>
             <dd class="break-all">
-              {{ containerInfo.image }}
+              {{ displayedContainerImage }}
             </dd>
           </div>
           <div class="space-y-1 sm:col-span-2">
