@@ -104,6 +104,10 @@ func (m *Manager) setupNetworkAndGetIP(ctx context.Context, containerID string) 
 				slog.Any("error", err))
 			continue
 		}
+		if strings.TrimSpace(result.IP) == "" {
+			lastErr = fmt.Errorf("network setup returned no IP for %s", containerID)
+			continue
+		}
 		return result.IP, nil
 	}
 	return "", fmt.Errorf("network setup failed for container %s: %w", containerID, lastErr)
@@ -264,16 +268,31 @@ func (m *Manager) PullImage(ctx context.Context, image string, opts *ctr.PullIma
 // SetupBotContainer creates/starts the container and upserts the DB record.
 func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
 	containerID := m.containerID(botID)
-
-	if err := m.Start(ctx, botID); err != nil {
-		m.logger.Error("setup bot container: start failed",
+	image, err := m.resolveWorkspaceImage(ctx, botID)
+	if err != nil {
+		m.logger.Error("setup bot container: resolve image failed",
 			slog.String("bot_id", botID),
 			slog.String("container_id", containerID),
 			slog.Any("error", err))
 		return err
 	}
 
-	m.upsertContainerRecord(ctx, botID, containerID, "running", m.imageRef())
+	if err := m.startWithResolvedImage(ctx, botID, image); err != nil {
+		m.logger.Error("setup bot container: start failed",
+			slog.String("bot_id", botID),
+			slog.String("container_id", containerID),
+			slog.Any("error", err))
+		return err
+	}
+	if err := m.RememberWorkspaceImage(ctx, botID, image); err != nil {
+		m.logger.Warn("setup bot container: remember workspace image failed",
+			slog.String("bot_id", botID),
+			slog.String("container_id", containerID),
+			slog.String("image", image),
+			slog.Any("error", err))
+	}
+
+	m.upsertContainerRecord(ctx, botID, containerID, "running", image)
 	return nil
 }
 

@@ -26,8 +26,11 @@ type legacyRouteTestService struct {
 	deleteCalls int
 	removeNet   int
 	deleteTask  int
+	setupNet    int
 
 	getContainerBeforeCreateErr error
+	setupNetworkResults         []ctr.NetworkResult
+	setupNetworkErrs            []error
 }
 
 func (*legacyRouteTestService) PullImage(context.Context, string, *ctr.PullImageOptions) (ctr.ImageInfo, error) {
@@ -112,7 +115,15 @@ func (*legacyRouteTestService) ListTasks(context.Context, *ctr.ListTasksOptions)
 	return nil, nil
 }
 
-func (*legacyRouteTestService) SetupNetwork(context.Context, ctr.NetworkSetupRequest) (ctr.NetworkResult, error) {
+func (s *legacyRouteTestService) SetupNetwork(context.Context, ctr.NetworkSetupRequest) (ctr.NetworkResult, error) {
+	idx := s.setupNet
+	s.setupNet++
+	if idx < len(s.setupNetworkErrs) && s.setupNetworkErrs[idx] != nil {
+		return ctr.NetworkResult{}, s.setupNetworkErrs[idx]
+	}
+	if idx < len(s.setupNetworkResults) {
+		return s.setupNetworkResults[idx], nil
+	}
 	return ctr.NetworkResult{IP: "10.0.0.2"}, nil
 }
 
@@ -213,6 +224,27 @@ func TestDeleteClearsLegacyRoute(t *testing.T) {
 	}
 	if svc.removeNet != 1 || svc.deleteTask != 1 || svc.deleteCalls != 1 {
 		t.Fatalf("expected delete cleanup once, got removeNet=%d deleteTask=%d delete=%d", svc.removeNet, svc.deleteTask, svc.deleteCalls)
+	}
+}
+
+func TestSetupNetworkAndGetIPRejectsEmptyIP(t *testing.T) {
+	svc := &legacyRouteTestService{
+		setupNetworkResults: []ctr.NetworkResult{{IP: ""}, {IP: "10.0.0.3"}},
+	}
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
+		CNIBinaryDir: "/opt/cni/bin",
+		CNIConfigDir: "/etc/cni/net.d",
+	})
+
+	ip, err := m.setupNetworkAndGetIP(context.Background(), "workspace-bot")
+	if err != nil {
+		t.Fatalf("setupNetworkAndGetIP failed: %v", err)
+	}
+	if ip != "10.0.0.3" {
+		t.Fatalf("expected retry IP, got %q", ip)
+	}
+	if svc.setupNet != 2 {
+		t.Fatalf("expected two network setup attempts, got %d", svc.setupNet)
 	}
 }
 

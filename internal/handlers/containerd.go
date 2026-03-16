@@ -205,8 +205,14 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	// Image override lets administrators specify a custom base image.
 	// NOTE(saas): if this becomes a multi-tenant SaaS, image override must be
 	// validated against an allowlist to prevent SSRF and resource abuse.
+	ctx := c.Request().Context()
 	imageOverride := strings.TrimSpace(req.Image)
-	image := h.mcpImageRef()
+	image, err := h.manager.ResolveWorkspaceImage(ctx, botID)
+	if err != nil {
+		h.logger.Error("resolve workspace image failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		return nil
+	}
 	if imageOverride != "" {
 		image = config.NormalizeImageRef(imageOverride)
 	}
@@ -215,8 +221,6 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if snapshotter == "" {
 		snapshotter = h.cfg.Snapshotter
 	}
-
-	ctx := c.Request().Context()
 
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {
@@ -269,11 +273,15 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	// Phase 2: Create container (image is local, should be fast)
 	send(createContainerCreatingEvent{Type: "creating"})
 
-	if err := h.manager.StartWithImage(ctx, botID, imageOverride); err != nil {
+	if err := h.manager.StartWithResolvedImage(ctx, botID, image); err != nil {
 		h.logger.Error("container start failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		sendError("container start failed: " + err.Error())
 		return nil
+	}
+	if err := h.manager.RememberWorkspaceImage(ctx, botID, image); err != nil {
+		h.logger.Warn("remember workspace image failed",
+			slog.String("bot_id", botID), slog.String("image", image), slog.Any("error", err))
 	}
 
 	containerID, err := h.manager.ContainerID(ctx, botID)

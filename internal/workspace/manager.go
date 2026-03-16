@@ -171,14 +171,18 @@ func (m *Manager) Init(ctx context.Context) error {
 // The Memoh runtime (bridge binary + toolkit) is injected via read-only bind mount.
 // If imageOverride is non-empty, it is used instead of the configured default.
 func (m *Manager) EnsureBot(ctx context.Context, botID, imageOverride string) error {
-	if err := validateBotID(botID); err != nil {
-		return err
-	}
-
 	image := m.imageRef()
 	if imageOverride != "" {
 		image = config.NormalizeImageRef(imageOverride)
 	}
+	return m.ensureBotWithImage(ctx, botID, image)
+}
+
+func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string) error {
+	if err := validateBotID(botID); err != nil {
+		return err
+	}
+
 	resolvPath, err := ctr.ResolveConfSource(m.dataRoot())
 	if err != nil {
 		return err
@@ -259,13 +263,35 @@ func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 }
 
 func (m *Manager) Start(ctx context.Context, botID string) error {
-	return m.StartWithImage(ctx, botID, "")
+	image, err := m.resolveWorkspaceImage(ctx, botID)
+	if err != nil {
+		return err
+	}
+	return m.startWithResolvedImage(ctx, botID, image)
 }
 
 // StartWithImage creates and starts the MCP container for a bot.
 // If imageOverride is non-empty, it is used as the base image instead of the
 // configured default. The override only applies when creating a new container.
 func (m *Manager) StartWithImage(ctx context.Context, botID, imageOverride string) error {
+	image := strings.TrimSpace(imageOverride)
+	if image == "" {
+		return m.Start(ctx, botID)
+	}
+	return m.startWithResolvedImage(ctx, botID, config.NormalizeImageRef(image))
+}
+
+// StartWithResolvedImage creates and starts the workspace container for a bot
+// using an explicit image reference.
+func (m *Manager) StartWithResolvedImage(ctx context.Context, botID, image string) error {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return errors.New("image is required")
+	}
+	return m.startWithResolvedImage(ctx, botID, image)
+}
+
+func (m *Manager) startWithResolvedImage(ctx context.Context, botID, image string) error {
 	containerID := m.containerID(botID)
 
 	// Before creating a new container, check for an orphaned snapshot
@@ -277,7 +303,7 @@ func (m *Manager) StartWithImage(ctx context.Context, botID, imageOverride strin
 		m.recoverOrphanedSnapshot(ctx, botID)
 	}
 
-	if err := m.EnsureBot(ctx, botID, imageOverride); err != nil {
+	if err := m.ensureBotWithImage(ctx, botID, image); err != nil {
 		return err
 	}
 

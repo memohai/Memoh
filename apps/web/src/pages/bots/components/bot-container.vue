@@ -57,6 +57,7 @@ const containerAction = ref<ContainerAction>('')
 const rollbackVersion = ref<number | null>(null)
 const createRestoreData = ref(false)
 const createImage = ref('')
+const createImagePrefilled = ref(false)
 const newSnapshotName = ref('')
 const importInputRef = ref<HTMLInputElement | null>(null)
 
@@ -184,6 +185,15 @@ const { data: bot } = useQuery({
   },
   enabled: () => !!botId.value,
 })
+
+function rememberedWorkspaceImage(metadata: Record<string, unknown> | undefined): string {
+  const workspace = metadata?.workspace
+  if (!workspace || typeof workspace !== 'object' || Array.isArray(workspace)) return ''
+  const image = (workspace as Record<string, unknown>).image
+  return typeof image === 'string' ? image.trim() : ''
+}
+
+const rememberedCreateImage = computed(() => rememberedWorkspaceImage(bot.value?.metadata as Record<string, unknown> | undefined))
 
 const { isPending: botLifecyclePending } = useBotStatusMeta(bot, t)
 
@@ -326,6 +336,7 @@ async function handleDeleteContainer(preserveData: boolean) {
   const successMessage = preserveData
     ? t('bots.container.deletePreserveSuccess')
     : t('bots.container.deleteSuccess')
+  const lastImage = containerInfo.value.image?.trim() ?? ''
 
   await runContainerAction(
     action,
@@ -339,6 +350,8 @@ async function handleDeleteContainer(preserveData: boolean) {
       containerMissing.value = true
       snapshots.value = []
       createRestoreData.value = preserveData
+      createImage.value = lastImage
+      createImagePrefilled.value = !!lastImage
     },
     successMessage,
   )
@@ -544,6 +557,19 @@ const sortedSnapshots = computed(() => {
 })
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
+
+watch(containerMissing, (missing) => {
+  if (!missing) {
+    createImagePrefilled.value = false
+  }
+})
+
+watch([containerMissing, rememberedCreateImage], ([missing, remembered]) => {
+  if (!missing || createImagePrefilled.value) return
+  if (!remembered || createImage.value.trim()) return
+  createImage.value = remembered
+  createImagePrefilled.value = true
+}, { immediate: true })
 
 watch([activeTab, botId], ([tab]) => {
   if (!botId.value) return
