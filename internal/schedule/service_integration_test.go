@@ -78,7 +78,6 @@ func createUserBotAndSchedule(ctx context.Context, t *testing.T, queries *sqlc.Q
 	meta, _ := json.Marshal(map[string]any{"source": "schedule-integration-test"})
 	botRow, err := queries.CreateBot(ctx, sqlc.CreateBotParams{
 		OwnerUserID: pgOwnerID,
-		Type:        "personal",
 		DisplayName: pgtype.Text{String: "schedule-test-bot", Valid: true},
 		AvatarUrl:   pgtype.Text{},
 		IsActive:    true,

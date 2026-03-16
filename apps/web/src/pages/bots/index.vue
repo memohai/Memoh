@@ -82,8 +82,7 @@ const filteredBots = computed(() => {
   if (!keyword) return allBots.value
   return allBots.value.filter((bot) =>
     bot.display_name?.toLowerCase().includes(keyword)
-    || bot.id?.toLowerCase().includes(keyword)
-    || bot.type?.toLowerCase().includes(keyword),
+    || bot.id?.toLowerCase().includes(keyword),
   )
 })
 

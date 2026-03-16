@@ -40,16 +40,6 @@
           </Badge>
         </div>
         <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-          <span
-            v-if="bot.type"
-            class="truncate"
-          >
-            {{ botTypeLabel }}
-          </span>
-          <span
-            v-if="bot.type && formattedDate"
-            class="text-muted-foreground/60"
-          >·</span>
           <span v-if="formattedDate">
             {{ $t('common.createdAt') }} {{ formattedDate }}
           </span>
@@ -94,12 +84,6 @@ const formattedDate = computed(() => {
 })
 
 const { hasIssue, isPending, issueTitle, statusLabel, statusVariant } = useBotStatusMeta(botRef, t)
-
-const botTypeLabel = computed(() => {
-  const type = props.bot.type
-  if (type === 'personal' || type === 'public') return t('bots.types.' + type)
-  return type ?? ''
-})
 
 function onOpenDetail() {
   if (isPending.value) return

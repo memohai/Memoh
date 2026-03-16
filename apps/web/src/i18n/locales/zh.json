@@ -497,11 +497,6 @@
     "editAvatarDescription": "设置 Bot 头像图片的链接地址",
     "avatarUpdateSuccess": "头像已更新",
     "avatarUpdateFailed": "更新头像失败",
-    "typePlaceholder": "选择 Bot 类型",
-    "types": {
-      "personal": "个人",
-      "public": "公开"
-    },
     "active": "运行中",
     "inactive": "未启用",
     "lifecycle": {
@@ -754,7 +749,6 @@
       "browserContext": "浏览器上下文",
       "browserContextPlaceholder": "选择浏览器上下文（未配置时不启用）",
       "allowGuest": "允许游客访问",
-      "allowGuestPersonalHint": "个人 Bot 不支持游客访问，请使用公开 Bot。",
       "loopDetectionTitle": "自动检测并阻止模型循环输出",
       "searchModel": "搜索模型…",
       "noModel": "暂无可选模型",
@@ -851,6 +845,8 @@
       "webhookCallbackPending": "保存平台配置后会生成回调地址。",
       "showSecretField": "显示{field}",
       "hideSecretField": "隐藏{field}",
+      "feishuWebhookSecurityHint": "出于安全考虑，Webhook 模式必须配置 Encrypt Key 或 Verification Token 之一；未受保护的回调地址不应直接暴露在公网上。",
+      "feishuWebhookSecretRequired": "出于安全考虑，请至少配置 Encrypt Key 或 Verification Token 之一。",
       "noAvailableTypes": "所有平台类型均已配置",
       "types": {
         "feishu": "飞书",

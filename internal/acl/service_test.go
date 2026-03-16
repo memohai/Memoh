@@ -59,26 +59,25 @@ func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 		scanFunc: func(dest ...any) error {
 			*dest[0].(*pgtype.UUID) = botID
 			*dest[1].(*pgtype.UUID) = ownerUserID
-			*dest[2].(*string) = bots.BotTypePublic
-			*dest[3].(*pgtype.Text) = pgtype.Text{String: "bot", Valid: true}
-			*dest[4].(*pgtype.Text) = pgtype.Text{}
-			*dest[5].(*bool) = true
-			*dest[6].(*string) = bots.BotStatusReady
-			*dest[7].(*int32) = 30
-			*dest[8].(*int32) = 0
-			*dest[9].(*int32) = 50
-			*dest[10].(*string) = "auto"
-			*dest[11].(*bool) = false
-			*dest[12].(*string) = "medium"
+			*dest[2].(*pgtype.Text) = pgtype.Text{String: "bot", Valid: true}
+			*dest[3].(*pgtype.Text) = pgtype.Text{}
+			*dest[4].(*bool) = true
+			*dest[5].(*string) = bots.BotStatusReady
+			*dest[6].(*int32) = 30
+			*dest[7].(*int32) = 0
+			*dest[8].(*int32) = 50
+			*dest[9].(*string) = "auto"
+			*dest[10].(*bool) = false
+			*dest[11].(*string) = "medium"
+			*dest[12].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[13].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[14].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[15].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[16].(*bool) = false
-			*dest[17].(*int32) = 30
-			*dest[18].(*string) = ""
-			*dest[19].(*[]byte) = []byte(`{}`)
+			*dest[15].(*bool) = false
+			*dest[16].(*int32) = 30
+			*dest[17].(*string) = ""
+			*dest[18].(*[]byte) = []byte(`{}`)
+			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			*dest[20].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

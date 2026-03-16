@@ -128,6 +128,9 @@ func parseConfig(raw map[string]any) (Config, error) {
 	if appID == "" || appSecret == "" {
 		return Config{}, errors.New("feishu appId and appSecret are required")
 	}
+	if inboundMode == inboundModeWebhook && encryptKey == "" && verificationToken == "" {
+		return Config{}, errors.New("feishu webhook mode requires encrypt_key or verification_token")
+	}
 	return Config{
 		AppID:             appID,
 		AppSecret:         appSecret,

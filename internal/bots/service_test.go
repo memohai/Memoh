@@ -40,40 +40,38 @@ func (d *fakeDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 	return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
 }
 
-// makeBotRow creates a fakeRow that populates a sqlc.Bot via Scan.
-// Column order: id, owner_user_id, type, display_name, avatar_url, is_active, status,
+// makeBotRow creates a fakeRow that populates a sqlc.GetBotByIDRow via Scan.
+// Column order: id, owner_user_id, display_name, avatar_url, is_active, status,
 // max_context_load_time, max_context_tokens, max_inbox_items, language,
 // reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id,
 // heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at.
-func makeBotRow(botID, ownerUserID pgtype.UUID, botType string, allowGuest bool) *fakeRow {
+func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) < 22 {
+			if len(dest) < 21 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
 			*dest[1].(*pgtype.UUID) = ownerUserID
-			*dest[2].(*string) = botType
-			*dest[3].(*pgtype.Text) = pgtype.Text{String: "test-bot", Valid: true}
-			*dest[4].(*pgtype.Text) = pgtype.Text{}
-			*dest[5].(*bool) = true
-			*dest[6].(*string) = BotStatusReady
-			*dest[7].(*int32) = 30   // MaxContextLoadTime
-			*dest[8].(*int32) = 4096 // MaxContextTokens
-			*dest[9].(*int32) = 10   // MaxInboxItems
-			*dest[10].(*string) = "en"
-			_ = allowGuest
-			*dest[11].(*bool) = false                // ReasoningEnabled
-			*dest[12].(*string) = "medium"           // ReasoningEffort
-			*dest[13].(*pgtype.UUID) = pgtype.UUID{} // ChatModelID
-			*dest[14].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
-			*dest[15].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
-			*dest[16].(*bool) = false                // HeartbeatEnabled
-			*dest[17].(*int32) = 30                  // HeartbeatInterval
-			*dest[18].(*string) = ""                 // HeartbeatPrompt
-			*dest[19].(*[]byte) = []byte(`{}`)
+			*dest[2].(*pgtype.Text) = pgtype.Text{String: "test-bot", Valid: true}
+			*dest[3].(*pgtype.Text) = pgtype.Text{}
+			*dest[4].(*bool) = true
+			*dest[5].(*string) = BotStatusReady
+			*dest[6].(*int32) = 30   // MaxContextLoadTime
+			*dest[7].(*int32) = 4096 // MaxContextTokens
+			*dest[8].(*int32) = 10   // MaxInboxItems
+			*dest[9].(*string) = "en"
+			*dest[10].(*bool) = false                // ReasoningEnabled
+			*dest[11].(*string) = "medium"           // ReasoningEffort
+			*dest[12].(*pgtype.UUID) = pgtype.UUID{} // ChatModelID
+			*dest[13].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
+			*dest[14].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
+			*dest[15].(*bool) = false                // HeartbeatEnabled
+			*dest[16].(*int32) = 30                  // HeartbeatInterval
+			*dest[17].(*string) = ""                 // HeartbeatPrompt
+			*dest[18].(*[]byte) = []byte(`{}`)
+			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			*dest[20].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}
@@ -97,47 +95,23 @@ func TestAuthorizeAccess(t *testing.T) {
 		name      string
 		userID    string
 		isAdmin   bool
-		policy    AccessPolicy
-		botType   string
-		allowGst  bool
 		wantErr   bool
 		wantErrIs error
 	}{
 		{
 			name:    "owner always allowed",
 			userID:  ownerID,
-			policy:  AccessPolicy{},
-			botType: BotTypePublic,
 			wantErr: false,
 		},
 		{
 			name:    "admin always allowed",
 			userID:  strangerID,
 			isAdmin: true,
-			policy:  AccessPolicy{},
-			botType: BotTypePublic,
 			wantErr: false,
 		},
 		{
-			name:      "stranger denied without guest on public bot",
+			name:      "stranger denied",
 			userID:    strangerID,
-			policy:    AccessPolicy{AllowGuest: false},
-			botType:   BotTypePublic,
-			wantErr:   true,
-			wantErrIs: ErrBotAccessDenied,
-		},
-		{
-			name:    "stranger allowed when policy allows guest",
-			userID:  strangerID,
-			policy:  AccessPolicy{AllowGuest: true},
-			botType: BotTypePublic,
-			wantErr: false,
-		},
-		{
-			name:      "guest not allowed on personal bot",
-			userID:    strangerID,
-			policy:    AccessPolicy{AllowGuest: true},
-			botType:   BotTypePersonal,
 			wantErr:   true,
 			wantErrIs: ErrBotAccessDenied,
 		},
@@ -148,12 +122,12 @@ func TestAuthorizeAccess(t *testing.T) {
 			db := &fakeDBTX{
 				queryRowFunc: func(_ context.Context, _ string, args ...any) pgx.Row {
 					_ = args
-					return makeBotRow(botUUID, ownerUUID, tt.botType, tt.allowGst)
+					return makeBotRow(botUUID, ownerUUID)
 				},
 			}
 			svc := NewService(nil, sqlc.New(db))
 
-			_, err := svc.AuthorizeAccess(context.Background(), tt.userID, botID, tt.isAdmin, tt.policy)
+			_, err := svc.AuthorizeAccess(context.Background(), tt.userID, botID, tt.isAdmin)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")

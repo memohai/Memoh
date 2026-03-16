@@ -80,7 +80,6 @@ func createBotForChatPresence(ctx context.Context, queries *sqlc.Queries, ownerU
 	}
 	row, err := queries.CreateBot(ctx, sqlc.CreateBotParams{
 		OwnerUserID: pgOwnerID,
-		Type:        "personal",
 		DisplayName: pgtype.Text{String: "presence-test-bot", Valid: true},
 		IsActive:    true,
 		Metadata:    meta,

@@ -91,7 +91,6 @@
             />
             {{ statusLabel }}
           </Badge>
-          <span v-if="bot?.type">{{ botTypeLabel }}</span>
         </div>
       </div>
     </div>
@@ -283,15 +282,15 @@ const tabList = computed(() => {
     { value: 'email', label: 'bots.tabs.email', component: BotEmail, params: { 'bot-id': bot_id } },
     { value: 'container', label: 'bots.tabs.container', component: BotContainer, params: {} },
     { value: 'terminal', label: 'bots.tabs.terminal', component: BotTerminal, params: { 'bot-id': bot_id } },
-    { value: 'files', label: 'bots.tabs.files', component: BotFiles, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
+    { value: 'files', label: 'bots.tabs.files', component: BotFiles, params: { 'bot-id': bot_id } },
     { value: 'mcp', label: 'bots.tabs.mcp', component: BotMcp, params: { 'bot-id': bot_id } },
     { value: 'subagents', label: 'bots.tabs.subagents', component: BotSubagents, params: { 'bot-id': bot_id } },
     { value: 'heartbeat', label: 'bots.tabs.heartbeat', component: BotHeartbeat, params: { 'bot-id': bot_id } },
     { value: 'schedule', label: 'bots.tabs.schedule', component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'history', label: 'bots.tabs.history', component: BotHistory, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', component: BotSkills, params: { 'bot-id': bot_id } },
-    { value: 'access', label: 'bots.tabs.access', component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
-    { value: 'settings', label: 'bots.tabs.settings', component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } }
+    { value: 'access', label: 'bots.tabs.access', component: BotAccess, params: { 'bot-id': bot_id } },
+    { value: 'settings', label: 'bots.tabs.settings', component: BotSettings, params: { 'bot-id': bot_id } }
   ]
 })
 
@@ -368,12 +367,6 @@ const {
   statusLabel,
   statusVariant,
 } = useBotStatusMeta(bot, t)
-
-const botTypeLabel = computed(() => {
-  const type = bot.value?.type
-  if (type === 'personal' || type === 'public') return t('bots.types.' + type)
-  return type ?? ''
-})
 
 const checks = ref<BotCheck[]>([])
 const checksLoading = ref(false)

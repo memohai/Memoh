@@ -13,10 +13,18 @@ DIR="Memoh"
 SILENT=false
 
 # Parse flags
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     -y|--yes) SILENT=true ;;
+    --version)
+      shift
+      MEMOH_VERSION="$1"
+      ;;
+    --version=*)
+      MEMOH_VERSION="${1#--version=}"
+      ;;
   esac
+  shift
 done
 
 # Auto-silent if no TTY available

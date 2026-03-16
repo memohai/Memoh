@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
@@ -69,27 +68,8 @@ func (f *fakeChannelIdentityService) LinkChannelIdentityToUser(_ context.Context
 }
 
 type fakePolicyService struct {
-	allow       bool
-	botType     string
 	ownerUserID string
 	err         error
-}
-
-func (f *fakePolicyService) AllowGuest(_ context.Context, _ string) (bool, error) {
-	if f.err != nil {
-		return false, f.err
-	}
-	return f.allow, nil
-}
-
-func (f *fakePolicyService) BotType(_ context.Context, _ string) (string, error) {
-	if f.err != nil {
-		return "", f.err
-	}
-	if strings.TrimSpace(f.botType) == "" {
-		return "public", nil
-	}
-	return f.botType, nil
 }
 
 func (f *fakePolicyService) BotOwnerUserID(_ context.Context, _ string) (string, error) {
@@ -163,7 +143,7 @@ func (f *fakeDirectoryAdapter) ResolveEntry(ctx context.Context, cfg channel.Cha
 
 func TestIdentityResolverAllowGuestWithoutMembershipSideEffect(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
-	policySvc := &fakePolicyService{allow: true, botType: "public"}
+	policySvc := &fakePolicyService{}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
 
 	msg := channel.InboundMessage{
@@ -207,7 +187,7 @@ func TestIdentityResolverResolveDisplayNameFromDirectory(t *testing.T) {
 	}
 
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-directory"}}
-	policySvc := &fakePolicyService{allow: false, botType: "public"}
+	policySvc := &fakePolicyService{}
 	resolver := NewIdentityResolver(slog.Default(), registry, channelIdentitySvc, policySvc, nil, "")
 
 	msg := channel.InboundMessage{
@@ -247,7 +227,7 @@ func TestIdentityResolverDirectoryLookupFailureDoesNotFallbackToOpenID(t *testin
 	}
 
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-directory-fail"}}
-	policySvc := &fakePolicyService{allow: false, botType: "public"}
+	policySvc := &fakePolicyService{}
 	resolver := NewIdentityResolver(slog.Default(), registry, channelIdentitySvc, policySvc, nil, "")
 
 	msg := channel.InboundMessage{
@@ -282,7 +262,7 @@ func TestIdentityResolverFeishuUsesOpenIDAsCanonicalSubject(t *testing.T) {
 			"u-userid":  {ID: "channelIdentity-userid"},
 		},
 	}
-	policySvc := &fakePolicyService{allow: false, botType: "public"}
+	policySvc := &fakePolicyService{}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
 
 	msg := channel.InboundMessage{
@@ -327,7 +307,7 @@ func TestIdentityResolverDirectoryAvatarURLPropagated(t *testing.T) {
 	}
 
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-avatar"}}
-	policySvc := &fakePolicyService{allow: false, botType: "public"}
+	policySvc := &fakePolicyService{}
 	resolver := NewIdentityResolver(slog.Default(), registry, channelIdentitySvc, policySvc, nil, "")
 
 	msg := channel.InboundMessage{
@@ -360,7 +340,7 @@ func TestIdentityResolverDirectoryAvatarURLPropagated(t *testing.T) {
 
 func TestIdentityResolverExistingMemberPasses(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-2"}}
-	policySvc := &fakePolicyService{allow: false, botType: "public"}
+	policySvc := &fakePolicyService{}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
 
 	msg := channel.InboundMessage{
@@ -381,7 +361,7 @@ func TestIdentityResolverExistingMemberPasses(t *testing.T) {
 
 func TestIdentityResolverPublicBotGuestPasses(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-5"}}
-	policySvc := &fakePolicyService{allow: false, botType: "public"}
+	policySvc := &fakePolicyService{}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "Access denied.")
 
 	msg := channel.InboundMessage{
@@ -400,9 +380,9 @@ func TestIdentityResolverPublicBotGuestPasses(t *testing.T) {
 	}
 }
 
-func TestIdentityResolverPersonalBotRejectsGroupMessages(t *testing.T) {
+func TestIdentityResolverNonOwnerGroupMessagePassesToACL(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-group"}}
-	policySvc := &fakePolicyService{allow: false, botType: "personal", ownerUserID: "channelIdentity-owner"}
+	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner"}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
 
 	msg := channel.InboundMessage{
@@ -420,20 +400,14 @@ func TestIdentityResolverPersonalBotRejectsGroupMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if state.Decision == nil || !state.Decision.Stop {
-		t.Fatal("personal bot should reject group messages")
-	}
-	if channelIdentitySvc.calls != 1 {
-		t.Fatalf("expected channelIdentity resolution once before owner check, got %d", channelIdentitySvc.calls)
-	}
-	if !state.Decision.Reply.IsEmpty() {
-		t.Fatal("non-owner group message should be silently ignored")
+	if state.Decision != nil {
+		t.Fatal("non-owner group message should pass identity resolution (ACL decides later)")
 	}
 }
 
 func TestIdentityResolverPersonalBotAllowsOwnerInGroup(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-owner"}}
-	policySvc := &fakePolicyService{allow: false, botType: "personal", ownerUserID: "channelIdentity-owner"}
+	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner"}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
 
 	msg := channel.InboundMessage{
@@ -461,7 +435,7 @@ func TestIdentityResolverPersonalBotAllowsOwnerInGroup(t *testing.T) {
 
 func TestIdentityResolverPersonalBotAllowsOwnerDirectWithoutMembership(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-owner-direct"}}
-	policySvc := &fakePolicyService{allow: false, botType: "personal", ownerUserID: "channelIdentity-owner-direct"}
+	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner-direct"}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
 
 	msg := channel.InboundMessage{
@@ -487,7 +461,7 @@ func TestIdentityResolverPersonalBotAllowsOwnerDirectWithoutMembership(t *testin
 	}
 }
 
-func TestIdentityResolverPersonalBotDoesNotFallbackToFeishuUserID(t *testing.T) {
+func TestIdentityResolverFeishuUnlinkedOpenIDPassesToACL(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
 		bySubject: map[string]identities.ChannelIdentity{
 			"ou-open-owner": {ID: "channelIdentity-open-owner"},
@@ -497,7 +471,7 @@ func TestIdentityResolverPersonalBotDoesNotFallbackToFeishuUserID(t *testing.T) 
 			"channelIdentity-user-owner": "owner-user-1",
 		},
 	}
-	policySvc := &fakePolicyService{allow: false, botType: "personal", ownerUserID: "owner-user-1"}
+	policySvc := &fakePolicyService{ownerUserID: "owner-user-1"}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
 
 	msg := channel.InboundMessage{
@@ -521,11 +495,9 @@ func TestIdentityResolverPersonalBotDoesNotFallbackToFeishuUserID(t *testing.T) 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if state.Decision == nil || !state.Decision.Stop {
-		t.Fatal("personal bot should deny when only feishu user_id is linked")
-	}
-	if state.Identity.UserID != "" {
-		t.Fatalf("expected no linked owner user via user_id fallback, got: %s", state.Identity.UserID)
+	// Without linked user, non-owner messages pass identity resolution; ACL decides later.
+	if state.Decision != nil {
+		t.Fatal("unlinked user should pass identity resolution (ACL decides later)")
 	}
 	if state.Identity.ChannelIdentityID != "channelIdentity-open-owner" {
 		t.Fatalf("expected open_id identity, got: %s", state.Identity.ChannelIdentityID)
@@ -535,9 +507,9 @@ func TestIdentityResolverPersonalBotDoesNotFallbackToFeishuUserID(t *testing.T) 
 	}
 }
 
-func TestIdentityResolverPersonalBotRejectsNonOwnerDirectEvenIfMember(t *testing.T) {
+func TestIdentityResolverNonOwnerDirectPassesToACL(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-non-owner"}}
-	policySvc := &fakePolicyService{allow: true, botType: "personal", ownerUserID: "channelIdentity-owner"}
+	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner"}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "Access denied.")
 
 	msg := channel.InboundMessage{
@@ -555,11 +527,8 @@ func TestIdentityResolverPersonalBotRejectsNonOwnerDirectEvenIfMember(t *testing
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if state.Decision == nil || !state.Decision.Stop {
-		t.Fatal("non-owner direct message should be rejected for personal bot")
-	}
-	if !state.Decision.Reply.IsEmpty() {
-		t.Fatal("non-owner direct message should be silently ignored")
+	if state.Decision != nil {
+		t.Fatal("non-owner direct message should pass identity resolution (ACL decides later)")
 	}
 }
 
@@ -685,7 +654,7 @@ func TestIdentityResolverBindCodeNotScopedToCurrentBot(t *testing.T) {
 
 func TestIdentityResolverPublicBotGroupGuestPasses(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-group-denied"}}
-	policySvc := &fakePolicyService{allow: false, botType: "public"}
+	policySvc := &fakePolicyService{}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "Access denied.")
 
 	msg := channel.InboundMessage{
@@ -710,7 +679,7 @@ func TestIdentityResolverPublicBotGroupGuestPasses(t *testing.T) {
 
 func TestIdentityResolverPublicBotDirectGuestPasses(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-direct-denied"}}
-	policySvc := &fakePolicyService{allow: false, botType: "public"}
+	policySvc := &fakePolicyService{}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "Access denied.")
 
 	msg := channel.InboundMessage{

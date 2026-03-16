@@ -501,11 +501,6 @@
     "editAvatarDescription": "Set the image URL for the bot avatar.",
     "avatarUpdateSuccess": "Avatar updated",
     "avatarUpdateFailed": "Failed to update avatar",
-    "typePlaceholder": "Select bot type",
-    "types": {
-      "personal": "Personal",
-      "public": "Public"
-    },
     "active": "Active",
     "inactive": "Inactive",
     "lifecycle": {
@@ -758,7 +753,6 @@
       "browserContext": "Browser Context",
       "browserContextPlaceholder": "Select browser context (disabled if empty)",
       "allowGuest": "Allow Guest Access",
-      "allowGuestPersonalHint": "Personal bots do not support guest access. Use a public bot instead.",
       "loopDetectionTitle": "Detect and auto-block output loops",
       "searchModel": "Search models…",
       "noModel": "No models available",
@@ -855,6 +849,8 @@
       "webhookCallbackPending": "Save this platform configuration to generate the callback URL.",
       "showSecretField": "Show {field}",
       "hideSecretField": "Hide {field}",
+      "feishuWebhookSecurityHint": "For security, webhook mode requires either an Encrypt Key or a Verification Token; an unprotected public callback URL should not be exposed.",
+      "feishuWebhookSecretRequired": "For security, configure at least one of Encrypt Key or Verification Token.",
       "noAvailableTypes": "All platform types have been configured",
       "types": {
         "feishu": "Feishu",

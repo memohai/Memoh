@@ -27,12 +27,6 @@
             <div class="font-medium truncate">
               {{ bot.display_name || bot.id }}
             </div>
-            <div
-              v-if="bot.type"
-              class="text-xs text-muted-foreground truncate"
-            >
-              {{ botTypeLabel(bot.type) }}
-            </div>
           </div>
         </Toggle>
       </SidebarMenuButton>
@@ -86,13 +80,6 @@ const bots = computed<BotsBot[]>(() => botData.value?.items ?? [])
 const isActive = (id: string) => computed(() => {
   return currentBotId.value === id
 })
-
-function botTypeLabel(type: string): string {
-  if (!type) return ''
-  const key = `bots.types.${type}`
-  const out = t(key)
-  return out !== key ? out : type
-}
 
 function handleSelect(bot: BotsBot) {
   chatStore.selectBot(bot.id)
