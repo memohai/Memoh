@@ -66,7 +66,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		return nil, err
 	}
 
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	unlock := m.lockContainer(containerID)
 	defer unlock()
 
@@ -142,7 +142,7 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		return nil, err
 	}
 
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	unlock := m.lockContainer(containerID)
 	defer unlock()
 
@@ -210,7 +210,7 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 		return nil, err
 	}
 
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	unlock := m.lockContainer(containerID)
 	defer unlock()
 
@@ -272,7 +272,7 @@ func (m *Manager) ListVersions(ctx context.Context, botID string) ([]VersionInfo
 		return nil, err
 	}
 
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	versions, err := m.queries.ListVersionsByContainerID(ctx, containerID)
 	if err != nil {
 		return nil, err
@@ -307,7 +307,7 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 		return errors.New("version out of range")
 	}
 
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	unlock := m.lockContainer(containerID)
 	defer unlock()
 
@@ -353,7 +353,7 @@ func (m *Manager) VersionSnapshotName(ctx context.Context, botID string, version
 		return "", errors.New("version out of range")
 	}
 
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	return m.queries.GetVersionSnapshotRuntimeName(ctx, dbsqlc.GetVersionSnapshotRuntimeNameParams{
 		ContainerID: containerID,
 		Version:     int32(version),

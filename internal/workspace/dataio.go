@@ -30,7 +30,7 @@ const (
 // The container is stopped during export and restarted afterwards.
 // Caller must consume the returned reader before the context is cancelled.
 func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, error) {
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	unlock := m.lockContainer(containerID)
 	defer unlock()
 
@@ -75,7 +75,7 @@ func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, 
 // ImportData extracts a tar.gz archive into the container's /data directory.
 // The container is stopped during import and restarted afterwards.
 func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) error {
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	unlock := m.lockContainer(containerID)
 	defer unlock()
 
@@ -112,13 +112,7 @@ func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) err
 // mounted snapshot is consistent; the Apple fallback uses gRPC and does not
 // require a stop.
 func (m *Manager) PreserveData(ctx context.Context, botID string) error {
-	// Resolve the actual container ID — may be legacy "mcp-" or new "workspace-".
-	containerID, err := m.ContainerID(ctx, botID)
-	if err != nil {
-		m.logger.Error("[MYDEBUG] PreserveData: ContainerID resolution failed",
-			slog.String("bot_id", botID), slog.Any("error", err))
-		return fmt.Errorf("resolve container for preserve: %w", err)
-	}
+	containerID := m.resolveContainerID(ctx, botID)
 	m.logger.Info("[MYDEBUG] PreserveData called",
 		slog.String("bot_id", botID), slog.String("container_id", containerID))
 
@@ -283,7 +277,7 @@ func (m *Manager) HasPreservedData(botID string) bool {
 // importLegacyDir copies a legacy bind-mount directory into the container
 // via snapshot mount, then renames the source to .migrated.
 func (m *Manager) importLegacyDir(ctx context.Context, botID, srcDir string) error {
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	m.logger.Info("[MYDEBUG] importLegacyDir called",
 		slog.String("bot_id", botID), slog.String("src_dir", srcDir),
 		slog.String("container_id", containerID))
@@ -357,7 +351,7 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 		return false
 	}
 
-	snapshotKey := m.containerID(botID)
+	snapshotKey := m.resolveContainerID(ctx, botID)
 	m.logger.Info("[MYDEBUG] recoverOrphanedSnapshot: querying snapshot mounts",
 		slog.String("bot_id", botID), slog.String("snapshotter", snapshotter),
 		slog.String("snapshot_key", snapshotKey))
@@ -450,7 +444,7 @@ func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string
 	}
 	defer func() { _ = f.Close() }()
 
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	m.logger.Info("[MYDEBUG] restorePreservedIntoSnapshot: getting container info",
 		slog.String("bot_id", botID), slog.String("container_id", containerID))
 	info, err := m.service.GetContainer(ctx, containerID)

@@ -163,7 +163,6 @@ func newLegacyRouteTestManager(t *testing.T, svc ctr.Service, cfg config.Workspa
 		legacyIPs:      make(map[string]string),
 		logger:         logger,
 	}
-	m.containerID = func(botID string) string { return ContainerPrefix + botID }
 	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
 }

@@ -52,7 +52,6 @@ type Manager struct {
 	service         ctr.Service
 	cfg             config.WorkspaceConfig
 	namespace       string
-	containerID     func(string) string
 	db              *pgxpool.Pool
 	queries         *dbsqlc.Queries
 	logger          *slog.Logger
@@ -76,12 +75,21 @@ func NewManager(log *slog.Logger, service ctr.Service, cfg config.WorkspaceConfi
 		logger:         log.With(slog.String("component", "workspace")),
 		containerLocks: make(map[string]*sync.Mutex),
 		legacyIPs:      make(map[string]string),
-		containerID: func(botID string) string {
-			return ContainerPrefix + botID
-		},
 	}
 	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
+}
+
+// resolveContainerID resolves the actual containerd container ID for a bot.
+// This is the SINGLE point of container ID resolution for all lookup operations.
+// It delegates to ContainerID (DB → label → scan) and falls back to the
+// new-style prefix if no container exists yet.
+func (m *Manager) resolveContainerID(ctx context.Context, botID string) string {
+	id, err := m.ContainerID(ctx, botID)
+	if err != nil {
+		return ContainerPrefix + botID
+	}
+	return id
 }
 
 func (m *Manager) lockContainer(containerID string) func() {
@@ -222,7 +230,7 @@ func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string) e
 	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
 
 	_, err = m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
-		ID:          m.containerID(botID),
+		ID:          ContainerPrefix + botID,
 		ImageRef:    image,
 		Snapshotter: m.cfg.Snapshotter,
 		Labels: map[string]string{
@@ -292,7 +300,7 @@ func (m *Manager) StartWithResolvedImage(ctx context.Context, botID, image strin
 }
 
 func (m *Manager) startWithResolvedImage(ctx context.Context, botID, image string) error {
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	m.logger.Info("[MYDEBUG] startWithResolvedImage called",
 		slog.String("bot_id", botID), slog.String("image", image),
 		slog.String("container_id", containerID))
@@ -372,7 +380,7 @@ func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration)
 	if err := validateBotID(botID); err != nil {
 		return err
 	}
-	return m.service.StopContainer(ctx, m.containerID(botID), &ctr.StopTaskOptions{
+	return m.service.StopContainer(ctx, m.resolveContainerID(ctx, botID), &ctr.StopTaskOptions{
 		Timeout: timeout,
 		Force:   true,
 	})
@@ -383,25 +391,7 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 		return err
 	}
 
-	// Resolve the actual container ID. The container may be a legacy "mcp-"
-	// container or a new "workspace-" container. We must use the real ID so
-	// that GetContainer/PreserveData/DeleteContainer operate on the correct
-	// containerd object.
-	containerID, err := m.ContainerID(ctx, botID)
-	if err != nil {
-		// Fallback to the default (new-style) container ID only when not
-		// preserving data — if we need to preserve, we must find the real
-		// container.
-		if preserveData {
-			m.logger.Error("[MYDEBUG] Delete: ContainerID resolution failed with preserve_data=true, aborting",
-				slog.String("bot_id", botID), slog.Any("error", err))
-			return fmt.Errorf("resolve container for preserve: %w", err)
-		}
-		containerID = m.containerID(botID)
-		m.logger.Warn("[MYDEBUG] Delete: ContainerID resolution failed, falling back to default",
-			slog.String("bot_id", botID), slog.String("fallback_container_id", containerID),
-			slog.Any("error", err))
-	}
+	containerID := m.resolveContainerID(ctx, botID)
 
 	stoppedForPreserve := false
 	m.logger.Info("[MYDEBUG] Delete called",
