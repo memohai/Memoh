@@ -43,10 +43,10 @@ describe('read_media runtime', () => {
     })
     const injected = prepared.messages?.[1]
     expect(injected?.role).toBe('user')
-    const content = injected?.content as Array<{ type?: string; image?: Uint8Array; mediaType?: string }>
+    const content = injected?.content as Array<{ type?: string; image?: string; mediaType?: string }>
     expect(content?.[0]?.type).toBe('image')
-    expect(content?.[0]?.image).toBeInstanceOf(Uint8Array)
-    expect(Array.from(content?.[0]?.image ?? [])).toEqual([1, 2, 3])
+    expect(typeof content?.[0]?.image).toBe('string')
+    expect(content?.[0]?.image).toBe('data:image/png;base64,AQID')
     expect(content?.[0]?.mediaType).toBe('image/png')
   })
 
@@ -109,9 +109,9 @@ describe('read_media runtime', () => {
       experimental_context: undefined,
     })
     const injected = prepared.messages?.[1]
-    const content = injected?.content as Array<{ type?: string; image?: Uint8Array; mediaType?: string }>
-    expect(Array.from(content?.[0]?.image ?? [])).toEqual([1])
-    expect(Array.from(content?.[1]?.image ?? [])).toEqual([2])
+    const content = injected?.content as Array<{ type?: string; image?: string; mediaType?: string }>
+    expect(content?.[0]?.image).toBe('data:image/png;base64,AQ==')
+    expect(content?.[1]?.image).toBe('data:image/png;base64,Ag==')
     expect(content?.[0]?.mediaType).toBe('image/png')
     expect(content?.[1]?.mediaType).toBe('image/png')
   })

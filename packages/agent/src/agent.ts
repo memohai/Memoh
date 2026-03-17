@@ -33,7 +33,7 @@ import type { ContainerFileAttachment } from './types/attachment'
 import { reactionsResolver, type ReactionItem } from './utils/reactions'
 import { speechResolver, type SpeechItem } from './utils/speech'
 import { StreamTagExtractor, extractTagsFromText, type TagEvent } from './utils/tag-extractor'
-import { createImagePartFromAttachment } from './utils/image-parts'
+import { createImagePartFromAttachment, sanitizeMessagesForJson } from './utils/image-parts'
 import type { GatewayInputAttachment } from './types/attachment'
 import { getMCPTools } from './tools/mcp'
 import { buildIdentityHeaders } from './utils/headers'
@@ -351,10 +351,10 @@ export const createAgent = (
       ...messageAttachments,
     ])
     return {
-      messages: [
+      messages: sanitizeMessagesForJson([
         userPrompt,
         ...strippedMessages,
-      ],
+      ]),
       usages: [null, ...stepUsages] as (LanguageModelUsage | null)[],
       reasoning: reasoning.map((part) => part.text),
       usage,
@@ -392,7 +392,7 @@ export const createAgent = (
     })
     const stepUsages = buildStepUsages(steps)
     return {
-      messages: [userPrompt, ...response.messages],
+      messages: sanitizeMessagesForJson([userPrompt, ...response.messages]),
       usages: [null, ...stepUsages] as (LanguageModelUsage | null)[],
       reasoning: reasoning.map((part) => part.text),
       usage,
@@ -423,7 +423,7 @@ export const createAgent = (
     })
     const stepUsages = buildStepUsages(steps)
     return {
-      messages: [scheduleMessage, ...response.messages],
+      messages: sanitizeMessagesForJson([scheduleMessage, ...response.messages]),
       usages: [null, ...stepUsages] as (LanguageModelUsage | null)[],
       reasoning: reasoning.map((part) => part.text),
       usage,
@@ -455,7 +455,7 @@ export const createAgent = (
     })
     const stepUsages = buildStepUsages(steps)
     return {
-      messages: [heartbeatMessage, ...response.messages],
+      messages: sanitizeMessagesForJson([heartbeatMessage, ...response.messages]),
       usages: [null, ...stepUsages] as (LanguageModelUsage | null)[],
       reasoning: reasoning.map((part) => part.text),
       usage,
@@ -742,10 +742,10 @@ export const createAgent = (
       )
       yield {
         type: 'agent_end',
-        messages: [
+        messages: sanitizeMessagesForJson([
           userPrompt,
           ...strippedMessages,
-        ],
+        ]),
         usages: [null, ...result.usages],
         reasoning: result.reasoning,
         usage: result.usage!,
@@ -767,7 +767,7 @@ export const createAgent = (
         )
         yield {
           type: 'agent_abort',
-          messages: [userPrompt, ...partialMessages],
+          messages: sanitizeMessagesForJson([userPrompt, ...partialMessages]),
           usages: [null, ...partialUsages],
           reasoning: partialReasoning,
           usage: partialUsage as LanguageModelUsage | null,

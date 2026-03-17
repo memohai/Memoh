@@ -1,4 +1,4 @@
-import type { ImagePart } from 'ai'
+import type { ImagePart, ModelMessage } from 'ai'
 import type { GatewayInputAttachment } from '../types/attachment'
 
 type NativeImageAttachment = GatewayInputAttachment & {
@@ -109,7 +109,10 @@ const isNativeImageAttachment = (
 const createInlineDataImagePart = (payload: string, mediaType?: string): ImagePart => {
   const parsed = parseDataUrl(payload)
   if (parsed != null) {
-    return createImagePart(parsed.bytes, mediaType ?? parsed.mediaType)
+    // Keep the original data URL string — Uint8Array does not survive JSON
+    // round-trips (serializes as {"0":255,"1":216,…}) and will break when
+    // the message is reloaded from the database.
+    return createImagePart(payload, mediaType ?? parsed.mediaType)
   }
   return createImagePart(payload, mediaType)
 }
@@ -124,7 +127,9 @@ const createPublicURLImagePart = (payload: string, mediaType?: string): ImagePar
 }
 
 export const createBinaryImagePart = (bytes: Uint8Array, mediaType?: string): ImagePart => {
-  return createImagePart(bytes, mediaType)
+  const base64 = Buffer.from(bytes).toString('base64')
+  const mime = mediaType || 'application/octet-stream'
+  return createImagePart(`data:${mime};base64,${base64}`, mediaType)
 }
 
 export const createImagePartFromAttachment = (
@@ -142,3 +147,57 @@ export const createImagePartFromAttachment = (
       return createInlineDataImagePart(payload, attachment.mime)
   }
 }
+
+// ---------------------------------------------------------------------------
+// Defensive sanitization: ensure image parts survive JSON round-trips.
+// Uint8Array / Buffer / ArrayBuffer serialize as {"0":255,"1":216,…} in JSON,
+// which cannot be deserialized back. Convert them to base64 data URL strings.
+// ---------------------------------------------------------------------------
+
+const binaryToDataUrl = (data: unknown, mediaType?: string): string => {
+  let bytes: Uint8Array
+  if (data instanceof ArrayBuffer) {
+    bytes = new Uint8Array(data)
+  } else if (ArrayBuffer.isView(data)) {
+    bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  } else {
+    return ''
+  }
+  const base64 = Buffer.from(bytes).toString('base64')
+  const mime = mediaType || 'application/octet-stream'
+  return `data:${mime};base64,${base64}`
+}
+
+const isJsonUnsafeImageData = (value: unknown): boolean =>
+  value instanceof ArrayBuffer ||
+  ArrayBuffer.isView(value) ||
+  value instanceof URL
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const sanitizeContentPart = (part: any): any => {
+  if (part?.type !== 'image' || part.image == null) return part
+  if (typeof part.image === 'string') return part
+  if (part.image instanceof URL) {
+    return { ...part, image: part.image.href }
+  }
+  if (!isJsonUnsafeImageData(part.image)) return part
+  const dataUrl = binaryToDataUrl(part.image, part.mediaType)
+  if (!dataUrl) return part
+  return { ...part, image: dataUrl }
+}
+
+export const sanitizeMessagesForJson = (messages: ModelMessage[]): ModelMessage[] => {
+  return messages.map((msg) => {
+    const raw = msg as any
+    if (!Array.isArray(raw.content)) return msg
+    let changed = false
+    const sanitized = raw.content.map((part: any) => {
+      const fixed = sanitizeContentPart(part)
+      if (fixed !== part) changed = true
+      return fixed
+    })
+    if (!changed) return msg
+    return { ...raw, content: sanitized } as ModelMessage
+  })
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
