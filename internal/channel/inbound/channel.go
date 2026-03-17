@@ -86,6 +86,7 @@ type ChannelInboundProcessor struct {
 	jwtSecret        string
 	tokenTTL         time.Duration
 	identity         *IdentityResolver
+	policy           PolicyService
 	acl              chatACL
 	observer         channel.StreamObserver
 	ttsService       ttsSynthesizer
@@ -121,6 +122,7 @@ func NewChannelInboundProcessor(
 		jwtSecret:     strings.TrimSpace(jwtSecret),
 		tokenTTL:      tokenTTL,
 		identity:      identityResolver,
+		policy:        policyService,
 	}
 }
 
@@ -370,16 +372,30 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
-	// Issue user JWT for downstream calls (MCP, schedule, etc.). For guests use chat token as Bearer.
+	// Issue bot-owner JWT for downstream calls (MCP tools, schedule, etc.).
+	// The agent uses this token to call back into the server's container/MCP
+	// endpoints which require bot-owner or admin access. Using the chatting
+	// user's identity would cause 403 for non-owner users.
 	token := ""
-	if identity.UserID != "" && p.jwtSecret != "" {
-		signed, _, err := auth.GenerateToken(identity.UserID, p.jwtSecret, p.tokenTTL)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.Warn("issue channel token failed", slog.Any("error", err))
+	if p.jwtSecret != "" {
+		tokenUserID := strings.TrimSpace(identity.UserID)
+		if p.policy != nil {
+			if ownerID, err := p.policy.BotOwnerUserID(ctx, identity.BotID); err == nil && ownerID != "" {
+				tokenUserID = ownerID
+			} else if p.logger != nil {
+				p.logger.Warn("resolve bot owner for token failed, falling back to caller identity",
+					slog.String("bot_id", identity.BotID), slog.Any("error", err))
 			}
-		} else {
-			token = "Bearer " + signed
+		}
+		if tokenUserID != "" {
+			signed, _, err := auth.GenerateToken(tokenUserID, p.jwtSecret, p.tokenTTL)
+			if err != nil {
+				if p.logger != nil {
+					p.logger.Warn("issue channel token failed", slog.Any("error", err))
+				}
+			} else {
+				token = "Bearer " + signed
+			}
 		}
 	}
 	if token == "" && chatToken != "" {

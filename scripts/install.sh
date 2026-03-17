@@ -117,8 +117,8 @@ if [ "$SILENT" = false ]; then
   read -r input < /dev/tty || true
   if [ -n "$input" ]; then
     case "$input" in
-      ~) WORKSPACE="${HOME:-/tmp}" ;;
-      ~/*) WORKSPACE="${HOME:-/tmp}${input#\~}" ;;
+      "~") WORKSPACE="${HOME:-/tmp}" ;;
+      "~"/*) WORKSPACE="${HOME:-/tmp}${input#\~}" ;;
       *) WORKSPACE="$input" ;;
     esac
   fi
