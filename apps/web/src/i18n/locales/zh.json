@@ -668,6 +668,7 @@
       "rollbackSuccess": "快照回滚成功",
       "pullingImage": "正在拉取镜像...",
       "creatingContainer": "正在创建容器...",
+      "preservingData": "正在备份数据，数据量较大时可能需要一段时间...",
       "restoringData": "正在迁移数据，数据量较大时可能需要一段时间...",
       "snapshotEmpty": "暂无快照",
       "snapshotLoadFailed": "加载快照失败",

@@ -63,7 +63,7 @@ const newSnapshotName = ref('')
 const importInputRef = ref<HTMLInputElement | null>(null)
 
 interface CreateProgress {
-  phase: 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
+  phase: 'preserving' | 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
   layers?: ContainerCreateLayerStatus[]
   image?: string
   error?: string
@@ -288,6 +288,7 @@ async function handleRecreateContainer() {
 
   containerAction.value = 'recreate'
   try {
+    createProgress.value = { phase: 'preserving' }
     await deleteBotsByBotIdContainer({
       path: { bot_id: botId.value },
       query: { preserve_data: true },

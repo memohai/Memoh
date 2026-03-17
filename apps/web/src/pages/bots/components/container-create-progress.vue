@@ -2,7 +2,7 @@
 import { Spinner } from '@memoh/ui'
 
 defineProps<{
-  phase: 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
+  phase: 'preserving' | 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
   percent: number
   error?: string
 }>()
@@ -11,7 +11,10 @@ defineProps<{
 <template>
   <div class="flex items-center gap-2 text-sm text-muted-foreground">
     <Spinner class="size-3.5" />
-    <span v-if="phase === 'pulling'">
+    <span v-if="phase === 'preserving'">
+      {{ $t('bots.container.preservingData') }}
+    </span>
+    <span v-else-if="phase === 'pulling'">
       {{ $t('bots.container.pullingImage') }}
       <span
         v-if="percent > 0"
@@ -38,7 +41,7 @@ defineProps<{
       :style="{ width: `${percent}%` }"
     />
     <div
-      v-else-if="phase === 'creating' || phase === 'restoring'"
+      v-else-if="phase === 'creating' || phase === 'restoring' || phase === 'preserving'"
       class="h-full w-full animate-pulse rounded-full bg-primary/60"
     />
   </div>
