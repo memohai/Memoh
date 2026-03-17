@@ -2,7 +2,7 @@
 import { Spinner } from '@memoh/ui'
 
 defineProps<{
-  phase: 'pulling' | 'creating' | 'complete' | 'error'
+  phase: 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
   percent: number
   error?: string
 }>()
@@ -21,6 +21,9 @@ defineProps<{
     <span v-else-if="phase === 'creating'">
       {{ $t('bots.container.creatingContainer') }}
     </span>
+    <span v-else-if="phase === 'restoring'">
+      {{ $t('bots.container.restoringData') }}
+    </span>
     <span
       v-else-if="phase === 'error'"
       class="text-destructive"
@@ -35,7 +38,7 @@ defineProps<{
       :style="{ width: `${percent}%` }"
     />
     <div
-      v-else-if="phase === 'creating'"
+      v-else-if="phase === 'creating' || phase === 'restoring'"
       class="h-full w-full animate-pulse rounded-full bg-primary/60"
     />
   </div>

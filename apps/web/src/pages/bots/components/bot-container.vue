@@ -63,7 +63,7 @@ const newSnapshotName = ref('')
 const importInputRef = ref<HTMLInputElement | null>(null)
 
 interface CreateProgress {
-  phase: 'pulling' | 'creating' | 'complete' | 'error'
+  phase: 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
   layers?: ContainerCreateLayerStatus[]
   image?: string
   error?: string
@@ -213,6 +213,9 @@ function applyCreateContainerEvent(event: ContainerCreateStreamEvent): boolean {
       return false
     case 'creating':
       createProgress.value = { phase: 'creating' }
+      return false
+    case 'restoring':
+      createProgress.value = { phase: 'restoring' }
       return false
     case 'complete':
       // Keep the last visible progress state until the container detail view loads.

@@ -112,130 +112,234 @@ func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) err
 // mounted snapshot is consistent; the Apple fallback uses gRPC and does not
 // require a stop.
 func (m *Manager) PreserveData(ctx context.Context, botID string) error {
-	containerID := m.containerID(botID)
+	// Resolve the actual container ID — may be legacy "mcp-" or new "workspace-".
+	containerID, err := m.ContainerID(ctx, botID)
+	if err != nil {
+		m.logger.Error("[MYDEBUG] PreserveData: ContainerID resolution failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		return fmt.Errorf("resolve container for preserve: %w", err)
+	}
+	m.logger.Info("[MYDEBUG] PreserveData called",
+		slog.String("bot_id", botID), slog.String("container_id", containerID))
 
 	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
+		m.logger.Error("[MYDEBUG] PreserveData: GetContainer failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return fmt.Errorf("get container: %w", err)
 	}
 
 	backupPath := m.backupPath(botID)
+	m.logger.Info("[MYDEBUG] PreserveData: backup target",
+		slog.String("bot_id", botID), slog.String("backup_path", backupPath))
 	if err := os.MkdirAll(filepath.Dir(backupPath), 0o750); err != nil {
+		m.logger.Error("[MYDEBUG] PreserveData: MkdirAll failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return fmt.Errorf("create backup dir: %w", err)
 	}
 
 	mounts, mountErr := m.snapshotMounts(ctx, info)
 	if errors.Is(mountErr, errMountNotSupported) {
+		m.logger.Info("[MYDEBUG] PreserveData: mounts not supported, falling back to gRPC",
+			slog.String("bot_id", botID))
 		return m.preserveDataViaGRPC(ctx, botID, backupPath)
 	}
 	if mountErr != nil {
+		m.logger.Error("[MYDEBUG] PreserveData: snapshotMounts failed",
+			slog.String("bot_id", botID), slog.Any("error", mountErr))
 		return mountErr
 	}
+	m.logger.Info("[MYDEBUG] PreserveData: snapshot mounts obtained",
+		slog.String("bot_id", botID), slog.Int("mount_count", len(mounts)))
 
 	f, err := os.Create(backupPath) //nolint:gosec // G304: operator-controlled path
 	if err != nil {
+		m.logger.Error("[MYDEBUG] PreserveData: os.Create backup file failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return fmt.Errorf("create backup file: %w", err)
 	}
 
 	writeErr := mount.WithReadonlyTempMount(ctx, mounts, func(root string) error {
 		dataDir := mountedDataDir(root)
-		if _, statErr := os.Stat(dataDir); statErr != nil {
+		m.logger.Info("[MYDEBUG] PreserveData: mounted snapshot, checking /data",
+			slog.String("bot_id", botID), slog.String("root", root),
+			slog.String("data_dir", dataDir))
+		stat, statErr := os.Stat(dataDir)
+		if statErr != nil {
+			m.logger.Warn("[MYDEBUG] PreserveData: /data does NOT exist in snapshot, nothing to backup",
+				slog.String("bot_id", botID), slog.Any("stat_error", statErr))
 			return nil // no /data to backup
 		}
+		m.logger.Info("[MYDEBUG] PreserveData: /data exists, starting tarGzDir",
+			slog.String("bot_id", botID), slog.Bool("is_dir", stat.IsDir()))
 		return tarGzDir(f, dataDir)
 	})
 
 	closeErr := f.Close()
 	if writeErr != nil {
 		_ = os.Remove(backupPath)
+		m.logger.Error("[MYDEBUG] PreserveData: tarGzDir/mount FAILED, backup removed",
+			slog.String("bot_id", botID), slog.Any("error", writeErr))
 		return fmt.Errorf("export data: %w", writeErr)
 	}
-	return closeErr
+	if closeErr != nil {
+		m.logger.Error("[MYDEBUG] PreserveData: file Close failed",
+			slog.String("bot_id", botID), slog.Any("error", closeErr))
+		return closeErr
+	}
+
+	// Log backup file size for verification
+	if fi, err := os.Stat(backupPath); err == nil {
+		m.logger.Info("[MYDEBUG] PreserveData: SUCCESS",
+			slog.String("bot_id", botID),
+			slog.String("backup_path", backupPath),
+			slog.Int64("backup_size_bytes", fi.Size()))
+	}
+	return nil
 }
 
 // RestorePreservedData imports preserved data (backup tar.gz or legacy
 // bind-mount directory) into a running container's /data.
 func (m *Manager) RestorePreservedData(ctx context.Context, botID string) error {
+	m.logger.Info("[MYDEBUG] RestorePreservedData called", slog.String("bot_id", botID))
+
 	bp := m.backupPath(botID)
-	if _, err := os.Stat(bp); err == nil {
+	m.logger.Info("[MYDEBUG] RestorePreservedData: checking backup tar.gz",
+		slog.String("bot_id", botID), slog.String("backup_path", bp))
+	if bpStat, err := os.Stat(bp); err == nil {
+		m.logger.Info("[MYDEBUG] RestorePreservedData: backup tar.gz found",
+			slog.String("bot_id", botID), slog.Int64("size_bytes", bpStat.Size()))
 		f, err := os.Open(bp) //nolint:gosec // G304: operator-controlled path
 		if err != nil {
+			m.logger.Error("[MYDEBUG] RestorePreservedData: failed to open backup",
+				slog.String("bot_id", botID), slog.Any("error", err))
 			return err
 		}
 		defer func() { _ = f.Close() }()
 
+		m.logger.Info("[MYDEBUG] RestorePreservedData: calling ImportData from tar.gz",
+			slog.String("bot_id", botID))
 		if err := m.ImportData(ctx, botID, f); err != nil {
+			m.logger.Error("[MYDEBUG] RestorePreservedData: ImportData failed",
+				slog.String("bot_id", botID), slog.Any("error", err))
 			return err
 		}
+		m.logger.Info("[MYDEBUG] RestorePreservedData: ImportData succeeded, removing backup",
+			slog.String("bot_id", botID))
 		return os.Remove(bp)
+	} else {
+		m.logger.Info("[MYDEBUG] RestorePreservedData: no backup tar.gz, checking legacy dir",
+			slog.String("bot_id", botID), slog.Any("stat_error", err))
 	}
 
 	// Legacy bind-mount directory
 	legacyDir := m.legacyDataDir(botID)
 	migratedDir := legacyDir + migratedSuffix
+	m.logger.Info("[MYDEBUG] RestorePreservedData: checking legacy paths",
+		slog.String("bot_id", botID),
+		slog.String("legacy_dir", legacyDir),
+		slog.String("migrated_dir", migratedDir))
+
 	if _, err := os.Stat(migratedDir); err == nil {
+		m.logger.Info("[MYDEBUG] RestorePreservedData: .migrated marker exists, already imported previously",
+			slog.String("bot_id", botID))
 		return nil // already imported previously
 	}
 	info, err := os.Stat(legacyDir)
 	if err != nil || !info.IsDir() {
+		m.logger.Error("[MYDEBUG] RestorePreservedData: no preserved data found anywhere",
+			slog.String("bot_id", botID), slog.Any("stat_error", err))
 		return errors.New("no preserved data found")
 	}
 
+	m.logger.Info("[MYDEBUG] RestorePreservedData: legacy dir found, calling importLegacyDir",
+		slog.String("bot_id", botID), slog.String("legacy_dir", legacyDir))
 	return m.importLegacyDir(ctx, botID, legacyDir)
 }
 
 // HasPreservedData checks whether backup data exists for a bot, either as
 // a tar.gz backup or a legacy bind-mount directory.
 func (m *Manager) HasPreservedData(botID string) bool {
-	if _, err := os.Stat(m.backupPath(botID)); err == nil {
+	bp := m.backupPath(botID)
+	if _, err := os.Stat(bp); err == nil {
+		m.logger.Info("[MYDEBUG] HasPreservedData: backup tar.gz exists",
+			slog.String("bot_id", botID), slog.String("backup_path", bp))
 		return true
 	}
 	legacyDir := m.legacyDataDir(botID)
 	if _, err := os.Stat(legacyDir + migratedSuffix); err == nil {
+		m.logger.Info("[MYDEBUG] HasPreservedData: .migrated marker found, already imported → false",
+			slog.String("bot_id", botID))
 		return false // already imported
 	}
 	info, err := os.Stat(legacyDir)
-	return err == nil && info.IsDir()
+	result := err == nil && info.IsDir()
+	m.logger.Info("[MYDEBUG] HasPreservedData: checked legacy dir",
+		slog.String("bot_id", botID), slog.String("legacy_dir", legacyDir),
+		slog.Bool("exists_and_is_dir", result), slog.Any("stat_error", err))
+	return result
 }
 
 // importLegacyDir copies a legacy bind-mount directory into the container
 // via snapshot mount, then renames the source to .migrated.
 func (m *Manager) importLegacyDir(ctx context.Context, botID, srcDir string) error {
 	containerID := m.containerID(botID)
+	m.logger.Info("[MYDEBUG] importLegacyDir called",
+		slog.String("bot_id", botID), slog.String("src_dir", srcDir),
+		slog.String("container_id", containerID))
 
 	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
+		m.logger.Error("[MYDEBUG] importLegacyDir: GetContainer failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return fmt.Errorf("get container: %w", err)
 	}
 
 	mounts, err := m.snapshotMounts(ctx, info)
 	if errors.Is(err, errMountNotSupported) {
+		m.logger.Info("[MYDEBUG] importLegacyDir: mounts not supported, using gRPC fallback",
+			slog.String("bot_id", botID))
 		return m.importLegacyDirViaGRPC(ctx, botID, srcDir)
 	}
 	if err != nil {
+		m.logger.Error("[MYDEBUG] importLegacyDir: snapshotMounts failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return err
 	}
 
+	m.logger.Info("[MYDEBUG] importLegacyDir: stopping task for import",
+		slog.String("bot_id", botID))
 	if err := m.safeStopTask(ctx, containerID); err != nil {
+		m.logger.Error("[MYDEBUG] importLegacyDir: safeStopTask failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return fmt.Errorf("stop container: %w", err)
 	}
 	defer m.restartContainer(context.WithoutCancel(ctx), botID, containerID)
 
+	m.logger.Info("[MYDEBUG] importLegacyDir: mounting snapshot and copying dir contents",
+		slog.String("bot_id", botID))
 	mountErr := mount.WithTempMount(ctx, mounts, func(root string) error {
 		dataDir := mountedDataDir(root)
+		m.logger.Info("[MYDEBUG] importLegacyDir: mounted, creating /data and copying",
+			slog.String("bot_id", botID), slog.String("data_dir", dataDir))
 		if err := os.MkdirAll(dataDir, 0o750); err != nil {
 			return err
 		}
 		return copyDirContents(srcDir, dataDir)
 	})
 	if mountErr != nil {
+		m.logger.Error("[MYDEBUG] importLegacyDir: mount/copy FAILED",
+			slog.String("bot_id", botID), slog.Any("error", mountErr))
 		return mountErr
 	}
 
+	m.logger.Info("[MYDEBUG] importLegacyDir: copy succeeded, renaming to .migrated",
+		slog.String("bot_id", botID))
 	if err := os.Rename(srcDir, srcDir+migratedSuffix); err != nil {
-		m.logger.Warn("legacy import: rename failed",
+		m.logger.Warn("[MYDEBUG] importLegacyDir: rename to .migrated failed (non-fatal)",
 			slog.String("src", srcDir), slog.Any("error", err))
 	}
+	m.logger.Info("[MYDEBUG] importLegacyDir: SUCCESS", slog.String("bot_id", botID))
 	return nil
 }
 
@@ -244,16 +348,27 @@ func (m *Manager) importLegacyDir(ctx context.Context, botID, srcDir string) err
 // backup archive. The caller should invoke restorePreservedIntoSnapshot after
 // creating the replacement container. Returns true when data was preserved.
 func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) bool {
+	m.logger.Info("[MYDEBUG] recoverOrphanedSnapshot called", slog.String("bot_id", botID))
+
 	snapshotter := m.cfg.Snapshotter
 	if snapshotter == "" {
+		m.logger.Info("[MYDEBUG] recoverOrphanedSnapshot: no snapshotter configured, skip",
+			slog.String("bot_id", botID))
 		return false
 	}
 
 	snapshotKey := m.containerID(botID)
+	m.logger.Info("[MYDEBUG] recoverOrphanedSnapshot: querying snapshot mounts",
+		slog.String("bot_id", botID), slog.String("snapshotter", snapshotter),
+		slog.String("snapshot_key", snapshotKey))
 	raw, err := m.service.SnapshotMounts(ctx, snapshotter, snapshotKey)
 	if err != nil {
+		m.logger.Info("[MYDEBUG] recoverOrphanedSnapshot: SnapshotMounts failed (no orphan)",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return false
 	}
+	m.logger.Info("[MYDEBUG] recoverOrphanedSnapshot: orphaned snapshot FOUND",
+		slog.String("bot_id", botID), slog.Int("mount_count", len(raw)))
 
 	mounts := make([]mount.Mount, len(raw))
 	for i, r := range raw {
@@ -262,40 +377,51 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 
 	backupPath := m.backupPath(botID)
 	if err := os.MkdirAll(filepath.Dir(backupPath), 0o750); err != nil {
-		m.logger.Warn("recover orphaned snapshot: mkdir failed",
+		m.logger.Warn("[MYDEBUG] recoverOrphanedSnapshot: mkdir failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		return false
 	}
 
 	f, err := os.Create(backupPath) //nolint:gosec // G304: operator-controlled path
 	if err != nil {
-		m.logger.Warn("recover orphaned snapshot: create backup failed",
+		m.logger.Warn("[MYDEBUG] recoverOrphanedSnapshot: create backup file failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		return false
 	}
 
 	writeErr := mount.WithReadonlyTempMount(ctx, mounts, func(root string) error {
 		dataDir := mountedDataDir(root)
+		m.logger.Info("[MYDEBUG] recoverOrphanedSnapshot: mounted, checking /data",
+			slog.String("bot_id", botID), slog.String("data_dir", dataDir))
 		if _, statErr := os.Stat(dataDir); statErr != nil {
+			m.logger.Warn("[MYDEBUG] recoverOrphanedSnapshot: /data does not exist in orphan",
+				slog.String("bot_id", botID), slog.Any("stat_error", statErr))
 			return nil
 		}
+		m.logger.Info("[MYDEBUG] recoverOrphanedSnapshot: /data exists, exporting",
+			slog.String("bot_id", botID))
 		return tarGzDir(f, dataDir)
 	})
 
 	closeErr := f.Close()
 	if writeErr != nil {
 		_ = os.Remove(backupPath)
-		m.logger.Warn("recover orphaned snapshot: export failed",
+		m.logger.Warn("[MYDEBUG] recoverOrphanedSnapshot: export FAILED",
 			slog.String("bot_id", botID), slog.Any("error", writeErr))
 		return false
 	}
 	if closeErr != nil {
 		_ = os.Remove(backupPath)
+		m.logger.Warn("[MYDEBUG] recoverOrphanedSnapshot: file close FAILED",
+			slog.String("bot_id", botID), slog.Any("error", closeErr))
 		return false
 	}
 
-	m.logger.Info("recovered data from orphaned snapshot",
-		slog.String("bot_id", botID), slog.String("backup", backupPath))
+	if fi, err := os.Stat(backupPath); err == nil {
+		m.logger.Info("[MYDEBUG] recoverOrphanedSnapshot: SUCCESS",
+			slog.String("bot_id", botID), slog.String("backup", backupPath),
+			slog.Int64("backup_size_bytes", fi.Size()))
+	}
 	return true
 }
 
@@ -304,35 +430,70 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 // stop/start cycle that RestorePreservedData (via ImportData) requires.
 func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string) error {
 	bp := m.backupPath(botID)
+	m.logger.Info("[MYDEBUG] restorePreservedIntoSnapshot called",
+		slog.String("bot_id", botID), slog.String("backup_path", bp))
+
+	bpStat, statErr := os.Stat(bp)
+	if statErr != nil {
+		m.logger.Error("[MYDEBUG] restorePreservedIntoSnapshot: backup file does NOT exist",
+			slog.String("bot_id", botID), slog.Any("error", statErr))
+	} else {
+		m.logger.Info("[MYDEBUG] restorePreservedIntoSnapshot: backup file found",
+			slog.String("bot_id", botID), slog.Int64("size_bytes", bpStat.Size()))
+	}
+
 	f, err := os.Open(bp) //nolint:gosec // G304: operator-controlled path
 	if err != nil {
+		m.logger.Error("[MYDEBUG] restorePreservedIntoSnapshot: os.Open FAILED",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return err
 	}
 	defer func() { _ = f.Close() }()
 
 	containerID := m.containerID(botID)
+	m.logger.Info("[MYDEBUG] restorePreservedIntoSnapshot: getting container info",
+		slog.String("bot_id", botID), slog.String("container_id", containerID))
 	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
+		m.logger.Error("[MYDEBUG] restorePreservedIntoSnapshot: GetContainer FAILED",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return fmt.Errorf("get container: %w", err)
 	}
 
+	m.logger.Info("[MYDEBUG] restorePreservedIntoSnapshot: getting snapshot mounts",
+		slog.String("bot_id", botID),
+		slog.String("snapshotter", info.Snapshotter),
+		slog.String("snapshot_key", info.SnapshotKey))
 	mounts, err := m.snapshotMounts(ctx, info)
 	if err != nil {
+		m.logger.Error("[MYDEBUG] restorePreservedIntoSnapshot: snapshotMounts FAILED",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return err
 	}
+	m.logger.Info("[MYDEBUG] restorePreservedIntoSnapshot: mounting snapshot and untarring",
+		slog.String("bot_id", botID), slog.Int("mount_count", len(mounts)))
 
 	if err := mount.WithTempMount(ctx, mounts, func(root string) error {
 		dataDir := mountedDataDir(root)
+		m.logger.Info("[MYDEBUG] restorePreservedIntoSnapshot: mounted at root, creating /data",
+			slog.String("bot_id", botID), slog.String("root", root),
+			slog.String("data_dir", dataDir))
 		if err := os.MkdirAll(dataDir, 0o750); err != nil {
+			m.logger.Error("[MYDEBUG] restorePreservedIntoSnapshot: MkdirAll /data FAILED",
+				slog.String("bot_id", botID), slog.Any("error", err))
 			return err
 		}
+		m.logger.Info("[MYDEBUG] restorePreservedIntoSnapshot: calling untarGzDir",
+			slog.String("bot_id", botID))
 		return untarGzDir(f, dataDir)
 	}); err != nil {
+		m.logger.Error("[MYDEBUG] restorePreservedIntoSnapshot: WithTempMount/untarGzDir FAILED",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return err
 	}
 
 	_ = os.Remove(bp)
-	m.logger.Info("restored preserved data into new container",
+	m.logger.Info("[MYDEBUG] restorePreservedIntoSnapshot: SUCCESS, backup removed",
 		slog.String("bot_id", botID))
 	return nil
 }
@@ -560,11 +721,34 @@ func tarGzDir(w io.Writer, dir string) error {
 		if err != nil || rel == "." {
 			return err
 		}
-		info, err := d.Info()
+
+		if d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			header, err := tar.FileInfoHeader(info, "")
+			if err != nil {
+				return err
+			}
+			header.Name = filepath.ToSlash(rel)
+			return tw.WriteHeader(header)
+		}
+
+		// For regular files: open first, then Fstat on the same fd so that
+		// the size in the tar header is guaranteed to match the content we
+		// read. This avoids race conditions and overlayfs size mismatches
+		// that cause "archive/tar: write too long".
+		f, err := os.Open(path) //nolint:gosec // G304: iterating operator-controlled data directory
 		if err != nil {
 			return err
 		}
+		defer func() { _ = f.Close() }()
 
+		info, err := f.Stat()
+		if err != nil {
+			return err
+		}
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
@@ -574,17 +758,7 @@ func tarGzDir(w io.Writer, dir string) error {
 		if err := tw.WriteHeader(header); err != nil {
 			return err
 		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		f, err := os.Open(path) //nolint:gosec // G304: iterating operator-controlled data directory
-		if err != nil {
-			return err
-		}
-		defer func() { _ = f.Close() }()
-		_, err = io.Copy(tw, f)
+		_, err = io.Copy(tw, io.LimitReader(f, info.Size()))
 		return err
 	})
 }

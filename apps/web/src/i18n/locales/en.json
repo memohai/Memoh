@@ -672,6 +672,7 @@
       "rollbackSuccess": "Snapshot rolled back",
       "pullingImage": "Pulling image...",
       "creatingContainer": "Creating container...",
+      "restoringData": "Restoring data, this may take a while for large volumes...",
       "snapshotEmpty": "No snapshots found",
       "snapshotLoadFailed": "Failed to load snapshots",
       "snapshotNamePlaceholder": "Snapshot display name (optional)",

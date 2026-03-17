@@ -293,6 +293,9 @@ func (m *Manager) StartWithResolvedImage(ctx context.Context, botID, image strin
 
 func (m *Manager) startWithResolvedImage(ctx context.Context, botID, image string) error {
 	containerID := m.containerID(botID)
+	m.logger.Info("[MYDEBUG] startWithResolvedImage called",
+		slog.String("bot_id", botID), slog.String("image", image),
+		slog.String("container_id", containerID))
 
 	// Before creating a new container, check for an orphaned snapshot
 	// (container deleted but snapshot with /data survived). Export /data
@@ -300,24 +303,49 @@ func (m *Manager) startWithResolvedImage(ctx context.Context, botID, image strin
 	// container. This covers dev image rebuilds, containerd metadata loss,
 	// and manual container deletion.
 	if _, err := m.service.GetContainer(ctx, containerID); errdefs.IsNotFound(err) {
-		m.recoverOrphanedSnapshot(ctx, botID)
+		m.logger.Info("[MYDEBUG] container not found in containerd, attempting orphaned snapshot recovery",
+			slog.String("bot_id", botID))
+		recovered := m.recoverOrphanedSnapshot(ctx, botID)
+		m.logger.Info("[MYDEBUG] orphaned snapshot recovery result",
+			slog.String("bot_id", botID), slog.Bool("recovered", recovered))
+	} else {
+		m.logger.Info("[MYDEBUG] container already exists in containerd, skipping orphaned snapshot recovery",
+			slog.String("bot_id", botID))
 	}
 
+	m.logger.Info("[MYDEBUG] calling ensureBotWithImage",
+		slog.String("bot_id", botID), slog.String("image", image))
 	if err := m.ensureBotWithImage(ctx, botID, image); err != nil {
+		m.logger.Error("[MYDEBUG] ensureBotWithImage failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
 		return err
 	}
+	m.logger.Info("[MYDEBUG] ensureBotWithImage succeeded", slog.String("bot_id", botID))
 
 	// Restore preserved data (from orphaned snapshot recovery or a previous
 	// CleanupBotContainer with preserveData) into the fresh snapshot before
 	// starting the task, avoiding a redundant stop/start cycle.
-	if m.HasPreservedData(botID) {
+	hasPreserved := m.HasPreservedData(botID)
+	m.logger.Info("[MYDEBUG] checking HasPreservedData before restore",
+		slog.String("bot_id", botID), slog.Bool("has_preserved", hasPreserved),
+		slog.String("backup_path", m.backupPath(botID)),
+		slog.String("legacy_dir", m.legacyDataDir(botID)))
+	if hasPreserved {
+		m.logger.Info("[MYDEBUG] calling restorePreservedIntoSnapshot",
+			slog.String("bot_id", botID))
 		if err := m.restorePreservedIntoSnapshot(ctx, botID); err != nil {
-			m.logger.Warn("restore preserved data into new container failed",
+			m.logger.Error("[MYDEBUG] restorePreservedIntoSnapshot FAILED — aborting container start",
 				slog.String("bot_id", botID), slog.Any("error", err))
+			return fmt.Errorf("restore preserved data: %w", err)
 		}
+		m.logger.Info("[MYDEBUG] restorePreservedIntoSnapshot succeeded",
+			slog.String("bot_id", botID))
 	}
 
+	m.logger.Info("[MYDEBUG] starting container task", slog.String("container_id", containerID))
 	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
+		m.logger.Error("[MYDEBUG] StartContainer failed",
+			slog.String("container_id", containerID), slog.Any("error", err))
 		return err
 	}
 
@@ -336,7 +364,7 @@ func (m *Manager) startWithResolvedImage(ctx context.Context, botID, image strin
 	if !m.IsLegacyContainer(ctx, containerID) {
 		m.clearLegacyRoute(botID)
 	}
-	m.logger.Info("container started", slog.String("bot_id", botID))
+	m.logger.Info("[MYDEBUG] container started successfully", slog.String("bot_id", botID))
 	return nil
 }
 
@@ -355,35 +383,88 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 		return err
 	}
 
-	containerID := m.containerID(botID)
+	// Resolve the actual container ID. The container may be a legacy "mcp-"
+	// container or a new "workspace-" container. We must use the real ID so
+	// that GetContainer/PreserveData/DeleteContainer operate on the correct
+	// containerd object.
+	containerID, err := m.ContainerID(ctx, botID)
+	if err != nil {
+		// Fallback to the default (new-style) container ID only when not
+		// preserving data — if we need to preserve, we must find the real
+		// container.
+		if preserveData {
+			m.logger.Error("[MYDEBUG] Delete: ContainerID resolution failed with preserve_data=true, aborting",
+				slog.String("bot_id", botID), slog.Any("error", err))
+			return fmt.Errorf("resolve container for preserve: %w", err)
+		}
+		containerID = m.containerID(botID)
+		m.logger.Warn("[MYDEBUG] Delete: ContainerID resolution failed, falling back to default",
+			slog.String("bot_id", botID), slog.String("fallback_container_id", containerID),
+			slog.Any("error", err))
+	}
+
 	stoppedForPreserve := false
+	m.logger.Info("[MYDEBUG] Delete called",
+		slog.String("bot_id", botID), slog.String("container_id", containerID),
+		slog.Bool("preserve_data", preserveData))
 
 	if preserveData {
+		m.logger.Info("[MYDEBUG] Delete: preserveData=true, getting container info",
+			slog.String("bot_id", botID))
 		info, err := m.service.GetContainer(ctx, containerID)
 		if err != nil {
+			m.logger.Error("[MYDEBUG] Delete: GetContainer failed",
+				slog.String("bot_id", botID), slog.Any("error", err))
 			return fmt.Errorf("get container for preserve: %w", err)
 		}
+		m.logger.Info("[MYDEBUG] Delete: got container info, checking snapshot mounts",
+			slog.String("bot_id", botID),
+			slog.String("snapshotter", info.Snapshotter),
+			slog.String("snapshot_key", info.SnapshotKey))
+
 		if _, err := m.snapshotMounts(ctx, info); errors.Is(err, errMountNotSupported) {
+			m.logger.Info("[MYDEBUG] Delete: snapshot mounts not supported (Apple backend), will use gRPC fallback",
+				slog.String("bot_id", botID))
 			// Apple backend fallback uses gRPC against a running container.
 		} else if err != nil {
+			m.logger.Error("[MYDEBUG] Delete: snapshotMounts failed",
+				slog.String("bot_id", botID), slog.Any("error", err))
 			return err
 		} else {
+			m.logger.Info("[MYDEBUG] Delete: snapshot mounts OK, stopping task for preserve",
+				slog.String("bot_id", botID))
 			if err := m.safeStopTask(ctx, containerID); err != nil {
+				m.logger.Error("[MYDEBUG] Delete: safeStopTask failed",
+					slog.String("bot_id", botID), slog.Any("error", err))
 				return fmt.Errorf("stop for data preserve: %w", err)
 			}
 			stoppedForPreserve = true
+			m.logger.Info("[MYDEBUG] Delete: task stopped for preserve",
+				slog.String("bot_id", botID))
 		}
 
+		m.logger.Info("[MYDEBUG] Delete: calling PreserveData",
+			slog.String("bot_id", botID))
 		if err := m.PreserveData(ctx, botID); err != nil {
+			m.logger.Error("[MYDEBUG] Delete: PreserveData FAILED",
+				slog.String("bot_id", botID), slog.Any("error", err),
+				slog.Bool("stopped_for_preserve", stoppedForPreserve))
 			// Export failed — restart only if we stopped the task, and abort
 			// deletion to prevent data loss.
 			if stoppedForPreserve {
+				m.logger.Info("[MYDEBUG] Delete: restarting container after failed preserve",
+					slog.String("bot_id", botID))
 				m.restartContainer(ctx, botID, containerID)
 			}
 			return fmt.Errorf("preserve data: %w", err)
 		}
+		m.logger.Info("[MYDEBUG] Delete: PreserveData succeeded, backup at",
+			slog.String("bot_id", botID),
+			slog.String("backup_path", m.backupPath(botID)))
 	}
 
+	m.logger.Info("[MYDEBUG] Delete: clearing legacy route and cleaning up",
+		slog.String("bot_id", botID))
 	m.clearLegacyRoute(botID)
 
 	if err := m.service.RemoveNetwork(ctx, ctr.NetworkSetupRequest{
@@ -391,11 +472,15 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 		CNIBinDir:   m.cfg.CNIBinaryDir,
 		CNIConfDir:  m.cfg.CNIConfigDir,
 	}); err != nil {
-		m.logger.Warn("cleanup: remove network failed", slog.String("container_id", containerID), slog.Any("error", err))
+		m.logger.Warn("[MYDEBUG] Delete: RemoveNetwork failed (non-fatal)",
+			slog.String("container_id", containerID), slog.Any("error", err))
 	}
 	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
-		m.logger.Warn("cleanup: delete task failed", slog.String("container_id", containerID), slog.Any("error", err))
+		m.logger.Warn("[MYDEBUG] Delete: DeleteTask failed (non-fatal)",
+			slog.String("container_id", containerID), slog.Any("error", err))
 	}
+	m.logger.Info("[MYDEBUG] Delete: deleting container with CleanupSnapshot=true",
+		slog.String("container_id", containerID))
 	return m.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{
 		CleanupSnapshot: true,
 	})
