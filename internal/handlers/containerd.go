@@ -303,22 +303,14 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}
 
 	dataRestored := false
-	h.logger.Info("[MYDEBUG] handler CreateContainer: checking restore conditions",
-		slog.String("bot_id", botID),
-		slog.Bool("req_restore_data", req.RestoreData),
-		slog.Bool("has_preserved_data", h.manager.HasPreservedData(botID)))
 	if req.RestoreData && h.manager.HasPreservedData(botID) {
-		h.logger.Info("[MYDEBUG] handler CreateContainer: calling RestorePreservedData",
-			slog.String("bot_id", botID))
 		if err := h.manager.RestorePreservedData(ctx, botID); err != nil {
-			h.logger.Error("[MYDEBUG] handler CreateContainer: RestorePreservedData FAILED — reporting error to client",
+			h.logger.Error("restore preserved data failed",
 				slog.String("bot_id", botID), slog.Any("error", err))
 			sendError("restore preserved data failed: " + err.Error())
 			return nil
 		}
 		dataRestored = true
-		h.logger.Info("[MYDEBUG] handler CreateContainer: RestorePreservedData succeeded",
-			slog.String("bot_id", botID))
 	}
 
 	h.manager.RecordContainerRunning(ctx, botID, containerID, image)
@@ -388,15 +380,9 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 		return err
 	}
 	preserveData := c.QueryParam("preserve_data") == "true"
-	h.logger.Info("[MYDEBUG] handler DeleteContainer called",
-		slog.String("bot_id", botID), slog.Bool("preserve_data", preserveData))
 	if err := h.manager.CleanupBotContainer(c.Request().Context(), botID, preserveData); err != nil {
-		h.logger.Error("[MYDEBUG] handler DeleteContainer: CleanupBotContainer FAILED",
-			slog.String("bot_id", botID), slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	h.logger.Info("[MYDEBUG] handler DeleteContainer: success",
-		slog.String("bot_id", botID))
 	return c.NoContent(http.StatusNoContent)
 }
 

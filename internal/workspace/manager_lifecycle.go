@@ -296,33 +296,21 @@ func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
 // CleanupBotContainer removes the container and DB record for a bot.
 // When preserveData is true, /data is exported to a backup archive before deletion.
 func (m *Manager) CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error {
-	m.logger.Info("[MYDEBUG] CleanupBotContainer starting",
-		slog.String("bot_id", botID), slog.Bool("preserve_data", preserveData))
-
 	if err := m.Delete(ctx, botID, preserveData); err != nil {
 		if preserveData {
 			// When preserving data, any error (including NotFound) must
 			// block the workflow — we cannot delete the DB record if we
 			// failed to preserve data.
-			m.logger.Error("[MYDEBUG] CleanupBotContainer: Delete failed with preserve_data=true, aborting",
-				slog.String("bot_id", botID), slog.Any("error", err))
 			return err
 		}
 		if !errdefs.IsNotFound(err) {
-			m.logger.Error("[MYDEBUG] CleanupBotContainer: Delete returned error, aborting",
-				slog.String("bot_id", botID), slog.Any("error", err))
 			return err
 		}
-		m.logger.Warn("[MYDEBUG] CleanupBotContainer: container not found in containerd (NotFound, preserve_data=false, continuing)",
-			slog.String("bot_id", botID))
-	} else {
-		m.logger.Info("[MYDEBUG] CleanupBotContainer: Delete succeeded",
+		m.logger.Warn("cleanup: container not found in containerd, continuing",
 			slog.String("bot_id", botID))
 	}
 
 	m.deleteContainerRecord(ctx, botID)
-	m.logger.Info("[MYDEBUG] CleanupBotContainer finished, DB record deleted",
-		slog.String("bot_id", botID))
 	return nil
 }
 
