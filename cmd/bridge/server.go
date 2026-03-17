@@ -59,11 +59,11 @@ func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*p
 		return nil, status.Errorf(codes.Internal, "seek: %v", err)
 	}
 
-	lineOffset := int(req.GetLineOffset())
+	lineOffset := req.GetLineOffset()
 	if lineOffset < 1 {
 		lineOffset = 1
 	}
-	nLines := int(req.GetNLines())
+	nLines := req.GetNLines()
 	if nLines < 1 || nLines > readMaxLines {
 		nLines = readMaxLines
 	}
@@ -71,10 +71,10 @@ func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*p
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	currentLine := 0
-	totalLines := 0
+	var currentLine int32
+	var totalLines int32
 	var out strings.Builder
-	linesRead := 0
+	var linesRead int32
 	bytesWritten := 0
 
 	for scanner.Scan() {
@@ -108,7 +108,7 @@ func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*p
 
 	return &pb.ReadFileResponse{
 		Content:    out.String(),
-		TotalLines: int32(totalLines), //nolint:gosec // file line count won't exceed int32
+		TotalLines: totalLines,
 	}, nil
 }
 
