@@ -9,12 +9,14 @@ import (
 // MessageAsset carries media asset metadata attached to a message.
 // ContentHash is the content-addressed identifier for the media file.
 type MessageAsset struct {
-	ContentHash string `json:"content_hash"`
-	Role        string `json:"role"`
-	Ordinal     int    `json:"ordinal"`
-	Mime        string `json:"mime"`
-	SizeBytes   int64  `json:"size_bytes"`
-	StorageKey  string `json:"storage_key"`
+	ContentHash string         `json:"content_hash"`
+	Role        string         `json:"role"`
+	Ordinal     int            `json:"ordinal"`
+	Mime        string         `json:"mime"`
+	SizeBytes   int64          `json:"size_bytes"`
+	StorageKey  string         `json:"storage_key"`
+	Name        string         `json:"name,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 // Message represents a single persisted bot message.
@@ -40,12 +42,14 @@ type Message struct {
 // AssetRef links a media asset to a persisted message.
 // ContentHash is the content-addressed identifier for the media file.
 type AssetRef struct {
-	ContentHash string `json:"content_hash"`
-	Role        string `json:"role"`
-	Ordinal     int    `json:"ordinal"`
-	Mime        string `json:"mime,omitempty"`
-	SizeBytes   int64  `json:"size_bytes,omitempty"`
-	StorageKey  string `json:"storage_key,omitempty"`
+	ContentHash string         `json:"content_hash"`
+	Role        string         `json:"role"`
+	Ordinal     int            `json:"ordinal"`
+	Mime        string         `json:"mime,omitempty"`
+	SizeBytes   int64          `json:"size_bytes,omitempty"`
+	StorageKey  string         `json:"storage_key,omitempty"`
+	Name        string         `json:"name,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 // PersistInput is the input for persisting a message.
@@ -79,4 +83,5 @@ type Service interface {
 	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
 	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
 	DeleteByBot(ctx context.Context, botID string) error
+	LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error
 }

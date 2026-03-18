@@ -164,6 +164,8 @@ export const useChatStore = defineStore('chat', () => {
       mime: a.mime,
       size: a.size_bytes,
       storage_key: a.storage_key,
+      name: a.name || undefined,
+      metadata: a.metadata || undefined,
     }))
     return [{ type: 'attachment', attachments: items }]
   }

@@ -87,6 +87,7 @@ type FileAttachment struct {
 	Path string `json:"path,omitempty"`
 	URL  string `json:"url,omitempty"`
 	Mime string `json:"mime,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 // ReactionItem represents an emoji reaction extracted from agent output.

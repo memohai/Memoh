@@ -1677,6 +1677,7 @@ func (p *ChannelInboundProcessor) ingestOutboundAttachments(ctx context.Context,
 			result = append(result, item)
 			continue
 		}
+		sourceURL := item.URL
 		item.ContentHash = asset.ContentHash
 		item.URL = ""
 		item.Base64 = ""
@@ -1685,6 +1686,12 @@ func (p *ChannelInboundProcessor) ingestOutboundAttachments(ctx context.Context,
 		}
 		item.Metadata["bot_id"] = botID
 		item.Metadata["storage_key"] = asset.StorageKey
+		if n := strings.TrimSpace(item.Name); n != "" {
+			item.Metadata["name"] = n
+		}
+		if su := strings.TrimSpace(sourceURL); su != "" && !isDataURL(su) {
+			item.Metadata["source_url"] = su
+		}
 		if strings.TrimSpace(item.Mime) == "" {
 			item.Mime = attachment.NormalizeMime(asset.Mime)
 		}
@@ -1710,12 +1717,14 @@ func isHTTPURL(raw string) bool {
 // For non-media-marker paths, it ingests the file into the media store first.
 // Returns true if the asset was resolved and item was updated.
 func (p *ChannelInboundProcessor) resolveContainerPathAsset(ctx context.Context, botID, accessPath string, item *channel.Attachment) bool {
+	sourcePath := accessPath
+
 	// Try media marker lookup first.
 	storageKey := extractStorageKey(accessPath, botID)
 	if storageKey != "" {
 		asset, err := p.mediaService.GetByStorageKey(ctx, botID, storageKey)
 		if err == nil {
-			applyAssetToAttachment(asset, botID, item)
+			applyAssetToAttachment(asset, botID, item, sourcePath)
 			return true
 		}
 	}
@@ -1733,14 +1742,15 @@ func (p *ChannelInboundProcessor) resolveContainerPathAsset(ctx context.Context,
 			}
 			return false
 		}
-		applyAssetToAttachment(asset, botID, item)
+		applyAssetToAttachment(asset, botID, item, sourcePath)
 		return true
 	}
 
 	return false
 }
 
-func applyAssetToAttachment(asset media.Asset, botID string, item *channel.Attachment) {
+func applyAssetToAttachment(asset media.Asset, botID string, item *channel.Attachment, sourcePath string) {
+	sourceURL := item.URL
 	item.ContentHash = asset.ContentHash
 	item.URL = ""
 	if item.Metadata == nil {
@@ -1748,13 +1758,21 @@ func applyAssetToAttachment(asset media.Asset, botID string, item *channel.Attac
 	}
 	item.Metadata["bot_id"] = botID
 	item.Metadata["storage_key"] = asset.StorageKey
+	if n := strings.TrimSpace(item.Name); n != "" {
+		item.Metadata["name"] = n
+	}
+	if sp := strings.TrimSpace(sourcePath); sp != "" {
+		item.Metadata["source_path"] = sp
+	}
+	if su := strings.TrimSpace(sourceURL); su != "" && !isDataURL(su) {
+		item.Metadata["source_url"] = su
+	}
 	if strings.TrimSpace(item.Mime) == "" {
 		item.Mime = attachment.NormalizeMime(asset.Mime)
 	}
 	if item.Size == 0 && asset.SizeBytes > 0 {
 		item.Size = asset.SizeBytes
 	}
-	// Infer a better attachment type from MIME when the TS side sent a generic "file".
 	if item.Type == channel.AttachmentFile || item.Type == "" {
 		item.Type = inferAttachmentTypeFromMime(strings.TrimSpace(item.Mime))
 	}
@@ -2024,6 +2042,8 @@ func buildAssetRefs(attachments []channel.Attachment, startOrdinal int) []conver
 			Ordinal:     startOrdinal + len(refs),
 			Mime:        strings.TrimSpace(att.Mime),
 			SizeBytes:   att.Size,
+			Name:        strings.TrimSpace(att.Name),
+			Metadata:    att.Metadata,
 		}
 		if att.Metadata != nil {
 			if sk, ok := att.Metadata["storage_key"].(string); ok {

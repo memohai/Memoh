@@ -492,6 +492,8 @@ CREATE TABLE IF NOT EXISTS bot_history_message_assets (
   role TEXT NOT NULL DEFAULT 'attachment',
   ordinal INTEGER NOT NULL DEFAULT 0,
   content_hash TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT message_asset_content_unique UNIQUE (message_id, content_hash)
 );

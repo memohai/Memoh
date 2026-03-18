@@ -43,23 +43,6 @@
         />
       </div>
 
-      <!-- Downloadable file -->
-      <a
-        v-else-if="getUrl(att)"
-        :href="getUrl(att)"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 hover:bg-muted/60 transition-colors text-sm"
-      >
-        <FontAwesomeIcon
-          :icon="['fas', fileIcon(att)]"
-          class="size-4 text-muted-foreground"
-        />
-        <span class="truncate max-w-[200px]">
-          {{ String(att.name ?? 'file') }}
-        </span>
-      </a>
-
       <!-- Container file attachment — open in file manager -->
       <button
         v-else-if="getContainerPath(att)"
@@ -80,6 +63,23 @@
           class="size-3 text-muted-foreground/60 shrink-0"
         />
       </button>
+
+      <!-- Downloadable file -->
+      <a
+        v-else-if="getUrl(att)"
+        :href="getUrl(att)"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 hover:bg-muted/60 transition-colors text-sm"
+      >
+        <FontAwesomeIcon
+          :icon="['fas', fileIcon(att)]"
+          class="size-4 text-muted-foreground"
+        />
+        <span class="truncate max-w-[200px]">
+          {{ String(att.name ?? 'file') }}
+        </span>
+      </a>
 
       <!-- Non-accessible attachment -->
       <div
@@ -137,7 +137,10 @@ function isAudio(att: Record<string, unknown>): boolean {
 }
 
 function getContainerPath(att: AttachmentItem): string {
-  return String(att.path ?? '').trim()
+  const direct = String(att.path ?? '').trim()
+  if (direct) return direct
+  const meta = att.metadata as Record<string, unknown> | undefined
+  return String(meta?.source_path ?? '').trim()
 }
 
 function getDisplayName(att: AttachmentItem): string {

@@ -21,6 +21,8 @@ export interface MessageAsset {
   mime: string
   size_bytes: number
   storage_key: string
+  name?: string
+  metadata?: Record<string, unknown>
 }
 
 export interface Message {

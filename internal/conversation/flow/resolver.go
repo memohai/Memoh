@@ -683,6 +683,30 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	return true, r.storeRound(ctx, req, roundMessages, envelope.Usage, usages, modelID)
 }
 
+// LinkOutboundAssets links bot-generated assets to the latest assistant
+// message for the given bot. Used by the WebSocket path where attachment
+// ingestion happens after message persistence.
+func (r *Resolver) LinkOutboundAssets(ctx context.Context, botID string, assets []messagepkg.AssetRef) {
+	if r.messageService == nil || len(assets) == 0 || strings.TrimSpace(botID) == "" {
+		return
+	}
+	// ListLatest returns messages in DESC order (newest first).
+	msgs, err := r.messageService.ListLatest(ctx, botID, 5)
+	if err != nil {
+		r.logger.Warn("LinkOutboundAssets: list latest failed", slog.Any("error", err))
+		return
+	}
+	for _, msg := range msgs {
+		if msg.Role == "assistant" {
+			if linkErr := r.messageService.LinkAssets(ctx, msg.ID, assets); linkErr != nil {
+				r.logger.Warn("LinkOutboundAssets: link failed", slog.Any("error", linkErr))
+			}
+			return
+		}
+	}
+	r.logger.Warn("LinkOutboundAssets: no assistant message found", slog.String("bot_id", botID))
+}
+
 // routeAndMergeAttachments applies CapabilityFallbackPolicy to split
 // request attachments by model input modalities, then merges the results
 // into a single []any for the gateway request.
@@ -1249,6 +1273,8 @@ func outboundAssetRefsToMessageRefs(refs []conversation.OutboundAssetRef) []mess
 			Mime:        ref.Mime,
 			SizeBytes:   ref.SizeBytes,
 			StorageKey:  ref.StorageKey,
+			Name:        ref.Name,
+			Metadata:    ref.Metadata,
 		})
 	}
 	return result
@@ -1272,6 +1298,8 @@ func chatAttachmentsToAssetRefs(attachments []conversation.ChatAttachment) []mes
 			Ordinal:     i,
 			Mime:        strings.TrimSpace(att.Mime),
 			SizeBytes:   att.Size,
+			Name:        strings.TrimSpace(att.Name),
+			Metadata:    att.Metadata,
 		}
 		if att.Metadata != nil {
 			if sk, ok := att.Metadata["storage_key"].(string); ok {

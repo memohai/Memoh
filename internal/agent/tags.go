@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -52,12 +54,12 @@ func AttachmentsResolver() TagResolver {
 				if _, ok := seen[path]; ok {
 					continue
 				}
-				seen[path] = struct{}{}
-				att := FileAttachment{Path: path, Type: "file"}
-				if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-					att = FileAttachment{URL: path, Type: "image"}
-				}
-				result = append(result, att)
+			seen[path] = struct{}{}
+			att := FileAttachment{Path: path, Type: "file", Name: filenameFromPath(path)}
+			if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+				att = FileAttachment{URL: path, Type: "image", Name: filenameFromURL(path)}
+			}
+			result = append(result, att)
 			}
 			return result
 		},
@@ -252,4 +254,20 @@ func (e *StreamTagExtractor) FlushRemainder() TagStreamResult {
 	e.tagBuffer = ""
 	e.activeMeta = nil
 	return TagStreamResult{VisibleText: out}
+}
+
+func filenameFromPath(p string) string {
+	return filepath.Base(p)
+}
+
+func filenameFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	base := filepath.Base(u.Path)
+	if base == "." || base == "/" {
+		return ""
+	}
+	return base
 }

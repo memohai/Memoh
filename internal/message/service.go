@@ -113,6 +113,8 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 			Role:        role,
 			Ordinal:     int32(ref.Ordinal),
 			ContentHash: contentHash,
+			Name:        ref.Name,
+			Metadata:    marshalMetadata(ref.Metadata),
 		}); assetErr != nil {
 			s.logger.Warn("create message asset link failed", slog.String("message_id", result.ID), slog.Any("error", assetErr))
 		}
@@ -134,6 +136,8 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 				Mime:        ref.Mime,
 				SizeBytes:   ref.SizeBytes,
 				StorageKey:  ref.StorageKey,
+				Name:        ref.Name,
+				Metadata:    ref.Metadata,
 			})
 		}
 		result.Assets = assets
@@ -229,6 +233,38 @@ func (s *DBService) ListBefore(ctx context.Context, botID string, before time.Ti
 	msgs := toMessagesFromBefore(rows)
 	s.enrichAssets(ctx, msgs)
 	return msgs, nil
+}
+
+// LinkAssets links asset refs to an existing persisted message.
+func (s *DBService) LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error {
+	pgMsgID, err := dbpkg.ParseUUID(messageID)
+	if err != nil {
+		return fmt.Errorf("invalid message id: %w", err)
+	}
+	for _, ref := range assets {
+		contentHash := strings.TrimSpace(ref.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		role := ref.Role
+		if strings.TrimSpace(role) == "" {
+			role = "attachment"
+		}
+		if ref.Ordinal < math.MinInt32 || ref.Ordinal > math.MaxInt32 {
+			return fmt.Errorf("asset ordinal out of range: %d", ref.Ordinal)
+		}
+		if _, assetErr := s.queries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
+			MessageID:   pgMsgID,
+			Role:        role,
+			Ordinal:     int32(ref.Ordinal),
+			ContentHash: contentHash,
+			Name:        ref.Name,
+			Metadata:    marshalMetadata(ref.Metadata),
+		}); assetErr != nil {
+			s.logger.Warn("link asset failed", slog.String("message_id", messageID), slog.Any("error", assetErr))
+		}
+	}
+	return nil
 }
 
 // DeleteByBot deletes all messages for a bot.
@@ -530,9 +566,8 @@ func (s *DBService) enrichAssets(ctx context.Context, messages []Message) {
 			ContentHash: contentHash,
 			Role:        row.Role,
 			Ordinal:     int(row.Ordinal),
-			Mime:        "",
-			SizeBytes:   0,
-			StorageKey:  "",
+			Name:        row.Name,
+			Metadata:    unmarshalMetadata(row.Metadata),
 		})
 	}
 	for i := range messages {
@@ -552,4 +587,26 @@ func ensureAssetsSlice(messages []Message) {
 			messages[i].Assets = []MessageAsset{}
 		}
 	}
+}
+
+func marshalMetadata(m map[string]any) []byte {
+	if len(m) == 0 {
+		return []byte("{}")
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
+}
+
+func unmarshalMetadata(b []byte) map[string]any {
+	if len(b) == 0 {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil || len(m) == 0 {
+		return nil
+	}
+	return m
 }
