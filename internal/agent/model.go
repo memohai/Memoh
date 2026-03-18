@@ -53,6 +53,13 @@ func CreateModel(cfg ModelConfig) *sdk.Model {
 		if cfg.BaseURL != "" {
 			opts = append(opts, anthropicmessages.WithBaseURL(cfg.BaseURL))
 		}
+		if cfg.ReasoningConfig != nil && cfg.ReasoningConfig.Enabled {
+			budget := ReasoningBudgetTokens(ClientTypeAnthropicMessages, cfg.ReasoningConfig.Effort)
+			opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
+				Type:         "enabled",
+				BudgetTokens: budget,
+			}))
+		}
 		p := anthropicmessages.New(opts...)
 		return p.ChatModel(cfg.ModelID)
 

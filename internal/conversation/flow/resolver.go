@@ -287,12 +287,21 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		reasoningEffort = botSettings.ReasoningEffort
 	}
 
+	var reasoningConfig *agentpkg.ReasoningConfig
+	if reasoningEffort != "" {
+		reasoningConfig = &agentpkg.ReasoningConfig{
+			Enabled: true,
+			Effort:  reasoningEffort,
+		}
+	}
+
 	modelCfg := agentpkg.ModelConfig{
 		ModelID:         chatModel.ModelID,
 		ClientType:      clientType,
 		InputModalities: chatModel.InputModalities,
 		APIKey:          provider.ApiKey,
 		BaseURL:         provider.BaseUrl,
+		ReasoningConfig: reasoningConfig,
 	}
 
 	sdkModel := agentpkg.CreateModel(modelCfg)
