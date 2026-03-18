@@ -40,7 +40,7 @@ func TestToolGatewayServiceListTools(t *testing.T) {
 			{Name: "dup_tool", InputSchema: map[string]any{"type": "object"}},
 		},
 	}
-	service := NewToolGatewayService(slog.Default(), []ToolExecutor{providerA, providerB}, nil)
+	service := NewToolGatewayService(slog.Default(), []ToolSource{providerA, providerB})
 
 	tools, err := service.ListTools(context.Background(), ToolSessionContext{BotID: "bot-1"})
 	if err != nil {
@@ -65,7 +65,7 @@ func TestToolGatewayServiceCallToolSuccess(t *testing.T) {
 		},
 		callErr: map[string]error{},
 	}
-	service := NewToolGatewayService(slog.Default(), []ToolExecutor{provider}, nil)
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
 
 	result, err := service.CallTool(context.Background(), ToolSessionContext{BotID: "bot-1"}, ToolCallPayload{
 		Name:      "echo_tool",
@@ -85,7 +85,7 @@ func TestToolGatewayServiceCallToolNotFound(t *testing.T) {
 		callResult: map[string]map[string]any{},
 		callErr:    map[string]error{},
 	}
-	service := NewToolGatewayService(slog.Default(), []ToolExecutor{provider}, nil)
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
 
 	result, err := service.CallTool(context.Background(), ToolSessionContext{BotID: "bot-1"}, ToolCallPayload{
 		Name:      "missing_tool",
@@ -110,7 +110,7 @@ func TestToolGatewayServiceCallToolProviderError(t *testing.T) {
 			"broken_tool": errors.New("boom"),
 		},
 	}
-	service := NewToolGatewayService(slog.Default(), []ToolExecutor{provider}, nil)
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
 
 	result, err := service.CallTool(context.Background(), ToolSessionContext{BotID: "bot-1"}, ToolCallPayload{
 		Name:      "broken_tool",

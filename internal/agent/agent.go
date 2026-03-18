@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/agent/tools"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
@@ -16,7 +16,7 @@ import (
 // Agent is the core agent that handles LLM interactions.
 type Agent struct {
 	client         *sdk.Client
-	toolGateway    *mcp.ToolGatewayService
+	toolProviders  []tools.ToolProvider
 	bridgeProvider bridge.Provider
 	logger         *slog.Logger
 }
@@ -34,11 +34,10 @@ func New(deps Deps) *Agent {
 	}
 }
 
-// SetToolGateway sets the tool gateway after construction.
-// This allows breaking dependency cycles in the DI graph since ToolGatewayService
-// has transitive dependencies that circle back through the Resolver.
-func (a *Agent) SetToolGateway(tg *mcp.ToolGatewayService) {
-	a.toolGateway = tg
+// SetToolProviders sets the tool providers after construction.
+// This allows breaking dependency cycles in the DI graph.
+func (a *Agent) SetToolProviders(providers []tools.ToolProvider) {
+	a.toolProviders = providers
 }
 
 // Stream runs the agent in streaming mode, emitting events to the returned channel.
@@ -426,13 +425,12 @@ func resolveClientType(model *sdk.Model) string {
 	}
 }
 
-// assembleTools fetches all available tools (built-in + external MCP) from the
-// ToolGatewayService and converts them to sdk.Tool values for the LLM.
+// assembleTools collects tools from all registered ToolProviders.
 func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, error) {
-	if a.toolGateway == nil {
+	if len(a.toolProviders) == 0 {
 		return nil, nil
 	}
-	session := mcp.ToolSessionContext{
+	session := tools.SessionContext{
 		BotID:             cfg.Identity.BotID,
 		ChatID:            cfg.Identity.ChatID,
 		ChannelIdentityID: cfg.Identity.ChannelIdentityID,
@@ -442,39 +440,16 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, e
 		IsSubagent:        cfg.Identity.IsSubagent,
 	}
 
-	descriptors, err := a.toolGateway.ListTools(ctx, session)
-	if err != nil {
-		return nil, fmt.Errorf("list tools: %w", err)
+	var allTools []sdk.Tool
+	for _, provider := range a.toolProviders {
+		providerTools, err := provider.Tools(ctx, session)
+		if err != nil {
+			a.logger.Warn("tool provider failed", slog.Any("error", err))
+			continue
+		}
+		allTools = append(allTools, providerTools...)
 	}
-
-	tools := make([]sdk.Tool, 0, len(descriptors))
-	for _, desc := range descriptors {
-		desc := desc
-		tools = append(tools, sdk.Tool{
-			Name:        desc.Name,
-			Description: desc.Description,
-			Parameters:  desc.InputSchema,
-			Execute: func(execCtx *sdk.ToolExecContext, input any) (any, error) {
-				args, ok := input.(map[string]any)
-				if !ok {
-					if input == nil {
-						args = map[string]any{}
-					} else {
-						raw, _ := json.Marshal(input)
-						_ = json.Unmarshal(raw, &args)
-						if args == nil {
-							args = map[string]any{}
-						}
-					}
-				}
-				return a.toolGateway.CallTool(execCtx, session, mcp.ToolCallPayload{
-					Name:      desc.Name,
-					Arguments: args,
-				})
-			},
-		})
-	}
-	return tools, nil
+	return allTools, nil
 }
 
 func emitTagEvents(ch chan<- StreamEvent, events []TagEvent) {

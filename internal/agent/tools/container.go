@@ -1,0 +1,282 @@
+package tools
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
+	"math"
+	"strings"
+
+	"github.com/memohai/memoh/internal/workspace/bridge"
+	sdk "github.com/memohai/twilight-ai/sdk"
+)
+
+const defaultContainerExecWorkDir = "/data"
+
+type ContainerProvider struct {
+	clients     bridge.Provider
+	execWorkDir string
+	logger      *slog.Logger
+}
+
+func NewContainerProvider(log *slog.Logger, clients bridge.Provider, execWorkDir string) *ContainerProvider {
+	if log == nil {
+		log = slog.Default()
+	}
+	wd := strings.TrimSpace(execWorkDir)
+	if wd == "" {
+		wd = defaultContainerExecWorkDir
+	}
+	return &ContainerProvider{clients: clients, execWorkDir: wd, logger: log.With(slog.String("tool", "container"))}
+}
+
+func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+	wd := p.execWorkDir
+	sess := session
+	return []sdk.Tool{
+		{
+			Name:        "read",
+			Description: fmt.Sprintf("Read file content inside the bot container. Supports pagination for large files. Max %d lines / %d bytes per call.", readMaxLines, readMaxBytes),
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":        map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute inside container)", wd)},
+					"line_offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed). Default: 1.", "minimum": 1, "default": 1},
+					"n_lines":     map[string]any{"type": "integer", "description": fmt.Sprintf("Number of lines to read per call. Default: %d. Max: %d.", readMaxLines, readMaxLines), "minimum": 1, "maximum": readMaxLines, "default": readMaxLines},
+				},
+				"required": []string{"path"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execRead(ctx, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "write",
+			Description: "Write file content inside the bot container.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":    map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute inside container)", wd)},
+					"content": map[string]any{"type": "string", "description": "File content"},
+				},
+				"required": []string{"path", "content"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execWrite(ctx, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "list",
+			Description: "List directory entries inside the bot container.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("Directory path (relative to %s or absolute inside container)", wd)},
+					"recursive": map[string]any{"type": "boolean", "description": "List recursively"},
+				},
+				"required": []string{"path"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execList(ctx, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "edit",
+			Description: "Replace exact text in a file inside the bot container.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":     map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute inside container)", wd)},
+					"old_text": map[string]any{"type": "string", "description": "Exact text to find"},
+					"new_text": map[string]any{"type": "string", "description": "Replacement text"},
+				},
+				"required": []string{"path", "old_text", "new_text"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execEdit(ctx, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "exec",
+			Description: fmt.Sprintf("Execute a command in the bot container. Runs in the bot's data directory (%s) by default.", wd),
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"command":  map[string]any{"type": "string", "description": "Shell command to run (e.g. ls -la, cat file.txt)"},
+					"work_dir": map[string]any{"type": "string", "description": fmt.Sprintf("Working directory inside the container (default: %s)", wd)},
+				},
+				"required": []string{"command"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execExec(ctx, sess, inputAsMap(input))
+			},
+		},
+	}, nil
+}
+
+func (p *ContainerProvider) normalizePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return path
+	}
+	prefix := p.execWorkDir
+	if prefix == "" {
+		prefix = defaultContainerExecWorkDir
+	}
+	if path == prefix {
+		return "."
+	}
+	if strings.HasPrefix(path, prefix+"/") {
+		return strings.TrimLeft(strings.TrimPrefix(path, prefix+"/"), "/")
+	}
+	return path
+}
+
+func (p *ContainerProvider) getClient(ctx context.Context, botID string) (*bridge.Client, error) {
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return nil, fmt.Errorf("bot_id is required")
+	}
+	client, err := p.clients.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, fmt.Errorf("container not reachable: %v", err)
+	}
+	return client, nil
+}
+
+func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	client, err := p.getClient(ctx, session.BotID)
+	if err != nil {
+		return nil, err
+	}
+	filePath := p.normalizePath(StringArg(args, "path"))
+	if filePath == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+	lineOffset := int32(1)
+	if offset, ok, err := IntArg(args, "line_offset"); err != nil {
+		return nil, fmt.Errorf("invalid line_offset: %v", err)
+	} else if ok {
+		if offset < 1 {
+			return nil, fmt.Errorf("line_offset must be >= 1")
+		}
+		if offset > math.MaxInt32 {
+			return nil, fmt.Errorf("line_offset exceeds maximum")
+		}
+		lineOffset = int32(offset)
+	}
+	nLines := int32(readMaxLines)
+	if n, ok, err := IntArg(args, "n_lines"); err != nil {
+		return nil, fmt.Errorf("invalid n_lines: %v", err)
+	} else if ok {
+		if n < 1 {
+			return nil, fmt.Errorf("n_lines must be >= 1")
+		}
+		if n > readMaxLines {
+			n = readMaxLines
+		}
+		nLines = int32(n) //nolint:gosec // bounded by readMaxLines
+	}
+	resp, err := client.ReadFile(ctx, filePath, lineOffset, nLines)
+	if err != nil {
+		return nil, err
+	}
+	if resp.GetBinary() {
+		return nil, fmt.Errorf("file appears to be binary. Read tool only supports text files")
+	}
+	return map[string]any{"content": resp.GetContent(), "total_lines": resp.GetTotalLines()}, nil
+}
+
+func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	client, err := p.getClient(ctx, session.BotID)
+	if err != nil {
+		return nil, err
+	}
+	filePath := p.normalizePath(StringArg(args, "path"))
+	content := StringArg(args, "content")
+	if filePath == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+	if err := client.WriteFile(ctx, filePath, []byte(content)); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+func (p *ContainerProvider) execList(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	client, err := p.getClient(ctx, session.BotID)
+	if err != nil {
+		return nil, err
+	}
+	dirPath := p.normalizePath(StringArg(args, "path"))
+	if dirPath == "" {
+		dirPath = "."
+	}
+	recursive, _, _ := BoolArg(args, "recursive")
+	entries, err := client.ListDir(ctx, dirPath, recursive)
+	if err != nil {
+		return nil, err
+	}
+	entriesMaps := make([]map[string]any, len(entries))
+	for i, e := range entries {
+		entriesMaps[i] = map[string]any{
+			"path": e.GetPath(), "is_dir": e.GetIsDir(), "size": e.GetSize(),
+			"mode": e.GetMode(), "mod_time": e.GetModTime(),
+		}
+	}
+	return map[string]any{"path": dirPath, "entries": entriesMaps}, nil
+}
+
+func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	client, err := p.getClient(ctx, session.BotID)
+	if err != nil {
+		return nil, err
+	}
+	filePath := p.normalizePath(StringArg(args, "path"))
+	oldText := StringArg(args, "old_text")
+	newText := StringArg(args, "new_text")
+	if filePath == "" || oldText == "" {
+		return nil, fmt.Errorf("path, old_text and new_text are required")
+	}
+	reader, err := client.ReadRaw(ctx, filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = reader.Close() }()
+	raw, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	updated, err := applyEdit(string(raw), filePath, oldText, newText)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.WriteFile(ctx, filePath, []byte(updated)); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	botID := strings.TrimSpace(session.BotID)
+	client, err := p.getClient(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	command := strings.TrimSpace(StringArg(args, "command"))
+	if command == "" {
+		return nil, fmt.Errorf("command is required")
+	}
+	workDir := strings.TrimSpace(StringArg(args, "work_dir"))
+	if workDir == "" {
+		workDir = p.execWorkDir
+	}
+	result, err := client.Exec(ctx, command, workDir, 30)
+	if err != nil {
+		return nil, err
+	}
+	stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
+	stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
+	return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": result.ExitCode}, nil
+}

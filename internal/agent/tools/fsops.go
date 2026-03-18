@@ -1,4 +1,4 @@
-package container
+package tools
 
 import (
 	"fmt"
@@ -6,8 +6,6 @@ import (
 	"unicode"
 )
 
-// applyEdit performs the fuzzy text replacement logic on raw file content.
-// Returns the updated content or an error.
 func applyEdit(raw, filePath, oldText, newText string) (string, error) {
 	bom, content := stripBOM(raw)
 	originalEnding := detectLineEnding(content)
@@ -27,8 +25,7 @@ func applyEdit(raw, filePath, oldText, newText string) (string, error) {
 	if occurrences > 1 {
 		return "", fmt.Errorf(
 			"found %d occurrences of the text in %s. the text must be unique. please provide more context to make it unique",
-			occurrences,
-			filePath,
+			occurrences, filePath,
 		)
 	}
 	baseContent := match.ContentForReplacement
@@ -41,29 +38,6 @@ func applyEdit(raw, filePath, oldText, newText string) (string, error) {
 	}
 	return bom + restoreLineEndings(updated, originalEnding), nil
 }
-
-// ShellQuote wraps a string in single quotes, escaping embedded single quotes.
-func ShellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	if strings.IndexByte(s, '\'') < 0 {
-		return "'" + s + "'"
-	}
-	var b strings.Builder
-	b.WriteByte('\'')
-	for _, c := range s {
-		if c == '\'' {
-			b.WriteString("'\\''")
-		} else {
-			b.WriteRune(c)
-		}
-	}
-	b.WriteByte('\'')
-	return b.String()
-}
-
-// ---------- fuzzy matching helpers ----------
 
 type fuzzyMatchResult struct {
 	Found                 bool
@@ -132,28 +106,13 @@ func normalizeForFuzzyMatch(text string) string {
 func fuzzyFindText(content, oldText string) fuzzyMatchResult {
 	exactIndex := strings.Index(content, oldText)
 	if exactIndex != -1 {
-		return fuzzyMatchResult{
-			Found:                 true,
-			Index:                 exactIndex,
-			MatchLength:           len(oldText),
-			ContentForReplacement: content,
-		}
+		return fuzzyMatchResult{Found: true, Index: exactIndex, MatchLength: len(oldText), ContentForReplacement: content}
 	}
 	fuzzyContent := normalizeForFuzzyMatch(content)
 	fuzzyOld := normalizeForFuzzyMatch(oldText)
 	fuzzyIndex := strings.Index(fuzzyContent, fuzzyOld)
 	if fuzzyIndex == -1 {
-		return fuzzyMatchResult{
-			Found:                 false,
-			Index:                 -1,
-			MatchLength:           0,
-			ContentForReplacement: content,
-		}
+		return fuzzyMatchResult{Found: false, Index: -1, ContentForReplacement: content}
 	}
-	return fuzzyMatchResult{
-		Found:                 true,
-		Index:                 fuzzyIndex,
-		MatchLength:           len(fuzzyOld),
-		ContentForReplacement: fuzzyContent,
-	}
+	return fuzzyMatchResult{Found: true, Index: fuzzyIndex, MatchLength: len(fuzzyOld), ContentForReplacement: fuzzyContent}
 }

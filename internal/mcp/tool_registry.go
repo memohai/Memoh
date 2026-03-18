@@ -8,8 +8,8 @@ import (
 )
 
 type registryItem struct {
-	executor ToolExecutor
-	tool     ToolDescriptor
+	source ToolSource
+	tool   ToolDescriptor
 }
 
 // ToolRegistry stores provider ownership and descriptor metadata.
@@ -23,9 +23,9 @@ func NewToolRegistry() *ToolRegistry {
 	}
 }
 
-func (r *ToolRegistry) Register(executor ToolExecutor, tool ToolDescriptor) error {
-	if executor == nil {
-		return errors.New("tool executor is required")
+func (r *ToolRegistry) Register(source ToolSource, tool ToolDescriptor) error {
+	if source == nil {
+		return errors.New("tool source is required")
 	}
 	name := strings.TrimSpace(tool.Name)
 	if name == "" {
@@ -42,18 +42,18 @@ func (r *ToolRegistry) Register(executor ToolExecutor, tool ToolDescriptor) erro
 	}
 	tool.Name = name
 	r.items[name] = registryItem{
-		executor: executor,
-		tool:     tool,
+		source: source,
+		tool:   tool,
 	}
 	return nil
 }
 
-func (r *ToolRegistry) Lookup(name string) (ToolExecutor, ToolDescriptor, bool) {
+func (r *ToolRegistry) Lookup(name string) (ToolSource, ToolDescriptor, bool) {
 	item, ok := r.items[strings.TrimSpace(name)]
 	if !ok {
 		return nil, ToolDescriptor{}, false
 	}
-	return item.executor, item.tool, true
+	return item.source, item.tool, true
 }
 
 func (r *ToolRegistry) List() []ToolDescriptor {
