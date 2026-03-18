@@ -862,12 +862,12 @@ func contentPartText(part conversation.ContentPart) string {
 	return ""
 }
 
-type gatewayStreamEnvelope struct {
+// agentStreamEnvelope is the JSON shape produced by internal/agent.StreamEvent.
+type agentStreamEnvelope struct {
 	Type     string                      `json:"type"`
 	Delta    string                      `json:"delta"`
 	Error    string                      `json:"error"`
 	Message  string                      `json:"message"`
-	Image    string                      `json:"image"`
 	Data     json.RawMessage             `json:"data"`
 	Messages []conversation.ModelMessage `json:"messages"`
 
@@ -880,26 +880,16 @@ type gatewayStreamEnvelope struct {
 	Speeches    json.RawMessage `json:"speeches"`
 }
 
-type gatewayStreamDoneData struct {
-	Messages []conversation.ModelMessage `json:"messages"`
-}
-
 func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.StreamEvent, []conversation.ModelMessage, error) {
 	if len(chunk) == 0 {
 		return nil, nil, nil
 	}
-	var envelope gatewayStreamEnvelope
+	var envelope agentStreamEnvelope
 	if err := json.Unmarshal(chunk, &envelope); err != nil {
 		return nil, nil, err
 	}
 	finalMessages := make([]conversation.ModelMessage, 0, len(envelope.Messages))
 	finalMessages = append(finalMessages, envelope.Messages...)
-	if len(finalMessages) == 0 && len(envelope.Data) > 0 {
-		var done gatewayStreamDoneData
-		if err := json.Unmarshal(envelope.Data, &done); err == nil && len(done.Messages) > 0 {
-			finalMessages = append(finalMessages, done.Messages...)
-		}
-	}
 	eventType := strings.ToLower(strings.TrimSpace(envelope.Type))
 	switch eventType {
 	case "text_delta":

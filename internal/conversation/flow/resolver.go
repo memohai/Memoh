@@ -1,7 +1,6 @@
 package flow
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -16,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
@@ -32,18 +31,13 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/textutil"
+	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 const (
 	defaultMaxContextMinutes = 24 * 60
-	// Keep gateway payload bounded when inlining binary attachments as data URLs.
+	// Keep inlined binary attachments bounded.
 	gatewayInlineAttachmentMaxBytes int64 = 20 * 1024 * 1024
-	// SSE payloads (especially attachment/tool results) can be very large.
-	// bufio.Scanner hard-fails with "token too long" if a single line exceeds its max token size.
-	// Use a reader-based parser and enforce an explicit per-line cap here. The agent gateway
-	// stream is expected to chunk large JSON payloads across multiple SSE "data:" lines, so
-	// this limit should stay relatively small.
-	gatewaySSEMaxLineBytes = 256 * 1024
 )
 
 // SkillEntry represents a skill loaded from the container.
@@ -69,8 +63,9 @@ type gatewayAssetLoader interface {
 	OpenForGateway(ctx context.Context, botID, contentHash string) (reader io.ReadCloser, mime string, err error)
 }
 
-// Resolver orchestrates chat with the agent gateway.
+// Resolver orchestrates chat with the internal agent.
 type Resolver struct {
+	agent           *agentpkg.Agent
 	modelsService   *models.Service
 	queries         *sqlc.Queries
 	memoryRegistry  *memprovider.Registry
@@ -80,14 +75,11 @@ type Resolver struct {
 	inboxService    *inbox.Service
 	skillLoader     SkillLoader
 	assetLoader     gatewayAssetLoader
-	gatewayBaseURL  string
 	timeout         time.Duration
 	logger          *slog.Logger
-	httpClient      *http.Client
-	streamingClient *http.Client
 }
 
-// NewResolver creates a Resolver that communicates with the agent gateway.
+// NewResolver creates a Resolver that uses the internal agent directly.
 func NewResolver(
 	log *slog.Logger,
 	modelsService *models.Service,
@@ -95,27 +87,21 @@ func NewResolver(
 	conversationSvc ConversationSettingsReader,
 	messageService messagepkg.Service,
 	settingsService *settings.Service,
-	gatewayBaseURL string,
+	a *agentpkg.Agent,
 	timeout time.Duration,
 ) *Resolver {
-	if strings.TrimSpace(gatewayBaseURL) == "" {
-		gatewayBaseURL = "http://127.0.0.1:8081"
-	}
-	gatewayBaseURL = strings.TrimRight(gatewayBaseURL, "/")
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
 	return &Resolver{
+		agent:           a,
 		modelsService:   modelsService,
 		queries:         queries,
 		conversationSvc: conversationSvc,
 		messageService:  messageService,
 		settingsService: settingsService,
-		gatewayBaseURL:  gatewayBaseURL,
 		timeout:         timeout,
 		logger:          log.With(slog.String("service", "conversation_resolver")),
-		httpClient:      &http.Client{Timeout: timeout},
-		streamingClient: &http.Client{},
 	}
 }
 
@@ -141,150 +127,19 @@ func (r *Resolver) SetInboxService(service *inbox.Service) {
 	r.inboxService = service
 }
 
-// --- gateway payload ---
-
-type gatewayReasoningConfig struct {
-	Enabled bool   `json:"enabled"`
-	Effort  string `json:"effort"`
-}
-
-type gatewayModelConfig struct {
-	ModelID    string                  `json:"modelId"`
-	ClientType string                  `json:"clientType"`
-	Input      []string                `json:"input"`
-	APIKey     string                  `json:"apiKey"` //nolint:gosec // intentional: forwarded to agent gateway for model authentication
-	BaseURL    string                  `json:"baseUrl"`
-	Reasoning  *gatewayReasoningConfig `json:"reasoning,omitempty"`
-}
-
-type gatewayIdentity struct {
-	BotID             string `json:"botId"`
-	ChannelIdentityID string `json:"channelIdentityId"`
-	DisplayName       string `json:"displayName"`
-	CurrentPlatform   string `json:"currentPlatform,omitempty"`
-	ReplyTarget       string `json:"replyTarget,omitempty"`
-	ConversationType  string `json:"conversationType,omitempty"`
-	SessionToken      string `json:"sessionToken,omitempty"` //nolint:gosec // intentional: session token forwarded to agent gateway for channel reply routing
-}
-
-type gatewaySkill struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Content     string         `json:"content"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-}
-
-type gatewayInboxItem struct {
-	ID        string         `json:"id"`
-	Source    string         `json:"source"`
-	Header    map[string]any `json:"header"`
-	Content   string         `json:"content"`
-	CreatedAt string         `json:"createdAt"`
-}
-
-type gatewayLoopDetectionConfig struct {
-	Enabled bool `json:"enabled"`
-}
-
-type gatewayRequest struct {
-	Model             gatewayModelConfig          `json:"model"`
-	ActiveContextTime int                         `json:"activeContextTime"`
-	Channels          []string                    `json:"channels"`
-	CurrentChannel    string                      `json:"currentChannel"`
-	Messages          []conversation.ModelMessage `json:"messages"`
-	Skills            []string                    `json:"skills"`
-	UsableSkills      []gatewaySkill              `json:"usableSkills"`
-	Query             string                      `json:"query"`
-	Identity          gatewayIdentity             `json:"identity"`
-	Attachments       []any                       `json:"attachments"`
-	Inbox             []gatewayInboxItem          `json:"inbox,omitempty"`
-	LoopDetection     *gatewayLoopDetectionConfig `json:"loopDetection,omitempty"`
-}
-
-type gatewayResponse struct {
-	Messages []conversation.ModelMessage `json:"messages"`
-	Skills   []string                    `json:"skills"`
-	Text     string                      `json:"text,omitempty"`
-	Usage    json.RawMessage             `json:"usage,omitempty"`
-	Usages   []json.RawMessage           `json:"usages,omitempty"`
-}
-
-type gatewayUsage struct {
+type usageInfo struct {
 	InputTokens  *int `json:"inputTokens"`
 	OutputTokens *int `json:"outputTokens"`
-}
-
-// gatewaySchedule matches the agent gateway ScheduleModel for /chat/trigger-schedule.
-type gatewaySchedule struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Pattern     string `json:"pattern"`
-	MaxCalls    *int   `json:"maxCalls,omitempty"`
-	Command     string `json:"command"`
-}
-
-// triggerScheduleRequest is the payload for POST /chat/trigger-schedule.
-// It omits "query" from JSON so the trigger-schedule endpoint does not receive it.
-type triggerScheduleRequest struct {
-	gatewayRequest
-	Schedule gatewaySchedule `json:"schedule"`
-}
-
-// MarshalJSON marshals the request without the "query" field for trigger-schedule.
-func (t triggerScheduleRequest) MarshalJSON() ([]byte, error) {
-	type alias struct {
-		gatewayRequest
-		Schedule gatewaySchedule `json:"schedule"`
-	}
-	raw, err := json.Marshal(alias(t))
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, err
-	}
-	delete(m, "query")
-	return json.Marshal(m)
-}
-
-// gatewayHeartbeat matches the agent gateway HeartbeatModel for /chat/trigger-heartbeat.
-type gatewayHeartbeat struct {
-	Interval int `json:"interval"`
-}
-
-// triggerHeartbeatRequest is the payload for POST /chat/trigger-heartbeat.
-type triggerHeartbeatRequest struct {
-	gatewayRequest
-	Heartbeat gatewayHeartbeat `json:"heartbeat"`
-}
-
-// MarshalJSON marshals the request without the "query" field for trigger-heartbeat.
-func (t triggerHeartbeatRequest) MarshalJSON() ([]byte, error) {
-	type alias struct {
-		gatewayRequest
-		Heartbeat gatewayHeartbeat `json:"heartbeat"`
-	}
-	raw, err := json.Marshal(alias(t))
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, err
-	}
-	delete(m, "query")
-	return json.Marshal(m)
 }
 
 // --- resolved context (shared by Chat / StreamChat / TriggerSchedule) ---
 
 type resolvedContext struct {
-	payload      gatewayRequest
+	runConfig    agentpkg.RunConfig
 	model        models.GetResponse
 	provider     sqlc.LlmProvider
 	inboxItemIDs []string
+	query        string // headerified query
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
@@ -380,27 +235,31 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	messages = append(messages, reqMessages...)
 	messages = sanitizeMessages(messages)
 	skills := dedup(req.Skills)
-	var usableSkills []gatewaySkill
+	var agentSkills []agentpkg.SkillEntry
 	if r.skillLoader != nil {
 		entries, err := r.skillLoader.LoadSkills(ctx, req.BotID)
 		if err != nil {
 			r.logger.Warn("failed to load usable skills", slog.String("bot_id", req.BotID), slog.Any("error", err))
 		} else {
-			usableSkills = make([]gatewaySkill, 0, len(entries))
+			agentSkills = make([]agentpkg.SkillEntry, 0, len(entries))
 			for _, e := range entries {
-				skill, ok := normalizeGatewaySkill(e)
-				if !ok {
+				if strings.TrimSpace(e.Name) == "" {
 					continue
 				}
-				usableSkills = append(usableSkills, skill)
+				agentSkills = append(agentSkills, agentpkg.SkillEntry{
+					Name:        e.Name,
+					Description: e.Description,
+					Content:     e.Content,
+					Metadata:    e.Metadata,
+				})
 			}
 		}
 	}
-	if usableSkills == nil {
-		usableSkills = []gatewaySkill{}
+	if agentSkills == nil {
+		agentSkills = []agentpkg.SkillEntry{}
 	}
 
-	var inboxGatewayItems []gatewayInboxItem
+	var agentInbox []agentpkg.InboxItem
 	var inboxItemIDs []string
 	if r.inboxService != nil {
 		maxInbox := botSettings.MaxInboxItems
@@ -411,10 +270,10 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		if err != nil {
 			r.logger.Warn("failed to load inbox items", slog.String("bot_id", req.BotID), slog.Any("error", err))
 		} else if len(items) > 0 {
-			inboxGatewayItems = make([]gatewayInboxItem, 0, len(items))
+			agentInbox = make([]agentpkg.InboxItem, 0, len(items))
 			inboxItemIDs = make([]string, 0, len(items))
 			for _, item := range items {
-				inboxGatewayItems = append(inboxGatewayItems, gatewayInboxItem{
+				agentInbox = append(agentInbox, agentpkg.InboxItem{
 					ID:        item.ID,
 					Source:    item.Source,
 					Header:    item.Header,
@@ -426,7 +285,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
-	attachments := r.routeAndMergeAttachments(ctx, chatModel, req)
 	displayName := r.resolveDisplayName(ctx, req)
 
 	headerifiedQuery := FormatUserHeader(
@@ -436,36 +294,36 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		req.CurrentChannel,
 		strings.TrimSpace(req.ConversationType),
 		strings.TrimSpace(req.ConversationName),
-		extractFileRefPaths(attachments),
+		nil, // attachments paths handled separately
 		req.Query,
 	)
 
-	var reasoning *gatewayReasoningConfig
+	reasoningEffort := ""
 	if chatModel.SupportsReasoning && botSettings.ReasoningEnabled {
-		reasoning = &gatewayReasoningConfig{
-			Enabled: true,
-			Effort:  botSettings.ReasoningEffort,
-		}
+		reasoningEffort = botSettings.ReasoningEffort
 	}
 
-	payload := gatewayRequest{
-		Model: gatewayModelConfig{
-			ModelID:    chatModel.ModelID,
-			ClientType: clientType,
-			Input:      chatModel.InputModalities,
-			APIKey:     provider.ApiKey,
-			BaseURL:    provider.BaseUrl,
-			Reasoning:  reasoning,
-		},
-		ActiveContextTime: maxCtx,
+	modelCfg := agentpkg.ModelConfig{
+		ModelID:         chatModel.ModelID,
+		ClientType:      clientType,
+		InputModalities: chatModel.InputModalities,
+		APIKey:          provider.ApiKey,
+		BaseURL:         provider.BaseUrl,
+	}
+
+	sdkModel := agentpkg.CreateModel(modelCfg)
+	sdkMessages := modelMessagesToSDKMessages(nonNilModelMessages(messages))
+
+	runCfg := agentpkg.RunConfig{
+		Model:             sdkModel,
+		ReasoningEffort:   reasoningEffort,
+		Messages:          sdkMessages,
+		Query:             headerifiedQuery,
 		Channels:          nonNilStrings(req.Channels),
 		CurrentChannel:    req.CurrentChannel,
-		Messages:          nonNilModelMessages(messages),
-		Skills:            nonNilStrings(skills),
-		UsableSkills:      usableSkills,
-		Query:             headerifiedQuery,
-		Identity: gatewayIdentity{
+		Identity: agentpkg.SessionContext{
 			BotID:             req.BotID,
+			ChatID:            req.ChatID,
 			ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 			DisplayName:       displayName,
 			CurrentPlatform:   req.CurrentChannel,
@@ -473,34 +331,44 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			ConversationType:  strings.TrimSpace(req.ConversationType),
 			SessionToken:      req.ChatToken,
 		},
-		Attachments:   attachments,
-		Inbox:         inboxGatewayItems,
-		LoopDetection: &gatewayLoopDetectionConfig{Enabled: loopDetectionEnabled},
+		Skills:            agentSkills,
+		EnabledSkillNames: nonNilStrings(skills),
+		Inbox:             agentInbox,
+		LoopDetection:     agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
+		ActiveContextTime: maxCtx,
 	}
 
-	return resolvedContext{payload: payload, model: chatModel, provider: provider, inboxItemIDs: inboxItemIDs}, nil
+	return resolvedContext{runConfig: runCfg, model: chatModel, provider: provider, inboxItemIDs: inboxItemIDs, query: headerifiedQuery}, nil
 }
 
 // --- Chat ---
 
-// Chat sends a synchronous chat request to the agent gateway and stores the result.
+// Chat sends a synchronous chat request and stores the result.
 func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conversation.ChatResponse, error) {
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
-	req.Query = rc.payload.Query
-	resp, err := r.postChat(ctx, rc.payload, req.Token)
+	req.Query = rc.query
+
+	cfg := rc.runConfig
+	cfg = r.prepareRunConfig(ctx, cfg)
+
+	result, err := r.agent.Generate(ctx, cfg)
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
-	if err := r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages, rc.model.ID); err != nil {
+
+	outputMessages := sdkMessagesToModelMessages(result.Messages)
+	roundMessages := prependUserMessage(req.Query, outputMessages)
+	usageJSON, _ := json.Marshal(result.Usage)
+	if err := r.storeRound(ctx, req, roundMessages, usageJSON, nil, rc.model.ID); err != nil {
 		return conversation.ChatResponse{}, err
 	}
 	r.markInboxRead(ctx, req.BotID, rc.inboxItemIDs)
 	return conversation.ChatResponse{
-		Messages: resp.Messages,
-		Skills:   resp.Skills,
+		Messages: outputMessages,
+		Skills:   result.Skills,
 		Model:    rc.model.ModelID,
 		Provider: string(rc.model.ClientType),
 	}, nil
@@ -508,7 +376,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 
 // --- TriggerSchedule ---
 
-// TriggerSchedule executes a scheduled command through the agent gateway trigger-schedule endpoint.
+// TriggerSchedule executes a scheduled command via the internal agent.
 func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) error {
 	if strings.TrimSpace(botID) == "" {
 		return errors.New("bot id is required")
@@ -529,40 +397,40 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 		return err
 	}
 
-	schedulePayload := rc.payload
-	schedulePayload.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
-	schedulePayload.Identity.DisplayName = "Scheduler"
+	cfg := rc.runConfig
+	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
+	cfg.Identity.DisplayName = "Scheduler"
 
-	triggerReq := triggerScheduleRequest{
-		gatewayRequest: schedulePayload,
-		Schedule: gatewaySchedule{
-			ID:          payload.ID,
-			Name:        payload.Name,
-			Description: payload.Description,
-			Pattern:     payload.Pattern,
-			MaxCalls:    payload.MaxCalls,
-			Command:     payload.Command,
-		},
-	}
+	schedulePrompt := agentpkg.GenerateSchedulePrompt(agentpkg.Schedule{
+		ID:          payload.ID,
+		Name:        payload.Name,
+		Description: payload.Description,
+		Pattern:     payload.Pattern,
+		MaxCalls:    payload.MaxCalls,
+		Command:     payload.Command,
+	})
+	cfg.Messages = append(cfg.Messages, sdk.UserMessage(schedulePrompt))
+	cfg = r.prepareRunConfig(ctx, cfg)
 
-	resp, err := r.postTriggerSchedule(ctx, triggerReq, token)
+	result, err := r.agent.Generate(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	return r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages, rc.model.ID)
+
+	outputMessages := sdkMessagesToModelMessages(result.Messages)
+	roundMessages := prependUserMessage(req.Query, outputMessages)
+	usageJSON, _ := json.Marshal(result.Usage)
+	return r.storeRound(ctx, req, roundMessages, usageJSON, nil, rc.model.ID)
 }
 
 // --- TriggerHeartbeat ---
 
-// TriggerHeartbeat executes a heartbeat check through the agent gateway trigger-heartbeat endpoint.
+// TriggerHeartbeat executes a heartbeat check via the internal agent.
 func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload heartbeat.TriggerPayload, token string) (heartbeat.TriggerResult, error) {
 	if strings.TrimSpace(botID) == "" {
 		return heartbeat.TriggerResult{}, errors.New("bot id is required")
 	}
 
-	// If a dedicated heartbeat model is configured, use it instead of the
-	// default chat model.  We load the bot settings first so that we can
-	// set req.Model, which takes highest priority in selectChatModel.
 	var heartbeatModel string
 	if botSettings, err := r.loadBotSettings(ctx, botID); err == nil {
 		heartbeatModel = strings.TrimSpace(botSettings.HeartbeatModelID)
@@ -581,40 +449,73 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 		return heartbeat.TriggerResult{}, err
 	}
 
-	hbPayload := rc.payload
-	hbPayload.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
-	hbPayload.Identity.DisplayName = "Heartbeat"
+	cfg := rc.runConfig
+	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
+	cfg.Identity.DisplayName = "Heartbeat"
 
-	triggerReq := triggerHeartbeatRequest{
-		gatewayRequest: hbPayload,
-		Heartbeat: gatewayHeartbeat{
-			Interval: payload.Interval,
-		},
+	// Load HEARTBEAT.md from container for the heartbeat prompt
+	var checklist string
+	if r.agent != nil {
+		fs := agentpkg.NewFSClient(nil, botID) // Container FS access
+		checklist = fs.ReadTextSafe(ctx, "/data/HEARTBEAT.md")
 	}
+	heartbeatPrompt := agentpkg.GenerateHeartbeatPrompt(payload.Interval, checklist)
+	cfg.Messages = append(cfg.Messages, sdk.UserMessage(heartbeatPrompt))
+	cfg = r.prepareRunConfig(ctx, cfg)
 
-	resp, err := r.postTriggerHeartbeat(ctx, triggerReq, token)
+	result, err := r.agent.Generate(ctx, cfg)
 	if err != nil {
 		return heartbeat.TriggerResult{}, err
 	}
 
 	status := "alert"
-	text := strings.TrimSpace(resp.Text)
+	text := strings.TrimSpace(result.Text)
 	if isHeartbeatOK(text) {
 		status = "ok"
 	}
 
-	var usageBytes []byte
-	if resp.Usage != nil {
-		usageBytes, _ = json.Marshal(resp.Usage)
-	}
+	usageJSON, _ := json.Marshal(result.Usage)
 
 	return heartbeat.TriggerResult{
 		Status:     status,
 		Text:       text,
-		Usage:      resp.Usage,
-		UsageBytes: usageBytes,
+		Usage:      usageJSON,
+		UsageBytes: usageJSON,
 		ModelID:    rc.model.ID,
 	}, nil
+}
+
+// prepareRunConfig generates the system prompt and appends the user message.
+func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig) agentpkg.RunConfig {
+	supportsImageInput := false
+	for _, m := range cfg.Identity.CurrentPlatform {
+		_ = m
+	}
+	// Build system prompt
+	var files []agentpkg.SystemFile
+	if r.agent != nil {
+		fs := agentpkg.NewFSClient(nil, cfg.Identity.BotID)
+		files = fs.LoadSystemFiles(ctx)
+	}
+
+	cfg.System = agentpkg.GenerateSystemPrompt(agentpkg.SystemPromptParams{
+		Language:           "Same as the user input",
+		MaxContextLoadTime: cfg.ActiveContextTime,
+		Channels:           cfg.Channels,
+		CurrentChannel:     cfg.CurrentChannel,
+		Skills:             cfg.Skills,
+		EnabledSkills:      nil,
+		Files:              files,
+		Inbox:              cfg.Inbox,
+		SupportsImageInput: supportsImageInput,
+	})
+
+	// Add user message with the headerified query
+	if cfg.Query != "" {
+		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query))
+	}
+
+	return cfg
 }
 
 func isHeartbeatOK(text string) bool {
@@ -624,11 +525,11 @@ func isHeartbeatOK(text string) bool {
 
 // --- StreamChat ---
 
-// StreamChat sends a streaming chat request to the agent gateway.
+// StreamChat runs a streaming chat via the internal agent.
 func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
 	chunkCh := make(chan conversation.StreamChunk)
 	errCh := make(chan error, 1)
-	r.logger.Info("gateway stream start",
+	r.logger.Info("agent stream start",
 		slog.String("bot_id", req.BotID),
 		slog.String("chat_id", req.ChatID),
 	)
@@ -640,7 +541,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		streamReq := req
 		rc, err := r.resolve(ctx, streamReq)
 		if err != nil {
-			r.logger.Error("gateway stream resolve failed",
+			r.logger.Error("agent stream resolve failed",
 				slog.String("bot_id", streamReq.BotID),
 				slog.String("chat_id", streamReq.ChatID),
 				slog.Any("error", err),
@@ -648,35 +549,37 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			errCh <- err
 			return
 		}
-		streamReq.Query = rc.payload.Query
-		// User message persistence is deferred to storeRound so that user +
-		// assistant messages are written atomically. This prevents duplicate
-		// user messages when concurrent requests hit the same bot.
-		if err := r.streamChat(ctx, rc.payload, streamReq, chunkCh, rc.model.ID); err != nil {
-			r.logger.Error("gateway stream request failed",
-				slog.String("bot_id", streamReq.BotID),
-				slog.String("chat_id", streamReq.ChatID),
-				slog.Any("error", err),
-			)
-			errCh <- err
-			return
+		streamReq.Query = rc.query
+
+		cfg := rc.runConfig
+		cfg = r.prepareRunConfig(ctx, cfg)
+
+		eventCh := r.agent.Stream(ctx, cfg)
+		stored := false
+		for event := range eventCh {
+			data, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			if !stored && event.IsTerminal() && len(event.Messages) > 0 {
+				if _, storeErr := r.tryStoreStream(ctx, streamReq, data, rc.model.ID); storeErr != nil {
+					r.logger.Error("stream persist failed", slog.Any("error", storeErr))
+				} else {
+					stored = true
+				}
+			}
+			chunkCh <- conversation.StreamChunk(data)
 		}
 		r.markInboxRead(ctx, streamReq.BotID, rc.inboxItemIDs)
 	}()
 	return chunkCh, errCh
 }
 
-// --- WebSocket streaming ---
-
-// WSStreamEvent represents a raw JSON event forwarded from the agent gateway
-// WebSocket connection to the Go server's client WebSocket.
+// WSStreamEvent represents a raw JSON event forwarded from the agent.
 type WSStreamEvent = json.RawMessage
 
-// StreamChatWS resolves the agent context and streams agent events from the
-// gateway WebSocket endpoint. Events are sent on eventCh. When abortCh is
-// closed or receives a value, an abort message is forwarded to the gateway.
-// Terminal events (agent_end, agent_abort) trigger message persistence before
-// being forwarded.
+// StreamChatWS resolves the agent context and streams agent events.
+// Events are sent on eventCh. When abortCh is closed, the context is cancelled.
 func (r *Resolver) StreamChatWS(
 	ctx context.Context,
 	req conversation.ChatRequest,
@@ -687,89 +590,41 @@ func (r *Resolver) StreamChatWS(
 	if err != nil {
 		return fmt.Errorf("resolve: %w", err)
 	}
-	req.Query = rc.payload.Query
+	req.Query = rc.query
 
-	wsURL := strings.Replace(r.gatewayBaseURL, "http://", "ws://", 1)
-	wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
-	wsURL += "/chat/ws"
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	r.logger.Info("gateway ws connect",
-		slog.String("url", wsURL),
-		slog.String("bot_id", req.BotID),
-	)
-
-	dialer := websocket.Dialer{
-		HandshakeTimeout: r.timeout,
-	}
-	conn, resp, err := dialer.DialContext(ctx, wsURL, nil)
-	if resp != nil {
-		defer func() { _ = resp.Body.Close() }()
-	}
-	if err != nil {
-		return fmt.Errorf("gateway ws dial: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	// The gateway WS handler uses the bearer field directly (not as an HTTP
-	// header), so strip the "Bearer " prefix that the Token field carries.
-	rawToken := strings.TrimSpace(req.Token)
-	rawToken = strings.TrimPrefix(rawToken, "Bearer ")
-	rawToken = strings.TrimPrefix(rawToken, "bearer ")
-
-	startPayload := struct {
-		Type   string `json:"type"`
-		Bearer string `json:"bearer,omitempty"`
-		gatewayRequest
-	}{
-		Type:           "start",
-		Bearer:         rawToken,
-		gatewayRequest: rc.payload,
-	}
-	if err := conn.WriteJSON(startPayload); err != nil {
-		return fmt.Errorf("gateway ws write start: %w", err)
-	}
-
-	// Forward abort signal to gateway.
-	abortDone := make(chan struct{})
 	go func() {
-		defer close(abortDone)
 		select {
 		case <-abortCh:
-			_ = conn.WriteJSON(map[string]string{"type": "abort"})
-		case <-ctx.Done():
+			cancel()
+		case <-streamCtx.Done():
 		}
 	}()
-	defer func() { <-abortDone }()
 
+	cfg := rc.runConfig
+	cfg = r.prepareRunConfig(streamCtx, cfg)
+
+	agentEventCh := r.agent.Stream(streamCtx, cfg)
 	modelID := rc.model.ID
 	stored := false
-	for {
-		_, msgData, err := conn.ReadMessage()
+	for event := range agentEventCh {
+		data, err := json.Marshal(event)
 		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				break
-			}
-			if ctx.Err() != nil {
-				break
-			}
-			return fmt.Errorf("gateway ws read: %w", err)
+			continue
 		}
 
-		if !stored {
-			var envelope struct {
-				Type string `json:"type"`
-			}
-			if json.Unmarshal(msgData, &envelope) == nil && isTerminalStreamEvent(envelope.Type) {
-				if _, storeErr := r.tryStoreStream(ctx, req, msgData, modelID); storeErr != nil {
-					r.logger.Error("ws persist failed", slog.Any("error", storeErr))
-				} else {
-					stored = true
-				}
+		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
+			if _, storeErr := r.tryStoreStream(ctx, req, data, modelID); storeErr != nil {
+				r.logger.Error("ws persist failed", slog.Any("error", storeErr))
+			} else {
+				stored = true
 			}
 		}
 
 		select {
-		case eventCh <- json.RawMessage(msgData):
+		case eventCh <- json.RawMessage(data):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -779,260 +634,35 @@ func (r *Resolver) StreamChatWS(
 	return nil
 }
 
-// --- HTTP helpers ---
-
-func (r *Resolver) postChat(ctx context.Context, payload gatewayRequest, token string) (gatewayResponse, error) {
-	url := r.gatewayBaseURL + "/chat/"
-	r.logger.Info(
-		"gateway request",
-		slog.String("url", url),
-		slog.Int("messages", len(payload.Messages)),
-		slog.Int("attachments", len(payload.Attachments)),
-	)
-
-	httpReq, err := newJSONRequestWithContext(ctx, http.MethodPost, url, payload)
-	if err != nil {
-		return gatewayResponse{}, err
-	}
-	if strings.TrimSpace(token) != "" {
-		httpReq.Header.Set("Authorization", token)
-	}
-
-	resp, err := r.httpClient.Do(httpReq) //nolint:gosec // G704: URL is from operator-configured agent gateway, not user input
-	if err != nil {
-		return gatewayResponse{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return gatewayResponse{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		r.logger.Error("gateway error", slog.String("url", url), slog.Int("status", resp.StatusCode), slog.String("body_prefix", truncate(string(respBody), 300)))
-		return gatewayResponse{}, fmt.Errorf("agent gateway error: %s", strings.TrimSpace(string(respBody)))
-	}
-
-	var parsed gatewayResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		r.logger.Error("gateway response parse failed", slog.String("body_prefix", truncate(string(respBody), 300)), slog.Any("error", err))
-		return gatewayResponse{}, fmt.Errorf("failed to parse gateway response: %w", err)
-	}
-	return parsed, nil
-}
-
-// postTriggerSchedule sends a trigger-schedule request to the agent gateway.
-func (r *Resolver) postTriggerSchedule(ctx context.Context, payload triggerScheduleRequest, token string) (gatewayResponse, error) {
-	url := r.gatewayBaseURL + "/chat/trigger-schedule"
-	r.logger.Info("gateway trigger-schedule request", slog.String("url", url), slog.String("schedule_id", payload.Schedule.ID))
-
-	httpReq, err := newJSONRequestWithContext(ctx, http.MethodPost, url, payload)
-	if err != nil {
-		return gatewayResponse{}, err
-	}
-	if strings.TrimSpace(token) != "" {
-		httpReq.Header.Set("Authorization", token)
-	}
-
-	resp, err := r.httpClient.Do(httpReq) //nolint:gosec // G704: URL is from operator-configured agent gateway, not user input
-	if err != nil {
-		return gatewayResponse{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return gatewayResponse{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		r.logger.Error("gateway trigger-schedule error", slog.String("url", url), slog.Int("status", resp.StatusCode), slog.String("body_prefix", truncate(string(respBody), 300)))
-		return gatewayResponse{}, fmt.Errorf("agent gateway error: %s", strings.TrimSpace(string(respBody)))
-	}
-
-	var parsed gatewayResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		r.logger.Error("gateway trigger-schedule response parse failed", slog.String("body_prefix", truncate(string(respBody), 300)), slog.Any("error", err))
-		return gatewayResponse{}, fmt.Errorf("failed to parse gateway response: %w", err)
-	}
-	return parsed, nil
-}
-
-// postTriggerHeartbeat sends a trigger-heartbeat request to the agent gateway.
-func (r *Resolver) postTriggerHeartbeat(ctx context.Context, payload triggerHeartbeatRequest, token string) (gatewayResponse, error) {
-	url := r.gatewayBaseURL + "/chat/trigger-heartbeat"
-	r.logger.Info("gateway trigger-heartbeat request", slog.String("url", url))
-
-	httpReq, err := newJSONRequestWithContext(ctx, http.MethodPost, url, payload)
-	if err != nil {
-		return gatewayResponse{}, err
-	}
-	if strings.TrimSpace(token) != "" {
-		httpReq.Header.Set("Authorization", token)
-	}
-
-	resp, err := r.httpClient.Do(httpReq) //nolint:gosec // G704: URL is from operator-configured agent gateway, not user input
-	if err != nil {
-		return gatewayResponse{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return gatewayResponse{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		r.logger.Error("gateway trigger-heartbeat error", slog.String("url", url), slog.Int("status", resp.StatusCode), slog.String("body_prefix", truncate(string(respBody), 300)))
-		return gatewayResponse{}, fmt.Errorf("agent gateway error: %s", strings.TrimSpace(string(respBody)))
-	}
-
-	var parsed gatewayResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		r.logger.Error("gateway trigger-heartbeat response parse failed", slog.String("body_prefix", truncate(string(respBody), 300)), slog.Any("error", err))
-		return gatewayResponse{}, fmt.Errorf("failed to parse gateway response: %w", err)
-	}
-	return parsed, nil
-}
-
-func (r *Resolver) streamChat(ctx context.Context, payload gatewayRequest, req conversation.ChatRequest, chunkCh chan<- conversation.StreamChunk, modelID string) error {
-	url := r.gatewayBaseURL + "/chat/stream"
-	r.logger.Info(
-		"gateway stream request",
-		slog.String("url", url),
-		slog.Int("messages", len(payload.Messages)),
-		slog.Int("attachments", len(payload.Attachments)),
-	)
-	httpReq, err := newJSONRequestWithContext(ctx, http.MethodPost, url, payload)
-	if err != nil {
-		return err
-	}
-	httpReq.Header.Set("Accept", "text/event-stream")
-	if strings.TrimSpace(req.Token) != "" {
-		httpReq.Header.Set("Authorization", req.Token)
-	}
-
-	resp, err := r.streamingClient.Do(httpReq) //nolint:gosec // G704: URL is from operator-configured agent gateway, not user input
-	if err != nil {
-		r.logger.Error("gateway stream connect failed", slog.String("url", url), slog.Any("error", err))
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errBody, _ := io.ReadAll(resp.Body)
-		r.logger.Error("gateway stream error", slog.String("url", url), slog.Int("status", resp.StatusCode), slog.String("body_prefix", truncate(string(errBody), 300)))
-		return fmt.Errorf("agent gateway error: %s", strings.TrimSpace(string(errBody)))
-	}
-
-	stored := false
-	var dataBuf bytes.Buffer
-
-	flushEvent := func() error {
-		if dataBuf.Len() == 0 {
-			return nil
-		}
-		out := append([]byte(nil), dataBuf.Bytes()...)
-		dataBuf.Reset()
-		if len(out) == 0 || bytes.Equal(bytes.TrimSpace(out), []byte("[DONE]")) {
-			return nil
-		}
-		// Persist final messages before forwarding the "done"/"agent_end" event so the
-		// next user turn can immediately see the assistant output in history.
-		if !stored {
-			if handled, storeErr := r.tryStoreStream(ctx, req, out, modelID); storeErr != nil {
-				return storeErr
-			} else if handled {
-				stored = true
-			}
-		}
-		chunkCh <- conversation.StreamChunk(out)
-		return nil
-	}
-
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), gatewaySSEMaxLineBytes)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			if err := flushEvent(); err != nil {
-				return err
-			}
-			continue
-		}
-		if len(line) > 0 && line[0] == ':' {
-			continue
-		}
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
-		}
-		part := bytes.TrimPrefix(line, []byte("data:"))
-		// Backward-compat: older SSE writers used "data: <payload>" (note the space).
-		// Only strip the first leading space for the *first* fragment to avoid corrupting
-		// chunked payloads split inside JSON string values.
-		if dataBuf.Len() == 0 && len(part) > 0 && part[0] == ' ' {
-			part = part[1:]
-		}
-		if len(part) == 0 {
-			continue
-		}
-		_, _ = dataBuf.Write(part)
-	}
-	if err := scanner.Err(); err != nil {
-		if errors.Is(err, bufio.ErrTooLong) {
-			return fmt.Errorf("sse line too long (max %d bytes)", gatewaySSEMaxLineBytes)
-		}
-		return err
-	}
-	return flushEvent()
-}
-
-func newJSONRequestWithContext(ctx context.Context, method, url string, payload any) (*http.Request, error) {
-	pr, pw := io.Pipe()
-	go func() {
-		enc := json.NewEncoder(pw)
-		_ = pw.CloseWithError(enc.Encode(payload))
-	}()
-	req, err := http.NewRequestWithContext(ctx, method, url, pr)
-	if err != nil {
-		_ = pr.Close()
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	return req, nil
-}
-
-// isTerminalStreamEvent returns true for event types that carry the final
-// message round (agent_end, agent_abort, done).
-func isTerminalStreamEvent(eventType string) bool {
-	return eventType == "agent_end" || eventType == "agent_abort" || eventType == "done"
-}
 
 // tryStoreStream attempts to extract final messages from a stream event and persist them.
 func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequest, data []byte, modelID string) (bool, error) {
 	var envelope struct {
-		Type     string                      `json:"type"`
-		Data     json.RawMessage             `json:"data"`
-		Messages []conversation.ModelMessage `json:"messages"`
-		Usage    json.RawMessage             `json:"usage,omitempty"`
-		Usages   []json.RawMessage           `json:"usages,omitempty"`
+		Type     string          `json:"type"`
+		Messages json.RawMessage `json:"messages"`
+		Usage    json.RawMessage `json:"usage,omitempty"`
+		Usages   json.RawMessage `json:"usages,omitempty"`
 	}
-	if err := json.Unmarshal(data, &envelope); err == nil {
-		if isTerminalStreamEvent(envelope.Type) && len(envelope.Messages) > 0 {
-			return true, r.storeRound(ctx, req, envelope.Messages, envelope.Usage, envelope.Usages, modelID)
-		}
-		if envelope.Type == "done" && len(envelope.Data) > 0 {
-			var resp gatewayResponse
-			if err := json.Unmarshal(envelope.Data, &resp); err == nil && len(resp.Messages) > 0 {
-				return true, r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages, modelID)
-			}
-		}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return false, nil
+	}
+	if len(envelope.Messages) == 0 {
+		return false, nil
 	}
 
-	// fallback: data: {messages: [...]}
-	var resp gatewayResponse
-	if err := json.Unmarshal(data, &resp); err == nil && len(resp.Messages) > 0 {
-		return true, r.storeRound(ctx, req, resp.Messages, resp.Usage, resp.Usages, modelID)
+	var sdkMsgs []sdk.Message
+	if err := json.Unmarshal(envelope.Messages, &sdkMsgs); err != nil || len(sdkMsgs) == 0 {
+		return false, nil
 	}
-	return false, nil
+	outputMessages := sdkMessagesToModelMessages(sdkMsgs)
+	roundMessages := prependUserMessage(req.Query, outputMessages)
+
+	var usages []json.RawMessage
+	if len(envelope.Usages) > 0 {
+		_ = json.Unmarshal(envelope.Usages, &usages)
+	}
+
+	return true, r.storeRound(ctx, req, roundMessages, envelope.Usage, usages, modelID)
 }
 
 // routeAndMergeAttachments applies CapabilityFallbackPolicy to split
@@ -1307,7 +937,7 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMi
 		var inputTokens *int
 		var outputTokens *int
 		if len(m.Usage) > 0 {
-			var u gatewayUsage
+			var u usageInfo
 			if json.Unmarshal(m.Usage, &u) == nil {
 				inputTokens = u.InputTokens
 				outputTokens = u.OutputTokens
@@ -2100,26 +1730,6 @@ func decodeIndexedByteObject(raw json.RawMessage) ([]byte, bool) {
 	return out, true
 }
 
-func normalizeGatewaySkill(entry SkillEntry) (gatewaySkill, bool) {
-	name := strings.TrimSpace(entry.Name)
-	if name == "" {
-		return gatewaySkill{}, false
-	}
-	description := strings.TrimSpace(entry.Description)
-	if description == "" {
-		description = name
-	}
-	content := strings.TrimSpace(entry.Content)
-	if content == "" {
-		content = description
-	}
-	return gatewaySkill{
-		Name:        name,
-		Description: description,
-		Content:     content,
-		Metadata:    entry.Metadata,
-	}, true
-}
 
 func dedup(items []string) []string {
 	seen := make(map[string]struct{}, len(items))

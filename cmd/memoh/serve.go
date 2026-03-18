@@ -22,12 +22,12 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/browsercontexts"
-	agentruntime "github.com/memohai/memoh/internal/bun/runtime"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/discord"
 	"github.com/memohai/memoh/internal/channel/adapters/feishu"
@@ -105,7 +105,6 @@ func runServe() {
 			provideDBConn,
 			provideDBQueries,
 			provideWorkspaceManager,
-			provideAgentRuntimeManager,
 			provideMemoryLLM,
 			memprovider.NewService,
 			provideMemoryProviderRegistry,
@@ -142,6 +141,7 @@ func runServe() {
 			provideChannelRouter,
 			provideChannelManager,
 			provideChannelLifecycleService,
+			provideAgent,
 			provideChatResolver,
 			browsercontexts.NewService,
 			provideScheduleTriggerer,
@@ -189,13 +189,13 @@ func runServe() {
 			provideServer,
 		),
 		fx.Invoke(
+			injectToolGateway,
 			startMemoryProviderBootstrap,
 			startScheduleService,
 			startHeartbeatService,
 			startChannelManager,
 			startEmailManager,
 			startContainerReconciliation,
-			startAgentRuntime,
 			startTtsTempStoreCleanup,
 			startServer,
 		),
@@ -248,10 +248,6 @@ func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 func provideDBQueries(conn *pgxpool.Pool) *dbsqlc.Queries { return dbsqlc.New(conn) }
 func provideWorkspaceManager(log *slog.Logger, service ctr.Service, cfg config.Config, conn *pgxpool.Pool) *workspace.Manager {
 	return workspace.NewManager(log, service, cfg.Workspace, cfg.Containerd.Namespace, conn)
-}
-
-func provideAgentRuntimeManager(log *slog.Logger, cfg config.Config) *agentruntime.Manager {
-	return agentruntime.NewManager(log, cfg)
 }
 
 func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, log *slog.Logger) memprovider.LLM {
@@ -314,8 +310,19 @@ func provideHeartbeatTriggerer(resolver *flow.Resolver) heartbeat.Triggerer {
 	return flow.NewHeartbeatGateway(resolver)
 }
 
-func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *flow.Resolver {
-	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
+func provideAgent(log *slog.Logger, manager *workspace.Manager) *agentpkg.Agent {
+	return agentpkg.New(agentpkg.Deps{
+		BridgeProvider: manager,
+		Logger:         log,
+	})
+}
+
+func injectToolGateway(a *agentpkg.Agent, tg *mcp.ToolGatewayService) {
+	a.SetToolGateway(tg)
+}
+
+func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *flow.Resolver {
+	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, a, 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
@@ -433,7 +440,7 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService)
 	emailExec := mcpemail.NewExecutor(log, emailService, emailManager)
 	webFetchExec := mcpwebfetch.NewExecutor(log)
-	subagentExec := mcpsubagent.NewExecutor(log, subagentService, settingsService, modelsService, queries, cfg.AgentGateway.BaseURL())
+	subagentExec := mcpsubagent.NewExecutor(log, subagentService, settingsService, modelsService, queries, "")
 	skillExec := mcpskill.NewExecutor(log)
 	browserExec := mcpbrowser.NewExecutor(log, settingsService, browserContextService, manager, cfg.BrowserGateway)
 	ttsExec := mcptts.NewExecutor(log, settingsService, ttsService, channelManager, registry)
@@ -622,13 +629,6 @@ func startChannelManager(lc fx.Lifecycle, channelManager *channel.Manager) {
 
 func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
 	lc.Append(fx.Hook{OnStart: func(ctx context.Context) error { go manager.ReconcileContainers(ctx); return nil }})
-}
-
-func startAgentRuntime(lc fx.Lifecycle, manager *agentruntime.Manager) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error { return manager.Start(ctx) },
-		OnStop:  func(ctx context.Context) error { return manager.Stop(ctx) },
-	})
 }
 
 func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *memohServer, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {

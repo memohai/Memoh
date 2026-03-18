@@ -107,25 +107,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  agent:
-    image: oven/bun:1-alpine
-    container_name: memoh-dev-agent
-    working_dir: /workspace/apps/agent
-    command: ["bun", "run", "--watch", "src/index.ts"]
-    environment:
-      MEMOH_CONFIG_PATH: /workspace/devenv/app.dev.toml
-    volumes:
-      - ..:/workspace
-      - node_modules:/workspace/node_modules
-    ports:
-      - "${MEMOH_DEV_AGENT_PORT:-18081}:8081"
-    depends_on:
-      deps:
-        condition: service_completed_successfully
-      server:
-        condition: service_healthy
-    restart: unless-stopped
-
   web:
     build:
       context: ..

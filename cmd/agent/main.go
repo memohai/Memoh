@@ -22,6 +22,7 @@ import (
 	dbembed "github.com/memohai/memoh/db"
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
@@ -210,7 +211,8 @@ func runServe() {
 			provideChannelManager,
 			provideChannelLifecycleService,
 
-			// conversation flow
+			// agent & conversation flow
+			provideAgent,
 			provideChatResolver,
 			provideScheduleTriggerer,
 			schedule.NewService,
@@ -260,6 +262,7 @@ func runServe() {
 			provideServer,
 		),
 		fx.Invoke(
+			injectToolGateway,
 			startMemoryProviderBootstrap,
 			startScheduleService,
 			startHeartbeatService,
@@ -399,8 +402,19 @@ func provideHeartbeatTriggerer(resolver *flow.Resolver) heartbeat.Triggerer {
 // conversation flow
 // ---------------------------------------------------------------------------
 
-func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *flow.Resolver {
-	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
+func provideAgent(log *slog.Logger, manager *workspace.Manager) *agentpkg.Agent {
+	return agentpkg.New(agentpkg.Deps{
+		BridgeProvider: manager,
+		Logger:         log,
+	})
+}
+
+func injectToolGateway(a *agentpkg.Agent, tg *mcp.ToolGatewayService) {
+	a.SetToolGateway(tg)
+}
+
+func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *flow.Resolver {
+	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, a, 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
@@ -564,7 +578,7 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService)
 	emailExec := mcpemail.NewExecutor(log, emailService, emailManager)
 	webFetchExec := mcpwebfetch.NewExecutor(log)
-	subagentExec := mcpsubagent.NewExecutor(log, subagentService, settingsService, modelsService, queries, cfg.AgentGateway.BaseURL())
+	subagentExec := mcpsubagent.NewExecutor(log, subagentService, settingsService, modelsService, queries, "")
 	skillExec := mcpskill.NewExecutor(log)
 	browserExec := mcpbrowser.NewExecutor(log, settingsService, browserContextService, manager, cfg.BrowserGateway)
 	ttsExec := mcptts.NewExecutor(log, settingsService, ttsService, channelManager, registry)

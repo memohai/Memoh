@@ -41,7 +41,6 @@ type Config struct {
 	Postgres       PostgresConfig       `toml:"postgres"`
 	Qdrant         QdrantConfig         `toml:"qdrant"`
 	Sparse         SparseConfig         `toml:"sparse"`
-	AgentGateway   AgentGatewayConfig   `toml:"agent_gateway"`
 	BrowserGateway BrowserGatewayConfig `toml:"browser_gateway"`
 }
 
@@ -140,23 +139,6 @@ type SparseConfig struct {
 	BaseURL string `toml:"base_url"`
 }
 
-type AgentGatewayConfig struct {
-	Host string `toml:"host"`
-	Port int    `toml:"port"`
-}
-
-func (c AgentGatewayConfig) BaseURL() string {
-	host := c.Host
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	port := c.Port
-	if port == 0 {
-		port = 8081
-	}
-	return "http://" + host + ":" + strconv.Itoa(port)
-}
-
 type BrowserGatewayConfig struct {
 	Host string `toml:"host"`
 	Port int    `toml:"port"`
@@ -207,10 +189,6 @@ func Load(path string) (Config, error) {
 			User:     DefaultPGUser,
 			Database: DefaultPGDatabase,
 			SSLMode:  DefaultPGSSLMode,
-		},
-		AgentGateway: AgentGatewayConfig{
-			Host: "127.0.0.1",
-			Port: 8081,
 		},
 		BrowserGateway: BrowserGatewayConfig{
 			Host: "127.0.0.1",

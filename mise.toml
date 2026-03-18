@@ -5,7 +5,7 @@ experimental_monorepo_root = true
 go = "1.25.6"
 # Node.js for frontend packages
 node = "25"
-# Bun for agent gateway
+# Bun for browser gateway
 bun = "latest"
 # pnpm for workspace management
 pnpm = "10"
@@ -96,7 +96,7 @@ description = "Release new version"
 run = "pnpm release"
 
 [tasks.build-embedded-assets]
-description = "Build and stage embedded web/agent/bun assets"
+description = "Build and stage embedded web assets"
 run = "scripts/release.sh --prepare-assets"
 depends = ["//:pnpm-install"]
 
