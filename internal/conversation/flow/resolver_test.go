@@ -529,3 +529,52 @@ func TestOutboundAssetRefsToMessageRefs_Empty(t *testing.T) {
 		t.Fatalf("expected nil, got %v", result)
 	}
 }
+
+func TestNormalizeImagePartsToDataURL_ConvertsIndexedObject(t *testing.T) {
+	msg := conversation.ModelMessage{
+		Role: "user",
+		Content: json.RawMessage(`[
+			{"type":"text","text":"hello"},
+			{"type":"image","image":{"0":82,"1":73,"2":70,"3":70},"mediaType":"image/webp"}
+		]`),
+	}
+
+	normalized, changed := normalizeImagePartsToDataURL(msg)
+	if !changed {
+		t.Fatal("expected message to be normalized")
+	}
+
+	var parts []map[string]any
+	if err := json.Unmarshal(normalized.Content, &parts); err != nil {
+		t.Fatalf("failed to unmarshal normalized content: %v", err)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts, got %d", len(parts))
+	}
+	image, ok := parts[1]["image"].(string)
+	if !ok {
+		t.Fatalf("expected image to be string data url, got %T", parts[1]["image"])
+	}
+	expected := "data:image/webp;base64," + base64.StdEncoding.EncodeToString([]byte{82, 73, 70, 70})
+	if image != expected {
+		t.Fatalf("unexpected data url, got %q", image)
+	}
+}
+
+func TestNormalizeImagePartsToDataURL_LeavesStringImageUntouched(t *testing.T) {
+	original := `[
+		{"type":"image","image":"data:image/png;base64,AAAA","mediaType":"image/png"}
+	]`
+	msg := conversation.ModelMessage{
+		Role:    "user",
+		Content: json.RawMessage(original),
+	}
+
+	normalized, changed := normalizeImagePartsToDataURL(msg)
+	if changed {
+		t.Fatal("expected no normalization for string image")
+	}
+	if string(normalized.Content) != original {
+		t.Fatalf("expected content unchanged, got %s", string(normalized.Content))
+	}
+}
