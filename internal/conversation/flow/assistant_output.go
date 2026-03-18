@@ -32,6 +32,10 @@ func filterContentParts(parts []conversation.ContentPart) []conversation.Content
 	}
 	filtered := make([]conversation.ContentPart, 0, len(parts))
 	for _, p := range parts {
+		// Ignore Reasoning parts
+		if p.Type == "reasoning" {
+			continue
+		}
 		if p.HasValue() {
 			filtered = append(filtered, p)
 		}

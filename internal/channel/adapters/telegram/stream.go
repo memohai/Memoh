@@ -401,20 +401,11 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.St
 
 	msg := event.Final.Message
 	finalText := bufText
-	if !s.isPrivateChat {
-		// For channels/groups, prefer authoritative final text over streamed
-		// buffer. Stream deltas can split surrogate pairs (emoji) and produce
-		// U+FFFD when reconstructed from partial chunks.
-		if final := strings.TrimSpace(msg.PlainText()); final != "" {
-			finalText = final
+	if authoritative := strings.TrimSpace(msg.PlainText()); authoritative != "" {
+		if !s.isPrivateChat || bufText != "" {
+			finalText = authoritative
 		}
-	} else if final := strings.TrimSpace(msg.PlainText()); final != "" && strings.TrimSpace(bufText) != "" {
-		// In private draft mode, only the first StreamEventFinal should send a
-		// permanent message. Prefer authoritative final text for that first send
-		// to avoid persisting replacement runes from split deltas.
-		finalText = final
 	}
-
 	// Convert markdown to Telegram HTML for the final message.
 	formatted, pm := formatTelegramOutput(finalText, msg.Format)
 	if pm != "" {
