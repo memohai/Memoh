@@ -115,6 +115,10 @@ func (m ModelMessage) TextContent() string {
 	if err := json.Unmarshal(m.Content, &parts); err == nil {
 		texts := make([]string, 0, len(parts))
 		for _, p := range parts {
+			// Ignore Reasoning parts
+			if p.Type == "reasoning" {
+				continue
+			}
 			if strings.TrimSpace(p.Text) != "" {
 				texts = append(texts, p.Text)
 			}
