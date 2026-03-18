@@ -16,6 +16,10 @@ func ExtractAssistantOutputs(messages []conversation.ModelMessage) []conversatio
 		if msg.Role != "assistant" {
 			continue
 		}
+		// skip tool call tips content.
+		if hasToolCallContent(msg) {
+			continue
+		}
 		content := strings.TrimSpace(msg.TextContent())
 		parts := filterContentParts(msg.ContentParts())
 		if content == "" && len(parts) == 0 {
@@ -24,6 +28,18 @@ func ExtractAssistantOutputs(messages []conversation.ModelMessage) []conversatio
 		outputs = append(outputs, conversation.AssistantOutput{Content: content, Parts: parts})
 	}
 	return outputs
+}
+
+func hasToolCallContent(msg conversation.ModelMessage) bool {
+	if len(msg.ToolCalls) > 0 {
+		return true
+	}
+	for _, p := range msg.ContentParts() {
+		if p.Type == "tool-call" {
+			return true
+		}
+	}
+	return false
 }
 
 func filterContentParts(parts []conversation.ContentPart) []conversation.ContentPart {
