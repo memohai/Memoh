@@ -36,13 +36,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [server, agent, web, browser, sparse]
+        image: [server, web, browser, sparse]
         platform: [linux/amd64, linux/arm64]
         include:
           - image: server
             dockerfile: docker/Dockerfile.server
-          - image: agent
-            dockerfile: docker/Dockerfile.agent
           - image: web
             dockerfile: docker/Dockerfile.web
           - image: browser
@@ -132,7 +130,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        image: [server, agent, web, browser, sparse]
+        image: [server, web, browser, sparse]
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
