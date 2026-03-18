@@ -446,6 +446,21 @@ const memoryProviders = computed(() => memoryProviderData.value ?? [])
 const ttsProviders = computed(() => ttsProviderData.value ?? [])
 const ttsModels = computed(() => ttsModelData.value ?? [])
 const browserContexts = computed(() => browserContextData.value ?? [])
+
+// ---- Form ----
+const form = reactive({
+  chat_model_id: '',
+  search_provider_id: '',
+  memory_provider_id: '',
+  tts_model_id: '',
+  browser_context_id: '',
+  max_context_load_time: 0,
+  max_context_tokens: 0,
+  language: '',
+  reasoning_enabled: false,
+  reasoning_effort: 'medium',
+})
+
 const selectedMemoryProvider = computed(() =>
   memoryProviders.value.find((provider) => provider.id === form.memory_provider_id),
 )
@@ -541,20 +556,6 @@ const encoderHealthLabel = computed(() =>
     ? t('bots.settings.memoryDenseEmbeddingHealth')
     : t('bots.settings.memoryEncoderHealth'),
 )
-
-// ---- Form ----
-const form = reactive({
-  chat_model_id: '',
-  search_provider_id: '',
-  memory_provider_id: '',
-  tts_model_id: '',
-  browser_context_id: '',
-  max_context_load_time: 0,
-  max_context_tokens: 0,
-  language: '',
-  reasoning_enabled: false,
-  reasoning_effort: 'medium',
-})
 
 watch(settings, (val) => {
   if (val) {
