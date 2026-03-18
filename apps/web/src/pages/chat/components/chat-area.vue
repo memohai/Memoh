@@ -17,48 +17,49 @@
 
     <template v-else>
       <!-- Bot info header -->
-    
+
 
       <!-- Messages -->
-      <div
-        ref="scrollContainer"
-        class="flex-1 overflow-y-auto"
-        role="log"
-        aria-live="polite"
-        aria-relevant="additions text"
-        @scroll="handleScroll"
-      >
-        <div class="max-w-3xl mx-auto px-4 py-6 space-y-6">
-          <!-- Load older indicator -->
-          <div
-            v-if="loadingOlder"
-            class="flex justify-center py-2"
+      <section class="flex-1 relative w-full">
+        <section class="absolute inset-0">
+          <ScrollArea
+            ref="scrollContainer"
+            class="h-full"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'spinner']"
-              class="size-3.5 animate-spin text-muted-foreground"
-            />
-          </div>
+            <div class="max-w-3xl mx-auto px-4 py-6 space-y-6">
+              <!-- Load older indicator -->
+              <div
+                v-if="loadingOlder"
+                class="flex justify-center py-2"
+              >
+                <FontAwesomeIcon
+                  :icon="['fas', 'spinner']"
+                  class="size-3.5 animate-spin text-muted-foreground"
+                />
+              </div>
 
-          <!-- Empty state -->
-          <div
-            v-if="messages.length === 0 && !loadingChats"
-            class="flex items-center justify-center min-h-[300px]"
-          >
-            <p class="text-muted-foreground text-lg">
-              {{ $t('chat.greeting') }}
-            </p>
-          </div>
+              <!-- Empty state -->
+              <div
+                v-if="messages.length === 0 && !loadingChats"
+                class="flex items-center justify-center min-h-[300px]"
+              >
+                <p class="text-muted-foreground text-lg">
+                  {{ $t('chat.greeting') }}
+                </p>
+              </div>
 
-          <!-- Message list -->
-          <MessageItem
-            v-for="msg in messages"
-            :key="msg.id"
-            :message="msg"
-            :on-open-media="galleryOpenBySrc"
-          />
-        </div>
-      </div>
+              <!-- Message list -->
+              <MessageItem
+                v-for="msg in messages"
+                :key="msg.id"
+                :message="msg"
+                :on-open-media="galleryOpenBySrc"
+              />
+            </div>
+          </ScrollArea>
+        </section>
+      </section>
+
 
       <!-- Media gallery lightbox -->
       <MediaGalleryLightbox
@@ -115,7 +116,7 @@
                 class="justify-end"
               >
                 <Button
-                  v-if="!streaming"                
+                  v-if="!streaming"
                   type="button"
                   size="sm"
                   variant="ghost"
@@ -200,8 +201,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, provide } from 'vue'
-import { Textarea, Button, Avatar, AvatarImage, AvatarFallback, Badge, InputGroup, InputGroupAddon, InputGroupButton, InputGroupText, InputGroupTextarea, Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@memoh/ui'
+import { ref, computed, nextTick, onMounted, provide, useTemplateRef, watchEffect} from 'vue'
+import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@memoh/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import MessageItem from './message-item.vue'
@@ -210,6 +211,7 @@ import FileManager from '@/components/file-manager/index.vue'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 import type { ChatAttachment } from '@/composables/api/useChat'
+import { useScroll, useElementBounding } from '@vueuse/core'
 
 const chatStore = useChatStore()
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -231,8 +233,7 @@ provide(openInFileManagerKey, (path: string, isDir = false) => {
 const {
   messages,
   streaming,
-  currentBotId,
-  bots,
+  currentBotId,  
   activeChatReadOnly,
   loadingOlder,
   loadingChats,
@@ -247,81 +248,60 @@ const {
 } = useMediaGallery(messages)
 
 const inputText = ref('')
-const scrollContainer = ref<HTMLElement>()
 
-const currentBot = computed(() =>
-  bots.value.find((b) => b.id === currentBotId.value) ?? null,
-)
 
-onMounted(() => {
-  void chatStore.initialize()
-})
-
-// ---- Auto-scroll ----
-
-let userScrolledUp = false
-
-function scrollToBottom(instant = false) {
-  requestAnimationFrame(() => {
+onMounted(async () => {
+  try {
+    await chatStore.initialize()  
+  } finally {
     requestAnimationFrame(() => {
-      const el = scrollContainer.value   
-      if (!el) return
-      el.scrollTo({ top: el.scrollHeight, behavior: instant ? 'instant' : 'smooth' })   
-    })
-   
-  })
-}
+      requestAnimationFrame(() => {
+        isInstant.value = true
+      })
+    })  
+  }  
+})
 
-function handleScroll() {
-  const el = scrollContainer.value
-  if (!el) return
-  const distanceFromBottom = el.scrollHeight - el.clientHeight - el.scrollTop
-  userScrolledUp = distanceFromBottom > 50
+const elNode = useTemplateRef('scrollContainer')
+const descEl = computed(() => elNode.value?.$el?.children[0]?.children[0])
+const scrollEl = computed(() => descEl.value?.parentNode)
+const isAutoScroll = ref(true)
+const isInstant=ref(false)
+const { y, directions, arrivedState } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value&&isInstant.value ? 'smooth' : 'instant') })
+const { height,bottom } = useElementBounding(descEl)
 
-  if (el.scrollTop < 200 && hasMoreOlder.value && !loadingOlder.value) {
-    const prevHeight = el.scrollHeight
-    chatStore.loadOlderMessages().then((count) => {
-      if (count > 0) {
-        nextTick(() => {
-          el.scrollTop = el.scrollHeight - prevHeight
-        })
-      }
-    })
+
+watchEffect(() => {
+  if (directions.top) {
+    isAutoScroll.value = false
   }
-}
-
-// After full load (initial / chat switch), instantly jump to bottom
-watch(loadingChats, (cur, prev) => {
-  if (prev && !cur) {
-    userScrolledUp = false
-    scrollToBottom(true)
+  if (arrivedState.bottom) {
+    isAutoScroll.value = true
   }
 })
 
-// Stream content auto-scroll
-watch(
-  () => {
-    const last = messages.value[messages.value.length - 1]
-    return last?.blocks.reduce((acc, b) => {
-      if (b.type === 'text') return acc + b.content.length
-      if (b.type === 'thinking') return acc + b.content.length
-      return acc + 1
-    }, 0) ?? 0
-  },
-  () => {
-    if (!userScrolledUp) scrollToBottom()
-  },
-)
+watchEffect(() => {  
+  if (isAutoScroll.value) {
+    y.value = height.value
+  }
+})
 
-// New realtime message auto-scroll
-watch(
-  () => messages.value.length,
-  () => {
-    if (loadingChats.value) return
-    userScrolledUp = false
-    scrollToBottom()
-  },
-)
+let Throttle = true
+
+watchEffect(() => {
+  if (directions.top && arrivedState.top && Throttle && hasMoreOlder.value && !loadingOlder.value) {
+    const prev=bottom.value
+    Throttle = false    
+    chatStore.loadOlderMessages().then((count) => {
+      setTimeout(() => {
+        if (count > 0) {               
+          y.value = height.value-prev
+          Throttle = true        
+        }    
+      })
+    })
+  }
+})
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.isComposing) return
@@ -329,13 +309,6 @@ function handleKeydown(e: KeyboardEvent) {
   handleSend()
 }
 
-function handleFileSelect(e: Event) {
-  const input = e.target as HTMLInputElement
-  if (input.files) {
-    pendingFiles.value.push(...Array.from(input.files))
-  }
-  input.value = ''
-}
 
 function handlePaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items
@@ -365,6 +338,7 @@ async function fileToAttachment(file: File): Promise<ChatAttachment> {
 }
 
 async function handleSend() {
+  isAutoScroll.value=true
   const text = inputText.value.trim()
   const files = [...pendingFiles.value]
   if ((!text && !files.length) || streaming.value || activeChatReadOnly.value) return

@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,28 +12,24 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/containerd/errdefs"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 type ContainerdHandler struct {
-	service          ctr.Service
-	manager          *mcp.Manager
-	cfg              config.MCPConfig
-	namespace        string
+	manager          *workspace.Manager
+	cfg              config.WorkspaceConfig
 	containerBackend string
 	logger           *slog.Logger
 	toolGateway      *mcp.ToolGatewayService
@@ -41,12 +39,12 @@ type ContainerdHandler struct {
 	botService       *bots.Service
 	accountService   *accounts.Service
 	policyService    *policy.Service
-	queries          *dbsqlc.Queries
 }
 
 type CreateContainerRequest struct {
 	Snapshotter string `json:"snapshotter,omitempty"`
 	RestoreData bool   `json:"restore_data,omitempty"`
+	Image       string `json:"image,omitempty"`
 }
 
 type CreateContainerResponse struct {
@@ -58,6 +56,36 @@ type CreateContainerResponse struct {
 	HasPreservedData bool   `json:"has_preserved_data"`
 }
 
+// codesync(container-create-stream): keep these SSE payloads in sync with
+// packages/sdk/src/container-stream.ts.
+type createContainerPullingEvent struct {
+	Type  string `json:"type"`
+	Image string `json:"image"`
+}
+
+type createContainerPullProgressEvent struct {
+	Type   string            `json:"type"`
+	Layers []ctr.LayerStatus `json:"layers"`
+}
+
+type createContainerCreatingEvent struct {
+	Type string `json:"type"`
+}
+
+type createContainerCompleteEvent struct {
+	Type      string                  `json:"type"`
+	Container CreateContainerResponse `json:"container"`
+}
+
+type createContainerRestoringEvent struct {
+	Type string `json:"type"`
+}
+
+type createContainerErrorEvent struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
 type GetContainerResponse struct {
 	ContainerID      string    `json:"container_id"`
 	Image            string    `json:"image"`
@@ -66,6 +94,7 @@ type GetContainerResponse struct {
 	ContainerPath    string    `json:"container_path"`
 	TaskRunning      bool      `json:"task_running"`
 	HasPreservedData bool      `json:"has_preserved_data"`
+	Legacy           bool      `json:"legacy"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -108,12 +137,10 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Manager, cfg config.MCPConfig, namespace string, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, queries *dbsqlc.Queries) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.WorkspaceConfig, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *ContainerdHandler {
 	h := &ContainerdHandler{
-		service:          service,
 		manager:          manager,
 		cfg:              cfg,
-		namespace:        namespace,
 		containerBackend: containerBackend,
 		logger:           log.With(slog.String("handler", "containerd")),
 		mcpSess:          make(map[string]*mcpSession),
@@ -121,7 +148,6 @@ func NewContainerdHandler(log *slog.Logger, service ctr.Service, manager *mcp.Ma
 		botService:       botService,
 		accountService:   accountService,
 		policyService:    policyService,
-		queries:          queries,
 	}
 	return h
 }
@@ -166,7 +192,7 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param payload body CreateContainerRequest true "Create container payload"
-// @Success 200 {object} CreateContainerResponse
+// @Success 200 {object} CreateContainerResponse "SSE stream of container creation events"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container [post].
@@ -180,156 +206,129 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	containerID := mcp.ContainerPrefix + botID
+	// Image override lets administrators specify a custom base image.
+	// NOTE(saas): if this becomes a multi-tenant SaaS, image override must be
+	// validated against an allowlist to prevent SSRF and resource abuse.
+	ctx := c.Request().Context()
+	imageOverride := strings.TrimSpace(req.Image)
+	image, err := h.manager.ResolveWorkspaceImage(ctx, botID)
+	if err != nil {
+		h.logger.Error("resolve workspace image failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		return nil
+	}
+	if imageOverride != "" {
+		image = config.NormalizeImageRef(imageOverride)
+	}
 
-	image := h.mcpImageRef()
 	snapshotter := strings.TrimSpace(req.Snapshotter)
 	if snapshotter == "" {
 		snapshotter = h.cfg.Snapshotter
 	}
 
-	ctx := c.Request().Context()
-
-	if h.manager == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "manager not configured")
+	flusher, ok := c.Response().Writer.(http.Flusher)
+	if !ok {
+		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
 	}
 
-	started := false
-	if err := h.manager.Start(ctx, botID); err != nil {
-		h.logger.Error("mcp container start failed",
-			slog.String("container_id", containerID),
-			slog.Any("error", err),
-		)
-	} else {
-		started = true
+	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
+	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
+	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+	writer := bufio.NewWriter(c.Response().Writer)
+
+	var mu sync.Mutex
+	send := func(payload any) {
+		mu.Lock()
+		defer mu.Unlock()
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		_ = writeSSEData(writer, flusher, string(data))
+	}
+
+	sendError := func(msg string) {
+		send(createContainerErrorEvent{Type: "error", Message: msg})
+	}
+
+	// Phase 1: Pull image with progress
+	send(createContainerPullingEvent{Type: "pulling", Image: image})
+
+	var pullDone atomic.Bool
+	_, pullErr := h.manager.PullImage(ctx, image, &ctr.PullImageOptions{
+		Unpack:      true,
+		Snapshotter: snapshotter,
+		OnProgress: func(p ctr.PullProgress) {
+			if pullDone.Load() {
+				return
+			}
+			send(createContainerPullProgressEvent{Type: "pull_progress", Layers: p.Layers})
+		},
+	})
+	pullDone.Store(true)
+	if pullErr != nil {
+		h.logger.Error("image pull failed",
+			slog.String("image", image), slog.Any("error", pullErr))
+		sendError("image pull failed: " + pullErr.Error())
+		return nil
+	}
+
+	// Phase 2: Create container (image is local, should be fast)
+	send(createContainerCreatingEvent{Type: "creating"})
+
+	// Notify the client before starting if data migration will happen,
+	// since restoring a large /data volume can take a while.
+	if h.manager.HasPreservedData(botID) {
+		send(createContainerRestoringEvent{Type: "restoring"})
+	}
+
+	if err := h.manager.StartWithResolvedImage(ctx, botID, image); err != nil {
+		h.logger.Error("container start failed",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		sendError("container start failed: " + err.Error())
+		return nil
+	}
+	if err := h.manager.RememberWorkspaceImage(ctx, botID, image); err != nil {
+		h.logger.Warn("remember workspace image failed",
+			slog.String("bot_id", botID), slog.String("image", image), slog.Any("error", err))
+	}
+
+	containerID, err := h.manager.ContainerID(ctx, botID)
+	if err != nil {
+		h.logger.Error("container ID resolution failed after start",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		sendError("container ID resolution failed: " + err.Error())
+		return nil
 	}
 
 	dataRestored := false
-	if started && req.RestoreData && h.manager.HasPreservedData(botID) {
+	if req.RestoreData && h.manager.HasPreservedData(botID) {
 		if err := h.manager.RestorePreservedData(ctx, botID); err != nil {
-			h.logger.Warn("restore preserved data on create failed",
+			h.logger.Error("restore preserved data failed",
 				slog.String("bot_id", botID), slog.Any("error", err))
-		} else {
-			dataRestored = true
-		}
-	}
-
-	h.upsertContainerRecord(ctx, botID, containerID, map[bool]string{true: "running", false: "created"}[started])
-
-	return c.JSON(http.StatusOK, CreateContainerResponse{
-		ContainerID:      containerID,
-		Image:            image,
-		Snapshotter:      snapshotter,
-		Started:          started,
-		DataRestored:     dataRestored,
-		HasPreservedData: h.manager.HasPreservedData(botID),
-	})
-}
-
-// ensureContainerAndTask verifies the container exists in containerd and its task is
-// running. If the container is missing (e.g. after a VM restart) it is recreated via
-// SetupBotContainer. This prevents permanent desync between DB and containerd state.
-func (h *ContainerdHandler) ensureContainerAndTask(ctx context.Context, containerID, botID string) error {
-	_, err := h.service.GetContainer(ctx, containerID)
-	if err != nil {
-		if !errdefs.IsNotFound(err) {
-			return err
-		}
-		h.logger.Warn("container missing in containerd, rebuilding",
-			slog.String("bot_id", botID),
-			slog.String("container_id", containerID),
-		)
-		return h.SetupBotContainer(ctx, botID)
-	}
-
-	tasks, err := h.service.ListTasks(ctx, &ctr.ListTasksOptions{
-		Filter: "container.id==" + containerID,
-	})
-	if err != nil {
-		return err
-	}
-	if len(tasks) > 0 {
-		if tasks[0].Status == ctr.TaskStatusRunning {
-			if err := h.setupNetworkOrFail(ctx, containerID, botID); err != nil {
-				return err
-			}
+			sendError("restore preserved data failed: " + err.Error())
 			return nil
 		}
-		if err := h.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
-			if !errdefs.IsNotFound(err) {
-				h.logger.Warn("cleanup: delete task failed", slog.String("container_id", containerID), slog.Any("error", err))
-				return err
-			}
-		}
+		dataRestored = true
 	}
 
-	if err := h.service.StartContainer(ctx, containerID, nil); err != nil {
-		return err
-	}
-	return h.setupNetworkOrFail(ctx, containerID, botID)
-}
+	h.manager.RecordContainerRunning(ctx, botID, containerID, image)
 
-// setupNetworkOrFail attempts CNI network setup with one retry. Returns an error
-// if no usable IP is obtained — callers must not silently ignore this.
-func (h *ContainerdHandler) setupNetworkOrFail(ctx context.Context, containerID, botID string) error {
-	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		netResult, err := h.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-			ContainerID: containerID,
-			CNIBinDir:   h.cfg.CNIBinaryDir,
-			CNIConfDir:  h.cfg.CNIConfigDir,
-		})
-		if err != nil {
-			lastErr = err
-			h.logger.Warn("network setup attempt failed",
-				slog.String("container_id", containerID),
-				slog.Int("attempt", attempt+1),
-				slog.Any("error", err))
-			continue
-		}
-		if netResult.IP == "" {
-			lastErr = fmt.Errorf("network setup returned no IP for %s", containerID)
-			continue
-		}
-		if h.manager != nil {
-			h.manager.SetContainerIP(botID, netResult.IP)
-		}
-		return nil
-	}
-	return fmt.Errorf("network setup failed for container %s: %w", containerID, lastErr)
-}
+	// Phase 3: Complete
+	send(createContainerCompleteEvent{
+		Type: "complete",
+		Container: CreateContainerResponse{
+			ContainerID:      containerID,
+			Image:            image,
+			Snapshotter:      snapshotter,
+			Started:          true,
+			DataRestored:     dataRestored,
+			HasPreservedData: h.manager.HasPreservedData(botID),
+		},
+	})
 
-// botContainerID resolves container_id for a bot from the database.
-func (h *ContainerdHandler) botContainerID(ctx context.Context, botID string) (string, error) {
-	if h.queries != nil {
-		pgBotID, err := db.ParseUUID(botID)
-		if err == nil {
-			row, dbErr := h.queries.GetContainerByBotID(ctx, pgBotID)
-			if dbErr == nil && strings.TrimSpace(row.ContainerID) != "" {
-				return row.ContainerID, nil
-			}
-			if dbErr != nil && !errors.Is(dbErr, pgx.ErrNoRows) {
-				h.logger.Warn("botContainerID: db lookup failed",
-					slog.String("bot_id", botID), slog.Any("error", dbErr))
-			}
-		}
-	}
-	containers, err := h.service.ListContainersByLabel(ctx, mcp.BotLabelKey, botID)
-	if err != nil {
-		return "", err
-	}
-	if len(containers) == 0 {
-		return "", echo.NewHTTPError(http.StatusNotFound, "container not found")
-	}
-	bestID := ""
-	var bestUpdated time.Time
-	for _, info := range containers {
-		if bestID == "" || info.UpdatedAt.After(bestUpdated) {
-			bestID = info.ID
-			bestUpdated = info.UpdatedAt
-		}
-	}
-	return bestID, nil
+	return nil
 }
 
 // GetContainer godoc
@@ -345,57 +344,24 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-
-	if h.queries != nil {
-		pgBotID, parseErr := db.ParseUUID(botID)
-		if parseErr == nil {
-			row, dbErr := h.queries.GetContainerByBotID(ctx, pgBotID)
-			if dbErr == nil {
-				taskRunning := h.isTaskRunning(ctx, row.ContainerID)
-				createdAt := time.Time{}
-				if row.CreatedAt.Valid {
-					createdAt = row.CreatedAt.Time
-				}
-				updatedAt := time.Time{}
-				if row.UpdatedAt.Valid {
-					updatedAt = row.UpdatedAt.Time
-				}
-				return c.JSON(http.StatusOK, GetContainerResponse{
-					ContainerID:      row.ContainerID,
-					Image:            row.Image,
-					Status:           row.Status,
-					Namespace:        row.Namespace,
-					ContainerPath:    row.ContainerPath,
-					TaskRunning:      taskRunning,
-					HasPreservedData: h.manager.HasPreservedData(botID),
-					CreatedAt:        createdAt,
-					UpdatedAt:        updatedAt,
-				})
-			}
-		}
-	}
-
-	containerID, err := h.botContainerID(ctx, botID)
+	status, err := h.manager.GetContainerInfo(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
-	}
-	info, err := h.service.GetContainer(ctx, containerID)
-	if err != nil {
-		if errdefs.IsNotFound(err) {
-			return echo.NewHTTPError(http.StatusNotFound, "container not found")
+		if errors.Is(err, workspace.ErrContainerNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, GetContainerResponse{
-		ContainerID:      info.ID,
-		Image:            info.Image,
-		Status:           "unknown",
-		Namespace:        h.namespace,
-		TaskRunning:      h.isTaskRunning(ctx, containerID),
-		HasPreservedData: h.manager.HasPreservedData(botID),
-		CreatedAt:        info.CreatedAt,
-		UpdatedAt:        info.UpdatedAt,
+		ContainerID:      status.ContainerID,
+		Image:            status.Image,
+		Status:           status.Status,
+		Namespace:        status.Namespace,
+		ContainerPath:    status.ContainerPath,
+		TaskRunning:      status.TaskRunning,
+		HasPreservedData: status.HasPreservedData,
+		Legacy:           status.Legacy,
+		CreatedAt:        status.CreatedAt,
+		UpdatedAt:        status.UpdatedAt,
 	})
 }
 
@@ -414,7 +380,7 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 		return err
 	}
 	preserveData := c.QueryParam("preserve_data") == "true"
-	if err := h.CleanupBotContainer(c.Request().Context(), botID, preserveData); err != nil {
+	if err := h.manager.CleanupBotContainer(c.Request().Context(), botID, preserveData); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -433,21 +399,11 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	containerID, err := h.botContainerID(ctx, botID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
-	}
-	if err := h.ensureContainerAndTask(ctx, containerID, botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if h.queries != nil {
-		if pgBotID, parseErr := db.ParseUUID(botID); parseErr == nil {
-			if dbErr := h.queries.UpdateContainerStarted(ctx, pgBotID); dbErr != nil {
-				h.logger.Error("failed to update container started status",
-					slog.String("bot_id", botID), slog.Any("error", dbErr))
-			}
+	if err := h.manager.EnsureRunning(c.Request().Context(), botID); err != nil {
+		if errors.Is(err, workspace.ErrContainerNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
 		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"started": true})
 }
@@ -465,27 +421,11 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	containerID, err := h.botContainerID(ctx, botID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
-	}
-	if err := h.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{
-		Timeout: 10 * time.Second,
-		Force:   true,
-	}); err != nil && !errdefs.IsNotFound(err) {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if err := h.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
-		h.logger.Warn("cleanup: delete task failed", slog.String("container_id", containerID), slog.Any("error", err))
-	}
-	if h.queries != nil {
-		if pgBotID, parseErr := db.ParseUUID(botID); parseErr == nil {
-			if dbErr := h.queries.UpdateContainerStopped(ctx, pgBotID); dbErr != nil {
-				h.logger.Error("failed to update container stopped status",
-					slog.String("bot_id", botID), slog.Any("error", dbErr))
-			}
+	if err := h.manager.StopBot(c.Request().Context(), botID); err != nil {
+		if errors.Is(err, workspace.ErrContainerNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
 		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"stopped": true})
 }
@@ -515,7 +455,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	created, err := h.manager.CreateSnapshot(c.Request().Context(), botID, req.SnapshotName, mcp.SnapshotSourceManual)
+	created, err := h.manager.CreateSnapshot(c.Request().Context(), botID, req.SnapshotName, workspace.SnapshotSourceManual)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "container not found")
@@ -529,7 +469,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 		DisplayName:         created.DisplayName,
 		Snapshotter:         created.Snapshotter,
 		Version:             created.Version,
-		Source:              mcp.SnapshotSourceManual,
+		Source:              workspace.SnapshotSourceManual,
 	})
 }
 
@@ -590,7 +530,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 
 	items := make([]SnapshotInfo, 0, len(lineage)+len(data.ManagedMeta))
 	seen := make(map[string]struct{}, len(lineage)+len(data.ManagedMeta))
-	appendRuntime := func(runtimeInfo ctr.SnapshotInfo, fallbackSource string, meta *mcp.ManagedSnapshotMeta) {
+	appendRuntime := func(runtimeInfo ctr.SnapshotInfo, fallbackSource string, meta *workspace.ManagedSnapshotMeta) {
 		source := fallbackSource
 		managed := false
 		var version *int
@@ -824,10 +764,6 @@ func snapshotLineage(root string, all []ctr.SnapshotInfo) ([]ctr.SnapshotInfo, b
 
 // ---------- auth helpers ----------
 
-func (h *ContainerdHandler) mcpImageRef() string {
-	return h.cfg.ImageRef()
-}
-
 // requireBotAccess extracts bot_id from path, validates user auth, and authorizes bot access.
 func (h *ContainerdHandler) requireBotAccess(c echo.Context) (string, error) {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -867,181 +803,4 @@ func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, e
 		return "", err
 	}
 	return botID, nil
-}
-
-// SetupBotContainer creates and starts the MCP container for a bot.
-func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string) error {
-	containerID := mcp.ContainerPrefix + botID
-
-	if h.manager == nil {
-		return errors.New("manager not configured")
-	}
-
-	if err := h.manager.Start(ctx, botID); err != nil {
-		h.logger.Error("setup bot container: start failed",
-			slog.String("bot_id", botID),
-			slog.String("container_id", containerID),
-			slog.Any("error", err),
-		)
-		return err
-	}
-
-	h.upsertContainerRecord(ctx, botID, containerID, "running")
-	return nil
-}
-
-// CleanupBotContainer removes the containerd container and DB record for a bot.
-// When preserveData is true, /data is exported to a backup archive before
-// deletion so it can be restored into a future container.
-func (h *ContainerdHandler) CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error {
-	h.logger.Info("CleanupBotContainer starting",
-		slog.String("bot_id", botID), slog.Bool("preserve_data", preserveData))
-
-	if h.manager != nil {
-		if err := h.manager.Delete(ctx, botID, preserveData); err != nil {
-			if !errdefs.IsNotFound(err) {
-				return err
-			}
-			h.logger.Warn("CleanupBotContainer: container not found in containerd",
-				slog.String("bot_id", botID))
-		}
-	}
-
-	if h.queries != nil {
-		if pgBotID, parseErr := db.ParseUUID(botID); parseErr == nil {
-			if dbErr := h.queries.DeleteContainerByBotID(ctx, pgBotID); dbErr != nil {
-				h.logger.Error("CleanupBotContainer: failed to delete DB record",
-					slog.String("bot_id", botID), slog.Any("error", dbErr))
-			}
-		}
-	}
-	h.logger.Info("CleanupBotContainer finished", slog.String("bot_id", botID))
-	return nil
-}
-
-func (h *ContainerdHandler) isTaskRunning(ctx context.Context, containerID string) bool {
-	tasks, err := h.service.ListTasks(ctx, &ctr.ListTasksOptions{
-		Filter: "container.id==" + containerID,
-	})
-	return err == nil && len(tasks) > 0 && tasks[0].Status == ctr.TaskStatusRunning
-}
-
-// ReconcileContainers compares the DB containers table against actual containerd
-// state on startup. For each auto_start container in DB it verifies the container
-// and task exist; if missing they are rebuilt via SetupBotContainer. Containers that
-// the DB claims are running but are not present in containerd get corrected.
-func (h *ContainerdHandler) ReconcileContainers(ctx context.Context) {
-	if h.queries == nil {
-		return
-	}
-	rows, err := h.queries.ListAutoStartContainers(ctx)
-	if err != nil {
-		h.logger.Error("reconcile: failed to list containers from DB", slog.Any("error", err))
-		return
-	}
-	if len(rows) == 0 {
-		h.logger.Info("reconcile: no auto-start containers in DB")
-		return
-	}
-
-	h.logger.Info("reconcile: checking containers", slog.Int("count", len(rows)))
-	for _, row := range rows {
-		containerID := row.ContainerID
-		botID := uuid.UUID(row.BotID.Bytes).String()
-
-		_, err := h.service.GetContainer(ctx, containerID)
-		if err != nil {
-			if !errdefs.IsNotFound(err) {
-				h.logger.Error("reconcile: failed to get container",
-					slog.String("container_id", containerID), slog.Any("error", err))
-				continue
-			}
-			// Container missing in containerd — rebuild.
-			h.logger.Warn("reconcile: container missing, rebuilding",
-				slog.String("bot_id", botID), slog.String("container_id", containerID))
-			if setupErr := h.SetupBotContainer(ctx, botID); setupErr != nil {
-				h.logger.Error("reconcile: rebuild failed",
-					slog.String("bot_id", botID), slog.Any("error", setupErr))
-				if dbErr := h.queries.UpdateContainerStatus(ctx, dbsqlc.UpdateContainerStatusParams{
-					Status: "error",
-					BotID:  row.BotID,
-				}); dbErr != nil {
-					h.logger.Error("reconcile: failed to mark container as error",
-						slog.String("bot_id", botID), slog.Any("error", dbErr))
-				}
-			}
-			continue
-		}
-
-		// Container exists — ensure the task is running.
-		running := h.isTaskRunning(ctx, containerID)
-		if running {
-			if row.Status != "running" {
-				if dbErr := h.queries.UpdateContainerStarted(ctx, row.BotID); dbErr != nil {
-					h.logger.Error("reconcile: failed to update DB status to running",
-						slog.String("bot_id", botID), slog.Any("error", dbErr))
-				}
-			}
-			if netErr := h.setupNetworkOrFail(ctx, containerID, botID); netErr != nil {
-				h.logger.Error("reconcile: network setup failed for running task, container unreachable",
-					slog.String("bot_id", botID),
-					slog.String("container_id", containerID),
-					slog.Any("error", netErr))
-			} else {
-				h.logger.Info("reconcile: container healthy",
-					slog.String("bot_id", botID), slog.String("container_id", containerID))
-			}
-			continue
-		}
-
-		// Task not running — try to start it.
-		h.logger.Warn("reconcile: task not running, starting",
-			slog.String("bot_id", botID), slog.String("container_id", containerID))
-		if err := h.ensureContainerAndTask(ctx, containerID, botID); err != nil {
-			h.logger.Error("reconcile: failed to start task",
-				slog.String("bot_id", botID), slog.Any("error", err))
-			if dbErr := h.queries.UpdateContainerStopped(ctx, row.BotID); dbErr != nil {
-				h.logger.Error("reconcile: failed to mark container as stopped",
-					slog.String("bot_id", botID), slog.Any("error", dbErr))
-			}
-		} else {
-			if dbErr := h.queries.UpdateContainerStarted(ctx, row.BotID); dbErr != nil {
-				h.logger.Error("reconcile: failed to update DB status to running",
-					slog.String("bot_id", botID), slog.Any("error", dbErr))
-			}
-		}
-	}
-	h.logger.Info("reconcile: completed")
-}
-
-func (h *ContainerdHandler) upsertContainerRecord(ctx context.Context, botID, containerID, status string) {
-	if h.queries == nil {
-		return
-	}
-	pgBotID, err := db.ParseUUID(botID)
-	if err != nil {
-		return
-	}
-	ns := strings.TrimSpace(h.namespace)
-	if ns == "" {
-		ns = "default"
-	}
-	if dbErr := h.queries.UpsertContainer(ctx, dbsqlc.UpsertContainerParams{
-		BotID:         pgBotID,
-		ContainerID:   containerID,
-		ContainerName: containerID,
-		Image:         h.mcpImageRef(),
-		Status:        status,
-		Namespace:     ns,
-		AutoStart:     true,
-	}); dbErr != nil {
-		h.logger.Error("failed to upsert container record",
-			slog.String("bot_id", botID), slog.Any("error", dbErr))
-	}
-	if status == "running" {
-		if dbErr := h.queries.UpdateContainerStarted(ctx, pgBotID); dbErr != nil {
-			h.logger.Error("failed to update container started status",
-				slog.String("bot_id", botID), slog.Any("error", dbErr))
-		}
-	}
 }

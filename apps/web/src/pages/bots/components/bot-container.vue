@@ -9,7 +9,6 @@ import {
   getBotsByBotIdContainer,
   getBotsByBotIdContainerSnapshots,
   getBotsById,
-  postBotsByBotIdContainer,
   postBotsByBotIdContainerDataExport,
   postBotsByBotIdContainerDataImport,
   postBotsByBotIdContainerDataRestore,
@@ -17,15 +16,23 @@ import {
   postBotsByBotIdContainerSnapshotsRollback,
   postBotsByBotIdContainerStart,
   postBotsByBotIdContainerStop,
+  type HandlersCreateContainerRequest,
   type HandlersGetContainerResponse,
   type HandlersListSnapshotsResponse,
 } from '@memoh/sdk'
+import {
+  postBotsByBotIdContainerStream,
+  type ContainerCreateLayerStatus,
+  type ContainerCreateStreamEvent,
+} from '@memoh/sdk/extra'
 import { Button, Input, Label, Separator, Spinner, Switch } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import ContainerCreateProgress from './container-create-progress.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { formatDateTime } from '@/utils/date-time'
+import { shortenImageRef } from '@/utils/image-ref'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const route = useRoute()
@@ -43,14 +50,37 @@ type ContainerAction =
   | 'import'
   | 'restore'
   | 'rollback'
+  | 'recreate'
   | ''
 
 const containerLoading = ref(false)
 const containerAction = ref<ContainerAction>('')
 const rollbackVersion = ref<number | null>(null)
 const createRestoreData = ref(false)
+const createImage = ref('')
+const createImagePrefilled = ref(false)
 const newSnapshotName = ref('')
 const importInputRef = ref<HTMLInputElement | null>(null)
+
+interface CreateProgress {
+  phase: 'preserving' | 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
+  layers?: ContainerCreateLayerStatus[]
+  image?: string
+  error?: string
+}
+const createProgress = ref<CreateProgress | null>(null)
+
+const createProgressPercent = computed(() => {
+  const layers = createProgress.value?.layers
+  if (!layers || layers.length === 0) return 0
+  let totalOffset = 0
+  let totalSize = 0
+  for (const l of layers) {
+    totalOffset += l.offset
+    totalSize += l.total
+  }
+  return totalSize > 0 ? Math.round((totalOffset / totalSize) * 100) : 0
+})
 
 const capabilitiesStore = useCapabilitiesStore()
 const botId = computed(() => route.params.botId as string)
@@ -157,29 +187,88 @@ const { data: bot } = useQuery({
   enabled: () => !!botId.value,
 })
 
+function rememberedWorkspaceImage(metadata: Record<string, unknown> | undefined): string {
+  const workspace = metadata?.workspace
+  if (!workspace || typeof workspace !== 'object' || Array.isArray(workspace)) return ''
+  const image = (workspace as Record<string, unknown>).image
+  return typeof image === 'string' ? shortenImageRef(image) : ''
+}
+
+const rememberedCreateImage = computed(() => rememberedWorkspaceImage(bot.value?.metadata as Record<string, unknown> | undefined))
+const displayedContainerImage = computed(() => shortenImageRef(containerInfo.value?.image))
+
 const { isPending: botLifecyclePending } = useBotStatusMeta(bot, t)
+
+function applyCreateContainerEvent(event: ContainerCreateStreamEvent): boolean {
+  switch (event.type) {
+    case 'pulling':
+      createProgress.value = { phase: 'pulling', image: event.image }
+      return false
+    case 'pull_progress':
+      createProgress.value = {
+        phase: 'pulling',
+        image: createProgress.value?.image,
+        layers: event.layers,
+      }
+      return false
+    case 'creating':
+      createProgress.value = { phase: 'creating' }
+      return false
+    case 'restoring':
+      createProgress.value = { phase: 'restoring' }
+      return false
+    case 'complete':
+      // Keep the last visible progress state until the container detail view loads.
+      // Rendering a separate "complete" phase here looks like the bar jumped back to 0.
+      return !!event.container.data_restored
+    case 'error':
+      createProgress.value = { phase: 'error', error: event.message }
+      throw new Error(event.message || 'Unknown error')
+  }
+}
+
+async function createContainerSSE(body: HandlersCreateContainerRequest): Promise<{ dataRestored: boolean }> {
+  const { stream } = await postBotsByBotIdContainerStream({
+    path: { bot_id: botId.value },
+    body,
+    throwOnError: true,
+  })
+
+  let dataRestored = false
+  for await (const event of stream) {
+    dataRestored = applyCreateContainerEvent(event) || dataRestored
+  }
+
+  return { dataRestored }
+}
 
 async function handleCreateContainer() {
   if (botLifecyclePending.value) return
 
-  await runContainerAction(
-    'create',
-    async () => {
-      const { data } = await postBotsByBotIdContainer({
-        path: { bot_id: botId.value },
-        body: {
-          restore_data: createRestoreData.value,
-        },
-        throwOnError: true,
-      })
-      createRestoreData.value = false
-      await loadContainerData(false)
-      return data
-    },
-    (result) => result.data_restored
+  containerAction.value = 'create'
+  createProgress.value = { phase: 'pulling' }
+  try {
+    const body: HandlersCreateContainerRequest = {
+      restore_data: createRestoreData.value,
+    }
+    const trimmedImage = createImage.value.trim()
+    if (trimmedImage) body.image = trimmedImage
+
+    const { dataRestored } = await createContainerSSE(body)
+    createRestoreData.value = false
+    createImage.value = ''
+    await loadContainerData(false)
+    toast.success(dataRestored
       ? t('bots.container.createRestoreSuccess')
-      : t('bots.container.createSuccess'),
-  )
+      : t('bots.container.createSuccess'))
+  }
+  catch (error) {
+    toast.error(resolveErrorMessage(error, t('bots.container.actionFailed')))
+  }
+  finally {
+    containerAction.value = ''
+    createProgress.value = null
+  }
 }
 
 const isContainerTaskRunning = computed(() => {
@@ -192,6 +281,33 @@ const isContainerTaskRunning = computed(() => {
 })
 
 const hasPreservedData = computed(() => !!containerInfo.value?.has_preserved_data)
+const isLegacy = computed(() => !!containerInfo.value?.legacy)
+
+async function handleRecreateContainer() {
+  if (botLifecyclePending.value || !containerInfo.value) return
+
+  containerAction.value = 'recreate'
+  try {
+    createProgress.value = { phase: 'preserving' }
+    await deleteBotsByBotIdContainer({
+      path: { bot_id: botId.value },
+      query: { preserve_data: true },
+      throwOnError: true,
+    })
+
+    createProgress.value = { phase: 'pulling' }
+    await createContainerSSE({ restore_data: true })
+    await loadContainerData(false)
+    toast.success(t('bots.container.legacyRecreateSuccess'))
+  }
+  catch (error) {
+    toast.error(resolveErrorMessage(error, t('bots.container.actionFailed')))
+  }
+  finally {
+    containerAction.value = ''
+    createProgress.value = null
+  }
+}
 
 async function handleStopContainer() {
   if (botLifecyclePending.value || !containerInfo.value) return
@@ -226,6 +342,7 @@ async function handleDeleteContainer(preserveData: boolean) {
   const successMessage = preserveData
     ? t('bots.container.deletePreserveSuccess')
     : t('bots.container.deleteSuccess')
+  const lastImage = shortenImageRef(containerInfo.value.image)
 
   await runContainerAction(
     action,
@@ -239,6 +356,8 @@ async function handleDeleteContainer(preserveData: boolean) {
       containerMissing.value = true
       snapshots.value = []
       createRestoreData.value = preserveData
+      createImage.value = lastImage
+      createImagePrefilled.value = !!lastImage
     },
     successMessage,
   )
@@ -445,6 +564,19 @@ const sortedSnapshots = computed(() => {
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
 
+watch(containerMissing, (missing) => {
+  if (!missing) {
+    createImagePrefilled.value = false
+  }
+})
+
+watch([containerMissing, rememberedCreateImage], ([missing, remembered]) => {
+  if (!missing || createImagePrefilled.value) return
+  if (!remembered || createImage.value.trim()) return
+  createImage.value = remembered
+  createImagePrefilled.value = true
+}, { immediate: true })
+
 watch([activeTab, botId], ([tab]) => {
   if (!botId.value) return
   if (tab === 'container') {
@@ -540,6 +672,19 @@ watch([activeTab, botId], ([tab]) => {
           />
         </div>
 
+        <div class="space-y-2">
+          <Label>{{ $t('bots.container.createImageLabel') }}</Label>
+          <Input
+            v-model="createImage"
+            placeholder="debian:bookworm-slim"
+            :disabled="containerBusy || botLifecyclePending"
+            class="font-mono"
+          />
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.container.createImageDescription') }}
+          </p>
+        </div>
+
         <div class="flex justify-end">
           <Button
             :disabled="containerBusy || botLifecyclePending"
@@ -552,6 +697,17 @@ watch([activeTab, botId], ([tab]) => {
             {{ $t('bots.container.actions.create') }}
           </Button>
         </div>
+
+        <div
+          v-if="createProgress && (containerAction === 'create')"
+          class="space-y-2"
+        >
+          <ContainerCreateProgress
+            :phase="createProgress.phase"
+            :percent="createProgressPercent"
+            :error="createProgress.error"
+          />
+        </div>
       </div>
     </div>
 
@@ -559,6 +715,39 @@ watch([activeTab, botId], ([tab]) => {
       v-else-if="containerInfo"
       class="space-y-5"
     >
+      <div
+        v-if="isLegacy"
+        class="flex items-center justify-between gap-3 rounded-md border border-amber-300/50 bg-amber-50/70 p-3 dark:border-amber-800/50 dark:bg-amber-900/10"
+      >
+        <p class="text-sm text-amber-800 dark:text-amber-200">
+          {{ $t('bots.container.legacyWarning') }}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          class="shrink-0"
+          :disabled="containerBusy || botLifecyclePending"
+          @click="handleRecreateContainer"
+        >
+          <Spinner
+            v-if="containerAction === 'recreate'"
+            class="mr-1.5"
+          />
+          {{ $t('bots.container.legacyRecreate') }}
+        </Button>
+      </div>
+
+      <div
+        v-if="createProgress && containerAction === 'recreate'"
+        class="space-y-2 rounded-md border p-3"
+      >
+        <ContainerCreateProgress
+          :phase="createProgress.phase"
+          :percent="createProgressPercent"
+          :error="createProgress.error"
+        />
+      </div>
+
       <div class="rounded-md border p-4">
         <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
           <div class="space-y-1">
@@ -592,7 +781,7 @@ watch([activeTab, botId], ([tab]) => {
               {{ $t('bots.container.fields.image') }}
             </dt>
             <dd class="break-all">
-              {{ containerInfo.image }}
+              {{ displayedContainerImage }}
             </dd>
           </div>
           <div class="space-y-1 sm:col-span-2">

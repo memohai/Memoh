@@ -20,7 +20,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcptools "github.com/memohai/memoh/internal/mcp"
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
 // MCPStdioRequest represents a request to create an MCP stdio session.
@@ -588,15 +588,15 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "command is required")
 	}
 	ctx := c.Request().Context()
-	containerID, err := h.botContainerID(ctx, botID)
+	if err := h.manager.EnsureRunning(ctx, botID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	containerID, err := h.manager.ContainerID(ctx, botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
 	}
-	if err := h.ensureContainerAndTask(ctx, containerID, botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
 
-	sess, err := h.startContainerdMCPCommandSession(ctx, containerID, req)
+	sess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -686,13 +686,7 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	return c.JSON(http.StatusOK, payload)
 }
 
-func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context, containerID string, req MCPStdioRequest) (*mcpSession, error) {
-	// Extract bot_id from container_id (remove "mcp-" prefix)
-	botID := strings.TrimPrefix(containerID, "mcp-")
-	if botID == "" || botID == containerID {
-		return nil, fmt.Errorf("invalid container_id: %s", containerID)
-	}
-
+func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context, botID, containerID string, req MCPStdioRequest) (*mcpSession, error) {
 	// Get gRPC client for the bot container via manager
 	client, err := h.manager.MCPClient(ctx, botID)
 	if err != nil {

@@ -110,7 +110,6 @@ export const createAgent = (
     currentChannel = 'Unknown Channel',
     identity = {
       botId: '',
-      containerId: '',
       channelIdentityId: '',
       displayName: '',
     },

@@ -1140,6 +1140,8 @@ definitions:
     type: object
   handlers.CreateContainerRequest:
     properties:
+      image:
+        type: string
       restore_data:
         type: boolean
       snapshotter:
@@ -1280,6 +1282,8 @@ definitions:
         type: boolean
       image:
         type: string
+      legacy:
+        type: boolean
       namespace:
         type: string
       status:

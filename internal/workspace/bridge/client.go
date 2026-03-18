@@ -1,8 +1,8 @@
-// Package mcpclient provides a gRPC client for the MCP container service.
-// Each bot container runs a gRPC server on port 9090 exposing file and exec
-// operations. This client wraps the generated gRPC stubs with connection
-// pooling and a simplified API for callers.
-package mcpclient
+// Package bridge provides a gRPC client for the workspace container bridge service.
+// Each bot container runs a gRPC server listening on a Unix domain socket.
+// This client wraps the generated gRPC stubs with connection pooling and a
+// simplified API for callers.
+package bridge
 
 import (
 	"bytes"
@@ -17,8 +17,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/memohai/memoh/internal/config"
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
 const connectingTimeout = 30 * time.Second
@@ -41,9 +40,9 @@ func NewClientFromConn(conn *grpc.ClientConn) *Client {
 	}
 }
 
-// Dial creates a new Client connected to the given container IP.
-func Dial(_ context.Context, ip string) (*Client, error) {
-	target := fmt.Sprintf("%s:%d", ip, config.MCPGRPCPort)
+// Dial creates a new Client connected to the given gRPC target.
+// For UDS use "unix:///path/to/sock", for TCP use "host:port".
+func Dial(_ context.Context, target string) (*Client, error) {
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
@@ -347,16 +346,17 @@ type Provider interface {
 
 // Pool manages cached gRPC clients keyed by bot ID.
 type Pool struct {
-	mu      sync.RWMutex
-	clients map[string]*Client
-	ipFunc  func(botID string) string
+	mu             sync.RWMutex
+	clients        map[string]*Client
+	dialTargetFunc func(botID string) string
 }
 
-// NewPool creates a client pool. ipFunc maps bot ID to container IP.
-func NewPool(ipFunc func(string) string) *Pool {
+// NewPool creates a client pool. dialTargetFunc maps bot ID to a gRPC target
+// string (e.g. "unix:///path/sock" or "host:port").
+func NewPool(dialTargetFunc func(string) string) *Pool {
 	return &Pool{
-		clients: make(map[string]*Client),
-		ipFunc:  ipFunc,
+		clients:        make(map[string]*Client),
+		dialTargetFunc: dialTargetFunc,
 	}
 }
 
@@ -383,12 +383,12 @@ func (p *Pool) Get(ctx context.Context, botID string) (*Client, error) {
 		p.mu.RUnlock()
 	}
 
-	ip := p.ipFunc(botID)
-	if ip == "" {
-		return nil, fmt.Errorf("no IP for bot %s", botID)
+	target := p.dialTargetFunc(botID)
+	if target == "" {
+		return nil, fmt.Errorf("no dial target for bot %s", botID)
 	}
 
-	c, err := Dial(ctx, ip)
+	c, err := Dial(ctx, target)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "twilight-ai": {
+      "source": "memohai/twilight-ai",
+      "sourceType": "github",
+      "computedHash": "f52a544c699944def25f46ac924b9e49cbf6b951f768325a0df9dd3f3fb512ab"
+    }
+  }
+}

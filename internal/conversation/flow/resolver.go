@@ -160,7 +160,6 @@ type gatewayModelConfig struct {
 
 type gatewayIdentity struct {
 	BotID             string `json:"botId"`
-	ContainerID       string `json:"containerId"`
 	ChannelIdentityID string `json:"channelIdentityId"`
 	DisplayName       string `json:"displayName"`
 	CurrentPlatform   string `json:"currentPlatform,omitempty"`
@@ -382,8 +381,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	messages = append(messages, reqMessages...)
 	messages = sanitizeMessages(messages)
 	skills := dedup(req.Skills)
-	containerID := r.resolveContainerID(ctx, req.BotID, req.ContainerID)
-
 	var usableSkills []gatewaySkill
 	if r.skillLoader != nil {
 		entries, err := r.skillLoader.LoadSkills(ctx, req.BotID)
@@ -470,7 +467,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		Query:             headerifiedQuery,
 		Identity: gatewayIdentity{
 			BotID:             req.BotID,
-			ContainerID:       containerID,
 			ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 			DisplayName:       displayName,
 			CurrentPlatform:   req.CurrentChannel,
@@ -1278,25 +1274,6 @@ func encodeReaderAsDataURL(reader io.Reader, maxBytes int64, attachmentType, fal
 	return encoded.String(), mime, nil
 }
 
-// --- container resolution ---
-
-func (r *Resolver) resolveContainerID(ctx context.Context, botID, explicit string) string {
-	if strings.TrimSpace(explicit) != "" {
-		return explicit
-	}
-	if r.queries != nil {
-		pgBotID, err := parseResolverUUID(botID)
-		if err == nil {
-			row, err := r.queries.GetContainerByBotID(ctx, pgBotID)
-			if err == nil && strings.TrimSpace(row.ContainerID) != "" {
-				return row.ContainerID
-			}
-		}
-	}
-	r.logger.Warn("no container found for bot, using fallback", slog.String("bot_id", botID))
-	return "mcp-" + botID
-}
-
 // --- message loading ---
 
 type messageWithUsage struct {
@@ -1991,6 +1968,9 @@ func sanitizeMessages(messages []conversation.ModelMessage) []conversation.Model
 	cleaned := make([]conversation.ModelMessage, 0, len(messages))
 	for _, msg := range messages {
 		msg = normalizeUserMessageContent(msg)
+		if normalized, ok := normalizeImagePartsToDataURL(msg); ok {
+			msg = normalized
+		}
 		if strings.TrimSpace(msg.Role) == "" {
 			continue
 		}
@@ -2135,6 +2115,126 @@ func anyNumberToByte(value any) (byte, bool) {
 		return 0, false
 	}
 	return byte(parsed), true
+}
+
+func normalizeImagePartsToDataURL(msg conversation.ModelMessage) (conversation.ModelMessage, bool) {
+	if len(msg.Content) == 0 {
+		return msg, false
+	}
+	var parts []map[string]json.RawMessage
+	if err := json.Unmarshal(msg.Content, &parts); err != nil || len(parts) == 0 {
+		return msg, false
+	}
+
+	changed := false
+	for i := range parts {
+		partTypeRaw, ok := parts[i]["type"]
+		if !ok {
+			continue
+		}
+		var partType string
+		if err := json.Unmarshal(partTypeRaw, &partType); err != nil || !strings.EqualFold(partType, "image") {
+			continue
+		}
+
+		imageRaw, ok := parts[i]["image"]
+		if !ok || len(imageRaw) == 0 {
+			continue
+		}
+		var tmp string
+		if json.Unmarshal(imageRaw, &tmp) == nil {
+			continue
+		}
+
+		var payload []byte
+		if b, ok := decodeIndexedByteObject(imageRaw); ok {
+			payload = b
+		} else if b, ok := decodeByteArray(imageRaw); ok {
+			payload = b
+		} else {
+			continue
+		}
+		if len(payload) == 0 {
+			continue
+		}
+
+		mediaType := "application/octet-stream"
+		if mediaTypeRaw, ok := parts[i]["mediaType"]; ok {
+			var mt string
+			if err := json.Unmarshal(mediaTypeRaw, &mt); err == nil && strings.TrimSpace(mt) != "" {
+				mediaType = strings.TrimSpace(mt)
+			}
+		}
+		dataURL := "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(payload)
+		rebuilt, err := json.Marshal(dataURL)
+		if err != nil {
+			continue
+		}
+		parts[i]["image"] = rebuilt
+		changed = true
+	}
+
+	if !changed {
+		return msg, false
+	}
+	rebuiltContent, err := json.Marshal(parts)
+	if err != nil {
+		return msg, false
+	}
+	msg.Content = rebuiltContent
+	return msg, true
+}
+
+func decodeByteArray(raw json.RawMessage) ([]byte, bool) {
+	var arr []int
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return nil, false
+	}
+	if len(arr) == 0 {
+		return nil, false
+	}
+	out := make([]byte, len(arr))
+	for i, v := range arr {
+		if v < 0 || v > 255 {
+			return nil, false
+		}
+		out[i] = byte(v)
+	}
+	return out, true
+}
+
+func decodeIndexedByteObject(raw json.RawMessage) ([]byte, bool) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || len(obj) == 0 {
+		return nil, false
+	}
+	type indexedByte struct {
+		idx int
+		val byte
+	}
+	items := make([]indexedByte, 0, len(obj))
+	for k, vRaw := range obj {
+		idx, err := strconv.Atoi(k)
+		if err != nil || idx < 0 {
+			return nil, false
+		}
+		var val int
+		if err := json.Unmarshal(vRaw, &val); err != nil || val < 0 || val > 255 {
+			return nil, false
+		}
+		items = append(items, indexedByte{idx: idx, val: byte(val)})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].idx < items[j].idx })
+	for i := range items {
+		if items[i].idx != i {
+			return nil, false
+		}
+	}
+	out := make([]byte, len(items))
+	for i := range items {
+		out[i] = items[i].val
+	}
+	return out, true
 }
 
 func normalizeGatewaySkill(entry SkillEntry) (gatewaySkill, bool) {

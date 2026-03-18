@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/mcp/mcpclient"
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
+	"github.com/memohai/memoh/internal/workspace/bridge"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
 const bufSize = 1 << 20
@@ -164,8 +164,8 @@ func splitLines(s string) []string {
 	return lines
 }
 
-// testSetup creates a bufconn gRPC server and a matching mcpclient.Provider.
-func testSetup(t *testing.T, svc *fakeContainerService) mcpclient.Provider {
+// testSetup creates a bufconn gRPC server and a matching bridge.Provider.
+func testSetup(t *testing.T, svc *fakeContainerService) bridge.Provider {
 	t.Helper()
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer()
@@ -193,16 +193,16 @@ func testSetup(t *testing.T, svc *fakeContainerService) mcpclient.Provider {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	client := mcpclient.NewClientFromConn(conn)
+	client := bridge.NewClientFromConn(conn)
 	return &staticProvider{client: client}
 }
 
 // staticProvider always returns the same client, ignoring botID.
 type staticProvider struct {
-	client *mcpclient.Client
+	client *bridge.Client
 }
 
-func (p *staticProvider) MCPClient(_ context.Context, _ string) (*mcpclient.Client, error) {
+func (p *staticProvider) MCPClient(_ context.Context, _ string) (*bridge.Client, error) {
 	return p.client, nil
 }
 
@@ -210,7 +210,7 @@ func session() mcpgw.ToolSessionContext {
 	return mcpgw.ToolSessionContext{BotID: "bot-test"}
 }
 
-func executor(provider mcpclient.Provider) *Executor {
+func executor(provider bridge.Provider) *Executor {
 	return NewExecutor(nil, provider, defaultExecWorkDir)
 }
 

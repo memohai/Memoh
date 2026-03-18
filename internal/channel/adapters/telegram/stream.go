@@ -401,10 +401,11 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.St
 
 	msg := event.Final.Message
 	finalText := bufText
-	if finalText == "" && !s.isPrivateChat {
-		finalText = strings.TrimSpace(msg.PlainText())
+	if authoritative := strings.TrimSpace(msg.PlainText()); authoritative != "" {
+		if !s.isPrivateChat || bufText != "" {
+			finalText = authoritative
+		}
 	}
-
 	// Convert markdown to Telegram HTML for the final message.
 	formatted, pm := formatTelegramOutput(finalText, msg.Format)
 	if pm != "" {

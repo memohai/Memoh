@@ -4,7 +4,7 @@ export interface Config {
   admin: AdminConfig;
   auth: AuthConfig;
   containerd: ContainerdConfig;
-  mcp: McpConfig;
+  workspace: WorkspaceConfig;
   postgres: PostgresConfig;
   qdrant: QdrantConfig;
   sparse: SparseConfig;
@@ -38,10 +38,14 @@ export interface ContainerdConfig {
   namespace: string;
 }
 
-export interface McpConfig {
-  image: string;
+export interface WorkspaceConfig {
+  registry?: string;
+  default_image: string;
   snapshotter: string;
   data_root: string;
+  cni_bin_dir?: string;
+  cni_conf_dir?: string;
+  runtime_dir?: string;
 }
 
 export interface PostgresConfig {
@@ -80,4 +84,3 @@ export interface WebConfig {
   host: string;
   port: number;
 }
-

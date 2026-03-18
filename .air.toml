@@ -2,7 +2,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -o ./tmp/memoh-server ./cmd/agent/main.go && sh devenv/mcp-build.sh"
+cmd = "go build -o ./tmp/memoh-server ./cmd/agent/main.go && sh devenv/bridge-build.sh"
 bin = "./tmp/memoh-server"
 args_bin = ["serve"]
 include_ext = ["go", "toml"]

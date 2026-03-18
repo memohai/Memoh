@@ -22,9 +22,9 @@ jwt_expires_in = "168h"
 socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
 
-[mcp]
+[workspace]
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
-image = "memohai/mcp:latest"
+default_image = "debian:bookworm-slim"
 snapshotter = "overlayfs"
 data_root = "data"
 cni_bin_dir = "/opt/cni/bin"

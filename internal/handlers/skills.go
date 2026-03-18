@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/mcp/mcpclient"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const skillsDirPath = config.DefaultDataMount + "/.skills"
@@ -196,7 +196,7 @@ func (h *ContainerdHandler) loadSkillsFromContainer(ctx context.Context, botID s
 	return skills, nil
 }
 
-func readContainerSkillFile(ctx context.Context, client *mcpclient.Client, filePath string) (string, error) {
+func readContainerSkillFile(ctx context.Context, client *bridge.Client, filePath string) (string, error) {
 	resp, err := client.ReadFile(ctx, filePath, 0, 0)
 	if err != nil {
 		return "", err

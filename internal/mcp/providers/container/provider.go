@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/mcp/mcpclient"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -26,13 +26,13 @@ const (
 // operate inside the bot container via gRPC. All I/O goes through the container
 // sandbox — no direct host filesystem access.
 type Executor struct {
-	clients     mcpclient.Provider
+	clients     bridge.Provider
 	execWorkDir string
 	logger      *slog.Logger
 }
 
 // NewExecutor returns a tool executor backed by gRPC container clients.
-func NewExecutor(log *slog.Logger, clients mcpclient.Provider, execWorkDir string) *Executor {
+func NewExecutor(log *slog.Logger, clients bridge.Provider, execWorkDir string) *Executor {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -187,7 +187,7 @@ func (p *Executor) CallTool(ctx context.Context, session mcpgw.ToolSessionContex
 	}
 }
 
-func (p *Executor) callRead(ctx context.Context, client *mcpclient.Client, args map[string]any) (map[string]any, error) {
+func (p *Executor) callRead(ctx context.Context, client *bridge.Client, args map[string]any) (map[string]any, error) {
 	filePath := p.normalizePath(mcpgw.StringArg(args, "path"))
 	if filePath == "" {
 		return mcpgw.BuildToolErrorResult("path is required"), nil
@@ -233,7 +233,7 @@ func (p *Executor) callRead(ctx context.Context, client *mcpclient.Client, args 
 	}), nil
 }
 
-func (p *Executor) callWrite(ctx context.Context, client *mcpclient.Client, args map[string]any) (map[string]any, error) {
+func (p *Executor) callWrite(ctx context.Context, client *bridge.Client, args map[string]any) (map[string]any, error) {
 	filePath := p.normalizePath(mcpgw.StringArg(args, "path"))
 	content := mcpgw.StringArg(args, "content")
 	if filePath == "" {
@@ -245,7 +245,7 @@ func (p *Executor) callWrite(ctx context.Context, client *mcpclient.Client, args
 	return mcpgw.BuildToolSuccessResult(map[string]any{"ok": true}), nil
 }
 
-func (p *Executor) callList(ctx context.Context, client *mcpclient.Client, args map[string]any) (map[string]any, error) {
+func (p *Executor) callList(ctx context.Context, client *bridge.Client, args map[string]any) (map[string]any, error) {
 	dirPath := p.normalizePath(mcpgw.StringArg(args, "path"))
 	if dirPath == "" {
 		dirPath = "."
@@ -269,7 +269,7 @@ func (p *Executor) callList(ctx context.Context, client *mcpclient.Client, args 
 	return mcpgw.BuildToolSuccessResult(map[string]any{"path": dirPath, "entries": entriesMaps}), nil
 }
 
-func (p *Executor) callEdit(ctx context.Context, client *mcpclient.Client, args map[string]any) (map[string]any, error) {
+func (p *Executor) callEdit(ctx context.Context, client *bridge.Client, args map[string]any) (map[string]any, error) {
 	filePath := p.normalizePath(mcpgw.StringArg(args, "path"))
 	oldText := mcpgw.StringArg(args, "old_text")
 	newText := mcpgw.StringArg(args, "new_text")
@@ -298,7 +298,7 @@ func (p *Executor) callEdit(ctx context.Context, client *mcpclient.Client, args 
 	return mcpgw.BuildToolSuccessResult(map[string]any{"ok": true}), nil
 }
 
-func (p *Executor) callExec(ctx context.Context, client *mcpclient.Client, botID string, args map[string]any) (map[string]any, error) {
+func (p *Executor) callExec(ctx context.Context, client *bridge.Client, botID string, args map[string]any) (map[string]any, error) {
 	command := strings.TrimSpace(mcpgw.StringArg(args, "command"))
 	if command == "" {
 		return mcpgw.BuildToolErrorResult("command is required"), nil

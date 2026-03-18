@@ -1,6 +1,14 @@
 #!/bin/sh
 set -e
 
+# Toolkit is volume-mounted from the host (.toolkit/).
+# If missing, the user forgot to run the install script.
+if [ ! -d /opt/memoh/runtime/toolkit/node-glibc ]; then
+  echo "ERROR: Toolkit not found at /opt/memoh/runtime/toolkit/." >&2
+  echo "       Run ./docker/toolkit/install.sh before starting the dev environment." >&2
+  exit 1
+fi
+
 # Clean up stale CNI state from previous runs. After a container restart the
 # cni0 bridge may linger with a zeroed MAC (00:00:00:00:00:00), causing the
 # bridge plugin to fail with "could not set bridge's mac: invalid argument".
@@ -41,10 +49,10 @@ if ! ctr version >/dev/null 2>&1; then
 fi
 echo "containerd is running (pid $CONTAINERD_PID)"
 
-# Build MCP binary and import as containerd image
-echo "Building MCP image..."
-(cd /workspace && sh devenv/mcp-build.sh)
-echo "MCP image ready."
+# Build bridge binary into runtime directory (first boot)
+echo "Building bridge binary..."
+(cd /workspace && go build -o /opt/memoh/runtime/bridge ./cmd/bridge)
+echo "Bridge binary ready."
 
 echo "Starting server..."
 

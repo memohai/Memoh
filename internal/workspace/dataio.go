@@ -1,4 +1,4 @@
-package mcp
+package workspace
 
 import (
 	"archive/tar"
@@ -30,7 +30,7 @@ const (
 // The container is stopped during export and restarted afterwards.
 // Caller must consume the returned reader before the context is cancelled.
 func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, error) {
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	unlock := m.lockContainer(containerID)
 	defer unlock()
 
@@ -75,7 +75,7 @@ func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, 
 // ImportData extracts a tar.gz archive into the container's /data directory.
 // The container is stopped during import and restarted afterwards.
 func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) error {
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	unlock := m.lockContainer(containerID)
 	defer unlock()
 
@@ -112,7 +112,7 @@ func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) err
 // mounted snapshot is consistent; the Apple fallback uses gRPC and does not
 // require a stop.
 func (m *Manager) PreserveData(ctx context.Context, botID string) error {
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 
 	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
@@ -150,7 +150,10 @@ func (m *Manager) PreserveData(ctx context.Context, botID string) error {
 		_ = os.Remove(backupPath)
 		return fmt.Errorf("export data: %w", writeErr)
 	}
-	return closeErr
+	if closeErr != nil {
+		return closeErr
+	}
+	return nil
 }
 
 // RestorePreservedData imports preserved data (backup tar.gz or legacy
@@ -172,15 +175,13 @@ func (m *Manager) RestorePreservedData(ctx context.Context, botID string) error 
 
 	// Legacy bind-mount directory
 	legacyDir := m.legacyDataDir(botID)
-	migratedDir := legacyDir + migratedSuffix
-	if _, err := os.Stat(migratedDir); err == nil {
+	if _, err := os.Stat(legacyDir + migratedSuffix); err == nil {
 		return nil // already imported previously
 	}
 	info, err := os.Stat(legacyDir)
 	if err != nil || !info.IsDir() {
 		return errors.New("no preserved data found")
 	}
-
 	return m.importLegacyDir(ctx, botID, legacyDir)
 }
 
@@ -201,7 +202,7 @@ func (m *Manager) HasPreservedData(botID string) bool {
 // importLegacyDir copies a legacy bind-mount directory into the container
 // via snapshot mount, then renames the source to .migrated.
 func (m *Manager) importLegacyDir(ctx context.Context, botID, srcDir string) error {
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 
 	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
@@ -233,7 +234,7 @@ func (m *Manager) importLegacyDir(ctx context.Context, botID, srcDir string) err
 	}
 
 	if err := os.Rename(srcDir, srcDir+migratedSuffix); err != nil {
-		m.logger.Warn("legacy import: rename failed",
+		m.logger.Warn("legacy import: rename to .migrated failed",
 			slog.String("src", srcDir), slog.Any("error", err))
 	}
 	return nil
@@ -249,7 +250,7 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 		return false
 	}
 
-	snapshotKey := m.containerID(botID)
+	snapshotKey := m.resolveContainerID(ctx, botID)
 	raw, err := m.service.SnapshotMounts(ctx, snapshotter, snapshotKey)
 	if err != nil {
 		return false
@@ -269,7 +270,7 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 
 	f, err := os.Create(backupPath) //nolint:gosec // G304: operator-controlled path
 	if err != nil {
-		m.logger.Warn("recover orphaned snapshot: create backup failed",
+		m.logger.Warn("recover orphaned snapshot: create backup file failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		return false
 	}
@@ -293,9 +294,6 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 		_ = os.Remove(backupPath)
 		return false
 	}
-
-	m.logger.Info("recovered data from orphaned snapshot",
-		slog.String("bot_id", botID), slog.String("backup", backupPath))
 	return true
 }
 
@@ -310,7 +308,7 @@ func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string
 	}
 	defer func() { _ = f.Close() }()
 
-	containerID := m.containerID(botID)
+	containerID := m.resolveContainerID(ctx, botID)
 	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
 		return fmt.Errorf("get container: %w", err)
@@ -332,8 +330,6 @@ func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string
 	}
 
 	_ = os.Remove(bp)
-	m.logger.Info("restored preserved data into new container",
-		slog.String("bot_id", botID))
 	return nil
 }
 
@@ -372,17 +368,17 @@ func (m *Manager) restartContainer(ctx context.Context, botID, containerID strin
 			slog.String("container_id", containerID), slog.Any("error", err))
 		return
 	}
-	netResult, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+	// CNI network setup — outbound connectivity is required for package
+	// downloads and other network-dependent operations in the container.
+	if _, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
 		ContainerID: containerID,
 		CNIBinDir:   m.cfg.CNIBinaryDir,
 		CNIConfDir:  m.cfg.CNIConfigDir,
-	})
-	if err != nil {
-		m.logger.Warn("network setup after restart failed",
+	}); err != nil {
+		m.logger.Error("network setup after restart failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 		return
 	}
-	m.SetContainerIP(botID, netResult.IP)
 }
 
 func mountedDataDir(root string) string {
@@ -560,11 +556,34 @@ func tarGzDir(w io.Writer, dir string) error {
 		if err != nil || rel == "." {
 			return err
 		}
-		info, err := d.Info()
+
+		if d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			header, err := tar.FileInfoHeader(info, "")
+			if err != nil {
+				return err
+			}
+			header.Name = filepath.ToSlash(rel)
+			return tw.WriteHeader(header)
+		}
+
+		// For regular files: open first, then Fstat on the same fd so that
+		// the size in the tar header is guaranteed to match the content we
+		// read. This avoids race conditions and overlayfs size mismatches
+		// that cause "archive/tar: write too long".
+		f, err := os.Open(path) //nolint:gosec // G304: iterating operator-controlled data directory
 		if err != nil {
 			return err
 		}
+		defer func() { _ = f.Close() }()
 
+		info, err := f.Stat()
+		if err != nil {
+			return err
+		}
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
@@ -574,17 +593,7 @@ func tarGzDir(w io.Writer, dir string) error {
 		if err := tw.WriteHeader(header); err != nil {
 			return err
 		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		f, err := os.Open(path) //nolint:gosec // G304: iterating operator-controlled data directory
-		if err != nil {
-			return err
-		}
-		defer func() { _ = f.Close() }()
-		_, err = io.Copy(tw, f)
+		_, err = io.Copy(tw, io.LimitReader(f, info.Size()))
 		return err
 	})
 }

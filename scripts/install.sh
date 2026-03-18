@@ -178,6 +178,7 @@ mkdir -p "$WORKSPACE"
 cd "$WORKSPACE"
 
 # Clone or update
+CLONED_FRESH=false
 if [ -d "$DIR" ]; then
     echo "Updating existing installation in $WORKSPACE..."
     cd "$DIR"
@@ -197,6 +198,7 @@ else
         git clone --depth 1 "$REPO" "$DIR"
     fi
     cd "$DIR"
+    CLONED_FRESH=true
 fi
 
 # Pin Docker image versions in docker-compose.yml
@@ -243,7 +245,7 @@ fi
 
 echo POSTGRES_PASSWORD="${PG_PASS}" >> .env
 echo MEMOH_CONFIG=./config.toml >> .env
-echo MEMOH_DATA_DIR="{$MEMOH_DATA_DIR}" >> .env
+echo MEMOH_DATA_DIR="${MEMOH_DATA_DIR}" >> .env
 echo BROWSER_CORES="${BROWSER_CORES}" >> .env
 echo USE_SPARSE="${USE_SPARSE}" >> .env
 echo "${GREEN}✓ Browser cores: ${BROWSER_CORES}${NC}"
@@ -260,8 +262,23 @@ echo ""
 echo "${GREEN}Starting services (first startup may take a few minutes)...${NC}"
 $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES up -d
 
+# After fresh clone: copy minimal files to workspace and remove clone directory
+if [ "$CLONED_FRESH" = true ]; then
+  echo ""
+  echo "${GREEN}Cleaning up clone directory...${NC}"
+  cp docker-compose.yml config.toml .env "$WORKSPACE/"
+  if [ "$USE_CN_MIRROR" = true ]; then
+    mkdir -p "$WORKSPACE/docker"
+    cp docker/docker-compose.cn.yml "$WORKSPACE/docker/"
+  fi
+  cd "$WORKSPACE"
+  rm -rf "$WORKSPACE/$DIR"
+  INSTALL_DIR="$WORKSPACE"
+  echo "${GREEN}✓ Clone directory removed, minimal install at ${INSTALL_DIR}${NC}"
+fi
+
 echo ""
-echo "${GREEN}✅ Memoh is running!${NC}${NC}"
+echo "${GREEN}✅ Memoh is running!${NC}"
 echo ""
 echo "  🌐 Web UI:            http://localhost:8082"
 echo "  🔌 API:               http://localhost:8080"

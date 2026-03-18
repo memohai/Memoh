@@ -1,4 +1,4 @@
-package mcpclient
+package bridge
 
 import (
 	"errors"

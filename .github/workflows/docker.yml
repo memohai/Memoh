@@ -36,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [server, agent, web, mcp, browser, sparse]
+        image: [server, agent, web, browser, sparse]
         platform: [linux/amd64, linux/arm64]
         include:
           - image: server
@@ -45,8 +45,6 @@ jobs:
             dockerfile: docker/Dockerfile.agent
           - image: web
             dockerfile: docker/Dockerfile.web
-          - image: mcp
-            dockerfile: docker/Dockerfile.mcp
           - image: browser
             dockerfile: docker/Dockerfile.browser
           - image: sparse
@@ -64,14 +62,14 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Set up Go
-        if: matrix.image == 'server' || matrix.image == 'mcp'
+        if: matrix.image == 'server'
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
           cache: true
 
       - name: Pre-warm Go mod cache
-        if: matrix.image == 'server' || matrix.image == 'mcp'
+        if: matrix.image == 'server'
         run: |
           mkdir -p .go-cache
           GOMODCACHE=$(pwd)/.go-cache go mod download
@@ -99,7 +97,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
           outputs: ${{ env.PUSH == 'true' && format('type=image,"name={0}/{1}/{2}",push-by-digest=true,name-canonical=true,push=true,compression=zstd', env.REGISTRY, github.repository_owner, matrix.image) || '' }}
-          build-contexts: ${{ (matrix.image == 'server' || matrix.image == 'mcp') && format('gomodcache={0}/.go-cache', github.workspace) || '' }}
+          build-contexts: ${{ matrix.image == 'server' && format('gomodcache={0}/.go-cache', github.workspace) || '' }}
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT_HASH=${{ github.sha }}
@@ -134,7 +132,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        image: [server, agent, web, mcp, browser, sparse]
+        image: [server, agent, web, browser, sparse]
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
