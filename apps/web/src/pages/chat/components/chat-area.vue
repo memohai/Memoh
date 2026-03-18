@@ -219,14 +219,30 @@ const pendingFiles = ref<File[]>([])
 const fileManagerOpen = ref(false)
 const fileManagerRef = ref<InstanceType<typeof FileManager> | null>(null)
 
+const FILE_MANAGER_ROOT = '/data'
+
+function normalizeFileManagerPath(path: string): string {
+  const trimmedPath = path.trim()
+  if (!trimmedPath) return FILE_MANAGER_ROOT
+  if (trimmedPath === FILE_MANAGER_ROOT || trimmedPath.startsWith(`${FILE_MANAGER_ROOT}/`)) {
+    return trimmedPath
+  }
+  if (trimmedPath === '/') return FILE_MANAGER_ROOT
+  if (trimmedPath.startsWith('/')) {
+    return `${FILE_MANAGER_ROOT}${trimmedPath}`
+  }
+  return `${FILE_MANAGER_ROOT}/${trimmedPath}`
+}
+
 provide(openInFileManagerKey, (path: string, isDir = false) => {
+  const normalizedPath = normalizeFileManagerPath(path)
   fileManagerOpen.value = true
   nextTick(() => {
     if (!fileManagerRef.value) return
     if (isDir) {
-      fileManagerRef.value.navigateTo(path)
+      fileManagerRef.value.navigateTo(normalizedPath)
     } else {
-      fileManagerRef.value.openFileByPath(path)
+      fileManagerRef.value.openFileByPath(normalizedPath)
     }
   })
 })
