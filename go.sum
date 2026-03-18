@@ -232,6 +232,8 @@ github.com/memohai/twilight-ai v0.3.0 h1:nxDpxoBir374eHUFVUbbjzopox9hcSclD8Ygr2D
 github.com/memohai/twilight-ai v0.3.0/go.mod h1:vHNoRb6/quMacMAgIp838aoiNhsZbE0bFCnRRNyRwNc=
 github.com/memohai/twilight-ai v0.3.1-0.20260318110926-4091f8b75398 h1:Cndj9skRPkYOQQj9HMyUFynZQ5Jp6R0U+mYs+aNQikI=
 github.com/memohai/twilight-ai v0.3.1-0.20260318110926-4091f8b75398/go.mod h1:vHNoRb6/quMacMAgIp838aoiNhsZbE0bFCnRRNyRwNc=
+github.com/memohai/twilight-ai v0.3.1-0.20260318145559-d898f0b17761 h1:CdTafziQBqwiPHjaLN9Op+nXiDULkOYVcFJxOSSBZVA=
+github.com/memohai/twilight-ai v0.3.1-0.20260318145559-d898f0b17761/go.mod h1:vHNoRb6/quMacMAgIp838aoiNhsZbE0bFCnRRNyRwNc=
 github.com/moby/docker-image-spec v1.3.1 h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3Nl2EsFP0=
 github.com/moby/docker-image-spec v1.3.1/go.mod h1:eKmb5VW8vQEh/BAr2yvVNvuiJuY6UIocYsFu/DxxRpo=
 github.com/moby/locker v1.0.1 h1:fOXqR41zeveg4fFODix+1Ch4mj/gT0NE1XJbp/epuBg=

@@ -557,6 +557,15 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		eventCh := r.agent.Stream(ctx, cfg)
 		stored := false
 		for event := range eventCh {
+			if event.Type == agentpkg.EventError {
+				r.logger.Error("agent stream error",
+					slog.String("bot_id", streamReq.BotID),
+					slog.String("chat_id", streamReq.ChatID),
+					slog.String("model_id", rc.model.ID),
+					slog.String("error", event.Error),
+				)
+			}
+
 			data, err := json.Marshal(event)
 			if err != nil {
 				continue
@@ -610,6 +619,15 @@ func (r *Resolver) StreamChatWS(
 	modelID := rc.model.ID
 	stored := false
 	for event := range agentEventCh {
+		if event.Type == agentpkg.EventError {
+			r.logger.Error("agent stream error",
+				slog.String("bot_id", req.BotID),
+				slog.String("chat_id", req.ChatID),
+				slog.String("model_id", modelID),
+				slog.String("error", event.Error),
+			)
+		}
+
 		data, err := json.Marshal(event)
 		if err != nil {
 			continue

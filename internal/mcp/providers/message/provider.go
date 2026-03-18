@@ -104,7 +104,9 @@ func (p *Executor) ListTools(_ context.Context, _ mcpgw.ToolSessionContext) ([]m
 					"attachments": map[string]any{
 						"type":        "array",
 						"description": "File paths or URLs to attach. Each item is a container path (e.g. /data/media/ab/file.jpg), an HTTP URL, or an object with {path, url, type, name}.",
-						"items":       map[string]any{},
+						"items": map[string]any{
+							"type": "string",
+						},
 					},
 					"message": map[string]any{
 						"type":        "object",

@@ -100,7 +100,7 @@ require (
 	github.com/lib/pq v1.10.9 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/memohai/twilight-ai v0.3.1-0.20260318110926-4091f8b75398 // indirect
+	github.com/memohai/twilight-ai v0.3.1-0.20260318145559-d898f0b17761 // indirect
 	github.com/moby/locker v1.0.1 // indirect
 	github.com/moby/sys/mountinfo v0.7.2 // indirect
 	github.com/moby/sys/sequential v0.6.0 // indirect
