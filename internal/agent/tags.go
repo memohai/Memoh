@@ -3,6 +3,7 @@ package agent
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // TagResolver parses the inner content of a specific XML-like tag.
@@ -161,6 +162,19 @@ func NewStreamTagExtractor(resolvers []TagResolver) *StreamTagExtractor {
 	}
 }
 
+// safeUTF8SplitIndex adjusts a byte split index so it does not fall in the
+// middle of a multi-byte UTF-8 character.  It backs up to the start of the
+// rune that contains idx, guaranteeing both halves are valid UTF-8.
+func safeUTF8SplitIndex(s string, idx int) int {
+	if idx <= 0 || idx >= len(s) {
+		return idx
+	}
+	for idx > 0 && !utf8.RuneStart(s[idx]) {
+		idx--
+	}
+	return idx
+}
+
 // Push processes a text delta and returns visible text and any completed tag events.
 func (e *StreamTagExtractor) Push(delta string) TagStreamResult {
 	e.buffer += delta
@@ -183,9 +197,10 @@ func (e *StreamTagExtractor) Push(delta string) TagStreamResult {
 				if keep > len(e.buffer) {
 					keep = len(e.buffer)
 				}
-				emit := e.buffer[:len(e.buffer)-keep]
+				splitAt := safeUTF8SplitIndex(e.buffer, len(e.buffer)-keep)
+				emit := e.buffer[:splitAt]
 				visible += emit
-				e.buffer = e.buffer[len(e.buffer)-keep:]
+				e.buffer = e.buffer[splitAt:]
 				break
 			}
 			visible += e.buffer[:earliestIdx]
@@ -204,9 +219,10 @@ func (e *StreamTagExtractor) Push(delta string) TagStreamResult {
 			if keep > len(e.buffer) {
 				keep = len(e.buffer)
 			}
-			take := e.buffer[:len(e.buffer)-keep]
+			splitAt := safeUTF8SplitIndex(e.buffer, len(e.buffer)-keep)
+			take := e.buffer[:splitAt]
 			e.tagBuffer += take
-			e.buffer = e.buffer[len(e.buffer)-keep:]
+			e.buffer = e.buffer[splitAt:]
 			break
 		}
 		e.tagBuffer += e.buffer[:endIdx]

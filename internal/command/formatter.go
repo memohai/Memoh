@@ -3,6 +3,7 @@ package command
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // formatItems renders a list of records as a Markdown-style list.
@@ -57,15 +58,15 @@ type kv struct {
 	value string
 }
 
-// truncate shortens a string to maxLen, appending "..." if truncated.
+// truncate shortens a string to at most maxLen runes, appending "..." if truncated.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
 	if maxLen <= 3 {
-		return s[:maxLen]
+		return string([]rune(s)[:maxLen])
 	}
-	return s[:maxLen-3] + "..."
+	return string([]rune(s)[:maxLen-3]) + "..."
 }
 
 // boolStr returns "yes" or "no".

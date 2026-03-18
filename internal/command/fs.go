@@ -3,6 +3,7 @@ package command
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 func (h *Handler) buildFSGroup() *CommandGroup {
@@ -51,9 +52,9 @@ func (h *Handler) buildFSGroup() *CommandGroup {
 			if err != nil {
 				return "", err
 			}
-			const maxLen = 2000
-			if len(content) > maxLen {
-				content = content[:maxLen] + "\n... (truncated)"
+			const maxRunes = 2000
+			if utf8.RuneCountInString(content) > maxRunes {
+				content = string([]rune(content)[:maxRunes]) + "\n... (truncated)"
 			}
 			return fmt.Sprintf("```\n%s\n```", content), nil
 		},
