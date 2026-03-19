@@ -19,6 +19,8 @@ type EventType string
 const (
 	// EventTypeMessageCreated is emitted after a message is persisted successfully.
 	EventTypeMessageCreated EventType = "message_created"
+	// EventTypeSessionTitleUpdated is emitted after a session title is auto-generated.
+	EventTypeSessionTitleUpdated EventType = "session_title_updated"
 )
 
 // Event is the normalized payload emitted by the in-process message event hub.

@@ -309,20 +309,33 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 			if strings.TrimSpace(event.BotID) != botID {
 				continue
 			}
-			if event.Type != messageevent.EventTypeMessageCreated {
-				continue
-			}
 			if len(event.Data) == 0 {
 				continue
 			}
-			var message messagepkg.Message
-			if err := json.Unmarshal(event.Data, &message); err != nil {
-				h.logger.Warn("decode message event failed", slog.Any("error", err))
-				continue
-			}
-			h.fillAssetMimeFromStorage(c.Request().Context(), botID, []messagepkg.Message{message})
-			if err := writeCreatedEvent(message); err != nil {
-				return nil
+			switch event.Type {
+			case messageevent.EventTypeMessageCreated:
+				var message messagepkg.Message
+				if err := json.Unmarshal(event.Data, &message); err != nil {
+					h.logger.Warn("decode message event failed", slog.Any("error", err))
+					continue
+				}
+				h.fillAssetMimeFromStorage(c.Request().Context(), botID, []messagepkg.Message{message})
+				if err := writeCreatedEvent(message); err != nil {
+					return nil
+				}
+			case messageevent.EventTypeSessionTitleUpdated:
+				var payload map[string]string
+				if err := json.Unmarshal(event.Data, &payload); err != nil {
+					continue
+				}
+				if err := writeSSEJSON(writer, flusher, map[string]any{
+					"type":       string(messageevent.EventTypeSessionTitleUpdated),
+					"bot_id":     botID,
+					"session_id": payload["session_id"],
+					"title":      payload["title"],
+				}); err != nil {
+					return nil
+				}
 			}
 		}
 	}

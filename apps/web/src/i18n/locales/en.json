@@ -731,6 +731,9 @@
     },
     "settings": {
       "chatModel": "Chat Model",
+      "titleModel": "Title Model",
+      "titleModelDescription": "Select a small model to auto-generate session titles. Leave empty to disable.",
+      "titleModelPlaceholder": "Disabled (no auto title)",
       "searchProvider": "Search Provider",
       "searchProviderPlaceholder": "Select search provider",
       "memoryProvider": "Memory Provider",

@@ -659,14 +659,23 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function handleStreamEvent(targetBotId: string, event: MessageStreamEvent) {
-    if ((event.type ?? '').toLowerCase() !== 'message_created') return
+    const eventType = (event.type ?? '').toLowerCase()
     const eBotId = (event.bot_id ?? '').trim()
     if (eBotId && eBotId !== targetBotId) return
-    const raw = event.message
-    if (!raw) return
-    const pBotId = (raw.bot_id ?? '').trim()
-    if (pBotId && pBotId !== targetBotId) return
-    appendRealtimeMessage(raw)
+
+    if (eventType === 'message_created') {
+      const raw = event.message
+      if (!raw) return
+      const pBotId = (raw.bot_id ?? '').trim()
+      if (pBotId && pBotId !== targetBotId) return
+      appendRealtimeMessage(raw)
+    } else if (eventType === 'session_title_updated') {
+      const sid = (event.session_id ?? '').trim()
+      const title = (event.title ?? '').trim()
+      if (!sid || !title) return
+      const target = sessions.value.find((s) => s.id === sid)
+      if (target) target.title = title
+    }
   }
 
   function startMessageEvents(targetBotId: string) {

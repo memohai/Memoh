@@ -24,6 +24,7 @@ type Settings struct {
 	HeartbeatEnabled   bool   `json:"heartbeat_enabled"`
 	HeartbeatInterval  int    `json:"heartbeat_interval"`
 	HeartbeatModelID   string `json:"heartbeat_model_id"`
+	TitleModelID       string `json:"title_model_id"`
 }
 
 type UpsertRequest struct {
@@ -42,4 +43,5 @@ type UpsertRequest struct {
 	HeartbeatEnabled   *bool   `json:"heartbeat_enabled,omitempty"`
 	HeartbeatInterval  *int    `json:"heartbeat_interval,omitempty"`
 	HeartbeatModelID   string  `json:"heartbeat_model_id,omitempty"`
+	TitleModelID       string  `json:"title_model_id,omitempty"`
 }

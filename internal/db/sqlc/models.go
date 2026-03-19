@@ -28,6 +28,7 @@ type Bot struct {
 	HeartbeatInterval  int32              `json:"heartbeat_interval"`
 	HeartbeatPrompt    string             `json:"heartbeat_prompt"`
 	HeartbeatModelID   pgtype.UUID        `json:"heartbeat_model_id"`
+	TitleModelID       pgtype.UUID        `json:"title_model_id"`
 	TtsModelID         pgtype.UUID        `json:"tts_model_id"`
 	BrowserContextID   pgtype.UUID        `json:"browser_context_id"`
 	Metadata           []byte             `json:"metadata"`

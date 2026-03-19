@@ -1,14 +1,9 @@
-import { mergeHeaders } from './client'
-import { client } from './client.gen'
-import type { Options } from './sdk.gen'
+import { client } from '@memoh/sdk/client'
+import type { Options } from '@memoh/sdk'
 import type {
   HandlersCreateContainerResponse,
   PostBotsByBotIdContainerData,
-} from './types.gen'
-
-// Handwritten SDK supplement for container-create SSE.
-// Re-export this module via @memoh/sdk/extra instead of the generated root entry,
-// because packages/sdk/src/index.ts is regenerated from OpenAPI.
+} from '@memoh/sdk'
 
 export type ContainerCreateLayerStatus = {
   ref: string
@@ -65,18 +60,20 @@ function toError(error: unknown): Error {
   return new Error('Container create stream failed')
 }
 
-export async function postBotsByBotIdContainerStream<ThrowOnError extends boolean = false>(
-  options: Options<PostBotsByBotIdContainerData, ThrowOnError>,
+export async function postBotsByBotIdContainerStream(
+  options: Options<PostBotsByBotIdContainerData>,
 ): Promise<ContainerCreateStreamResult> {
   let streamError: unknown
 
+  const { throwOnError: _throwOnError, ...rest } = options
   const result = await client.sse.post<ContainerCreateStreamEvent>({
     url: '/bots/{bot_id}/container',
-    ...options,
-    headers: mergeHeaders(options.headers, {
+    ...rest,
+    headers: {
+      ...options.headers as Record<string, string>,
       Accept: 'text/event-stream',
       'Content-Type': 'application/json',
-    }),
+    },
     onSseError: (error) => {
       streamError = error
     },

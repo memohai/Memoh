@@ -727,6 +727,9 @@
     },
     "settings": {
       "chatModel": "对话模型",
+      "titleModel": "标题模型",
+      "titleModelDescription": "选择一个小模型来自动生成会话标题。留空则禁用自动标题生成。",
+      "titleModelPlaceholder": "未启用（不自动生成标题）",
       "searchProvider": "搜索提供方",
       "searchProviderPlaceholder": "选择搜索提供方",
       "memoryProvider": "记忆提供方",

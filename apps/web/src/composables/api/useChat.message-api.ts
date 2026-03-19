@@ -103,9 +103,13 @@ export async function streamMessageEvents(
   if (!body) throw new Error('No response body')
 
   await readSSEStream(body, (payload) => {
-    const parsed = parseStreamPayload(payload)
-    if (!parsed || typeof parsed !== 'object' || !('type' in parsed)) return
-    if (typeof parsed.type !== 'string' || !parsed.type.trim()) return
-    onEvent(parsed as MessageStreamEvent)
+    try {
+      const parsed = JSON.parse(payload)
+      if (!parsed || typeof parsed !== 'object' || !('type' in parsed)) return
+      if (typeof parsed.type !== 'string' || !parsed.type.trim()) return
+      onEvent(parsed as MessageStreamEvent)
+    } catch {
+      // Ignore unparsable payloads
+    }
   })
 }

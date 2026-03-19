@@ -114,6 +114,14 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		heartbeatModelUUID = modelID
 	}
+	titleModelUUID := pgtype.UUID{}
+	if value := strings.TrimSpace(req.TitleModelID); value != "" {
+		modelID, err := s.resolveModelUUID(ctx, value)
+		if err != nil {
+			return Settings{}, err
+		}
+		titleModelUUID = modelID
+	}
 	searchProviderUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.SearchProviderID); value != "" {
 		providerID, err := db.ParseUUID(value)
@@ -166,6 +174,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		HeartbeatPrompt:    "",
 		ChatModelID:        chatModelUUID,
 		HeartbeatModelID:   heartbeatModelUUID,
+		TitleModelID:       titleModelUUID,
 		SearchProviderID:   searchProviderUUID,
 		MemoryProviderID:   memoryProviderUUID,
 		TtsModelID:         ttsModelUUID,
@@ -254,6 +263,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.HeartbeatInterval,
 		row.ChatModelID,
 		row.HeartbeatModelID,
+		row.TitleModelID,
 		row.SearchProviderID,
 		row.MemoryProviderID,
 		row.TtsModelID,
@@ -273,6 +283,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.HeartbeatInterval,
 		row.ChatModelID,
 		row.HeartbeatModelID,
+		row.TitleModelID,
 		row.SearchProviderID,
 		row.MemoryProviderID,
 		row.TtsModelID,
@@ -291,6 +302,7 @@ func normalizeBotSettingsFields(
 	heartbeatInterval int32,
 	chatModelID pgtype.UUID,
 	heartbeatModelID pgtype.UUID,
+	titleModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
@@ -302,6 +314,9 @@ func normalizeBotSettingsFields(
 	}
 	if heartbeatModelID.Valid {
 		settings.HeartbeatModelID = uuid.UUID(heartbeatModelID.Bytes).String()
+	}
+	if titleModelID.Valid {
+		settings.TitleModelID = uuid.UUID(titleModelID.Bytes).String()
 	}
 	if searchProviderID.Valid {
 		settings.SearchProviderID = uuid.UUID(searchProviderID.Bytes).String()

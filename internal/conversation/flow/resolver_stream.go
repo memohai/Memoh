@@ -41,6 +41,8 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		}
 		streamReq.Query = rc.query
 
+		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.Query)
+
 		cfg := rc.runConfig
 		cfg = r.prepareRunConfig(ctx, cfg)
 
@@ -87,6 +89,8 @@ func (r *Resolver) StreamChatWS(
 		return fmt.Errorf("resolve: %w", err)
 	}
 	req.Query = rc.query
+
+	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.Query)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

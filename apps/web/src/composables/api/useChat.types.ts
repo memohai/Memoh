@@ -68,6 +68,8 @@ export interface MessageStreamEvent {
   type: string
   bot_id?: string
   message?: Message
+  session_id?: string
+  title?: string
 }
 
 export interface FetchMessagesOptions {

@@ -2329,6 +2329,8 @@ definitions:
         type: boolean
       search_provider_id:
         type: string
+      title_model_id:
+        type: string
       tts_model_id:
         type: string
     type: object
@@ -2361,6 +2363,8 @@ definitions:
       reasoning_enabled:
         type: boolean
       search_provider_id:
+        type: string
+      title_model_id:
         type: string
       tts_model_id:
         type: string

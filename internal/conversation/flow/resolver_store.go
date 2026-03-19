@@ -35,6 +35,7 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 
 	r.storeMessages(ctx, req, fullRound, usage, roundUsages, modelID)
 	go r.storeMemory(context.WithoutCancel(ctx), req, fullRound)
+
 	return nil
 }
 

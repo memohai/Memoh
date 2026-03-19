@@ -12600,6 +12600,9 @@ const docTemplate = `{
                 "search_provider_id": {
                     "type": "string"
                 },
+                "title_model_id": {
+                    "type": "string"
+                },
                 "tts_model_id": {
                     "type": "string"
                 }
@@ -12648,6 +12651,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "search_provider_id": {
+                    "type": "string"
+                },
+                "title_model_id": {
                     "type": "string"
                 },
                 "tts_model_id": {

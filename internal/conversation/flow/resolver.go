@@ -17,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/inbox"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -58,6 +59,8 @@ type Resolver struct {
 	messageService  messagepkg.Service
 	settingsService *settings.Service
 	inboxService    *inbox.Service
+	sessionService  SessionService
+	eventPublisher  messageevent.Publisher
 	skillLoader     SkillLoader
 	assetLoader     gatewayAssetLoader
 	timeout         time.Duration
@@ -343,6 +346,8 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 		return conversation.ChatResponse{}, err
 	}
 	req.Query = rc.query
+
+	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.Query)
 
 	cfg := rc.runConfig
 	cfg = r.prepareRunConfig(ctx, cfg)

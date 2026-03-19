@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS bots (
   heartbeat_interval INTEGER NOT NULL DEFAULT 30,
   heartbeat_prompt TEXT NOT NULL DEFAULT '',
   heartbeat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  title_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id UUID REFERENCES tts_models(id) ON DELETE SET NULL,
   browser_context_id UUID REFERENCES browser_contexts(id) ON DELETE SET NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
