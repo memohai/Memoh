@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -30,7 +31,12 @@ func (r *Resolver) resolveUserTimezone(ctx context.Context, userID string) (stri
 	loc, name, err := timezone.Resolve(account.Timezone)
 	if err != nil {
 		if r.logger != nil {
-			r.logger.Warn("resolve user timezone failed", "user_id", userID, "timezone", account.Timezone, "error", err)
+			r.logger.Warn(
+				"resolve user timezone failed",
+				slog.String("user_id", userID),
+				slog.String("timezone", account.Timezone),
+				slog.Any("error", err),
+			)
 		}
 		return fallbackName, fallbackLocation
 	}
