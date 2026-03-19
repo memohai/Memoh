@@ -77,3 +77,22 @@ func TestExtractAssistantOutputsSkipsReasoningOnlyStructuredMessage(t *testing.T
 		t.Fatalf("expected no visible assistant outputs, got %#v", outputs)
 	}
 }
+
+func TestExtractAssistantOutputsSkipsStructuredToolCallMessageWithVisibleText(t *testing.T) {
+	content, err := json.Marshal([]map[string]any{
+		{"type": "text", "text": "I will inspect the file first."},
+		{"type": "tool-call", "toolName": "read", "toolCallId": "call_1", "input": map[string]any{"path": "/tmp/a.txt"}},
+	})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+
+	outputs := ExtractAssistantOutputs([]conversation.ModelMessage{{
+		Role:    "assistant",
+		Content: content,
+	}})
+
+	if len(outputs) != 0 {
+		t.Fatalf("expected no visible assistant outputs, got %#v", outputs)
+	}
+}
