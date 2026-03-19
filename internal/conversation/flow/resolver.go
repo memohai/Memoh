@@ -23,7 +23,6 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/textutil"
 )
 
 const (
@@ -539,10 +538,6 @@ func anyNumberToByte(value any) (byte, bool) {
 		return 0, false
 	}
 	return byte(parsed), true
-}
-
-func truncate(s string, n int) string {
-	return textutil.TruncateRunesWithSuffix(s, n, "...")
 }
 
 // extractFileRefPaths collects container file paths from gateway attachments
