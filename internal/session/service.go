@@ -16,14 +16,16 @@ import (
 
 // Session represents a chat session within a bot.
 type Session struct {
-	ID          string         `json:"id"`
-	BotID       string         `json:"bot_id"`
-	RouteID     string         `json:"route_id,omitempty"`
-	ChannelType string         `json:"channel_type,omitempty"`
-	Title       string         `json:"title"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	ID                    string         `json:"id"`
+	BotID                 string         `json:"bot_id"`
+	RouteID               string         `json:"route_id,omitempty"`
+	ChannelType           string         `json:"channel_type,omitempty"`
+	Title                 string         `json:"title"`
+	Metadata              map[string]any `json:"metadata,omitempty"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+	RouteMetadata         map[string]any `json:"route_metadata,omitempty"`
+	RouteConversationType string         `json:"route_conversation_type,omitempty"`
 }
 
 // CreateInput holds input for creating a new session.
@@ -115,7 +117,7 @@ func (s *Service) ListByBot(ctx context.Context, botID string) ([]Session, error
 	}
 	sessions := make([]Session, 0, len(rows))
 	for _, row := range rows {
-		sessions = append(sessions, toSession(row))
+		sessions = append(sessions, toSessionFromListRow(row))
 	}
 	return sessions, nil
 }
@@ -272,4 +274,19 @@ func parseJSONMap(data []byte) map[string]any {
 	var m map[string]any
 	_ = json.Unmarshal(data, &m)
 	return m
+}
+
+func toSessionFromListRow(row sqlc.ListSessionsByBotRow) Session {
+	return Session{
+		ID:                    row.ID.String(),
+		BotID:                 row.BotID.String(),
+		RouteID:               row.RouteID.String(),
+		ChannelType:           dbpkg.TextToString(row.ChannelType),
+		Title:                 row.Title,
+		Metadata:              parseJSONMap(row.Metadata),
+		CreatedAt:             row.CreatedAt.Time,
+		UpdatedAt:             row.UpdatedAt.Time,
+		RouteMetadata:         parseJSONMap(row.RouteMetadata),
+		RouteConversationType: dbpkg.TextToString(row.RouteConversationType),
+	}
 }

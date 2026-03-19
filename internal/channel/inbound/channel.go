@@ -292,6 +292,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return errors.New("route resolver not configured")
 	}
 	routeMetadata := buildRouteMetadata(msg, identity)
+	p.enrichConversationAvatar(ctx, cfg, msg, routeMetadata)
 	resolved, err := p.routeResolver.ResolveConversation(ctx, route.ResolveInput{
 		BotID:             identity.BotID,
 		Platform:          msg.Channel.String(),
@@ -2172,6 +2173,9 @@ func buildRouteMetadata(msg channel.InboundMessage, identity InboundIdentity) ma
 	if v := strings.TrimSpace(identity.DisplayName); v != "" {
 		m["sender_display_name"] = v
 	}
+	if v := strings.TrimSpace(identity.AvatarURL); v != "" {
+		m["sender_avatar_url"] = v
+	}
 	if v := strings.TrimSpace(msg.Sender.SubjectID); v != "" {
 		m["sender_id"] = v
 	}
@@ -2190,4 +2194,43 @@ func buildRouteMetadata(msg channel.InboundMessage, identity InboundIdentity) ma
 	}
 
 	return m
+}
+
+// enrichConversationAvatar resolves group-level metadata (avatar, handle) via
+// the directory adapter and stores them in the route metadata map.
+func (p *ChannelInboundProcessor) enrichConversationAvatar(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, meta map[string]any) {
+	convType := strings.TrimSpace(msg.Conversation.Type)
+	if convType != "group" && convType != "supergroup" && convType != "channel" {
+		return
+	}
+	if p.registry == nil {
+		return
+	}
+	directoryAdapter, ok := p.registry.DirectoryAdapter(msg.Channel)
+	if !ok || directoryAdapter == nil {
+		return
+	}
+	convID := strings.TrimSpace(msg.Conversation.ID)
+	if convID == "" {
+		return
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	entry, err := directoryAdapter.ResolveEntry(lookupCtx, cfg, convID, channel.DirectoryEntryGroup)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Debug("resolve conversation directory entry failed",
+				slog.String("channel", msg.Channel.String()),
+				slog.String("conversation_id", convID),
+				slog.Any("error", err),
+			)
+		}
+		return
+	}
+	if v := strings.TrimSpace(entry.AvatarURL); v != "" {
+		meta["conversation_avatar_url"] = v
+	}
+	if v := strings.TrimSpace(entry.Handle); v != "" {
+		meta["conversation_handle"] = v
+	}
 }

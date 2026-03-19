@@ -11,6 +11,8 @@ export interface SessionSummary {
   metadata?: Record<string, unknown>
   created_at?: string
   updated_at?: string
+  route_metadata?: Record<string, unknown>
+  route_conversation_type?: string
 }
 
 export interface MessageAsset {

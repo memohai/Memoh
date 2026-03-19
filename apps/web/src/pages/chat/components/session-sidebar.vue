@@ -15,16 +15,48 @@
             :model-value="sessionId === session.id"
             @click="handleSelect(session)"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'message']"
-              class="size-3.5 shrink-0 text-muted-foreground"
-            />
+            <!-- Avatar area -->
+            <div class="relative shrink-0">
+              <Avatar
+                v-if="isIMSession(session)"
+                class="size-8"
+              >
+                <AvatarImage
+                  v-if="sessionAvatarUrl(session)"
+                  :src="sessionAvatarUrl(session)!"
+                  :alt="sessionDisplayLabel(session)"
+                />
+                <AvatarFallback class="text-xs bg-primary/10 text-primary">
+                  {{ sessionAvatarFallback(session) }}
+                </AvatarFallback>
+              </Avatar>
+              <div
+                v-else
+                class="flex items-center justify-center size-8"
+              >
+                <FontAwesomeIcon
+                  :icon="['fas', 'message']"
+                  class="size-3.5 text-muted-foreground"
+                />
+              </div>
+              <ChannelBadge
+                v-if="isIMSession(session)"
+                :platform="session.channel_type!"
+              />
+            </div>
+
             <div class="flex-1 text-left min-w-0">
               <div class="text-sm truncate">
                 {{ session.title || $t('chat.untitledSession') }}
               </div>
               <div
-                v-if="session.updated_at"
+                v-if="sessionSubLabel(session)"
+                class="text-xs text-muted-foreground truncate"
+              >
+                {{ sessionSubLabel(session) }}
+              </div>
+              <div
+                v-else-if="session.updated_at"
                 class="text-xs text-muted-foreground truncate"
               >
                 {{ formatTime(session.updated_at) }}
@@ -83,6 +115,8 @@
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '@/store/chat-list'
 import type { SessionSummary } from '@/composables/api/useChat'
+import { Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
+import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 import {
   Toggle,
   SidebarMenu,
@@ -96,6 +130,66 @@ import {
 
 const chatStore = useChatStore()
 const { sessions, sessionId, currentBotId, loadingChats } = storeToRefs(chatStore)
+
+const WEB_CHANNELS = new Set(['web', ''])
+
+function isIMSession(session: SessionSummary): boolean {
+  const ct = (session.channel_type ?? '').trim().toLowerCase()
+  return ct !== '' && !WEB_CHANNELS.has(ct)
+}
+
+function routeMeta(session: SessionSummary): Record<string, unknown> {
+  return session.route_metadata ?? {}
+}
+
+function isGroupConversation(session: SessionSummary): boolean {
+  const ct = (session.route_conversation_type ?? '').trim().toLowerCase()
+  return ct === 'group' || ct === 'supergroup' || ct === 'channel'
+}
+
+function sessionAvatarUrl(session: SessionSummary): string | null {
+  const meta = routeMeta(session)
+  if (isGroupConversation(session)) {
+    const convAvatar = (meta.conversation_avatar_url as string ?? '').trim()
+    if (convAvatar) return convAvatar
+  }
+  const url = (meta.sender_avatar_url as string ?? '').trim()
+  return url || null
+}
+
+function sessionAvatarFallback(session: SessionSummary): string {
+  const label = sessionDisplayLabel(session)
+  return label ? label.charAt(0).toUpperCase() : '?'
+}
+
+function sessionDisplayLabel(session: SessionSummary): string {
+  const meta = routeMeta(session)
+  const convName = (meta.conversation_name as string ?? '').trim()
+  if (convName) return convName
+  const senderName = (meta.sender_display_name as string ?? '').trim()
+  if (senderName) return senderName
+  const senderUsername = (meta.sender_username as string ?? '').trim()
+  if (senderUsername) return senderUsername
+  return ''
+}
+
+function sessionSubLabel(session: SessionSummary): string {
+  if (!isIMSession(session)) return ''
+  const meta = routeMeta(session)
+
+  if (isGroupConversation(session)) {
+    const convHandle = (meta.conversation_handle as string ?? '').trim()
+    if (convHandle) return convHandle.startsWith('@') ? convHandle : `@${convHandle}`
+    const convName = (meta.conversation_name as string ?? '').trim()
+    if (convName) return `@${convName}`
+  }
+
+  const senderUsername = (meta.sender_username as string ?? '').trim()
+  if (senderUsername) return `@${senderUsername}`
+  const senderName = (meta.sender_display_name as string ?? '').trim()
+  if (senderName) return senderName
+  return ''
+}
 
 function handleSelect(session: SessionSummary) {
   chatStore.selectSession(session.id)

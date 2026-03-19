@@ -106,22 +106,41 @@ func (q *Queries) GetSessionByID(ctx context.Context, id pgtype.UUID) (BotSessio
 }
 
 const listSessionsByBot = `-- name: ListSessionsByBot :many
-SELECT id, bot_id, route_id, channel_type, title, metadata, created_at, updated_at, deleted_at
-FROM bot_sessions
-WHERE bot_id = $1
-  AND deleted_at IS NULL
-ORDER BY updated_at DESC
+SELECT
+  s.id, s.bot_id, s.route_id, s.channel_type, s.title, s.metadata,
+  s.created_at, s.updated_at, s.deleted_at,
+  r.metadata AS route_metadata,
+  r.conversation_type AS route_conversation_type
+FROM bot_sessions s
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE s.bot_id = $1
+  AND s.deleted_at IS NULL
+ORDER BY s.updated_at DESC
 `
 
-func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]BotSession, error) {
+type ListSessionsByBotRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	BotID                 pgtype.UUID        `json:"bot_id"`
+	RouteID               pgtype.UUID        `json:"route_id"`
+	ChannelType           pgtype.Text        `json:"channel_type"`
+	Title                 string             `json:"title"`
+	Metadata              []byte             `json:"metadata"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
+	RouteMetadata         []byte             `json:"route_metadata"`
+	RouteConversationType pgtype.Text        `json:"route_conversation_type"`
+}
+
+func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]ListSessionsByBotRow, error) {
 	rows, err := q.db.Query(ctx, listSessionsByBot, botID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BotSession
+	var items []ListSessionsByBotRow
 	for rows.Next() {
-		var i BotSession
+		var i ListSessionsByBotRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
@@ -132,6 +151,8 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]B
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.RouteMetadata,
+			&i.RouteConversationType,
 		); err != nil {
 			return nil, err
 		}

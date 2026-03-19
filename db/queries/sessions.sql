@@ -18,11 +18,16 @@ WHERE id = $1
   AND deleted_at IS NULL;
 
 -- name: ListSessionsByBot :many
-SELECT *
-FROM bot_sessions
-WHERE bot_id = sqlc.arg(bot_id)
-  AND deleted_at IS NULL
-ORDER BY updated_at DESC;
+SELECT
+  s.id, s.bot_id, s.route_id, s.channel_type, s.title, s.metadata,
+  s.created_at, s.updated_at, s.deleted_at,
+  r.metadata AS route_metadata,
+  r.conversation_type AS route_conversation_type
+FROM bot_sessions s
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.deleted_at IS NULL
+ORDER BY s.updated_at DESC;
 
 -- name: ListSessionsByRoute :many
 SELECT *
