@@ -201,9 +201,6 @@ You can create a subagent to help you with these tasks,
 `description` will be the system prompt for the subagent.
 {{fileSections}}
 
-## Skills
-{{skillsCount}} skills available via `use_skill`:
-{{skillsList}}
-{{enabledSkillsSection}}
+{{skillsSection}}
 
 {{inboxSection}}

@@ -12,10 +12,8 @@ type SessionContext struct {
 	BotID             string
 	ChatID            string
 	ChannelIdentityID string
-	DisplayName       string
 	CurrentPlatform   string
 	ReplyTarget       string
-	ConversationType  string
 	SessionToken      string //nolint:gosec // carries session credential material at runtime
 	IsSubagent        bool
 }
@@ -59,16 +57,12 @@ type RunConfig struct {
 	Messages           []sdk.Message
 	Query              string
 	System             string
-	Tools              []sdk.Tool
 	SupportsImageInput bool
-	Channels           []string
-	CurrentChannel     string
 	Identity           SessionContext
 	Skills             []SkillEntry
 	EnabledSkillNames  []string
 	Inbox              []InboxItem
 	LoopDetection      LoopDetectionConfig
-	ActiveContextTime  int
 }
 
 // GenerateResult holds the result of a non-streaming agent invocation.

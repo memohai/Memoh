@@ -64,7 +64,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
 
-	enabledSkills := make([]string, 0, len(cfg.EnabledSkillNames))
+	enabledSkills := make([]string, len(cfg.EnabledSkillNames))
 	copy(enabledSkills, cfg.EnabledSkillNames)
 	enableSkill := func(name string) {
 		for _, s := range cfg.Skills {
@@ -297,7 +297,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 	}
 	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
 
-	enabledSkills := make([]string, 0, len(cfg.EnabledSkillNames))
+	enabledSkills := make([]string, len(cfg.EnabledSkillNames))
 	copy(enabledSkills, cfg.EnabledSkillNames)
 	enableSkill := func(name string) {
 		for _, s := range cfg.Skills {
@@ -452,6 +452,13 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, e
 	if len(a.toolProviders) == 0 {
 		return nil, nil
 	}
+	skillsMap := make(map[string]tools.SkillDetail, len(cfg.Skills))
+	for _, s := range cfg.Skills {
+		skillsMap[s.Name] = tools.SkillDetail{
+			Description: s.Description,
+			Content:     s.Content,
+		}
+	}
 	session := tools.SessionContext{
 		BotID:              cfg.Identity.BotID,
 		ChatID:             cfg.Identity.ChatID,
@@ -461,6 +468,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, e
 		ReplyTarget:        cfg.Identity.ReplyTarget,
 		SupportsImageInput: cfg.SupportsImageInput,
 		IsSubagent:         cfg.Identity.IsSubagent,
+		Skills:             skillsMap,
 	}
 
 	var allTools []sdk.Tool

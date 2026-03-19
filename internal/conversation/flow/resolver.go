@@ -317,23 +317,18 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		Messages:           sdkMessages,
 		Query:              headerifiedQuery,
 		SupportsImageInput: chatModel.HasInputModality(models.ModelInputImage),
-		Channels:           nonNilStrings(req.Channels),
-		CurrentChannel:     req.CurrentChannel,
 		Identity: agentpkg.SessionContext{
 			BotID:             req.BotID,
 			ChatID:            req.ChatID,
 			ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
-			DisplayName:       displayName,
 			CurrentPlatform:   req.CurrentChannel,
 			ReplyTarget:       strings.TrimSpace(req.ReplyTarget),
-			ConversationType:  strings.TrimSpace(req.ConversationType),
 			SessionToken:      req.ChatToken,
 		},
 		Skills:            agentSkills,
 		EnabledSkillNames: nonNilStrings(skills),
 		Inbox:             agentInbox,
 		LoopDetection:     agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
-		ActiveContextTime: maxCtx,
 	}
 
 	return resolvedContext{runConfig: runCfg, model: chatModel, provider: provider, inboxItemIDs: inboxItemIDs, query: headerifiedQuery}, nil
@@ -375,22 +370,30 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 // prepareRunConfig generates the system prompt and appends the user message.
 func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig) agentpkg.RunConfig {
 	supportsImageInput := cfg.SupportsImageInput
-	// Build system prompt
 	var files []agentpkg.SystemFile
 	if r.agent != nil {
 		fs := agentpkg.NewFSClient(nil, cfg.Identity.BotID)
 		files = fs.LoadSystemFiles(ctx)
 	}
 
+	var enabledSkills []agentpkg.SkillEntry
+	for _, s := range cfg.Skills {
+		for _, name := range cfg.EnabledSkillNames {
+			if s.Name == name {
+				enabledSkills = append(enabledSkills, s)
+				break
+			}
+		}
+	}
+
 	cfg.System = agentpkg.GenerateSystemPrompt(agentpkg.SystemPromptParams{
 		Skills:             cfg.Skills,
-		EnabledSkills:      nil,
+		EnabledSkills:      enabledSkills,
 		Files:              files,
 		Inbox:              cfg.Inbox,
 		SupportsImageInput: supportsImageInput,
 	})
 
-	// Add user message with the headerified query
 	if cfg.Query != "" {
 		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query))
 	}

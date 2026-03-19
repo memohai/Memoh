@@ -58,40 +58,24 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 		"- `exec`: execute command",
 	)
 
-	skillsList := ""
-	if len(params.Skills) > 0 {
-		lines := make([]string, len(params.Skills))
-		for i, s := range params.Skills {
-			lines[i] = "- " + s.Name + ": " + s.Description
-		}
-		skillsList = strings.Join(lines, "\n")
-	}
-
-	enabledSkillsSection := ""
-	var enabledSkillsSectionSb70 strings.Builder
-	for _, s := range params.EnabledSkills {
-		enabledSkillsSectionSb70.WriteString("\n\n---\n\n" + formatSkillPrompt(s))
-	}
-	enabledSkillsSection += enabledSkillsSectionSb70.String()
+	skillsSection := buildSkillsSection(params.Skills, params.EnabledSkills)
 
 	fileSections := ""
-	var fileSectionsSb75 strings.Builder
+	var fileSectionsSb strings.Builder
 	for _, f := range params.Files {
 		if f.Content == "" {
 			continue
 		}
-		fileSectionsSb75.WriteString("\n\n" + formatSystemFile(f))
+		fileSectionsSb.WriteString("\n\n" + formatSystemFile(f))
 	}
-	fileSections += fileSectionsSb75.String()
+	fileSections += fileSectionsSb.String()
 
 	return render(systemTmpl, map[string]string{
-		"home":                 home,
-		"basicTools":           strings.Join(basicTools, "\n"),
-		"fileSections":         fileSections,
-		"skillsCount":          strconv.Itoa(len(params.Skills)),
-		"skillsList":           skillsList,
-		"enabledSkillsSection": enabledSkillsSection,
-		"inboxSection":         formatInbox(params.Inbox),
+		"home":          home,
+		"basicTools":    strings.Join(basicTools, "\n"),
+		"fileSections":  fileSections,
+		"skillsSection": skillsSection,
+		"inboxSection":  formatInbox(params.Inbox),
 	})
 }
 
@@ -146,6 +130,25 @@ func formatSkillPrompt(skill SkillEntry) string {
 
 func formatSystemFile(file SystemFile) string {
 	return fmt.Sprintf("## %s\n\n%s", file.Filename, file.Content)
+}
+
+func buildSkillsSection(skills []SkillEntry, enabledSkills []SkillEntry) string {
+	if len(skills) == 0 && len(enabledSkills) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Skills\n")
+	sb.WriteString(strconv.Itoa(len(skills)))
+	sb.WriteString(" skills available via `use_skill`:\n")
+	for _, s := range skills {
+		sb.WriteString("- " + s.Name + ": " + s.Description + "\n")
+	}
+	for _, s := range enabledSkills {
+		sb.WriteString("\n---\n\n")
+		sb.WriteString(formatSkillPrompt(s))
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 func formatInbox(items []InboxItem) string {
