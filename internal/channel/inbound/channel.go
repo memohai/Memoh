@@ -862,12 +862,12 @@ func contentPartText(part conversation.ContentPart) string {
 	return ""
 }
 
-type gatewayStreamEnvelope struct {
+// agentStreamEnvelope is the JSON shape produced by internal/agent.StreamEvent.
+type agentStreamEnvelope struct {
 	Type     string                      `json:"type"`
 	Delta    string                      `json:"delta"`
 	Error    string                      `json:"error"`
 	Message  string                      `json:"message"`
-	Image    string                      `json:"image"`
 	Data     json.RawMessage             `json:"data"`
 	Messages []conversation.ModelMessage `json:"messages"`
 
@@ -880,26 +880,16 @@ type gatewayStreamEnvelope struct {
 	Speeches    json.RawMessage `json:"speeches"`
 }
 
-type gatewayStreamDoneData struct {
-	Messages []conversation.ModelMessage `json:"messages"`
-}
-
 func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.StreamEvent, []conversation.ModelMessage, error) {
 	if len(chunk) == 0 {
 		return nil, nil, nil
 	}
-	var envelope gatewayStreamEnvelope
+	var envelope agentStreamEnvelope
 	if err := json.Unmarshal(chunk, &envelope); err != nil {
 		return nil, nil, err
 	}
 	finalMessages := make([]conversation.ModelMessage, 0, len(envelope.Messages))
 	finalMessages = append(finalMessages, envelope.Messages...)
-	if len(finalMessages) == 0 && len(envelope.Data) > 0 {
-		var done gatewayStreamDoneData
-		if err := json.Unmarshal(envelope.Data, &done); err == nil && len(done.Messages) > 0 {
-			finalMessages = append(finalMessages, done.Messages...)
-		}
-	}
 	eventType := strings.ToLower(strings.TrimSpace(envelope.Type))
 	switch eventType {
 	case "text_delta":
@@ -1687,6 +1677,7 @@ func (p *ChannelInboundProcessor) ingestOutboundAttachments(ctx context.Context,
 			result = append(result, item)
 			continue
 		}
+		sourceURL := item.URL
 		item.ContentHash = asset.ContentHash
 		item.URL = ""
 		item.Base64 = ""
@@ -1695,6 +1686,12 @@ func (p *ChannelInboundProcessor) ingestOutboundAttachments(ctx context.Context,
 		}
 		item.Metadata["bot_id"] = botID
 		item.Metadata["storage_key"] = asset.StorageKey
+		if n := strings.TrimSpace(item.Name); n != "" {
+			item.Metadata["name"] = n
+		}
+		if su := strings.TrimSpace(sourceURL); su != "" && !isDataURL(su) {
+			item.Metadata["source_url"] = su
+		}
 		if strings.TrimSpace(item.Mime) == "" {
 			item.Mime = attachment.NormalizeMime(asset.Mime)
 		}
@@ -1720,12 +1717,14 @@ func isHTTPURL(raw string) bool {
 // For non-media-marker paths, it ingests the file into the media store first.
 // Returns true if the asset was resolved and item was updated.
 func (p *ChannelInboundProcessor) resolveContainerPathAsset(ctx context.Context, botID, accessPath string, item *channel.Attachment) bool {
+	sourcePath := accessPath
+
 	// Try media marker lookup first.
 	storageKey := extractStorageKey(accessPath, botID)
 	if storageKey != "" {
 		asset, err := p.mediaService.GetByStorageKey(ctx, botID, storageKey)
 		if err == nil {
-			applyAssetToAttachment(asset, botID, item)
+			applyAssetToAttachment(asset, botID, item, sourcePath)
 			return true
 		}
 	}
@@ -1743,14 +1742,15 @@ func (p *ChannelInboundProcessor) resolveContainerPathAsset(ctx context.Context,
 			}
 			return false
 		}
-		applyAssetToAttachment(asset, botID, item)
+		applyAssetToAttachment(asset, botID, item, sourcePath)
 		return true
 	}
 
 	return false
 }
 
-func applyAssetToAttachment(asset media.Asset, botID string, item *channel.Attachment) {
+func applyAssetToAttachment(asset media.Asset, botID string, item *channel.Attachment, sourcePath string) {
+	sourceURL := item.URL
 	item.ContentHash = asset.ContentHash
 	item.URL = ""
 	if item.Metadata == nil {
@@ -1758,13 +1758,21 @@ func applyAssetToAttachment(asset media.Asset, botID string, item *channel.Attac
 	}
 	item.Metadata["bot_id"] = botID
 	item.Metadata["storage_key"] = asset.StorageKey
+	if n := strings.TrimSpace(item.Name); n != "" {
+		item.Metadata["name"] = n
+	}
+	if sp := strings.TrimSpace(sourcePath); sp != "" {
+		item.Metadata["source_path"] = sp
+	}
+	if su := strings.TrimSpace(sourceURL); su != "" && !isDataURL(su) {
+		item.Metadata["source_url"] = su
+	}
 	if strings.TrimSpace(item.Mime) == "" {
 		item.Mime = attachment.NormalizeMime(asset.Mime)
 	}
 	if item.Size == 0 && asset.SizeBytes > 0 {
 		item.Size = asset.SizeBytes
 	}
-	// Infer a better attachment type from MIME when the TS side sent a generic "file".
 	if item.Type == channel.AttachmentFile || item.Type == "" {
 		item.Type = inferAttachmentTypeFromMime(strings.TrimSpace(item.Mime))
 	}
@@ -2034,6 +2042,8 @@ func buildAssetRefs(attachments []channel.Attachment, startOrdinal int) []conver
 			Ordinal:     startOrdinal + len(refs),
 			Mime:        strings.TrimSpace(att.Mime),
 			SizeBytes:   att.Size,
+			Name:        strings.TrimSpace(att.Name),
+			Metadata:    att.Metadata,
 		}
 		if att.Metadata != nil {
 			if sk, ok := att.Metadata["storage_key"].(string); ok {

@@ -102,7 +102,7 @@ func (e *mcpToolsTestExecutor) CallTool(_ context.Context, session mcpgw.ToolSes
 func TestHandleMCPToolsWithGatewayAcceptCompatibility(t *testing.T) {
 	e := echo.New()
 	executor := &mcpToolsTestExecutor{}
-	toolGateway := mcpgw.NewToolGatewayService(slog.Default(), []mcpgw.ToolExecutor{executor}, nil)
+	toolGateway := mcpgw.NewToolGatewayService(slog.Default(), []mcpgw.ToolSource{executor})
 	handler := &ContainerdHandler{
 		logger:      slog.Default(),
 		toolGateway: toolGateway,

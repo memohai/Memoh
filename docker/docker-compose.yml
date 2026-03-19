@@ -18,18 +18,12 @@ services:
         - COMMIT_HASH=${MEMOH_COMMIT:-unknown}
         - BUILD_TIME=${MEMOH_BUILD_TIME:-unknown}
 
-  agent:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.agent
-
   web:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
       args:
         - VITE_API_URL=${VITE_API_URL:-/api}
-        - VITE_AGENT_URL=${VITE_AGENT_URL:-/agent}
 
   sparse:
     build:

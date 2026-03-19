@@ -22,6 +22,7 @@ Twilight AI is a lightweight Go AI SDK with a provider-agnostic core API.
 - Text generation: `sdk.GenerateText`, `sdk.GenerateTextResult`, `sdk.StreamText`
 - Embeddings: `sdk.Embed`, `sdk.EmbedMany`
 - Tool calling: `sdk.Tool`, `sdk.NewTool[T]`, `WithMaxSteps`, approval flow
+- MCP tool integration: `sdk.CreateMCPClient`, `sdk.MCPClient`, `sdk.MCPClientConfig`
 - Streaming: typed `StreamPart` events over Go channels
 - Current providers:
   - `provider/openai/completions`
@@ -38,6 +39,7 @@ Prefer the high-level SDK API first, then drop to provider details only when nee
 - `sdk.Model` binds a chat model to a `sdk.Provider`
 - `sdk.EmbeddingModel` binds an embedding model to an `sdk.EmbeddingProvider`
 - The client orchestrates tool loops, callbacks, approvals, and streaming lifecycle
+- MCP clients can load remote MCP tools and turn them into ordinary `sdk.Tool` values
 - Providers handle backend-specific HTTP, request mapping, response parsing, and SSE translation
 
 ## Core API Guidance
@@ -113,6 +115,26 @@ When streaming with tools, ensure the implementation can emit:
 - tool execution parts
 - progress updates
 - denial/error events when applicable
+
+### MCP Tool Calling
+
+Use MCP when the task needs remote tools exposed by an MCP server rather than locally implemented `Execute` handlers.
+
+Default guidance:
+
+- use `sdk.CreateMCPClient(ctx, &sdk.MCPClientConfig{...})`
+- use `sdk.MCPTransportHTTP` for streamable HTTP MCP servers
+- use `sdk.MCPTransportSSE` only when the server exposes legacy SSE transport
+- for stdio, build the transport with the official MCP Go SDK and pass `Transport: ...`
+- call `mcpClient.Tools(ctx)` and pass the result into `sdk.WithTools(...)`
+- call `defer mcpClient.Close()` after successful creation
+
+Important behavior:
+
+- MCP tools become ordinary `sdk.Tool` values from the caller's perspective
+- Twilight AI converts MCP `InputSchema` into `*jsonschema.Schema`
+- MCP tool execution is delegated to `tools/call` on the remote server
+- remote MCP text output becomes the tool result visible to the model
 
 ### Streaming
 
@@ -198,6 +220,7 @@ Before finishing work in this repo, verify:
 - public examples use top-level `sdk` APIs unless lower-level behavior is the point
 - streaming logic uses typed `StreamPart` handling
 - tool-calling changes cover both inspection mode and multi-step mode when relevant
+- MCP examples show both transport setup and normal `WithTools(...)` usage when relevant
 - provider work includes health checks or model discovery behavior if the backend supports them
 
 ## Additional Resources

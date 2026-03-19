@@ -22,6 +22,8 @@ import (
 	dbembed "github.com/memohai/memoh/db"
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
+	agentpkg "github.com/memohai/memoh/internal/agent"
+	agenttools "github.com/memohai/memoh/internal/agent/tools"
 	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
@@ -57,19 +59,6 @@ import (
 	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
-	mcpbrowser "github.com/memohai/memoh/internal/mcp/providers/browser"
-	mcpcontacts "github.com/memohai/memoh/internal/mcp/providers/contacts"
-	mcpcontainer "github.com/memohai/memoh/internal/mcp/providers/container"
-	mcpemail "github.com/memohai/memoh/internal/mcp/providers/email"
-	mcpinbox "github.com/memohai/memoh/internal/mcp/providers/inbox"
-	mcpmemory "github.com/memohai/memoh/internal/mcp/providers/memory"
-	mcpmessage "github.com/memohai/memoh/internal/mcp/providers/message"
-	mcpschedule "github.com/memohai/memoh/internal/mcp/providers/schedule"
-	mcpskill "github.com/memohai/memoh/internal/mcp/providers/skill"
-	mcpsubagent "github.com/memohai/memoh/internal/mcp/providers/subagent"
-	mcptts "github.com/memohai/memoh/internal/mcp/providers/tts"
-	mcpweb "github.com/memohai/memoh/internal/mcp/providers/web"
-	mcpwebfetch "github.com/memohai/memoh/internal/mcp/providers/webfetch"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
 	"github.com/memohai/memoh/internal/media"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
@@ -211,7 +200,8 @@ func runServe() {
 			provideChannelManager,
 			provideChannelLifecycleService,
 
-			// conversation flow
+			// agent & conversation flow
+			provideAgent,
 			provideChatResolver,
 			provideScheduleTriggerer,
 			schedule.NewService,
@@ -222,6 +212,7 @@ func runServe() {
 			provideContainerdHandler,
 			provideFederationGateway,
 			provideToolGatewayService,
+			provideToolProviders,
 
 			// http handlers (group:"server_handlers")
 			provideServerHandler(handlers.NewPingHandler),
@@ -261,6 +252,7 @@ func runServe() {
 			provideServer,
 		),
 		fx.Invoke(
+			injectToolProviders,
 			startMemoryProviderBootstrap,
 			startScheduleService,
 			startHeartbeatService,
@@ -400,8 +392,19 @@ func provideHeartbeatTriggerer(resolver *flow.Resolver) heartbeat.Triggerer {
 // conversation flow
 // ---------------------------------------------------------------------------
 
-func provideChatResolver(log *slog.Logger, cfg config.Config, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *flow.Resolver {
-	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, cfg.AgentGateway.BaseURL(), 120*time.Second)
+func provideAgent(log *slog.Logger, manager *workspace.Manager) *agentpkg.Agent {
+	return agentpkg.New(agentpkg.Deps{
+		BridgeProvider: manager,
+		Logger:         log,
+	})
+}
+
+func injectToolProviders(a *agentpkg.Agent, providers []agenttools.ToolProvider) {
+	a.SetToolProviders(providers)
+}
+
+func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry) *flow.Resolver {
+	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, a, 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
@@ -557,34 +560,36 @@ func provideOAuthService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.C
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
-func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, _ *conversation.Service, _ *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, containerdHandler *handlers.ContainerdHandler) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
-	var assetResolver mcpmessage.AssetResolver
+	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService)
+	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{fedSource})
+	containerdHandler.SetToolGatewayService(svc)
+	return svc
+}
+
+func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service) []agenttools.ToolProvider {
+	var assetResolver agenttools.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
 	}
-	messageExec := mcpmessage.NewExecutor(log, channelManager, channelManager, registry, assetResolver)
-	contactsExec := mcpcontacts.NewExecutor(log, routeService)
-	scheduleExec := mcpschedule.NewExecutor(log, scheduleService)
-	memoryExec := mcpmemory.NewExecutor(log, memoryRegistry, settingsService)
-	webExec := mcpweb.NewExecutor(log, settingsService, searchProviderService)
-	inboxExec := mcpinbox.NewExecutor(log, inboxService)
-	fsExec := mcpcontainer.NewExecutor(log, manager, config.DefaultDataMount)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService)
-	emailExec := mcpemail.NewExecutor(log, emailService, emailManager)
-	webFetchExec := mcpwebfetch.NewExecutor(log)
-	subagentExec := mcpsubagent.NewExecutor(log, subagentService, settingsService, modelsService, queries, cfg.AgentGateway.BaseURL())
-	skillExec := mcpskill.NewExecutor(log)
-	browserExec := mcpbrowser.NewExecutor(log, settingsService, browserContextService, manager, cfg.BrowserGateway)
-	ttsExec := mcptts.NewExecutor(log, settingsService, ttsService, channelManager, registry)
-
-	svc := mcp.NewToolGatewayService(
-		log,
-		[]mcp.ToolExecutor{messageExec, contactsExec, scheduleExec, memoryExec, webExec, fsExec, inboxExec, emailExec, webFetchExec, subagentExec, skillExec, browserExec, ttsExec},
-		[]mcp.ToolSource{fedSource},
-	)
-	containerdHandler.SetToolGatewayService(svc)
-	return svc
+	return []agenttools.ToolProvider{
+		agenttools.NewMessageProvider(log, channelManager, channelManager, registry, assetResolver),
+		agenttools.NewContactsProvider(log, routeService),
+		agenttools.NewScheduleProvider(log, scheduleService),
+		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
+		agenttools.NewWebProvider(log, settingsService, searchProviderService),
+		agenttools.NewContainerProvider(log, manager, config.DefaultDataMount),
+		agenttools.NewInboxProvider(log, inboxService),
+		agenttools.NewEmailProvider(log, emailService, emailManager),
+		agenttools.NewWebFetchProvider(log),
+		agenttools.NewSubagentProvider(log, subagentService, settingsService, modelsService, queries, ""),
+		agenttools.NewSkillProvider(log),
+		agenttools.NewBrowserProvider(log, settingsService, browserContextService, manager, cfg.BrowserGateway),
+		agenttools.NewTTSProvider(log, settingsService, ttsService, channelManager, registry),
+		agenttools.NewFederationProvider(log, fedSource),
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1001,15 +1006,15 @@ type mediaAssetResolverAdapter struct {
 	media *media.Service
 }
 
-func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, storageKey string) (mcpmessage.AssetMeta, error) {
+func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, storageKey string) (agenttools.AssetMeta, error) {
 	if a == nil || a.media == nil {
-		return mcpmessage.AssetMeta{}, errors.New("media service not configured")
+		return agenttools.AssetMeta{}, errors.New("media service not configured")
 	}
 	asset, err := a.media.GetByStorageKey(ctx, botID, storageKey)
 	if err != nil {
-		return mcpmessage.AssetMeta{}, err
+		return agenttools.AssetMeta{}, err
 	}
-	return mcpmessage.AssetMeta{
+	return agenttools.AssetMeta{
 		ContentHash: asset.ContentHash,
 		Mime:        asset.Mime,
 		SizeBytes:   asset.SizeBytes,
@@ -1017,15 +1022,15 @@ func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, 
 	}, nil
 }
 
-func (a *mediaAssetResolverAdapter) IngestContainerFile(ctx context.Context, botID, containerPath string) (mcpmessage.AssetMeta, error) {
+func (a *mediaAssetResolverAdapter) IngestContainerFile(ctx context.Context, botID, containerPath string) (agenttools.AssetMeta, error) {
 	if a == nil || a.media == nil {
-		return mcpmessage.AssetMeta{}, errors.New("media service not configured")
+		return agenttools.AssetMeta{}, errors.New("media service not configured")
 	}
 	asset, err := a.media.IngestContainerFile(ctx, botID, containerPath)
 	if err != nil {
-		return mcpmessage.AssetMeta{}, err
+		return agenttools.AssetMeta{}, err
 	}
-	return mcpmessage.AssetMeta{
+	return agenttools.AssetMeta{
 		ContentHash: asset.ContentHash,
 		Mime:        asset.Mime,
 		SizeBytes:   asset.SizeBytes,

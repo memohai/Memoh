@@ -12,17 +12,21 @@ import (
 )
 
 const createMessageAsset = `-- name: CreateMessageAsset :one
-INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash)
+INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash, name, metadata)
 VALUES (
   $1,
   $2,
   $3,
-  $4
+  $4,
+  $5,
+  $6
 )
 ON CONFLICT (message_id, content_hash) DO UPDATE SET
   role = EXCLUDED.role,
-  ordinal = EXCLUDED.ordinal
-RETURNING id, message_id, role, ordinal, content_hash, created_at
+  ordinal = EXCLUDED.ordinal,
+  name = EXCLUDED.name,
+  metadata = EXCLUDED.metadata
+RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at
 `
 
 type CreateMessageAssetParams struct {
@@ -30,6 +34,8 @@ type CreateMessageAssetParams struct {
 	Role        string      `json:"role"`
 	Ordinal     int32       `json:"ordinal"`
 	ContentHash string      `json:"content_hash"`
+	Name        string      `json:"name"`
+	Metadata    []byte      `json:"metadata"`
 }
 
 func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAssetParams) (BotHistoryMessageAsset, error) {
@@ -38,6 +44,8 @@ func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAsset
 		arg.Role,
 		arg.Ordinal,
 		arg.ContentHash,
+		arg.Name,
+		arg.Metadata,
 	)
 	var i BotHistoryMessageAsset
 	err := row.Scan(
@@ -46,6 +54,8 @@ func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAsset
 		&i.Role,
 		&i.Ordinal,
 		&i.ContentHash,
+		&i.Name,
+		&i.Metadata,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -141,7 +151,7 @@ func (q *Queries) GetStorageProviderByName(ctx context.Context, name string) (St
 }
 
 const listMessageAssets = `-- name: ListMessageAssets :many
-SELECT id AS rel_id, message_id, role, ordinal, content_hash
+SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
 FROM bot_history_message_assets
 WHERE message_id = $1
 ORDER BY ordinal ASC
@@ -153,6 +163,8 @@ type ListMessageAssetsRow struct {
 	Role        string      `json:"role"`
 	Ordinal     int32       `json:"ordinal"`
 	ContentHash string      `json:"content_hash"`
+	Name        string      `json:"name"`
+	Metadata    []byte      `json:"metadata"`
 }
 
 func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) ([]ListMessageAssetsRow, error) {
@@ -170,6 +182,8 @@ func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) 
 			&i.Role,
 			&i.Ordinal,
 			&i.ContentHash,
+			&i.Name,
+			&i.Metadata,
 		); err != nil {
 			return nil, err
 		}
@@ -182,7 +196,7 @@ func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) 
 }
 
 const listMessageAssetsBatch = `-- name: ListMessageAssetsBatch :many
-SELECT id AS rel_id, message_id, role, ordinal, content_hash
+SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
 FROM bot_history_message_assets
 WHERE message_id = ANY($1::uuid[])
 ORDER BY message_id, ordinal ASC
@@ -194,6 +208,8 @@ type ListMessageAssetsBatchRow struct {
 	Role        string      `json:"role"`
 	Ordinal     int32       `json:"ordinal"`
 	ContentHash string      `json:"content_hash"`
+	Name        string      `json:"name"`
+	Metadata    []byte      `json:"metadata"`
 }
 
 func (q *Queries) ListMessageAssetsBatch(ctx context.Context, messageIds []pgtype.UUID) ([]ListMessageAssetsBatchRow, error) {
@@ -211,6 +227,8 @@ func (q *Queries) ListMessageAssetsBatch(ctx context.Context, messageIds []pgtyp
 			&i.Role,
 			&i.Ordinal,
 			&i.ContentHash,
+			&i.Name,
+			&i.Metadata,
 		); err != nil {
 			return nil, err
 		}

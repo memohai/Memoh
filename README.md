@@ -134,45 +134,54 @@ Additional capabilities include memory compaction (merge redundant entries), reb
   </tr>
 </table>
 
-## Tech Stack
-
-| Layer | Stack |
-|-------|-------|
-| Backend | Go, Echo, sqlc, Uber FX, pgx/v5, containerd v2 |
-| Agent Gateway | Bun, Elysia |
-| Browser Gateway | Bun, Elysia, Playwright (Chromium) |
-| Frontend | Vue 3, Vite, Pinia, Tailwind CSS, Reka UI |
-| Storage | PostgreSQL, Qdrant |
-| Infra | Docker, containerd, CNI |
-| Tooling | mise, pnpm, swaggo, sqlc |
-
 ## Architecture
 
+```mermaid
+flowchart TB
+    subgraph Clients [" Clients "]
+        direction LR
+        CH["Channels<br/>Telegram · Discord · Feishu · QQ · Email"]
+        WEB["Web UI (Vue 3 :8082)"]
+        CLI["CLI"]
+    end
+
+    CH & WEB & CLI --> API
+
+    subgraph Server [" Server · Go :8080 "]
+        API["REST API & Channel Adapters"]
+
+        subgraph Agent [" In-process AI Agent "]
+            TWILIGHT["Twilight AI SDK<br/>OpenAI · Anthropic · Google"]
+            CONV["Conversation Flow<br/>Streaming · Sential · Loop Detection"]
+        end
+
+        subgraph ToolProviders [" Tool Providers "]
+            direction LR
+            T_CORE["Memory · Web Search<br/>Schedule · Contacts · Inbox"]
+            T_EXT["Container · Email · Browser<br/>Subagent · Skill · TTS<br/>MCP Federation"]
+        end
+
+        API --> Agent --> ToolProviders
+    end
+
+    PG[("PostgreSQL")]
+    QD[("Qdrant")]
+    BROWSER["Browser Gateway<br/>(Playwright :8083)"]
+
+    subgraph Workspace [" Workspace Containers · containerd "]
+        direction LR
+        BA["Bot A"] ~~~ BB["Bot B"] ~~~ BC["Bot C"]
+    end
+
+    Server --- PG
+    Server --- QD
+    ToolProviders -.-> BROWSER
+    ToolProviders -- "gRPC Bridge over UDS" --> Workspace
 ```
-┌──────────────────┐  ┌─────────────────┐  ┌──────────────┐
-│     Channels     │  │      Web UI     │  │   CLI        │
-│ (TG/DC/FS/Email) │  │  (Vue 3 :8082)  │  │              │
-└────────┬─────────┘  └────────┬────────┘  └──────┬───────┘
-         │                     │                  │
-         ▼                     ▼                  ▼
-┌──────────────────────────────────────────────────────────┐
-│                   Server (Go :8080)                       │
-│  Auth · Bots · Channels · Memory · Containers · MCP      │
-└──────────────────────┬───────────────────────────────────┘
-                       │
-           ┌───────────┼───────────┬───────────┐
-           ▼           ▼           ▼           ▼
-     ┌──────────┐ ┌─────────┐ ┌──────────────────┐ ┌───────────────────┐
-     │ PostgreSQL│ │ Qdrant  │ │ Agent Gateway     │ │ Browser Gateway    │
-     │          │ │ (Vector)│ │ (Bun/Elysia :8081)│ │ (Playwright :8083) │
-     └──────────┘ └─────────┘ └────────┬──────────┘ └───────────────────┘
-                                       │
-                               ┌───────┼───────┐
-                               ▼       ▼       ▼
-                          ┌─────┐ ┌─────┐ ┌─────┐
-                          │Bot A│ │Bot B│ │Bot C│  ← containerd
-                          └─────┘ └─────┘ └─────┘
-```
+
+## Sub-projects Born for This Project
+
+- [**Twilight AI**](https://github.com/memohai/twilight-ai) — A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://sdk.vercel.ai/). Provider-agnostic (OpenAI, Anthropic, Google), with first-class streaming, tool calling, MCP support, and embeddings.
 
 ## Roadmap
 

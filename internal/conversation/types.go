@@ -215,6 +215,8 @@ type OutboundAssetRef struct {
 	Mime        string
 	SizeBytes   int64
 	StorageKey  string
+	Name        string
+	Metadata    map[string]any
 }
 
 // ChatRequest is the input for Chat and StreamChat.
