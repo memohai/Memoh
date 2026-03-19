@@ -289,14 +289,16 @@ const inputText = ref('')
 
 onMounted(async () => {
   try {
-    await chatStore.initialize()  
+    if (chatStore.currentBotId || chatStore.sessionId) {
+      await chatStore.initialize()
+    }
   } finally {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         isInstant.value = true
       })
-    })  
-  }  
+    })
+  }
 })
 
 const elNode = useTemplateRef('scrollContainer')

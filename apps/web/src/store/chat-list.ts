@@ -647,6 +647,8 @@ export const useChatStore = defineStore('chat', () => {
 
   function appendRealtimeMessage(raw: Message) {
     updateSince(raw.created_at)
+    const msgSessionId = (raw.session_id ?? '').trim()
+    if (msgSessionId && sessionId.value && msgSessionId !== sessionId.value) return
     const platform = (raw.platform ?? '').trim().toLowerCase()
     if (platform === 'web') return
     const mid = String(raw.id ?? '').trim()
