@@ -64,6 +64,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 
 	for i, msg := range messages {
+		msg = normalizeUserMessageContent(msg)
 		content, err := json.Marshal(msg)
 		if err != nil {
 			r.logger.Warn("storeMessages: marshal failed", slog.Any("error", err))
