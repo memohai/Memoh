@@ -379,10 +379,6 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 	}
 
 	cfg.System = agentpkg.GenerateSystemPrompt(agentpkg.SystemPromptParams{
-		Language:           "Same as the user input",
-		MaxContextLoadTime: cfg.ActiveContextTime,
-		Channels:           cfg.Channels,
-		CurrentChannel:     cfg.CurrentChannel,
 		Skills:             cfg.Skills,
 		EnabledSkills:      nil,
 		Files:              files,
