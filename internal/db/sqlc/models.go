@@ -76,6 +76,7 @@ type BotChannelRoute struct {
 	ExternalThreadID       pgtype.Text        `json:"external_thread_id"`
 	ConversationType       pgtype.Text        `json:"conversation_type"`
 	DefaultReplyTarget     pgtype.Text        `json:"default_reply_target"`
+	ActiveSessionID        pgtype.UUID        `json:"active_session_id"`
 	Metadata               []byte             `json:"metadata"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
@@ -109,10 +110,9 @@ type BotHeartbeatLog struct {
 type BotHistoryMessage struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
-	RouteID                 pgtype.UUID        `json:"route_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderAccountUserID     pgtype.UUID        `json:"sender_account_user_id"`
-	ChannelType             pgtype.Text        `json:"channel_type"`
 	SourceMessageID         pgtype.Text        `json:"source_message_id"`
 	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
 	Role                    string             `json:"role"`
@@ -144,6 +144,18 @@ type BotInbox struct {
 	IsRead    bool               `json:"is_read"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	ReadAt    pgtype.Timestamptz `json:"read_at"`
+}
+
+type BotSession struct {
+	ID          pgtype.UUID        `json:"id"`
+	BotID       pgtype.UUID        `json:"bot_id"`
+	RouteID     pgtype.UUID        `json:"route_id"`
+	ChannelType pgtype.Text        `json:"channel_type"`
+	Title       string             `json:"title"`
+	Metadata    []byte             `json:"metadata"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type BotStorageBinding struct {

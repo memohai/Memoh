@@ -23,7 +23,7 @@ type MessageAsset struct {
 type Message struct {
 	ID                      string          `json:"id"`
 	BotID                   string          `json:"bot_id"`
-	RouteID                 string          `json:"route_id,omitempty"`
+	SessionID               string          `json:"session_id,omitempty"`
 	SenderChannelIdentityID string          `json:"sender_channel_identity_id,omitempty"`
 	SenderUserID            string          `json:"sender_user_id,omitempty"`
 	SenderDisplayName       string          `json:"sender_display_name,omitempty"`
@@ -55,10 +55,9 @@ type AssetRef struct {
 // PersistInput is the input for persisting a message.
 type PersistInput struct {
 	BotID                   string
-	RouteID                 string
+	SessionID               string
 	SenderChannelIdentityID string
 	SenderUserID            string
-	Platform                string
 	ExternalMessageID       string
 	SourceReplyToMessageID  string
 	Role                    string
@@ -82,6 +81,12 @@ type Service interface {
 	ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
 	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
 	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
+	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
+	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
+	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
+	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
+	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error)
 	DeleteByBot(ctx context.Context, botID string) error
+	DeleteBySession(ctx context.Context, sessionID string) error
 	LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error
 }

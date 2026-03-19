@@ -200,7 +200,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 
 	var messages []conversation.ModelMessage
 	if !skipHistory && r.conversationSvc != nil {
-		loaded, loadErr := r.loadMessages(ctx, req.ChatID, maxCtx)
+		loaded, loadErr := r.loadMessages(ctx, req.ChatID, req.SessionID, maxCtx)
 		if loadErr != nil {
 			return resolvedContext{}, loadErr
 		}

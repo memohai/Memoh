@@ -72,6 +72,16 @@ type ttsModelResolver interface {
 	ResolveTtsModelID(ctx context.Context, botID string) (string, error)
 }
 
+// SessionEnsurer resolves or creates an active session for a route.
+type SessionEnsurer interface {
+	EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
+}
+
+// SessionResult carries the minimum fields needed from a session.
+type SessionResult struct {
+	ID string
+}
+
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
 	runner           flow.Runner
@@ -91,6 +101,7 @@ type ChannelInboundProcessor struct {
 	observer         channel.StreamObserver
 	ttsService       ttsSynthesizer
 	ttsModelResolver ttsModelResolver
+	sessionEnsurer   SessionEnsurer
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -184,6 +195,14 @@ func (p *ChannelInboundProcessor) SetTtsService(synth ttsSynthesizer, modelResol
 	}
 	p.ttsService = synth
 	p.ttsModelResolver = modelResolver
+}
+
+// SetSessionEnsurer configures the session ensurer for auto-creating sessions on routes.
+func (p *ChannelInboundProcessor) SetSessionEnsurer(ensurer SessionEnsurer) {
+	if p == nil {
+		return
+	}
+	p.sessionEnsurer = ensurer
 }
 
 // SetCommandHandler configures the slash command handler for intercepting
@@ -287,6 +306,20 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if err != nil {
 		return fmt.Errorf("resolve route conversation: %w", err)
 	}
+
+	// Resolve or auto-create the active session for this route.
+	sessionID := ""
+	if p.sessionEnsurer != nil {
+		sess, sessErr := p.sessionEnsurer.EnsureActiveSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
+		if sessErr != nil {
+			if p.logger != nil {
+				p.logger.Warn("ensure active session failed", slog.Any("error", sessErr))
+			}
+		} else {
+			sessionID = sess.ID
+		}
+	}
+
 	// Bot-centric history container:
 	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
 	activeChatID := strings.TrimSpace(identity.BotID)
@@ -498,6 +531,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	chunkCh, streamErrCh := p.runner.StreamChat(ctx, conversation.ChatRequest{
 		BotID:                   identity.BotID,
 		ChatID:                  activeChatID,
+		SessionID:               sessionID,
 		Token:                   token,
 		UserID:                  identity.UserID,
 		SourceChannelIdentityID: identity.ChannelIdentityID,

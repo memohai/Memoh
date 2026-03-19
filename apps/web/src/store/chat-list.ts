@@ -4,16 +4,16 @@ import { useLocalStorage } from '@vueuse/core'
 import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import {
-  createChat,
-  deleteChat as requestDeleteChat,
+  createSession,
+  deleteSession as requestDeleteSession,
+  fetchSessions,
   type Bot,
-  type ChatSummary,
+  type SessionSummary,
   type Message,
   type StreamEvent,
   type MessageStreamEvent,
   fetchBots,
   fetchMessages,
-  fetchChats,
   extractMessageText,
   extractToolCalls,
   extractAllToolResults,
@@ -95,14 +95,14 @@ interface PendingAssistantStream {
 export const useChatStore = defineStore('chat', () => {
   const messages = reactive<ChatMessage[]>([])
   const streaming = ref(false)
-  const chats = ref<ChatSummary[]>([])
+  const sessions = ref<SessionSummary[]>([])
   const loading = ref(false)
   const loadingChats = ref(false)
   const loadingOlder = ref(false)
   const hasMoreOlder = ref(true)
   const initializing = ref(false)
   const currentBotId = useLocalStorage<string | null>('chat-bot-id', null)
-  const chatId = useLocalStorage<string | null>('chat-id', null)
+  const sessionId = useLocalStorage<string | null>('chat-session-id', null)
   const bots = ref<Bot[]>([])
 
   let abortFn: (() => void) | null = null
@@ -112,18 +112,11 @@ export const useChatStore = defineStore('chat', () => {
   const localStream = useRetryingStream()
   let activeWs: ChatWebSocket | null = null
 
-  const participantChats = computed(() =>
-    chats.value.filter((c) => (c.access_mode ?? 'participant') === 'participant'),
+  const activeSession = computed(() =>
+    sessions.value.find((s) => s.id === sessionId.value) ?? null,
   )
-  const observedChats = computed(() =>
-    chats.value.filter((c) => c.access_mode === 'channel_identity_observed'),
-  )
-  const activeChat = computed(() =>
-    chats.value.find((c) => c.id === chatId.value) ?? null,
-  )
-  const activeChatReadOnly = computed(() =>
-    activeChat.value?.access_mode === 'channel_identity_observed',
-  )
+
+  const activeChatReadOnly = computed(() => false)
 
   watch(currentBotId, (newId) => {
     if (newId) {
@@ -134,8 +127,8 @@ export const useChatStore = defineStore('chat', () => {
       stopWebSocket()
       rejectPendingAssistantStream(new Error('Bot stream stopped'))
       messageEventsSince = ''
-      chats.value = []
-      chatId.value = null
+      sessions.value = []
+      sessionId.value = null
       replaceMessages([])
     }
   })
@@ -217,11 +210,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  /**
-   * Convert an ordered array of raw messages into ChatMessages,
-   * merging consecutive assistant(tool_calls) + tool + assistant(text)
-   * sequences into a single ChatMessage with ToolCallBlocks.
-   */
   function convertMessagesToChats(rows: Message[]): ChatMessage[] {
     const result: ChatMessage[] = []
     let pendingAssistant: ChatMessage | null = null
@@ -430,13 +418,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function handleLocalStreamEvent(event: StreamEvent) {
-    // Cross-channel events arrive without a pending session. Detect them via
-    // source_channel metadata injected by the RouteHubBroadcaster.
     const meta = event.metadata as Record<string, unknown> | undefined
     const sourceChannel = meta?.source_channel as string | undefined
     const isCrossChannel = !!sourceChannel
 
-    // Cross-channel user message (the inbound message from Telegram/Feishu user).
     if (isCrossChannel && (event.type ?? '').toLowerCase() === 'final' && meta?.role === 'user') {
       const finalPayload = event.final as Record<string, unknown> | undefined
       const msg = finalPayload?.message as Record<string, unknown> | undefined
@@ -475,10 +460,8 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
 
-    // Cross-channel assistant events: auto-create a session when none exists.
     if (isCrossChannel && !pendingAssistantStream) {
       const type = (event.type ?? '').toLowerCase()
-      // Only start a session for events that carry actual content.
       if (type === 'delta' || type === 'text_delta' || type === 'text_start'
         || type === 'reasoning_start' || type === 'reasoning_delta'
         || type === 'tool_call_start' || type === 'attachment_delta'
@@ -491,8 +474,6 @@ export const useChatStore = defineStore('chat', () => {
           streaming: true,
           platform: sourceChannel,
         })
-        // IMPORTANT: get the reactive proxy from the array, not the plain object.
-        // Vue 3 wraps pushed objects in a Proxy; using the original ref bypasses reactivity.
         const reactiveMsg = messages[messages.length - 1]!
         pendingAssistantStream = {
           assistantMsg: reactiveMsg,
@@ -597,8 +578,6 @@ export const useChatStore = defineStore('chat', () => {
         break
       }
       case 'final':
-        // Text and attachments already accumulated via deltas/attachment_delta.
-        // For cross-channel, finalize via processing_completed instead.
         break
       case 'processing_started':
         if (session.assistantMsg.blocks.length === 0) {
@@ -676,7 +655,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!item) return
     messages.push(item)
     messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-    if (chatId.value) touchChat(chatId.value)
+    if (sessionId.value) touchSession(sessionId.value)
   }
 
   function handleStreamEvent(targetBotId: string, event: MessageStreamEvent) {
@@ -729,8 +708,8 @@ export const useChatStore = defineStore('chat', () => {
 
   const PAGE_SIZE = 30
 
-  async function loadMessages(botId: string, cid: string) {
-    const rows = await fetchMessages(botId, cid, { limit: PAGE_SIZE })
+  async function loadMessages(botId: string, sid: string) {
+    const rows = await fetchMessages(botId, sid, { limit: PAGE_SIZE })
     const items = convertMessagesToChats(rows)
     replaceMessages(items)
     hasMoreOlder.value = true
@@ -739,15 +718,15 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadOlderMessages(): Promise<number> {
     const bid = currentBotId.value ?? ''
-    const cid = chatId.value ?? ''
-    if (!bid || !cid || loadingOlder.value || !hasMoreOlder.value) return 0
+    const sid = sessionId.value ?? ''
+    if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
     const first = messages[0]
     if (!first?.timestamp) return 0
 
     const before = first.timestamp.toISOString()
     loadingOlder.value = true
     try {
-      const rows = await fetchMessages(bid, cid, { limit: PAGE_SIZE, before })
+      const rows = await fetchMessages(bid, sid, { limit: PAGE_SIZE, before })
       const items = convertMessagesToChats(rows)
       if (rows.length < PAGE_SIZE) hasMoreOlder.value = false
       messages.unshift(...items)
@@ -757,24 +736,24 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  // ---- Chat CRUD ----
+  // ---- Session CRUD ----
 
-  function touchChat(targetChatId: string) {
-    const idx = chats.value.findIndex((c) => c.id === targetChatId)
+  function touchSession(targetSessionId: string) {
+    const idx = sessions.value.findIndex((s) => s.id === targetSessionId)
     if (idx < 0) return
-    const [target] = chats.value.splice(idx, 1)
+    const [target] = sessions.value.splice(idx, 1)
     if (!target) return
     target.updated_at = new Date().toISOString()
-    chats.value.unshift(target)
+    sessions.value.unshift(target)
   }
 
-  async function ensureActiveChat() {
-    if (chatId.value) return
+  async function ensureActiveSession() {
+    if (sessionId.value) return
     const bid = currentBotId.value ?? await ensureBot()
     if (!bid) throw new Error('Bot not ready')
-    const created = await createChat(bid)
-    chats.value = [created, ...chats.value.filter((c) => c.id !== created.id)]
-    chatId.value = created.id
+    const created = await createSession(bid)
+    sessions.value = [created, ...sessions.value.filter((s) => s.id !== created.id)]
+    sessionId.value = created.id
     replaceMessages([])
   }
 
@@ -791,24 +770,24 @@ export const useChatStore = defineStore('chat', () => {
       const bid = await ensureBot()
       if (!bid) {
         messageEventsSince = ''
-        chats.value = []
-        chatId.value = null
+        sessions.value = []
+        sessionId.value = null
         replaceMessages([])
         return
       }
-      const visible = await fetchChats(bid)
-      chats.value = visible
+      const visible = await fetchSessions(bid)
+      sessions.value = visible
       if (!visible.length) {
         messageEventsSince = ''
-        chatId.value = null
+        sessionId.value = null
         replaceMessages([])
         return
       }
-      const activeChatId = chatId.value && visible.some((c) => c.id === chatId.value)
-        ? chatId.value
+      const activeSessionId = sessionId.value && visible.some((s) => s.id === sessionId.value)
+        ? sessionId.value
         : visible[0]!.id
-      chatId.value = activeChatId
-      await loadMessages(bid, activeChatId)
+      sessionId.value = activeSessionId
+      await loadMessages(bid, activeSessionId)
       startWebSocket(bid)
       startMessageEvents(bid)
       startLocalStream(bid)
@@ -822,55 +801,55 @@ export const useChatStore = defineStore('chat', () => {
     if (currentBotId.value === targetBotId) return
     abort()
     currentBotId.value = targetBotId
-    chatId.value = null
+    sessionId.value = null
     await initialize()
   }
 
-  async function selectChat(targetChatId: string) {
-    const cid = targetChatId.trim()
-    if (!cid || cid === chatId.value) return
-    chatId.value = cid
+  async function selectSession(targetSessionId: string) {
+    const sid = targetSessionId.trim()
+    if (!sid || sid === sessionId.value) return
+    sessionId.value = sid
     loadingChats.value = true
     try {
       const bid = currentBotId.value ?? ''
       if (!bid) throw new Error('Bot not selected')
-      await loadMessages(bid, cid)
+      await loadMessages(bid, sid)
     } finally {
       loadingChats.value = false
     }
   }
 
-  async function createNewChat() {
+  async function createNewSession() {
     loadingChats.value = true
     try {
       const bid = await ensureBot()
       if (!bid) return
-      const created = await createChat(bid)
-      chats.value = [created, ...chats.value.filter((c) => c.id !== created.id)]
-      chatId.value = created.id
+      const created = await createSession(bid)
+      sessions.value = [created, ...sessions.value.filter((s) => s.id !== created.id)]
+      sessionId.value = created.id
       replaceMessages([])
     } finally {
       loadingChats.value = false
     }
   }
 
-  async function removeChat(targetChatId: string) {
-    const delId = targetChatId.trim()
+  async function removeSession(targetSessionId: string) {
+    const delId = targetSessionId.trim()
     if (!delId) return
     loadingChats.value = true
     try {
       const bid = currentBotId.value ?? ''
       if (!bid) throw new Error('Bot not selected')
-      await requestDeleteChat(bid, delId)
-      const remaining = chats.value.filter((c) => c.id !== delId)
-      chats.value = remaining
-      if (chatId.value !== delId) return
+      await requestDeleteSession(bid, delId)
+      const remaining = sessions.value.filter((s) => s.id !== delId)
+      sessions.value = remaining
+      if (sessionId.value !== delId) return
       if (!remaining.length) {
-        chatId.value = null
+        sessionId.value = null
         replaceMessages([])
         return
       }
-      chatId.value = remaining[0]!.id
+      sessionId.value = remaining[0]!.id
       await loadMessages(bid, remaining[0]!.id)
     } finally {
       loadingChats.value = false
@@ -887,11 +866,10 @@ export const useChatStore = defineStore('chat', () => {
     streaming.value = true
 
     try {
-      await ensureActiveChat()
-      if (activeChatReadOnly.value) throw new Error('Chat is read-only')
+      await ensureActiveSession()
 
       const bid = currentBotId.value!
-      const cid = chatId.value!
+      const sid = sessionId.value!
 
       // Add user message
       const userBlocks: ContentBlock[] = []
@@ -945,7 +923,7 @@ export const useChatStore = defineStore('chat', () => {
       }
 
       if (activeWs?.connected) {
-        activeWs.send({ type: 'message', text: trimmed, attachments })
+        activeWs.send({ type: 'message', text: trimmed, session_id: sid, attachments })
       } else {
         await sendLocalChannelMessage(bid, trimmed, attachments)
       }
@@ -955,7 +933,7 @@ export const useChatStore = defineStore('chat', () => {
       streaming.value = false
       loading.value = false
       abortFn = null
-      touchChat(cid)
+      touchSession(sid)
     } catch (err) {
       const isAbort = err instanceof Error && err.name === 'AbortError'
       const reason = err instanceof Error ? err.message : 'Unknown error'
@@ -984,16 +962,20 @@ export const useChatStore = defineStore('chat', () => {
     replaceMessages([])
   }
 
+  // Backward-compatible aliases
+  const chats = sessions
+  const chatId = sessionId
+
   return {
     messages,
     streaming,
+    sessions,
     chats,
-    participantChats,
-    observedChats,
     chatId,
+    sessionId,
     currentBotId,
     bots,
-    activeChat,
+    activeSession,
     activeChatReadOnly,
     loading,
     loadingChats,
@@ -1002,10 +984,13 @@ export const useChatStore = defineStore('chat', () => {
     initializing,
     initialize,
     selectBot,
-    selectChat,
-    createNewChat,
-    removeChat,
-    deleteChat: removeChat,
+    selectSession,
+    selectChat: selectSession,
+    createNewSession,
+    createNewChat: createNewSession,
+    removeSession,
+    removeChat: removeSession,
+    deleteChat: removeSession,
     sendMessage,
     clearMessages,
     loadOlderMessages,

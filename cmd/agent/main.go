@@ -73,6 +73,7 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/server"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/subagent"
@@ -188,6 +189,7 @@ func runServe() {
 
 			// services requiring provide functions
 			provideRouteService,
+			provideSessionService,
 			provideMessageService,
 			provideMediaService,
 
@@ -218,6 +220,7 @@ func runServe() {
 			provideServerHandler(provideAuthHandler),
 			provideServerHandler(provideMemoryHandler),
 			provideServerHandler(provideMessageHandler),
+			provideServerHandler(provideSessionHandler),
 			provideServerHandler(handlers.NewSwaggerHandler),
 			provideServerHandler(handlers.NewProvidersHandler),
 			provideServerHandler(handlers.NewSearchProvidersHandler),
@@ -375,6 +378,10 @@ func provideRouteService(log *slog.Logger, queries *dbsqlc.Queries, chatService 
 	return route.NewService(log, queries, chatService)
 }
 
+func provideSessionService(log *slog.Logger, queries *dbsqlc.Queries) *sessionpkg.Service {
+	return sessionpkg.NewService(log, queries)
+}
+
 func provideMessageService(log *slog.Logger, queries *dbsqlc.Queries, hub *event.Hub) *message.DBService {
 	return message.NewService(log, queries, hub)
 }
@@ -446,6 +453,7 @@ func provideChannelRouter(
 	registry *channel.Registry,
 	hub *local.RouteHub,
 	routeService *route.DBService,
+	sessionService *sessionpkg.Service,
 	msgService *message.DBService,
 	resolver *flow.Resolver,
 	identityService *identities.Service,
@@ -485,6 +493,7 @@ func provideChannelRouter(
 	qqAdapter.SetRouteResolver(routeService)
 
 	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, policyService, bindService, rc.JwtSecret, 5*time.Minute)
+	processor.SetSessionEnsurer(&sessionEnsurerAdapter{svc: sessionService})
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
@@ -606,6 +615,10 @@ func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, 
 	return h
 }
 
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service) *handlers.SessionHandler {
+	return handlers.NewSessionHandler(log, sessionService, botService, accountService)
+}
+
 func provideMediaService(log *slog.Logger, manager *workspace.Manager) *media.Service {
 	provider := containerfs.New(manager)
 	return media.NewService(log, provider)
@@ -661,6 +674,19 @@ func startTtsTempStoreCleanup(lc fx.Lifecycle, store *ttspkg.TempStore) {
 
 // settingsTtsModelResolver adapts settings.Service to the ttsModelResolver interface
 // expected by ChannelInboundProcessor and LocalChannelHandler.
+// sessionEnsurerAdapter adapts session.Service to the inbound sessionEnsurer interface.
+type sessionEnsurerAdapter struct {
+	svc *sessionpkg.Service
+}
+
+func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (inbound.SessionResult, error) {
+	sess, err := a.svc.EnsureActiveSession(ctx, botID, routeID, channelType)
+	if err != nil {
+		return inbound.SessionResult{}, err
+	}
+	return inbound.SessionResult{ID: sess.ID}, nil
+}
+
 type settingsTtsModelResolver struct {
 	settings *settings.Service
 }

@@ -74,6 +74,7 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/server"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/subagent"
@@ -121,6 +122,7 @@ func runServe() {
 			provideEmailTrigger,
 			emailpkg.NewManager,
 			provideRouteService,
+			provideSessionService,
 			provideMessageService,
 			provideMediaService,
 			local.NewRouteHub,
@@ -144,6 +146,7 @@ func runServe() {
 			provideServerHandler(provideMemohAuthHandler),
 			provideServerHandler(provideMemoryHandler),
 			provideServerHandler(provideMessageHandler),
+			provideServerHandler(provideSessionHandler),
 			provideServerHandler(handlers.NewSwaggerHandler),
 			provideServerHandler(handlers.NewProvidersHandler),
 			provideServerHandler(handlers.NewSearchProvidersHandler),
@@ -287,6 +290,10 @@ func provideRouteService(log *slog.Logger, queries *dbsqlc.Queries, chatService 
 	return route.NewService(log, queries, chatService)
 }
 
+func provideSessionService(log *slog.Logger, queries *dbsqlc.Queries) *sessionpkg.Service {
+	return sessionpkg.NewService(log, queries)
+}
+
 func provideMessageService(log *slog.Logger, queries *dbsqlc.Queries, hub *event.Hub) *message.DBService {
 	return message.NewService(log, queries, hub)
 }
@@ -339,7 +346,7 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	return registry
 }
 
-func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *local.RouteHub, routeService *route.DBService, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, aclService *acl.Service, policyService *policy.Service, bindService *bind.Service, mediaService *media.Service, inboxService *inbox.Service, ttsService *ttspkg.Service, settingsService *settings.Service, subagentService *subagent.Service, scheduleService *schedule.Service, mcpConnService *mcp.ConnectionService, modelsService *models.Service, providersService *providers.Service, memProvService *memprovider.Service, searchProvService *searchproviders.Service, browserCtxService *browsercontexts.Service, emailService *emailpkg.Service, emailOutboxService *emailpkg.OutboxService, heartbeatService *heartbeat.Service, queries *dbsqlc.Queries, containerdHandler *handlers.ContainerdHandler, manager *workspace.Manager, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
+func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *local.RouteHub, routeService *route.DBService, sessionService *sessionpkg.Service, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, aclService *acl.Service, policyService *policy.Service, bindService *bind.Service, mediaService *media.Service, inboxService *inbox.Service, ttsService *ttspkg.Service, settingsService *settings.Service, subagentService *subagent.Service, scheduleService *schedule.Service, mcpConnService *mcp.ConnectionService, modelsService *models.Service, providersService *providers.Service, memProvService *memprovider.Service, searchProvService *searchproviders.Service, browserCtxService *browsercontexts.Service, emailService *emailpkg.Service, emailOutboxService *emailpkg.OutboxService, heartbeatService *heartbeat.Service, queries *dbsqlc.Queries, containerdHandler *handlers.ContainerdHandler, manager *workspace.Manager, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
 	adapter, ok := registry.Get(qq.Type)
 	if !ok {
 		panic("qq adapter not registered")
@@ -351,6 +358,7 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 	qqAdapter.SetChannelIdentityResolver(identityService)
 	qqAdapter.SetRouteResolver(routeService)
 	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, policyService, bindService, rc.JwtSecret, 5*time.Minute)
+	processor.SetSessionEnsurer(&sessionEnsurerAdapter{svc: sessionService})
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
@@ -462,6 +470,10 @@ func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, 
 	h := handlers.NewMessageHandler(log, chatService, msgService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	return h
+}
+
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service) *handlers.SessionHandler {
+	return handlers.NewSessionHandler(log, sessionService, botService, accountService)
 }
 
 type memohAuthHandler struct{ inner *handlers.AuthHandler }
@@ -740,6 +752,18 @@ func startTtsTempStoreCleanup(lc fx.Lifecycle, store *ttspkg.TempStore) {
 
 // settingsTtsModelResolver adapts settings.Service to the ttsModelResolver interface
 // expected by ChannelInboundProcessor and LocalChannelHandler.
+type sessionEnsurerAdapter struct {
+	svc *sessionpkg.Service
+}
+
+func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (inbound.SessionResult, error) {
+	sess, err := a.svc.EnsureActiveSession(ctx, botID, routeID, channelType)
+	if err != nil {
+		return inbound.SessionResult{}, err
+	}
+	return inbound.SessionResult{ID: sess.ID}, nil
+}
+
 type settingsTtsModelResolver struct {
 	settings *settings.Service
 }

@@ -95,10 +95,9 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		}
 		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:                   req.BotID,
-			RouteID:                 req.RouteID,
+			SessionID:               req.SessionID,
 			SenderChannelIdentityID: messageSenderChannelIdentityID,
 			SenderUserID:            messageSenderUserID,
-			Platform:                req.CurrentChannel,
 			ExternalMessageID:       externalMessageID,
 			SourceReplyToMessageID:  sourceReplyToMessageID,
 			Role:                    msg.Role,

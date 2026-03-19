@@ -326,6 +326,7 @@ CREATE TABLE IF NOT EXISTS bot_channel_routes (
   external_thread_id TEXT,
   conversation_type TEXT,
   default_reply_target TEXT,
+  active_session_id UUID,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -335,14 +336,35 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_channel_routes_unique
   ON bot_channel_routes (bot_id, channel_type, external_conversation_id, COALESCE(external_thread_id, ''));
 CREATE INDEX IF NOT EXISTS idx_bot_channel_routes_bot ON bot_channel_routes(bot_id);
 
+-- bot_sessions: chat sessions within a bot, optionally linked to a channel route.
+CREATE TABLE IF NOT EXISTS bot_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
+  channel_type TEXT,
+  title TEXT NOT NULL DEFAULT '',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_id ON bot_sessions(bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_route_id ON bot_sessions(route_id);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active ON bot_sessions(bot_id, deleted_at);
+
+-- Add FK from routes to sessions (deferred to avoid circular dependency during CREATE).
+ALTER TABLE bot_channel_routes
+  ADD CONSTRAINT fk_bot_channel_routes_active_session
+  FOREIGN KEY (active_session_id) REFERENCES bot_sessions(id) ON DELETE SET NULL;
+
 -- bot_history_messages: unified message history under bot scope.
 CREATE TABLE IF NOT EXISTS bot_history_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
+  session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   sender_channel_identity_id UUID REFERENCES channel_identities(id),
   sender_account_user_id UUID REFERENCES users(id),
-  channel_type TEXT,
   source_message_id TEXT,
   source_reply_to_message_id TEXT,
   role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
@@ -354,13 +376,12 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_messages(bot_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_route ON bot_history_messages(route_id);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_source_lookup
-  ON bot_history_messages(channel_type, source_message_id);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_reply_lookup
-  ON bot_history_messages(channel_type, source_reply_to_message_id);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_identity_route_created
-  ON bot_history_messages(bot_id, sender_channel_identity_id, route_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session
+  ON bot_history_messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
+  ON bot_history_messages(session_id, source_message_id);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
+  ON bot_history_messages(session_id, source_reply_to_message_id);
 
 CREATE TABLE IF NOT EXISTS containers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

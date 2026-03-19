@@ -905,6 +905,13 @@ export type HandlersTokenUsageResponse = {
     heartbeat?: Array<HandlersDailyTokenUsage>;
 };
 
+export type HandlersCreateSessionRequest = {
+    metadata?: {
+        [key: string]: unknown;
+    };
+    title?: string;
+};
+
 export type HandlersEmailOAuthStatusResponse = {
     configured?: boolean;
     email_address?: string;
@@ -995,6 +1002,13 @@ export type HandlersSynthesizeResponse = {
 export type HandlersTerminalInfoResponse = {
     available?: boolean;
     shell?: string;
+};
+
+export type HandlersUpdateSessionRequest = {
+    metadata?: {
+        [key: string]: unknown;
+    };
+    title?: string;
 };
 
 export type HeartbeatListLogsResponse = {
@@ -1146,18 +1160,22 @@ export type MessageMessage = {
     };
     platform?: string;
     role?: string;
-    route_id?: string;
     sender_avatar_url?: string;
     sender_channel_identity_id?: string;
     sender_display_name?: string;
     sender_user_id?: string;
+    session_id?: string;
     source_reply_to_message_id?: string;
     usage?: Array<number>;
 };
 
 export type MessageMessageAsset = {
     content_hash?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
     mime?: string;
+    name?: string;
     ordinal?: number;
     role?: string;
     size_bytes?: number;
@@ -1359,6 +1377,19 @@ export type SearchprovidersUpdateRequest = {
     };
     name?: string;
     provider?: SearchprovidersProviderName;
+};
+
+export type SessionSession = {
+    bot_id?: string;
+    channel_type?: string;
+    created_at?: string;
+    id?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    route_id?: string;
+    title?: string;
+    updated_at?: string;
 };
 
 export type SettingsSettings = {
@@ -2165,7 +2196,7 @@ export type PostBotsByBotIdContainerError = PostBotsByBotIdContainerErrors[keyof
 
 export type PostBotsByBotIdContainerResponses = {
     /**
-     * OK
+     * SSE stream of container creation events
      */
     200: HandlersCreateContainerResponse;
 };
@@ -4838,6 +4869,202 @@ export type PutBotsByBotIdScheduleByIdResponses = {
 };
 
 export type PutBotsByBotIdScheduleByIdResponse = PutBotsByBotIdScheduleByIdResponses[keyof PutBotsByBotIdScheduleByIdResponses];
+
+export type GetBotsByBotIdSessionsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions';
+};
+
+export type GetBotsByBotIdSessionsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsError = GetBotsByBotIdSessionsErrors[keyof GetBotsByBotIdSessionsErrors];
+
+export type GetBotsByBotIdSessionsResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: Array<SessionSession>;
+    };
+};
+
+export type GetBotsByBotIdSessionsResponse = GetBotsByBotIdSessionsResponses[keyof GetBotsByBotIdSessionsResponses];
+
+export type PostBotsByBotIdSessionsData = {
+    /**
+     * Session data
+     */
+    body: HandlersCreateSessionRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions';
+};
+
+export type PostBotsByBotIdSessionsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdSessionsError = PostBotsByBotIdSessionsErrors[keyof PostBotsByBotIdSessionsErrors];
+
+export type PostBotsByBotIdSessionsResponses = {
+    /**
+     * Created
+     */
+    201: SessionSession;
+};
+
+export type PostBotsByBotIdSessionsResponse = PostBotsByBotIdSessionsResponses[keyof PostBotsByBotIdSessionsResponses];
+
+export type DeleteBotsByBotIdSessionsBySessionIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}';
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdError = DeleteBotsByBotIdSessionsBySessionIdErrors[keyof DeleteBotsByBotIdSessionsBySessionIdErrors];
+
+export type DeleteBotsByBotIdSessionsBySessionIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdError = GetBotsByBotIdSessionsBySessionIdErrors[keyof GetBotsByBotIdSessionsBySessionIdErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdResponses = {
+    /**
+     * OK
+     */
+    200: SessionSession;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdResponse = GetBotsByBotIdSessionsBySessionIdResponses[keyof GetBotsByBotIdSessionsBySessionIdResponses];
+
+export type PatchBotsByBotIdSessionsBySessionIdData = {
+    /**
+     * Fields to update
+     */
+    body: HandlersUpdateSessionRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}';
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdError = PatchBotsByBotIdSessionsBySessionIdErrors[keyof PatchBotsByBotIdSessionsBySessionIdErrors];
+
+export type PatchBotsByBotIdSessionsBySessionIdResponses = {
+    /**
+     * OK
+     */
+    200: SessionSession;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdResponse = PatchBotsByBotIdSessionsBySessionIdResponses[keyof PatchBotsByBotIdSessionsBySessionIdResponses];
 
 export type DeleteBotsByBotIdSettingsData = {
     body?: never;

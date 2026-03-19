@@ -80,6 +80,10 @@ const deleteChat = `-- name: DeleteChat :exec
 WITH deleted_messages AS (
   DELETE FROM bot_history_messages
   WHERE bot_id = $1
+),
+deleted_sessions AS (
+  DELETE FROM bot_sessions
+  WHERE bot_id = $1
 )
 DELETE FROM bot_channel_routes bcr
 WHERE bcr.bot_id = $1

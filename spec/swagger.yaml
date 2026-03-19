@@ -1489,6 +1489,14 @@ definitions:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
     type: object
+  handlers.createSessionRequest:
+    properties:
+      metadata:
+        additionalProperties: {}
+        type: object
+      title:
+        type: string
+    type: object
   handlers.emailOAuthStatusResponse:
     properties:
       configured:
@@ -1627,6 +1635,14 @@ definitions:
       available:
         type: boolean
       shell:
+        type: string
+    type: object
+  handlers.updateSessionRequest:
+    properties:
+      metadata:
+        additionalProperties: {}
+        type: object
+      title:
         type: string
     type: object
   heartbeat.ListLogsResponse:
@@ -1868,8 +1884,6 @@ definitions:
         type: string
       role:
         type: string
-      route_id:
-        type: string
       sender_avatar_url:
         type: string
       sender_channel_identity_id:
@@ -1877,6 +1891,8 @@ definitions:
       sender_display_name:
         type: string
       sender_user_id:
+        type: string
+      session_id:
         type: string
       source_reply_to_message_id:
         type: string
@@ -1889,7 +1905,12 @@ definitions:
     properties:
       content_hash:
         type: string
+      metadata:
+        additionalProperties: {}
+        type: object
       mime:
+        type: string
+      name:
         type: string
       ordinal:
         type: integer
@@ -2257,6 +2278,26 @@ definitions:
         type: string
       provider:
         $ref: '#/definitions/searchproviders.ProviderName'
+    type: object
+  session.Session:
+    properties:
+      bot_id:
+        type: string
+      channel_type:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      route_id:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
     type: object
   settings.Settings:
     properties:
@@ -3059,7 +3100,7 @@ paths:
           $ref: '#/definitions/handlers.CreateContainerRequest'
       responses:
         "200":
-          description: OK
+          description: SSE stream of container creation events
           schema:
             $ref: '#/definitions/handlers.CreateContainerResponse'
         "400":
@@ -5247,6 +5288,160 @@ paths:
       summary: Update schedule
       tags:
       - schedule
+  /bots/{bot_id}/sessions:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                $ref: '#/definitions/session.Session'
+              type: array
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List bot sessions
+      tags:
+      - sessions
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.createSessionRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/session.Session'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a new chat session
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Soft-delete a session
+      tags:
+      - sessions
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/session.Session'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a session by ID
+      tags:
+      - sessions
+    patch:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.updateSessionRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/session.Session'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a session
+      tags:
+      - sessions
   /bots/{bot_id}/settings:
     delete:
       description: Remove agent settings for current user

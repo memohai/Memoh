@@ -22,6 +22,7 @@ RETURNING
   external_thread_id AS thread_id,
   conversation_type,
   default_reply_target AS reply_target,
+  active_session_id,
   metadata,
   created_at,
   updated_at;
@@ -37,6 +38,7 @@ SELECT
   external_thread_id AS thread_id,
   conversation_type,
   default_reply_target AS reply_target,
+  active_session_id,
   metadata,
   created_at,
   updated_at
@@ -58,6 +60,7 @@ SELECT
   external_thread_id AS thread_id,
   conversation_type,
   default_reply_target AS reply_target,
+  active_session_id,
   metadata,
   created_at,
   updated_at
@@ -75,6 +78,7 @@ SELECT
   external_thread_id AS thread_id,
   conversation_type,
   default_reply_target AS reply_target,
+  active_session_id,
   metadata,
   created_at,
   updated_at
@@ -90,6 +94,11 @@ WHERE id = sqlc.arg(id);
 -- name: UpdateChatRouteMetadata :exec
 UPDATE bot_channel_routes
 SET metadata = sqlc.arg(metadata), updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: SetRouteActiveSession :exec
+UPDATE bot_channel_routes
+SET active_session_id = sqlc.narg(active_session_id)::uuid, updated_at = now()
 WHERE id = sqlc.arg(id);
 
 -- name: DeleteChatRoute :exec

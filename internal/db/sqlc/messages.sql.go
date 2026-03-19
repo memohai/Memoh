@@ -14,10 +14,9 @@ import (
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO bot_history_messages (
   bot_id,
-  route_id,
+  session_id,
   sender_channel_identity_id,
   sender_account_user_id,
-  channel_type,
   source_message_id,
   source_reply_to_message_id,
   role,
@@ -33,20 +32,18 @@ VALUES (
   $4::uuid,
   $5::text,
   $6::text,
-  $7::text,
+  $7,
   $8,
   $9,
   $10,
-  $11,
-  $12::uuid
+  $11::uuid
 )
 RETURNING
   id,
   bot_id,
-  route_id,
+  session_id,
   sender_channel_identity_id,
   sender_account_user_id AS sender_user_id,
-  channel_type AS platform,
   source_message_id AS external_message_id,
   source_reply_to_message_id,
   role,
@@ -58,10 +55,9 @@ RETURNING
 
 type CreateMessageParams struct {
 	BotID                   pgtype.UUID `json:"bot_id"`
-	RouteID                 pgtype.UUID `json:"route_id"`
+	SessionID               pgtype.UUID `json:"session_id"`
 	SenderChannelIdentityID pgtype.UUID `json:"sender_channel_identity_id"`
 	SenderUserID            pgtype.UUID `json:"sender_user_id"`
-	Platform                pgtype.Text `json:"platform"`
 	ExternalMessageID       pgtype.Text `json:"external_message_id"`
 	SourceReplyToMessageID  pgtype.Text `json:"source_reply_to_message_id"`
 	Role                    string      `json:"role"`
@@ -74,10 +70,9 @@ type CreateMessageParams struct {
 type CreateMessageRow struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
-	RouteID                 pgtype.UUID        `json:"route_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
-	Platform                pgtype.Text        `json:"platform"`
 	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
 	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
 	Role                    string             `json:"role"`
@@ -90,10 +85,9 @@ type CreateMessageRow struct {
 func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (CreateMessageRow, error) {
 	row := q.db.QueryRow(ctx, createMessage,
 		arg.BotID,
-		arg.RouteID,
+		arg.SessionID,
 		arg.SenderChannelIdentityID,
 		arg.SenderUserID,
-		arg.Platform,
 		arg.ExternalMessageID,
 		arg.SourceReplyToMessageID,
 		arg.Role,
@@ -106,10 +100,9 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
-		&i.RouteID,
+		&i.SessionID,
 		&i.SenderChannelIdentityID,
 		&i.SenderUserID,
-		&i.Platform,
 		&i.ExternalMessageID,
 		&i.SourceReplyToMessageID,
 		&i.Role,
@@ -131,14 +124,23 @@ func (q *Queries) DeleteMessagesByBot(ctx context.Context, botID pgtype.UUID) er
 	return err
 }
 
+const deleteMessagesBySession = `-- name: DeleteMessagesBySession :exec
+DELETE FROM bot_history_messages
+WHERE session_id = $1
+`
+
+func (q *Queries) DeleteMessagesBySession(ctx context.Context, sessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteMessagesBySession, sessionID)
+	return err
+}
+
 const listActiveMessagesSince = `-- name: ListActiveMessagesSince :many
 SELECT
   m.id,
   m.bot_id,
-  m.route_id,
+  m.session_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
-  m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
@@ -147,9 +149,11 @@ SELECT
   m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
   AND m.created_at >= $2
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
@@ -164,10 +168,9 @@ type ListActiveMessagesSinceParams struct {
 type ListActiveMessagesSinceRow struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
-	RouteID                 pgtype.UUID        `json:"route_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
-	Platform                pgtype.Text        `json:"platform"`
 	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
 	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
 	Role                    string             `json:"role"`
@@ -177,6 +180,7 @@ type ListActiveMessagesSinceRow struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
 }
 
 func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMessagesSinceParams) ([]ListActiveMessagesSinceRow, error) {
@@ -191,10 +195,9 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
-			&i.RouteID,
+			&i.SessionID,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
-			&i.Platform,
 			&i.ExternalMessageID,
 			&i.SourceReplyToMessageID,
 			&i.Role,
@@ -204,6 +207,92 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveMessagesSinceBySession = `-- name: ListActiveMessagesSinceBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = $1
+  AND m.created_at >= $2
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.created_at ASC
+`
+
+type ListActiveMessagesSinceBySessionParams struct {
+	SessionID pgtype.UUID        `json:"session_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type ListActiveMessagesSinceBySessionRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg ListActiveMessagesSinceBySessionParams) ([]ListActiveMessagesSinceBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listActiveMessagesSinceBySession, arg.SessionID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveMessagesSinceBySessionRow
+	for rows.Next() {
+		var i ListActiveMessagesSinceBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
 		); err != nil {
 			return nil, err
 		}
@@ -219,10 +308,9 @@ const listMessages = `-- name: ListMessages :many
 SELECT
   m.id,
   m.bot_id,
-  m.route_id,
+  m.session_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
-  m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
@@ -231,9 +319,11 @@ SELECT
   m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
 ORDER BY m.created_at ASC
 LIMIT 10000
@@ -242,10 +332,9 @@ LIMIT 10000
 type ListMessagesRow struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
-	RouteID                 pgtype.UUID        `json:"route_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
-	Platform                pgtype.Text        `json:"platform"`
 	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
 	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
 	Role                    string             `json:"role"`
@@ -255,6 +344,7 @@ type ListMessagesRow struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
 }
 
 func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]ListMessagesRow, error) {
@@ -269,10 +359,9 @@ func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]ListMe
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
-			&i.RouteID,
+			&i.SessionID,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
-			&i.Platform,
 			&i.ExternalMessageID,
 			&i.SourceReplyToMessageID,
 			&i.Role,
@@ -282,6 +371,7 @@ func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]ListMe
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
+			&i.Platform,
 		); err != nil {
 			return nil, err
 		}
@@ -297,10 +387,9 @@ const listMessagesBefore = `-- name: ListMessagesBefore :many
 SELECT
   m.id,
   m.bot_id,
-  m.route_id,
+  m.session_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
-  m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
@@ -309,9 +398,11 @@ SELECT
   m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
   AND m.created_at < $2
 ORDER BY m.created_at DESC
@@ -327,10 +418,9 @@ type ListMessagesBeforeParams struct {
 type ListMessagesBeforeRow struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
-	RouteID                 pgtype.UUID        `json:"route_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
-	Platform                pgtype.Text        `json:"platform"`
 	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
 	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
 	Role                    string             `json:"role"`
@@ -340,6 +430,7 @@ type ListMessagesBeforeRow struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
 }
 
 func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBeforeParams) ([]ListMessagesBeforeRow, error) {
@@ -354,10 +445,9 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
-			&i.RouteID,
+			&i.SessionID,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
-			&i.Platform,
 			&i.ExternalMessageID,
 			&i.SourceReplyToMessageID,
 			&i.Role,
@@ -367,6 +457,172 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesBeforeBySession = `-- name: ListMessagesBeforeBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = $1
+  AND m.created_at < $2
+ORDER BY m.created_at DESC
+LIMIT $3
+`
+
+type ListMessagesBeforeBySessionParams struct {
+	SessionID pgtype.UUID        `json:"session_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	MaxCount  int32              `json:"max_count"`
+}
+
+type ListMessagesBeforeBySessionRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessagesBeforeBySessionParams) ([]ListMessagesBeforeBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listMessagesBeforeBySession, arg.SessionID, arg.CreatedAt, arg.MaxCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesBeforeBySessionRow
+	for rows.Next() {
+		var i ListMessagesBeforeBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesBySession = `-- name: ListMessagesBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = $1
+ORDER BY m.created_at ASC
+LIMIT 10000
+`
+
+type ListMessagesBySessionRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]ListMessagesBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listMessagesBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesBySessionRow
+	for rows.Next() {
+		var i ListMessagesBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
 		); err != nil {
 			return nil, err
 		}
@@ -382,10 +638,9 @@ const listMessagesLatest = `-- name: ListMessagesLatest :many
 SELECT
   m.id,
   m.bot_id,
-  m.route_id,
+  m.session_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
-  m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
@@ -394,9 +649,11 @@ SELECT
   m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
 ORDER BY m.created_at DESC
 LIMIT $2
@@ -410,10 +667,9 @@ type ListMessagesLatestParams struct {
 type ListMessagesLatestRow struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
-	RouteID                 pgtype.UUID        `json:"route_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
-	Platform                pgtype.Text        `json:"platform"`
 	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
 	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
 	Role                    string             `json:"role"`
@@ -423,6 +679,7 @@ type ListMessagesLatestRow struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
 }
 
 func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatestParams) ([]ListMessagesLatestRow, error) {
@@ -437,10 +694,9 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
-			&i.RouteID,
+			&i.SessionID,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
-			&i.Platform,
 			&i.ExternalMessageID,
 			&i.SourceReplyToMessageID,
 			&i.Role,
@@ -450,6 +706,91 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesLatestBySession = `-- name: ListMessagesLatestBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = $1
+ORDER BY m.created_at DESC
+LIMIT $2
+`
+
+type ListMessagesLatestBySessionParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	MaxCount  int32       `json:"max_count"`
+}
+
+type ListMessagesLatestBySessionRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+func (q *Queries) ListMessagesLatestBySession(ctx context.Context, arg ListMessagesLatestBySessionParams) ([]ListMessagesLatestBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listMessagesLatestBySession, arg.SessionID, arg.MaxCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesLatestBySessionRow
+	for rows.Next() {
+		var i ListMessagesLatestBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
 		); err != nil {
 			return nil, err
 		}
@@ -465,10 +806,9 @@ const listMessagesSince = `-- name: ListMessagesSince :many
 SELECT
   m.id,
   m.bot_id,
-  m.route_id,
+  m.session_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
-  m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
@@ -477,9 +817,11 @@ SELECT
   m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
   AND m.created_at >= $2
 ORDER BY m.created_at ASC
@@ -493,10 +835,9 @@ type ListMessagesSinceParams struct {
 type ListMessagesSinceRow struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
-	RouteID                 pgtype.UUID        `json:"route_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
-	Platform                pgtype.Text        `json:"platform"`
 	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
 	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
 	Role                    string             `json:"role"`
@@ -506,6 +847,7 @@ type ListMessagesSinceRow struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
 }
 
 func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSinceParams) ([]ListMessagesSinceRow, error) {
@@ -520,10 +862,9 @@ func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSincePa
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
-			&i.RouteID,
+			&i.SessionID,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
-			&i.Platform,
 			&i.ExternalMessageID,
 			&i.SourceReplyToMessageID,
 			&i.Role,
@@ -533,6 +874,91 @@ func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSincePa
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesSinceBySession = `-- name: ListMessagesSinceBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = $1
+  AND m.created_at >= $2
+ORDER BY m.created_at ASC
+`
+
+type ListMessagesSinceBySessionParams struct {
+	SessionID pgtype.UUID        `json:"session_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type ListMessagesSinceBySessionRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+func (q *Queries) ListMessagesSinceBySession(ctx context.Context, arg ListMessagesSinceBySessionParams) ([]ListMessagesSinceBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listMessagesSinceBySession, arg.SessionID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesSinceBySessionRow
+	for rows.Next() {
+		var i ListMessagesSinceBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
 		); err != nil {
 			return nil, err
 		}
@@ -558,13 +984,14 @@ WITH observed_routes AS (
   UNION ALL
 
   SELECT
-    m.route_id,
+    s.route_id,
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_history_messages m
+  JOIN bot_sessions s ON s.id = m.session_id
   WHERE m.bot_id = $1
     AND m.sender_channel_identity_id = $2::uuid
-    AND m.route_id IS NOT NULL
-  GROUP BY m.route_id
+    AND s.route_id IS NOT NULL
+  GROUP BY s.route_id
 ),
 ranked_routes AS (
   SELECT

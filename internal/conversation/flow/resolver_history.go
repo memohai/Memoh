@@ -8,24 +8,31 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 type messageWithUsage struct {
 	Message           conversation.ModelMessage
 	UsageInputTokens  *int
 	UsageOutputTokens *int
-	RouteID           string
+	SessionID         string
 	ExternalMessageID string
 	Platform          string
 	SenderChannelID   string
 }
 
-func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMinutes int) ([]messageWithUsage, error) {
+func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID string, maxContextMinutes int) ([]messageWithUsage, error) {
 	if r.messageService == nil {
 		return nil, nil
 	}
 	since := time.Now().UTC().Add(-time.Duration(maxContextMinutes) * time.Minute)
-	msgs, err := r.messageService.ListActiveSince(ctx, chatID, since)
+	var msgs []messagepkg.Message
+	var err error
+	if strings.TrimSpace(sessionID) != "" {
+		msgs, err = r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
+	} else {
+		msgs, err = r.messageService.ListActiveSince(ctx, chatID, since)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +59,7 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMi
 			Message:           mm,
 			UsageInputTokens:  inputTokens,
 			UsageOutputTokens: outputTokens,
-			RouteID:           strings.TrimSpace(m.RouteID),
+			SessionID:         strings.TrimSpace(m.SessionID),
 			ExternalMessageID: strings.TrimSpace(m.ExternalMessageID),
 			Platform:          strings.TrimSpace(m.Platform),
 			SenderChannelID:   strings.TrimSpace(m.SenderChannelIdentityID),
@@ -66,7 +73,7 @@ func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversa
 		return messages
 	}
 
-	targetRouteID := strings.TrimSpace(req.RouteID)
+	targetSessionID := strings.TrimSpace(req.SessionID)
 	targetExternalID := strings.TrimSpace(req.ExternalMessageID)
 	targetPlatform := strings.TrimSpace(req.CurrentChannel)
 	targetSenderChannelID := strings.TrimSpace(req.SourceChannelIdentityID)
@@ -82,7 +89,7 @@ func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversa
 		if strings.TrimSpace(item.ExternalMessageID) != targetExternalID {
 			continue
 		}
-		if targetRouteID != "" && item.RouteID != "" && item.RouteID != targetRouteID {
+		if targetSessionID != "" && item.SessionID != "" && item.SessionID != targetSessionID {
 			continue
 		}
 		if targetPlatform != "" && item.Platform != "" && !strings.EqualFold(item.Platform, targetPlatform) {

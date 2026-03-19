@@ -223,6 +223,7 @@ type OutboundAssetRef struct {
 type ChatRequest struct {
 	BotID                   string `json:"-"`
 	ChatID                  string `json:"-"`
+	SessionID               string `json:"-"`
 	Token                   string `json:"-"`
 	UserID                  string `json:"-"`
 	SourceChannelIdentityID string `json:"-"`

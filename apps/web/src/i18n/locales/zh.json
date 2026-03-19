@@ -150,7 +150,15 @@
     "toolEmailAccounts": "{count} 个账户",
     "toolSubagentCount": "{count} 个子代理",
     "unknownUser": "{platform}用户",
-    "files": "文件管理"
+    "files": "文件管理",
+    "sessions": "会话",
+    "newSession": "新建会话",
+    "deleteSession": "删除会话",
+    "deleteSessionConfirm": "确定要删除此会话吗？",
+    "renameSession": "重命名会话",
+    "sessionTitle": "会话",
+    "untitledSession": "未命名会话",
+    "noSessions": "暂无会话"
   },
   "models": {
     "title": "模型",

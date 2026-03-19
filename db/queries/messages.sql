@@ -1,10 +1,9 @@
 -- name: CreateMessage :one
 INSERT INTO bot_history_messages (
   bot_id,
-  route_id,
+  session_id,
   sender_channel_identity_id,
   sender_account_user_id,
-  channel_type,
   source_message_id,
   source_reply_to_message_id,
   role,
@@ -15,10 +14,9 @@ INSERT INTO bot_history_messages (
 )
 VALUES (
   sqlc.arg(bot_id),
-  sqlc.narg(route_id)::uuid,
+  sqlc.narg(session_id)::uuid,
   sqlc.narg(sender_channel_identity_id)::uuid,
   sqlc.narg(sender_user_id)::uuid,
-  sqlc.narg(platform)::text,
   sqlc.narg(external_message_id)::text,
   sqlc.narg(source_reply_to_message_id)::text,
   sqlc.arg(role),
@@ -30,10 +28,9 @@ VALUES (
 RETURNING
   id,
   bot_id,
-  route_id,
+  session_id,
   sender_channel_identity_id,
   sender_account_user_id AS sender_user_id,
-  channel_type AS platform,
   source_message_id AS external_message_id,
   source_reply_to_message_id,
   role,
@@ -46,10 +43,9 @@ RETURNING
 SELECT
   m.id,
   m.bot_id,
-  m.route_id,
+  m.session_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
-  m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
@@ -58,10 +54,36 @@ SELECT
   m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+ORDER BY m.created_at ASC
+LIMIT 10000;
+
+-- name: ListMessagesBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = sqlc.arg(session_id)
 ORDER BY m.created_at ASC
 LIMIT 10000;
 
@@ -69,10 +91,9 @@ LIMIT 10000;
 SELECT
   m.id,
   m.bot_id,
-  m.route_id,
+  m.session_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
-  m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
@@ -81,10 +102,36 @@ SELECT
   m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.created_at >= sqlc.arg(created_at)
+ORDER BY m.created_at ASC;
+
+-- name: ListMessagesSinceBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = sqlc.arg(session_id)
   AND m.created_at >= sqlc.arg(created_at)
 ORDER BY m.created_at ASC;
 
@@ -92,10 +139,9 @@ ORDER BY m.created_at ASC;
 SELECT
   m.id,
   m.bot_id,
-  m.route_id,
+  m.session_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
-  m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
@@ -104,10 +150,37 @@ SELECT
   m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.created_at >= sqlc.arg(created_at)
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.created_at ASC;
+
+-- name: ListActiveMessagesSinceBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = sqlc.arg(session_id)
   AND m.created_at >= sqlc.arg(created_at)
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.created_at ASC;
@@ -116,10 +189,9 @@ ORDER BY m.created_at ASC;
 SELECT
   m.id,
   m.bot_id,
-  m.route_id,
+  m.session_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
-  m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
@@ -128,10 +200,37 @@ SELECT
   m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.created_at < sqlc.arg(created_at)
+ORDER BY m.created_at DESC
+LIMIT sqlc.arg(max_count);
+
+-- name: ListMessagesBeforeBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = sqlc.arg(session_id)
   AND m.created_at < sqlc.arg(created_at)
 ORDER BY m.created_at DESC
 LIMIT sqlc.arg(max_count);
@@ -140,10 +239,9 @@ LIMIT sqlc.arg(max_count);
 SELECT
   m.id,
   m.bot_id,
-  m.route_id,
+  m.session_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
-  m.channel_type AS platform,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
@@ -152,16 +250,46 @@ SELECT
   m.usage,
   m.created_at,
   ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+ORDER BY m.created_at DESC
+LIMIT sqlc.arg(max_count);
+
+-- name: ListMessagesLatestBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = sqlc.arg(session_id)
 ORDER BY m.created_at DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: DeleteMessagesByBot :exec
 DELETE FROM bot_history_messages
 WHERE bot_id = sqlc.arg(bot_id);
+
+-- name: DeleteMessagesBySession :exec
+DELETE FROM bot_history_messages
+WHERE session_id = sqlc.arg(session_id);
 
 -- name: ListObservedConversationsByChannelIdentity :many
 WITH observed_routes AS (
@@ -177,13 +305,14 @@ WITH observed_routes AS (
   UNION ALL
 
   SELECT
-    m.route_id,
+    s.route_id,
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_history_messages m
+  JOIN bot_sessions s ON s.id = m.session_id
   WHERE m.bot_id = sqlc.arg(bot_id)
     AND m.sender_channel_identity_id = sqlc.arg(channel_identity_id)::uuid
-    AND m.route_id IS NOT NULL
-  GROUP BY m.route_id
+    AND s.route_id IS NOT NULL
+  GROUP BY s.route_id
 ),
 ranked_routes AS (
   SELECT
