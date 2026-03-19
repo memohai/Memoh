@@ -37,6 +37,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 	}
 
 	cfg := rc.runConfig
+	cfg.SessionType = "schedule"
 	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 
 	schedulePrompt := agentpkg.GenerateSchedulePrompt(agentpkg.Schedule{
@@ -94,6 +95,7 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 	}
 
 	cfg := rc.runConfig
+	cfg.SessionType = "heartbeat"
 	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 
 	var checklist string

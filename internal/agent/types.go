@@ -57,6 +57,7 @@ type RunConfig struct {
 	Messages           []sdk.Message
 	Query              string
 	System             string
+	SessionType        string
 	SupportsImageInput bool
 	Identity           SessionContext
 	Skills             []SkillEntry

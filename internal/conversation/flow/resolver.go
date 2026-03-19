@@ -387,6 +387,7 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 	}
 
 	cfg.System = agentpkg.GenerateSystemPrompt(agentpkg.SystemPromptParams{
+		SessionType:        cfg.SessionType,
 		Skills:             cfg.Skills,
 		EnabledSkills:      enabledSkills,
 		Files:              files,

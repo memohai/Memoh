@@ -3,6 +3,7 @@ package agent
 import (
 	"embed"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -11,17 +12,37 @@ import (
 var promptsFS embed.FS
 
 var (
-	systemTmpl    string
-	scheduleTmpl  string
-	heartbeatTmpl string
-	subagentTmpl  string
+	systemChatTmpl      string
+	systemHeartbeatTmpl string
+	systemScheduleTmpl  string
+	scheduleTmpl        string
+	heartbeatTmpl       string
+	subagentTmpl        string
+
+	includes map[string]string
 )
 
+var includeRe = regexp.MustCompile(`\{\{include:(\w+)\}\}`)
+
 func init() {
-	systemTmpl = mustReadPrompt("prompts/system.md")
+	systemChatTmpl = mustReadPrompt("prompts/system_chat.md")
+	systemHeartbeatTmpl = mustReadPrompt("prompts/system_heartbeat.md")
+	systemScheduleTmpl = mustReadPrompt("prompts/system_schedule.md")
 	scheduleTmpl = mustReadPrompt("prompts/schedule.md")
 	heartbeatTmpl = mustReadPrompt("prompts/heartbeat.md")
 	subagentTmpl = mustReadPrompt("prompts/subagent.md")
+
+	includes = map[string]string{
+		"_memory":        mustReadPrompt("prompts/_memory.md"),
+		"_tools":         mustReadPrompt("prompts/_tools.md"),
+		"_contacts":      mustReadPrompt("prompts/_contacts.md"),
+		"_schedule_task": mustReadPrompt("prompts/_schedule_task.md"),
+		"_subagent":      mustReadPrompt("prompts/_subagent.md"),
+	}
+
+	systemChatTmpl = resolveIncludes(systemChatTmpl)
+	systemHeartbeatTmpl = resolveIncludes(systemHeartbeatTmpl)
+	systemScheduleTmpl = resolveIncludes(systemScheduleTmpl)
 }
 
 func mustReadPrompt(name string) string {
@@ -32,6 +53,21 @@ func mustReadPrompt(name string) string {
 	return string(data)
 }
 
+// resolveIncludes replaces {{include:_name}} placeholders with the content of the named fragment.
+func resolveIncludes(tmpl string) string {
+	return includeRe.ReplaceAllStringFunc(tmpl, func(match string) string {
+		sub := includeRe.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		content, ok := includes[sub[1]]
+		if !ok {
+			return match
+		}
+		return strings.TrimSpace(content)
+	})
+}
+
 // render replaces all {{key}} placeholders in tmpl with values from vars.
 func render(tmpl string, vars map[string]string) string {
 	result := tmpl
@@ -39,6 +75,17 @@ func render(tmpl string, vars map[string]string) string {
 		result = strings.ReplaceAll(result, "{{"+k+"}}", v)
 	}
 	return strings.TrimSpace(result)
+}
+
+func selectSystemTemplate(sessionType string) string {
+	switch sessionType {
+	case "heartbeat":
+		return systemHeartbeatTmpl
+	case "schedule":
+		return systemScheduleTmpl
+	default:
+		return systemChatTmpl
+	}
 }
 
 // GenerateSystemPrompt builds the complete system prompt from files, skills, and context.
@@ -70,7 +117,9 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 	}
 	fileSections += fileSectionsSb.String()
 
-	return render(systemTmpl, map[string]string{
+	tmpl := selectSystemTemplate(params.SessionType)
+
+	return render(tmpl, map[string]string{
 		"home":          home,
 		"basicTools":    strings.Join(basicTools, "\n"),
 		"fileSections":  fileSections,
@@ -81,6 +130,7 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 
 // SystemPromptParams holds all inputs for system prompt generation.
 type SystemPromptParams struct {
+	SessionType        string
 	Skills             []SkillEntry
 	EnabledSkills      []SkillEntry
 	Files              []SystemFile
