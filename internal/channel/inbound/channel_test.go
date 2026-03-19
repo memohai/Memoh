@@ -321,10 +321,9 @@ func (f *fakeChatService) Persist(_ context.Context, input messagepkg.PersistInp
 	f.persistedIn = append(f.persistedIn, input)
 	msg := messagepkg.Message{
 		BotID:                   input.BotID,
-		RouteID:                 input.RouteID,
+		SessionID:               input.SessionID,
 		SenderChannelIdentityID: input.SenderChannelIdentityID,
 		SenderUserID:            input.SenderUserID,
-		Platform:                input.Platform,
 		ExternalMessageID:       input.ExternalMessageID,
 		SourceReplyToMessageID:  input.SourceReplyToMessageID,
 		Role:                    input.Role,
