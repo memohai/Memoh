@@ -320,14 +320,6 @@ export const useChatStore = defineStore('chat', () => {
     return senderUserId === currentUserId
   }
 
-  function resolveCrossChannelIsSelf(senderUserId: string): boolean {
-    if (!senderUserId) return false
-    const userStore = useUserStore()
-    const currentUserId = (userStore.userInfo.id ?? '').trim()
-    if (!currentUserId) return false
-    return senderUserId === currentUserId
-  }
-
   // ---- Abort ----
 
   function abort() {
@@ -422,71 +414,11 @@ export const useChatStore = defineStore('chat', () => {
     const sourceChannel = meta?.source_channel as string | undefined
     const isCrossChannel = !!sourceChannel
 
-    if (isCrossChannel && (event.type ?? '').toLowerCase() === 'final' && meta?.role === 'user') {
-      const finalPayload = event.final as Record<string, unknown> | undefined
-      const msg = finalPayload?.message as Record<string, unknown> | undefined
-      if (msg) {
-        const text = String(msg.text ?? '').trim()
-        const msgMeta = msg.metadata as Record<string, unknown> | undefined
-        const senderName = (msgMeta?.sender_display_name as string | undefined) ?? sourceChannel
-        const senderUserId = String(meta?.sender_user_id ?? '').trim()
-        const blocks: ContentBlock[] = []
-        if (text) blocks.push({ type: 'text', content: text })
-        const rawAtts = (msg.attachments ?? msg.Attachments) as Array<Record<string, unknown>> | undefined
-        if (Array.isArray(rawAtts) && rawAtts.length > 0) {
-          const items: AttachmentItem[] = rawAtts.map((a) => ({
-            type: mediaTypeFromMime(String(a.mime ?? '')),
-            content_hash: String(a.content_hash ?? ''),
-            bot_id: currentBotId.value ?? '',
-            mime: String(a.mime ?? ''),
-            size: Number(a.size ?? 0),
-            storage_key: String((a.metadata as Record<string, unknown> | undefined)?.storage_key ?? ''),
-          }))
-          blocks.push({ type: 'attachment', attachments: items })
-        }
-        if (blocks.length > 0) {
-          messages.push({
-            id: nextId(),
-            role: 'user',
-            blocks,
-            timestamp: new Date(),
-            streaming: false,
-            isSelf: resolveCrossChannelIsSelf(senderUserId),
-            platform: sourceChannel,
-            senderDisplayName: senderName,
-          })
-        }
-      }
-      return
-    }
-
-    if (isCrossChannel && !pendingAssistantStream) {
-      const type = (event.type ?? '').toLowerCase()
-      if (type === 'delta' || type === 'text_delta' || type === 'text_start'
-        || type === 'reasoning_start' || type === 'reasoning_delta'
-        || type === 'tool_call_start' || type === 'attachment_delta'
-        || type === 'status' || type === 'processing_started') {
-        messages.push({
-          id: nextId(),
-          role: 'assistant',
-          blocks: [],
-          timestamp: new Date(),
-          streaming: true,
-          platform: sourceChannel,
-        })
-        const reactiveMsg = messages[messages.length - 1]!
-        pendingAssistantStream = {
-          assistantMsg: reactiveMsg,
-          textBlockIdx: -1,
-          thinkingBlockIdx: -1,
-          done: false,
-          resolve: () => { reactiveMsg.streaming = false },
-          reject: () => { reactiveMsg.streaming = false },
-        }
-      } else {
-        return
-      }
-    }
+    // Cross-channel events (Telegram, Discord, etc.) don't carry session_id,
+    // so we can't determine which session they belong to. Skip them here;
+    // persisted messages will arrive through the SSE message events stream
+    // with proper session_id filtering via appendRealtimeMessage.
+    if (isCrossChannel) return
 
     const session = pendingAssistantStream
     if (!session || session.done) return
