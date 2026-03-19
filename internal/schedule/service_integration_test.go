@@ -39,7 +39,7 @@ func setupScheduleIntegrationTest(t *testing.T) (*schedule.Service, *sqlc.Querie
 	mock := &mockTriggerer{}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	cfg := &boot.RuntimeConfig{JwtSecret: "integration-test-jwt-secret"}
-	svc := schedule.NewService(logger, queries, mock, cfg)
+	svc := schedule.NewService(logger, queries, mock, nil, cfg)
 
 	return svc, queries, pool, mock, func() { pool.Close() }
 }
@@ -51,12 +51,12 @@ type mockTriggerer struct {
 	token   string
 }
 
-func (m *mockTriggerer) TriggerSchedule(_ context.Context, botID string, payload schedule.TriggerPayload, token string) error {
+func (m *mockTriggerer) TriggerSchedule(_ context.Context, botID string, payload schedule.TriggerPayload, token string) (schedule.TriggerResult, error) {
 	m.called = true
 	m.botID = botID
 	m.payload = payload
 	m.token = token
-	return nil
+	return schedule.TriggerResult{Status: "ok"}, nil
 }
 
 func createUserBotAndSchedule(ctx context.Context, t *testing.T, queries *sqlc.Queries) (ownerUserID, botID, scheduleID string) {

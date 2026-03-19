@@ -6,6 +6,7 @@ type TriggerPayload struct {
 	BotID       string
 	Interval    int
 	OwnerUserID string
+	SessionID   string
 }
 
 type TriggerResult struct {
@@ -14,6 +15,7 @@ type TriggerResult struct {
 	Usage      any
 	UsageBytes []byte
 	ModelID    string
+	SessionID  string
 }
 
 type Triggerer interface {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -33,7 +35,10 @@ func (h *ScheduleHandler) Register(e *echo.Echo) {
 	group := e.Group("/bots/:bot_id/schedule")
 	group.POST("", h.Create)
 	group.GET("", h.List)
+	group.GET("/logs", h.ListLogs)
+	group.DELETE("/logs", h.DeleteLogs)
 	group.GET("/:id", h.Get)
+	group.GET("/:id/logs", h.ListLogsBySchedule)
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
 }
@@ -213,6 +218,118 @@ func (h *ScheduleHandler) Delete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// ListLogs godoc
+// @Summary List schedule logs
+// @Description List schedule execution logs for a bot
+// @Tags schedule
+// @Param bot_id path string true "Bot ID"
+// @Param before query string false "Before timestamp (RFC3339)"
+// @Param limit query int false "Limit" default(50)
+// @Success 200 {object} schedule.ListLogsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/schedule/logs [get].
+func (h *ScheduleHandler) ListLogs(c echo.Context) error {
+	userID, err := h.requireUserID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+
+	before, limit := parseBeforeLimit(c)
+	items, err := h.service.ListLogs(c.Request().Context(), botID, before, limit)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, schedule.ListLogsResponse{Items: items})
+}
+
+// ListLogsBySchedule godoc
+// @Summary List schedule logs by schedule
+// @Description List execution logs for a specific schedule
+// @Tags schedule
+// @Param bot_id path string true "Bot ID"
+// @Param id path string true "Schedule ID"
+// @Param before query string false "Before timestamp (RFC3339)"
+// @Param limit query int false "Limit" default(50)
+// @Success 200 {object} schedule.ListLogsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/schedule/{id}/logs [get].
+func (h *ScheduleHandler) ListLogsBySchedule(c echo.Context) error {
+	userID, err := h.requireUserID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+	scheduleID := strings.TrimSpace(c.Param("id"))
+	if scheduleID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "schedule id is required")
+	}
+
+	before, limit := parseBeforeLimit(c)
+	items, err := h.service.ListLogsBySchedule(c.Request().Context(), scheduleID, before, limit)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, schedule.ListLogsResponse{Items: items})
+}
+
+// DeleteLogs godoc
+// @Summary Delete schedule logs
+// @Description Delete all schedule execution logs for a bot
+// @Tags schedule
+// @Param bot_id path string true "Bot ID"
+// @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/schedule/logs [delete].
+func (h *ScheduleHandler) DeleteLogs(c echo.Context) error {
+	userID, err := h.requireUserID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+	if err := h.service.DeleteLogs(c.Request().Context(), botID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func parseBeforeLimit(c echo.Context) (*time.Time, int) {
+	var before *time.Time
+	if raw := strings.TrimSpace(c.QueryParam("before")); raw != "" {
+		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			before = &t
+		}
+	}
+	limit := 50
+	if raw := strings.TrimSpace(c.QueryParam("limit")); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	return before, limit
 }
 
 func (*ScheduleHandler) requireUserID(c echo.Context) (string, error) {

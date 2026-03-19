@@ -15,24 +15,25 @@ import (
 )
 
 // TriggerSchedule executes a scheduled command via the internal agent.
-func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) error {
+func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (schedule.TriggerResult, error) {
 	if strings.TrimSpace(botID) == "" {
-		return errors.New("bot id is required")
+		return schedule.TriggerResult{}, errors.New("bot id is required")
 	}
 	if strings.TrimSpace(payload.Command) == "" {
-		return errors.New("schedule command is required")
+		return schedule.TriggerResult{}, errors.New("schedule command is required")
 	}
 
 	req := conversation.ChatRequest{
-		BotID:  botID,
-		ChatID: botID,
-		Query:  payload.Command,
-		UserID: payload.OwnerUserID,
-		Token:  token,
+		BotID:     botID,
+		ChatID:    botID,
+		SessionID: payload.SessionID,
+		Query:     payload.Command,
+		UserID:    payload.OwnerUserID,
+		Token:     token,
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
-		return err
+		return schedule.TriggerResult{}, err
 	}
 
 	cfg := rc.runConfig
@@ -51,13 +52,20 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 
 	result, err := r.agent.Generate(ctx, cfg)
 	if err != nil {
-		return err
+		return schedule.TriggerResult{}, err
 	}
 
 	outputMessages := sdkMessagesToModelMessages(result.Messages)
 	roundMessages := prependUserMessage(req.Query, outputMessages)
 	usageJSON, _ := json.Marshal(result.Usage)
-	return r.storeRound(ctx, req, roundMessages, usageJSON, nil, rc.model.ID)
+	storeErr := r.storeRound(ctx, req, roundMessages, usageJSON, nil, rc.model.ID)
+
+	return schedule.TriggerResult{
+		Status:     "ok",
+		Text:       strings.TrimSpace(result.Text),
+		UsageBytes: usageJSON,
+		ModelID:    rc.model.ID,
+	}, storeErr
 }
 
 // TriggerHeartbeat executes a heartbeat check via the internal agent.
@@ -72,12 +80,13 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 	}
 
 	req := conversation.ChatRequest{
-		BotID:  botID,
-		ChatID: botID,
-		Query:  "heartbeat",
-		UserID: payload.OwnerUserID,
-		Token:  token,
-		Model:  heartbeatModel,
+		BotID:     botID,
+		ChatID:    botID,
+		SessionID: payload.SessionID,
+		Query:     "heartbeat",
+		UserID:    payload.OwnerUserID,
+		Token:     token,
+		Model:     heartbeatModel,
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
@@ -109,12 +118,17 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 
 	usageJSON, _ := json.Marshal(result.Usage)
 
+	outputMessages := sdkMessagesToModelMessages(result.Messages)
+	roundMessages := prependUserMessage(req.Query, outputMessages)
+	_ = r.storeRound(ctx, req, roundMessages, usageJSON, nil, rc.model.ID)
+
 	return heartbeat.TriggerResult{
 		Status:     status,
 		Text:       text,
 		Usage:      usageJSON,
 		UsageBytes: usageJSON,
 		ModelID:    rc.model.ID,
+		SessionID:  payload.SessionID,
 	}, nil
 }
 

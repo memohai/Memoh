@@ -577,11 +577,18 @@ export const useChatStore = defineStore('chat', () => {
     return tid ? messages.some((m) => String(m.id).trim() === tid) : false
   }
 
+  function resolveMessagePlatform(raw: Message): string {
+    const direct = (raw.platform ?? '').trim().toLowerCase()
+    if (direct) return direct
+    const fromMeta = raw.metadata?.platform
+    return typeof fromMeta === 'string' ? fromMeta.trim().toLowerCase() : ''
+  }
+
   function appendRealtimeMessage(raw: Message) {
     updateSince(raw.created_at)
     const msgSessionId = (raw.session_id ?? '').trim()
     if (msgSessionId && sessionId.value && msgSessionId !== sessionId.value) return
-    const platform = (raw.platform ?? '').trim().toLowerCase()
+    const platform = resolveMessagePlatform(raw)
     if (platform === 'web') return
     const mid = String(raw.id ?? '').trim()
     if (mid && hasMessageWithId(mid)) return

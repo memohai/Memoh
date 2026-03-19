@@ -20,6 +20,7 @@ type Session struct {
 	BotID                 string         `json:"bot_id"`
 	RouteID               string         `json:"route_id,omitempty"`
 	ChannelType           string         `json:"channel_type,omitempty"`
+	Type                  string         `json:"type"`
 	Title                 string         `json:"title"`
 	Metadata              map[string]any `json:"metadata,omitempty"`
 	CreatedAt             time.Time      `json:"created_at"`
@@ -28,11 +29,18 @@ type Session struct {
 	RouteConversationType string         `json:"route_conversation_type,omitempty"`
 }
 
+const (
+	TypeChat      = "chat"
+	TypeHeartbeat = "heartbeat"
+	TypeSchedule  = "schedule"
+)
+
 // CreateInput holds input for creating a new session.
 type CreateInput struct {
 	BotID       string
 	RouteID     string
 	ChannelType string
+	Type        string
 	Title       string
 	Metadata    map[string]any
 }
@@ -79,10 +87,16 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		channelType = pgtype.Text{String: ct, Valid: true}
 	}
 
+	sessionType := strings.TrimSpace(input.Type)
+	if sessionType == "" {
+		sessionType = TypeChat
+	}
+
 	row, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
 		BotID:       pgBotID,
 		RouteID:     pgRouteID,
 		ChannelType: channelType,
+		Type:        sessionType,
 		Title:       input.Title,
 		Metadata:    metaBytes,
 	})
@@ -253,6 +267,7 @@ func toSession(row sqlc.BotSession) Session {
 		BotID:       row.BotID.String(),
 		RouteID:     row.RouteID.String(),
 		ChannelType: dbpkg.TextToString(row.ChannelType),
+		Type:        row.Type,
 		Title:       row.Title,
 		Metadata:    parseJSONMap(row.Metadata),
 		CreatedAt:   row.CreatedAt.Time,
@@ -282,6 +297,7 @@ func toSessionFromListRow(row sqlc.ListSessionsByBotRow) Session {
 		BotID:                 row.BotID.String(),
 		RouteID:               row.RouteID.String(),
 		ChannelType:           dbpkg.TextToString(row.ChannelType),
+		Type:                  row.Type,
 		Title:                 row.Title,
 		Metadata:              parseJSONMap(row.Metadata),
 		CreatedAt:             row.CreatedAt.Time,

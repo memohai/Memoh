@@ -99,6 +99,7 @@ type BotEmailBinding struct {
 type BotHeartbeatLog struct {
 	ID           pgtype.UUID        `json:"id"`
 	BotID        pgtype.UUID        `json:"bot_id"`
+	SessionID    pgtype.UUID        `json:"session_id"`
 	Status       string             `json:"status"`
 	ResultText   string             `json:"result_text"`
 	ErrorMessage string             `json:"error_message"`
@@ -152,6 +153,7 @@ type BotSession struct {
 	BotID       pgtype.UUID        `json:"bot_id"`
 	RouteID     pgtype.UUID        `json:"route_id"`
 	ChannelType pgtype.Text        `json:"channel_type"`
+	Type        string             `json:"type"`
 	Title       string             `json:"title"`
 	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
@@ -383,6 +385,20 @@ type Schedule struct {
 	Enabled      bool               `json:"enabled"`
 	Command      string             `json:"command"`
 	BotID        pgtype.UUID        `json:"bot_id"`
+}
+
+type ScheduleLog struct {
+	ID           pgtype.UUID        `json:"id"`
+	ScheduleID   pgtype.UUID        `json:"schedule_id"`
+	BotID        pgtype.UUID        `json:"bot_id"`
+	SessionID    pgtype.UUID        `json:"session_id"`
+	Status       string             `json:"status"`
+	ResultText   string             `json:"result_text"`
+	ErrorMessage string             `json:"error_message"`
+	Usage        []byte             `json:"usage"`
+	ModelID      pgtype.UUID        `json:"model_id"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
 }
 
 type SearchProvider struct {

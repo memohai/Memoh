@@ -205,6 +205,8 @@ func runServe() {
 			provideAgent,
 			provideChatResolver,
 			provideScheduleTriggerer,
+			provideHeartbeatSessionCreator,
+			provideScheduleSessionCreator,
 			schedule.NewService,
 			provideHeartbeatTriggerer,
 			heartbeat.NewService,
@@ -392,6 +394,29 @@ func provideScheduleTriggerer(resolver *flow.Resolver) schedule.Triggerer {
 
 func provideHeartbeatTriggerer(resolver *flow.Resolver) heartbeat.Triggerer {
 	return flow.NewHeartbeatGateway(resolver)
+}
+
+type sessionCreatorAdapter struct {
+	svc *sessionpkg.Service
+}
+
+func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessionType string) (string, error) {
+	sess, err := a.svc.Create(ctx, sessionpkg.CreateInput{
+		BotID: botID,
+		Type:  sessionType,
+	})
+	if err != nil {
+		return "", err
+	}
+	return sess.ID, nil
+}
+
+func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service) heartbeat.SessionCreator {
+	return &sessionCreatorAdapter{svc: sessionService}
+}
+
+func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.SessionCreator {
+	return &sessionCreatorAdapter{svc: sessionService}
 }
 
 // ---------------------------------------------------------------------------

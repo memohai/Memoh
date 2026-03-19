@@ -343,6 +343,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
   channel_type TEXT,
+  type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule')),
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -542,6 +543,7 @@ CREATE INDEX IF NOT EXISTS idx_bot_inbox_bot_created ON bot_inbox(bot_id, create
 CREATE TABLE IF NOT EXISTS bot_heartbeat_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'alert', 'error')),
   result_text TEXT NOT NULL DEFAULT '',
   error_message TEXT NOT NULL DEFAULT '',
@@ -552,6 +554,24 @@ CREATE TABLE IF NOT EXISTS bot_heartbeat_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_bot_started ON bot_heartbeat_logs(bot_id, started_at DESC);
+
+-- schedule_logs: structured execution records for scheduled tasks.
+CREATE TABLE IF NOT EXISTS schedule_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  schedule_id UUID NOT NULL REFERENCES schedule(id) ON DELETE CASCADE,
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error')),
+  result_text TEXT NOT NULL DEFAULT '',
+  error_message TEXT NOT NULL DEFAULT '',
+  usage JSONB,
+  model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_logs_schedule ON schedule_logs(schedule_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_schedule_logs_bot ON schedule_logs(bot_id, started_at DESC);
 
 -- email_providers: pluggable email service backends
 CREATE TABLE IF NOT EXISTS email_providers (

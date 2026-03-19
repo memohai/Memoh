@@ -64,8 +64,8 @@ func (f *fakeChatGateway) StreamChat(_ context.Context, req conversation.ChatReq
 	return chunks, errs
 }
 
-func (*fakeChatGateway) TriggerSchedule(_ context.Context, _ string, _ schedule.TriggerPayload, _ string) error {
-	return nil
+func (*fakeChatGateway) TriggerSchedule(_ context.Context, _ string, _ schedule.TriggerPayload, _ string) (schedule.TriggerResult, error) {
+	return schedule.TriggerResult{}, nil
 }
 
 type fakeReplySender struct {

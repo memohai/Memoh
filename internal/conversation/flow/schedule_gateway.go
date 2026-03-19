@@ -18,9 +18,9 @@ func NewScheduleGateway(resolver *Resolver) *ScheduleGateway {
 }
 
 // TriggerSchedule delegates a schedule trigger to the chat Resolver.
-func (g *ScheduleGateway) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) error {
+func (g *ScheduleGateway) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (schedule.TriggerResult, error) {
 	if g == nil || g.resolver == nil {
-		return errors.New("chat resolver not configured")
+		return schedule.TriggerResult{}, errors.New("chat resolver not configured")
 	}
 	return g.resolver.TriggerSchedule(ctx, botID, payload, token)
 }

@@ -1,11 +1,12 @@
 -- name: CreateSession :one
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, title, metadata
+  bot_id, route_id, channel_type, type, title, metadata
 )
 VALUES (
   sqlc.arg(bot_id),
   sqlc.narg(route_id)::uuid,
   sqlc.narg(channel_type)::text,
+  sqlc.arg(type),
   sqlc.arg(title),
   sqlc.arg(metadata)
 )
@@ -19,7 +20,7 @@ WHERE id = $1
 
 -- name: ListSessionsByBot :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.title, s.metadata,
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
   s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type
