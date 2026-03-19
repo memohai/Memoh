@@ -463,6 +463,7 @@ type User struct {
 	Role         string             `json:"role"`
 	DisplayName  pgtype.Text        `json:"display_name"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
+	Timezone     string             `json:"timezone"`
 	DataRoot     pgtype.Text        `json:"data_root"`
 	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
 	IsActive     bool               `json:"is_active"`

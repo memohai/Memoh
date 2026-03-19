@@ -15,6 +15,9 @@ type SessionContext struct {
 	ChannelIdentityID string
 	CurrentPlatform   string
 	ReplyTarget       string
+	ConversationType  string
+	Timezone          string
+	TimezoneLocation  *time.Location
 	SessionToken      string //nolint:gosec // carries session credential material at runtime
 	IsSubagent        bool
 }

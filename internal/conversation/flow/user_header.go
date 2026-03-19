@@ -15,6 +15,7 @@ type UserMessageMeta struct {
 	ConversationType  string   `json:"conversation-type"`
 	ConversationName  string   `json:"conversation-name,omitempty"`
 	Time              string   `json:"time"`
+	Timezone          string   `json:"timezone,omitempty"`
 	AttachmentPaths   []string `json:"attachments"`
 }
 
@@ -35,7 +36,19 @@ func BuildUserMessageMeta(messageID, channelIdentityID, displayName, channel, co
 	}
 }
 
-// ToMap returns the metadata as a map with the same keys used in the YAML header.
+// BuildUserMessageMetaWithTime constructs metadata with an explicit timestamp
+// and timezone label for user-facing prompts.
+func BuildUserMessageMetaWithTime(messageID, channelIdentityID, displayName, channel, conversationType, conversationName string, attachmentPaths []string, now time.Time, timezone string) UserMessageMeta {
+	meta := BuildUserMessageMeta(messageID, channelIdentityID, displayName, channel, conversationType, conversationName, attachmentPaths)
+	if !now.IsZero() {
+		meta.Time = now.Format(time.RFC3339)
+	}
+	meta.Timezone = strings.TrimSpace(timezone)
+	return meta
+}
+
+// ToMap returns the metadata as a map with the same keys used in the YAML
+// header, suitable for storing as inbox content JSONB.
 func (m UserMessageMeta) ToMap() map[string]any {
 	result := map[string]any{
 		"channel-identity-id": m.ChannelIdentityID,
@@ -51,6 +64,9 @@ func (m UserMessageMeta) ToMap() map[string]any {
 	if m.ConversationName != "" {
 		result["conversation-name"] = m.ConversationName
 	}
+	if strings.TrimSpace(m.Timezone) != "" {
+		result["timezone"] = m.Timezone
+	}
 	return result
 }
 
@@ -58,8 +74,8 @@ func (m UserMessageMeta) ToMap() map[string]any {
 // the LLM sees structured context (sender, channel, time, attachments)
 // alongside the raw message. This must be the single source of truth for
 // user-message formatting — the agent gateway must NOT add its own header.
-func FormatUserHeader(messageID, channelIdentityID, displayName, channel, conversationType, conversationName string, attachmentPaths []string, query string) string {
-	meta := BuildUserMessageMeta(messageID, channelIdentityID, displayName, channel, conversationType, conversationName, attachmentPaths)
+func FormatUserHeader(messageID, channelIdentityID, displayName, channel, conversationType, conversationName string, attachmentPaths []string, now time.Time, timezone, query string) string {
+	meta := BuildUserMessageMetaWithTime(messageID, channelIdentityID, displayName, channel, conversationType, conversationName, attachmentPaths, now, timezone)
 	return FormatUserHeaderFromMeta(meta, query)
 }
 
@@ -79,6 +95,9 @@ func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 		writeYAMLString(&sb, "conversation-name", meta.ConversationName)
 	}
 	writeYAMLString(&sb, "time", meta.Time)
+	if strings.TrimSpace(meta.Timezone) != "" {
+		writeYAMLString(&sb, "timezone", meta.Timezone)
+	}
 	if len(meta.AttachmentPaths) > 0 {
 		sb.WriteString("attachments:\n")
 		for _, p := range meta.AttachmentPaths {

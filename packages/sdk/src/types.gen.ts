@@ -13,6 +13,7 @@ export type AccountsAccount = {
     is_active?: boolean;
     last_login_at?: string;
     role?: string;
+    timezone?: string;
     updated_at?: string;
     username?: string;
 };
@@ -50,6 +51,7 @@ export type AccountsUpdatePasswordRequest = {
 export type AccountsUpdateProfileRequest = {
     avatar_url?: string;
     display_name?: string;
+    timezone?: string;
 };
 
 export type AclChannelIdentityCandidate = {
@@ -825,6 +827,7 @@ export type HandlersLoginResponse = {
     display_name?: string;
     expires_at?: string;
     role?: string;
+    timezone?: string;
     token_type?: string;
     user_id?: string;
     username?: string;

@@ -75,6 +75,8 @@
     "userID": "User ID",
     "displayName": "Display Name",
     "avatarUrl": "Avatar URL",
+    "timezone": "Timezone",
+    "timezonePlaceholder": "e.g. America/New_York",
     "saveProfile": "Save Profile",
     "profileUpdated": "Profile updated",
     "profileUpdateFailed": "Failed to update profile",

@@ -46,6 +46,16 @@
           @update:model-value="onAvatarUrlChange"
         />
       </div>
+      <div class="space-y-2">
+        <Label for="settings-timezone">{{ $t('settings.timezone') }}</Label>
+        <Input
+          id="settings-timezone"
+          :model-value="timezone"
+          :aria-label="$t('settings.timezone')"
+          :placeholder="$t('settings.timezonePlaceholder')"
+          @update:model-value="onTimezoneChange"
+        />
+      </div>
       <div class="flex justify-end">
         <Button
           :disabled="saving || loading"
@@ -67,6 +77,7 @@ defineProps<{
   displayUsername: string
   displayName: string
   avatarUrl: string
+  timezone: string
   saving: boolean
   loading: boolean
 }>()
@@ -74,6 +85,7 @@ defineProps<{
 const emit = defineEmits<{
   'update:displayName': [value: string]
   'update:avatarUrl': [value: string]
+  'update:timezone': [value: string]
   save: []
 }>()
 
@@ -83,5 +95,9 @@ function onDisplayNameChange(value: string | number) {
 
 function onAvatarUrlChange(value: string | number) {
   emit('update:avatarUrl', String(value))
+}
+
+function onTimezoneChange(value: string | number) {
+  emit('update:timezone', String(value))
 }
 </script>

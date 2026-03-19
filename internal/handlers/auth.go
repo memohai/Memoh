@@ -33,6 +33,7 @@ type LoginResponse struct {
 	Role        string `json:"role"`
 	DisplayName string `json:"display_name"`
 	Username    string `json:"username"`
+	Timezone    string `json:"timezone,omitempty"`
 }
 
 func NewAuthHandler(log *slog.Logger, accountService *accounts.Service, jwtSecret string, expiresIn time.Duration) *AuthHandler {
@@ -102,6 +103,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		Username:    account.Username,
 		Role:        account.Role,
 		DisplayName: account.DisplayName,
+		Timezone:    account.Timezone,
 	})
 }
 

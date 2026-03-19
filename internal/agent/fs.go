@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -12,11 +13,15 @@ import (
 type FSClient struct {
 	provider bridge.Provider
 	botID    string
+	now      func() time.Time
 }
 
 // NewFSClient creates a new container filesystem client.
-func NewFSClient(provider bridge.Provider, botID string) *FSClient {
-	return &FSClient{provider: provider, botID: botID}
+func NewFSClient(provider bridge.Provider, botID string, now func() time.Time) *FSClient {
+	if now == nil {
+		now = time.Now
+	}
+	return &FSClient{provider: provider, botID: botID, now: now}
 }
 
 // ReadText reads a text file from the container, returning its content as a string.
@@ -45,7 +50,10 @@ func (f *FSClient) ReadTextSafe(ctx context.Context, path string) string {
 // LoadSystemFiles loads the standard set of system files from the bot container.
 func (f *FSClient) LoadSystemFiles(ctx context.Context) []SystemFile {
 	home := "/data"
-	now := TimeNow()
+	now := time.Now()
+	if f.now != nil {
+		now = f.now()
+	}
 	pad := func(n int) string { return fmt.Sprintf("%02d", n) }
 	today := fmt.Sprintf("%d-%s-%s", now.Year(), pad(int(now.Month())), pad(now.Day()))
 	yesterday := now.AddDate(0, 0, -1)

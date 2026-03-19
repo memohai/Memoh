@@ -187,6 +187,7 @@ const login = form.handleSubmit(async (values) => {
         displayName: data.display_name ?? '',
         role: data.role ?? '',
         avatarUrl: data.avatar_url ?? '',
+        timezone: data.timezone ?? 'UTC',
       }, data.access_token)
     } else {
       throw new Error(t('auth.loginFailed'))

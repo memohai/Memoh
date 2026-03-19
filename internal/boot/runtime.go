@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/timezone"
 )
 
 type RuntimeConfig struct {
@@ -17,6 +18,8 @@ type RuntimeConfig struct {
 	ServerAddr           string
 	ContainerdSocketPath string
 	ContainerBackend     string // "containerd" or "apple"
+	Timezone             string
+	TimezoneLocation     *time.Location
 }
 
 func ProvideRuntimeConfig(cfg config.Config) (*RuntimeConfig, error) {
@@ -34,12 +37,23 @@ func ProvideRuntimeConfig(cfg config.Config) (*RuntimeConfig, error) {
 		backend = "apple"
 	}
 
+	tzName := strings.TrimSpace(cfg.Timezone)
+	if envTZ := strings.TrimSpace(os.Getenv("TZ")); envTZ != "" {
+		tzName = envTZ
+	}
+	tzLocation, resolvedTZ, err := timezone.Resolve(tzName)
+	if err != nil {
+		return nil, err
+	}
+
 	ret := &RuntimeConfig{
 		JwtSecret:            cfg.Auth.JWTSecret,
 		JwtExpiresIn:         jwtExpiresIn,
 		ServerAddr:           cfg.Server.Addr,
 		ContainerdSocketPath: cfg.Containerd.SocketPath,
 		ContainerBackend:     backend,
+		Timezone:             resolvedTZ,
+		TimezoneLocation:     tzLocation,
 	}
 
 	if value := os.Getenv("HTTP_ADDR"); value != "" {
