@@ -65,5 +65,13 @@ BEGIN
   END IF;
 END $$;
 
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_identity_route_created
-  ON bot_history_messages(bot_id, sender_channel_identity_id, route_id, created_at DESC);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'bot_history_messages' AND column_name = 'route_id'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_bot_history_messages_identity_route_created
+      ON bot_history_messages(bot_id, sender_channel_identity_id, route_id, created_at DESC);
+  END IF;
+END $$;
