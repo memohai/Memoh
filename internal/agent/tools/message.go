@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strings"
 
-	"github.com/memohai/memoh/internal/channel"
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/channel"
 )
 
 // MessageSender sends outbound messages through channel manager.
@@ -82,7 +82,7 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 				"required": []string{},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSend(ctx, sess, inputAsMap(input))
+				return p.execSend(ctx.Context, sess, inputAsMap(input))
 			},
 		})
 	}
@@ -103,7 +103,7 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 				"required": []string{"message_id"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execReact(ctx, sess, inputAsMap(input))
+				return p.execReact(ctx.Context, sess, inputAsMap(input))
 			},
 		})
 	}
@@ -130,18 +130,18 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 	if rawAttachments, ok := args["attachments"]; ok && rawAttachments != nil {
 		items := normalizeAttachmentInputs(rawAttachments)
 		if items == nil {
-			return nil, fmt.Errorf("attachments must be a string, object, or array")
+			return nil, errors.New("attachments must be a string, object, or array")
 		}
 		if len(items) > 0 {
 			resolved := p.resolveAttachments(ctx, botID, items)
 			if len(resolved) == 0 {
-				return nil, fmt.Errorf("attachments could not be resolved")
+				return nil, errors.New("attachments could not be resolved")
 			}
 			outboundMessage.Attachments = append(outboundMessage.Attachments, resolved...)
 		}
 	}
 	if outboundMessage.IsEmpty() {
-		return nil, fmt.Errorf("message or attachments required")
+		return nil, errors.New("message or attachments required")
 	}
 	if replyTo := FirstStringArg(args, "reply_to"); replyTo != "" {
 		outboundMessage.Reply = &channel.ReplyRef{MessageID: replyTo}
@@ -154,14 +154,13 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 		target = strings.TrimSpace(session.ReplyTarget)
 	}
 	if target == "" {
-		return nil, fmt.Errorf("target is required")
+		return nil, errors.New("target is required")
 	}
 	if strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) &&
 		target == strings.TrimSpace(session.ReplyTarget) {
-		return nil, fmt.Errorf(
-			"You are trying to send a message to the SAME conversation you are already in. " +
-				"Do NOT use the send tool for this. Instead, write your reply as plain text directly. " +
-				"To include files, use the <attachments> block in your response (e.g. <attachments>[{\"type\":\"image\",\"path\":\"/data/media/file.jpg\"}]</attachments>).")
+		return nil, errors.New("you are trying to send a message to the same conversation you are already in. " +
+			"Do not use the send tool for this. Instead, write your reply as plain text directly. " +
+			"To include files, use the <attachments> block in your response (e.g. <attachments>[{\"type\":\"image\",\"path\":\"/data/media/file.jpg\"}]</attachments>)")
 	}
 	if err := p.sender.Send(ctx, botID, channelType, channel.SendRequest{Target: target, Message: outboundMessage}); err != nil {
 		return nil, err
@@ -186,11 +185,11 @@ func (p *MessageProvider) execReact(ctx context.Context, session SessionContext,
 		target = strings.TrimSpace(session.ReplyTarget)
 	}
 	if target == "" {
-		return nil, fmt.Errorf("target is required")
+		return nil, errors.New("target is required")
 	}
 	messageID := FirstStringArg(args, "message_id")
 	if messageID == "" {
-		return nil, fmt.Errorf("message_id is required")
+		return nil, errors.New("message_id is required")
 	}
 	emoji := FirstStringArg(args, "emoji")
 	remove, _, _ := BoolArg(args, "remove")

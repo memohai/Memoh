@@ -2,14 +2,16 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"math"
 	"strings"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const defaultContainerExecWorkDir = "/data"
@@ -48,7 +50,7 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 				"required": []string{"path"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execRead(ctx, sess, inputAsMap(input))
+				return p.execRead(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 		{
@@ -63,7 +65,7 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 				"required": []string{"path", "content"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execWrite(ctx, sess, inputAsMap(input))
+				return p.execWrite(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 		{
@@ -78,7 +80,7 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 				"required": []string{"path"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execList(ctx, sess, inputAsMap(input))
+				return p.execList(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 		{
@@ -94,7 +96,7 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 				"required": []string{"path", "old_text", "new_text"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execEdit(ctx, sess, inputAsMap(input))
+				return p.execEdit(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 		{
@@ -109,7 +111,7 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 				"required": []string{"command"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execExec(ctx, sess, inputAsMap(input))
+				return p.execExec(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
@@ -136,11 +138,11 @@ func (p *ContainerProvider) normalizePath(path string) string {
 func (p *ContainerProvider) getClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot_id is required")
+		return nil, errors.New("bot_id is required")
 	}
 	client, err := p.clients.MCPClient(ctx, botID)
 	if err != nil {
-		return nil, fmt.Errorf("container not reachable: %v", err)
+		return nil, fmt.Errorf("container not reachable: %w", err)
 	}
 	return client, nil
 }
@@ -152,26 +154,26 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	}
 	filePath := p.normalizePath(StringArg(args, "path"))
 	if filePath == "" {
-		return nil, fmt.Errorf("path is required")
+		return nil, errors.New("path is required")
 	}
 	lineOffset := int32(1)
 	if offset, ok, err := IntArg(args, "line_offset"); err != nil {
-		return nil, fmt.Errorf("invalid line_offset: %v", err)
+		return nil, fmt.Errorf("invalid line_offset: %w", err)
 	} else if ok {
 		if offset < 1 {
-			return nil, fmt.Errorf("line_offset must be >= 1")
+			return nil, errors.New("line_offset must be >= 1")
 		}
 		if offset > math.MaxInt32 {
-			return nil, fmt.Errorf("line_offset exceeds maximum")
+			return nil, errors.New("line_offset exceeds maximum")
 		}
 		lineOffset = int32(offset)
 	}
 	nLines := int32(readMaxLines)
 	if n, ok, err := IntArg(args, "n_lines"); err != nil {
-		return nil, fmt.Errorf("invalid n_lines: %v", err)
+		return nil, fmt.Errorf("invalid n_lines: %w", err)
 	} else if ok {
 		if n < 1 {
-			return nil, fmt.Errorf("n_lines must be >= 1")
+			return nil, errors.New("n_lines must be >= 1")
 		}
 		if n > readMaxLines {
 			n = readMaxLines
@@ -183,7 +185,7 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 		return nil, err
 	}
 	if resp.GetBinary() {
-		return nil, fmt.Errorf("file appears to be binary. Read tool only supports text files")
+		return nil, errors.New("file appears to be binary. Read tool only supports text files")
 	}
 	return map[string]any{"content": resp.GetContent(), "total_lines": resp.GetTotalLines()}, nil
 }
@@ -196,7 +198,7 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	filePath := p.normalizePath(StringArg(args, "path"))
 	content := StringArg(args, "content")
 	if filePath == "" {
-		return nil, fmt.Errorf("path is required")
+		return nil, errors.New("path is required")
 	}
 	if err := client.WriteFile(ctx, filePath, []byte(content)); err != nil {
 		return nil, err
@@ -237,7 +239,7 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	oldText := StringArg(args, "old_text")
 	newText := StringArg(args, "new_text")
 	if filePath == "" || oldText == "" {
-		return nil, fmt.Errorf("path, old_text and new_text are required")
+		return nil, errors.New("path, old_text and new_text are required")
 	}
 	reader, err := client.ReadRaw(ctx, filePath)
 	if err != nil {
@@ -266,7 +268,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	}
 	command := strings.TrimSpace(StringArg(args, "command"))
 	if command == "" {
-		return nil, fmt.Errorf("command is required")
+		return nil, errors.New("command is required")
 	}
 	workDir := strings.TrimSpace(StringArg(args, "work_dir"))
 	if workDir == "" {

@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/memohai/memoh/internal/mcp"
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/mcp"
 )
 
 // FederationProvider adapts a mcp.ToolSource (federated MCP connections)
@@ -48,7 +49,7 @@ func (f *FederationProvider) Tools(ctx context.Context, session SessionContext) 
 			Parameters:  desc.InputSchema,
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				args := inputAsMap(input)
-				result, err := src.CallTool(ctx, sess, desc.Name, args)
+				result, err := src.CallTool(ctx.Context, sess, desc.Name, args)
 				if err != nil {
 					return nil, err
 				}

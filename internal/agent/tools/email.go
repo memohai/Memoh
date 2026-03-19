@@ -2,14 +2,15 @@ package tools
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"math"
 	"strconv"
 	"strings"
 
-	"github.com/memohai/memoh/internal/email"
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/email"
 )
 
 type EmailProvider struct {
@@ -33,7 +34,7 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 			Name: "list_email_accounts", Description: "List the email accounts (provider bindings) configured for this bot, including provider IDs, email addresses, and permissions.",
 			Parameters: emptyObjectSchema(),
 			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
-				return p.execListAccounts(ctx, sess)
+				return p.execListAccounts(ctx.Context, sess)
 			},
 		},
 		{
@@ -50,7 +51,7 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 				"required": []string{"to", "subject", "body"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSendEmail(ctx, sess, inputAsMap(input))
+				return p.execSendEmail(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 		{
@@ -64,7 +65,7 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 				},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execListEmails(ctx, sess, inputAsMap(input))
+				return p.execListEmails(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 		{
@@ -78,7 +79,7 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 				"required": []string{"uid"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execReadEmail(ctx, sess, inputAsMap(input))
+				return p.execReadEmail(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
@@ -87,7 +88,7 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 func (p *EmailProvider) getBindings(ctx context.Context, botID string) ([]email.BindingResponse, error) {
 	bindings, err := p.service.ListBindings(ctx, botID)
 	if err != nil || len(bindings) == 0 {
-		return nil, fmt.Errorf("no email binding configured for this bot")
+		return nil, errors.New("no email binding configured for this bot")
 	}
 	return bindings, nil
 }
@@ -95,7 +96,7 @@ func (p *EmailProvider) getBindings(ctx context.Context, botID string) ([]email.
 func (p *EmailProvider) execListAccounts(ctx context.Context, session SessionContext) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot_id is required")
+		return nil, errors.New("bot_id is required")
 	}
 	bindings, err := p.getBindings(ctx, botID)
 	if err != nil {
@@ -114,7 +115,7 @@ func (p *EmailProvider) execListAccounts(ctx context.Context, session SessionCon
 func (p *EmailProvider) execSendEmail(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot_id is required")
+		return nil, errors.New("bot_id is required")
 	}
 	bindings, err := p.getBindings(ctx, botID)
 	if err != nil {
@@ -122,14 +123,14 @@ func (p *EmailProvider) execSendEmail(ctx context.Context, session SessionContex
 	}
 	binding := resolveWriteBinding(bindings, StringArg(args, "provider_id"))
 	if binding == nil {
-		return nil, fmt.Errorf("email write permission denied or provider not found")
+		return nil, errors.New("email write permission denied or provider not found")
 	}
 	toRaw := StringArg(args, "to")
 	subject := StringArg(args, "subject")
 	body := StringArg(args, "body")
 	isHTML, _, _ := BoolArg(args, "html")
 	if toRaw == "" || subject == "" || body == "" {
-		return nil, fmt.Errorf("to, subject, and body are required")
+		return nil, errors.New("to, subject, and body are required")
 	}
 	var toList []string
 	for _, addr := range strings.Split(toRaw, ",") {
@@ -150,7 +151,7 @@ func (p *EmailProvider) execSendEmail(ctx context.Context, session SessionContex
 func (p *EmailProvider) execListEmails(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot_id is required")
+		return nil, errors.New("bot_id is required")
 	}
 	bindings, err := p.getBindings(ctx, botID)
 	if err != nil {
@@ -158,7 +159,7 @@ func (p *EmailProvider) execListEmails(ctx context.Context, session SessionConte
 	}
 	binding := resolveReadBinding(bindings, StringArg(args, "provider_id"))
 	if binding == nil {
-		return nil, fmt.Errorf("email read permission denied or provider not found")
+		return nil, errors.New("email read permission denied or provider not found")
 	}
 	providerName, config, err := p.service.ProviderConfig(ctx, binding.EmailProviderID)
 	if err != nil {
@@ -167,7 +168,7 @@ func (p *EmailProvider) execListEmails(ctx context.Context, session SessionConte
 	config = ensureProviderID(config, binding.EmailProviderID)
 	reader, err := p.service.Registry().GetMailboxReader(providerName)
 	if err != nil {
-		return nil, fmt.Errorf("mailbox listing not supported for this provider")
+		return nil, errors.New("mailbox listing not supported for this provider")
 	}
 	page, _, _ := IntArg(args, "page")
 	pageSize, _, _ := IntArg(args, "page_size")
@@ -190,7 +191,7 @@ func (p *EmailProvider) execListEmails(ctx context.Context, session SessionConte
 func (p *EmailProvider) execReadEmail(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot_id is required")
+		return nil, errors.New("bot_id is required")
 	}
 	bindings, err := p.getBindings(ctx, botID)
 	if err != nil {
@@ -198,7 +199,7 @@ func (p *EmailProvider) execReadEmail(ctx context.Context, session SessionContex
 	}
 	binding := resolveReadBinding(bindings, StringArg(args, "provider_id"))
 	if binding == nil {
-		return nil, fmt.Errorf("email read permission denied or provider not found")
+		return nil, errors.New("email read permission denied or provider not found")
 	}
 	uidRaw, ok, _ := IntArg(args, "uid")
 	if !ok || uidRaw <= 0 {
@@ -209,10 +210,10 @@ func (p *EmailProvider) execReadEmail(ctx context.Context, session SessionContex
 		}
 	}
 	if uidRaw <= 0 {
-		return nil, fmt.Errorf("uid is required")
+		return nil, errors.New("uid is required")
 	}
 	if uidRaw > math.MaxUint32 {
-		return nil, fmt.Errorf("uid out of range")
+		return nil, errors.New("uid out of range")
 	}
 	providerName, config, err := p.service.ProviderConfig(ctx, binding.EmailProviderID)
 	if err != nil {
@@ -221,7 +222,7 @@ func (p *EmailProvider) execReadEmail(ctx context.Context, session SessionContex
 	config = ensureProviderID(config, binding.EmailProviderID)
 	reader, err := p.service.Registry().GetMailboxReader(providerName)
 	if err != nil {
-		return nil, fmt.Errorf("mailbox reading not supported for this provider")
+		return nil, errors.New("mailbox reading not supported for this provider")
 	}
 	item, err := reader.ReadMailbox(ctx, config, uint32(uidRaw)) //nolint:gosec // bounds checked above
 	if err != nil {

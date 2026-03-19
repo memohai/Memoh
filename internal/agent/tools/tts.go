@@ -8,10 +8,11 @@ import (
 	"log/slog"
 	"strings"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/settings"
 	ttspkg "github.com/memohai/memoh/internal/tts"
-	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 const ttsMaxTextLen = 500
@@ -78,7 +79,7 @@ func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.
 				"required": []string{"text"},
 			},
 			Execute: func(execCtx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSpeak(execCtx, sess, inputAsMap(input))
+				return p.execSpeak(execCtx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
@@ -87,14 +88,14 @@ func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.
 func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot_id is required")
+		return nil, errors.New("bot_id is required")
 	}
 	text := strings.TrimSpace(StringArg(args, "text"))
 	if text == "" {
-		return nil, fmt.Errorf("text is required")
+		return nil, errors.New("text is required")
 	}
 	if len([]rune(text)) > ttsMaxTextLen {
-		return nil, fmt.Errorf("text too long, max 500 characters")
+		return nil, errors.New("text too long, max 500 characters")
 	}
 	channelType, err := p.resolvePlatform(args, session)
 	if err != nil {
@@ -105,21 +106,20 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 		target = strings.TrimSpace(session.ReplyTarget)
 	}
 	if target == "" {
-		return nil, fmt.Errorf("target is required")
+		return nil, errors.New("target is required")
 	}
 	if strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) &&
 		target == strings.TrimSpace(session.ReplyTarget) {
-		return nil, fmt.Errorf(
-			"You are trying to speak in the SAME conversation you are already in. " +
-				"Do NOT use the speak tool for this. Instead, use the <speech> block in your response " +
-				"(e.g. <speech>Hello world</speech>).")
+		return nil, errors.New("you are trying to speak in the same conversation you are already in. " +
+			"Do not use the speak tool for this. Instead, use the <speech> block in your response " +
+			"(e.g. <speech>Hello world</speech>)")
 	}
 	botSettings, err := p.settings.GetBot(ctx, botID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load bot settings")
+		return nil, errors.New("failed to load bot settings")
 	}
 	if botSettings.TtsModelID == "" {
-		return nil, fmt.Errorf("bot has no TTS model configured")
+		return nil, errors.New("bot has no TTS model configured")
 	}
 	audioData, contentType, synthErr := p.tts.Synthesize(ctx, botSettings.TtsModelID, text, nil)
 	if synthErr != nil {

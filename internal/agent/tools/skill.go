@@ -2,7 +2,7 @@ package tools
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -19,7 +19,7 @@ func NewSkillProvider(log *slog.Logger) *SkillProvider {
 	return &SkillProvider{logger: log.With(slog.String("tool", "skill"))}
 }
 
-func (p *SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (*SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
 	if session.IsSubagent {
 		return nil, nil
 	}
@@ -46,7 +46,7 @@ func (p *SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 				skillName := StringArg(args, "skillName")
 				reason := StringArg(args, "reason")
 				if skillName == "" {
-					return nil, fmt.Errorf("skillName is required")
+					return nil, errors.New("skillName is required")
 				}
 				return map[string]any{
 					"success":   true,

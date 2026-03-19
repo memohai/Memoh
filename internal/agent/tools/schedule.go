@@ -2,12 +2,13 @@ package tools
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"strings"
 
-	sched "github.com/memohai/memoh/internal/schedule"
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	sched "github.com/memohai/memoh/internal/schedule"
 )
 
 type ScheduleProvider struct {
@@ -46,9 +47,9 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, fmt.Errorf("bot_id is required")
+					return nil, errors.New("bot_id is required")
 				}
-				items, err := p.service.List(ctx, botID)
+				items, err := p.service.List(ctx.Context, botID)
 				if err != nil {
 					return nil, err
 				}
@@ -68,18 +69,18 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 				args := inputAsMap(input)
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, fmt.Errorf("bot_id is required")
+					return nil, errors.New("bot_id is required")
 				}
 				id := StringArg(args, "id")
 				if id == "" {
-					return nil, fmt.Errorf("id is required")
+					return nil, errors.New("id is required")
 				}
-				item, err := p.service.Get(ctx, id)
+				item, err := p.service.Get(ctx.Context, id)
 				if err != nil {
 					return nil, err
 				}
 				if item.BotID != botID {
-					return nil, fmt.Errorf("bot mismatch")
+					return nil, errors.New("bot mismatch")
 				}
 				return item, nil
 			},
@@ -100,14 +101,14 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 				args := inputAsMap(input)
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, fmt.Errorf("bot_id is required")
+					return nil, errors.New("bot_id is required")
 				}
 				name := StringArg(args, "name")
 				description := StringArg(args, "description")
 				pattern := StringArg(args, "pattern")
 				command := StringArg(args, "command")
 				if name == "" || description == "" || pattern == "" || command == "" {
-					return nil, fmt.Errorf("name, description, pattern, command are required")
+					return nil, errors.New("name, description, pattern, command are required")
 				}
 				req := sched.CreateRequest{Name: name, Description: description, Pattern: pattern, Command: command}
 				maxCalls, err := parseNullableIntArg(args, "max_calls")
@@ -120,7 +121,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 				} else if ok {
 					req.Enabled = &enabled
 				}
-				item, err := p.service.Create(ctx, botID, req)
+				item, err := p.service.Create(ctx.Context, botID, req)
 				if err != nil {
 					return nil, err
 				}
@@ -134,7 +135,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 				"properties": map[string]any{
 					"id": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"},
 					"description": map[string]any{"type": "string"}, "pattern": map[string]any{"type": "string"},
-					"command": map[string]any{"type": "string"},
+					"command":   map[string]any{"type": "string"},
 					"max_calls": map[string]any{"type": []string{"integer", "null"}},
 					"enabled":   map[string]any{"type": "boolean"},
 				},
@@ -144,11 +145,11 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 				args := inputAsMap(input)
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, fmt.Errorf("bot_id is required")
+					return nil, errors.New("bot_id is required")
 				}
 				id := StringArg(args, "id")
 				if id == "" {
-					return nil, fmt.Errorf("id is required")
+					return nil, errors.New("id is required")
 				}
 				req := sched.UpdateRequest{}
 				maxCalls, err := parseNullableIntArg(args, "max_calls")
@@ -173,12 +174,12 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 				} else if ok {
 					req.Enabled = &enabled
 				}
-				item, err := p.service.Update(ctx, id, req)
+				item, err := p.service.Update(ctx.Context, id, req)
 				if err != nil {
 					return nil, err
 				}
 				if item.BotID != botID {
-					return nil, fmt.Errorf("bot mismatch")
+					return nil, errors.New("bot mismatch")
 				}
 				return item, nil
 			},
@@ -196,20 +197,20 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 				args := inputAsMap(input)
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, fmt.Errorf("bot_id is required")
+					return nil, errors.New("bot_id is required")
 				}
 				id := StringArg(args, "id")
 				if id == "" {
-					return nil, fmt.Errorf("id is required")
+					return nil, errors.New("id is required")
 				}
-				item, err := p.service.Get(ctx, id)
+				item, err := p.service.Get(ctx.Context, id)
 				if err != nil {
 					return nil, err
 				}
 				if item.BotID != botID {
-					return nil, fmt.Errorf("bot mismatch")
+					return nil, errors.New("bot mismatch")
 				}
-				if err := p.service.Delete(ctx, id); err != nil {
+				if err := p.service.Delete(ctx.Context, id); err != nil {
 					return nil, err
 				}
 				return map[string]any{"success": true}, nil

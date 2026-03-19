@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
-	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 // WSStreamEvent represents a raw JSON event forwarded from the agent.

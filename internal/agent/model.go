@@ -1,19 +1,18 @@
 package agent
 
 import (
-	sdk "github.com/memohai/twilight-ai/sdk"
-
 	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
 	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
 	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
 	openairesponses "github.com/memohai/twilight-ai/provider/openai/responses"
+	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 // ClientType constants matching the database model configuration.
 const (
-	ClientTypeOpenAICompletions = "openai-completions"
-	ClientTypeOpenAIResponses   = "openai-responses"
-	ClientTypeAnthropicMessages = "anthropic-messages"
+	ClientTypeOpenAICompletions  = "openai-completions"
+	ClientTypeOpenAIResponses    = "openai-responses"
+	ClientTypeAnthropicMessages  = "anthropic-messages"
 	ClientTypeGoogleGenerativeAI = "google-generative-ai"
 )
 

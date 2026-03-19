@@ -8,9 +8,10 @@ import (
 	"log/slog"
 	"strings"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/agent/tools"
 	"github.com/memohai/memoh/internal/workspace/bridge"
-	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 // Agent is the core agent that handles LLM interactions.
@@ -388,7 +389,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 	}, nil
 }
 
-func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool) []sdk.GenerateOption {
+func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool) []sdk.GenerateOption {
 	opts := []sdk.GenerateOption{
 		sdk.WithModel(cfg.Model),
 		sdk.WithMessages(cfg.Messages),

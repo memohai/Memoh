@@ -2,13 +2,15 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
-	inboxsvc "github.com/memohai/memoh/internal/inbox"
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	inboxsvc "github.com/memohai/memoh/internal/inbox"
 )
 
 const (
@@ -55,7 +57,7 @@ func (p *InboxProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 				args := inputAsMap(input)
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, fmt.Errorf("bot_id is required")
+					return nil, errors.New("bot_id is required")
 				}
 				query := StringArg(args, "query")
 				limit := defaultInboxSearchLimit
@@ -74,14 +76,14 @@ func (p *InboxProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 				if startStr := StringArg(args, "start_time"); startStr != "" {
 					t, err := time.Parse(time.RFC3339, startStr)
 					if err != nil {
-						return nil, fmt.Errorf("invalid start_time: %v", err)
+						return nil, fmt.Errorf("invalid start_time: %w", err)
 					}
 					req.StartTime = &t
 				}
 				if endStr := StringArg(args, "end_time"); endStr != "" {
 					t, err := time.Parse(time.RFC3339, endStr)
 					if err != nil {
-						return nil, fmt.Errorf("invalid end_time: %v", err)
+						return nil, fmt.Errorf("invalid end_time: %w", err)
 					}
 					req.EndTime = &t
 				}
@@ -90,9 +92,9 @@ func (p *InboxProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 				} else if ok {
 					req.IncludeRead = &includeRead
 				}
-				items, err := p.service.Search(ctx, botID, req)
+				items, err := p.service.Search(ctx.Context, botID, req)
 				if err != nil {
-					return nil, fmt.Errorf("inbox search failed")
+					return nil, errors.New("inbox search failed")
 				}
 				results := make([]map[string]any, 0, len(items))
 				for _, item := range items {

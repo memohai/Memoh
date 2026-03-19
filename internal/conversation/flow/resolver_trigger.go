@@ -6,11 +6,12 @@ import (
 	"errors"
 	"strings"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/schedule"
-	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 // TriggerSchedule executes a scheduled command via the internal agent.

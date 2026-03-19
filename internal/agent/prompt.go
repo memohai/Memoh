@@ -3,6 +3,7 @@ package agent
 import (
 	"embed"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -67,23 +68,27 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 	}
 
 	enabledSkillsSection := ""
+	var enabledSkillsSectionSb70 strings.Builder
 	for _, s := range params.EnabledSkills {
-		enabledSkillsSection += "\n\n---\n\n" + formatSkillPrompt(s)
+		enabledSkillsSectionSb70.WriteString("\n\n---\n\n" + formatSkillPrompt(s))
 	}
+	enabledSkillsSection += enabledSkillsSectionSb70.String()
 
 	fileSections := ""
+	var fileSectionsSb75 strings.Builder
 	for _, f := range params.Files {
 		if f.Content == "" {
 			continue
 		}
-		fileSections += "\n\n" + formatSystemFile(f)
+		fileSectionsSb75.WriteString("\n\n" + formatSystemFile(f))
 	}
+	fileSections += fileSectionsSb75.String()
 
 	return render(systemTmpl, map[string]string{
 		"home":                 home,
 		"basicTools":           strings.Join(basicTools, "\n"),
 		"fileSections":         fileSections,
-		"skillsCount":          fmt.Sprintf("%d", len(params.Skills)),
+		"skillsCount":          strconv.Itoa(len(params.Skills)),
 		"skillsList":           skillsList,
 		"enabledSkillsSection": enabledSkillsSection,
 		"inboxSection":         formatInbox(params.Inbox),
@@ -103,7 +108,7 @@ type SystemPromptParams struct {
 func GenerateSchedulePrompt(s Schedule) string {
 	maxCallsStr := "Unlimited"
 	if s.MaxCalls != nil {
-		maxCallsStr = fmt.Sprintf("%d", *s.MaxCalls)
+		maxCallsStr = strconv.Itoa(*s.MaxCalls)
 	}
 	return render(scheduleTmpl, map[string]string{
 		"name":        s.Name,
@@ -121,7 +126,7 @@ func GenerateHeartbeatPrompt(interval int, checklist string) string {
 		checklistSection = "\n## HEARTBEAT.md (checklist)\n\n" + strings.TrimSpace(checklist) + "\n"
 	}
 	return render(heartbeatTmpl, map[string]string{
-		"interval":         fmt.Sprintf("%d", interval),
+		"interval":         strconv.Itoa(interval),
 		"timeNow":          TimeNow().UTC().Format("2006-01-02T15:04:05Z"),
 		"checklistSection": checklistSection,
 	})
@@ -160,7 +165,7 @@ func formatInbox(items []InboxItem) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## Inbox (%d unread)\n\n", len(items)))
+	fmt.Fprintf(&sb, "## Inbox (%d unread)\n\n", len(items))
 	sb.WriteString("These are messages from other channels — NOT from the current conversation. Use `send` or `react` if you want to respond to any of them.\n\n")
 	sb.WriteString("<inbox>\n")
 	sb.Write(mustMarshal(formatted))

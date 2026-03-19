@@ -25,21 +25,21 @@ const (
 
 // StreamEvent is emitted by the agent during streaming.
 type StreamEvent struct {
-	Type        StreamEventType `json:"type"`
-	Delta       string          `json:"delta,omitempty"`
-	ToolName    string          `json:"toolName,omitempty"`
-	ToolCallID  string          `json:"toolCallId,omitempty"`
-	Input       any             `json:"input,omitempty"`
-	Result      any             `json:"result,omitempty"`
+	Type        StreamEventType  `json:"type"`
+	Delta       string           `json:"delta,omitempty"`
+	ToolName    string           `json:"toolName,omitempty"`
+	ToolCallID  string           `json:"toolCallId,omitempty"`
+	Input       any              `json:"input,omitempty"`
+	Result      any              `json:"result,omitempty"`
 	Attachments []FileAttachment `json:"attachments,omitempty"`
-	Reactions   []ReactionItem  `json:"reactions,omitempty"`
-	Speeches    []SpeechItem    `json:"speeches,omitempty"`
-	Messages    json.RawMessage `json:"messages,omitempty"`
-	Usage       json.RawMessage `json:"usage,omitempty"`
-	Usages      json.RawMessage `json:"usages,omitempty"`
-	Skills      []string        `json:"skills,omitempty"`
-	Reasoning   []string        `json:"reasoning,omitempty"`
-	Error       string          `json:"error,omitempty"`
+	Reactions   []ReactionItem   `json:"reactions,omitempty"`
+	Speeches    []SpeechItem     `json:"speeches,omitempty"`
+	Messages    json.RawMessage  `json:"messages,omitempty"`
+	Usage       json.RawMessage  `json:"usage,omitempty"`
+	Usages      json.RawMessage  `json:"usages,omitempty"`
+	Skills      []string         `json:"skills,omitempty"`
+	Reasoning   []string         `json:"reasoning,omitempty"`
+	Error       string           `json:"error,omitempty"`
 }
 
 // IsTerminal returns true for events that signal end of stream.

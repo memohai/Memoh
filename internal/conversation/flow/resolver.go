@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/sqlc"
@@ -17,7 +19,6 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
-	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 const (
@@ -308,12 +309,12 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	sdkMessages := modelMessagesToSDKMessages(nonNilModelMessages(messages))
 
 	runCfg := agentpkg.RunConfig{
-		Model:             sdkModel,
-		ReasoningEffort:   reasoningEffort,
-		Messages:          sdkMessages,
-		Query:             headerifiedQuery,
-		Channels:          nonNilStrings(req.Channels),
-		CurrentChannel:    req.CurrentChannel,
+		Model:           sdkModel,
+		ReasoningEffort: reasoningEffort,
+		Messages:        sdkMessages,
+		Query:           headerifiedQuery,
+		Channels:        nonNilStrings(req.Channels),
+		CurrentChannel:  req.CurrentChannel,
 		Identity: agentpkg.SessionContext{
 			BotID:             req.BotID,
 			ChatID:            req.ChatID,

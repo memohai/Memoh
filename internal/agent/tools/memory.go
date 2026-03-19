@@ -6,10 +6,11 @@ import (
 	"log/slog"
 	"strings"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/settings"
-	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 // MemorySettingsReader returns bot settings for memory provider resolution.
@@ -55,7 +56,7 @@ func (p *MemoryProvider) Tools(ctx context.Context, session SessionContext) ([]s
 			Parameters:  desc.InputSchema,
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				args := inputAsMap(input)
-				result, err := prov.CallTool(ctx, sess, desc.Name, args)
+				result, err := prov.CallTool(ctx.Context, sess, desc.Name, args)
 				if err != nil {
 					return nil, err
 				}

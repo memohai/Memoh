@@ -253,15 +253,3 @@ func encodeReaderAsDataURL(reader io.Reader, maxBytes int64, attachmentType, fal
 	}
 	return encoded.String(), mime, nil
 }
-
-// extractFileRefPaths collects container file paths from gateway attachments
-// that use the tool_file_ref transport (files already written to the bot container).
-func extractFileRefPaths(attachments []any) []string {
-	var paths []string
-	for _, att := range attachments {
-		if ga, ok := att.(gatewayAttachment); ok && ga.Transport == gatewayTransportToolFileRef && strings.TrimSpace(ga.Payload) != "" {
-			paths = append(paths, ga.Payload)
-		}
-	}
-	return paths
-}

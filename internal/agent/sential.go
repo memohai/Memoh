@@ -2,6 +2,7 @@ package agent
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -12,21 +13,21 @@ import (
 
 // Loop detection constants matching the TypeScript implementation.
 const (
-	LoopDetectedAbortMessage         = "loop detected, stream aborted"
-	LoopDetectedStreakThreshold       = 3
-	LoopDetectedMinNewGramsPerChunk  = 8
-	LoopDetectedProbeChars           = 256
-	ToolLoopDetectedAbortMessage     = "tool loop detected, stream aborted"
-	ToolLoopRepeatThreshold          = 5
-	ToolLoopWarningsBeforeAbort      = 1
-	ToolLoopWarningKey               = "__memoh_tool_loop_warning"
-	ToolLoopWarningText              = "[MEMOH_TOOL_LOOP_WARNING] Repeated identical tool invocation (same tool + arguments) was detected more than 5 times. Stop looping this tool and either summarize current results or change strategy."
+	LoopDetectedAbortMessage        = "loop detected, stream aborted"
+	LoopDetectedStreakThreshold     = 3
+	LoopDetectedMinNewGramsPerChunk = 8
+	LoopDetectedProbeChars          = 256
+	ToolLoopDetectedAbortMessage    = "tool loop detected, stream aborted"
+	ToolLoopRepeatThreshold         = 5
+	ToolLoopWarningsBeforeAbort     = 1
+	ToolLoopWarningKey              = "__memoh_tool_loop_warning"                                                                                                                                                                            //nolint:gosec // internal warning key, not a credential
+	ToolLoopWarningText             = "[MEMOH_TOOL_LOOP_WARNING] Repeated identical tool invocation (same tool + arguments) was detected more than 5 times. Stop looping this tool and either summarize current results or change strategy." //nolint:gosec // human-readable warning text, not a credential
 
-	defaultNgramSize            = 10
-	defaultWindowSize           = 1000
-	defaultOverlapThreshold     = 0.75
-	defaultConsecutiveHits      = 10
-	defaultMinNewGramsPerChunk  = 1
+	defaultNgramSize           = 10
+	defaultWindowSize          = 1000
+	defaultOverlapThreshold    = 0.75
+	defaultConsecutiveHits     = 10
+	defaultMinNewGramsPerChunk = 1
 )
 
 // --- Sential: n-gram overlap detector ---
@@ -136,7 +137,8 @@ func (s *Sential) Inspect(text string) SentialResult {
 		contextChars = make([]rune, len(s.windowChars[start:]))
 		copy(contextChars, s.windowChars[start:])
 	}
-	candidate := append(contextChars, incoming...)
+	candidate := append([]rune{}, contextChars...)
+	candidate = append(candidate, incoming...)
 	contextLength := len(contextChars)
 
 	matchedGrams := 0
@@ -192,10 +194,10 @@ type TextLoopGuardResult struct {
 
 // TextLoopGuard wraps Sential with consecutive-hit tracking.
 type TextLoopGuard struct {
-	sential              *Sential
+	sential                *Sential
 	consecutiveHitsToAbort int
-	minNewGramsPerChunk  int
-	streak               int
+	minNewGramsPerChunk    int
+	streak                 int
 }
 
 // NewTextLoopGuard creates a text loop guard.
@@ -207,9 +209,9 @@ func NewTextLoopGuard(consecutiveHits, minNewGrams int, opts SentialOptions) *Te
 		minNewGrams = defaultMinNewGramsPerChunk
 	}
 	return &TextLoopGuard{
-		sential:              NewSential(opts),
+		sential:                NewSential(opts),
 		consecutiveHitsToAbort: consecutiveHits,
-		minNewGramsPerChunk:  minNewGrams,
+		minNewGramsPerChunk:    minNewGrams,
 	}
 }
 
@@ -320,13 +322,13 @@ type ToolLoopResult struct {
 
 // ToolLoopGuard detects repeated identical tool calls.
 type ToolLoopGuard struct {
-	repeatThreshold    int
+	repeatThreshold     int
 	warningsBeforeAbort int
-	volatileKeySet     map[string]struct{}
-	lastHash           string
-	repeatCount        int
-	breachCount        int
-	breachHash         string
+	volatileKeySet      map[string]struct{}
+	lastHash            string
+	repeatCount         int
+	breachCount         int
+	breachHash          string
 }
 
 // NewToolLoopGuard creates a tool loop guard.
@@ -342,9 +344,9 @@ func NewToolLoopGuard(repeatThreshold, warningsBeforeAbort int) *ToolLoopGuard {
 		volatileSet[normalizeKeyName(k)] = struct{}{}
 	}
 	return &ToolLoopGuard{
-		repeatThreshold:    repeatThreshold,
+		repeatThreshold:     repeatThreshold,
 		warningsBeforeAbort: warningsBeforeAbort,
-		volatileKeySet:     volatileSet,
+		volatileKeySet:      volatileSet,
 	}
 }
 
@@ -469,7 +471,7 @@ func computeToolLoopHash(input ToolLoopInput, volatileSet map[string]struct{}) s
 	}
 	serialized, _ := json.Marshal(payload)
 	h := sha256.Sum256(serialized)
-	return fmt.Sprintf("%x", h)
+	return hex.EncodeToString(h[:])
 }
 
 // --- Helper to check for repetitions in text ---

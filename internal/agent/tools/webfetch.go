@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -61,13 +62,13 @@ func (p *WebFetchProvider) Tools(_ context.Context, _ SessionContext) ([]sdk.Too
 				args := inputAsMap(input)
 				rawURL := strings.TrimSpace(StringArg(args, "url"))
 				if rawURL == "" {
-					return nil, fmt.Errorf("url is required")
+					return nil, errors.New("url is required")
 				}
 				format := strings.TrimSpace(StringArg(args, "format"))
 				if format == "" {
 					format = "auto"
 				}
-				return p.callWebFetch(ctx, rawURL, format)
+				return p.callWebFetch(ctx.Context, rawURL, format)
 			},
 		},
 	}, nil
@@ -76,7 +77,7 @@ func (p *WebFetchProvider) Tools(_ context.Context, _ SessionContext) ([]sdk.Too
 func (p *WebFetchProvider) callWebFetch(ctx context.Context, rawURL, format string) (any, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("invalid url: %v", err)
+		return nil, fmt.Errorf("invalid url: %w", err)
 	}
 	req.Header.Set("User-Agent", webFetchUserAgent)
 
@@ -87,7 +88,7 @@ func (p *WebFetchProvider) callWebFetch(ctx context.Context, rawURL, format stri
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("http error: %d %s", resp.StatusCode, resp.Status)
 	}
 
 	contentType := resp.Header.Get("Content-Type")
@@ -130,7 +131,7 @@ func detectWebFetchFormat(contentType string) string {
 func (*WebFetchProvider) processJSON(fetchedURL, contentType string, body []byte) (any, error) {
 	var data any
 	if err := json.Unmarshal(body, &data); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON")
+		return nil, errors.New("failed to parse json")
 	}
 	return map[string]any{"success": true, "url": fetchedURL, "format": "json", "contentType": contentType, "data": data}, nil
 }
@@ -150,10 +151,10 @@ func (p *WebFetchProvider) processHTML(fetchedURL, contentType string, body []by
 	}
 	article, err := readability.FromReader(strings.NewReader(string(body)), parsed)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract readable content from HTML: %v", err)
+		return nil, fmt.Errorf("failed to extract readable content from html: %w", err)
 	}
 	if strings.TrimSpace(article.Content) == "" {
-		return nil, fmt.Errorf("failed to extract readable content from HTML")
+		return nil, errors.New("failed to extract readable content from html")
 	}
 	markdown, err := htmltomarkdown.ConvertString(article.Content)
 	if err != nil {

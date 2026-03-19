@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -21,11 +22,12 @@ import (
 	"strings"
 	"time"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
-	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 type WebProvider struct {
@@ -63,7 +65,7 @@ func (p *WebProvider) Tools(_ context.Context, session SessionContext) ([]sdk.To
 				"required": []string{"query"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execWebSearch(ctx, sess, inputAsMap(input))
+				return p.execWebSearch(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
@@ -72,7 +74,7 @@ func (p *WebProvider) Tools(_ context.Context, session SessionContext) ([]sdk.To
 func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot_id is required")
+		return nil, errors.New("bot_id is required")
 	}
 	botSettings, err := p.settings.GetBot(ctx, botID)
 	if err != nil {
@@ -80,7 +82,7 @@ func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext,
 	}
 	searchProviderID := strings.TrimSpace(botSettings.SearchProviderID)
 	if searchProviderID == "" {
-		return nil, fmt.Errorf("search provider not configured for this bot")
+		return nil, errors.New("search provider not configured for this bot")
 	}
 	provider, err := p.searchProviders.GetRawByID(ctx, searchProviderID)
 	if err != nil {
@@ -90,7 +92,7 @@ func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext,
 
 	query := strings.TrimSpace(StringArg(args, "query"))
 	if query == "" {
-		return nil, fmt.Errorf("query is required")
+		return nil, errors.New("query is required")
 	}
 	count := 5
 	if value, ok, err := IntArg(args, "count"); err != nil {
@@ -104,7 +106,7 @@ func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext,
 	return p.callSearch(ctx, provider.Provider, provider.Config, query, count)
 }
 
-func (p *WebProvider) callSearch(ctx context.Context, providerName string, configJSON []byte, query string, count int) (any, error) {
+func (*WebProvider) callSearch(ctx context.Context, providerName string, configJSON []byte, query string, count int) (any, error) {
 	switch strings.TrimSpace(providerName) {
 	case string(searchproviders.ProviderBrave):
 		return callBraveSearch(ctx, configJSON, query, count)
@@ -131,7 +133,7 @@ func (p *WebProvider) callSearch(ctx context.Context, providerName string, confi
 	case string(searchproviders.ProviderYandex):
 		return callYandexSearch(ctx, configJSON, query, count)
 	default:
-		return nil, fmt.Errorf("unsupported search provider")
+		return nil, errors.New("unsupported search provider")
 	}
 }
 
@@ -142,7 +144,7 @@ func callBraveSearch(ctx context.Context, configJSON []byte, query string, count
 	endpoint := strings.TrimRight(firstNonEmpty(stringValue(cfg["base_url"]), "https://api.search.brave.com/res/v1/web/search"), "/")
 	reqURL, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("invalid search provider base_url")
+		return nil, errors.New("invalid search provider base_url")
 	}
 	params := reqURL.Query()
 	params.Set("q", query)
@@ -178,7 +180,7 @@ func callBraveSearch(ctx context.Context, configJSON []byte, query string, count
 		} `json:"web"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	return buildSearchResults(query, raw.Web.Results, func(r struct{ Title, URL, Description string }) map[string]any {
 		return map[string]any{"title": r.Title, "url": r.URL, "description": r.Description}
@@ -217,7 +219,7 @@ func callBingSearch(ctx context.Context, configJSON []byte, query string, count 
 		} `json:"webPages"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	results := make([]map[string]any, 0, len(raw.WebPages.Value))
 	for _, item := range raw.WebPages.Value {
@@ -232,7 +234,7 @@ func callGoogleSearch(ctx context.Context, configJSON []byte, query string, coun
 	reqURL, _ := url.Parse(endpoint)
 	cx := stringValue(cfg["cx"])
 	if cx == "" {
-		return nil, fmt.Errorf("Google Custom Search requires cx (Search Engine ID)")
+		return nil, errors.New("google custom search requires cx (search engine ID)")
 	}
 	if count > 10 {
 		count = 10
@@ -264,7 +266,7 @@ func callGoogleSearch(ctx context.Context, configJSON []byte, query string, coun
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	results := make([]map[string]any, 0, len(raw.Items))
 	for _, item := range raw.Items {
@@ -278,7 +280,7 @@ func callTavilySearch(ctx context.Context, configJSON []byte, query string, coun
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.tavily.com/search")
 	apiKey := stringValue(cfg["api_key"])
 	if apiKey == "" {
-		return nil, fmt.Errorf("Tavily API key is required")
+		return nil, errors.New("tavily API key is required")
 	}
 	payload, _ := json.Marshal(map[string]any{"query": query, "max_results": count})
 	timeout := parseSearchTimeout(configJSON, 15*time.Second)
@@ -302,7 +304,7 @@ func callTavilySearch(ctx context.Context, configJSON []byte, query string, coun
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	results := make([]map[string]any, 0, len(raw.Results))
 	for _, item := range raw.Results {
@@ -317,7 +319,7 @@ func callSogouSearch(ctx context.Context, configJSON []byte, query string, count
 	secretID := stringValue(cfg["secret_id"])
 	secretKey := stringValue(cfg["secret_key"])
 	if secretID == "" || secretKey == "" {
-		return nil, fmt.Errorf("Sogou search requires Tencent Cloud SecretId and SecretKey")
+		return nil, errors.New("sogou search requires Tencent Cloud SecretId and SecretKey")
 	}
 	action := "SearchPro"
 	version := "2025-05-08"
@@ -362,10 +364,10 @@ func callSogouSearch(ctx context.Context, configJSON []byte, query string, count
 		} `json:"Response"`
 	}
 	if err := json.Unmarshal(body, &rawResp); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	if rawResp.Response.Error != nil {
-		return nil, fmt.Errorf("Sogou search failed: %s", rawResp.Response.Error.Message)
+		return nil, fmt.Errorf("sogou search failed: %s", rawResp.Response.Error.Message)
 	}
 	type sogouPage struct {
 		Title, URL, Passage string
@@ -402,7 +404,7 @@ func callSerperSearch(ctx context.Context, configJSON []byte, query string, coun
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://google.serper.dev/search")
 	apiKey := stringValue(cfg["api_key"])
 	if apiKey == "" {
-		return nil, fmt.Errorf("Serper API key is required")
+		return nil, errors.New("serper API key is required")
 	}
 	payload, _ := json.Marshal(map[string]any{"q": query})
 	timeout := parseSearchTimeout(configJSON, 15*time.Second)
@@ -427,7 +429,7 @@ func callSerperSearch(ctx context.Context, configJSON []byte, query string, coun
 		} `json:"organic"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	sort.Slice(raw.Organic, func(i, j int) bool { return raw.Organic[i].Position < raw.Organic[j].Position })
 	results := make([]map[string]any, 0)
@@ -444,7 +446,7 @@ func callSearXNGSearch(ctx context.Context, configJSON []byte, query string, cou
 	cfg := parseSearchConfig(configJSON)
 	baseURL := stringValue(cfg["base_url"])
 	if baseURL == "" {
-		return nil, fmt.Errorf("SearXNG base URL is required")
+		return nil, errors.New("SearXNG base URL is required")
 	}
 	reqURL, _ := url.Parse(strings.TrimRight(baseURL, "/"))
 	params := reqURL.Query()
@@ -481,7 +483,7 @@ func callSearXNGSearch(ctx context.Context, configJSON []byte, query string, cou
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	sort.Slice(raw.Results, func(i, j int) bool { return raw.Results[i].Score > raw.Results[j].Score })
 	results := make([]map[string]any, 0)
@@ -499,7 +501,7 @@ func callJinaSearch(ctx context.Context, configJSON []byte, query string, count 
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://s.jina.ai/")
 	apiKey := stringValue(cfg["api_key"])
 	if apiKey == "" {
-		return nil, fmt.Errorf("Jina API key is required")
+		return nil, errors.New("jina API key is required")
 	}
 	if count > 10 {
 		count = 10
@@ -525,7 +527,7 @@ func callJinaSearch(ctx context.Context, configJSON []byte, query string, count 
 		Data []struct{ Title, URL, Content string } `json:"data"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	results := make([]map[string]any, 0, len(raw.Data))
 	for _, item := range raw.Data {
@@ -539,7 +541,7 @@ func callExaSearch(ctx context.Context, configJSON []byte, query string, count i
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.exa.ai/search")
 	apiKey := stringValue(cfg["api_key"])
 	if apiKey == "" {
-		return nil, fmt.Errorf("Exa API key is required")
+		return nil, errors.New("exa API key is required")
 	}
 	payload, _ := json.Marshal(map[string]any{"query": query, "numResults": count, "contents": map[string]any{"text": true, "highlights": true}, "type": "auto"})
 	timeout := parseSearchTimeout(configJSON, 15*time.Second)
@@ -561,7 +563,7 @@ func callExaSearch(ctx context.Context, configJSON []byte, query string, count i
 		Results []struct{ Title, URL, Text string } `json:"results"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	results := make([]map[string]any, 0, len(raw.Results))
 	for _, item := range raw.Results {
@@ -575,7 +577,7 @@ func callBochaSearch(ctx context.Context, configJSON []byte, query string, count
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.bochaai.com/v1/web-search")
 	apiKey := stringValue(cfg["api_key"])
 	if apiKey == "" {
-		return nil, fmt.Errorf("Bocha API key is required")
+		return nil, errors.New("bocha API key is required")
 	}
 	payload, _ := json.Marshal(map[string]any{"query": query, "summary": true, "freshness": "noLimit", "count": count})
 	timeout := parseSearchTimeout(configJSON, 15*time.Second)
@@ -601,7 +603,7 @@ func callBochaSearch(ctx context.Context, configJSON []byte, query string, count
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	results := make([]map[string]any, 0, len(raw.Data.WebPages.Value))
 	for _, item := range raw.Data.WebPages.Value {
@@ -664,7 +666,7 @@ func callYandexSearch(ctx context.Context, configJSON []byte, query string, coun
 	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://searchapi.api.cloud.yandex.net/v2/web/search")
 	apiKey := stringValue(cfg["api_key"])
 	if apiKey == "" {
-		return nil, fmt.Errorf("Yandex API key is required")
+		return nil, errors.New("yandex API key is required")
 	}
 	searchType := firstNonEmpty(stringValue(cfg["search_type"]), "SEARCH_TYPE_RU")
 	payload, _ := json.Marshal(map[string]any{
@@ -689,15 +691,15 @@ func callYandexSearch(ctx context.Context, configJSON []byte, query string, coun
 		RawData string `json:"rawData"`
 	}
 	if err := json.Unmarshal(body, &rawResp); err != nil {
-		return nil, fmt.Errorf("invalid search response")
+		return nil, errors.New("invalid search response")
 	}
 	xmlData, err := base64.StdEncoding.DecodeString(rawResp.RawData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode Yandex response")
+		return nil, errors.New("failed to decode Yandex response")
 	}
 	results, err := parseYandexXML(xmlData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse Yandex XML response")
+		return nil, errors.New("failed to parse Yandex XML response")
 	}
 	return map[string]any{"query": query, "results": results}, nil
 }

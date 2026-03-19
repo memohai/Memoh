@@ -13,11 +13,12 @@ import (
 	"strings"
 	"time"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 	subagentsvc "github.com/memohai/memoh/internal/subagent"
-	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 const subagentGatewayTimeout = 120 * time.Second
@@ -66,9 +67,9 @@ func (p *SubagentProvider) Tools(_ context.Context, session SessionContext) ([]s
 			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, fmt.Errorf("bot_id is required")
+					return nil, errors.New("bot_id is required")
 				}
-				items, err := p.service.List(ctx, botID)
+				items, err := p.service.List(ctx.Context, botID)
 				if err != nil {
 					return nil, err
 				}
@@ -92,9 +93,9 @@ func (p *SubagentProvider) Tools(_ context.Context, session SessionContext) ([]s
 				args := inputAsMap(input)
 				id := StringArg(args, "id")
 				if id == "" {
-					return nil, fmt.Errorf("id is required")
+					return nil, errors.New("id is required")
 				}
-				if err := p.service.Delete(ctx, id); err != nil {
+				if err := p.service.Delete(ctx.Context, id); err != nil {
 					return nil, err
 				}
 				return map[string]any{"success": true}, nil
@@ -112,7 +113,7 @@ func (p *SubagentProvider) Tools(_ context.Context, session SessionContext) ([]s
 				"required": []string{"name", "description", "query"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execQuery(ctx, sess, inputAsMap(input))
+				return p.execQuery(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
@@ -121,21 +122,21 @@ func (p *SubagentProvider) Tools(_ context.Context, session SessionContext) ([]s
 func (p *SubagentProvider) execQuery(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot_id is required")
+		return nil, errors.New("bot_id is required")
 	}
 	name := StringArg(args, "name")
 	description := StringArg(args, "description")
 	query := StringArg(args, "query")
 	if name == "" || description == "" || query == "" {
-		return nil, fmt.Errorf("name, description, and query are required")
+		return nil, errors.New("name, description, and query are required")
 	}
 	target, err := p.service.GetOrCreate(ctx, botID, subagentsvc.CreateRequest{Name: name, Description: description})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get or create subagent: %v", err)
+		return nil, fmt.Errorf("failed to get or create subagent: %w", err)
 	}
 	modelCfg, provider, err := p.resolveModel(ctx, botID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve model: %v", err)
+		return nil, fmt.Errorf("failed to resolve model: %w", err)
 	}
 	gwResp, err := p.postSubagent(ctx, session, subagentGWRequest{
 		Model: subagentModelCfg{
@@ -149,7 +150,7 @@ func (p *SubagentProvider) execQuery(ctx context.Context, session SessionContext
 		Messages: target.Messages, Query: query, Name: name, Desc: description,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("subagent query failed: %v", err)
+		return nil, fmt.Errorf("subagent query failed: %w", err)
 	}
 	updatedMessages := slices.Clone(target.Messages)
 	updatedMessages = append(updatedMessages, gwResp.Messages...)
@@ -196,7 +197,7 @@ type subagentModelCfg struct {
 	ModelID    string   `json:"modelId"`
 	ClientType string   `json:"clientType"`
 	Input      []string `json:"input"`
-	APIKey     string   `json:"apiKey"`     //nolint:gosec // forwarded to agent gateway
+	APIKey     string   `json:"apiKey"` //nolint:gosec // forwarded to agent gateway
 	BaseURL    string   `json:"baseUrl"`
 }
 

@@ -2,12 +2,13 @@ package tools
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"strings"
 
-	"github.com/memohai/memoh/internal/channel/route"
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/channel/route"
 )
 
 type ContactsProvider struct {
@@ -48,9 +49,9 @@ func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]s
 				args := inputAsMap(input)
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, fmt.Errorf("bot_id is required")
+					return nil, errors.New("bot_id is required")
 				}
-				routes, err := p.routeService.List(ctx, botID)
+				routes, err := p.routeService.List(ctx.Context, botID)
 				if err != nil {
 					return nil, err
 				}

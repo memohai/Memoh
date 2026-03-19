@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/memohai/memoh/internal/conversation"
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/conversation"
 )
 
 // sdkMessagesToModelMessages converts SDK messages to the persistence/API format

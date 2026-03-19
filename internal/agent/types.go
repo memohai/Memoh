@@ -16,7 +16,7 @@ type SessionContext struct {
 	CurrentPlatform   string
 	ReplyTarget       string
 	ConversationType  string
-	SessionToken      string
+	SessionToken      string //nolint:gosec // carries session credential material at runtime
 	IsSubagent        bool
 }
 
@@ -111,7 +111,7 @@ type ModelConfig struct {
 	ModelID         string
 	ClientType      string
 	InputModalities []string
-	APIKey          string
+	APIKey          string //nolint:gosec // carries provider credential material at runtime
 	BaseURL         string
 	ReasoningConfig *ReasoningConfig
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,11 +13,12 @@ import (
 	"strings"
 	"time"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/browsercontexts"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/workspace/bridge"
-	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 type BrowserProvider struct {
@@ -81,7 +83,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 				"required": []string{"action"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execAction(ctx, sess, inputAsMap(input))
+				return p.execAction(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 		{
@@ -98,7 +100,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 				"required": []string{"observe"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execObserve(ctx, sess, inputAsMap(input))
+				return p.execObserve(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
@@ -111,7 +113,7 @@ func (p *BrowserProvider) resolveContext(ctx context.Context, botID string) (str
 	}
 	browserCtxID := strings.TrimSpace(botSettings.BrowserContextID)
 	if browserCtxID == "" {
-		return "", browsercontexts.BrowserContext{}, fmt.Errorf("browser context not configured for this bot")
+		return "", browsercontexts.BrowserContext{}, errors.New("browser context not configured for this bot")
 	}
 	bcConfig, err := p.browserContexts.GetByID(ctx, browserCtxID)
 	if err != nil {
@@ -126,7 +128,7 @@ func (p *BrowserProvider) resolveContext(ctx context.Context, botID string) (str
 func (p *BrowserProvider) execAction(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot_id is required")
+		return nil, errors.New("bot_id is required")
 	}
 	contextID, _, err := p.resolveContext(ctx, botID)
 	if err != nil {
@@ -134,7 +136,7 @@ func (p *BrowserProvider) execAction(ctx context.Context, session SessionContext
 	}
 	action := StringArg(args, "action")
 	if action == "" {
-		return nil, fmt.Errorf("action is required")
+		return nil, errors.New("action is required")
 	}
 	payload := map[string]any{"action": action}
 	for _, key := range []string{"url", "selector", "text", "key", "value", "target_selector", "direction"} {
@@ -160,7 +162,7 @@ func (p *BrowserProvider) execAction(ctx context.Context, session SessionContext
 func (p *BrowserProvider) execObserve(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
-		return nil, fmt.Errorf("bot_id is required")
+		return nil, errors.New("bot_id is required")
 	}
 	contextID, _, err := p.resolveContext(ctx, botID)
 	if err != nil {
@@ -168,7 +170,7 @@ func (p *BrowserProvider) execObserve(ctx context.Context, session SessionContex
 	}
 	observe := StringArg(args, "observe")
 	if observe == "" {
-		return nil, fmt.Errorf("observe is required")
+		return nil, errors.New("observe is required")
 	}
 	payload := map[string]any{"action": observe}
 	if v := StringArg(args, "selector"); v != "" {
@@ -243,7 +245,7 @@ func (p *BrowserProvider) doGatewayAction(ctx context.Context, botID, contextID 
 		Error   string         `json:"error"`
 	}
 	if err := json.Unmarshal(respBody, &gwResp); err != nil {
-		return nil, fmt.Errorf("invalid gateway response")
+		return nil, errors.New("invalid gateway response")
 	}
 	if !gwResp.Success {
 		errMsg := gwResp.Error

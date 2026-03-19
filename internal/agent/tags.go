@@ -54,12 +54,12 @@ func AttachmentsResolver() TagResolver {
 				if _, ok := seen[path]; ok {
 					continue
 				}
-			seen[path] = struct{}{}
-			att := FileAttachment{Path: path, Type: "file", Name: filenameFromPath(path)}
-			if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-				att = FileAttachment{URL: path, Type: "image", Name: filenameFromURL(path)}
-			}
-			result = append(result, att)
+				seen[path] = struct{}{}
+				att := FileAttachment{Path: path, Type: "file", Name: filenameFromPath(path)}
+				if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+					att = FileAttachment{URL: path, Type: "image", Name: filenameFromURL(path)}
+				}
+				result = append(result, att)
 			}
 			return result
 		},
@@ -113,10 +113,10 @@ func ExtractTagsFromText(text string, resolvers []TagResolver) (string, []TagEve
 	cleaned := text
 	for _, r := range resolvers {
 		open := "<" + r.Tag + ">"
-		close := "</" + r.Tag + ">"
-		pattern := regexp.MustCompile(regexp.QuoteMeta(open) + `([\s\S]*?)` + regexp.QuoteMeta(close))
+		closeTag := "</" + r.Tag + ">"
+		pattern := regexp.MustCompile(regexp.QuoteMeta(open) + `([\s\S]*?)` + regexp.QuoteMeta(closeTag))
 		cleaned = pattern.ReplaceAllStringFunc(cleaned, func(match string) string {
-			inner := match[len(open) : len(match)-len(close)]
+			inner := match[len(open) : len(match)-len(closeTag)]
 			parsed := r.Parse(inner)
 			if len(parsed) > 0 {
 				events = append(events, TagEvent{Tag: r.Tag, Data: parsed})
@@ -152,8 +152,8 @@ func NewStreamTagExtractor(resolvers []TagResolver) *StreamTagExtractor {
 	maxOpenLen := 0
 	for i, r := range resolvers {
 		open := "<" + r.Tag + ">"
-		close := "</" + r.Tag + ">"
-		metas[i] = resolverMeta{resolver: r, openTag: open, closeTag: close}
+		closeTag := "</" + r.Tag + ">"
+		metas[i] = resolverMeta{resolver: r, openTag: open, closeTag: closeTag}
 		if len(open) > maxOpenLen {
 			maxOpenLen = len(open)
 		}
@@ -183,6 +183,7 @@ func (e *StreamTagExtractor) Push(delta string) TagStreamResult {
 	visible := ""
 	var events []TagEvent
 
+	var visibleSb186 strings.Builder
 	for len(e.buffer) > 0 {
 		if e.state == 0 { // text
 			earliestIdx := -1
@@ -201,11 +202,11 @@ func (e *StreamTagExtractor) Push(delta string) TagStreamResult {
 				}
 				splitAt := safeUTF8SplitIndex(e.buffer, len(e.buffer)-keep)
 				emit := e.buffer[:splitAt]
-				visible += emit
+				visibleSb186.WriteString(emit)
 				e.buffer = e.buffer[splitAt:]
 				break
 			}
-			visible += e.buffer[:earliestIdx]
+			visibleSb186.WriteString(e.buffer[:earliestIdx])
 			e.buffer = e.buffer[earliestIdx+len(matchedMeta.openTag):]
 			e.tagBuffer = ""
 			e.activeMeta = matchedMeta
@@ -237,6 +238,7 @@ func (e *StreamTagExtractor) Push(delta string) TagStreamResult {
 		e.activeMeta = nil
 		e.state = 0
 	}
+	visible += visibleSb186.String()
 
 	return TagStreamResult{VisibleText: visible, Events: events}
 }

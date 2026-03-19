@@ -12,7 +12,6 @@ import (
 
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/textutil"
 )
 
 func sanitizeMessages(messages []conversation.ModelMessage) []conversation.ModelMessage {
@@ -191,10 +190,6 @@ func nonNilModelMessages(m []conversation.ModelMessage) []conversation.ModelMess
 		return []conversation.ModelMessage{}
 	}
 	return m
-}
-
-func truncate(s string, n int) string {
-	return textutil.TruncateRunesWithSuffix(s, n, "...")
 }
 
 func parseResolverUUID(id string) (pgtype.UUID, error) {

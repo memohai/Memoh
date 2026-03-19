@@ -15,7 +15,7 @@ type SessionContext struct {
 	BotID             string
 	ChatID            string
 	ChannelIdentityID string
-	SessionToken      string
+	SessionToken      string //nolint:gosec // carries session credential material at runtime
 	CurrentPlatform   string
 	ReplyTarget       string
 	IsSubagent        bool
