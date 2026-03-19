@@ -382,7 +382,7 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.SenderUserID,
 		pgtype.Text{},
 		pgtype.Text{},
-		pgtype.Text{},
+		extractPlatformFromMetadata(row.Metadata),
 		row.ExternalMessageID,
 		row.SourceReplyToMessageID,
 		row.Role,
@@ -391,6 +391,14 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.Usage,
 		row.CreatedAt,
 	)
+}
+
+func extractPlatformFromMetadata(metadata []byte) pgtype.Text {
+	m := parseJSONMap(metadata)
+	if v, ok := m["platform"].(string); ok && strings.TrimSpace(v) != "" {
+		return pgtype.Text{String: strings.TrimSpace(v), Valid: true}
+	}
+	return pgtype.Text{}
 }
 
 func toMessageFromListRow(row sqlc.ListMessagesRow) Message {

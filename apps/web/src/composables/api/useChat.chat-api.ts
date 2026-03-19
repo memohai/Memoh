@@ -28,7 +28,7 @@ export async function createSession(botId: string, title?: string): Promise<Sess
   if (!id) throw new Error('bot id is required')
   const { data } = await postBotsByBotIdSessions({
     path: { bot_id: id },
-    body: { title: title ?? '' } as any,
+    body: { title: title ?? '', channel_type: 'web' } as any,
     throwOnError: true,
   })
   return data as any

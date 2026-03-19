@@ -41,8 +41,9 @@ func (h *SessionHandler) Register(e *echo.Echo) {
 }
 
 type createSessionRequest struct {
-	Title    string         `json:"title"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Title       string         `json:"title"`
+	ChannelType string         `json:"channel_type,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 type updateSessionRequest struct {
@@ -76,9 +77,10 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	sess, err := h.sessionService.Create(c.Request().Context(), session.CreateInput{
-		BotID:    botID,
-		Title:    req.Title,
-		Metadata: req.Metadata,
+		BotID:       botID,
+		ChannelType: req.ChannelType,
+		Title:       req.Title,
+		Metadata:    req.Metadata,
 	})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
