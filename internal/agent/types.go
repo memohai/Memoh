@@ -61,7 +61,6 @@ type RunConfig struct {
 	SupportsImageInput bool
 	Identity           SessionContext
 	Skills             []SkillEntry
-	EnabledSkillNames  []string
 	Inbox              []InboxItem
 	LoopDetection      LoopDetectionConfig
 }
@@ -72,9 +71,8 @@ type GenerateResult struct {
 	Text        string
 	Attachments []FileAttachment
 	Reactions   []ReactionItem
-	Speeches    []SpeechItem
-	Skills      []string
-	Usage       *sdk.Usage
+	Speeches []SpeechItem
+	Usage    *sdk.Usage
 }
 
 // FileAttachment represents a file reference extracted from agent output.

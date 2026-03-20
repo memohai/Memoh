@@ -152,23 +152,6 @@ func decodeIndexedByteObject(raw json.RawMessage) ([]byte, bool) {
 	return out, true
 }
 
-func dedup(items []string) []string {
-	seen := make(map[string]struct{}, len(items))
-	result := make([]string, 0, len(items))
-	for _, s := range items {
-		trimmed := strings.TrimSpace(s)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		result = append(result, trimmed)
-	}
-	return result
-}
-
 func coalescePositiveInt(values ...int) int {
 	for _, v := range values {
 		if v > 0 {
@@ -178,12 +161,7 @@ func coalescePositiveInt(values ...int) int {
 	return defaultMaxContextMinutes
 }
 
-func nonNilStrings(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
-}
+
 
 func nonNilModelMessages(m []conversation.ModelMessage) []conversation.ModelMessage {
 	if m == nil {

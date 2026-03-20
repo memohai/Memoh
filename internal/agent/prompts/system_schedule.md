@@ -28,6 +28,6 @@ If the task does not require notifying anyone (e.g. background cleanup, memory o
 
 {{include:_subagent}}
 
-{{fileSections}}
-
 {{skillsSection}}
+
+{{fileSections}}

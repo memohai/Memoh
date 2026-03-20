@@ -96,8 +96,8 @@ When a scheduled task triggers, it runs in its own session — not here. Use `se
 
 {{include:_subagent}}
 
-{{fileSections}}
-
 {{skillsSection}}
+
+{{fileSections}}
 
 {{inboxSection}}

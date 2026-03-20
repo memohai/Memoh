@@ -49,8 +49,8 @@ During heartbeats you can freely:
 
 {{include:_subagent}}
 
-{{fileSections}}
-
 {{skillsSection}}
+
+{{fileSections}}
 
 {{inboxSection}}

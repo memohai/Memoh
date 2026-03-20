@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -105,7 +106,7 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 		"- `exec`: execute command",
 	)
 
-	skillsSection := buildSkillsSection(params.Skills, params.EnabledSkills)
+	skillsSection := buildSkillsSection(params.Skills)
 
 	fileSections := ""
 	var fileSectionsSb strings.Builder
@@ -122,8 +123,8 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 	return render(tmpl, map[string]string{
 		"home":          home,
 		"basicTools":    strings.Join(basicTools, "\n"),
-		"fileSections":  fileSections,
 		"skillsSection": skillsSection,
+		"fileSections":  fileSections,
 		"inboxSection":  formatInbox(params.Inbox),
 	})
 }
@@ -132,7 +133,6 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 type SystemPromptParams struct {
 	SessionType        string
 	Skills             []SkillEntry
-	EnabledSkills      []SkillEntry
 	Files              []SystemFile
 	Inbox              []InboxItem
 	SupportsImageInput bool
@@ -174,31 +174,27 @@ func GenerateSubagentSystemPrompt(name, description string) string {
 	})
 }
 
-func formatSkillPrompt(skill SkillEntry) string {
-	return fmt.Sprintf("**`%s`**\n> %s\n\n%s", skill.Name, skill.Description, skill.Content)
+func buildSkillsSection(skills []SkillEntry) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	sorted := make([]SkillEntry, len(skills))
+	copy(sorted, skills)
+	slices.SortFunc(sorted, func(a, b SkillEntry) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	var sb strings.Builder
+	sb.WriteString("## Skills\n")
+	sb.WriteString(strconv.Itoa(len(sorted)))
+	sb.WriteString(" skills available via `use_skill`:\n")
+	for _, s := range sorted {
+		sb.WriteString("- " + s.Name + ": " + s.Description + "\n")
+	}
+	return sb.String()
 }
 
 func formatSystemFile(file SystemFile) string {
 	return fmt.Sprintf("## %s\n\n%s", file.Filename, file.Content)
-}
-
-func buildSkillsSection(skills []SkillEntry, enabledSkills []SkillEntry) string {
-	if len(skills) == 0 && len(enabledSkills) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("## Skills\n")
-	sb.WriteString(strconv.Itoa(len(skills)))
-	sb.WriteString(" skills available via `use_skill`:\n")
-	for _, s := range skills {
-		sb.WriteString("- " + s.Name + ": " + s.Description + "\n")
-	}
-	for _, s := range enabledSkills {
-		sb.WriteString("\n---\n\n")
-		sb.WriteString(formatSkillPrompt(s))
-		sb.WriteString("\n")
-	}
-	return sb.String()
 }
 
 func formatInbox(items []InboxItem) string {

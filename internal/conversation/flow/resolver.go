@@ -221,7 +221,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 	messages = append(messages, reqMessages...)
 	messages = sanitizeMessages(messages)
-	skills := dedup(req.Skills)
 	var agentSkills []agentpkg.SkillEntry
 	if r.skillLoader != nil {
 		entries, err := r.skillLoader.LoadSkills(ctx, req.BotID)
@@ -325,8 +324,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			SessionToken:      req.ChatToken,
 		},
 		Skills:            agentSkills,
-		EnabledSkillNames: nonNilStrings(skills),
-		Inbox:             agentInbox,
+		Inbox:         agentInbox,
 		LoopDetection:     agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 	}
 
@@ -359,7 +357,6 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	r.markInboxRead(ctx, req.BotID, rc.inboxItemIDs)
 	return conversation.ChatResponse{
 		Messages: outputMessages,
-		Skills:   result.Skills,
 		Model:    rc.model.ModelID,
 		Provider: string(rc.model.ClientType),
 	}, nil
@@ -374,20 +371,9 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 		files = fs.LoadSystemFiles(ctx)
 	}
 
-	var enabledSkills []agentpkg.SkillEntry
-	for _, s := range cfg.Skills {
-		for _, name := range cfg.EnabledSkillNames {
-			if s.Name == name {
-				enabledSkills = append(enabledSkills, s)
-				break
-			}
-		}
-	}
-
 	cfg.System = agentpkg.GenerateSystemPrompt(agentpkg.SystemPromptParams{
 		SessionType:        cfg.SessionType,
 		Skills:             cfg.Skills,
-		EnabledSkills:      enabledSkills,
 		Files:              files,
 		Inbox:              cfg.Inbox,
 		SupportsImageInput: supportsImageInput,

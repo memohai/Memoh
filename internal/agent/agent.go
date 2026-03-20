@@ -64,22 +64,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
 
-	enabledSkills := make([]string, len(cfg.EnabledSkillNames))
-	copy(enabledSkills, cfg.EnabledSkillNames)
-	enableSkill := func(name string) {
-		for _, s := range cfg.Skills {
-			if s.Name == name {
-				for _, existing := range enabledSkills {
-					if existing == name {
-						return
-					}
-				}
-				enabledSkills = append(enabledSkills, name)
-				return
-			}
-		}
-	}
-
 	// Loop detection setup
 	var textLoopGuard *TextLoopGuard
 	var textLoopProbeBuffer *TextLoopProbeBuffer
@@ -202,13 +186,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				Input:      p.Input,
 				Result:     p.Output,
 			}
-			if p.ToolName == "use_skill" {
-				if resultMap, ok := p.Output.(map[string]any); ok {
-					if skillName, ok := resultMap["skillName"].(string); ok && skillName != "" {
-						enableSkill(skillName)
-					}
-				}
-			}
 			if shouldAbort {
 				a.logger.Warn("tool loop abort triggered", slog.String("tool_call_id", p.ToolCallID))
 				aborted = true
@@ -280,7 +257,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	termEvent := StreamEvent{
 		Messages: mustMarshal(finalMessages),
 		Usage:    usageJSON,
-		Skills:   enabledSkills,
 	}
 	if aborted {
 		termEvent.Type = EventAgentAbort
@@ -296,22 +272,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		return nil, fmt.Errorf("assemble tools: %w", err)
 	}
 	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
-
-	enabledSkills := make([]string, len(cfg.EnabledSkillNames))
-	copy(enabledSkills, cfg.EnabledSkillNames)
-	enableSkill := func(name string) {
-		for _, s := range cfg.Skills {
-			if s.Name == name {
-				for _, existing := range enabledSkills {
-					if existing == name {
-						return
-					}
-				}
-				enabledSkills = append(enabledSkills, name)
-				return
-			}
-		}
-	}
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard
@@ -340,15 +300,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 					result := textLoopGuard.Inspect(step.Text)
 					if result.Abort {
 						return nil // stop
-					}
-				}
-			}
-			for _, tr := range step.ToolResults {
-				if tr.ToolName == "use_skill" {
-					if resultMap, ok := tr.Output.(map[string]any); ok {
-						if skillName, ok := resultMap["skillName"].(string); ok && skillName != "" {
-							enableSkill(skillName)
-						}
 					}
 				}
 			}
@@ -402,7 +353,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		Attachments: attachments,
 		Reactions:   reactions,
 		Speeches:    speeches,
-		Skills:      enabledSkills,
 		Usage:       &genResult.Usage,
 	}, nil
 }
