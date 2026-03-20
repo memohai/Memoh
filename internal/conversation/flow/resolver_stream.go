@@ -148,8 +148,6 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	var envelope struct {
 		Type     string          `json:"type"`
 		Messages json.RawMessage `json:"messages"`
-		Usage    json.RawMessage `json:"usage,omitempty"`
-		Usages   json.RawMessage `json:"usages,omitempty"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return false, nil
@@ -165,10 +163,5 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	outputMessages := sdkMessagesToModelMessages(sdkMsgs)
 	roundMessages := prependUserMessage(req.Query, outputMessages)
 
-	var usages []json.RawMessage
-	if len(envelope.Usages) > 0 {
-		_ = json.Unmarshal(envelope.Usages, &usages)
-	}
-
-	return true, r.storeRound(ctx, req, roundMessages, envelope.Usage, usages, modelID)
+	return true, r.storeRound(ctx, req, roundMessages, modelID)
 }

@@ -263,23 +263,23 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	finalMessages = StripTagsFromMessages(finalMessages)
 
 	var totalUsage sdk.Usage
-	perStepUsages := make([]json.RawMessage, 0, len(streamResult.Steps))
 	for _, step := range streamResult.Steps {
 		totalUsage.InputTokens += step.Usage.InputTokens
 		totalUsage.OutputTokens += step.Usage.OutputTokens
 		totalUsage.TotalTokens += step.Usage.TotalTokens
 		totalUsage.ReasoningTokens += step.Usage.ReasoningTokens
 		totalUsage.CachedInputTokens += step.Usage.CachedInputTokens
-		stepJSON, _ := json.Marshal(step.Usage)
-		perStepUsages = append(perStepUsages, stepJSON)
+		totalUsage.InputTokenDetails.NoCacheTokens += step.Usage.InputTokenDetails.NoCacheTokens
+		totalUsage.InputTokenDetails.CacheReadTokens += step.Usage.InputTokenDetails.CacheReadTokens
+		totalUsage.InputTokenDetails.CacheWriteTokens += step.Usage.InputTokenDetails.CacheWriteTokens
+		totalUsage.OutputTokenDetails.TextTokens += step.Usage.OutputTokenDetails.TextTokens
+		totalUsage.OutputTokenDetails.ReasoningTokens += step.Usage.OutputTokenDetails.ReasoningTokens
 	}
 	usageJSON, _ := json.Marshal(totalUsage)
-	usagesJSON, _ := json.Marshal(perStepUsages)
 
 	termEvent := StreamEvent{
 		Messages: mustMarshal(finalMessages),
 		Usage:    usageJSON,
-		Usages:   usagesJSON,
 		Skills:   enabledSkills,
 	}
 	if aborted {

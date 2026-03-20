@@ -2,7 +2,6 @@ package flow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -354,8 +353,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 
 	outputMessages := sdkMessagesToModelMessages(result.Messages)
 	roundMessages := prependUserMessage(req.Query, outputMessages)
-	usageJSON, _ := json.Marshal(result.Usage)
-	if err := r.storeRound(ctx, req, roundMessages, usageJSON, nil, rc.model.ID); err != nil {
+	if err := r.storeRound(ctx, req, roundMessages, rc.model.ID); err != nil {
 		return conversation.ChatResponse{}, err
 	}
 	r.markInboxRead(ctx, req.BotID, rc.inboxItemIDs)

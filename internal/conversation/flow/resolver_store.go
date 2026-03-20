@@ -1,7 +1,6 @@
 package flow
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -11,35 +10,31 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
-func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage, usages []json.RawMessage, modelID string) error {
+func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string) error {
 	fullRound := make([]conversation.ModelMessage, 0, len(messages))
-	roundUsages := make([]json.RawMessage, 0, len(usages))
 
 	// When the user message was already persisted by a channel adapter, skip
 	// the duplicate from the round. Otherwise keep it so that user + assistant
 	// messages are written atomically (deferred persistence).
 	skipUserQuery := req.UserMessagePersisted
-	for i, m := range messages {
+	for _, m := range messages {
 		if skipUserQuery && m.Role == "user" && strings.TrimSpace(m.TextContent()) == strings.TrimSpace(req.Query) {
 			skipUserQuery = false // only skip the first matching user message
 			continue
 		}
 		fullRound = append(fullRound, m)
-		if i < len(usages) {
-			roundUsages = append(roundUsages, usages[i])
-		}
 	}
 	if len(fullRound) == 0 {
 		return nil
 	}
 
-	r.storeMessages(ctx, req, fullRound, usage, roundUsages, modelID)
+	r.storeMessages(ctx, req, fullRound, modelID)
 	go r.storeMemory(context.WithoutCancel(ctx), req, fullRound)
 
 	return nil
 }
 
-func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage, usages []json.RawMessage, modelID string) {
+func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string) {
 	if r.messageService == nil {
 		return
 	}
@@ -88,12 +83,6 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		if i == lastAssistantIdx && len(outboundAssets) > 0 {
 			assets = append(assets, outboundAssets...)
 		}
-		var msgUsage json.RawMessage
-		if i < len(usages) && len(usages[i]) > 0 && !isJSONNull(usages[i]) {
-			msgUsage = usages[i]
-		} else if i == len(messages)-1 && len(usage) > 0 {
-			msgUsage = usage
-		}
 		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
@@ -104,7 +93,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			Role:                    msg.Role,
 			Content:                 content,
 			Metadata:                meta,
-			Usage:                   msgUsage,
+			Usage:                   msg.Usage,
 			Assets:                  assets,
 			ModelID:                 modelID,
 		}); err != nil {
@@ -113,9 +102,6 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 }
 
-func isJSONNull(data json.RawMessage) bool {
-	return len(data) == 0 || bytes.Equal(bytes.TrimSpace(data), []byte("null"))
-}
 
 // outboundAssetRefsToMessageRefs converts outbound asset refs from the streaming
 // collector into message-level asset refs for persistence.

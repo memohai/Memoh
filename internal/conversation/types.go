@@ -95,6 +95,7 @@ type UpdateSettingsRequest struct {
 type ModelMessage struct {
 	Role       string          `json:"role"`
 	Content    json.RawMessage `json:"content,omitempty"`
+	Usage      json.RawMessage `json:"-"`
 	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
 	Name       string          `json:"name,omitempty"`

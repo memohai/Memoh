@@ -24,9 +24,14 @@ func sdkMessagesToModelMessages(msgs []sdk.Message) []conversation.ModelMessage 
 		if err := json.Unmarshal(data, &envelope); err != nil {
 			continue
 		}
+		var usage json.RawMessage
+		if msg.Usage != nil {
+			usage, _ = json.Marshal(msg.Usage)
+		}
 		result = append(result, conversation.ModelMessage{
 			Role:    string(msg.Role),
 			Content: envelope.Content,
+			Usage:   usage,
 		})
 	}
 	return result

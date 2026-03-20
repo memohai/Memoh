@@ -58,13 +58,13 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 
 	outputMessages := sdkMessagesToModelMessages(result.Messages)
 	roundMessages := prependUserMessage(req.Query, outputMessages)
-	usageJSON, _ := json.Marshal(result.Usage)
-	storeErr := r.storeRound(ctx, req, roundMessages, usageJSON, nil, rc.model.ID)
+	storeErr := r.storeRound(ctx, req, roundMessages, rc.model.ID)
 
+	totalUsageJSON, _ := json.Marshal(result.Usage)
 	return schedule.TriggerResult{
 		Status:     "ok",
 		Text:       strings.TrimSpace(result.Text),
-		UsageBytes: usageJSON,
+		UsageBytes: totalUsageJSON,
 		ModelID:    rc.model.ID,
 	}, storeErr
 }
@@ -118,17 +118,16 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 		status = "ok"
 	}
 
-	usageJSON, _ := json.Marshal(result.Usage)
-
 	outputMessages := sdkMessagesToModelMessages(result.Messages)
 	roundMessages := prependUserMessage(req.Query, outputMessages)
-	_ = r.storeRound(ctx, req, roundMessages, usageJSON, nil, rc.model.ID)
+	_ = r.storeRound(ctx, req, roundMessages, rc.model.ID)
 
+	totalUsageJSON, _ := json.Marshal(result.Usage)
 	return heartbeat.TriggerResult{
 		Status:     status,
 		Text:       text,
-		Usage:      usageJSON,
-		UsageBytes: usageJSON,
+		Usage:      totalUsageJSON,
+		UsageBytes: totalUsageJSON,
 		ModelID:    rc.model.ID,
 		SessionID:  payload.SessionID,
 	}, nil
