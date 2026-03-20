@@ -75,6 +75,9 @@ type ttsModelResolver interface {
 // SessionEnsurer resolves or creates an active session for a route.
 type SessionEnsurer interface {
 	EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
+	// CreateNewSession always creates a fresh session and sets it as the
+	// active session for the given route, replacing any previous one.
+	CreateNewSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
 }
 
 // SessionResult carries the minimum fields needed from a session.
@@ -271,6 +274,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// In group chats, only process if the message is directed at this bot
 	// (via @mention or reply) to avoid all bots responding to the same command.
 	cmdText := rawTextForCommand(msg, text)
+
+	// /new requires route context, so it is handled separately from the
+	// general command handler (which runs before route resolution).
+	if isNewSessionCommand(cmdText) && isDirectedAtBot(msg) {
+		return p.handleNewSessionCommand(ctx, cfg, msg, sender, identity)
+	}
+
 	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && isDirectedAtBot(msg) {
 		reply, err := p.commandHandler.Execute(ctx, strings.TrimSpace(identity.BotID), strings.TrimSpace(identity.ChannelIdentityID), cmdText)
 		if err != nil {
@@ -2233,4 +2243,95 @@ func (p *ChannelInboundProcessor) enrichConversationAvatar(ctx context.Context, 
 	if v := strings.TrimSpace(entry.Handle); v != "" {
 		meta["conversation_handle"] = v
 	}
+}
+
+// isNewSessionCommand returns true when the command text is "/new" (with
+// optional Telegram-style @botname suffix and trailing whitespace).
+func isNewSessionCommand(cmdText string) bool {
+	extracted := command.ExtractCommandText(cmdText)
+	if extracted == "" {
+		return false
+	}
+	parsed, err := command.Parse(extracted)
+	if err != nil {
+		return false
+	}
+	return parsed.Resource == "new"
+}
+
+// handleNewSessionCommand resolves the route for the current message and
+// creates a brand-new active session, effectively starting a fresh
+// conversation in the same IM thread/chat.
+func (p *ChannelInboundProcessor) handleNewSessionCommand(
+	ctx context.Context,
+	cfg channel.ChannelConfig,
+	msg channel.InboundMessage,
+	sender channel.StreamReplySender,
+	identity InboundIdentity,
+) error {
+	target := strings.TrimSpace(msg.ReplyTarget)
+	if target == "" {
+		return errors.New("reply target missing for /new command")
+	}
+
+	if p.routeResolver == nil {
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: route resolver not configured."},
+		})
+	}
+	if p.sessionEnsurer == nil {
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: session service not configured."},
+		})
+	}
+
+	threadID := extractThreadID(msg)
+	routeMetadata := buildRouteMetadata(msg, identity)
+	p.enrichConversationAvatar(ctx, cfg, msg, routeMetadata)
+	resolved, err := p.routeResolver.ResolveConversation(ctx, route.ResolveInput{
+		BotID:             identity.BotID,
+		Platform:          msg.Channel.String(),
+		ConversationID:    msg.Conversation.ID,
+		ThreadID:          threadID,
+		ConversationType:  msg.Conversation.Type,
+		ChannelIdentityID: identity.UserID,
+		ChannelConfigID:   identity.ChannelConfigID,
+		ReplyTarget:       target,
+		Metadata:          routeMetadata,
+	})
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("resolve route for /new command failed", slog.Any("error", err))
+		}
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: failed to resolve conversation route."},
+		})
+	}
+
+	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("create new session via /new command failed", slog.Any("error", err))
+		}
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: failed to create new session."},
+		})
+	}
+
+	if p.logger != nil {
+		p.logger.Info("new session created via /new command",
+			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+			slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
+			slog.String("session_id", strings.TrimSpace(sess.ID)),
+			slog.String("channel", msg.Channel.String()),
+		)
+	}
+	return sender.Send(ctx, channel.OutboundMessage{
+		Target:  target,
+		Message: channel.Message{Text: "New conversation started."},
+	})
 }

@@ -239,6 +239,24 @@ func (s *Service) SetRouteActiveSession(ctx context.Context, routeID, sessionID 
 	})
 }
 
+// CreateNewSession always creates a fresh session and sets it as the active
+// session for the given route, replacing any previous active session.
+func (s *Service) CreateNewSession(ctx context.Context, botID, routeID, channelType string) (Session, error) {
+	sess, err := s.Create(ctx, CreateInput{
+		BotID:       botID,
+		RouteID:     routeID,
+		ChannelType: channelType,
+	})
+	if err != nil {
+		return Session{}, fmt.Errorf("create new session: %w", err)
+	}
+
+	if err := s.SetRouteActiveSession(ctx, routeID, sess.ID); err != nil {
+		s.logger.Warn("failed to set active session on route", slog.Any("error", err))
+	}
+	return sess, nil
+}
+
 // EnsureActiveSession returns the active session for a route, creating one if it doesn't exist.
 func (s *Service) EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (Session, error) {
 	sess, err := s.GetActiveForRoute(ctx, routeID)

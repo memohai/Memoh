@@ -714,6 +714,14 @@ func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, 
 	return inbound.SessionResult{ID: sess.ID}, nil
 }
 
+func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, routeID, channelType string) (inbound.SessionResult, error) {
+	sess, err := a.svc.CreateNewSession(ctx, botID, routeID, channelType)
+	if err != nil {
+		return inbound.SessionResult{}, err
+	}
+	return inbound.SessionResult{ID: sess.ID}, nil
+}
+
 type settingsTtsModelResolver struct {
 	settings *settings.Service
 }
