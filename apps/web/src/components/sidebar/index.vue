@@ -1,23 +1,27 @@
 <template>
-  <aside aria-label="Primary">
+  <aside>
     <Sidebar
       collapsible="icon"
-      role="navigation"
-      aria-label="Primary"
     >
-      <SidebarHeader>
-        <div class="flex items-center gap-2 px-1 py-1 group-data-[collapsible=icon]:justify-center">
+      <SidebarHeader class=" h-12">
+        <section class="my-auto px-2 flex gap-2 font-extrabold group-data-[collapsible=icon]:px-1">
           <img
             src="/logo.png"
-            class="size-6 shrink-0"
+            class="w-6! object-fit "
             alt="Memoh logo"
           >
+          <h1 class="font-semibold group-data-[collapsible=icon]:hidden">
+            Memoh
+          </h1>
+        </section>
+        <!-- <div class="flex items-center gap-2  group-data-[collapsible=icon]:justify-center">
+        
           <span class="text-lg font-bold text-muted-foreground truncate group-data-[collapsible=icon]:hidden">
             Memoh
           </span>
-        </div>
+        </div> -->
       </SidebarHeader>
-
+      <Separator />
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
@@ -30,9 +34,13 @@
                   :tooltip="sidebarItem.title"
                   :is-active="isItemActive(sidebarItem.name)"
                   :aria-current="isItemActive(sidebarItem.name) ? 'page' : undefined"
-                  @click="router.push({ name: sidebarItem.name })"
+                  class="py-5 text-muted-foreground relative before:absolute before:w-0.75 before:top-2 before:bottom-2 data-[active=true]:before:bg-[#8B56E3] hover:before:bg-[#8B56E3] before:left-0.5"
+                  @click="router.push({ name: sidebarItem.name })"                  
                 >
-                  <FontAwesomeIcon :icon="sidebarItem.icon" />
+                  <FontAwesomeIcon
+                    class="ml-1"
+                    :icon="sidebarItem.icon"
+                  />
                   <span>{{ sidebarItem.title }}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -81,6 +89,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  Separator
 } from '@memoh/ui'
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'

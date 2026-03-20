@@ -1,83 +1,171 @@
 <template>
-  <SidebarMenu
-    v-for="bot in bots"
-    :key="bot.id"
-  >
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        as-child
-        class="justify-start py-5! px-4"
-      >
-        <Toggle
-          :class="`p-2! border border-transparent h-[initial]! ${currentBotId === bot.id ? 'border-inherit' : ''}`"
-          :model-value="isActive(bot.id as string).value"
-          @click="handleSelect(bot)"
-        >
-          <Avatar class="size-8 shrink-0">
-            <AvatarImage
-              v-if="bot.avatar_url"
-              :src="bot.avatar_url"
-              :alt="bot.display_name"
-            />
-            <AvatarFallback class="text-xs">
-              {{ (bot.display_name || bot.id).slice(0, 2).toUpperCase() }}
-            </AvatarFallback>
-          </Avatar>
-          <div class="flex-1 text-left min-w-0">
-            <div class="font-medium truncate">
-              {{ bot.display_name || bot.id }}
-            </div>
-          </div>
-        </Toggle>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  </SidebarMenu>
-  <SidebarMenu>
-    <div
-      v-if="isLoading"
-      class="flex justify-center py-4"
-    >
-      <FontAwesomeIcon
-        :icon="['fas', 'spinner']"
-        class="size-4 animate-spin text-muted-foreground"
-      />
-    </div>
-
-    <div
-      v-if="!isLoading && bots.length === 0"
-      class="px-3 py-6 text-center text-sm text-muted-foreground"
-    >
-      {{ $t('bots.emptyTitle') }}
-    </div>
-  </SidebarMenu>
+  <section :class="mountNode.id">
+    <Teleport :to="mountNode.leftDefault">
+      <SidebarProvider>
+        <SidebarInset>
+          <Sidebar class="relative! **:[[role=navigation]]:relative">
+            <SidebarHeader
+              class="h-12 flex flex-rows justify-center"
+              @click="collpaseSider"
+            >
+              <section class="flex items-center gap-2">
+                <FontAwesomeIcon :icon="['fas', 'bars']" />
+                <h3 class="font-semibold text-sm">
+                  {{ $t('sidebar.session') }}
+                </h3>
+              </section>
+            </SidebarHeader>
+            <Separator />
+            <SidebarContent>
+              <ScrollArea class="h-full px-2">
+                <SidebarMenu class="my-4">
+                  <InputGroup>
+                    <InputGroupInput placeholder="Search..." />
+                    <InputGroupAddon>
+                      <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
+                    </InputGroupAddon>
+                  </InputGroup>
+                </SidebarMenu>
+                <h4 class="text-xs uppercase text-muted-foreground tracking-wide mb-2">
+                  我的SESSION
+                </h4>
+                <SidebarMenu ref="session-item">
+                  <SidebarMenuItem
+                    v-for="bot in bots"
+                    :key="bot.id"
+                    class="relative hover:[&_svg]:visible"
+                  >
+                    <FontAwesomeIcon
+                      :icon="['fas','grip-vertical']"
+                      class="can-dragable  cursor-pointer absolute top-0 bottom-0 m-auto w-1.5! left-1! invisible text-[#C7C7C7]!"
+                    />
+            
+                    <BotItem :bot="bot" />
+                  </SidebarMenuItem>
+                </SidebarMenu>
+                <SidebarMenu>
+                  <div
+                    v-if="isLoading"
+                    class="flex justify-center py-4"
+                  >
+                    <FontAwesomeIcon
+                      :icon="['fas', 'spinner']"
+                      class="size-4 animate-spin text-muted-foreground"
+                    />
+                  </div>
+                  <div
+                    v-if="!isLoading && bots.length === 0"
+                    class="px-3 py-6 text-center text-sm text-muted-foreground"
+                  >
+                    {{ $t('bots.emptyTitle') }}
+                  </div>
+                </SidebarMenu>
+              </ScrollArea>
+            </SidebarContent>
+            <SidebarFooter>
+              <Button class="mb-4 justify-start gap-4">
+                <FontAwesomeIcon
+                  :icon="['fas', 'plus']"
+                />
+                Session
+              </Button>
+            </SidebarFooter>
+          </Sidebar>
+        </SidebarInset>
+      </SidebarProvider>
+    </Teleport>
+    <section class="hidden-clip-section" />
+  </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
+import { computed,useTemplateRef,watch } from 'vue'
+// import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
 import { getBotsQuery } from '@memoh/sdk/colada'
-import type { BotsBot } from '@memoh/sdk'
-import { useChatStore } from '@/store/chat-list'
-import { storeToRefs } from 'pinia'
+import type { BotsBot } from '@memoh/sdk' 
+import Sortable from 'sortablejs'
 import {
-  Toggle,
   SidebarMenu,
-  SidebarMenuButton,
   SidebarMenuItem,
- } from '@memoh/ui'
+  SidebarHeader,
+  SidebarProvider,
+  SidebarContent,
+  Sidebar,
+  SidebarInset,
+  Separator,
+  SidebarFooter,
+  Button,
+  InputGroup,
+  InputGroupInput,
+  InputGroupAddon,
+  ScrollArea
+} from '@memoh/ui'
+import BotItem from './bot-item.vue'
+import useControlVisibleStatus from '@/utils/useControlVisibleStatus'
+import { useSidebar } from '@memoh/ui'
 
-const chatStore = useChatStore()
-const { currentBotId } = storeToRefs(chatStore)
+const {toggleSidebar}=useSidebar()
+const collpaseSider = () => {
+  console.log('enter')
+  toggleSidebar()
+}
 
-const { data: botData, isLoading } = useQuery(getBotsQuery())
-const bots = computed<BotsBot[]>(() => botData.value?.items ?? [])
+const sessionItem=useTemplateRef('session-item')
 
-const isActive = (id: string) => computed(() => {
-  return currentBotId.value === id
+watch(sessionItem, () => {
+  const el= sessionItem.value?.$el
+  if (sessionItem.value?.$el) {  
+    new Sortable(el, {
+      animation: 150,
+      handle:'.can-dragable'
+    })
+  }
+}, {
+  immediate:true
 })
 
-function handleSelect(bot: BotsBot) {
-  chatStore.selectBot(bot.id)
-}
+console.log(Sortable)
+
+const { data: botData, isLoading } = useQuery(getBotsQuery())
+const bots = computed<BotsBot[]>(() => botData.value?.items?.concat({
+    'id': '991cd528-0c10-41a0-93e6-a6a7006a433cd',
+    'owner_user_id': '9b7390f6-a336-4c76-bf58-df616942c9a6',
+    'type': 'personal',
+    'display_name': 'feafew',
+    'is_active': true,
+    'allow_guest': false,
+    'status': 'loading',
+    'check_state': 'ok',
+    'check_issue_count': 0,
+    'created_at': '2026-03-23T10:14:13.269928+08:00',
+    'updated_at': '2026-03-23T10:14:13.435601+08:00'
+}, {
+  'id': '991cd528-0c10-41a0-93e6-a6a754006ac3cd',
+  'owner_user_id': '9b7390f6-a336-4c76-bf58-df616942c9a6',
+  'type': 'personal',
+  'display_name': 'feafew',
+  'is_active': true,
+  'allow_guest': false,
+  'status': 'error',
+  'check_state': 'ok',
+  'check_issue_count': 0,
+  'created_at': '2026-03-23T10:14:13.269928+08:00',
+  'updated_at': '2026-03-23T10:14:13.435601+08:00'
+}, {
+  'id': '991cd528-0c10-41a0fewf-93e6-a6a754006ac3cd',
+  'owner_user_id': '9b7390f6-a336-4c76-bf58-df616942c9a6',
+  'type': 'personal',
+  'display_name': 'feafew',
+  'is_active': true,
+  'allow_guest': false,
+  'status': 'no-setting',
+  'check_state': 'ok',
+  'check_issue_count': 0,
+  'created_at': '2026-03-23T10:14:13.269928+08:00',
+  'updated_at': '2026-03-23T10:14:13.435601+08:00'
+}) ?? [])
+
+
+const mountNode = useControlVisibleStatus()
 </script>

@@ -73,7 +73,7 @@
         >
           <div
             v-if="block.type === 'text' && cleanUserText(block.content)"
-            class="rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap"
+            class="rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap break-all"
             :class="isSelf
               ? 'rounded-tr-sm bg-primary text-primary-foreground'
               : 'rounded-tl-sm bg-accent/60 text-foreground'"

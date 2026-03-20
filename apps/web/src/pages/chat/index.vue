@@ -1,6 +1,14 @@
 <template>
   <div class="flex h-full">
-    <MasterDetailSidebarLayout>
+    <!-- <Teleport to=".main-left-section">
+      <SidebarProvider>
+        <SidebarContent>
+          <BotSidebar />
+        </SidebarContent>
+      </SidebarProvider>
+    </Teleport>
+   -->
+    <!-- <MasterDetailSidebarLayout>
       <template #sidebar-header>
         <div class="p-4 border-b">
           <p class="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
@@ -8,7 +16,7 @@
           </p>
         </div>
       </template>
-      <template #sidebar-content>
+<template #sidebar-content>
         <BotSidebar />
 
         <template v-if="currentBotId">
@@ -30,10 +38,14 @@
           <SessionSidebar />
         </template>
       </template>
-      <template #detail>
+<template #detail>
         <ChatArea />
       </template>
-    </MasterDetailSidebarLayout>
+</MasterDetailSidebarLayout> -->
+    <ChatHeader />
+    <BotSidebar />
+    <SessionSidebar />
+    <ChatArea />
   </div>
 </template>
 
@@ -42,10 +54,16 @@ import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
-import BotSidebar from './components/bot-sidebar.vue'
-import SessionSidebar from './components/session-sidebar.vue'
+// import BotSidebar from './components/bot-sidebar.vue'
+// import SessionSidebar from './components/session-sidebar.vue'
 import ChatArea from './components/chat-area.vue'
-import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
+import { defineAsyncComponent } from 'vue'
+
+const BotSidebar = defineAsyncComponent(async () => import('./components/bot-sidebar.vue'))
+
+const SessionSidebar = defineAsyncComponent(() => import('./components/session_sidebar.vue'))
+
+const ChatHeader = defineAsyncComponent(() => import('./components/chat-header.vue'))
 
 const route = useRoute()
 const router = useRouter()

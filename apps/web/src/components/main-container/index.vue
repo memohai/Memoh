@@ -1,9 +1,7 @@
 <template>
   <SidebarInset class="grid grid-rows-[auto_auto_1fr]">
-    <header
-      class="flex h-12 shrink-0 items-center gap-2"
-    >
-      <div class="flex items-center gap-2 px-4">     
+    <header class="flex h-12 shrink-0 items-center gap-2 [&:has(.--h-memoh-header_*)_.--h-memoh-primary]:hidden">
+      <div class="flex items-center gap-2 px-4 --h-memoh-primary">
         <SidebarTrigger class="-ml-1" />
         <Separator
           orientation="vertical"
@@ -33,6 +31,7 @@
           </BreadcrumbList>
         </Breadcrumb>
       </div>
+      <section class="--h-memoh-header has-[section]:w-full" />
     </header>
     <Separator />
     <section class="w-full relative">
