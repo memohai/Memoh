@@ -54,20 +54,21 @@ type LoopDetectionConfig struct {
 
 // RunConfig holds everything needed for a single agent invocation.
 type RunConfig struct {
-	Model             *sdk.Model
-	ReasoningEffort   string
-	Messages          []sdk.Message
-	Query             string
-	System            string
-	Tools             []sdk.Tool
-	Channels          []string
-	CurrentChannel    string
-	Identity          SessionContext
-	Skills            []SkillEntry
-	EnabledSkillNames []string
-	Inbox             []InboxItem
-	LoopDetection     LoopDetectionConfig
-	ActiveContextTime int
+	Model              *sdk.Model
+	ReasoningEffort    string
+	Messages           []sdk.Message
+	Query              string
+	System             string
+	Tools              []sdk.Tool
+	SupportsImageInput bool
+	Channels           []string
+	CurrentChannel     string
+	Identity           SessionContext
+	Skills             []SkillEntry
+	EnabledSkillNames  []string
+	Inbox              []InboxItem
+	LoopDetection      LoopDetectionConfig
+	ActiveContextTime  int
 }
 
 // GenerateResult holds the result of a non-streaming agent invocation.

@@ -12,13 +12,14 @@ import (
 
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
-	BotID             string
-	ChatID            string
-	ChannelIdentityID string
-	SessionToken      string //nolint:gosec // carries session credential material at runtime
-	CurrentPlatform   string
-	ReplyTarget       string
-	IsSubagent        bool
+	BotID              string
+	ChatID             string
+	ChannelIdentityID  string
+	SessionToken       string //nolint:gosec // carries session credential material at runtime
+	CurrentPlatform    string
+	ReplyTarget        string
+	SupportsImageInput bool
+	IsSubagent         bool
 }
 
 // ToolProvider supplies a set of tools for the agent.
