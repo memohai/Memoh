@@ -7,6 +7,7 @@ export interface SessionSummary {
   bot_id: string
   route_id?: string
   channel_type?: string
+  type?: string
   title: string
   metadata?: Record<string, unknown>
   created_at?: string

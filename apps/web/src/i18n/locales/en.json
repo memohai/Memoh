@@ -162,7 +162,9 @@
     "renameSession": "Rename Session",
     "sessionTitle": "Session",
     "untitledSession": "Untitled Session",
-    "noSessions": "No sessions yet"
+    "noSessions": "No sessions yet",
+    "sessionTypeHeartbeat": "Heartbeat",
+    "sessionTypeSchedule": "Scheduled Task"
   },
   "models": {
     "title": "Models",

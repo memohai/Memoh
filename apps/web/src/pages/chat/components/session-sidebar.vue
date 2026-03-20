@@ -35,8 +35,9 @@
                 class="flex items-center justify-center size-8"
               >
                 <FontAwesomeIcon
-                  :icon="['fas', 'message']"
-                  class="size-3.5 text-muted-foreground"
+                  :icon="sessionIcon(session)"
+                  class="size-3.5"
+                  :class="sessionIconClass(session)"
                 />
               </div>
               <ChannelBadge
@@ -113,6 +114,7 @@
 
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/store/chat-list'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
@@ -128,6 +130,7 @@ import {
   DropdownMenuItem,
 } from '@memoh/ui'
 
+const { t } = useI18n()
 const chatStore = useChatStore()
 const { sessions, sessionId, currentBotId, loadingChats } = storeToRefs(chatStore)
 
@@ -136,6 +139,22 @@ const WEB_CHANNELS = new Set(['web', ''])
 function isIMSession(session: SessionSummary): boolean {
   const ct = (session.channel_type ?? '').trim().toLowerCase()
   return ct !== '' && !WEB_CHANNELS.has(ct)
+}
+
+function sessionIcon(session: SessionSummary): string[] {
+  switch (session.type) {
+    case 'heartbeat': return ['fas', 'heart-pulse']
+    case 'schedule': return ['fas', 'clock']
+    default: return ['fas', 'message']
+  }
+}
+
+function sessionIconClass(session: SessionSummary): string {
+  switch (session.type) {
+    case 'heartbeat': return 'text-rose-400'
+    case 'schedule': return 'text-amber-400'
+    default: return 'text-muted-foreground'
+  }
 }
 
 function routeMeta(session: SessionSummary): Record<string, unknown> {
@@ -174,6 +193,9 @@ function sessionDisplayLabel(session: SessionSummary): string {
 }
 
 function sessionSubLabel(session: SessionSummary): string {
+  if (session.type === 'heartbeat') return t('chat.sessionTypeHeartbeat')
+  if (session.type === 'schedule') return t('chat.sessionTypeSchedule')
+
   if (!isIMSession(session)) return ''
   const meta = routeMeta(session)
 
