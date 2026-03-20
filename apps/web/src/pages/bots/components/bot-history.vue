@@ -122,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import {
@@ -148,8 +148,10 @@ const isLoading = ref(false)
 const messages = ref<MessageMessage[]>([])
 const roleFilter = ref('')
 const currentPage = ref(1)
+const fetchVersion = ref(0)
 
 const PAGE_SIZE = 20
+const FETCH_LIMIT = 100
 
 const filteredMessages = computed(() => {
   if (!roleFilter.value) return messages.value
@@ -177,32 +179,61 @@ watch(roleFilter, () => {
 
 async function fetchAllHistory() {
   if (!props.botId) return
+  const requestVersion = ++fetchVersion.value
   isLoading.value = true
   messages.value = []
 
   try {
     let before: string | undefined
     let hasMore = true
+    const seenCursors = new Set<string>()
+    const seenMessageIds = new Set<string>()
 
     while (hasMore) {
       const { data } = await getBotsByBotIdMessages({
         path: { bot_id: props.botId },
-        query: { limit: 100, before },
+        query: { limit: FETCH_LIMIT, before },
         throwOnError: true,
       })
+      if (requestVersion !== fetchVersion.value) {
+        return
+      }
+
       const items = data?.items || []
       if (items.length === 0) {
         hasMore = false
       } else {
-        messages.value.push(...items)
-        before = items[items.length - 1]?.created_at
-        hasMore = items.length >= 100
+        const uniqueItems = items.filter((item) => {
+          const id = item.id?.trim()
+          if (!id || seenMessageIds.has(id)) {
+            return false
+          }
+          seenMessageIds.add(id)
+          return true
+        })
+
+        if (before) {
+          messages.value.unshift(...uniqueItems)
+        } else {
+          messages.value.push(...uniqueItems)
+        }
+
+        const nextBefore = items[0]?.created_at?.trim()
+        if (!nextBefore || seenCursors.has(nextBefore) || nextBefore === before) {
+          hasMore = false
+        } else {
+          seenCursors.add(nextBefore)
+          before = nextBefore
+          hasMore = items.length >= FETCH_LIMIT
+        }
       }
     }
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.history.loadFailed')))
   } finally {
-    isLoading.value = false
+    if (requestVersion === fetchVersion.value) {
+      isLoading.value = false
+    }
   }
 }
 
@@ -211,7 +242,12 @@ async function handleRefresh() {
   await fetchAllHistory()
 }
 
-onMounted(() => {
-  fetchAllHistory()
-})
+watch(
+  () => props.botId,
+  () => {
+    currentPage.value = 1
+    void fetchAllHistory()
+  },
+  { immediate: true }
+)
 </script>
