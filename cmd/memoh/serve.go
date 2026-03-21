@@ -56,7 +56,6 @@ import (
 	mcpchecker "github.com/memohai/memoh/internal/healthcheck/checkers/mcp"
 	modelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/model"
 	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
@@ -68,6 +67,7 @@ import (
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
+	"github.com/memohai/memoh/internal/messaging"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
@@ -111,7 +111,6 @@ func runServe() {
 			identities.NewService,
 			bind.NewService,
 			event.NewHub,
-			inbox.NewService,
 			provideTtsRegistry,
 			ttspkg.NewService,
 			provideTtsTempStore,
@@ -174,7 +173,6 @@ func runServe() {
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideOAuthService,
-			provideServerHandler(handlers.NewInboxHandler),
 			provideServerHandler(handlers.NewTokenUsageHandler),
 			provideServerHandler(handlers.NewBrowserContextsHandler),
 			provideServerHandler(provideCLIHandler),
@@ -342,12 +340,11 @@ func injectToolProviders(a *agentpkg.Agent, providers []agenttools.ToolProvider)
 	a.SetToolProviders(providers)
 }
 
-func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, sessionService *sessionpkg.Service, eventHub *event.Hub) *flow.Resolver {
+func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, sessionService *sessionpkg.Service, eventHub *event.Hub) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, a, 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
-	resolver.SetInboxService(inboxService)
 	resolver.SetSessionService(sessionService)
 	resolver.SetEventPublisher(eventHub)
 	return resolver
@@ -373,7 +370,7 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	return registry
 }
 
-func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *local.RouteHub, routeService *route.DBService, sessionService *sessionpkg.Service, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, aclService *acl.Service, policyService *policy.Service, bindService *bind.Service, mediaService *media.Service, inboxService *inbox.Service, ttsService *ttspkg.Service, settingsService *settings.Service, subagentService *subagent.Service, scheduleService *schedule.Service, mcpConnService *mcp.ConnectionService, modelsService *models.Service, providersService *providers.Service, memProvService *memprovider.Service, searchProvService *searchproviders.Service, browserCtxService *browsercontexts.Service, emailService *emailpkg.Service, emailOutboxService *emailpkg.OutboxService, heartbeatService *heartbeat.Service, queries *dbsqlc.Queries, containerdHandler *handlers.ContainerdHandler, manager *workspace.Manager, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
+func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *local.RouteHub, routeService *route.DBService, sessionService *sessionpkg.Service, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, aclService *acl.Service, policyService *policy.Service, bindService *bind.Service, mediaService *media.Service, ttsService *ttspkg.Service, settingsService *settings.Service, subagentService *subagent.Service, scheduleService *schedule.Service, mcpConnService *mcp.ConnectionService, modelsService *models.Service, providersService *providers.Service, memProvService *memprovider.Service, searchProvService *searchproviders.Service, browserCtxService *browsercontexts.Service, emailService *emailpkg.Service, emailOutboxService *emailpkg.OutboxService, heartbeatService *heartbeat.Service, queries *dbsqlc.Queries, containerdHandler *handlers.ContainerdHandler, manager *workspace.Manager, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
 	adapter, ok := registry.Get(qq.Type)
 	if !ok {
 		panic("qq adapter not registered")
@@ -389,7 +386,6 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
-	processor.SetInboxService(inboxService)
 	processor.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
 	processor.SetCommandHandler(command.NewHandler(
 		log,
@@ -398,7 +394,6 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 		scheduleService,
 		settingsService,
 		mcpConnService,
-		inboxService,
 		modelsService,
 		providersService,
 		memProvService,
@@ -456,8 +451,8 @@ func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederat
 	return svc
 }
 
-func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service) []agenttools.ToolProvider {
-	var assetResolver agenttools.AssetResolver
+func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service) []agenttools.ToolProvider {
+	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
 	}
@@ -470,7 +465,6 @@ func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *c
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
 		agenttools.NewContainerProvider(log, manager, config.DefaultDataMount),
 		agenttools.NewReadMediaProvider(log, manager, config.DefaultDataMount),
-		agenttools.NewInboxProvider(log, inboxService),
 		agenttools.NewEmailProvider(log, emailService, emailManager),
 		agenttools.NewWebFetchProvider(log),
 		agenttools.NewSubagentProvider(log, subagentService, settingsService, modelsService, queries, ""),
@@ -572,7 +566,6 @@ var (
 		"/auth",
 		"/channels",
 		"/containers",
-		"/inbox",
 		"/users",
 		"/bots",
 		"/models",
@@ -836,8 +829,8 @@ func provideEmailChatGateway(resolver *flow.Resolver, queries *dbsqlc.Queries, c
 	return flow.NewEmailChatGateway(resolver, queries, cfg.Auth.JWTSecret, log)
 }
 
-func provideEmailTrigger(log *slog.Logger, service *emailpkg.Service, botInbox *inbox.Service, chatTriggerer emailpkg.ChatTriggerer) *emailpkg.Trigger {
-	return emailpkg.NewTrigger(log, service, botInbox, chatTriggerer)
+func provideEmailTrigger(log *slog.Logger, service *emailpkg.Service, chatTriggerer emailpkg.ChatTriggerer) *emailpkg.Trigger {
+	return emailpkg.NewTrigger(log, service, chatTriggerer)
 }
 
 func startEmailManager(lc fx.Lifecycle, emailManager *emailpkg.Manager) {
@@ -976,26 +969,26 @@ func (a *skillLoaderAdapter) LoadSkills(ctx context.Context, botID string) ([]fl
 
 type mediaAssetResolverAdapter struct{ media *media.Service }
 
-func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, storageKey string) (agenttools.AssetMeta, error) {
+func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, storageKey string) (messaging.AssetMeta, error) {
 	if a == nil || a.media == nil {
-		return agenttools.AssetMeta{}, errors.New("media service not configured")
+		return messaging.AssetMeta{}, errors.New("media service not configured")
 	}
 	asset, err := a.media.GetByStorageKey(ctx, botID, storageKey)
 	if err != nil {
-		return agenttools.AssetMeta{}, err
+		return messaging.AssetMeta{}, err
 	}
-	return agenttools.AssetMeta{ContentHash: asset.ContentHash, Mime: asset.Mime, SizeBytes: asset.SizeBytes, StorageKey: asset.StorageKey}, nil
+	return messaging.AssetMeta{ContentHash: asset.ContentHash, Mime: asset.Mime, SizeBytes: asset.SizeBytes, StorageKey: asset.StorageKey}, nil
 }
 
-func (a *mediaAssetResolverAdapter) IngestContainerFile(ctx context.Context, botID, containerPath string) (agenttools.AssetMeta, error) {
+func (a *mediaAssetResolverAdapter) IngestContainerFile(ctx context.Context, botID, containerPath string) (messaging.AssetMeta, error) {
 	if a == nil || a.media == nil {
-		return agenttools.AssetMeta{}, errors.New("media service not configured")
+		return messaging.AssetMeta{}, errors.New("media service not configured")
 	}
 	asset, err := a.media.IngestContainerFile(ctx, botID, containerPath)
 	if err != nil {
-		return agenttools.AssetMeta{}, err
+		return messaging.AssetMeta{}, err
 	}
-	return agenttools.AssetMeta{ContentHash: asset.ContentHash, Mime: asset.Mime, SizeBytes: asset.SizeBytes, StorageKey: asset.StorageKey}, nil
+	return messaging.AssetMeta{ContentHash: asset.ContentHash, Mime: asset.Mime, SizeBytes: asset.SizeBytes, StorageKey: asset.StorageKey}, nil
 }
 
 type gatewayAssetLoaderAdapter struct{ media *media.Service }

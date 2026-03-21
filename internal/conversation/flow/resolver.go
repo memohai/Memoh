@@ -13,7 +13,6 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/sqlc"
-	"github.com/memohai/memoh/internal/inbox"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
@@ -57,7 +56,6 @@ type Resolver struct {
 	conversationSvc ConversationSettingsReader
 	messageService  messagepkg.Service
 	settingsService *settings.Service
-	inboxService    *inbox.Service
 	sessionService  SessionService
 	eventPublisher  messageevent.Publisher
 	skillLoader     SkillLoader
@@ -108,12 +106,6 @@ func (r *Resolver) SetGatewayAssetLoader(loader gatewayAssetLoader) {
 	r.assetLoader = loader
 }
 
-// SetInboxService configures inbox support for injecting unread items into the
-// system prompt and marking them as read after a response.
-func (r *Resolver) SetInboxService(service *inbox.Service) {
-	r.inboxService = service
-}
-
 type usageInfo struct {
 	InputTokens  *int `json:"inputTokens"`
 	OutputTokens *int `json:"outputTokens"`
@@ -122,11 +114,10 @@ type usageInfo struct {
 // --- resolved context (shared by Chat / StreamChat / TriggerSchedule) ---
 
 type resolvedContext struct {
-	runConfig    agentpkg.RunConfig
-	model        models.GetResponse
-	provider     sqlc.LlmProvider
-	inboxItemIDs []string
-	query        string // headerified query
+	runConfig agentpkg.RunConfig
+	model     models.GetResponse
+	provider  sqlc.LlmProvider
+	query     string // headerified query
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
@@ -245,32 +236,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		agentSkills = []agentpkg.SkillEntry{}
 	}
 
-	var agentInbox []agentpkg.InboxItem
-	var inboxItemIDs []string
-	if r.inboxService != nil {
-		maxInbox := botSettings.MaxInboxItems
-		if maxInbox <= 0 {
-			maxInbox = settings.DefaultMaxInboxItems
-		}
-		items, err := r.inboxService.ListUnread(ctx, req.BotID, maxInbox)
-		if err != nil {
-			r.logger.Warn("failed to load inbox items", slog.String("bot_id", req.BotID), slog.Any("error", err))
-		} else if len(items) > 0 {
-			agentInbox = make([]agentpkg.InboxItem, 0, len(items))
-			inboxItemIDs = make([]string, 0, len(items))
-			for _, item := range items {
-				agentInbox = append(agentInbox, agentpkg.InboxItem{
-					ID:        item.ID,
-					Source:    item.Source,
-					Header:    item.Header,
-					Content:   item.Content,
-					CreatedAt: item.CreatedAt.Format(time.RFC3339),
-				})
-				inboxItemIDs = append(inboxItemIDs, item.ID)
-			}
-		}
-	}
-
 	displayName := r.resolveDisplayName(ctx, req)
 
 	headerifiedQuery := FormatUserHeader(
@@ -323,12 +288,11 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			ReplyTarget:       strings.TrimSpace(req.ReplyTarget),
 			SessionToken:      req.ChatToken,
 		},
-		Skills:            agentSkills,
-		Inbox:         agentInbox,
-		LoopDetection:     agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
+		Skills:        agentSkills,
+		LoopDetection: agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 	}
 
-	return resolvedContext{runConfig: runCfg, model: chatModel, provider: provider, inboxItemIDs: inboxItemIDs, query: headerifiedQuery}, nil
+	return resolvedContext{runConfig: runCfg, model: chatModel, provider: provider, query: headerifiedQuery}, nil
 }
 
 // Chat sends a synchronous chat request and stores the result.
@@ -354,7 +318,6 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err := r.storeRound(ctx, req, roundMessages, rc.model.ID); err != nil {
 		return conversation.ChatResponse{}, err
 	}
-	r.markInboxRead(ctx, req.BotID, rc.inboxItemIDs)
 	return conversation.ChatResponse{
 		Messages: outputMessages,
 		Model:    rc.model.ModelID,
@@ -375,7 +338,6 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 		SessionType:        cfg.SessionType,
 		Skills:             cfg.Skills,
 		Files:              files,
-		Inbox:              cfg.Inbox,
 		SupportsImageInput: supportsImageInput,
 	})
 

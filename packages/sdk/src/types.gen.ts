@@ -906,6 +906,7 @@ export type HandlersTokenUsageResponse = {
 };
 
 export type HandlersCreateSessionRequest = {
+    channel_type?: string;
     metadata?: {
         [key: string]: unknown;
     };
@@ -928,10 +929,6 @@ export type HandlersFsOpResponse = {
 export type HandlersListMyIdentitiesResponse = {
     items?: Array<IdentitiesChannelIdentity>;
     user_id?: string;
-};
-
-export type HandlersMarkReadRequest = {
-    ids?: Array<string>;
 };
 
 export type HandlersMemoryAddPayload = {
@@ -1021,6 +1018,7 @@ export type HeartbeatLog = {
     error_message?: string;
     id?: string;
     result_text?: string;
+    session_id?: string;
     started_at?: string;
     status?: string;
     usage?: unknown;
@@ -1038,35 +1036,6 @@ export type IdentitiesChannelIdentity = {
     };
     updated_at?: string;
     user_id?: string;
-};
-
-export type InboxCountResult = {
-    total?: number;
-    unread?: number;
-};
-
-export type InboxCreateRequest = {
-    action?: string;
-    bot_id?: string;
-    content?: string;
-    header?: {
-        [key: string]: unknown;
-    };
-    source?: string;
-};
-
-export type InboxItem = {
-    action?: string;
-    bot_id?: string;
-    content?: string;
-    created_at?: string;
-    header?: {
-        [key: string]: unknown;
-    };
-    id?: string;
-    is_read?: boolean;
-    read_at?: string;
-    source?: string;
 };
 
 export type McpAuthorizeResult = {
@@ -1297,8 +1266,25 @@ export type ScheduleCreateRequest = {
     pattern?: string;
 };
 
+export type ScheduleListLogsResponse = {
+    items?: Array<ScheduleLog>;
+};
+
 export type ScheduleListResponse = {
     items?: Array<ScheduleSchedule>;
+};
+
+export type ScheduleLog = {
+    bot_id?: string;
+    completed_at?: string;
+    error_message?: string;
+    id?: string;
+    result_text?: string;
+    schedule_id?: string;
+    session_id?: string;
+    started_at?: string;
+    status?: string;
+    usage?: unknown;
 };
 
 export type ScheduleNullableInt = {
@@ -1387,8 +1373,13 @@ export type SessionSession = {
     metadata?: {
         [key: string]: unknown;
     };
+    route_conversation_type?: string;
     route_id?: string;
+    route_metadata?: {
+        [key: string]: unknown;
+    };
     title?: string;
+    type?: string;
     updated_at?: string;
 };
 
@@ -1402,7 +1393,6 @@ export type SettingsSettings = {
     language?: string;
     max_context_load_time?: number;
     max_context_tokens?: number;
-    max_inbox_items?: number;
     memory_provider_id?: string;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
@@ -1421,7 +1411,6 @@ export type SettingsUpsertRequest = {
     language?: string;
     max_context_load_time?: number;
     max_context_tokens?: number;
-    max_inbox_items?: number;
     memory_provider_id?: string;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
@@ -3368,241 +3357,6 @@ export type GetBotsByBotIdHeartbeatLogsResponses = {
 
 export type GetBotsByBotIdHeartbeatLogsResponse = GetBotsByBotIdHeartbeatLogsResponses[keyof GetBotsByBotIdHeartbeatLogsResponses];
 
-export type GetBotsByBotIdInboxData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: {
-        /**
-         * Filter by read status (true/false)
-         */
-        is_read?: string;
-        /**
-         * Filter by source
-         */
-        source?: string;
-        /**
-         * Max items to return
-         */
-        limit?: number;
-        /**
-         * Offset for pagination
-         */
-        offset?: number;
-    };
-    url: '/bots/{bot_id}/inbox';
-};
-
-export type GetBotsByBotIdInboxErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdInboxError = GetBotsByBotIdInboxErrors[keyof GetBotsByBotIdInboxErrors];
-
-export type GetBotsByBotIdInboxResponses = {
-    /**
-     * OK
-     */
-    200: Array<InboxItem>;
-};
-
-export type GetBotsByBotIdInboxResponse = GetBotsByBotIdInboxResponses[keyof GetBotsByBotIdInboxResponses];
-
-export type PostBotsByBotIdInboxData = {
-    /**
-     * Inbox item payload
-     */
-    body: InboxCreateRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/inbox';
-};
-
-export type PostBotsByBotIdInboxErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdInboxError = PostBotsByBotIdInboxErrors[keyof PostBotsByBotIdInboxErrors];
-
-export type PostBotsByBotIdInboxResponses = {
-    /**
-     * Created
-     */
-    201: InboxItem;
-};
-
-export type PostBotsByBotIdInboxResponse = PostBotsByBotIdInboxResponses[keyof PostBotsByBotIdInboxResponses];
-
-export type GetBotsByBotIdInboxCountData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/inbox/count';
-};
-
-export type GetBotsByBotIdInboxCountErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdInboxCountError = GetBotsByBotIdInboxCountErrors[keyof GetBotsByBotIdInboxCountErrors];
-
-export type GetBotsByBotIdInboxCountResponses = {
-    /**
-     * OK
-     */
-    200: InboxCountResult;
-};
-
-export type GetBotsByBotIdInboxCountResponse = GetBotsByBotIdInboxCountResponses[keyof GetBotsByBotIdInboxCountResponses];
-
-export type PostBotsByBotIdInboxMarkReadData = {
-    /**
-     * Item IDs to mark as read
-     */
-    body: HandlersMarkReadRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/inbox/mark-read';
-};
-
-export type PostBotsByBotIdInboxMarkReadErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdInboxMarkReadError = PostBotsByBotIdInboxMarkReadErrors[keyof PostBotsByBotIdInboxMarkReadErrors];
-
-export type PostBotsByBotIdInboxMarkReadResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type DeleteBotsByBotIdInboxByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Inbox item ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/inbox/{id}';
-};
-
-export type DeleteBotsByBotIdInboxByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteBotsByBotIdInboxByIdError = DeleteBotsByBotIdInboxByIdErrors[keyof DeleteBotsByBotIdInboxByIdErrors];
-
-export type DeleteBotsByBotIdInboxByIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetBotsByBotIdInboxByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Inbox item ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/inbox/{id}';
-};
-
-export type GetBotsByBotIdInboxByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdInboxByIdError = GetBotsByBotIdInboxByIdErrors[keyof GetBotsByBotIdInboxByIdErrors];
-
-export type GetBotsByBotIdInboxByIdResponses = {
-    /**
-     * OK
-     */
-    200: InboxItem;
-};
-
-export type GetBotsByBotIdInboxByIdResponse = GetBotsByBotIdInboxByIdResponses[keyof GetBotsByBotIdInboxByIdResponses];
-
 export type GetBotsByBotIdMcpData = {
     body?: never;
     path?: never;
@@ -4765,6 +4519,81 @@ export type PostBotsByBotIdScheduleResponses = {
 
 export type PostBotsByBotIdScheduleResponse = PostBotsByBotIdScheduleResponses[keyof PostBotsByBotIdScheduleResponses];
 
+export type DeleteBotsByBotIdScheduleLogsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/schedule/logs';
+};
+
+export type DeleteBotsByBotIdScheduleLogsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdScheduleLogsError = DeleteBotsByBotIdScheduleLogsErrors[keyof DeleteBotsByBotIdScheduleLogsErrors];
+
+export type DeleteBotsByBotIdScheduleLogsResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdScheduleLogsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Before timestamp (RFC3339)
+         */
+        before?: string;
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/schedule/logs';
+};
+
+export type GetBotsByBotIdScheduleLogsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdScheduleLogsError = GetBotsByBotIdScheduleLogsErrors[keyof GetBotsByBotIdScheduleLogsErrors];
+
+export type GetBotsByBotIdScheduleLogsResponses = {
+    /**
+     * OK
+     */
+    200: ScheduleListLogsResponse;
+};
+
+export type GetBotsByBotIdScheduleLogsResponse = GetBotsByBotIdScheduleLogsResponses[keyof GetBotsByBotIdScheduleLogsResponses];
+
 export type DeleteBotsByBotIdScheduleByIdData = {
     body?: never;
     path: {
@@ -4871,6 +4700,53 @@ export type PutBotsByBotIdScheduleByIdResponses = {
 };
 
 export type PutBotsByBotIdScheduleByIdResponse = PutBotsByBotIdScheduleByIdResponses[keyof PutBotsByBotIdScheduleByIdResponses];
+
+export type GetBotsByBotIdScheduleByIdLogsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Schedule ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Before timestamp (RFC3339)
+         */
+        before?: string;
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/schedule/{id}/logs';
+};
+
+export type GetBotsByBotIdScheduleByIdLogsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdScheduleByIdLogsError = GetBotsByBotIdScheduleByIdLogsErrors[keyof GetBotsByBotIdScheduleByIdLogsErrors];
+
+export type GetBotsByBotIdScheduleByIdLogsResponses = {
+    /**
+     * OK
+     */
+    200: ScheduleListLogsResponse;
+};
+
+export type GetBotsByBotIdScheduleByIdLogsResponse = GetBotsByBotIdScheduleByIdLogsResponses[keyof GetBotsByBotIdScheduleByIdLogsResponses];
 
 export type GetBotsByBotIdSessionsData = {
     body?: never;

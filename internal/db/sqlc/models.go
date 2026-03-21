@@ -20,7 +20,6 @@ type Bot struct {
 	Language           string             `json:"language"`
 	ReasoningEnabled   bool               `json:"reasoning_enabled"`
 	ReasoningEffort    string             `json:"reasoning_effort"`
-	MaxInboxItems      int32              `json:"max_inbox_items"`
 	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
 	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
 	MemoryProviderID   pgtype.UUID        `json:"memory_provider_id"`
@@ -134,18 +133,6 @@ type BotHistoryMessageAsset struct {
 	Name        string             `json:"name"`
 	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
-type BotInbox struct {
-	ID        pgtype.UUID        `json:"id"`
-	BotID     pgtype.UUID        `json:"bot_id"`
-	Source    string             `json:"source"`
-	Header    []byte             `json:"header"`
-	Content   string             `json:"content"`
-	Action    string             `json:"action"`
-	IsRead    bool               `json:"is_read"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	ReadAt    pgtype.Timestamptz `json:"read_at"`
 }
 
 type BotSession struct {

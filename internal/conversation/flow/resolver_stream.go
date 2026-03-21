@@ -71,7 +71,6 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			}
 			chunkCh <- conversation.StreamChunk(data)
 		}
-		r.markInboxRead(ctx, streamReq.BotID, rc.inboxItemIDs)
 	}()
 	return chunkCh, errCh
 }
@@ -139,7 +138,6 @@ func (r *Resolver) StreamChatWS(
 		}
 	}
 
-	r.markInboxRead(ctx, req.BotID, rc.inboxItemIDs)
 	return nil
 }
 

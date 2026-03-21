@@ -247,8 +247,8 @@ type ChatRequest struct {
 	MaxContextLoadTime int              `json:"max_context_load_time,omitempty"`
 	Channels           []string         `json:"channels,omitempty"`
 	CurrentChannel     string           `json:"current_channel,omitempty"`
-	Messages    []ModelMessage   `json:"messages,omitempty"`
-	Attachments []ChatAttachment `json:"attachments,omitempty"`
+	Messages           []ModelMessage   `json:"messages,omitempty"`
+	Attachments        []ChatAttachment `json:"attachments,omitempty"`
 }
 
 // ChatResponse is the output of a non-streaming chat call.

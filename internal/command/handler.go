@@ -10,7 +10,6 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
@@ -50,7 +49,6 @@ type Handler struct {
 	scheduleService *schedule.Service
 	settingsService *settings.Service
 	mcpConnService  *mcp.ConnectionService
-	inboxService    *inbox.Service
 
 	modelsService      *models.Service
 	providersService   *providers.Service
@@ -75,7 +73,6 @@ func NewHandler(
 	scheduleService *schedule.Service,
 	settingsService *settings.Service,
 	mcpConnService *mcp.ConnectionService,
-	inboxService *inbox.Service,
 	modelsService *models.Service,
 	providersService *providers.Service,
 	memProvService *memprovider.Service,
@@ -97,7 +94,6 @@ func NewHandler(
 		scheduleService:    scheduleService,
 		settingsService:    settingsService,
 		mcpConnService:     mcpConnService,
-		inboxService:       inboxService,
 		modelsService:      modelsService,
 		providersService:   providersService,
 		memProvService:     memProvService,

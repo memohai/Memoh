@@ -42,13 +42,13 @@ func (d *fakeDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 
 // makeBotRow creates a fakeRow that populates a sqlc.GetBotByIDRow via Scan.
 // Column order: id, owner_user_id, display_name, avatar_url, is_active, status,
-// max_context_load_time, max_context_tokens, max_inbox_items, language,
+// max_context_load_time, max_context_tokens, language,
 // reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id,
 // heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at.
 func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) < 21 {
+			if len(dest) < 20 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -57,21 +57,20 @@ func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 			*dest[3].(*pgtype.Text) = pgtype.Text{}
 			*dest[4].(*bool) = true
 			*dest[5].(*string) = BotStatusReady
-			*dest[6].(*int32) = 30   // MaxContextLoadTime
-			*dest[7].(*int32) = 4096 // MaxContextTokens
-			*dest[8].(*int32) = 10   // MaxInboxItems
-			*dest[9].(*string) = "en"
-			*dest[10].(*bool) = false                // ReasoningEnabled
-			*dest[11].(*string) = "medium"           // ReasoningEffort
-			*dest[12].(*pgtype.UUID) = pgtype.UUID{} // ChatModelID
-			*dest[13].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
-			*dest[14].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
-			*dest[15].(*bool) = false                // HeartbeatEnabled
-			*dest[16].(*int32) = 30                  // HeartbeatInterval
-			*dest[17].(*string) = ""                 // HeartbeatPrompt
-			*dest[18].(*[]byte) = []byte(`{}`)
+			*dest[6].(*int32) = 30                   // MaxContextLoadTime
+			*dest[7].(*int32) = 4096                 // MaxContextTokens
+			*dest[8].(*string) = "en"                // Language
+			*dest[9].(*bool) = false                 // ReasoningEnabled
+			*dest[10].(*string) = "medium"           // ReasoningEffort
+			*dest[11].(*pgtype.UUID) = pgtype.UUID{} // ChatModelID
+			*dest[12].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
+			*dest[13].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
+			*dest[14].(*bool) = false                // HeartbeatEnabled
+			*dest[15].(*int32) = 30                  // HeartbeatInterval
+			*dest[16].(*string) = ""                 // HeartbeatPrompt
+			*dest[17].(*[]byte) = []byte(`{}`)
+			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[20].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

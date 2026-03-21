@@ -52,5 +52,3 @@ During heartbeats you can freely:
 {{skillsSection}}
 
 {{fileSections}}
-
-{{inboxSection}}

@@ -24,7 +24,6 @@ import (
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
-	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
@@ -92,7 +91,6 @@ type ChannelInboundProcessor struct {
 	message          messagepkg.Writer
 	mediaService     mediaIngestor
 	reactor          channelReactor
-	inboxService     *inbox.Service
 	commandHandler   *command.Handler
 	registry         *channel.Registry
 	logger           *slog.Logger
@@ -179,15 +177,6 @@ func (p *ChannelInboundProcessor) SetStreamObserver(observer channel.StreamObser
 		return
 	}
 	p.observer = observer
-}
-
-// SetInboxService configures the inbox service for storing non-mentioned
-// group messages as inbox items.
-func (p *ChannelInboundProcessor) SetInboxService(service *inbox.Service) {
-	if p == nil {
-		return
-	}
-	p.inboxService = service
 }
 
 // SetTtsService configures the TTS synthesizer and settings reader for handling
@@ -337,12 +326,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if activeChatID == "" {
 		activeChatID = strings.TrimSpace(resolved.ChatID)
 	}
-	// Determine inbox action: trigger (immediate response) or notify (passive).
-	inboxAction := inbox.ActionNotify
-	if shouldTriggerAssistantResponse(msg) || identity.ForceReply {
-		inboxAction = inbox.ActionTrigger
-	}
-	if inboxAction == inbox.ActionTrigger && p.acl != nil {
+	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply
+	if shouldTrigger && p.acl != nil {
 		allowed, err := p.acl.CanPerformChatTrigger(ctx, acl.ChatTriggerRequest{
 			BotID:             identity.BotID,
 			UserID:            identity.UserID,
@@ -358,7 +343,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			return fmt.Errorf("authorize chat trigger: %w", err)
 		}
 		if !allowed {
-			inboxAction = inbox.ActionNotify
+			shouldTrigger = false
 			if p.logger != nil {
 				p.logger.Info(
 					"inbound trigger denied by acl",
@@ -372,10 +357,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
-	// All messages go through inbox first.
-	inboxItem := p.createInboxItem(ctx, identity, msg, text, attachments, resolved.RouteID, inboxAction)
-
-	if inboxAction != inbox.ActionTrigger {
+	if !shouldTrigger {
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID)
 		if p.logger != nil {
 			p.logger.Info(
 				"inbound not triggering assistant (group trigger condition not met)",
@@ -390,11 +373,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			)
 		}
 		return nil
-	}
-
-	// Mark the trigger inbox item as read immediately.
-	if inboxItem.ID != "" {
-		p.markInboxItemRead(ctx, inboxItem)
 	}
 
 	// Issue chat token for reply routing.
@@ -765,69 +743,91 @@ func metadataBool(metadata map[string]any, key string) bool {
 	}
 }
 
-func (p *ChannelInboundProcessor) createInboxItem(
+// persistPassiveMessage writes a user message directly into bot_history_messages
+// for group conversations where the bot was not @mentioned. This replaces the
+// old inbox system — the message is stored in the route's active session so it
+// becomes part of the conversation history the next time the agent is triggered.
+func (p *ChannelInboundProcessor) persistPassiveMessage(
 	ctx context.Context,
 	ident InboundIdentity,
 	msg channel.InboundMessage,
 	text string,
 	attachments []conversation.ChatAttachment,
-	routeID string,
-	action string,
-) inbox.Item {
-	if p.inboxService == nil {
-		return inbox.Item{}
+	routeID, sessionID string,
+) {
+	if p.message == nil {
+		return
 	}
 	botID := strings.TrimSpace(ident.BotID)
 	if botID == "" {
-		return inbox.Item{}
+		return
 	}
 	trimmedText := strings.TrimSpace(text)
 	if trimmedText == "" && len(attachments) == 0 {
-		return inbox.Item{}
-	}
-	displayName := strings.TrimSpace(ident.DisplayName)
-	if displayName == "" {
-		displayName = "Unknown"
+		return
 	}
 
 	var attachmentPaths []string
 	for _, att := range attachments {
-		if p := strings.TrimSpace(att.Path); p != "" {
-			attachmentPaths = append(attachmentPaths, p)
+		if ap := strings.TrimSpace(att.Path); ap != "" {
+			attachmentPaths = append(attachmentPaths, ap)
 		}
 	}
 
-	meta := flow.BuildUserMessageMeta(
+	headerifiedText := flow.FormatUserHeader(
 		strings.TrimSpace(msg.Message.ID),
 		strings.TrimSpace(ident.ChannelIdentityID),
-		displayName,
+		strings.TrimSpace(ident.DisplayName),
 		msg.Channel.String(),
 		strings.TrimSpace(msg.Conversation.Type),
 		strings.TrimSpace(msg.Conversation.Name),
 		attachmentPaths,
+		trimmedText,
 	)
-	header := meta.ToMap()
-	header["route_id"] = strings.TrimSpace(routeID)
 
-	item, err := p.inboxService.Create(ctx, inbox.CreateRequest{
-		BotID:   botID,
-		Source:  msg.Channel.String(),
-		Header:  header,
-		Content: trimmedText,
-		Action:  action,
-	})
-	if err != nil && p.logger != nil {
-		p.logger.Warn("create inbox item failed", slog.Any("error", err), slog.String("bot_id", botID))
-	}
-	return item
-}
-
-func (p *ChannelInboundProcessor) markInboxItemRead(ctx context.Context, item inbox.Item) {
-	if p.inboxService == nil || item.ID == "" {
+	modelMsg := conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(headerifiedText)}
+	serialized, err := json.Marshal(modelMsg)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("marshal passive message failed", slog.Any("error", err))
+		}
 		return
 	}
-	if err := p.inboxService.MarkRead(ctx, item.BotID, []string{item.ID}); err != nil && p.logger != nil {
-		p.logger.Warn("mark inbox item read failed", slog.Any("error", err), slog.String("item_id", item.ID))
+
+	meta := map[string]any{
+		"route_id": strings.TrimSpace(routeID),
+		"platform": msg.Channel.String(),
+	}
+
+	var assets []messagepkg.AssetRef
+	for i, att := range attachments {
+		ch := strings.TrimSpace(att.ContentHash)
+		if ch == "" {
+			continue
+		}
+		assets = append(assets, messagepkg.AssetRef{
+			ContentHash: ch,
+			Role:        "attachment",
+			Ordinal:     i,
+			Mime:        strings.TrimSpace(att.Mime),
+			SizeBytes:   att.Size,
+			Name:        strings.TrimSpace(att.Name),
+			Metadata:    att.Metadata,
+		})
+	}
+
+	if _, err := p.message.Persist(ctx, messagepkg.PersistInput{
+		BotID:                   botID,
+		SessionID:               sessionID,
+		SenderChannelIdentityID: strings.TrimSpace(ident.ChannelIdentityID),
+		SenderUserID:            strings.TrimSpace(ident.UserID),
+		ExternalMessageID:       strings.TrimSpace(msg.Message.ID),
+		Role:                    "user",
+		Content:                 serialized,
+		Metadata:                meta,
+		Assets:                  assets,
+	}); err != nil && p.logger != nil {
+		p.logger.Warn("persist passive message failed", slog.Any("error", err), slog.String("bot_id", botID))
 	}
 }
 

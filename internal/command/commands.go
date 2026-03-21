@@ -6,7 +6,6 @@ func (h *Handler) buildRegistry() *Registry {
 	r.RegisterGroup(h.buildSubagentGroup())
 	r.RegisterGroup(h.buildScheduleGroup())
 	r.RegisterGroup(h.buildMCPGroup())
-	r.RegisterGroup(h.buildInboxGroup())
 	r.RegisterGroup(h.buildSettingsGroup())
 	r.RegisterGroup(h.buildModelGroup())
 	r.RegisterGroup(h.buildMemoryGroup())

@@ -59,7 +59,7 @@ type updateSessionRequest struct {
 // @Success 201 {object} session.Session
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
-// @Router /bots/{bot_id}/sessions [post]
+// @Router /bots/{bot_id}/sessions [post].
 func (h *SessionHandler) CreateSession(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
@@ -95,7 +95,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 // @Success 200 {object} map[string][]session.Session
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
-// @Router /bots/{bot_id}/sessions [get]
+// @Router /bots/{bot_id}/sessions [get].
 func (h *SessionHandler) ListSessions(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
@@ -124,7 +124,7 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /bots/{bot_id}/sessions/{session_id} [get]
+// @Router /bots/{bot_id}/sessions/{session_id} [get].
 func (h *SessionHandler) GetSession(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
@@ -161,7 +161,7 @@ func (h *SessionHandler) GetSession(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /bots/{bot_id}/sessions/{session_id} [patch]
+// @Router /bots/{bot_id}/sessions/{session_id} [patch].
 func (h *SessionHandler) UpdateSession(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
@@ -219,7 +219,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 // @Success 204
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
-// @Router /bots/{bot_id}/sessions/{session_id} [delete]
+// @Router /bots/{bot_id}/sessions/{session_id} [delete].
 func (h *SessionHandler) DeleteSession(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {

@@ -294,17 +294,6 @@ WHERE session_id = sqlc.arg(session_id);
 -- name: ListObservedConversationsByChannelIdentity :many
 WITH observed_routes AS (
   SELECT
-    (i.header->>'route_id')::uuid AS route_id,
-    MAX(i.created_at)::timestamptz AS last_observed_at
-  FROM bot_inbox i
-  WHERE i.bot_id = sqlc.arg(bot_id)
-    AND i.header->>'channel-identity-id' = sqlc.arg(channel_identity_id)::text
-    AND COALESCE(i.header->>'route_id', '') != ''
-  GROUP BY (i.header->>'route_id')::uuid
-
-  UNION ALL
-
-  SELECT
     s.route_id,
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_history_messages m
@@ -313,13 +302,6 @@ WITH observed_routes AS (
     AND m.sender_channel_identity_id = sqlc.arg(channel_identity_id)::uuid
     AND s.route_id IS NOT NULL
   GROUP BY s.route_id
-),
-ranked_routes AS (
-  SELECT
-    route_id,
-    MAX(last_observed_at)::timestamptz AS last_observed_at
-  FROM observed_routes
-  GROUP BY route_id
 )
 SELECT
   r.id AS route_id,
@@ -332,7 +314,7 @@ SELECT
   COALESCE(r.external_thread_id, '') AS thread_id,
   COALESCE(r.metadata->>'conversation_name', '')::text AS conversation_name,
   rr.last_observed_at
-FROM ranked_routes rr
+FROM observed_routes rr
 JOIN bot_channel_routes r ON r.id = rr.route_id
 WHERE LOWER(COALESCE(r.conversation_type, '')) NOT IN ('', 'p2p', 'private', 'direct', 'dm')
 GROUP BY

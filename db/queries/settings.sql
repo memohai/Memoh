@@ -3,7 +3,6 @@ SELECT
   bots.id AS bot_id,
   bots.max_context_load_time,
   bots.max_context_tokens,
-  bots.max_inbox_items,
   bots.language,
   bots.reasoning_enabled,
   bots.reasoning_effort,
@@ -32,7 +31,6 @@ WITH updated AS (
   UPDATE bots
   SET max_context_load_time = sqlc.arg(max_context_load_time),
       max_context_tokens = sqlc.arg(max_context_tokens),
-      max_inbox_items = sqlc.arg(max_inbox_items),
       language = sqlc.arg(language),
       reasoning_enabled = sqlc.arg(reasoning_enabled),
       reasoning_effort = sqlc.arg(reasoning_effort),
@@ -48,13 +46,12 @@ WITH updated AS (
       browser_context_id = COALESCE(sqlc.narg(browser_context_id)::uuid, bots.browser_context_id),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.max_inbox_items, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.chat_model_id, bots.heartbeat_model_id, bots.title_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
+  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.chat_model_id, bots.heartbeat_model_id, bots.title_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
 )
 SELECT
   updated.id AS bot_id,
   updated.max_context_load_time,
   updated.max_context_tokens,
-  updated.max_inbox_items,
   updated.language,
   updated.reasoning_enabled,
   updated.reasoning_effort,
@@ -81,7 +78,6 @@ LEFT JOIN browser_contexts ON browser_contexts.id = updated.browser_context_id;
 UPDATE bots
 SET max_context_load_time = 1440,
     max_context_tokens = 0,
-    max_inbox_items = 50,
     language = 'auto',
     reasoning_enabled = false,
     reasoning_effort = 'medium',

@@ -58,12 +58,3 @@ func parseLoopDetectionEnabledFromMetadata(payload []byte) bool {
 	}
 	return enabled
 }
-
-func (r *Resolver) markInboxRead(ctx context.Context, botID string, ids []string) {
-	if r.inboxService == nil || len(ids) == 0 {
-		return
-	}
-	if err := r.inboxService.MarkRead(ctx, botID, ids); err != nil {
-		r.logger.Warn("failed to mark inbox items as read", slog.String("bot_id", botID), slog.Any("error", err))
-	}
-}

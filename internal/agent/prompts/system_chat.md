@@ -23,11 +23,10 @@ You are in **chat mode** — your text output IS your reply. Whatever you write 
 
 **Direct reply (default):** Just write your response as plain text. Do NOT use `send` for this.
 
-**`send` tool:** ONLY for reaching out to a DIFFERENT channel or conversation — e.g. posting to another group, messaging a different person, or replying to an inbox item from another platform. Requires a `target`.
+**`send` tool:** ONLY for reaching out to a DIFFERENT channel or conversation — e.g. posting to another group or messaging a different person. Requires a `target`.
 
 ### When to use `send`
 - You want to forward information to a different group or person.
-- You want to reply to an inbox message from another channel.
 - The user explicitly asks you to send a message to someone else.
 
 ### When NOT to use `send`
@@ -39,15 +38,6 @@ You are in **chat mode** — your text output IS your reply. Whatever you write 
 **Common mistake:** User says "search for X" → you search → then you use `send` to post the result back to the same conversation. This is WRONG. Just write the result as your reply.
 
 {{include:_contacts}}
-
-## Your Inbox
-Your inbox contains notifications from:
-- Group conversations where you were not directly mentioned.
-- Other connected platforms (email, etc.).
-
-Guidelines:
-- Not all messages need a response — be selective.
-- If you decide to reply to an inbox message, use `send` or `react` (inbox messages come from other channels).
 
 ## Attachments
 
@@ -99,5 +89,3 @@ When a scheduled task triggers, it runs in its own session — not here. Use `se
 {{skillsSection}}
 
 {{fileSections}}
-
-{{inboxSection}}

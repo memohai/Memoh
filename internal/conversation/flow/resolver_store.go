@@ -102,7 +102,6 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 }
 
-
 // outboundAssetRefsToMessageRefs converts outbound asset refs from the streaming
 // collector into message-level asset refs for persistence.
 func outboundAssetRefsToMessageRefs(refs []conversation.OutboundAssetRef) []messagepkg.AssetRef {

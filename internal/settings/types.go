@@ -2,7 +2,6 @@ package settings
 
 const (
 	DefaultMaxContextLoadTime = 24 * 60
-	DefaultMaxInboxItems      = 50
 	DefaultLanguage           = "auto"
 	DefaultReasoningEffort    = "medium"
 	DefaultHeartbeatInterval  = 30
@@ -16,7 +15,6 @@ type Settings struct {
 	BrowserContextID   string `json:"browser_context_id"`
 	MaxContextLoadTime int    `json:"max_context_load_time"`
 	MaxContextTokens   int    `json:"max_context_tokens"`
-	MaxInboxItems      int    `json:"max_inbox_items"`
 	Language           string `json:"language"`
 	AllowGuest         bool   `json:"allow_guest"`
 	ReasoningEnabled   bool   `json:"reasoning_enabled"`
@@ -35,7 +33,6 @@ type UpsertRequest struct {
 	BrowserContextID   string  `json:"browser_context_id,omitempty"`
 	MaxContextLoadTime *int    `json:"max_context_load_time,omitempty"`
 	MaxContextTokens   *int    `json:"max_context_tokens,omitempty"`
-	MaxInboxItems      *int    `json:"max_inbox_items,omitempty"`
 	Language           string  `json:"language,omitempty"`
 	AllowGuest         *bool   `json:"allow_guest,omitempty"`
 	ReasoningEnabled   *bool   `json:"reasoning_enabled,omitempty"`

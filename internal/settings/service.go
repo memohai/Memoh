@@ -70,15 +70,12 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting(botRow.MaxContextLoadTime, botRow.MaxContextTokens, botRow.MaxInboxItems, botRow.Language, allowGuest, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval)
+	current := normalizeBotSetting(botRow.MaxContextLoadTime, botRow.MaxContextTokens, botRow.Language, allowGuest, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval)
 	if req.MaxContextLoadTime != nil && *req.MaxContextLoadTime > 0 {
 		current.MaxContextLoadTime = *req.MaxContextLoadTime
 	}
 	if req.MaxContextTokens != nil && *req.MaxContextTokens >= 0 {
 		current.MaxContextTokens = *req.MaxContextTokens
-	}
-	if req.MaxInboxItems != nil && *req.MaxInboxItems >= 0 {
-		current.MaxInboxItems = *req.MaxInboxItems
 	}
 	if strings.TrimSpace(req.Language) != "" {
 		current.Language = strings.TrimSpace(req.Language)
@@ -156,7 +153,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if current.MaxContextLoadTime < math.MinInt32 || current.MaxContextLoadTime > math.MaxInt32 ||
 		current.MaxContextTokens < math.MinInt32 || current.MaxContextTokens > math.MaxInt32 ||
-		current.MaxInboxItems < math.MinInt32 || current.MaxInboxItems > math.MaxInt32 ||
 		current.HeartbeatInterval < math.MinInt32 || current.HeartbeatInterval > math.MaxInt32 {
 		return Settings{}, errors.New("settings numeric value out of int32 range")
 	}
@@ -165,7 +161,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		ID:                 pgID,
 		MaxContextLoadTime: int32(current.MaxContextLoadTime), //nolint:gosec // range validated above
 		MaxContextTokens:   int32(current.MaxContextTokens),
-		MaxInboxItems:      int32(current.MaxInboxItems),
 		Language:           current.Language,
 		ReasoningEnabled:   current.ReasoningEnabled,
 		ReasoningEffort:    current.ReasoningEffort,
@@ -209,11 +204,10 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return s.setAllowGuest(ctx, botID, "", false)
 }
 
-func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, maxInboxItems int32, language string, allowGuest bool, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32) Settings {
+func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, language string, allowGuest bool, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32) Settings {
 	settings := Settings{
 		MaxContextLoadTime: int(maxContextLoadTime),
 		MaxContextTokens:   int(maxContextTokens),
-		MaxInboxItems:      int(maxInboxItems),
 		Language:           strings.TrimSpace(language),
 		AllowGuest:         allowGuest,
 		ReasoningEnabled:   reasoningEnabled,
@@ -226,9 +220,6 @@ func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, maxIn
 	}
 	if settings.MaxContextTokens < 0 {
 		settings.MaxContextTokens = 0
-	}
-	if settings.MaxInboxItems <= 0 {
-		settings.MaxInboxItems = DefaultMaxInboxItems
 	}
 	if settings.Language == "" {
 		settings.Language = DefaultLanguage
@@ -255,7 +246,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 	return normalizeBotSettingsFields(
 		row.MaxContextLoadTime,
 		row.MaxContextTokens,
-		row.MaxInboxItems,
 		row.Language,
 		row.ReasoningEnabled,
 		row.ReasoningEffort,
@@ -275,7 +265,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 	return normalizeBotSettingsFields(
 		row.MaxContextLoadTime,
 		row.MaxContextTokens,
-		row.MaxInboxItems,
 		row.Language,
 		row.ReasoningEnabled,
 		row.ReasoningEffort,
@@ -294,7 +283,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 func normalizeBotSettingsFields(
 	maxContextLoadTime int32,
 	maxContextTokens int32,
-	maxInboxItems int32,
 	language string,
 	reasoningEnabled bool,
 	reasoningEffort string,
@@ -308,7 +296,7 @@ func normalizeBotSettingsFields(
 	ttsModelID pgtype.UUID,
 	browserContextID pgtype.UUID,
 ) Settings {
-	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, maxInboxItems, language, false, reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval)
+	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, language, false, reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval)
 	if chatModelID.Valid {
 		settings.ChatModelID = uuid.UUID(chatModelID.Bytes).String()
 	}

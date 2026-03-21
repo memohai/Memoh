@@ -161,8 +161,6 @@ func coalescePositiveInt(values ...int) int {
 	return defaultMaxContextMinutes
 }
 
-
-
 func nonNilModelMessages(m []conversation.ModelMessage) []conversation.ModelMessage {
 	if m == nil {
 		return []conversation.ModelMessage{}

@@ -165,7 +165,6 @@ CREATE TABLE IF NOT EXISTS bots (
   language TEXT NOT NULL DEFAULT 'auto',
   reasoning_enabled BOOLEAN NOT NULL DEFAULT false,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
-  max_inbox_items INTEGER NOT NULL DEFAULT 50,
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   search_provider_id UUID REFERENCES search_providers(id) ON DELETE SET NULL,
   memory_provider_id UUID REFERENCES memory_providers(id) ON DELETE SET NULL,
@@ -523,21 +522,6 @@ CREATE TABLE IF NOT EXISTS bot_history_message_assets (
 
 CREATE INDEX IF NOT EXISTS idx_message_assets_message_id ON bot_history_message_assets(message_id);
 
--- bot_inbox: per-bot message inbox for channel messages, notifications, etc.
-CREATE TABLE IF NOT EXISTS bot_inbox (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  source TEXT NOT NULL DEFAULT '',
-  header JSONB NOT NULL DEFAULT '{}'::jsonb,
-  content TEXT NOT NULL DEFAULT '',
-  action TEXT NOT NULL DEFAULT 'notify',
-  is_read BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  read_at TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS idx_bot_inbox_bot_unread ON bot_inbox(bot_id, created_at DESC) WHERE is_read = FALSE;
-CREATE INDEX IF NOT EXISTS idx_bot_inbox_bot_created ON bot_inbox(bot_id, created_at DESC);
 
 -- bot_heartbeat_logs: structured execution records for periodic heartbeat checks.
 CREATE TABLE IF NOT EXISTS bot_heartbeat_logs (

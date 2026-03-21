@@ -125,7 +125,6 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 		"basicTools":    strings.Join(basicTools, "\n"),
 		"skillsSection": skillsSection,
 		"fileSections":  fileSections,
-		"inboxSection":  formatInbox(params.Inbox),
 	})
 }
 
@@ -134,7 +133,6 @@ type SystemPromptParams struct {
 	SessionType        string
 	Skills             []SkillEntry
 	Files              []SystemFile
-	Inbox              []InboxItem
 	SupportsImageInput bool
 }
 
@@ -195,30 +193,4 @@ func buildSkillsSection(skills []SkillEntry) string {
 
 func formatSystemFile(file SystemFile) string {
 	return fmt.Sprintf("## %s\n\n%s", file.Filename, file.Content)
-}
-
-func formatInbox(items []InboxItem) string {
-	if len(items) == 0 {
-		return ""
-	}
-
-	formatted := make([]map[string]any, len(items))
-	for i, item := range items {
-		formatted[i] = map[string]any{
-			"id":        item.ID,
-			"source":    item.Source,
-			"header":    item.Header,
-			"content":   item.Content,
-			"createdAt": item.CreatedAt,
-		}
-	}
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "## Inbox (%d unread)\n\n", len(items))
-	sb.WriteString("These are messages from other channels — NOT from the current conversation. Use `send` or `react` if you want to respond to any of them.\n\n")
-	sb.WriteString("<inbox>\n")
-	sb.Write(mustMarshal(formatted))
-	sb.WriteString("\n</inbox>\n\n")
-	sb.WriteString("Use `search_inbox` to find older messages by keyword.")
-	return sb.String()
 }

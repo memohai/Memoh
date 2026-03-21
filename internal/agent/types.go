@@ -26,15 +26,6 @@ type SkillEntry struct {
 	Metadata    map[string]any
 }
 
-// InboxItem represents an unread inbox notification.
-type InboxItem struct {
-	ID        string         `json:"id"`
-	Source    string         `json:"source"`
-	Header    map[string]any `json:"header"`
-	Content   string         `json:"content"`
-	CreatedAt string         `json:"createdAt"`
-}
-
 // Schedule represents a scheduled task definition.
 type Schedule struct {
 	ID          string `json:"id"`
@@ -61,7 +52,6 @@ type RunConfig struct {
 	SupportsImageInput bool
 	Identity           SessionContext
 	Skills             []SkillEntry
-	Inbox              []InboxItem
 	LoopDetection      LoopDetectionConfig
 }
 
@@ -71,8 +61,8 @@ type GenerateResult struct {
 	Text        string
 	Attachments []FileAttachment
 	Reactions   []ReactionItem
-	Speeches []SpeechItem
-	Usage    *sdk.Usage
+	Speeches    []SpeechItem
+	Usage       *sdk.Usage
 }
 
 // FileAttachment represents a file reference extracted from agent output.
