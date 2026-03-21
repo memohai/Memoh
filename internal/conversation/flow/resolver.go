@@ -330,7 +330,7 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 	supportsImageInput := cfg.SupportsImageInput
 	var files []agentpkg.SystemFile
 	if r.agent != nil {
-		fs := agentpkg.NewFSClient(nil, cfg.Identity.BotID)
+		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), cfg.Identity.BotID)
 		files = fs.LoadSystemFiles(ctx)
 	}
 

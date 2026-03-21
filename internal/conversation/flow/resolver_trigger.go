@@ -100,10 +100,10 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 
 	var checklist string
 	if r.agent != nil {
-		fs := agentpkg.NewFSClient(nil, botID)
+		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), botID)
 		checklist = fs.ReadTextSafe(ctx, "/data/HEARTBEAT.md")
 	}
-	heartbeatPrompt := agentpkg.GenerateHeartbeatPrompt(payload.Interval, checklist)
+	heartbeatPrompt := agentpkg.GenerateHeartbeatPrompt(payload.Interval, checklist, payload.LastHeartbeatAt)
 	cfg.Messages = append(cfg.Messages, sdk.UserMessage(heartbeatPrompt))
 	cfg = r.prepareRunConfig(ctx, cfg)
 
@@ -119,7 +119,7 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 	}
 
 	outputMessages := sdkMessagesToModelMessages(result.Messages)
-	roundMessages := prependUserMessage(req.Query, outputMessages)
+	roundMessages := prependUserMessage(heartbeatPrompt, outputMessages)
 	_ = r.storeRound(ctx, req, roundMessages, rc.model.ID)
 
 	totalUsageJSON, _ := json.Marshal(result.Usage)

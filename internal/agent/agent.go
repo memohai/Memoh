@@ -35,6 +35,11 @@ func New(deps Deps) *Agent {
 	}
 }
 
+// BridgeProvider returns the underlying bridge provider (workspace manager).
+func (a *Agent) BridgeProvider() bridge.Provider {
+	return a.bridgeProvider
+}
+
 // SetToolProviders sets the tool providers after construction.
 // This allows breaking dependency cycles in the DI graph.
 func (a *Agent) SetToolProviders(providers []tools.ToolProvider) {
