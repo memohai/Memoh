@@ -46,7 +46,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	// Embedding models don't have a chat Provider in the SDK — probe
 	// the /embeddings endpoint directly.
 	if model.Type == string(ModelTypeEmbedding) {
-		return s.testEmbeddingModel(ctx, baseURL, apiKey, model.ModelID)
+		return testEmbeddingModel(ctx, baseURL, apiKey, model.ModelID)
 	}
 
 	sdkProvider := NewSDKProvider(baseURL, apiKey, clientType, probeTimeout)
@@ -102,7 +102,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 // testEmbeddingModel probes an embedding model by sending a minimal
 // request to the /embeddings endpoint.
-func (s *Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID string) (TestResponse, error) {
+func testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID string) (TestResponse, error) {
 	body, _ := json.Marshal(map[string]any{"model": modelID, "input": "hello"})
 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
@@ -117,7 +117,7 @@ func (s *Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, model
 	req.Header.Set("Content-Type", "application/json")
 
 	start := time.Now()
-	resp, err := (&http.Client{}).Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL comes from operator-configured provider base URL
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {
