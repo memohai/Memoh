@@ -326,3 +326,37 @@ GROUP BY
   r.metadata,
   rr.last_observed_at
 ORDER BY rr.last_observed_at DESC;
+
+-- name: SearchMessages :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.role,
+  m.content,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.bot_id = sqlc.arg(bot_id)
+  AND (sqlc.narg(session_id)::uuid IS NULL OR m.session_id = sqlc.narg(session_id)::uuid)
+  AND (sqlc.narg(contact_id)::uuid IS NULL OR m.sender_channel_identity_id = sqlc.narg(contact_id)::uuid)
+  AND (sqlc.narg(start_time)::timestamptz IS NULL OR m.created_at >= sqlc.narg(start_time)::timestamptz)
+  AND (sqlc.narg(end_time)::timestamptz IS NULL OR m.created_at <= sqlc.narg(end_time)::timestamptz)
+  AND (sqlc.narg(role)::text IS NULL OR m.role = sqlc.narg(role)::text)
+  AND (sqlc.narg(keyword)::text IS NULL OR (
+    CASE
+      WHEN jsonb_typeof(m.content->'content') = 'string'
+        THEN m.content->>'content'
+      WHEN jsonb_typeof(m.content->'content') = 'array'
+        THEN (SELECT COALESCE(string_agg(elem->>'text', ' '), '')
+              FROM jsonb_array_elements(m.content->'content') AS elem
+              WHERE elem->>'type' = 'text')
+      ELSE ''
+    END
+  ) ILIKE '%' || sqlc.narg(keyword)::text || '%')
+ORDER BY m.created_at DESC
+LIMIT sqlc.arg(max_count);

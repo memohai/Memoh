@@ -451,7 +451,7 @@ func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederat
 	return svc
 }
 
-func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service, sessionService *sessionpkg.Service) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -472,6 +472,7 @@ func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *c
 		agenttools.NewBrowserProvider(log, settingsService, browserContextService, manager, cfg.BrowserGateway),
 		agenttools.NewTTSProvider(log, settingsService, ttsService, channelManager, registry),
 		agenttools.NewFederationProvider(log, fedSource),
+		agenttools.NewHistoryProvider(log, sessionService, queries),
 	}
 }
 

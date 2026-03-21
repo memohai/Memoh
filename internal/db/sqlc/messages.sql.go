@@ -1049,3 +1049,100 @@ func (q *Queries) ListObservedConversationsByChannelIdentity(ctx context.Context
 	}
 	return items, nil
 }
+
+const searchMessages = `-- name: SearchMessages :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.role,
+  m.content,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.bot_id = $1
+  AND ($2::uuid IS NULL OR m.session_id = $2::uuid)
+  AND ($3::uuid IS NULL OR m.sender_channel_identity_id = $3::uuid)
+  AND ($4::timestamptz IS NULL OR m.created_at >= $4::timestamptz)
+  AND ($5::timestamptz IS NULL OR m.created_at <= $5::timestamptz)
+  AND ($6::text IS NULL OR m.role = $6::text)
+  AND ($7::text IS NULL OR (
+    CASE
+      WHEN jsonb_typeof(m.content->'content') = 'string'
+        THEN m.content->>'content'
+      WHEN jsonb_typeof(m.content->'content') = 'array'
+        THEN (SELECT COALESCE(string_agg(elem->>'text', ' '), '')
+              FROM jsonb_array_elements(m.content->'content') AS elem
+              WHERE elem->>'type' = 'text')
+      ELSE ''
+    END
+  ) ILIKE '%' || $7::text || '%')
+ORDER BY m.created_at DESC
+LIMIT $8
+`
+
+type SearchMessagesParams struct {
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	ContactID pgtype.UUID        `json:"contact_id"`
+	StartTime pgtype.Timestamptz `json:"start_time"`
+	EndTime   pgtype.Timestamptz `json:"end_time"`
+	Role      pgtype.Text        `json:"role"`
+	Keyword   pgtype.Text        `json:"keyword"`
+	MaxCount  int32              `json:"max_count"`
+}
+
+type SearchMessagesRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) ([]SearchMessagesRow, error) {
+	rows, err := q.db.Query(ctx, searchMessages,
+		arg.BotID,
+		arg.SessionID,
+		arg.ContactID,
+		arg.StartTime,
+		arg.EndTime,
+		arg.Role,
+		arg.Keyword,
+		arg.MaxCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchMessagesRow
+	for rows.Next() {
+		var i SearchMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.Role,
+			&i.Content,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
