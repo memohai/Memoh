@@ -302,12 +302,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	sdkMessages := modelMessagesToSDKMessages(nonNilModelMessages(messages))
 
 	runCfg := agentpkg.RunConfig{
-		Model:           sdkModel,
-		ReasoningEffort: reasoningEffort,
-		Messages:        sdkMessages,
-		Query:           headerifiedQuery,
-		Channels:        nonNilStrings(req.Channels),
-		CurrentChannel:  req.CurrentChannel,
+		Model:              sdkModel,
+		ReasoningEffort:    reasoningEffort,
+		Messages:           sdkMessages,
+		Query:              headerifiedQuery,
+		SupportsImageInput: chatModel.HasInputModality(models.ModelInputImage),
+		Channels:           nonNilStrings(req.Channels),
+		CurrentChannel:     req.CurrentChannel,
 		Identity: agentpkg.SessionContext{
 			BotID:             req.BotID,
 			ChatID:            req.ChatID,
@@ -361,8 +362,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 
 // prepareRunConfig generates the system prompt and appends the user message.
 func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig) agentpkg.RunConfig {
-	supportsImageInput := false
-
+	supportsImageInput := cfg.SupportsImageInput
 	var files []agentpkg.SystemFile
 	if r.agent != nil {
 		fs := agentpkg.NewFSClient(nil, cfg.Identity.BotID)

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: memoh.cn/postgres:18-alpine
+    image: memoh.cn/library/postgres:18-alpine
   qdrant:
     image: memoh.cn/qdrant/qdrant:latest
   migrate:

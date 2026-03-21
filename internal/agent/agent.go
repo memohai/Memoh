@@ -62,6 +62,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("assemble tools: %v", err)}
 		return
 	}
+	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
 
 	enabledSkills := make([]string, 0, len(cfg.EnabledSkillNames))
 	copy(enabledSkills, cfg.EnabledSkillNames)
@@ -103,7 +104,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	tagResolvers := DefaultTagResolvers()
 	tagExtractor := NewStreamTagExtractor(tagResolvers)
 
-	opts := a.buildGenerateOptions(cfg, tools)
+	var prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams
+	if readMediaState != nil {
+		prepareStep = readMediaState.prepareStep
+	}
+	opts := a.buildGenerateOptions(cfg, tools, prepareStep)
 
 	streamResult, err := a.client.StreamText(ctx, opts...)
 	if err != nil {
@@ -251,7 +256,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		textLoopProbeBuffer.Flush()
 	}
 
-	finalMessages := StripTagsFromMessages(streamResult.Messages)
+	finalMessages := streamResult.Messages
+	if readMediaState != nil {
+		finalMessages = readMediaState.mergeMessages(streamResult.Steps, finalMessages)
+	}
+	finalMessages = StripTagsFromMessages(finalMessages)
 
 	var totalUsage sdk.Usage
 	perStepUsages := make([]json.RawMessage, 0, len(streamResult.Steps))
@@ -286,6 +295,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 	if err != nil {
 		return nil, fmt.Errorf("assemble tools: %w", err)
 	}
+	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
 
 	enabledSkills := make([]string, 0, len(cfg.EnabledSkillNames))
 	copy(enabledSkills, cfg.EnabledSkillNames)
@@ -315,7 +325,11 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		tools = wrapToolsWithLoopGuard(tools, toolLoopGuard, toolLoopAbortCallIDs)
 	}
 
-	opts := a.buildGenerateOptions(cfg, tools)
+	var prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams
+	if readMediaState != nil {
+		prepareStep = readMediaState.prepareStep
+	}
+	opts := a.buildGenerateOptions(cfg, tools, prepareStep)
 	opts = append(opts,
 		sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
 			if cfg.LoopDetection.Enabled {
@@ -376,7 +390,11 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		}
 	}
 
-	finalMessages := StripTagsFromMessages(genResult.Messages)
+	finalMessages := genResult.Messages
+	if readMediaState != nil {
+		finalMessages = readMediaState.mergeMessages(genResult.Steps, finalMessages)
+	}
+	finalMessages = StripTagsFromMessages(finalMessages)
 
 	return &GenerateResult{
 		Messages:    finalMessages,
@@ -389,7 +407,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 	}, nil
 }
 
-func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool) []sdk.GenerateOption {
+func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams) []sdk.GenerateOption {
 	opts := []sdk.GenerateOption{
 		sdk.WithModel(cfg.Model),
 		sdk.WithMessages(cfg.Messages),
@@ -398,6 +416,9 @@ func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool) []sdk.Genera
 	}
 	if len(tools) > 0 {
 		opts = append(opts, sdk.WithTools(tools))
+	}
+	if prepareStep != nil {
+		opts = append(opts, sdk.WithPrepareStep(prepareStep))
 	}
 	opts = append(opts, BuildReasoningOptions(ModelConfig{
 		ClientType: resolveClientType(cfg.Model),
@@ -432,13 +453,14 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, e
 		return nil, nil
 	}
 	session := tools.SessionContext{
-		BotID:             cfg.Identity.BotID,
-		ChatID:            cfg.Identity.ChatID,
-		ChannelIdentityID: cfg.Identity.ChannelIdentityID,
-		SessionToken:      cfg.Identity.SessionToken,
-		CurrentPlatform:   cfg.Identity.CurrentPlatform,
-		ReplyTarget:       cfg.Identity.ReplyTarget,
-		IsSubagent:        cfg.Identity.IsSubagent,
+		BotID:              cfg.Identity.BotID,
+		ChatID:             cfg.Identity.ChatID,
+		ChannelIdentityID:  cfg.Identity.ChannelIdentityID,
+		SessionToken:       cfg.Identity.SessionToken,
+		CurrentPlatform:    cfg.Identity.CurrentPlatform,
+		ReplyTarget:        cfg.Identity.ReplyTarget,
+		SupportsImageInput: cfg.SupportsImageInput,
+		IsSubagent:         cfg.Identity.IsSubagent,
 	}
 
 	var allTools []sdk.Tool

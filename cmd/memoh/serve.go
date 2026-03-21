@@ -443,6 +443,7 @@ func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *c
 		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
 		agenttools.NewContainerProvider(log, manager, config.DefaultDataMount),
+		agenttools.NewReadMediaProvider(log, manager, config.DefaultDataMount),
 		agenttools.NewInboxProvider(log, inboxService),
 		agenttools.NewEmailProvider(log, emailService, emailManager),
 		agenttools.NewWebFetchProvider(log),
