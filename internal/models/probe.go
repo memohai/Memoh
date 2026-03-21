@@ -3,19 +3,26 @@ package models
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
+	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
+	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
+	openairesponses "github.com/memohai/twilight-ai/provider/openai/responses"
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/db"
 )
 
 const probeTimeout = 15 * time.Second
 
-// Test probes a model's provider endpoint using the model's real model_id
-// and client_type to verify that the configuration is valid.
+// Test probes a model's provider endpoint using the Twilight AI SDK
+// to verify connectivity, authentication, and model availability.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	modelID, err := db.ParseUUID(id)
 	if err != nil {
@@ -34,139 +41,163 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 	apiKey := provider.ApiKey
+	clientType := ClientType(model.ClientType.String)
 
-	// Reachability check
-	reachable, reachMsg := probeReachable(ctx, baseURL)
-	if !reachable {
+	// Embedding models don't have a chat Provider in the SDK — probe
+	// the /embeddings endpoint directly.
+	if model.Type == string(ModelTypeEmbedding) {
+		return s.testEmbeddingModel(ctx, baseURL, apiKey, model.ModelID)
+	}
+
+	sdkProvider := NewSDKProvider(baseURL, apiKey, clientType, probeTimeout)
+
+	start := time.Now()
+
+	providerResult := sdkProvider.Test(ctx)
+	switch providerResult.Status {
+	case sdk.ProviderStatusUnreachable:
 		return TestResponse{
-			Status:  TestStatusError,
-			Message: reachMsg,
+			Status:    TestStatusError,
+			Reachable: false,
+			LatencyMs: time.Since(start).Milliseconds(),
+			Message:   providerResult.Message,
+		}, nil
+	case sdk.ProviderStatusUnhealthy:
+		return TestResponse{
+			Status:    TestStatusAuthError,
+			Reachable: true,
+			LatencyMs: time.Since(start).Milliseconds(),
+			Message:   providerResult.Message,
 		}, nil
 	}
 
-	// Select probe by client type (chat) or model type (embedding)
-	var result probeResult
-	if model.Type == string(ModelTypeEmbedding) {
-		result = probeEmbedding(ctx, baseURL, apiKey, model.ModelID)
-	} else {
-		result = probeChatModel(ctx, baseURL, apiKey, model.ModelID, ClientType(model.ClientType.String))
+	modelResult, err := sdkProvider.TestModel(ctx, model.ModelID)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return TestResponse{
+			Status:    TestStatusError,
+			Reachable: true,
+			LatencyMs: latency,
+			Message:   err.Error(),
+		}, nil
+	}
+
+	if !modelResult.Supported {
+		return TestResponse{
+			Status:    TestStatusModelNotSupported,
+			Reachable: true,
+			LatencyMs: latency,
+			Message:   modelResult.Message,
+		}, nil
 	}
 
 	return TestResponse{
-		Status:    classifyProbe(result.statusCode),
+		Status:    TestStatusOK,
 		Reachable: true,
-		LatencyMs: result.latencyMs,
-		Message:   result.message,
+		LatencyMs: latency,
+		Message:   modelResult.Message,
 	}, nil
 }
 
-type probeResult struct {
-	statusCode int
-	latencyMs  int64
-	message    string
-}
+// testEmbeddingModel probes an embedding model by sending a minimal
+// request to the /embeddings endpoint.
+func (s *Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID string) (TestResponse, error) {
+	body, _ := json.Marshal(map[string]any{"model": modelID, "input": "hello"})
 
-func probeChatModel(ctx context.Context, baseURL, apiKey, modelID string, clientType ClientType) probeResult {
-	switch clientType {
-	case ClientTypeOpenAIResponses:
-		body := fmt.Sprintf(`{"model":%q,"input":"hi","max_output_tokens":1}`, modelID)
-		return doProbe(ctx, http.MethodPost, baseURL+"/responses", openAIHeaders(apiKey), body)
-
-	case ClientTypeOpenAICompletions:
-		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"max_tokens":1}`, modelID)
-		return doProbe(ctx, http.MethodPost, baseURL+"/chat/completions", openAIHeaders(apiKey), body)
-
-	case ClientTypeAnthropicMessages:
-		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"max_tokens":1}`, modelID)
-		return doProbe(ctx, http.MethodPost, baseURL+"/messages", map[string]string{
-			"x-api-key":         apiKey,
-			"anthropic-version": "2023-06-01",
-			"Content-Type":      "application/json",
-		}, body)
-
-	case ClientTypeGoogleGenerativeAI:
-		body := `{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":1}}`
-		url := fmt.Sprintf("%s/models/%s:generateContent", baseURL, modelID)
-		return doProbe(ctx, http.MethodPost, url, map[string]string{
-			"x-goog-api-key": apiKey,
-			"Content-Type":   "application/json",
-		}, body)
-
-	default:
-		// Fallback: treat as OpenAI completions compatible
-		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"max_tokens":1}`, modelID)
-		return doProbe(ctx, http.MethodPost, baseURL+"/chat/completions", openAIHeaders(apiKey), body)
-	}
-}
-
-func probeEmbedding(ctx context.Context, baseURL, apiKey, modelID string) probeResult {
-	body := fmt.Sprintf(`{"model":%q,"input":"hello"}`, modelID)
-	return doProbe(ctx, http.MethodPost, baseURL+"/embeddings", openAIHeaders(apiKey), body)
-}
-
-func openAIHeaders(apiKey string) map[string]string {
-	return map[string]string{
-		"Authorization": "Bearer " + apiKey,
-		"Content-Type":  "application/json",
-	}
-}
-
-func probeReachable(ctx context.Context, baseURL string) (bool, string) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		baseURL+"/embeddings", bytes.NewReader(body))
 	if err != nil {
-		return false, err.Error()
+		return TestResponse{Status: TestStatusError, Message: err.Error()}, nil
 	}
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
-	if err != nil {
-		return false, err.Error()
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
-	return true, ""
-}
-
-func doProbe(ctx context.Context, method, url string, headers map[string]string, body string) probeResult {
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
-	defer cancel()
-
-	var bodyReader io.Reader
-	if body != "" {
-		bodyReader = bytes.NewBufferString(body)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
-	if err != nil {
-		return probeResult{message: err.Error()}
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
 
 	start := time.Now()
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
+	resp, err := (&http.Client{}).Do(req)
 	latency := time.Since(start).Milliseconds()
+
 	if err != nil {
-		return probeResult{latencyMs: latency, message: err.Error()}
+		return TestResponse{
+			Status:    TestStatusError,
+			Reachable: false,
+			LatencyMs: latency,
+			Message:   err.Error(),
+		}, nil
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 
-	return probeResult{statusCode: resp.StatusCode, latencyMs: latency}
+	result, classifyErr := sdk.ClassifyProbeStatus(resp.StatusCode)
+	if classifyErr != nil {
+		return TestResponse{
+			Status:    TestStatusError,
+			Reachable: true,
+			LatencyMs: latency,
+			Message:   classifyErr.Error(),
+		}, nil
+	}
+
+	tr := TestResponse{
+		Reachable: true,
+		LatencyMs: latency,
+		Message:   result.Message,
+	}
+	if result.Supported {
+		tr.Status = TestStatusOK
+	} else {
+		tr.Status = TestStatusModelNotSupported
+	}
+	return tr, nil
 }
 
-func classifyProbe(statusCode int) TestStatus {
-	switch {
-	case statusCode >= 200 && statusCode <= 299:
-		return TestStatusOK
-	case statusCode == 400 || statusCode == 422 || statusCode == 429:
-		// 400/422 = endpoint works but request rejected; 429 = rate limited (model exists)
-		return TestStatusOK
-	case statusCode == 401 || statusCode == 403:
-		return TestStatusAuthError
+// NewSDKProvider creates a Twilight AI SDK Provider for the given client type.
+// It is exported so that other packages (e.g. providers) can reuse it for testing.
+func NewSDKProvider(baseURL, apiKey string, clientType ClientType, timeout time.Duration) sdk.Provider {
+	httpClient := &http.Client{Timeout: timeout}
+
+	switch clientType {
+	case ClientTypeOpenAIResponses:
+		opts := []openairesponses.Option{
+			openairesponses.WithAPIKey(apiKey),
+			openairesponses.WithHTTPClient(httpClient),
+		}
+		if baseURL != "" {
+			opts = append(opts, openairesponses.WithBaseURL(baseURL))
+		}
+		return openairesponses.New(opts...)
+
+	case ClientTypeAnthropicMessages:
+		opts := []anthropicmessages.Option{
+			anthropicmessages.WithAPIKey(apiKey),
+			anthropicmessages.WithHTTPClient(httpClient),
+		}
+		if baseURL != "" {
+			opts = append(opts, anthropicmessages.WithBaseURL(baseURL))
+		}
+		return anthropicmessages.New(opts...)
+
+	case ClientTypeGoogleGenerativeAI:
+		opts := []googlegenerative.Option{
+			googlegenerative.WithAPIKey(apiKey),
+			googlegenerative.WithHTTPClient(httpClient),
+		}
+		if baseURL != "" {
+			opts = append(opts, googlegenerative.WithBaseURL(baseURL))
+		}
+		return googlegenerative.New(opts...)
+
 	default:
-		return TestStatusError
+		opts := []openaicompletions.Option{
+			openaicompletions.WithAPIKey(apiKey),
+			openaicompletions.WithHTTPClient(httpClient),
+		}
+		if baseURL != "" {
+			opts = append(opts, openaicompletions.WithBaseURL(baseURL))
+		}
+		return openaicompletions.New(opts...)
 	}
 }

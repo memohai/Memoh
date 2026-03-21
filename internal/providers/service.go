@@ -10,8 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/models"
 )
 
 // Service handles provider operations.
@@ -163,7 +167,8 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 
 const probeTimeout = 5 * time.Second
 
-// Test probes the provider's base URL to check reachability.
+// Test probes the provider using the Twilight AI SDK to check
+// reachability and authentication.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -177,15 +182,32 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 
+	// Determine client type from the first model using this provider.
+	clientType := resolveProviderClientType(ctx, s.queries, providerID)
+
+	sdkProvider := models.NewSDKProvider(baseURL, provider.ApiKey, clientType, probeTimeout)
+
 	start := time.Now()
-	reachable, msg := probeReachable(ctx, baseURL)
+	result := sdkProvider.Test(ctx)
 	latency := time.Since(start).Milliseconds()
 
 	return TestResponse{
-		Reachable: reachable,
+		Reachable: result.Status != sdk.ProviderStatusUnreachable,
 		LatencyMs: latency,
-		Message:   msg,
+		Message:   result.Message,
 	}, nil
+}
+
+// resolveProviderClientType looks up models associated with the provider
+// and returns the first model's client_type. Falls back to openai-completions.
+func resolveProviderClientType(ctx context.Context, q *sqlc.Queries, providerID pgtype.UUID) models.ClientType {
+	rows, err := q.ListModelsByProviderID(ctx, providerID)
+	if err == nil && len(rows) > 0 {
+		if ct := rows[0].ClientType; ct.Valid && ct.String != "" {
+			return models.ClientType(ct.String)
+		}
+	}
+	return models.ClientTypeOpenAICompletions
 }
 
 // FetchRemoteModels fetches models from the provider's /v1/models endpoint.
@@ -232,23 +254,6 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	}
 
 	return fetchResp.Data, nil
-}
-
-func probeReachable(ctx context.Context, baseURL string) (bool, string) {
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
-	if err != nil {
-		return false, err.Error()
-	}
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
-	if err != nil {
-		return false, err.Error()
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
-	return true, ""
 }
 
 // toGetResponse converts a database provider to a response.

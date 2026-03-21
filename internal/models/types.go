@@ -143,9 +143,10 @@ type CountResponse struct {
 type TestStatus string
 
 const (
-	TestStatusOK        TestStatus = "ok"
-	TestStatusAuthError TestStatus = "auth_error"
-	TestStatusError     TestStatus = "error"
+	TestStatusOK                TestStatus = "ok"
+	TestStatusAuthError         TestStatus = "auth_error"
+	TestStatusModelNotSupported TestStatus = "model_not_supported"
+	TestStatusError             TestStatus = "error"
 )
 
 // TestResponse is returned by POST /models/:id/test.
