@@ -147,6 +147,7 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -177,6 +178,7 @@ type ListActiveMessagesSinceRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -204,6 +206,7 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.CompactID,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -232,6 +235,7 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -262,6 +266,7 @@ type ListActiveMessagesSinceBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -289,6 +294,7 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.CompactID,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -1048,6 +1054,64 @@ func (q *Queries) ListObservedConversationsByChannelIdentity(ctx context.Context
 		return nil, err
 	}
 	return items, nil
+}
+
+const listUncompactedMessagesBySession = `-- name: ListUncompactedMessagesBySession :many
+SELECT id, role, content, usage, created_at
+FROM bot_history_messages
+WHERE session_id = $1
+  AND compact_id IS NULL
+ORDER BY created_at ASC
+`
+
+type ListUncompactedMessagesBySessionRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	Role      string             `json:"role"`
+	Content   []byte             `json:"content"`
+	Usage     []byte             `json:"usage"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]ListUncompactedMessagesBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listUncompactedMessagesBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUncompactedMessagesBySessionRow
+	for rows.Next() {
+		var i ListUncompactedMessagesBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Role,
+			&i.Content,
+			&i.Usage,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markMessagesCompacted = `-- name: MarkMessagesCompacted :exec
+UPDATE bot_history_messages
+SET compact_id = $1
+WHERE id = ANY($2::uuid[])
+`
+
+type MarkMessagesCompactedParams struct {
+	CompactID  pgtype.UUID   `json:"compact_id"`
+	MessageIds []pgtype.UUID `json:"message_ids"`
+}
+
+func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCompactedParams) error {
+	_, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.MessageIds)
+	return err
 }
 
 const searchMessages = `-- name: SearchMessages :many

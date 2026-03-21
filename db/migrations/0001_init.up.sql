@@ -172,6 +172,9 @@ CREATE TABLE IF NOT EXISTS bots (
   heartbeat_interval INTEGER NOT NULL DEFAULT 30,
   heartbeat_prompt TEXT NOT NULL DEFAULT '',
   heartbeat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  compaction_enabled BOOLEAN NOT NULL DEFAULT false,
+  compaction_threshold INTEGER NOT NULL DEFAULT 100000,
+  compaction_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   title_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id UUID REFERENCES tts_models(id) ON DELETE SET NULL,
   browser_context_id UUID REFERENCES browser_contexts(id) ON DELETE SET NULL,
@@ -373,10 +376,12 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   usage JSONB,
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  compact_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_messages(bot_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_compact ON bot_history_messages(compact_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session
   ON bot_history_messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
@@ -538,6 +543,23 @@ CREATE TABLE IF NOT EXISTS bot_heartbeat_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_bot_started ON bot_heartbeat_logs(bot_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'ok', 'error')),
+  summary TEXT NOT NULL DEFAULT '',
+  message_count INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT NOT NULL DEFAULT '',
+  usage JSONB,
+  model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_compacts_bot_session ON bot_history_message_compacts(bot_id, session_id, started_at DESC);
+
+ALTER TABLE bot_history_messages ADD CONSTRAINT fk_compact_id FOREIGN KEY (compact_id) REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL;
 
 -- schedule_logs: structured execution records for scheduled tasks.
 CREATE TABLE IF NOT EXISTS schedule_logs (

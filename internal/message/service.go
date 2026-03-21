@@ -482,7 +482,7 @@ func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Mess
 }
 
 func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
-	return toMessageFields(
+	m := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -499,10 +499,14 @@ func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
 		row.Usage,
 		row.CreatedAt,
 	)
+	if row.CompactID.Valid {
+		m.CompactID = row.CompactID.String()
+	}
+	return m
 }
 
 func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
-	return toMessageFields(
+	m := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -519,6 +523,10 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 		row.Usage,
 		row.CreatedAt,
 	)
+	if row.CompactID.Valid {
+		m.CompactID = row.CompactID.String()
+	}
+	return m
 }
 
 func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {

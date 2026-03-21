@@ -11,6 +11,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
@@ -49,19 +50,20 @@ type gatewayAssetLoader interface {
 
 // Resolver orchestrates chat with the internal agent.
 type Resolver struct {
-	agent           *agentpkg.Agent
-	modelsService   *models.Service
-	queries         *sqlc.Queries
-	memoryRegistry  *memprovider.Registry
-	conversationSvc ConversationSettingsReader
-	messageService  messagepkg.Service
-	settingsService *settings.Service
-	sessionService  SessionService
-	eventPublisher  messageevent.Publisher
-	skillLoader     SkillLoader
-	assetLoader     gatewayAssetLoader
-	timeout         time.Duration
-	logger          *slog.Logger
+	agent             *agentpkg.Agent
+	modelsService     *models.Service
+	queries           *sqlc.Queries
+	memoryRegistry    *memprovider.Registry
+	conversationSvc   ConversationSettingsReader
+	messageService    messagepkg.Service
+	settingsService   *settings.Service
+	sessionService    SessionService
+	compactionService *compaction.Service
+	eventPublisher    messageevent.Publisher
+	skillLoader       SkillLoader
+	assetLoader       gatewayAssetLoader
+	timeout           time.Duration
+	logger            *slog.Logger
 }
 
 // NewResolver creates a Resolver that uses the internal agent directly.
@@ -104,6 +106,11 @@ func (r *Resolver) SetSkillLoader(sl SkillLoader) {
 // attachments before calling the agent gateway.
 func (r *Resolver) SetGatewayAssetLoader(loader gatewayAssetLoader) {
 	r.assetLoader = loader
+}
+
+// SetCompactionService configures the compaction service for context compaction.
+func (r *Resolver) SetCompactionService(s *compaction.Service) {
+	r.compactionService = s
 }
 
 type usageInfo struct {
@@ -199,6 +206,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 		loaded = pruneHistoryForGateway(loaded)
 		loaded = dedupePersistedCurrentUserMessage(loaded, req)
+		loaded = r.replaceCompactedMessages(ctx, loaded)
 		messages = trimMessagesByTokens(r.logger, loaded, historyBudget)
 		r.logger.Debug("context trim result",
 			slog.Int("loaded_messages", len(loaded)),
@@ -318,6 +326,11 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err := r.storeRound(ctx, req, roundMessages, rc.model.ID); err != nil {
 		return conversation.ChatResponse{}, err
 	}
+
+	if result.Usage != nil {
+		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
+	}
+
 	return conversation.ChatResponse{
 		Messages: outputMessages,
 		Model:    rc.model.ModelID,

@@ -63,7 +63,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 				continue
 			}
 			if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-				if _, storeErr := r.tryStoreStream(ctx, streamReq, data, rc.model.ID); storeErr != nil {
+				if _, storeErr := r.tryStoreStream(ctx, streamReq, data, rc.model.ID, rc); storeErr != nil {
 					r.logger.Error("stream persist failed", slog.Any("error", storeErr))
 				} else {
 					stored = true
@@ -124,7 +124,7 @@ func (r *Resolver) StreamChatWS(
 		}
 
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if _, storeErr := r.tryStoreStream(ctx, req, data, modelID); storeErr != nil {
+			if _, storeErr := r.tryStoreStream(ctx, req, data, modelID, rc); storeErr != nil {
 				r.logger.Error("ws persist failed", slog.Any("error", storeErr))
 			} else {
 				stored = true
@@ -142,10 +142,11 @@ func (r *Resolver) StreamChatWS(
 }
 
 // tryStoreStream attempts to extract final messages from a stream event and persist them.
-func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequest, data []byte, modelID string) (bool, error) {
+func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequest, data []byte, modelID string, rc resolvedContext) (bool, error) {
 	var envelope struct {
 		Type     string          `json:"type"`
 		Messages json.RawMessage `json:"messages"`
+		Usage    json.RawMessage `json:"usage,omitempty"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return false, nil
@@ -161,5 +162,26 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	outputMessages := sdkMessagesToModelMessages(sdkMsgs)
 	roundMessages := prependUserMessage(req.Query, outputMessages)
 
-	return true, r.storeRound(ctx, req, roundMessages, modelID)
+	if err := r.storeRound(ctx, req, roundMessages, modelID); err != nil {
+		return false, err
+	}
+
+	if inputTokens := extractInputTokensFromUsage(envelope.Usage); inputTokens > 0 {
+		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, inputTokens)
+	}
+
+	return true, nil
+}
+
+func extractInputTokensFromUsage(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var u struct {
+		InputTokens int `json:"inputTokens"`
+	}
+	if json.Unmarshal(raw, &u) != nil {
+		return 0
+	}
+	return u.InputTokens
 }

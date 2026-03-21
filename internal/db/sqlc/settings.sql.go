@@ -21,8 +21,11 @@ SET max_context_load_time = 1440,
     heartbeat_enabled = false,
     heartbeat_interval = 30,
     heartbeat_prompt = '',
+    compaction_enabled = false,
+    compaction_threshold = 100000,
     chat_model_id = NULL,
     heartbeat_model_id = NULL,
+    compaction_model_id = NULL,
     title_model_id = NULL,
     search_provider_id = NULL,
     memory_provider_id = NULL,
@@ -48,8 +51,11 @@ SELECT
   bots.heartbeat_enabled,
   bots.heartbeat_interval,
   bots.heartbeat_prompt,
+  bots.compaction_enabled,
+  bots.compaction_threshold,
   chat_models.id AS chat_model_id,
   heartbeat_models.id AS heartbeat_model_id,
+  compaction_models.id AS compaction_model_id,
   title_models.id AS title_model_id,
   search_providers.id AS search_provider_id,
   memory_providers.id AS memory_provider_id,
@@ -58,6 +64,7 @@ SELECT
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id
+LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id
 LEFT JOIN models AS title_models ON title_models.id = bots.title_model_id
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
@@ -67,22 +74,25 @@ WHERE bots.id = $1
 `
 
 type GetSettingsByBotIDRow struct {
-	BotID              pgtype.UUID `json:"bot_id"`
-	MaxContextLoadTime int32       `json:"max_context_load_time"`
-	MaxContextTokens   int32       `json:"max_context_tokens"`
-	Language           string      `json:"language"`
-	ReasoningEnabled   bool        `json:"reasoning_enabled"`
-	ReasoningEffort    string      `json:"reasoning_effort"`
-	HeartbeatEnabled   bool        `json:"heartbeat_enabled"`
-	HeartbeatInterval  int32       `json:"heartbeat_interval"`
-	HeartbeatPrompt    string      `json:"heartbeat_prompt"`
-	ChatModelID        pgtype.UUID `json:"chat_model_id"`
-	HeartbeatModelID   pgtype.UUID `json:"heartbeat_model_id"`
-	TitleModelID       pgtype.UUID `json:"title_model_id"`
-	SearchProviderID   pgtype.UUID `json:"search_provider_id"`
-	MemoryProviderID   pgtype.UUID `json:"memory_provider_id"`
-	TtsModelID         pgtype.UUID `json:"tts_model_id"`
-	BrowserContextID   pgtype.UUID `json:"browser_context_id"`
+	BotID               pgtype.UUID `json:"bot_id"`
+	MaxContextLoadTime  int32       `json:"max_context_load_time"`
+	MaxContextTokens    int32       `json:"max_context_tokens"`
+	Language            string      `json:"language"`
+	ReasoningEnabled    bool        `json:"reasoning_enabled"`
+	ReasoningEffort     string      `json:"reasoning_effort"`
+	HeartbeatEnabled    bool        `json:"heartbeat_enabled"`
+	HeartbeatInterval   int32       `json:"heartbeat_interval"`
+	HeartbeatPrompt     string      `json:"heartbeat_prompt"`
+	CompactionEnabled   bool        `json:"compaction_enabled"`
+	CompactionThreshold int32       `json:"compaction_threshold"`
+	ChatModelID         pgtype.UUID `json:"chat_model_id"`
+	HeartbeatModelID    pgtype.UUID `json:"heartbeat_model_id"`
+	CompactionModelID   pgtype.UUID `json:"compaction_model_id"`
+	TitleModelID        pgtype.UUID `json:"title_model_id"`
+	SearchProviderID    pgtype.UUID `json:"search_provider_id"`
+	MemoryProviderID    pgtype.UUID `json:"memory_provider_id"`
+	TtsModelID          pgtype.UUID `json:"tts_model_id"`
+	BrowserContextID    pgtype.UUID `json:"browser_context_id"`
 }
 
 func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSettingsByBotIDRow, error) {
@@ -98,8 +108,11 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.HeartbeatEnabled,
 		&i.HeartbeatInterval,
 		&i.HeartbeatPrompt,
+		&i.CompactionEnabled,
+		&i.CompactionThreshold,
 		&i.ChatModelID,
 		&i.HeartbeatModelID,
+		&i.CompactionModelID,
 		&i.TitleModelID,
 		&i.SearchProviderID,
 		&i.MemoryProviderID,
@@ -120,16 +133,19 @@ WITH updated AS (
       heartbeat_enabled = $6,
       heartbeat_interval = $7,
       heartbeat_prompt = $8,
-      chat_model_id = COALESCE($9::uuid, bots.chat_model_id),
-      heartbeat_model_id = COALESCE($10::uuid, bots.heartbeat_model_id),
-      title_model_id = COALESCE($11::uuid, bots.title_model_id),
-      search_provider_id = COALESCE($12::uuid, bots.search_provider_id),
-      memory_provider_id = COALESCE($13::uuid, bots.memory_provider_id),
-      tts_model_id = COALESCE($14::uuid, bots.tts_model_id),
-      browser_context_id = COALESCE($15::uuid, bots.browser_context_id),
+      compaction_enabled = $9,
+      compaction_threshold = $10,
+      chat_model_id = COALESCE($11::uuid, bots.chat_model_id),
+      heartbeat_model_id = COALESCE($12::uuid, bots.heartbeat_model_id),
+      compaction_model_id = COALESCE($13::uuid, bots.compaction_model_id),
+      title_model_id = COALESCE($14::uuid, bots.title_model_id),
+      search_provider_id = COALESCE($15::uuid, bots.search_provider_id),
+      memory_provider_id = COALESCE($16::uuid, bots.memory_provider_id),
+      tts_model_id = COALESCE($17::uuid, bots.tts_model_id),
+      browser_context_id = COALESCE($18::uuid, bots.browser_context_id),
       updated_at = now()
-  WHERE bots.id = $16
-  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.chat_model_id, bots.heartbeat_model_id, bots.title_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
+  WHERE bots.id = $19
+  RETURNING bots.id, bots.max_context_load_time, bots.max_context_tokens, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
 )
 SELECT
   updated.id AS bot_id,
@@ -141,8 +157,11 @@ SELECT
   updated.heartbeat_enabled,
   updated.heartbeat_interval,
   updated.heartbeat_prompt,
+  updated.compaction_enabled,
+  updated.compaction_threshold,
   chat_models.id AS chat_model_id,
   heartbeat_models.id AS heartbeat_model_id,
+  compaction_models.id AS compaction_model_id,
   title_models.id AS title_model_id,
   search_providers.id AS search_provider_id,
   memory_providers.id AS memory_provider_id,
@@ -151,6 +170,7 @@ SELECT
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id
+LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id
 LEFT JOIN models AS title_models ON title_models.id = updated.title_model_id
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id
@@ -159,41 +179,47 @@ LEFT JOIN browser_contexts ON browser_contexts.id = updated.browser_context_id
 `
 
 type UpsertBotSettingsParams struct {
-	MaxContextLoadTime int32       `json:"max_context_load_time"`
-	MaxContextTokens   int32       `json:"max_context_tokens"`
-	Language           string      `json:"language"`
-	ReasoningEnabled   bool        `json:"reasoning_enabled"`
-	ReasoningEffort    string      `json:"reasoning_effort"`
-	HeartbeatEnabled   bool        `json:"heartbeat_enabled"`
-	HeartbeatInterval  int32       `json:"heartbeat_interval"`
-	HeartbeatPrompt    string      `json:"heartbeat_prompt"`
-	ChatModelID        pgtype.UUID `json:"chat_model_id"`
-	HeartbeatModelID   pgtype.UUID `json:"heartbeat_model_id"`
-	TitleModelID       pgtype.UUID `json:"title_model_id"`
-	SearchProviderID   pgtype.UUID `json:"search_provider_id"`
-	MemoryProviderID   pgtype.UUID `json:"memory_provider_id"`
-	TtsModelID         pgtype.UUID `json:"tts_model_id"`
-	BrowserContextID   pgtype.UUID `json:"browser_context_id"`
-	ID                 pgtype.UUID `json:"id"`
+	MaxContextLoadTime  int32       `json:"max_context_load_time"`
+	MaxContextTokens    int32       `json:"max_context_tokens"`
+	Language            string      `json:"language"`
+	ReasoningEnabled    bool        `json:"reasoning_enabled"`
+	ReasoningEffort     string      `json:"reasoning_effort"`
+	HeartbeatEnabled    bool        `json:"heartbeat_enabled"`
+	HeartbeatInterval   int32       `json:"heartbeat_interval"`
+	HeartbeatPrompt     string      `json:"heartbeat_prompt"`
+	CompactionEnabled   bool        `json:"compaction_enabled"`
+	CompactionThreshold int32       `json:"compaction_threshold"`
+	ChatModelID         pgtype.UUID `json:"chat_model_id"`
+	HeartbeatModelID    pgtype.UUID `json:"heartbeat_model_id"`
+	CompactionModelID   pgtype.UUID `json:"compaction_model_id"`
+	TitleModelID        pgtype.UUID `json:"title_model_id"`
+	SearchProviderID    pgtype.UUID `json:"search_provider_id"`
+	MemoryProviderID    pgtype.UUID `json:"memory_provider_id"`
+	TtsModelID          pgtype.UUID `json:"tts_model_id"`
+	BrowserContextID    pgtype.UUID `json:"browser_context_id"`
+	ID                  pgtype.UUID `json:"id"`
 }
 
 type UpsertBotSettingsRow struct {
-	BotID              pgtype.UUID `json:"bot_id"`
-	MaxContextLoadTime int32       `json:"max_context_load_time"`
-	MaxContextTokens   int32       `json:"max_context_tokens"`
-	Language           string      `json:"language"`
-	ReasoningEnabled   bool        `json:"reasoning_enabled"`
-	ReasoningEffort    string      `json:"reasoning_effort"`
-	HeartbeatEnabled   bool        `json:"heartbeat_enabled"`
-	HeartbeatInterval  int32       `json:"heartbeat_interval"`
-	HeartbeatPrompt    string      `json:"heartbeat_prompt"`
-	ChatModelID        pgtype.UUID `json:"chat_model_id"`
-	HeartbeatModelID   pgtype.UUID `json:"heartbeat_model_id"`
-	TitleModelID       pgtype.UUID `json:"title_model_id"`
-	SearchProviderID   pgtype.UUID `json:"search_provider_id"`
-	MemoryProviderID   pgtype.UUID `json:"memory_provider_id"`
-	TtsModelID         pgtype.UUID `json:"tts_model_id"`
-	BrowserContextID   pgtype.UUID `json:"browser_context_id"`
+	BotID               pgtype.UUID `json:"bot_id"`
+	MaxContextLoadTime  int32       `json:"max_context_load_time"`
+	MaxContextTokens    int32       `json:"max_context_tokens"`
+	Language            string      `json:"language"`
+	ReasoningEnabled    bool        `json:"reasoning_enabled"`
+	ReasoningEffort     string      `json:"reasoning_effort"`
+	HeartbeatEnabled    bool        `json:"heartbeat_enabled"`
+	HeartbeatInterval   int32       `json:"heartbeat_interval"`
+	HeartbeatPrompt     string      `json:"heartbeat_prompt"`
+	CompactionEnabled   bool        `json:"compaction_enabled"`
+	CompactionThreshold int32       `json:"compaction_threshold"`
+	ChatModelID         pgtype.UUID `json:"chat_model_id"`
+	HeartbeatModelID    pgtype.UUID `json:"heartbeat_model_id"`
+	CompactionModelID   pgtype.UUID `json:"compaction_model_id"`
+	TitleModelID        pgtype.UUID `json:"title_model_id"`
+	SearchProviderID    pgtype.UUID `json:"search_provider_id"`
+	MemoryProviderID    pgtype.UUID `json:"memory_provider_id"`
+	TtsModelID          pgtype.UUID `json:"tts_model_id"`
+	BrowserContextID    pgtype.UUID `json:"browser_context_id"`
 }
 
 func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsParams) (UpsertBotSettingsRow, error) {
@@ -206,8 +232,11 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.HeartbeatEnabled,
 		arg.HeartbeatInterval,
 		arg.HeartbeatPrompt,
+		arg.CompactionEnabled,
+		arg.CompactionThreshold,
 		arg.ChatModelID,
 		arg.HeartbeatModelID,
+		arg.CompactionModelID,
 		arg.TitleModelID,
 		arg.SearchProviderID,
 		arg.MemoryProviderID,
@@ -226,8 +255,11 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.HeartbeatEnabled,
 		&i.HeartbeatInterval,
 		&i.HeartbeatPrompt,
+		&i.CompactionEnabled,
+		&i.CompactionThreshold,
 		&i.ChatModelID,
 		&i.HeartbeatModelID,
+		&i.CompactionModelID,
 		&i.TitleModelID,
 		&i.SearchProviderID,
 		&i.MemoryProviderID,

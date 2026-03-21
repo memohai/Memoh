@@ -915,6 +915,37 @@ definitions:
       verified_at:
         type: string
     type: object
+  compaction.ListLogsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/compaction.Log'
+        type: array
+    type: object
+  compaction.Log:
+    properties:
+      bot_id:
+        type: string
+      completed_at:
+        type: string
+      error_message:
+        type: string
+      id:
+        type: string
+      message_count:
+        type: integer
+      model_id:
+        type: string
+      session_id:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      usage: {}
+    type: object
   email.BindingResponse:
     properties:
       bot_id:
@@ -1825,6 +1856,8 @@ definitions:
         type: array
       bot_id:
         type: string
+      compact_id:
+        type: string
       content:
         items:
           type: integer
@@ -2303,6 +2336,12 @@ definitions:
         type: string
       chat_model_id:
         type: string
+      compaction_enabled:
+        type: boolean
+      compaction_model_id:
+        type: string
+      compaction_threshold:
+        type: integer
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -2336,6 +2375,12 @@ definitions:
         type: string
       chat_model_id:
         type: string
+      compaction_enabled:
+        type: boolean
+      compaction_model_id:
+        type: string
+      compaction_threshold:
+        type: integer
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -3032,6 +3077,62 @@ paths:
       summary: WebSocket chat endpoint
       tags:
       - local-channel
+  /bots/{bot_id}/compaction/logs:
+    delete:
+      description: Delete all context compaction logs for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete compaction logs
+      tags:
+      - compaction
+    get:
+      description: List context compaction logs for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Before timestamp (RFC3339)
+        in: query
+        name: before
+        type: string
+      - default: 50
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/compaction.ListLogsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List compaction logs
+      tags:
+      - compaction
   /bots/{bot_id}/container:
     delete:
       parameters:

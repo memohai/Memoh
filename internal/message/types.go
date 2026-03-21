@@ -36,6 +36,7 @@ type Message struct {
 	Metadata                map[string]any  `json:"metadata,omitempty"`
 	Usage                   json.RawMessage `json:"usage,omitempty"`
 	Assets                  []MessageAsset  `json:"assets,omitempty"`
+	CompactID               string          `json:"compact_id,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
 }
 

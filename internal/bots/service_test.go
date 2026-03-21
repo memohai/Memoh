@@ -44,11 +44,13 @@ func (d *fakeDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 // Column order: id, owner_user_id, display_name, avatar_url, is_active, status,
 // max_context_load_time, max_context_tokens, language,
 // reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id,
-// heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at.
+// heartbeat_enabled, heartbeat_interval, heartbeat_prompt,
+// compaction_enabled, compaction_threshold, compaction_model_id,
+// metadata, created_at, updated_at.
 func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) < 20 {
+			if len(dest) < 23 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -68,9 +70,12 @@ func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 			*dest[14].(*bool) = false                // HeartbeatEnabled
 			*dest[15].(*int32) = 30                  // HeartbeatInterval
 			*dest[16].(*string) = ""                 // HeartbeatPrompt
-			*dest[17].(*[]byte) = []byte(`{}`)
-			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[17].(*bool) = false                // CompactionEnabled
+			*dest[18].(*int32) = 100000              // CompactionThreshold
+			*dest[19].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
+			*dest[20].(*[]byte) = []byte(`{}`)
+			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

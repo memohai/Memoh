@@ -552,6 +552,24 @@ export type ChannelUpsertConfigRequest = {
     verified_at?: string;
 };
 
+export type CompactionListLogsResponse = {
+    items?: Array<CompactionLog>;
+};
+
+export type CompactionLog = {
+    bot_id?: string;
+    completed_at?: string;
+    error_message?: string;
+    id?: string;
+    message_count?: number;
+    model_id?: string;
+    session_id?: string;
+    started_at?: string;
+    status?: string;
+    summary?: string;
+    usage?: unknown;
+};
+
 export type EmailBindingResponse = {
     bot_id?: string;
     can_delete?: boolean;
@@ -1121,6 +1139,7 @@ export type McpUpsertRequest = {
 export type MessageMessage = {
     assets?: Array<MessageMessageAsset>;
     bot_id?: string;
+    compact_id?: string;
     content?: Array<number>;
     created_at?: string;
     external_message_id?: string;
@@ -1388,6 +1407,9 @@ export type SettingsSettings = {
     allow_guest?: boolean;
     browser_context_id?: string;
     chat_model_id?: string;
+    compaction_enabled?: boolean;
+    compaction_model_id?: string;
+    compaction_threshold?: number;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -1406,6 +1428,9 @@ export type SettingsUpsertRequest = {
     allow_guest?: boolean;
     browser_context_id?: string;
     chat_model_id?: string;
+    compaction_enabled?: boolean;
+    compaction_model_id?: string;
+    compaction_threshold?: number;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -2086,6 +2111,81 @@ export type GetBotsByBotIdCliWsErrors = {
 };
 
 export type GetBotsByBotIdCliWsError = GetBotsByBotIdCliWsErrors[keyof GetBotsByBotIdCliWsErrors];
+
+export type DeleteBotsByBotIdCompactionLogsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/compaction/logs';
+};
+
+export type DeleteBotsByBotIdCompactionLogsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdCompactionLogsError = DeleteBotsByBotIdCompactionLogsErrors[keyof DeleteBotsByBotIdCompactionLogsErrors];
+
+export type DeleteBotsByBotIdCompactionLogsResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdCompactionLogsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Before timestamp (RFC3339)
+         */
+        before?: string;
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/compaction/logs';
+};
+
+export type GetBotsByBotIdCompactionLogsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdCompactionLogsError = GetBotsByBotIdCompactionLogsErrors[keyof GetBotsByBotIdCompactionLogsErrors];
+
+export type GetBotsByBotIdCompactionLogsResponses = {
+    /**
+     * OK
+     */
+    200: CompactionListLogsResponse;
+};
+
+export type GetBotsByBotIdCompactionLogsResponse = GetBotsByBotIdCompactionLogsResponses[keyof GetBotsByBotIdCompactionLogsResponses];
 
 export type DeleteBotsByBotIdContainerData = {
     body?: never;

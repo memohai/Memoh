@@ -9,30 +9,33 @@ import (
 )
 
 type Bot struct {
-	ID                 pgtype.UUID        `json:"id"`
-	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
-	DisplayName        pgtype.Text        `json:"display_name"`
-	AvatarUrl          pgtype.Text        `json:"avatar_url"`
-	IsActive           bool               `json:"is_active"`
-	Status             string             `json:"status"`
-	MaxContextLoadTime int32              `json:"max_context_load_time"`
-	MaxContextTokens   int32              `json:"max_context_tokens"`
-	Language           string             `json:"language"`
-	ReasoningEnabled   bool               `json:"reasoning_enabled"`
-	ReasoningEffort    string             `json:"reasoning_effort"`
-	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
-	SearchProviderID   pgtype.UUID        `json:"search_provider_id"`
-	MemoryProviderID   pgtype.UUID        `json:"memory_provider_id"`
-	HeartbeatEnabled   bool               `json:"heartbeat_enabled"`
-	HeartbeatInterval  int32              `json:"heartbeat_interval"`
-	HeartbeatPrompt    string             `json:"heartbeat_prompt"`
-	HeartbeatModelID   pgtype.UUID        `json:"heartbeat_model_id"`
-	TitleModelID       pgtype.UUID        `json:"title_model_id"`
-	TtsModelID         pgtype.UUID        `json:"tts_model_id"`
-	BrowserContextID   pgtype.UUID        `json:"browser_context_id"`
-	Metadata           []byte             `json:"metadata"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID                  pgtype.UUID        `json:"id"`
+	OwnerUserID         pgtype.UUID        `json:"owner_user_id"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	IsActive            bool               `json:"is_active"`
+	Status              string             `json:"status"`
+	MaxContextLoadTime  int32              `json:"max_context_load_time"`
+	MaxContextTokens    int32              `json:"max_context_tokens"`
+	Language            string             `json:"language"`
+	ReasoningEnabled    bool               `json:"reasoning_enabled"`
+	ReasoningEffort     string             `json:"reasoning_effort"`
+	ChatModelID         pgtype.UUID        `json:"chat_model_id"`
+	SearchProviderID    pgtype.UUID        `json:"search_provider_id"`
+	MemoryProviderID    pgtype.UUID        `json:"memory_provider_id"`
+	HeartbeatEnabled    bool               `json:"heartbeat_enabled"`
+	HeartbeatInterval   int32              `json:"heartbeat_interval"`
+	HeartbeatPrompt     string             `json:"heartbeat_prompt"`
+	HeartbeatModelID    pgtype.UUID        `json:"heartbeat_model_id"`
+	TitleModelID        pgtype.UUID        `json:"title_model_id"`
+	TtsModelID          pgtype.UUID        `json:"tts_model_id"`
+	BrowserContextID    pgtype.UUID        `json:"browser_context_id"`
+	CompactionEnabled   bool               `json:"compaction_enabled"`
+	CompactionThreshold int32              `json:"compaction_threshold"`
+	CompactionModelID   pgtype.UUID        `json:"compaction_model_id"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotAclRule struct {
@@ -121,6 +124,7 @@ type BotHistoryMessage struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	ModelID                 pgtype.UUID        `json:"model_id"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -133,6 +137,20 @@ type BotHistoryMessageAsset struct {
 	Name        string             `json:"name"`
 	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type BotHistoryMessageCompact struct {
+	ID           pgtype.UUID        `json:"id"`
+	BotID        pgtype.UUID        `json:"bot_id"`
+	SessionID    pgtype.UUID        `json:"session_id"`
+	Status       string             `json:"status"`
+	Summary      string             `json:"summary"`
+	MessageCount int32              `json:"message_count"`
+	ErrorMessage string             `json:"error_message"`
+	Usage        []byte             `json:"usage"`
+	ModelID      pgtype.UUID        `json:"model_id"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
 }
 
 type BotSession struct {

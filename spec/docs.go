@@ -641,6 +641,90 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/compaction/logs": {
+            "get": {
+                "description": "List context compaction logs for a bot",
+                "tags": [
+                    "compaction"
+                ],
+                "summary": "List compaction logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Before timestamp (RFC3339)",
+                        "name": "before",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/compaction.ListLogsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete all context compaction logs for a bot",
+                "tags": [
+                    "compaction"
+                ],
+                "summary": "Delete compaction logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/container": {
             "get": {
                 "tags": [
@@ -10316,6 +10400,53 @@ const docTemplate = `{
                 }
             }
         },
+        "compaction.ListLogsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/compaction.Log"
+                    }
+                }
+            }
+        },
+        "compaction.Log": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message_count": {
+                    "type": "integer"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "usage": {}
+            }
+        },
         "email.BindingResponse": {
             "type": "object",
             "properties": {
@@ -11709,6 +11840,9 @@ const docTemplate = `{
                 "bot_id": {
                     "type": "string"
                 },
+                "compact_id": {
+                    "type": "string"
+                },
                 "content": {
                     "type": "array",
                     "items": {
@@ -12416,6 +12550,15 @@ const docTemplate = `{
                 "chat_model_id": {
                     "type": "string"
                 },
+                "compaction_enabled": {
+                    "type": "boolean"
+                },
+                "compaction_model_id": {
+                    "type": "string"
+                },
+                "compaction_threshold": {
+                    "type": "integer"
+                },
                 "heartbeat_enabled": {
                     "type": "boolean"
                 },
@@ -12465,6 +12608,15 @@ const docTemplate = `{
                 },
                 "chat_model_id": {
                     "type": "string"
+                },
+                "compaction_enabled": {
+                    "type": "boolean"
+                },
+                "compaction_model_id": {
+                    "type": "string"
+                },
+                "compaction_threshold": {
+                    "type": "integer"
                 },
                 "heartbeat_enabled": {
                     "type": "boolean"

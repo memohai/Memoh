@@ -39,6 +39,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/inbound"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/command"
+	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/conversation"
@@ -209,6 +210,7 @@ func runServe() {
 			schedule.NewService,
 			provideHeartbeatTriggerer,
 			heartbeat.NewService,
+			compaction.NewService,
 
 			// containerd handler & tool gateway
 			provideContainerdHandler,
@@ -231,6 +233,7 @@ func runServe() {
 			provideServerHandler(handlers.NewBindHandler),
 			provideServerHandler(handlers.NewScheduleHandler),
 			provideServerHandler(handlers.NewHeartbeatHandler),
+			provideServerHandler(handlers.NewCompactionHandler),
 			provideServerHandler(handlers.NewSubagentHandler),
 			provideServerHandler(handlers.NewChannelHandler),
 			provideServerHandler(feishu.NewWebhookServerHandler),
@@ -432,13 +435,14 @@ func injectToolProviders(a *agentpkg.Agent, providers []agenttools.ToolProvider)
 	a.SetToolProviders(providers)
 }
 
-func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, sessionService *sessionpkg.Service, eventHub *event.Hub) *flow.Resolver {
+func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, a, 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
 	resolver.SetSessionService(sessionService)
 	resolver.SetEventPublisher(eventHub)
+	resolver.SetCompactionService(compactionService)
 	return resolver
 }
 

@@ -148,6 +148,7 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -173,6 +174,7 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -360,3 +362,16 @@ WHERE m.bot_id = sqlc.arg(bot_id)
   ) ILIKE '%' || sqlc.narg(keyword)::text || '%')
 ORDER BY m.created_at DESC
 LIMIT sqlc.arg(max_count);
+
+-- name: MarkMessagesCompacted :exec
+UPDATE bot_history_messages
+SET compact_id = $1
+WHERE id = ANY($2::uuid[]);
+
+-- name: ListUncompactedMessagesBySession :many
+SELECT id, chat_id, session_id, role, content, usage, platform, external_message_id, sender_channel_identity_id, compact_id, created_at
+FROM bot_history_messages
+WHERE session_id = $1
+  AND compact_id IS NULL
+  AND is_active = true
+ORDER BY created_at ASC;
