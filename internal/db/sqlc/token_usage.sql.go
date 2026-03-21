@@ -11,135 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getHeartbeatTokenUsageByDay = `-- name: GetHeartbeatTokenUsageByDay :many
+const getTokenUsageByDayAndType = `-- name: GetTokenUsageByDayAndType :many
 SELECT
-  date_trunc('day', h.started_at)::date AS day,
-  COALESCE(SUM((h.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
-  COALESCE(SUM((h.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
-  COALESCE(SUM((h.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
-  COALESCE(SUM((h.usage->'inputTokenDetails'->>'cacheWriteTokens')::bigint), 0)::bigint AS cache_write_tokens,
-  COALESCE(SUM((h.usage->'outputTokenDetails'->>'reasoningTokens')::bigint), 0)::bigint AS reasoning_tokens
-FROM bot_heartbeat_logs h
-WHERE h.bot_id = $1
-  AND h.usage IS NOT NULL
-  AND h.started_at >= $2
-  AND h.started_at < $3
-  AND ($4::uuid IS NULL OR h.model_id = $4::uuid)
-GROUP BY day
-ORDER BY day
-`
-
-type GetHeartbeatTokenUsageByDayParams struct {
-	BotID    pgtype.UUID        `json:"bot_id"`
-	FromTime pgtype.Timestamptz `json:"from_time"`
-	ToTime   pgtype.Timestamptz `json:"to_time"`
-	ModelID  pgtype.UUID        `json:"model_id"`
-}
-
-type GetHeartbeatTokenUsageByDayRow struct {
-	Day              pgtype.Date `json:"day"`
-	InputTokens      int64       `json:"input_tokens"`
-	OutputTokens     int64       `json:"output_tokens"`
-	CacheReadTokens  int64       `json:"cache_read_tokens"`
-	CacheWriteTokens int64       `json:"cache_write_tokens"`
-	ReasoningTokens  int64       `json:"reasoning_tokens"`
-}
-
-func (q *Queries) GetHeartbeatTokenUsageByDay(ctx context.Context, arg GetHeartbeatTokenUsageByDayParams) ([]GetHeartbeatTokenUsageByDayRow, error) {
-	rows, err := q.db.Query(ctx, getHeartbeatTokenUsageByDay,
-		arg.BotID,
-		arg.FromTime,
-		arg.ToTime,
-		arg.ModelID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetHeartbeatTokenUsageByDayRow
-	for rows.Next() {
-		var i GetHeartbeatTokenUsageByDayRow
-		if err := rows.Scan(
-			&i.Day,
-			&i.InputTokens,
-			&i.OutputTokens,
-			&i.CacheReadTokens,
-			&i.CacheWriteTokens,
-			&i.ReasoningTokens,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getHeartbeatTokenUsageByModel = `-- name: GetHeartbeatTokenUsageByModel :many
-SELECT
-  h.model_id,
-  COALESCE(mo.model_id, 'unknown') AS model_slug,
-  COALESCE(mo.name, 'Unknown') AS model_name,
-  COALESCE(lp.name, 'Unknown') AS provider_name,
-  COALESCE(SUM((h.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
-  COALESCE(SUM((h.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens
-FROM bot_heartbeat_logs h
-LEFT JOIN models mo ON mo.id = h.model_id
-LEFT JOIN llm_providers lp ON lp.id = mo.llm_provider_id
-WHERE h.bot_id = $1
-  AND h.usage IS NOT NULL
-  AND h.started_at >= $2
-  AND h.started_at < $3
-GROUP BY h.model_id, mo.model_id, mo.name, lp.name
-ORDER BY input_tokens DESC
-`
-
-type GetHeartbeatTokenUsageByModelParams struct {
-	BotID    pgtype.UUID        `json:"bot_id"`
-	FromTime pgtype.Timestamptz `json:"from_time"`
-	ToTime   pgtype.Timestamptz `json:"to_time"`
-}
-
-type GetHeartbeatTokenUsageByModelRow struct {
-	ModelID      pgtype.UUID `json:"model_id"`
-	ModelSlug    string      `json:"model_slug"`
-	ModelName    string      `json:"model_name"`
-	ProviderName string      `json:"provider_name"`
-	InputTokens  int64       `json:"input_tokens"`
-	OutputTokens int64       `json:"output_tokens"`
-}
-
-func (q *Queries) GetHeartbeatTokenUsageByModel(ctx context.Context, arg GetHeartbeatTokenUsageByModelParams) ([]GetHeartbeatTokenUsageByModelRow, error) {
-	rows, err := q.db.Query(ctx, getHeartbeatTokenUsageByModel, arg.BotID, arg.FromTime, arg.ToTime)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetHeartbeatTokenUsageByModelRow
-	for rows.Next() {
-		var i GetHeartbeatTokenUsageByModelRow
-		if err := rows.Scan(
-			&i.ModelID,
-			&i.ModelSlug,
-			&i.ModelName,
-			&i.ProviderName,
-			&i.InputTokens,
-			&i.OutputTokens,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getMessageTokenUsageByDay = `-- name: GetMessageTokenUsageByDay :many
-SELECT
+  COALESCE(s.type, 'chat')::text AS session_type,
   date_trunc('day', m.created_at)::date AS day,
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
@@ -147,23 +21,25 @@ SELECT
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheWriteTokens')::bigint), 0)::bigint AS cache_write_tokens,
   COALESCE(SUM((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint), 0)::bigint AS reasoning_tokens
 FROM bot_history_messages m
+LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
   AND m.usage IS NOT NULL
   AND m.created_at >= $2
   AND m.created_at < $3
   AND ($4::uuid IS NULL OR m.model_id = $4::uuid)
-GROUP BY day
-ORDER BY day
+GROUP BY session_type, day
+ORDER BY day, session_type
 `
 
-type GetMessageTokenUsageByDayParams struct {
+type GetTokenUsageByDayAndTypeParams struct {
 	BotID    pgtype.UUID        `json:"bot_id"`
 	FromTime pgtype.Timestamptz `json:"from_time"`
 	ToTime   pgtype.Timestamptz `json:"to_time"`
 	ModelID  pgtype.UUID        `json:"model_id"`
 }
 
-type GetMessageTokenUsageByDayRow struct {
+type GetTokenUsageByDayAndTypeRow struct {
+	SessionType      string      `json:"session_type"`
 	Day              pgtype.Date `json:"day"`
 	InputTokens      int64       `json:"input_tokens"`
 	OutputTokens     int64       `json:"output_tokens"`
@@ -172,8 +48,8 @@ type GetMessageTokenUsageByDayRow struct {
 	ReasoningTokens  int64       `json:"reasoning_tokens"`
 }
 
-func (q *Queries) GetMessageTokenUsageByDay(ctx context.Context, arg GetMessageTokenUsageByDayParams) ([]GetMessageTokenUsageByDayRow, error) {
-	rows, err := q.db.Query(ctx, getMessageTokenUsageByDay,
+func (q *Queries) GetTokenUsageByDayAndType(ctx context.Context, arg GetTokenUsageByDayAndTypeParams) ([]GetTokenUsageByDayAndTypeRow, error) {
+	rows, err := q.db.Query(ctx, getTokenUsageByDayAndType,
 		arg.BotID,
 		arg.FromTime,
 		arg.ToTime,
@@ -183,10 +59,11 @@ func (q *Queries) GetMessageTokenUsageByDay(ctx context.Context, arg GetMessageT
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetMessageTokenUsageByDayRow
+	var items []GetTokenUsageByDayAndTypeRow
 	for rows.Next() {
-		var i GetMessageTokenUsageByDayRow
+		var i GetTokenUsageByDayAndTypeRow
 		if err := rows.Scan(
+			&i.SessionType,
 			&i.Day,
 			&i.InputTokens,
 			&i.OutputTokens,
@@ -204,7 +81,7 @@ func (q *Queries) GetMessageTokenUsageByDay(ctx context.Context, arg GetMessageT
 	return items, nil
 }
 
-const getMessageTokenUsageByModel = `-- name: GetMessageTokenUsageByModel :many
+const getTokenUsageByModel = `-- name: GetTokenUsageByModel :many
 SELECT
   m.model_id,
   COALESCE(mo.model_id, 'unknown') AS model_slug,
@@ -223,13 +100,13 @@ GROUP BY m.model_id, mo.model_id, mo.name, lp.name
 ORDER BY input_tokens DESC
 `
 
-type GetMessageTokenUsageByModelParams struct {
+type GetTokenUsageByModelParams struct {
 	BotID    pgtype.UUID        `json:"bot_id"`
 	FromTime pgtype.Timestamptz `json:"from_time"`
 	ToTime   pgtype.Timestamptz `json:"to_time"`
 }
 
-type GetMessageTokenUsageByModelRow struct {
+type GetTokenUsageByModelRow struct {
 	ModelID      pgtype.UUID `json:"model_id"`
 	ModelSlug    string      `json:"model_slug"`
 	ModelName    string      `json:"model_name"`
@@ -238,15 +115,15 @@ type GetMessageTokenUsageByModelRow struct {
 	OutputTokens int64       `json:"output_tokens"`
 }
 
-func (q *Queries) GetMessageTokenUsageByModel(ctx context.Context, arg GetMessageTokenUsageByModelParams) ([]GetMessageTokenUsageByModelRow, error) {
-	rows, err := q.db.Query(ctx, getMessageTokenUsageByModel, arg.BotID, arg.FromTime, arg.ToTime)
+func (q *Queries) GetTokenUsageByModel(ctx context.Context, arg GetTokenUsageByModelParams) ([]GetTokenUsageByModelRow, error) {
+	rows, err := q.db.Query(ctx, getTokenUsageByModel, arg.BotID, arg.FromTime, arg.ToTime)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetMessageTokenUsageByModelRow
+	var items []GetTokenUsageByModelRow
 	for rows.Next() {
-		var i GetMessageTokenUsageByModelRow
+		var i GetTokenUsageByModelRow
 		if err := rows.Scan(
 			&i.ModelID,
 			&i.ModelSlug,

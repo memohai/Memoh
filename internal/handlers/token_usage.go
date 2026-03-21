@@ -60,12 +60,13 @@ type ModelTokenUsage struct {
 type TokenUsageResponse struct {
 	Chat      []DailyTokenUsage `json:"chat"`
 	Heartbeat []DailyTokenUsage `json:"heartbeat"`
+	Schedule  []DailyTokenUsage `json:"schedule"`
 	ByModel   []ModelTokenUsage `json:"by_model"`
 }
 
 // GetTokenUsage godoc
 // @Summary Get token usage statistics
-// @Description Get daily aggregated token usage for a bot, split by chat and heartbeat, with optional model filter and per-model breakdown
+// @Description Get daily aggregated token usage for a bot, split by chat, heartbeat, and schedule session types, with optional model filter and per-model breakdown
 // @Tags token-usage
 // @Param bot_id path string true "Bot ID"
 // @Param from query string true "Start date (YYYY-MM-DD)"
@@ -124,7 +125,7 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 
 	ctx := c.Request().Context()
 
-	chatRows, hbRows, err := h.fetchUsage(ctx, pgBotID, fromTS, toTS, pgModelID)
+	chat, heartbeat, schedule, err := h.fetchUsageByDay(ctx, pgBotID, fromTS, toTS, pgModelID)
 	if err != nil {
 		h.logger.Error("fetch token usage failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage")
@@ -137,39 +138,48 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	}
 
 	resp := TokenUsageResponse{
-		Chat:      convertMessageRows(chatRows),
-		Heartbeat: convertHeartbeatRows(hbRows),
+		Chat:      chat,
+		Heartbeat: heartbeat,
+		Schedule:  schedule,
 		ByModel:   byModel,
 	}
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *TokenUsageHandler) fetchUsage(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, modelID pgtype.UUID) ([]sqlc.GetMessageTokenUsageByDayRow, []sqlc.GetHeartbeatTokenUsageByDayRow, error) {
-	chatRows, err := h.queries.GetMessageTokenUsageByDay(ctx, sqlc.GetMessageTokenUsageByDayParams{
+func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, modelID pgtype.UUID) (chat, heartbeat, schedule []DailyTokenUsage, err error) {
+	rows, err := h.queries.GetTokenUsageByDayAndType(ctx, sqlc.GetTokenUsageByDayAndTypeParams{
 		BotID:    botID,
 		FromTime: from,
 		ToTime:   to,
 		ModelID:  modelID,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	hbRows, err := h.queries.GetHeartbeatTokenUsageByDay(ctx, sqlc.GetHeartbeatTokenUsageByDayParams{
-		BotID:    botID,
-		FromTime: from,
-		ToTime:   to,
-		ModelID:  modelID,
-	})
-	if err != nil {
-		return nil, nil, err
+
+	for _, r := range rows {
+		d := DailyTokenUsage{
+			Day:              formatPgDate(r.Day),
+			InputTokens:      r.InputTokens,
+			OutputTokens:     r.OutputTokens,
+			CacheReadTokens:  r.CacheReadTokens,
+			CacheWriteTokens: r.CacheWriteTokens,
+			ReasoningTokens:  r.ReasoningTokens,
+		}
+		switch r.SessionType {
+		case "heartbeat":
+			heartbeat = append(heartbeat, d)
+		case "schedule":
+			schedule = append(schedule, d)
+		default:
+			chat = append(chat, d)
+		}
 	}
-	return chatRows, hbRows, nil
+	return chat, heartbeat, schedule, nil
 }
 
 func (h *TokenUsageHandler) fetchUsageByModel(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz) ([]ModelTokenUsage, error) {
-	merged := map[string]*ModelTokenUsage{}
-
-	chatRows, err := h.queries.GetMessageTokenUsageByModel(ctx, sqlc.GetMessageTokenUsageByModelParams{
+	rows, err := h.queries.GetTokenUsageByModel(ctx, sqlc.GetTokenUsageByModelParams{
 		BotID:    botID,
 		FromTime: from,
 		ToTime:   to,
@@ -177,83 +187,19 @@ func (h *TokenUsageHandler) fetchUsageByModel(ctx context.Context, botID pgtype.
 	if err != nil {
 		return nil, err
 	}
-	for _, r := range chatRows {
-		key := r.ModelID.String()
-		if m, ok := merged[key]; ok {
-			m.InputTokens += r.InputTokens
-			m.OutputTokens += r.OutputTokens
-		} else {
-			merged[key] = &ModelTokenUsage{
-				ModelID:      formatOptionalUUID(r.ModelID),
-				ModelSlug:    r.ModelSlug,
-				ModelName:    r.ModelName,
-				ProviderName: r.ProviderName,
-				InputTokens:  r.InputTokens,
-				OutputTokens: r.OutputTokens,
-			}
-		}
-	}
 
-	hbRows, err := h.queries.GetHeartbeatTokenUsageByModel(ctx, sqlc.GetHeartbeatTokenUsageByModelParams{
-		BotID:    botID,
-		FromTime: from,
-		ToTime:   to,
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range hbRows {
-		key := r.ModelID.String()
-		if m, ok := merged[key]; ok {
-			m.InputTokens += r.InputTokens
-			m.OutputTokens += r.OutputTokens
-		} else {
-			merged[key] = &ModelTokenUsage{
-				ModelID:      formatOptionalUUID(r.ModelID),
-				ModelSlug:    r.ModelSlug,
-				ModelName:    r.ModelName,
-				ProviderName: r.ProviderName,
-				InputTokens:  r.InputTokens,
-				OutputTokens: r.OutputTokens,
-			}
-		}
-	}
-
-	result := make([]ModelTokenUsage, 0, len(merged))
-	for _, m := range merged {
-		result = append(result, *m)
+	result := make([]ModelTokenUsage, 0, len(rows))
+	for _, r := range rows {
+		result = append(result, ModelTokenUsage{
+			ModelID:      formatOptionalUUID(r.ModelID),
+			ModelSlug:    r.ModelSlug,
+			ModelName:    r.ModelName,
+			ProviderName: r.ProviderName,
+			InputTokens:  r.InputTokens,
+			OutputTokens: r.OutputTokens,
+		})
 	}
 	return result, nil
-}
-
-func convertMessageRows(rows []sqlc.GetMessageTokenUsageByDayRow) []DailyTokenUsage {
-	out := make([]DailyTokenUsage, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, DailyTokenUsage{
-			Day:              formatPgDate(r.Day),
-			InputTokens:      r.InputTokens,
-			OutputTokens:     r.OutputTokens,
-			CacheReadTokens:  r.CacheReadTokens,
-			CacheWriteTokens: r.CacheWriteTokens,
-			ReasoningTokens:  r.ReasoningTokens,
-		})
-	}
-	return out
-}
-
-func convertHeartbeatRows(rows []sqlc.GetHeartbeatTokenUsageByDayRow) []DailyTokenUsage {
-	out := make([]DailyTokenUsage, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, DailyTokenUsage{
-			Day:              formatPgDate(r.Day),
-			InputTokens:      r.InputTokens,
-			OutputTokens:     r.OutputTokens,
-			CacheReadTokens:  r.CacheReadTokens,
-			CacheWriteTokens: r.CacheWriteTokens,
-			ReasoningTokens:  r.ReasoningTokens,
-		})
-	}
-	return out
 }
 
 func formatPgDate(d pgtype.Date) string {

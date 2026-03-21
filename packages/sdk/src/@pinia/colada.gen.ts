@@ -1698,7 +1698,7 @@ export const getBotsByBotIdTokenUsageQueryKey = (options: Options<GetBotsByBotId
 /**
  * Get token usage statistics
  *
- * Get daily aggregated token usage for a bot, split by chat and heartbeat, with optional model filter and per-model breakdown
+ * Get daily aggregated token usage for a bot, split by chat, heartbeat, and schedule session types, with optional model filter and per-model breakdown
  */
 export const getBotsByBotIdTokenUsageQuery = defineQueryOptions((options: Options<GetBotsByBotIdTokenUsageData>) => ({
     key: getBotsByBotIdTokenUsageQueryKey(options),

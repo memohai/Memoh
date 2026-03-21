@@ -4685,7 +4685,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/token-usage": {
             "get": {
-                "description": "Get daily aggregated token usage for a bot, split by chat and heartbeat, with optional model filter and per-model breakdown",
+                "description": "Get daily aggregated token usage for a bot, split by chat, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
                 "tags": [
                     "token-usage"
                 ],
@@ -11192,6 +11192,12 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/handlers.DailyTokenUsage"
                     }
+                },
+                "schedule": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.DailyTokenUsage"
+                    }
                 }
             }
         },
@@ -11918,11 +11924,13 @@ const docTemplate = `{
             "enum": [
                 "ok",
                 "auth_error",
+                "model_not_supported",
                 "error"
             ],
             "x-enum-varnames": [
                 "TestStatusOK",
                 "TestStatusAuthError",
+                "TestStatusModelNotSupported",
                 "TestStatusError"
             ]
         },

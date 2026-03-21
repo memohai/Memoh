@@ -963,7 +963,7 @@ export const putBotsByBotIdSubagentsByIdSkills = <ThrowOnError extends boolean =
 /**
  * Get token usage statistics
  *
- * Get daily aggregated token usage for a bot, split by chat and heartbeat, with optional model filter and per-model breakdown
+ * Get daily aggregated token usage for a bot, split by chat, heartbeat, and schedule session types, with optional model filter and per-model breakdown
  */
 export const getBotsByBotIdTokenUsage = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdTokenUsageData, ThrowOnError>) => (options.client ?? client).get<GetBotsByBotIdTokenUsageResponses, GetBotsByBotIdTokenUsageErrors, ThrowOnError>({ url: '/bots/{bot_id}/token-usage', ...options });
 

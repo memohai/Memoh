@@ -903,6 +903,7 @@ export type HandlersTokenUsageResponse = {
     by_model?: Array<HandlersModelTokenUsage>;
     chat?: Array<HandlersDailyTokenUsage>;
     heartbeat?: Array<HandlersDailyTokenUsage>;
+    schedule?: Array<HandlersDailyTokenUsage>;
 };
 
 export type HandlersCreateSessionRequest = {
@@ -1194,7 +1195,7 @@ export type ModelsTestResponse = {
     status?: ModelsTestStatus;
 };
 
-export type ModelsTestStatus = 'ok' | 'auth_error' | 'error';
+export type ModelsTestStatus = 'ok' | 'auth_error' | 'model_not_supported' | 'error';
 
 export type ModelsUpdateRequest = {
     client_type?: ModelsClientType;
