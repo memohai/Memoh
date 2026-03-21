@@ -187,7 +187,8 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	if resp.GetBinary() {
 		return nil, errors.New("file appears to be binary. Read tool only supports text files")
 	}
-	return map[string]any{"content": resp.GetContent(), "total_lines": resp.GetTotalLines()}, nil
+	content := addLineNumbers(resp.GetContent(), lineOffset)
+	return map[string]any{"content": content, "total_lines": resp.GetTotalLines()}, nil
 }
 
 func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
@@ -281,4 +282,17 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
 	stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
 	return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": result.ExitCode}, nil
+}
+
+func addLineNumbers(content string, startLine int32) string {
+	if content == "" {
+		return content
+	}
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	var out strings.Builder
+	out.Grow(len(content) + len(lines)*8)
+	for i, line := range lines {
+		fmt.Fprintf(&out, "%6d\t%s\n", int(startLine)+i, line)
+	}
+	return out.String()
 }
