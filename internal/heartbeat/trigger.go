@@ -3,10 +3,11 @@ package heartbeat
 import "context"
 
 type TriggerPayload struct {
-	BotID       string
-	Interval    int
-	OwnerUserID string
-	SessionID   string
+	BotID           string
+	Interval        int
+	OwnerUserID     string
+	SessionID       string
+	LastHeartbeatAt string // ISO 8601; empty on first heartbeat
 }
 
 type TriggerResult struct {

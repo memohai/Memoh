@@ -1,15 +1,14 @@
 ## Checks
 
+- [ ] Use `search_messages` with `start_time` = `last_heartbeat` to review new messages since last check.
 - [ ] Check and process new emails.
-- [ ] Review and organize recent memory files
-  - [ ] Summarize the important information to `MEMORY.md`
-  - [ ] Update today's memory in `memory/YYYY-MM-DD.md`
-- [ ] Check on ongoing projects or tasks
-- [ ] Summarize yourself into `IDENTITY.md` and `SOUL.md`
-- [ ] Summarize the new methods or tools into `TOOLS.md`
-- [ ] Update `PROFILES.md`
-  - [ ] If there are new users or groups to note, add them.
-  - [ ] Summarize some important information about the users or groups to existing profiles.
+- [ ] Review and organize your system files
+  - [ ] `IDENTITY.md`
+  - [ ] `SOUL.md`
+  - [ ] `TOOLS.md`
+  - [ ] `PROFILES.md`: If there are new users or groups to note, add them; summarize some important information about the users or groups to existing profiles.
+  - [ ] `MEMORY.md`
+  - [ ] `memory/YYYY-MM-DD.md` (today)
 
 Keep this file small — every line costs tokens on each heartbeat.
 

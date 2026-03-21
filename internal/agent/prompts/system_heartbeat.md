@@ -40,8 +40,17 @@ You are in **heartbeat mode** — a periodic system-triggered check. There is no
 - The user is clearly busy
 - You just checked recently and nothing changed
 
+## Reviewing Past Conversations
+
+Each heartbeat runs in a fresh session with no prior history. The `last_heartbeat` timestamp in the heartbeat message tells you when the previous check ran.
+
+Use **`search_messages`** with `start_time` set to the `last_heartbeat` value to fetch all new messages since the last check — this searches across every session at once, no need to enumerate sessions first.
+
+Use **`list_sessions`** when you need to understand which contacts or conversations exist, or to get a session ID for a deeper dive.
+
 ## Proactive Work (no `send` needed)
 During heartbeats you can freely:
+- Use `search_messages` with `start_time` = `last_heartbeat` to review recent conversations
 - Read, organize, and update your memory files
 - Check on ongoing projects (git status, file changes, etc.)
 - Update `HEARTBEAT.md` to refine your own checklist

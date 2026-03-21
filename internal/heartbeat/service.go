@@ -126,6 +126,14 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 		}
 	}
 
+	var lastHeartbeatAt string
+	if prevLogs, listErr := s.queries.ListHeartbeatLogsByBot(ctx, sqlc.ListHeartbeatLogsByBotParams{
+		BotID: pgBotID,
+		Limit: 1,
+	}); listErr == nil && len(prevLogs) > 0 {
+		lastHeartbeatAt = prevLogs[0].StartedAt.Time.UTC().Format("2006-01-02T15:04:05Z")
+	}
+
 	logRow, err := s.queries.CreateHeartbeatLog(ctx, sqlc.CreateHeartbeatLogParams{
 		BotID:     pgBotID,
 		SessionID: pgSessionID,
@@ -143,10 +151,11 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 	}
 
 	result, err := s.triggerer.TriggerHeartbeat(ctx, cfg.BotID, TriggerPayload{
-		BotID:       cfg.BotID,
-		Interval:    cfg.Interval,
-		OwnerUserID: cfg.OwnerUserID,
-		SessionID:   sessionID,
+		BotID:           cfg.BotID,
+		Interval:        cfg.Interval,
+		OwnerUserID:     cfg.OwnerUserID,
+		SessionID:       sessionID,
+		LastHeartbeatAt: lastHeartbeatAt,
 	}, token)
 	if err != nil {
 		s.completeLog(ctx, logRow.ID, "error", "", err.Error(), nil, pgtype.UUID{})

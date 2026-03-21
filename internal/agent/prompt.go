@@ -152,14 +152,19 @@ func GenerateSchedulePrompt(s Schedule) string {
 }
 
 // GenerateHeartbeatPrompt builds the user message for a heartbeat trigger.
-func GenerateHeartbeatPrompt(interval int, checklist string) string {
+func GenerateHeartbeatPrompt(interval int, checklist string, lastHeartbeatAt string) string {
 	checklistSection := ""
 	if strings.TrimSpace(checklist) != "" {
 		checklistSection = "\n## HEARTBEAT.md (checklist)\n\n" + strings.TrimSpace(checklist) + "\n"
 	}
+	lastHB := strings.TrimSpace(lastHeartbeatAt)
+	if lastHB == "" {
+		lastHB = "never (first heartbeat)"
+	}
 	return render(heartbeatTmpl, map[string]string{
 		"interval":         strconv.Itoa(interval),
 		"timeNow":          TimeNow().UTC().Format("2006-01-02T15:04:05Z"),
+		"lastHeartbeat":    lastHB,
 		"checklistSection": checklistSection,
 	})
 }
