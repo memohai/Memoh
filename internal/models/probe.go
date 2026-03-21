@@ -102,7 +102,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 // testEmbeddingModel probes an embedding model by sending a minimal
 // request to the /embeddings endpoint.
-func (s *Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID string) (TestResponse, error) {
+func (*Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID string) (TestResponse, error) {
 	body, _ := json.Marshal(map[string]any{"model": modelID, "input": "hello"})
 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
@@ -117,7 +117,9 @@ func (s *Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, model
 	req.Header.Set("Content-Type", "application/json")
 
 	start := time.Now()
-	resp, err := (&http.Client{}).Do(req)
+	httpClient := &http.Client{Timeout: probeTimeout}
+	// #nosec G704 -- baseURL comes from the configured provider endpoint that this health probe is expected to test.
+	resp, err := httpClient.Do(req)
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {

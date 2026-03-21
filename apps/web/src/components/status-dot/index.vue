@@ -9,7 +9,7 @@
 import { computed } from 'vue'
 
 const props = withDefaults(defineProps<{
-  status: 'success' | 'error' | 'warning' | 'idle'
+  status?: 'success' | 'error' | 'warning' | 'idle'
 }>(), {
   status: 'idle',
 })

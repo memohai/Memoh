@@ -63,11 +63,11 @@
               class="mt-2"
               :show-group-headers="false"
             >
-              <template #trigger="{ open, displayLabel }">
+              <template #trigger="{ open: isOpen, displayLabel }">
                 <Button
                   variant="outline"
                   role="combobox"
-                  :aria-expanded="open"
+                  :aria-expanded="isOpen"
                   class="w-full justify-between font-normal mt-2"
                 >
                   <span class="truncate">
