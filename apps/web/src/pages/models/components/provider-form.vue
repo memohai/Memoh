@@ -148,7 +148,6 @@ import {
   FormControl,
   FormField,
   FormItem,
-  Spinner,
 } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import StatusDot from '@/components/status-dot/index.vue'

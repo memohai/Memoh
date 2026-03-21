@@ -9,7 +9,7 @@ interface BotStatusSource {
 
 export function useBotStatusMeta(
   bot: Ref<BotStatusSource | null | undefined>,
-  t: (...args: any[]) => string,
+  t: (key: string, named?: Record<string, unknown>) => string,
 ) {
   const isCreating = computed(() => bot.value?.status === 'creating')
   const isDeleting = computed(() => bot.value?.status === 'deleting')

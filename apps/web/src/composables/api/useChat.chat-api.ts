@@ -20,7 +20,7 @@ export async function fetchSessions(botId: string): Promise<SessionSummary[]> {
     path: { bot_id: id },
     throwOnError: true,
   })
-  return (data as any)?.items ?? []
+  return (data as Record<string, unknown>)?.items as SessionSummary[] ?? []
 }
 
 export async function createSession(botId: string, title?: string): Promise<SessionSummary> {
@@ -28,19 +28,19 @@ export async function createSession(botId: string, title?: string): Promise<Sess
   if (!id) throw new Error('bot id is required')
   const { data } = await postBotsByBotIdSessions({
     path: { bot_id: id },
-    body: { title: title ?? '', channel_type: 'web' } as any,
+    body: { title: title ?? '', channel_type: 'web' },
     throwOnError: true,
   })
-  return data as any
+  return data as SessionSummary
 }
 
 export async function updateSessionTitle(botId: string, sessionId: string, title: string): Promise<SessionSummary> {
   const { data } = await patchBotsByBotIdSessionsBySessionId({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
-    body: { title } as any,
+    body: { title },
     throwOnError: true,
   })
-  return data as any
+  return data as SessionSummary
 }
 
 export async function deleteSession(botId: string, sessionId: string): Promise<void> {

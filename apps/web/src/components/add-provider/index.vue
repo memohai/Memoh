@@ -155,9 +155,10 @@ import {
 } from '@memoh/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
-import { useForm,Form,Field } from 'vee-validate'
+import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postProviders, postProvidersByIdImportModels } from '@memoh/sdk'
+import type { ProvidersCreateRequest } from '@memoh/sdk'
 import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
@@ -176,7 +177,7 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
       ...data,
       metadata: { additionalProp1: {} },
     }
-    const { data: result } = await postProviders({ body: payload as any, throwOnError: true })
+    const { data: result } = await postProviders({ body: payload as ProvidersCreateRequest, throwOnError: true })
     if (data.auto_import && result?.id) {
       try {
         const { data: importResult } = await postProvidersByIdImportModels({

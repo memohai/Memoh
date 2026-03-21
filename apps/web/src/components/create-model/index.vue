@@ -202,7 +202,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postModels, putModelsById, putModelsModelByModelId } from '@memoh/sdk'
-import type { ModelsGetResponse } from '@memoh/sdk'
+import type { ModelsGetResponse, ModelsAddRequest, ModelsUpdateRequest } from '@memoh/sdk'
 import { useI18n } from 'vue-i18n'
 import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
@@ -288,7 +288,7 @@ const { id } = defineProps<{ id: string }>()
 const queryCache = useQueryCache()
 const { mutateAsync: createModel, isLoading: createLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
-    const { data: result } = await postModels({ body: data as any, throwOnError: true })
+    const { data: result } = await postModels({ body: data as ModelsAddRequest, throwOnError: true })
     return result
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['provider-models'] }),
@@ -297,7 +297,7 @@ const { mutateAsync: updateModel, isLoading: updateLoading } = useMutation({
   mutation: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
     const { data: result } = await putModelsById({
       path: { id },
-      body: data as any,
+      body: data as ModelsUpdateRequest,
       throwOnError: true,
     })
     return result
@@ -308,7 +308,7 @@ const { mutateAsync: updateModelByLegacyModelID, isLoading: updateLegacyLoading 
   mutation: async ({ modelId, data }: { modelId: string; data: Record<string, unknown> }) => {
     const { data: result } = await putModelsModelByModelId({
       path: { modelId },
-      body: data as any,
+      body: data as ModelsUpdateRequest,
       throwOnError: true,
     })
     return result
@@ -361,9 +361,9 @@ async function addModel() {
       if (isEdit) {
         const modelUUID = fallback?.id
         if (modelUUID) {
-          return updateModel({ id: modelUUID, data: payload as any })
+          return updateModel({ id: modelUUID, data: payload as ModelsUpdateRequest })
         }
-        return updateModelByLegacyModelID({ modelId: fallback!.model_id, data: payload as any })
+        return updateModelByLegacyModelID({ modelId: fallback!.model_id, data: payload as ModelsUpdateRequest })
       }
       return createModel(payload)
     },

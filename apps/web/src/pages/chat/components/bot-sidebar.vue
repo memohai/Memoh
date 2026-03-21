@@ -54,7 +54,6 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useI18n } from 'vue-i18n'
 import { Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
 import { useQuery } from '@pinia/colada'
 import { getBotsQuery } from '@memoh/sdk/colada'
@@ -66,11 +65,8 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarHeader
  } from '@memoh/ui'
 
-
-const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 
