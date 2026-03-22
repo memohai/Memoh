@@ -27,7 +27,7 @@ func NewContactsProvider(log *slog.Logger, routeService route.Service) *Contacts
 }
 
 func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if p.routeService == nil {
+	if session.IsSubagent || p.routeService == nil {
 		return nil, nil
 	}
 	sess := session

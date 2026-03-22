@@ -45,7 +45,7 @@ func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, browser
 }
 
 func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if p.settings == nil || p.browserContexts == nil {
+	if session.IsSubagent || p.settings == nil || p.browserContexts == nil {
 		return nil, nil
 	}
 	botID := strings.TrimSpace(session.BotID)

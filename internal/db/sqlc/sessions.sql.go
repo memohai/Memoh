@@ -13,7 +13,7 @@ import (
 
 const createSession = `-- name: CreateSession :one
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, type, title, metadata
+  bot_id, route_id, channel_type, type, title, metadata, parent_session_id
 )
 VALUES (
   $1,
@@ -21,18 +21,20 @@ VALUES (
   $3::text,
   $4,
   $5,
-  $6
+  $6,
+  $7::uuid
 )
-RETURNING id, bot_id, route_id, channel_type, type, title, metadata, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_at, updated_at, deleted_at
 `
 
 type CreateSessionParams struct {
-	BotID       pgtype.UUID `json:"bot_id"`
-	RouteID     pgtype.UUID `json:"route_id"`
-	ChannelType pgtype.Text `json:"channel_type"`
-	Type        string      `json:"type"`
-	Title       string      `json:"title"`
-	Metadata    []byte      `json:"metadata"`
+	BotID           pgtype.UUID `json:"bot_id"`
+	RouteID         pgtype.UUID `json:"route_id"`
+	ChannelType     pgtype.Text `json:"channel_type"`
+	Type            string      `json:"type"`
+	Title           string      `json:"title"`
+	Metadata        []byte      `json:"metadata"`
+	ParentSessionID pgtype.UUID `json:"parent_session_id"`
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (BotSession, error) {
@@ -43,6 +45,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 		arg.Type,
 		arg.Title,
 		arg.Metadata,
+		arg.ParentSessionID,
 	)
 	var i BotSession
 	err := row.Scan(
@@ -53,6 +56,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 		&i.Type,
 		&i.Title,
 		&i.Metadata,
+		&i.ParentSessionID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -61,7 +65,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 }
 
 const getActiveSessionForRoute = `-- name: GetActiveSessionForRoute :one
-SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata, s.created_at, s.updated_at, s.deleted_at
+SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata, s.parent_session_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 JOIN bot_channel_routes r ON r.active_session_id = s.id
 WHERE r.id = $1
@@ -79,6 +83,7 @@ func (q *Queries) GetActiveSessionForRoute(ctx context.Context, routeID pgtype.U
 		&i.Type,
 		&i.Title,
 		&i.Metadata,
+		&i.ParentSessionID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -87,7 +92,7 @@ func (q *Queries) GetActiveSessionForRoute(ctx context.Context, routeID pgtype.U
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, bot_id, route_id, channel_type, type, title, metadata, created_at, updated_at, deleted_at
+SELECT id, bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_at, updated_at, deleted_at
 FROM bot_sessions
 WHERE id = $1
   AND deleted_at IS NULL
@@ -104,6 +109,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id pgtype.UUID) (BotSessio
 		&i.Type,
 		&i.Title,
 		&i.Metadata,
+		&i.ParentSessionID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -173,7 +179,7 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]L
 }
 
 const listSessionsByRoute = `-- name: ListSessionsByRoute :many
-SELECT id, bot_id, route_id, channel_type, type, title, metadata, created_at, updated_at, deleted_at
+SELECT id, bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_at, updated_at, deleted_at
 FROM bot_sessions
 WHERE route_id = $1
   AND deleted_at IS NULL
@@ -197,6 +203,47 @@ func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) 
 			&i.Type,
 			&i.Title,
 			&i.Metadata,
+			&i.ParentSessionID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubagentSessionsByParent = `-- name: ListSubagentSessionsByParent :many
+SELECT id, bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_at, updated_at, deleted_at
+FROM bot_sessions
+WHERE parent_session_id = $1
+  AND deleted_at IS NULL
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListSubagentSessionsByParent(ctx context.Context, parentSessionID pgtype.UUID) ([]BotSession, error) {
+	rows, err := q.db.Query(ctx, listSubagentSessionsByParent, parentSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BotSession
+	for rows.Next() {
+		var i BotSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.RouteID,
+			&i.ChannelType,
+			&i.Type,
+			&i.Title,
+			&i.Metadata,
+			&i.ParentSessionID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
@@ -248,7 +295,7 @@ const updateSessionMetadata = `-- name: UpdateSessionMetadata :one
 UPDATE bot_sessions
 SET metadata = $1, updated_at = now()
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, title, metadata, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_at, updated_at, deleted_at
 `
 
 type UpdateSessionMetadataParams struct {
@@ -267,6 +314,7 @@ func (q *Queries) UpdateSessionMetadata(ctx context.Context, arg UpdateSessionMe
 		&i.Type,
 		&i.Title,
 		&i.Metadata,
+		&i.ParentSessionID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -278,7 +326,7 @@ const updateSessionTitle = `-- name: UpdateSessionTitle :one
 UPDATE bot_sessions
 SET title = $1, updated_at = now()
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, title, metadata, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_at, updated_at, deleted_at
 `
 
 type UpdateSessionTitleParams struct {
@@ -297,6 +345,7 @@ func (q *Queries) UpdateSessionTitle(ctx context.Context, arg UpdateSessionTitle
 		&i.Type,
 		&i.Title,
 		&i.Metadata,
+		&i.ParentSessionID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,

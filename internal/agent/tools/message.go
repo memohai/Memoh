@@ -29,6 +29,9 @@ func NewMessageProvider(log *slog.Logger, sender messaging.Sender, reactor messa
 }
 
 func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+	if session.IsSubagent {
+		return nil, nil
+	}
 	var tools []sdk.Tool
 	sess := session
 	if p.exec.CanSend() {

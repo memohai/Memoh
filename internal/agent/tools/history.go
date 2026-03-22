@@ -43,6 +43,9 @@ func NewHistoryProvider(log *slog.Logger, sessions SessionLister, queries *sqlc.
 }
 
 func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.Tool, error) {
+	if sess.IsSubagent {
+		return nil, nil
+	}
 	var tools []sdk.Tool
 
 	if p.sessions != nil {

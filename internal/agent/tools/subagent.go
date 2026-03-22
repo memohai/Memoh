@@ -1,299 +1,356 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"slices"
 	"strings"
-	"time"
+	"sync"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/db/sqlc"
+	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
-	subagentsvc "github.com/memohai/memoh/internal/subagent"
 )
 
-const subagentGatewayTimeout = 120 * time.Second
+// SpawnAgent is the interface the spawn tool uses to run subagent tasks.
+// It is satisfied by *agent.Agent and avoids an import cycle.
+type SpawnAgent interface {
+	Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error)
+}
 
-type SubagentProvider struct {
-	logger         *slog.Logger
-	service        *subagentsvc.Service
+// SpawnRunConfig mirrors agent.RunConfig fields needed by spawn.
+type SpawnRunConfig struct {
+	Model           *sdk.Model
+	System          string
+	Query           string
+	SessionType     string
+	Identity        SpawnIdentity
+	LoopDetection   SpawnLoopConfig
+	Messages        []sdk.Message
+	ReasoningEffort string
+}
+
+// SpawnIdentity mirrors agent.SessionContext fields needed by spawn.
+type SpawnIdentity struct {
+	BotID             string
+	ChatID            string
+	SessionID         string
+	ChannelIdentityID string
+	CurrentPlatform   string
+	SessionToken      string //nolint:gosec // #nosec G117 -- session identifier, not a secret
+	IsSubagent        bool
+}
+
+// SpawnLoopConfig mirrors agent.LoopDetectionConfig.
+type SpawnLoopConfig struct {
+	Enabled bool
+}
+
+// SpawnResult mirrors agent.GenerateResult.
+type SpawnResult struct {
+	Messages []sdk.Message
+	Text     string
+	Usage    *sdk.Usage
+}
+
+// SpawnProvider exposes a "spawn" tool that runs one or more subagent tasks
+// concurrently and returns results to the parent agent.
+type SpawnProvider struct {
+	agent          SpawnAgent
 	settings       *settings.Service
 	models         *models.Service
 	queries        *sqlc.Queries
-	gatewayBaseURL string
-	httpClient     *http.Client
+	sessionService *sessionpkg.Service
+	messageService messagepkg.Writer
+	systemPromptFn func(sessionType string) string
+	modelCreator   ModelCreator
+	logger         *slog.Logger
 }
 
-func NewSubagentProvider(
+// NewSpawnProvider creates a SpawnProvider. The agent must be injected later
+// via SetAgent to avoid a dependency cycle.
+func NewSpawnProvider(
 	log *slog.Logger,
-	service *subagentsvc.Service,
 	settingsSvc *settings.Service,
 	modelsSvc *models.Service,
 	queries *sqlc.Queries,
-	gatewayBaseURL string,
-) *SubagentProvider {
+	sessionService *sessionpkg.Service,
+) *SpawnProvider {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &SubagentProvider{
-		logger:         log.With(slog.String("tool", "subagent")),
-		service:        service,
+	return &SpawnProvider{
 		settings:       settingsSvc,
 		models:         modelsSvc,
 		queries:        queries,
-		gatewayBaseURL: strings.TrimRight(gatewayBaseURL, "/"),
-		httpClient:     &http.Client{Timeout: subagentGatewayTimeout},
+		sessionService: sessionService,
+		logger:         log.With(slog.String("tool", "spawn")),
 	}
 }
 
-func (p *SubagentProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if p.service == nil || session.IsSubagent {
+// SetAgent injects the agent after construction (breaking the DI cycle).
+func (p *SpawnProvider) SetAgent(a SpawnAgent) {
+	p.agent = a
+}
+
+// SetMessageService injects an optional message writer for persisting
+// subagent conversation history.
+func (p *SpawnProvider) SetMessageService(w messagepkg.Writer) {
+	p.messageService = w
+}
+
+// SetSystemPromptFunc injects the function used to generate the system prompt
+// (typically agent.GenerateSystemPrompt).
+func (p *SpawnProvider) SetSystemPromptFunc(fn func(sessionType string) string) {
+	p.systemPromptFn = fn
+}
+
+func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+	if session.IsSubagent || p.agent == nil {
 		return nil, nil
 	}
 	sess := session
 	return []sdk.Tool{
 		{
-			Name: "list_subagents", Description: "List subagents for current bot",
-			Parameters: emptyObjectSchema(),
-			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
-				botID := strings.TrimSpace(sess.BotID)
-				if botID == "" {
-					return nil, errors.New("bot_id is required")
-				}
-				items, err := p.service.List(ctx.Context, botID)
-				if err != nil {
-					return nil, err
-				}
-				result := make([]map[string]any, 0, len(items))
-				for _, item := range items {
-					result = append(result, map[string]any{"id": item.ID, "name": item.Name, "description": item.Description})
-				}
-				return map[string]any{"items": result}, nil
-			},
-		},
-		{
-			Name: "delete_subagent", Description: "Delete a subagent by id",
+			Name:        "spawn",
+			Description: "Spawn one or more subagents to work on tasks in parallel. Each task runs in its own context with file, exec, and web tools. All results are returned together.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{"type": "string", "description": "Subagent ID"},
+					"tasks": map[string]any{
+						"type":        "array",
+						"description": "List of task instructions. Each string is a self-contained prompt for one subagent.",
+						"items":       map[string]any{"type": "string"},
+					},
 				},
-				"required": []string{"id"},
+				"required": []string{"tasks"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				args := inputAsMap(input)
-				id := StringArg(args, "id")
-				if id == "" {
-					return nil, errors.New("id is required")
-				}
-				if err := p.service.Delete(ctx.Context, id); err != nil {
-					return nil, err
-				}
-				return map[string]any{"success": true}, nil
-			},
-		},
-		{
-			Name: "query_subagent", Description: "Query a subagent. If the subagent does not exist it will be created automatically.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":        map[string]any{"type": "string", "description": "The name of the subagent"},
-					"description": map[string]any{"type": "string", "description": "A short description of the subagent purpose (used when creating)"},
-					"query":       map[string]any{"type": "string", "description": "The prompt to ask the subagent to do."},
-				},
-				"required": []string{"name", "description", "query"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execQuery(ctx.Context, sess, inputAsMap(input))
+				return p.execSpawn(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
 }
 
-func (p *SubagentProvider) execQuery(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+type spawnResult struct {
+	Task      string `json:"task"`
+	SessionID string `json:"session_id,omitempty"`
+	Text      string `json:"text"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
 	}
-	name := StringArg(args, "name")
-	description := StringArg(args, "description")
-	query := StringArg(args, "query")
-	if name == "" || description == "" || query == "" {
-		return nil, errors.New("name, description, and query are required")
+
+	tasksRaw, ok := args["tasks"]
+	if !ok {
+		return nil, errors.New("tasks is required")
 	}
-	target, err := p.service.GetOrCreate(ctx, botID, subagentsvc.CreateRequest{Name: name, Description: description})
+	tasks, err := toStringSlice(tasksRaw)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get or create subagent: %w", err)
+		return nil, fmt.Errorf("invalid tasks: %w", err)
 	}
-	modelCfg, provider, err := p.resolveModel(ctx, botID)
+	if len(tasks) == 0 {
+		return nil, errors.New("at least one task is required")
+	}
+
+	sdkModel, modelID, err := p.resolveModel(ctx, botID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve model: %w", err)
+		return nil, fmt.Errorf("resolve model: %w", err)
 	}
-	gwResp, err := p.postSubagent(ctx, session, subagentGWRequest{
-		Model: subagentModelCfg{
-			ModelID: modelCfg.ModelID, ClientType: provider.ClientType,
-			APIKey: provider.ApiKey, BaseURL: provider.BaseUrl,
-		},
-		Identity: subagentIdentityCfg{
-			BotID: botID, ChannelIdentityID: session.ChannelIdentityID,
-			CurrentPlatform: session.CurrentPlatform, SessionToken: session.SessionToken,
-		},
-		Messages: target.Messages, Query: query, Name: name, Desc: description,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("subagent query failed: %w", err)
+
+	systemPrompt := ""
+	if p.systemPromptFn != nil {
+		systemPrompt = p.systemPromptFn(sessionpkg.TypeSubagent)
 	}
-	updatedMessages := slices.Clone(target.Messages)
-	updatedMessages = append(updatedMessages, gwResp.Messages...)
-	usage := mergeSubagentUsage(target.Usage, gwResp.Usage)
-	if _, err := p.service.UpdateContext(ctx, target.ID, subagentsvc.UpdateContextRequest{
-		Messages: updatedMessages, Usage: usage,
-	}); err != nil {
-		p.logger.Warn("failed to persist subagent context", slog.String("subagent_id", target.ID), slog.Any("error", err))
+
+	results := make([]spawnResult, len(tasks))
+	var wg sync.WaitGroup
+	wg.Add(len(tasks))
+
+	for i, task := range tasks {
+		go func(idx int, query string) {
+			defer wg.Done()
+			results[idx] = p.runSubagentTask(ctx, session, sdkModel, modelID, systemPrompt, query)
+		}(i, task)
 	}
-	resultContent := gwResp.Text
-	if resultContent == "" && len(gwResp.Messages) > 0 {
-		last := gwResp.Messages[len(gwResp.Messages)-1]
-		if content, ok := last["content"]; ok {
-			resultContent = fmt.Sprintf("%v", content)
-		}
-	}
-	return map[string]any{"success": true, "result": resultContent}, nil
+	wg.Wait()
+
+	return map[string]any{"results": results}, nil
 }
 
-func (p *SubagentProvider) resolveModel(ctx context.Context, botID string) (models.GetResponse, sqlc.LlmProvider, error) {
+func (p *SpawnProvider) runSubagentTask(
+	ctx context.Context,
+	parentSession SessionContext,
+	model *sdk.Model,
+	modelID string,
+	systemPrompt string,
+	query string,
+) spawnResult {
+	res := spawnResult{Task: query}
+
+	var sessionID string
+	if p.sessionService != nil {
+		sess, err := p.sessionService.Create(ctx, sessionpkg.CreateInput{
+			BotID:           parentSession.BotID,
+			Type:            sessionpkg.TypeSubagent,
+			Title:           truncateTitle(query, 100),
+			ParentSessionID: parentSession.SessionID,
+		})
+		if err != nil {
+			p.logger.Warn("failed to create subagent session", slog.Any("error", err))
+		} else {
+			sessionID = sess.ID
+			res.SessionID = sessionID
+		}
+	}
+
+	cfg := SpawnRunConfig{
+		Model:       model,
+		System:      systemPrompt,
+		Query:       query,
+		SessionType: sessionpkg.TypeSubagent,
+		Identity: SpawnIdentity{
+			BotID:             parentSession.BotID,
+			ChatID:            parentSession.ChatID,
+			SessionID:         sessionID,
+			ChannelIdentityID: parentSession.ChannelIdentityID,
+			CurrentPlatform:   parentSession.CurrentPlatform,
+			SessionToken:      parentSession.SessionToken,
+			IsSubagent:        true,
+		},
+		LoopDetection: SpawnLoopConfig{Enabled: true},
+	}
+
+	genResult, err := p.agent.Generate(ctx, cfg)
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+
+	res.Text = genResult.Text
+	res.Success = true
+
+	if p.messageService != nil && sessionID != "" {
+		p.persistMessages(ctx, parentSession.BotID, sessionID, modelID, query, genResult)
+	}
+
+	return res
+}
+
+func (p *SpawnProvider) persistMessages(
+	ctx context.Context,
+	botID, sessionID, modelID, query string,
+	result *SpawnResult,
+) {
+	userContent, _ := json.Marshal(map[string]any{
+		"role":    "user",
+		"content": query,
+	})
+	if _, err := p.messageService.Persist(ctx, messagepkg.PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   userContent,
+	}); err != nil {
+		p.logger.Warn("persist subagent user message failed", slog.Any("error", err))
+	}
+
+	for _, msg := range result.Messages {
+		if msg.Role == sdk.MessageRoleUser {
+			continue
+		}
+		content, err := json.Marshal(msg)
+		if err != nil {
+			continue
+		}
+		var usage json.RawMessage
+		if msg.Usage != nil {
+			usage, _ = json.Marshal(msg.Usage)
+		}
+		if _, err := p.messageService.Persist(ctx, messagepkg.PersistInput{
+			BotID:     botID,
+			SessionID: sessionID,
+			Role:      string(msg.Role),
+			Content:   content,
+			Usage:     usage,
+			ModelID:   modelID,
+		}); err != nil {
+			p.logger.Warn("persist subagent message failed", slog.Any("error", err))
+		}
+	}
+}
+
+// ModelCreator creates an sdk.Model from provider config. Set via SetModelCreator.
+type ModelCreator func(modelID, clientType, apiKey, baseURL string) *sdk.Model
+
+// SetModelCreator injects the function used to create SDK models
+// (typically agent.CreateModel wrapped to match the signature).
+func (p *SpawnProvider) SetModelCreator(fn ModelCreator) {
+	p.modelCreator = fn
+}
+
+func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Model, string, error) {
 	if p.settings == nil || p.models == nil || p.queries == nil {
-		return models.GetResponse{}, sqlc.LlmProvider{}, errors.New("model resolution services not configured")
+		return nil, "", errors.New("model resolution services not configured")
 	}
 	botSettings, err := p.settings.GetBot(ctx, botID)
 	if err != nil {
-		return models.GetResponse{}, sqlc.LlmProvider{}, err
+		return nil, "", err
 	}
 	chatModelID := strings.TrimSpace(botSettings.ChatModelID)
 	if chatModelID == "" {
-		return models.GetResponse{}, sqlc.LlmProvider{}, errors.New("no chat model configured for bot")
+		return nil, "", errors.New("no chat model configured for bot")
 	}
-	model, err := p.models.GetByID(ctx, chatModelID)
+	modelInfo, err := p.models.GetByID(ctx, chatModelID)
 	if err != nil {
-		return models.GetResponse{}, sqlc.LlmProvider{}, err
+		return nil, "", err
 	}
-	provider, err := models.FetchProviderByID(ctx, p.queries, model.LlmProviderID)
+	provider, err := models.FetchProviderByID(ctx, p.queries, modelInfo.LlmProviderID)
 	if err != nil {
-		return models.GetResponse{}, sqlc.LlmProvider{}, err
+		return nil, "", err
 	}
-	return model, provider, nil
+	if p.modelCreator == nil {
+		return nil, "", errors.New("model creator not configured")
+	}
+	sdkModel := p.modelCreator(modelInfo.ModelID, provider.ClientType, provider.ApiKey, provider.BaseUrl)
+	return sdkModel, modelInfo.ID, nil
 }
 
-type subagentModelCfg struct {
-	ModelID    string `json:"modelId"`
-	ClientType string `json:"clientType"`
-	APIKey     string `json:"apiKey"` //nolint:gosec // forwarded to agent gateway
-	BaseURL    string `json:"baseUrl"`
-}
-
-type subagentIdentityCfg struct {
-	BotID             string `json:"botId"`
-	ChannelIdentityID string `json:"channelIdentityId"`
-	CurrentPlatform   string `json:"currentPlatform,omitempty"`
-	SessionToken      string `json:"sessionToken,omitempty"` //nolint:gosec // session token forwarded
-}
-
-type subagentGWRequest struct {
-	Model    subagentModelCfg    `json:"model"`
-	Identity subagentIdentityCfg `json:"identity"`
-	Messages []map[string]any    `json:"messages"`
-	Query    string              `json:"query"`
-	Name     string              `json:"name"`
-	Desc     string              `json:"description"`
-}
-
-type subagentGWResponse struct {
-	Messages []map[string]any `json:"messages"`
-	Text     string           `json:"text,omitempty"`
-	Usage    json.RawMessage  `json:"usage,omitempty"`
-}
-
-func (p *SubagentProvider) postSubagent(ctx context.Context, session SessionContext, payload subagentGWRequest) (subagentGWResponse, error) {
-	url := p.gatewayBaseURL + "/chat/subagent"
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return subagentGWResponse{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return subagentGWResponse{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if token := strings.TrimSpace(session.SessionToken); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := p.httpClient.Do(req) //nolint:gosec // URL is from operator-configured agent gateway
-	if err != nil {
-		return subagentGWResponse{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return subagentGWResponse{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail := string(respBody)
-		if len(detail) > 300 {
-			detail = detail[:300]
-		}
-		return subagentGWResponse{}, fmt.Errorf("agent gateway error (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(detail))
-	}
-	var parsed subagentGWResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return subagentGWResponse{}, fmt.Errorf("failed to parse gateway response: %w", err)
-	}
-	return parsed, nil
-}
-
-func mergeSubagentUsage(existing map[string]any, delta json.RawMessage) map[string]any {
-	if existing == nil {
-		existing = map[string]any{}
-	}
-	if len(delta) == 0 {
-		return existing
-	}
-	var deltaMap map[string]any
-	if err := json.Unmarshal(delta, &deltaMap); err != nil {
-		return existing
-	}
-	for key, val := range deltaMap {
-		if num, ok := toFloat64(val); ok {
-			if prev, ok := toFloat64(existing[key]); ok {
-				existing[key] = prev + num
-			} else {
-				existing[key] = num
+func toStringSlice(v any) ([]string, error) {
+	switch val := v.(type) {
+	case []string:
+		return val, nil
+	case []any:
+		result := make([]string, 0, len(val))
+		for _, item := range val {
+			s, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("expected string, got %T", item)
 			}
+			result = append(result, s)
 		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("expected array, got %T", v)
 	}
-	return existing
 }
 
-func toFloat64(v any) (float64, bool) {
-	switch n := v.(type) {
-	case float64:
-		return n, true
-	case int:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case json.Number:
-		f, err := n.Float64()
-		return f, err == nil
-	default:
-		return 0, false
+func truncateTitle(s string, maxRunes int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
 	}
+	return string(runes[:maxRunes-3]) + "..."
 }

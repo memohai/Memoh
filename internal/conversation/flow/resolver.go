@@ -290,6 +290,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		Identity: agentpkg.SessionContext{
 			BotID:             req.BotID,
 			ChatID:            req.ChatID,
+			SessionID:         req.SessionID,
 			ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 			CurrentPlatform:   req.CurrentChannel,
 			ReplyTarget:       strings.TrimSpace(req.ReplyTarget),

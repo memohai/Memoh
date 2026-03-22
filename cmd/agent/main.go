@@ -78,7 +78,6 @@ import (
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
-	"github.com/memohai/memoh/internal/subagent"
 	ttspkg "github.com/memohai/memoh/internal/tts"
 	ttsedge "github.com/memohai/memoh/internal/tts/adapter/edge"
 	"github.com/memohai/memoh/internal/version"
@@ -168,7 +167,6 @@ func runServe() {
 			browsercontexts.NewService,
 			policy.NewService,
 			mcp.NewConnectionService,
-			subagent.NewService,
 			conversation.NewService,
 			identities.NewService,
 			bind.NewService,
@@ -235,7 +233,6 @@ func runServe() {
 			provideServerHandler(handlers.NewScheduleHandler),
 			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewCompactionHandler),
-			provideServerHandler(handlers.NewSubagentHandler),
 			provideServerHandler(handlers.NewChannelHandler),
 			provideServerHandler(feishu.NewWebhookServerHandler),
 			provideServerHandler(provideUsersHandler),
@@ -433,8 +430,16 @@ func provideAgent(log *slog.Logger, manager *workspace.Manager) *agentpkg.Agent 
 	})
 }
 
-func injectToolProviders(a *agentpkg.Agent, providers []agenttools.ToolProvider) {
+func injectToolProviders(a *agentpkg.Agent, msgService *message.DBService, providers []agenttools.ToolProvider) {
 	a.SetToolProviders(providers)
+	for _, p := range providers {
+		if sp, ok := p.(*agenttools.SpawnProvider); ok {
+			sp.SetAgent(agentpkg.NewSpawnAdapter(a))
+			sp.SetMessageService(msgService)
+			sp.SetSystemPromptFunc(agentpkg.SpawnSystemPrompt)
+			sp.SetModelCreator(agentpkg.SpawnModelCreatorFunc())
+		}
+	}
 }
 
 func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service) *flow.Resolver {
@@ -494,7 +499,6 @@ func provideChannelRouter(
 	mediaService *media.Service,
 	ttsService *ttspkg.Service,
 	settingsService *settings.Service,
-	subagentService *subagent.Service,
 	scheduleService *schedule.Service,
 	mcpConnService *mcp.ConnectionService,
 	modelsService *models.Service,
@@ -530,7 +534,6 @@ func provideChannelRouter(
 	processor.SetCommandHandler(command.NewHandler(
 		log,
 		&command.BotMemberRoleAdapter{BotService: botService},
-		subagentService,
 		scheduleService,
 		settingsService,
 		mcpConnService,
@@ -595,7 +598,7 @@ func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederat
 	return svc
 }
 
-func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service, sessionService *sessionpkg.Service) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service, sessionService *sessionpkg.Service) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -611,7 +614,7 @@ func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *c
 		agenttools.NewReadMediaProvider(log, manager, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailManager),
 		agenttools.NewWebFetchProvider(log),
-		agenttools.NewSubagentProvider(log, subagentService, settingsService, modelsService, queries, ""),
+		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService),
 		agenttools.NewSkillProvider(log),
 		agenttools.NewBrowserProvider(log, settingsService, browserContextService, manager, cfg.BrowserGateway),
 		agenttools.NewTTSProvider(log, settingsService, ttsService, channelManager, registry),

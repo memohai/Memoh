@@ -151,7 +151,7 @@
     "toolContactsCount": "{count} contacts",
     "toolEmailCount": "{count} emails",
     "toolEmailAccounts": "{count} accounts",
-    "toolSubagentCount": "{count} subagents",
+    "toolSpawnCount": "{count} tasks",
     "unknownUser": "{platform} User",
     "files": "Files",
     "sessions": "Sessions",
@@ -163,7 +163,8 @@
     "untitledSession": "Untitled Session",
     "noSessions": "No sessions yet",
     "sessionTypeHeartbeat": "Heartbeat",
-    "sessionTypeSchedule": "Scheduled Task"
+    "sessionTypeSchedule": "Scheduled Task",
+    "sessionTypeSubagent": "Subagent"
   },
   "models": {
     "title": "Models",
@@ -565,7 +566,6 @@
       "channels": "Platforms",
       "container": "Container",
       "mcp": "MCP",
-      "subagents": "Subagents",
       "heartbeat": "Heartbeat",
       "compaction": "Compaction",
       "schedule": "Schedule",
@@ -1017,27 +1017,6 @@
       "filterAll": "All",
       "expandContent": "Expand",
       "collapseContent": "Collapse"
-    },
-    "subagents": {
-      "title": "Subagents",
-      "subtitle": "Manage autonomous subagents for this bot.",
-      "add": "Create Subagent",
-      "emptyTitle": "No Subagents",
-      "emptyDescription": "Click above to create a subagent",
-      "description": "Description",
-      "descriptionPlaceholder": "Enter subagent description",
-      "deleteConfirm": "Are you sure you want to delete this subagent?",
-      "deleteSuccess": "Subagent deleted",
-      "deleteFailed": "Failed to delete subagent",
-      "saveSuccess": "Subagent saved",
-      "saveFailed": "Failed to save subagent",
-      "loadFailed": "Failed to load subagents",
-      "viewContext": "View Context",
-      "contextTitle": "Subagent Context",
-      "contextEmpty": "No context messages",
-      "messagesCount": "{count} messages",
-      "usage": "Usage",
-      "skills": "Skills"
     }
   },
   "usage": {

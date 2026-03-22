@@ -147,7 +147,7 @@
     "toolContactsCount": "{count} 个联系人",
     "toolEmailCount": "{count} 封邮件",
     "toolEmailAccounts": "{count} 个账户",
-    "toolSubagentCount": "{count} 个子代理",
+    "toolSpawnCount": "{count} 个任务",
     "unknownUser": "{platform}用户",
     "files": "文件管理",
     "sessions": "会话",
@@ -159,7 +159,8 @@
     "untitledSession": "未命名会话",
     "noSessions": "暂无会话",
     "sessionTypeHeartbeat": "心跳",
-    "sessionTypeSchedule": "定时任务"
+    "sessionTypeSchedule": "定时任务",
+    "sessionTypeSubagent": "子智能体"
   },
   "models": {
     "title": "模型",
@@ -561,7 +562,6 @@
       "channels": "平台",
       "container": "容器",
       "mcp": "MCP",
-      "subagents": "子智能体",
       "heartbeat": "心跳",
       "compaction": "上下文压缩",
       "schedule": "定时任务",
@@ -1013,27 +1013,6 @@
       "filterAll": "全部",
       "expandContent": "展开",
       "collapseContent": "收起"
-    },
-    "subagents": {
-      "title": "子智能体",
-      "subtitle": "管理当前 Bot 的自治子智能体。",
-      "add": "创建子智能体",
-      "emptyTitle": "暂无子智能体",
-      "emptyDescription": "点击上方按钮创建子智能体",
-      "description": "描述",
-      "descriptionPlaceholder": "输入子智能体描述",
-      "deleteConfirm": "确定要删除这个子智能体吗？",
-      "deleteSuccess": "子智能体已删除",
-      "deleteFailed": "删除子智能体失败",
-      "saveSuccess": "子智能体已保存",
-      "saveFailed": "保存子智能体失败",
-      "loadFailed": "加载子智能体失败",
-      "viewContext": "查看上下文",
-      "contextTitle": "子智能体上下文",
-      "contextEmpty": "暂无上下文消息",
-      "messagesCount": "{count} 条消息",
-      "usage": "用量",
-      "skills": "技能"
     }
   },
   "usage": {
