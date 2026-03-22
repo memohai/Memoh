@@ -7,46 +7,18 @@
         :class="block.done ? 'text-green-600 dark:text-green-400' : 'animate-spin text-muted-foreground'"
       />
       <FontAwesomeIcon
-        :icon="['fas', 'robot']"
-        class="size-3 text-muted-foreground"
+        :icon="['fas', 'code-branch']"
+        class="size-3 text-violet-400"
       />
-
-      <!-- query_subagent -->
-      <template v-if="block.toolName === 'query_subagent'">
-        <span
-          v-if="name"
-          class="font-mono font-medium text-xs text-foreground"
-        >
-          {{ name }}
-        </span>
-        <span
-          v-if="query"
-          class="text-xs truncate text-muted-foreground"
-          :title="query"
-        >
-          {{ query }}
-        </span>
-      </template>
-
-      <!-- list_subagents / delete_subagent -->
-      <template v-else>
-        <span class="font-mono font-medium text-xs text-muted-foreground">
-          {{ block.toolName }}
-        </span>
-        <span
-          v-if="block.toolName === 'delete_subagent' && deleteId"
-          class="text-xs truncate text-foreground"
-        >
-          {{ deleteId }}
-        </span>
-      </template>
-
+      <span class="font-mono font-medium text-xs text-foreground">
+        spawn
+      </span>
       <Badge
-        v-if="block.done && block.toolName === 'list_subagents' && subagentCount !== null"
+        v-if="block.done && taskCount !== null"
         variant="secondary"
         class="text-[10px] ml-auto shrink-0"
       >
-        {{ $t('chat.toolSubagentCount', { count: subagentCount }) }}
+        {{ $t('chat.toolSpawnCount', { count: taskCount }) }}
       </Badge>
       <Badge
         v-else-if="block.done"
@@ -64,9 +36,25 @@
       </Badge>
     </div>
 
-    <!-- query_subagent result -->
+    <!-- Task list -->
+    <div
+      v-if="tasks.length"
+      class="px-3 py-2 space-y-1"
+    >
+      <div
+        v-for="(task, idx) in tasks"
+        :key="idx"
+        class="text-xs text-muted-foreground truncate"
+        :title="task"
+      >
+        <span class="text-foreground font-mono mr-1.5">#{{ idx + 1 }}</span>
+        {{ task }}
+      </div>
+    </div>
+
+    <!-- Results -->
     <Collapsible
-      v-if="block.done && block.toolName === 'query_subagent' && subagentResult"
+      v-if="block.done && results.length"
       v-model:open="resultOpen"
     >
       <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full">
@@ -78,7 +66,39 @@
         {{ $t('chat.toolResult') }}
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre class="px-3 pb-2 text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-40 overflow-y-auto">{{ subagentResult }}</pre>
+        <div class="px-3 pb-2 space-y-2">
+          <div
+            v-for="(result, idx) in results"
+            :key="idx"
+            class="text-xs"
+          >
+            <div class="flex items-center gap-1.5 mb-0.5">
+              <FontAwesomeIcon
+                :icon="['fas', result.success ? 'circle-check' : 'circle-xmark']"
+                class="size-2.5"
+                :class="result.success ? 'text-green-500' : 'text-red-500'"
+              />
+              <span class="font-mono text-foreground">#{{ idx + 1 }}</span>
+              <span
+                v-if="result.task"
+                class="truncate text-muted-foreground"
+                :title="result.task"
+              >
+                {{ result.task }}
+              </span>
+            </div>
+            <pre
+              v-if="result.text"
+              class="text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-32 overflow-y-auto pl-4"
+            >{{ result.text }}</pre>
+            <p
+              v-if="result.error"
+              class="text-red-500 pl-4"
+            >
+              {{ result.error }}
+            </p>
+          </div>
+        </div>
       </CollapsibleContent>
     </Collapsible>
   </div>
@@ -89,40 +109,38 @@ import { ref, computed } from 'vue'
 import { Badge, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memoh/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 
+interface SpawnTaskResult {
+  task?: string
+  session_id?: string
+  text?: string
+  success?: boolean
+  error?: string
+}
+
 const props = defineProps<{ block: ToolCallBlock }>()
 
 const resultOpen = ref(false)
 
-const name = computed(() => {
+const tasks = computed(() => {
   const input = props.block.input as Record<string, unknown> | undefined
-  return (input?.name as string) ?? ''
+  const t = input?.tasks
+  return Array.isArray(t) ? (t as string[]) : []
 })
 
-const query = computed(() => {
-  const input = props.block.input as Record<string, unknown> | undefined
-  return (input?.query as string) ?? ''
+const taskCount = computed(() => {
+  return tasks.value.length || null
 })
 
-const deleteId = computed(() => {
-  const input = props.block.input as Record<string, unknown> | undefined
-  return (input?.id as string) ?? ''
-})
-
-function resolveResult() {
+function resolveResult(): Record<string, unknown> | null {
   if (!props.block.result) return null
   const result = props.block.result as Record<string, unknown>
   return (result.structuredContent as Record<string, unknown>) ?? result
 }
 
-const subagentCount = computed(() => {
+const results = computed<SpawnTaskResult[]>(() => {
   const r = resolveResult()
-  if (!r) return null
-  const items = r.items as unknown[] | undefined
-  return Array.isArray(items) ? items.length : null
-})
-
-const subagentResult = computed(() => {
-  const r = resolveResult()
-  return (r?.result as string) ?? ''
+  if (!r) return []
+  const items = r.results
+  return Array.isArray(items) ? (items as SpawnTaskResult[]) : []
 })
 </script>

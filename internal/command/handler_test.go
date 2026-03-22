@@ -4,12 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/subagent"
 )
 
 // --- fake services ---
@@ -23,17 +21,13 @@ func (f *fakeRoleResolver) GetMemberRole(_ context.Context, _, _ string) (string
 	return f.role, f.err
 }
 
-type fakeSubagentService struct {
-	items []subagent.Subagent
-}
-
 type fakeScheduleService struct {
 	items []schedule.Schedule
 }
 
 // newTestHandler creates a Handler with nil services for use in tests.
 func newTestHandler(roleResolver MemberRoleResolver) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // --- tests ---
@@ -46,7 +40,6 @@ func TestIsCommand(t *testing.T) {
 		want  bool
 	}{
 		{"/help", true},
-		{"/subagent list", true},
 		{" /schedule list", true},
 		{"@BotName /help", true},
 		{"@_user_1 /schedule list", true},
@@ -79,9 +72,6 @@ func TestExecute_Help(t *testing.T) {
 	}
 	if !strings.Contains(result, "Available commands") {
 		t.Errorf("expected help text, got: %s", result)
-	}
-	if !strings.Contains(result, "/subagent") {
-		t.Errorf("expected /subagent in help, got: %s", result)
 	}
 }
 
@@ -124,22 +114,22 @@ func TestExecute_TelegramBotSuffix(t *testing.T) {
 func TestExecute_UnknownAction(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(&fakeRoleResolver{role: "owner"})
-	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/subagent foobar")
+	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/schedule foobar")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(result, "Unknown action") {
 		t.Errorf("expected unknown action message, got: %s", result)
 	}
-	if !strings.Contains(result, "/subagent") {
-		t.Errorf("expected subagent usage in message, got: %s", result)
+	if !strings.Contains(result, "/schedule") {
+		t.Errorf("expected schedule usage in message, got: %s", result)
 	}
 }
 
 func TestExecute_WritePermissionDenied(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(&fakeRoleResolver{role: ""})
-	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/subagent create test desc")
+	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/schedule create test desc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -151,7 +141,7 @@ func TestExecute_WritePermissionDenied(t *testing.T) {
 func TestExecute_WritePermissionAllowedForOwner(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(&fakeRoleResolver{role: "owner"})
-	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/subagent create")
+	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/schedule create")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -182,9 +172,6 @@ func TestExecute_MissingArgs(t *testing.T) {
 		cmd      string
 		contains string
 	}{
-		{"/subagent get", "Usage:"},
-		{"/subagent create", "Usage:"},
-		{"/subagent delete", "Usage:"},
 		{"/schedule get", "Usage:"},
 		{"/schedule create", "Usage:"},
 		{"/schedule delete", "Usage:"},
@@ -266,7 +253,7 @@ func TestGlobalHelp_AllGroups(t *testing.T) {
 	h := newTestHandler(nil)
 	help := h.registry.GlobalHelp()
 	for _, group := range []string{
-		"subagent", "schedule", "mcp", "settings",
+		"schedule", "mcp", "settings",
 		"model", "memory", "search", "browser", "usage",
 		"email", "heartbeat", "skill", "fs",
 	} {
@@ -317,7 +304,6 @@ func TestNewCommands_NilServices(t *testing.T) {
 
 // suppress unused warnings.
 var (
-	_ = fakeSubagentService{items: []subagent.Subagent{{ID: "1", Name: "test", CreatedAt: time.Now(), UpdatedAt: time.Now()}}}
 	_ = fakeScheduleService{items: []schedule.Schedule{{ID: "1", Name: "test"}}}
 	_ = mcp.Connection{}
 	_ = settings.Settings{}

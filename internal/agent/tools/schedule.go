@@ -36,7 +36,7 @@ func NewScheduleProvider(log *slog.Logger, service Scheduler) *ScheduleProvider 
 }
 
 func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if p.service == nil {
+	if session.IsSubagent || p.service == nil {
 		return nil, nil
 	}
 	sess := session

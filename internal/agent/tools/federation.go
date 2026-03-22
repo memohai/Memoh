@@ -29,7 +29,7 @@ func NewFederationProvider(log *slog.Logger, source mcp.ToolSource) *FederationP
 }
 
 func (f *FederationProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if f.source == nil {
+	if session.IsSubagent || f.source == nil {
 		return nil, nil
 	}
 	mcpSession := toMCPSession(session)

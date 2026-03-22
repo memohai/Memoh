@@ -49,7 +49,7 @@ func NewTTSProvider(log *slog.Logger, settingsSvc *settings.Service, ttsSvc *tts
 }
 
 func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if p.settings == nil || p.tts == nil || p.sender == nil || p.resolver == nil {
+	if session.IsSubagent || p.settings == nil || p.tts == nil || p.sender == nil || p.resolver == nil {
 		return nil, nil
 	}
 	botID := strings.TrimSpace(session.BotID)

@@ -1,6 +1,6 @@
 -- name: CreateSession :one
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, type, title, metadata
+  bot_id, route_id, channel_type, type, title, metadata, parent_session_id
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -8,7 +8,8 @@ VALUES (
   sqlc.narg(channel_type)::text,
   sqlc.arg(type),
   sqlc.arg(title),
-  sqlc.arg(metadata)
+  sqlc.arg(metadata),
+  sqlc.narg(parent_session_id)::uuid
 )
 RETURNING *;
 
@@ -65,6 +66,13 @@ FROM bot_sessions s
 JOIN bot_channel_routes r ON r.active_session_id = s.id
 WHERE r.id = sqlc.arg(route_id)
   AND s.deleted_at IS NULL;
+
+-- name: ListSubagentSessionsByParent :many
+SELECT *
+FROM bot_sessions
+WHERE parent_session_id = sqlc.arg(parent_session_id)
+  AND deleted_at IS NULL
+ORDER BY created_at DESC;
 
 -- name: SoftDeleteSessionsByBot :exec
 UPDATE bot_sessions

@@ -3,7 +3,6 @@ package command
 // buildRegistry constructs the full command registry with all resource groups.
 func (h *Handler) buildRegistry() *Registry {
 	r := newRegistry()
-	r.RegisterGroup(h.buildSubagentGroup())
 	r.RegisterGroup(h.buildScheduleGroup())
 	r.RegisterGroup(h.buildMCPGroup())
 	r.RegisterGroup(h.buildSettingsGroup())

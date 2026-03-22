@@ -1,0 +1,82 @@
+name: xAI (Grok)
+client_type: openai-completions
+icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/xai.svg
+base_url: https://api.x.ai/v1
+
+models:
+  - model_id: grok-4.20-beta-0309-reasoning
+    name: Grok 4.20 Beta
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 2000000
+
+  - model_id: grok-4.20-beta-0309-non-reasoning
+    name: Grok 4.20 Beta (Non-Reasoning)
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 2000000
+
+  - model_id: grok-4.20-multi-agent-beta-0309
+    name: Grok 4.20 Multi-Agent Beta
+    type: chat
+    config:
+      compatibilities: [vision, reasoning]
+      context_window: 2000000
+
+  - model_id: grok-4-1-fast-non-reasoning
+    name: Grok 4.1 Fast (Non-Reasoning)
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 2000000
+
+  - model_id: grok-4-1-fast-reasoning
+    name: Grok 4.1 Fast
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 2000000
+
+  - model_id: grok-4-fast-non-reasoning
+    name: Grok 4 Fast (Non-Reasoning)
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 2000000
+
+  - model_id: grok-4-fast-reasoning
+    name: Grok 4 Fast
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 2000000
+
+  - model_id: grok-code-fast-1
+    name: Grok Code Fast 1
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 256000
+
+  - model_id: grok-4
+    name: Grok 4 0709
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 256000
+
+  - model_id: grok-3
+    name: Grok 3
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 131072
+
+  - model_id: grok-3-mini
+    name: Grok 3 Mini
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072

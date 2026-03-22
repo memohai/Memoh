@@ -343,9 +343,10 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
   channel_type TEXT,
-  type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule')),
+  type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent')),
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at TIMESTAMPTZ
@@ -354,6 +355,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_id ON bot_sessions(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_route_id ON bot_sessions(route_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active ON bot_sessions(bot_id, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_session_id) WHERE parent_session_id IS NOT NULL;
 
 -- Add FK from routes to sessions (deferred to avoid circular dependency during CREATE).
 ALTER TABLE bot_channel_routes
@@ -464,25 +466,6 @@ CREATE TABLE IF NOT EXISTS schedule (
 
 CREATE INDEX IF NOT EXISTS idx_schedule_bot_id ON schedule(bot_id);
 CREATE INDEX IF NOT EXISTS idx_schedule_enabled ON schedule(enabled);
-
-CREATE TABLE IF NOT EXISTS subagents (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  description TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted BOOLEAN NOT NULL DEFAULT false,
-  deleted_at TIMESTAMPTZ,
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  messages JSONB NOT NULL DEFAULT '[]'::jsonb,
-  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  skills JSONB NOT NULL DEFAULT '[]'::jsonb,
-  usage JSONB NOT NULL DEFAULT '{}'::jsonb,
-  CONSTRAINT subagents_name_unique UNIQUE (bot_id, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_subagents_bot_id ON subagents(bot_id);
-CREATE INDEX IF NOT EXISTS idx_subagents_deleted ON subagents(deleted);
 
 -- storage_providers: pluggable object storage backends
 CREATE TABLE IF NOT EXISTS storage_providers (

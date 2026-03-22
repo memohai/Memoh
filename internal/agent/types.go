@@ -11,6 +11,7 @@ import (
 type SessionContext struct {
 	BotID             string
 	ChatID            string
+	SessionID         string
 	ChannelIdentityID string
 	CurrentPlatform   string
 	ReplyTarget       string

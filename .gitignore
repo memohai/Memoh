@@ -107,3 +107,4 @@ config.toml
 data
 _main-ref/
 .toolkit/
+/scripts/vendor

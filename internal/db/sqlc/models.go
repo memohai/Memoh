@@ -154,16 +154,17 @@ type BotHistoryMessageCompact struct {
 }
 
 type BotSession struct {
-	ID          pgtype.UUID        `json:"id"`
-	BotID       pgtype.UUID        `json:"bot_id"`
-	RouteID     pgtype.UUID        `json:"route_id"`
-	ChannelType pgtype.Text        `json:"channel_type"`
-	Type        string             `json:"type"`
-	Title       string             `json:"title"`
-	Metadata    []byte             `json:"metadata"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	RouteID         pgtype.UUID        `json:"route_id"`
+	ChannelType     pgtype.Text        `json:"channel_type"`
+	Type            string             `json:"type"`
+	Title           string             `json:"title"`
+	Metadata        []byte             `json:"metadata"`
+	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type BotStorageBinding struct {
@@ -433,21 +434,6 @@ type StorageProvider struct {
 	Config    []byte             `json:"config"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-type Subagent struct {
-	ID          pgtype.UUID        `json:"id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Deleted     bool               `json:"deleted"`
-	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
-	BotID       pgtype.UUID        `json:"bot_id"`
-	Messages    []byte             `json:"messages"`
-	Metadata    []byte             `json:"metadata"`
-	Skills      []byte             `json:"skills"`
-	Usage       []byte             `json:"usage"`
 }
 
 type TtsModel struct {
