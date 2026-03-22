@@ -61,10 +61,14 @@ CREATE TABLE IF NOT EXISTS llm_providers (
   name TEXT NOT NULL,
   base_url TEXT NOT NULL,
   api_key TEXT NOT NULL,
+  client_type TEXT NOT NULL DEFAULT 'openai-completions',
+  icon TEXT,
+  enable BOOLEAN NOT NULL DEFAULT true,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT llm_providers_name_unique UNIQUE (name)
+  CONSTRAINT llm_providers_name_unique UNIQUE (name),
+  CONSTRAINT llm_providers_client_type_check CHECK (client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai'))
 );
 
 CREATE TABLE IF NOT EXISTS search_providers (
@@ -82,18 +86,12 @@ CREATE TABLE IF NOT EXISTS models (
   model_id TEXT NOT NULL,
   name TEXT,
   llm_provider_id UUID NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
-  client_type TEXT,
-  dimensions INTEGER,
-  input_modalities TEXT[] NOT NULL DEFAULT ARRAY['text']::TEXT[],
-  supports_reasoning BOOLEAN NOT NULL DEFAULT false,
   type TEXT NOT NULL DEFAULT 'chat',
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT models_provider_model_id_unique UNIQUE (llm_provider_id, model_id),
-  CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding')),
-  CONSTRAINT models_dimensions_check CHECK (type != 'embedding' OR dimensions IS NOT NULL),
-  CONSTRAINT models_client_type_check CHECK (client_type IS NULL OR client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai')),
-  CONSTRAINT models_chat_client_type_check CHECK (type != 'chat' OR client_type IS NOT NULL)
+  CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding'))
 );
 
 CREATE TABLE IF NOT EXISTS model_variants (

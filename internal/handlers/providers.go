@@ -293,7 +293,6 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 // @Accept json
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
-// @Param request body providers.ImportModelsRequest true "Import configuration"
 // @Success 200 {object} providers.ImportModelsResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -305,40 +304,32 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
 
-	var req providers.ImportModelsRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
-	if req.ClientType == "" {
-		req.ClientType = string(models.ClientTypeOpenAICompletions)
-	}
-
 	remoteModels, err := h.service.FetchRemoteModels(c.Request().Context(), id)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("fetch remote models: %v", err))
 	}
+
+	defaultCompat := []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning}
 
 	resp := providers.ImportModelsResponse{
 		Models: make([]string, 0),
 	}
 
 	for _, m := range remoteModels {
-		// Try to create the model
 		_, err := h.modelsService.Create(c.Request().Context(), models.AddRequest{
-			ModelID:         m.ID,
-			Name:            m.ID,
-			LlmProviderID:   id,
-			ClientType:      models.ClientType(req.ClientType),
-			Type:            models.ModelTypeChat,
-			InputModalities: []string{models.ModelInputText},
+			ModelID:       m.ID,
+			Name:          m.ID,
+			LlmProviderID: id,
+			Type:          models.ModelTypeChat,
+			Config: models.ModelConfig{
+				Compatibilities: defaultCompat,
+			},
 		})
 		if err != nil {
 			if errors.Is(err, models.ErrModelIDAlreadyExists) {
 				resp.Skipped++
 				continue
 			}
-			// Log error but continue with other models
 			h.logger.Warn("failed to import model", slog.String("model_id", m.ID), slog.Any("error", err))
 			continue
 		}

@@ -94,7 +94,6 @@ type SystemFile struct {
 type ModelConfig struct {
 	ModelID         string
 	ClientType      string
-	InputModalities []string
 	APIKey          string //nolint:gosec // carries provider credential material at runtime
 	BaseURL         string
 	ReasoningConfig *ReasoningConfig

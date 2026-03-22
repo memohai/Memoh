@@ -73,6 +73,7 @@ import (
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
+	"github.com/memohai/memoh/internal/registry"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/server"
@@ -186,6 +187,7 @@ func runServe() {
 		),
 		fx.Invoke(
 			injectToolProviders,
+			startRegistrySync,
 			startMemoryProviderBootstrap,
 			startScheduleService,
 			startHeartbeatService,
@@ -269,6 +271,22 @@ func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.S
 	})
 	registry.Register("__builtin_default__", membuiltin.NewBuiltinProvider(log, builtinRuntime, chatService, accountService))
 	return registry
+}
+
+func startRegistrySync(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, queries *dbsqlc.Queries) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			defs, err := registry.Load(cfg.Registry.ProvidersPath())
+			if err != nil {
+				log.Warn("registry: failed to load provider definitions", slog.Any("error", err))
+				return nil
+			}
+			if len(defs) == 0 {
+				return nil
+			}
+			return registry.Sync(ctx, log, queries, defs)
+		},
+	})
 }
 
 func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *memprovider.Service, registry *memprovider.Registry) {
@@ -956,7 +974,7 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memprovider.LLM, error) {
 	if err != nil {
 		return nil, err
 	}
-	clientType := string(memoryModel.ClientType)
+	clientType := memoryProvider.ClientType
 	switch clientType {
 	case "openai-responses", "openai-completions", "anthropic-messages", "google-generative-ai":
 	default:

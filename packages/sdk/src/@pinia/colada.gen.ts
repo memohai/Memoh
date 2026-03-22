@@ -255,7 +255,7 @@ export const getBotsByBotIdCliWsQuery = defineQueryOptions((options: Options<Get
 /**
  * Delete compaction logs
  *
- * Delete all context compaction logs for a bot
+ * Delete all compaction logs for a bot
  */
 export const deleteBotsByBotIdCompactionLogsMutation = (options?: Partial<Options<DeleteBotsByBotIdCompactionLogsData>>): UseMutationOptions<unknown, Options<DeleteBotsByBotIdCompactionLogsData>, DeleteBotsByBotIdCompactionLogsError> => ({
     mutation: async (vars) => {
@@ -273,7 +273,7 @@ export const getBotsByBotIdCompactionLogsQueryKey = (options: Options<GetBotsByB
 /**
  * List compaction logs
  *
- * List context compaction logs for a bot
+ * List compaction logs for a bot
  */
 export const getBotsByBotIdCompactionLogsQuery = defineQueryOptions((options: Options<GetBotsByBotIdCompactionLogsData>) => ({
     key: getBotsByBotIdCompactionLogsQueryKey(options),
@@ -2502,7 +2502,7 @@ export const getModelsQueryKey = (options?: Options<GetModelsData>) => createQue
 /**
  * List all models
  *
- * Get a list of all configured models, optionally filtered by type or client type
+ * Get a list of all configured models, optionally filtered by type or provider client type
  */
 export const getModelsQuery = defineQueryOptions((options?: Options<GetModelsData>) => ({
     key: getModelsQueryKey(options),

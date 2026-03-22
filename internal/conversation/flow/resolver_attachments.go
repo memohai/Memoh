@@ -27,7 +27,7 @@ func (r *Resolver) routeAndMergeAttachments(ctx context.Context, model models.Ge
 		return []any{}
 	}
 	typed := r.prepareGatewayAttachments(ctx, req)
-	routed := routeAttachmentsByCapability(model.InputModalities, typed)
+	routed := routeAttachmentsByCapability(model.Config.Compatibilities, typed)
 	for i := range routed.Fallback {
 		fallbackPath := strings.TrimSpace(routed.Fallback[i].FallbackPath)
 		if fallbackPath == "" {

@@ -1,0 +1,33 @@
+name: Anthropic
+client_type: anthropic-messages
+icon: https://www.anthropic.com/images/icons/apple-touch-icon.png
+base_url: https://api.anthropic.com
+
+models:
+  - model_id: claude-sonnet-4-20250514
+    name: Claude Sonnet 4
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-4-opus-20250514
+    name: Claude 4 Opus
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-3-7-sonnet-20250219
+    name: Claude 3.7 Sonnet
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-3-5-haiku-20241022
+    name: Claude 3.5 Haiku
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 200000

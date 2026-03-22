@@ -27,12 +27,12 @@ type Bot struct {
 	HeartbeatInterval   int32              `json:"heartbeat_interval"`
 	HeartbeatPrompt     string             `json:"heartbeat_prompt"`
 	HeartbeatModelID    pgtype.UUID        `json:"heartbeat_model_id"`
-	TitleModelID        pgtype.UUID        `json:"title_model_id"`
-	TtsModelID          pgtype.UUID        `json:"tts_model_id"`
-	BrowserContextID    pgtype.UUID        `json:"browser_context_id"`
 	CompactionEnabled   bool               `json:"compaction_enabled"`
 	CompactionThreshold int32              `json:"compaction_threshold"`
 	CompactionModelID   pgtype.UUID        `json:"compaction_model_id"`
+	TitleModelID        pgtype.UUID        `json:"title_model_id"`
+	TtsModelID          pgtype.UUID        `json:"tts_model_id"`
+	BrowserContextID    pgtype.UUID        `json:"browser_context_id"`
 	Metadata            []byte             `json:"metadata"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
@@ -278,13 +278,16 @@ type LifecycleEvent struct {
 }
 
 type LlmProvider struct {
-	ID        pgtype.UUID        `json:"id"`
-	Name      string             `json:"name"`
-	BaseUrl   string             `json:"base_url"`
-	ApiKey    string             `json:"api_key"`
-	Metadata  []byte             `json:"metadata"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID         pgtype.UUID        `json:"id"`
+	Name       string             `json:"name"`
+	BaseUrl    string             `json:"base_url"`
+	ApiKey     string             `json:"api_key"`
+	Icon       pgtype.Text        `json:"icon"`
+	Enable     bool               `json:"enable"`
+	Metadata   []byte             `json:"metadata"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ClientType string             `json:"client_type"`
 }
 
 type McpConnection struct {
@@ -355,17 +358,14 @@ type MemoryProvider struct {
 }
 
 type Model struct {
-	ID                pgtype.UUID        `json:"id"`
-	ModelID           string             `json:"model_id"`
-	Name              pgtype.Text        `json:"name"`
-	LlmProviderID     pgtype.UUID        `json:"llm_provider_id"`
-	ClientType        pgtype.Text        `json:"client_type"`
-	Dimensions        pgtype.Int4        `json:"dimensions"`
-	InputModalities   []string           `json:"input_modalities"`
-	SupportsReasoning bool               `json:"supports_reasoning"`
-	Type              string             `json:"type"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ID            pgtype.UUID        `json:"id"`
+	ModelID       string             `json:"model_id"`
+	Name          pgtype.Text        `json:"name"`
+	LlmProviderID pgtype.UUID        `json:"llm_provider_id"`
+	Type          string             `json:"type"`
+	Config        []byte             `json:"config"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ModelVariant struct {

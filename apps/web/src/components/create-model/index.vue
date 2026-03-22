@@ -48,40 +48,6 @@
             </FormItem>
           </FormField>
 
-          <!-- Client Type (chat only) -->
-          <div v-if="selectedType === 'chat'">
-            <Label class="mb-2">
-              {{ $t('models.clientType') }}
-            </Label>
-            <SearchableSelectPopover
-              v-model="clientTypeModel"
-              :options="clientTypeOptions"
-              :placeholder="$t('models.clientTypePlaceholder')"
-              :aria-label="$t('models.clientType')"
-              :search-placeholder="$t('models.clientTypePlaceholder')"
-              :search-aria-label="$t('models.clientType')"
-              class="mt-2"
-              :show-group-headers="false"
-            >
-              <template #trigger="{ open: isOpen, displayLabel }">
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  :aria-expanded="isOpen"
-                  class="w-full justify-between font-normal mt-2"
-                >
-                  <span class="truncate">
-                    {{ displayLabel || $t('models.clientTypePlaceholder') }}
-                  </span>
-                  <FontAwesomeIcon
-                    :icon="['fas', 'chevron-down']"
-                    class="ml-2 size-3 shrink-0 text-muted-foreground"
-                  />
-                </Button>
-              </template>
-            </SearchableSelectPopover>
-          </div>
-
           <!-- Model -->
           <FormField
             v-slot="{ componentField }"
@@ -141,38 +107,46 @@
             </FormItem>
           </FormField>
 
-          <!-- Input Modalities (chat only) -->
+          <!-- Compatibilities (chat only) -->
           <div v-if="selectedType === 'chat'">
             <Label class="mb-2">
-              {{ $t('models.inputModalities') }}
+              {{ $t('models.compatibilities') }}
             </Label>
             <div class="flex flex-wrap gap-3 mt-2">
               <label
-                v-for="mod in availableInputModalities"
-                :key="mod"
+                v-for="opt in COMPATIBILITY_OPTIONS"
+                :key="opt.value"
                 class="flex items-center gap-1.5 text-sm"
               >
                 <Checkbox
-                  :model-value="selectedModalities.includes(mod)"
-                  :disabled="mod === 'text'"
-                  @update:model-value="(val: boolean) => toggleModality(mod, val)"
+                  :model-value="selectedCompat.includes(opt.value)"
+                  @update:model-value="(val: boolean) => toggleCompat(opt.value, val)"
                 />
-                {{ $t(`models.modality.${mod}`) }}
+                {{ $t(`models.compatibility.${opt.value}`) }}
               </label>
             </div>
           </div>
 
-          <!-- Supports Reasoning (chat only) -->
-          <div
+          <!-- Context Window (optional) -->
+          <FormField
             v-if="selectedType === 'chat'"
-            class="flex items-center justify-between"
+            v-slot="{ componentField }"
+            name="context_window"
           >
-            <Label>{{ $t('models.supportsReasoning') }}</Label>
-            <Switch
-              :model-value="supportsReasoning"
-              @update:model-value="(val) => supportsReasoning = !!val"
-            />
-          </div>
+            <FormItem>
+              <Label class="mb-2">
+                {{ $t('models.contextWindow') }}
+                <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+              </Label>
+              <FormControl>
+                <Input
+                  type="number"
+                  :placeholder="$t('models.contextWindowPlaceholder')"
+                  v-bind="componentField"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
         </div>
       </template>
     </FormDialogShell>
@@ -194,7 +168,6 @@ import {
   FormItem,
   Checkbox,
   Label,
-  Switch,
 } from '@memoh/ui'
 import { useForm } from 'vee-validate'
 import { inject, computed, watch, nextTick, type Ref, ref } from 'vue'
@@ -204,24 +177,20 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { postModels, putModelsById, putModelsModelByModelId } from '@memoh/sdk'
 import type { ModelsGetResponse, ModelsAddRequest, ModelsUpdateRequest } from '@memoh/sdk'
 import { useI18n } from 'vue-i18n'
-import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
+import { COMPATIBILITY_OPTIONS } from '@/constants/compatibilities'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
-import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
-import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
-const availableInputModalities = ['text', 'image', 'audio', 'video', 'file'] as const
-const selectedModalities = ref<string[]>(['text'])
-const supportsReasoning = ref(false)
+const selectedCompat = ref<string[]>([])
 const { t } = useI18n()
 const { run } = useDialogMutation()
 
 const formSchema = toTypedSchema(z.object({
   type: z.string().min(1),
-  client_type: z.string().optional(),
   model_id: z.string().min(1),
   name: z.string().optional(),
   dimensions: z.coerce.number().min(1).optional(),
+  context_window: z.coerce.number().min(1).optional(),
 }))
 
 const form = useForm({
@@ -233,37 +202,22 @@ const form = useForm({
 
 const selectedType = computed(() => form.values.type || 'chat')
 
-const clientTypeModel = computed({
-  get: () => form.values.client_type || '',
-  set: (value: string) => form.setFieldValue('client_type', value),
-})
-
-const clientTypeOptions = computed<SearchableSelectOption[]>(() =>
-  CLIENT_TYPE_LIST.map((ct) => ({
-    value: ct.value,
-    label: ct.label,
-    description: ct.hint,
-    keywords: [ct.label, ct.hint, CLIENT_TYPE_META[ct.value]?.value ?? ct.value],
-  })),
-)
-
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))
 const editInfo = inject<Ref<ModelsGetResponse | null>>('openModelState', ref(null))
 
 const canSubmit = computed(() => {
   if (title.value === 'edit') return true
-  const { type, model_id, client_type } = form.values
+  const { type, model_id } = form.values
   if (!type || !model_id) return false
-  if (type === 'chat' && !client_type) return false
   return true
 })
 
-function toggleModality(mod: string, checked: boolean) {
+function toggleCompat(cap: string, checked: boolean) {
   if (checked) {
-    selectedModalities.value = [...selectedModalities.value, mod]
+    selectedCompat.value = [...selectedCompat.value, cap]
   } else {
-    selectedModalities.value = selectedModalities.value.filter(m => m !== mod)
+    selectedCompat.value = selectedCompat.value.filter(c => c !== cap)
   }
 }
 
@@ -318,42 +272,37 @@ const { mutateAsync: updateModelByLegacyModelID, isLoading: updateLegacyLoading 
 const isLoading = computed(() => createLoading.value || updateLoading.value || updateLegacyLoading.value)
 
 async function addModel() {
-  
-  const isEdit = title.value === 'edit' && !!editInfo?.value 
+  const isEdit = title.value === 'edit' && !!editInfo?.value
   const fallback = editInfo?.value
 
   const type = form.values.type || (isEdit ? fallback!.type : 'chat')
-  const client_type = type === 'chat'
-    ? (form.values.client_type || (isEdit ? fallback!.client_type : ''))
-    : undefined
   const model_id = form.values.model_id || (isEdit ? fallback!.model_id : '')
   const name = form.values.name ?? (isEdit ? fallback!.name : '')
-  const dimensions = form.values.dimensions ?? (isEdit ? fallback!.dimensions : undefined)
 
   if (!type || !model_id) return
-  if (type === 'chat' && !client_type) return
+
+  const config: Record<string, unknown> = {}
+
+  if (type === 'embedding') {
+    const dim = form.values.dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined)
+    if (dim) config.dimensions = dim
+  }
+
+  if (type === 'chat') {
+    config.compatibilities = selectedCompat.value
+    const ctxWin = form.values.context_window ?? (isEdit ? fallback!.config?.context_window : undefined)
+    if (ctxWin) config.context_window = ctxWin
+  }
 
   const payload: Record<string, unknown> = {
     type,
     model_id,
     llm_provider_id: id,
-  }
-
-  if (type === 'chat' && client_type) {
-    payload.client_type = client_type
+    config,
   }
 
   if (name) {
     payload.name = name
-  }
-
-  if (type === 'embedding' && dimensions) {
-    payload.dimensions = dimensions
-  }
-
-  if (type === 'chat') {
-    payload.input_modalities = selectedModalities.value.length > 0 ? selectedModalities.value : ['text']
-    payload.supports_reasoning = supportsReasoning.value
   }
 
   await run(
@@ -386,25 +335,24 @@ watch(open, async () => {
   await nextTick()
 
   if (editInfo?.value) {
-    const { client_type, type, model_id, name, dimensions, input_modalities } = editInfo.value
-    form.resetForm({ values: { type: type || 'chat', client_type: client_type || '', model_id, name, dimensions } })
-    selectedModalities.value = input_modalities ?? ['text']
-    supportsReasoning.value = !!editInfo.value.supports_reasoning
+    const { type, model_id, name, config } = editInfo.value
+    form.resetForm({
+      values: {
+        type: type || 'chat',
+        model_id,
+        name,
+        dimensions: config?.dimensions,
+        context_window: config?.context_window,
+      },
+    })
+    selectedCompat.value = config?.compatibilities ?? []
     userEditedName.value = !!(name && name !== model_id)
   } else {
-    form.resetForm({ values: { type: 'chat', client_type: '', model_id: '', name: '', dimensions: undefined } })
-    selectedModalities.value = ['text']
-    supportsReasoning.value = false
+    form.resetForm({ values: { type: 'chat', model_id: '', name: '', dimensions: undefined, context_window: undefined } })
+    selectedCompat.value = []
     userEditedName.value = false
   }
 }, {
   immediate: true,
-})
-
-// Clear client_type when switching to embedding
-watch(selectedType, (newType) => {
-  if (newType === 'embedding') {
-    form.setFieldValue('client_type', '')
-  }
 })
 </script>

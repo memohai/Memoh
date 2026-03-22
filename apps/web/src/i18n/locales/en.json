@@ -183,16 +183,15 @@
     "displayNamePlaceholder": "Custom display name",
     "dimensions": "Dimensions",
     "dimensionsPlaceholder": "e.g. 1536",
-    "multimodal": "Multimodal",
-    "inputModalities": "Input Modalities",
-    "supportsReasoning": "Supports Reasoning",
-    "modality": {
-      "text": "Text",
-      "image": "Image",
-      "audio": "Audio",
-      "video": "Video",
-      "file": "File"
+    "compatibilities": "Compatibilities",
+    "compatibility": {
+      "vision": "Vision",
+      "tool-call": "Tool Call",
+      "image-output": "Image Output",
+      "reasoning": "Reasoning"
     },
+    "contextWindow": "Context Window",
+    "contextWindowPlaceholder": "e.g. 128000",
     "testModel": "Test Model",
     "testOk": "OK",
     "testAuthError": "Auth Error",
@@ -201,8 +200,7 @@
     "importModels": "Import Models",
     "importSuccess": "Successfully imported {created} models, skipped {skipped}",
     "importFailed": "Failed to import models",
-    "importClientType": "Model Client Type",
-    "importClientTypeHint": "Set default client type for imported models",
+    "importConfirmHint": "Models will be imported from this provider's API with default compatibilities (vision, tool-call, reasoning).",
     "showingCount": "Showing {count} of {total}",
     "showMore": "Show More"
   },
@@ -222,7 +220,12 @@
     "unreachable": "Unreachable",
     "testFailed": "Test failed",
     "autoImport": "Auto Import Models",
-    "autoImportHint": "Automatically fetch and import models from the provider after creation"
+    "autoImportHint": "Automatically fetch and import models from the provider after creation",
+    "clientType": "Client Type",
+    "icon": "Icon",
+    "iconPlaceholder": "Icon URL or identifier (optional)",
+    "enable": "Enable",
+    "enableHint": "Only models from enabled providers appear in the available model list"
   },
   "searchProvider": {
     "title": "Search Providers",

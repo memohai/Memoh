@@ -15,12 +15,20 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-  Button
+  Button,
+  Avatar,
+  AvatarImage,
+  AvatarFallback,
 } from '@memoh/ui'
 import { getProviders } from '@memoh/sdk'
 import type { ProvidersGetResponse } from '@memoh/sdk'
 import AddProvider from '@/components/add-provider/index.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
+
+function getInitials(name: string | undefined) {
+  const label = name?.trim() ?? ''
+  return label ? label.slice(0, 2).toUpperCase() : '?'
+}
 
 const { data: providerData } = useQuery({
   key: () => ['providers'],
@@ -46,12 +54,15 @@ const curFilterProvider = computed(() => {
   if (!Array.isArray(providerData.value)) {
     return []
   }
-  if (!searchText.value) {
-    return providerData.value
+  let list = providerData.value as ProvidersGetResponse[]
+  if (searchText.value) {
+    const keyword = searchText.value.toLowerCase()
+    list = list.filter((p) => (p.name ?? '').toLowerCase().includes(keyword))
   }
-  const keyword = searchText.value.toLowerCase()
-  return providerData.value.filter((provider: ProvidersGetResponse) => {
-    return (provider.name ?? '').toLowerCase().includes(keyword)
+  return [...list].sort((a, b) => {
+    const ae = a.enable !== false ? 1 : 0
+    const be = b.enable !== false ? 1 : 0
+    return be - ae
   })
 })
 
@@ -108,7 +119,10 @@ const openStatus = reactive({
             class="justify-start py-5! px-4"
           >
             <Toggle
-              :class="['py-4 border', curProvider?.name === providerItem.name ? 'border-border' : 'border-transparent']"
+              :class="[
+                'py-4 border',
+                curProvider?.name === providerItem.name ? 'border-border' : 'border-transparent',
+              ]"
               :model-value="selectProvider(providerItem.name ?? '').value"
               @update:model-value="(isSelect) => {
                 if (isSelect) {
@@ -116,7 +130,22 @@ const openStatus = reactive({
                 }
               }"
             >
-              {{ providerItem.name }}
+              <span class="relative shrink-0">
+                <Avatar class="size-7">
+                  <AvatarImage
+                    v-if="providerItem.icon"
+                    :src="providerItem.icon"
+                  />
+                  <AvatarFallback class="text-xs font-medium">
+                    {{ getInitials(providerItem.name) }}
+                  </AvatarFallback>
+                </Avatar>
+                <span
+                  v-if="providerItem.enable !== false"
+                  class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-green-500 ring-2 ring-background"
+                />
+              </span>
+              <span class="truncate">{{ providerItem.name }}</span>
             </Toggle>
           </SidebarMenuButton>
         </SidebarMenuItem>

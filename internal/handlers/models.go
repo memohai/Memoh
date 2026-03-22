@@ -66,10 +66,10 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 
 // List godoc
 // @Summary List all models
-// @Description Get a list of all configured models, optionally filtered by type or client type
+// @Description Get a list of all configured models, optionally filtered by type or provider client type
 // @Tags models
 // @Param type query string false "Model type (chat, embedding)"
-// @Param client_type query string false "Client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)"
+// @Param client_type query string false "Provider client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)"
 // @Success 200 {array} models.GetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -83,11 +83,11 @@ func (h *ModelsHandler) List(c echo.Context) error {
 
 	switch {
 	case modelType != "":
-		resp, err = h.service.ListByType(c.Request().Context(), models.ModelType(modelType))
+		resp, err = h.service.ListEnabledByType(c.Request().Context(), models.ModelType(modelType))
 	case clientType != "":
-		resp, err = h.service.ListByClientType(c.Request().Context(), models.ClientType(clientType))
+		resp, err = h.service.ListEnabledByProviderClientType(c.Request().Context(), models.ClientType(clientType))
 	default:
-		resp, err = h.service.List(c.Request().Context())
+		resp, err = h.service.ListEnabled(c.Request().Context())
 	}
 
 	if err != nil {
