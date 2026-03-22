@@ -85,26 +85,6 @@
         </FormField>
       </section>
 
-      <section class="space-y-2">
-        <h4 class="scroll-m-20 font-semibold tracking-tight">
-          {{ $t('provider.icon') }}
-        </h4>
-        <FormField
-          v-slot="{ componentField }"
-          name="icon"
-        >
-          <FormItem>
-            <FormControl>
-              <Input
-                type="text"
-                :placeholder="$t('provider.iconPlaceholder')"
-                :aria-label="$t('provider.icon')"
-                v-bind="componentField"
-              />
-            </FormControl>
-          </FormItem>
-        </FormField>
-      </section>
     </div>
 
     <section class="flex justify-between items-center mt-4">
@@ -258,7 +238,6 @@ const providerSchema = toTypedSchema(z.object({
   base_url: z.string().min(1),
   api_key: z.string().optional(),
   client_type: z.string().min(1),
-  icon: z.string().optional(),
   metadata: z.object({
     additionalProp1: z.object({}),
   }),
@@ -275,7 +254,6 @@ watch(() => props.provider, (newVal) => {
       base_url: newVal.base_url,
       api_key: '',
       client_type: newVal.client_type || 'openai-completions',
-      icon: newVal.icon || '',
     })
   }
 }, { immediate: true })
@@ -286,13 +264,11 @@ const hasChanges = computed(() => {
     name: form.values.name,
     base_url: form.values.base_url,
     client_type: form.values.client_type,
-    icon: form.values.icon || '',
     metadata: form.values.metadata,
   }) !== JSON.stringify({
     name: raw?.name,
     base_url: raw?.base_url,
     client_type: raw?.client_type || 'openai-completions',
-    icon: raw?.icon || '',
     metadata: { additionalProp1: {} },
   })
 
@@ -305,7 +281,6 @@ const editProvider = form.handleSubmit(async (value) => {
     name: value.name,
     base_url: value.base_url,
     client_type: value.client_type,
-    icon: value.icon || '',
     metadata: value.metadata,
   }
   if (value.api_key && value.api_key.trim() !== '') {

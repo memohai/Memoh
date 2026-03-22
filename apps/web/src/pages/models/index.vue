@@ -15,12 +15,20 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-  Button
+  Button,
+  Avatar,
+  AvatarImage,
+  AvatarFallback,
 } from '@memoh/ui'
 import { getProviders } from '@memoh/sdk'
 import type { ProvidersGetResponse } from '@memoh/sdk'
 import AddProvider from '@/components/add-provider/index.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
+
+function getInitials(name: string | undefined) {
+  const label = name?.trim() ?? ''
+  return label ? label.slice(0, 2).toUpperCase() : '?'
+}
 
 const { data: providerData } = useQuery({
   key: () => ['providers'],
@@ -116,7 +124,16 @@ const openStatus = reactive({
                 }
               }"
             >
-              {{ providerItem.name }}
+              <Avatar class="size-7 shrink-0">
+                <AvatarImage
+                  v-if="providerItem.icon"
+                  :src="providerItem.icon"
+                />
+                <AvatarFallback class="text-xs font-medium">
+                  {{ getInitials(providerItem.name) }}
+                </AvatarFallback>
+              </Avatar>
+              <span class="truncate">{{ providerItem.name }}</span>
             </Toggle>
           </SidebarMenuButton>
         </SidebarMenuItem>
