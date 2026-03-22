@@ -57,29 +57,33 @@ func (r *fakeRow) Scan(dest ...any) error {
 func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
+			if len(dest) < 24 {
+				return pgx.ErrNoRows
+			}
 			*dest[0].(*pgtype.UUID) = botID
 			*dest[1].(*pgtype.UUID) = ownerUserID
 			*dest[2].(*pgtype.Text) = pgtype.Text{String: "bot", Valid: true}
 			*dest[3].(*pgtype.Text) = pgtype.Text{}
-			*dest[4].(*bool) = true
-			*dest[5].(*string) = bots.BotStatusReady
-			*dest[6].(*int32) = 30
-			*dest[7].(*int32) = 0
-			*dest[8].(*string) = ""
-			*dest[9].(*bool) = false
-			*dest[10].(*string) = "medium"
-			*dest[11].(*pgtype.UUID) = pgtype.UUID{}
+			*dest[4].(*pgtype.Text) = pgtype.Text{}
+			*dest[5].(*bool) = true
+			*dest[6].(*string) = bots.BotStatusReady
+			*dest[7].(*int32) = 30
+			*dest[8].(*int32) = 0
+			*dest[9].(*string) = ""
+			*dest[10].(*bool) = false
+			*dest[11].(*string) = "medium"
 			*dest[12].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[13].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[14].(*bool) = false
-			*dest[15].(*int32) = 30
-			*dest[16].(*string) = ""
-			*dest[17].(*bool) = false                // CompactionEnabled
-			*dest[18].(*int32) = 100000              // CompactionThreshold
-			*dest[19].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
-			*dest[20].(*[]byte) = []byte(`{}`)
-			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[14].(*pgtype.UUID) = pgtype.UUID{}
+			*dest[15].(*bool) = false
+			*dest[16].(*int32) = 30
+			*dest[17].(*string) = ""
+			*dest[18].(*bool) = false                // CompactionEnabled
+			*dest[19].(*int32) = 100000              // CompactionThreshold
+			*dest[20].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
+			*dest[21].(*[]byte) = []byte(`{}`)
 			*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[23].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}
