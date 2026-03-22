@@ -1,7 +1,5 @@
-import type { ModelsClientType } from '@memoh/sdk'
-
 export interface ClientTypeMeta {
-  value: ModelsClientType
+  value: string
   label: string
   hint: string
 }

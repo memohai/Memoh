@@ -41,13 +41,13 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		return
 	}
 	cfg.ModelID = model.ModelID
-	cfg.ClientType = string(model.ClientType)
 
 	provider, err := models.FetchProviderByID(ctx, r.queries, model.LlmProviderID)
 	if err != nil {
 		r.logger.Warn("compaction: failed to fetch provider", slog.Any("error", err))
 		return
 	}
+	cfg.ClientType = provider.ClientType
 	cfg.APIKey = provider.ApiKey
 	cfg.BaseURL = provider.BaseUrl
 

@@ -102,7 +102,7 @@ func (r *Resolver) listCandidates(ctx context.Context, providerFilter string) ([
 	var all []models.GetResponse
 	var err error
 	if providerFilter != "" {
-		all, err = r.modelsService.ListByClientType(ctx, models.ClientType(providerFilter))
+		all, err = r.modelsService.ListByProviderClientType(ctx, models.ClientType(providerFilter))
 	} else {
 		all, err = r.modelsService.ListByType(ctx, models.ModelTypeChat)
 	}

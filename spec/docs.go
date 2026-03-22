@@ -643,7 +643,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/compaction/logs": {
             "get": {
-                "description": "List context compaction logs for a bot",
+                "description": "List compaction logs for a bot",
                 "tags": [
                     "compaction"
                 ],
@@ -692,7 +692,7 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "Delete all context compaction logs for a bot",
+                "description": "Delete all compaction logs for a bot",
                 "tags": [
                     "compaction"
                 ],
@@ -6842,7 +6842,7 @@ const docTemplate = `{
         },
         "/models": {
             "get": {
-                "description": "Get a list of all configured models, optionally filtered by type or client type",
+                "description": "Get a list of all configured models, optionally filtered by type or provider client type",
                 "tags": [
                     "models"
                 ],
@@ -6856,7 +6856,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)",
+                        "description": "Provider client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)",
                         "name": "client_type",
                         "in": "query"
                     }
@@ -7622,15 +7622,6 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "description": "Import configuration",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/providers.ImportModelsRequest"
-                        }
                     }
                 ],
                 "responses": {
@@ -11927,17 +11918,8 @@ const docTemplate = `{
         "models.AddRequest": {
             "type": "object",
             "properties": {
-                "client_type": {
-                    "$ref": "#/definitions/models.ClientType"
-                },
-                "dimensions": {
-                    "type": "integer"
-                },
-                "input_modalities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "config": {
+                    "$ref": "#/definitions/models.ModelConfig"
                 },
                 "llm_provider_id": {
                     "type": "string"
@@ -11947,9 +11929,6 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
-                },
-                "supports_reasoning": {
-                    "type": "boolean"
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
@@ -11967,21 +11946,6 @@ const docTemplate = `{
                 }
             }
         },
-        "models.ClientType": {
-            "type": "string",
-            "enum": [
-                "openai-responses",
-                "openai-completions",
-                "anthropic-messages",
-                "google-generative-ai"
-            ],
-            "x-enum-varnames": [
-                "ClientTypeOpenAIResponses",
-                "ClientTypeOpenAICompletions",
-                "ClientTypeAnthropicMessages",
-                "ClientTypeGoogleGenerativeAI"
-            ]
-        },
         "models.CountResponse": {
             "type": "object",
             "properties": {
@@ -11993,20 +11957,11 @@ const docTemplate = `{
         "models.GetResponse": {
             "type": "object",
             "properties": {
-                "client_type": {
-                    "$ref": "#/definitions/models.ClientType"
-                },
-                "dimensions": {
-                    "type": "integer"
+                "config": {
+                    "$ref": "#/definitions/models.ModelConfig"
                 },
                 "id": {
                     "type": "string"
-                },
-                "input_modalities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "llm_provider_id": {
                     "type": "string"
@@ -12017,11 +11972,25 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
-                "supports_reasoning": {
-                    "type": "boolean"
-                },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
+                }
+            }
+        },
+        "models.ModelConfig": {
+            "type": "object",
+            "properties": {
+                "compatibilities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "context_window": {
+                    "type": "integer"
+                },
+                "dimensions": {
+                    "type": "integer"
                 }
             }
         },
@@ -12071,17 +12040,8 @@ const docTemplate = `{
         "models.UpdateRequest": {
             "type": "object",
             "properties": {
-                "client_type": {
-                    "$ref": "#/definitions/models.ClientType"
-                },
-                "dimensions": {
-                    "type": "integer"
-                },
-                "input_modalities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "config": {
+                    "$ref": "#/definitions/models.ModelConfig"
                 },
                 "llm_provider_id": {
                     "type": "string"
@@ -12091,9 +12051,6 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
-                },
-                "supports_reasoning": {
-                    "type": "boolean"
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
@@ -12112,6 +12069,7 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "base_url",
+                "client_type",
                 "name"
             ],
             "properties": {
@@ -12119,6 +12077,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "base_url": {
+                    "type": "string"
+                },
+                "client_type": {
+                    "type": "string"
+                },
+                "icon": {
                     "type": "string"
                 },
                 "metadata": {
@@ -12139,7 +12103,13 @@ const docTemplate = `{
                 "base_url": {
                     "type": "string"
                 },
+                "client_type": {
+                    "type": "string"
+                },
                 "created_at": {
+                    "type": "string"
+                },
+                "icon": {
                     "type": "string"
                 },
                 "id": {
@@ -12153,14 +12123,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "providers.ImportModelsRequest": {
-            "type": "object",
-            "properties": {
-                "client_type": {
                     "type": "string"
                 }
             }
@@ -12203,6 +12165,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "base_url": {
+                    "type": "string"
+                },
+                "client_type": {
+                    "type": "string"
+                },
+                "icon": {
                     "type": "string"
                 },
                 "metadata": {

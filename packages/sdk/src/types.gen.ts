@@ -1172,13 +1172,10 @@ export type MessageMessageAsset = {
 };
 
 export type ModelsAddRequest = {
-    client_type?: ModelsClientType;
-    dimensions?: number;
-    input_modalities?: Array<string>;
+    config?: ModelsModelConfig;
     llm_provider_id?: string;
     model_id?: string;
     name?: string;
-    supports_reasoning?: boolean;
     type?: ModelsModelType;
 };
 
@@ -1187,22 +1184,23 @@ export type ModelsAddResponse = {
     model_id?: string;
 };
 
-export type ModelsClientType = 'openai-responses' | 'openai-completions' | 'anthropic-messages' | 'google-generative-ai';
-
 export type ModelsCountResponse = {
     count?: number;
 };
 
 export type ModelsGetResponse = {
-    client_type?: ModelsClientType;
-    dimensions?: number;
+    config?: ModelsModelConfig;
     id?: string;
-    input_modalities?: Array<string>;
     llm_provider_id?: string;
     model_id?: string;
     name?: string;
-    supports_reasoning?: boolean;
     type?: ModelsModelType;
+};
+
+export type ModelsModelConfig = {
+    compatibilities?: Array<string>;
+    context_window?: number;
+    dimensions?: number;
 };
 
 export type ModelsModelType = 'chat' | 'embedding';
@@ -1217,13 +1215,10 @@ export type ModelsTestResponse = {
 export type ModelsTestStatus = 'ok' | 'auth_error' | 'model_not_supported' | 'error';
 
 export type ModelsUpdateRequest = {
-    client_type?: ModelsClientType;
-    dimensions?: number;
-    input_modalities?: Array<string>;
+    config?: ModelsModelConfig;
     llm_provider_id?: string;
     model_id?: string;
     name?: string;
-    supports_reasoning?: boolean;
     type?: ModelsModelType;
 };
 
@@ -1234,6 +1229,8 @@ export type ProvidersCountResponse = {
 export type ProvidersCreateRequest = {
     api_key?: string;
     base_url: string;
+    client_type: string;
+    icon?: string;
     metadata?: {
         [key: string]: unknown;
     };
@@ -1243,17 +1240,15 @@ export type ProvidersCreateRequest = {
 export type ProvidersGetResponse = {
     api_key?: string;
     base_url?: string;
+    client_type?: string;
     created_at?: string;
+    icon?: string;
     id?: string;
     metadata?: {
         [key: string]: unknown;
     };
     name?: string;
     updated_at?: string;
-};
-
-export type ProvidersImportModelsRequest = {
-    client_type?: string;
 };
 
 export type ProvidersImportModelsResponse = {
@@ -1271,6 +1266,8 @@ export type ProvidersTestResponse = {
 export type ProvidersUpdateRequest = {
     api_key?: string;
     base_url?: string;
+    client_type?: string;
+    icon?: string;
     metadata?: {
         [key: string]: unknown;
     };
@@ -7228,7 +7225,7 @@ export type GetModelsData = {
          */
         type?: string;
         /**
-         * Client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)
+         * Provider client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)
          */
         client_type?: string;
     };
@@ -7843,10 +7840,7 @@ export type PutProvidersByIdResponses = {
 export type PutProvidersByIdResponse = PutProvidersByIdResponses[keyof PutProvidersByIdResponses];
 
 export type PostProvidersByIdImportModelsData = {
-    /**
-     * Import configuration
-     */
-    body: ProvidersImportModelsRequest;
+    body?: never;
     path: {
         /**
          * Provider ID (UUID)

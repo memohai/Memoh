@@ -91,6 +91,25 @@
             </FormItem>
           </FormField>
 
+          <FormField
+            v-slot="{ value, handleChange }"
+            name="client_type"
+          >
+            <FormItem>
+              <Label class="mb-2">
+                {{ $t('provider.clientType') }}
+              </Label>
+              <FormControl>
+                <SearchableSelectPopover
+                  :model-value="value"
+                  :options="clientTypeOptions"
+                  :placeholder="$t('models.clientTypePlaceholder')"
+                  @update:model-value="handleChange"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+
           <Separator />
 
           <FormField
@@ -112,29 +131,6 @@
                   @update:model-value="handleChange"
                 />
               </FormControl>
-            </FormItem>
-          </FormField>
-
-          <FormField
-            v-if="form.values.auto_import"
-            v-slot="{ value, handleChange }"
-            name="client_type"
-          >
-            <FormItem>
-              <Label class="mb-2">
-                {{ $t('models.importClientType') }}
-              </Label>
-              <FormControl>
-                <SearchableSelectPopover
-                  :model-value="value"
-                  :options="CLIENT_TYPE_LIST"
-                  :placeholder="$t('models.clientTypePlaceholder')"
-                  @update:model-value="handleChange"
-                />
-              </FormControl>
-              <p class="text-[0.8rem] text-muted-foreground">
-                {{ $t('models.importClientTypeHint') }}
-              </p>
             </FormItem>
           </FormField>
         </div>
@@ -163,12 +159,22 @@ import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
-import { CLIENT_TYPE_LIST } from '@/constants/client-types'
+import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
 import { toast } from 'vue-sonner'
+import { computed } from 'vue'
 
 const open = defineModel<boolean>('open')
 const { t } = useI18n()
 const { run } = useDialogMutation()
+
+const clientTypeOptions = computed(() =>
+  CLIENT_TYPE_LIST.map((ct) => ({
+    value: ct.value,
+    label: ct.label,
+    description: ct.hint,
+    keywords: [ct.label, ct.hint, CLIENT_TYPE_META[ct.value]?.value ?? ct.value],
+  })),
+)
 
 const queryCache = useQueryCache()
 const { mutateAsync: createProviderMutation, isLoading } = useMutation({
@@ -182,7 +188,6 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
       try {
         const { data: importResult } = await postProvidersByIdImportModels({
           path: { id: result.id },
-          body: { client_type: data.client_type as string },
           throwOnError: true,
         })
         if (importResult) {
@@ -206,8 +211,8 @@ const providerSchema = toTypedSchema(z.object({
   api_key: z.string().min(1),
   base_url: z.string().min(1),
   name: z.string().min(1),
+  client_type: z.string().min(1),
   auto_import: z.boolean().optional(),
-  client_type: z.string().optional(),
 }))
 
 const form = useForm({

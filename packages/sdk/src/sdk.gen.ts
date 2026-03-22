@@ -140,14 +140,14 @@ export const getBotsByBotIdCliWs = <ThrowOnError extends boolean = false>(option
 /**
  * Delete compaction logs
  *
- * Delete all context compaction logs for a bot
+ * Delete all compaction logs for a bot
  */
 export const deleteBotsByBotIdCompactionLogs = <ThrowOnError extends boolean = false>(options: Options<DeleteBotsByBotIdCompactionLogsData, ThrowOnError>) => (options.client ?? client).delete<DeleteBotsByBotIdCompactionLogsResponses, DeleteBotsByBotIdCompactionLogsErrors, ThrowOnError>({ url: '/bots/{bot_id}/compaction/logs', ...options });
 
 /**
  * List compaction logs
  *
- * List context compaction logs for a bot
+ * List compaction logs for a bot
  */
 export const getBotsByBotIdCompactionLogs = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdCompactionLogsData, ThrowOnError>) => (options.client ?? client).get<GetBotsByBotIdCompactionLogsResponses, GetBotsByBotIdCompactionLogsErrors, ThrowOnError>({ url: '/bots/{bot_id}/compaction/logs', ...options });
 
@@ -1397,7 +1397,7 @@ export const getMemoryProvidersByIdStatus = <ThrowOnError extends boolean = fals
 /**
  * List all models
  *
- * Get a list of all configured models, optionally filtered by type or client type
+ * Get a list of all configured models, optionally filtered by type or provider client type
  */
 export const getModels = <ThrowOnError extends boolean = false>(options?: Options<GetModelsData, ThrowOnError>) => (options?.client ?? client).get<GetModelsResponses, GetModelsErrors, ThrowOnError>({ url: '/models', ...options });
 
@@ -1558,14 +1558,7 @@ export const putProvidersById = <ThrowOnError extends boolean = false>(options: 
  *
  * Fetch models from provider's /v1/models endpoint and import them
  */
-export const postProvidersByIdImportModels = <ThrowOnError extends boolean = false>(options: Options<PostProvidersByIdImportModelsData, ThrowOnError>) => (options.client ?? client).post<PostProvidersByIdImportModelsResponses, PostProvidersByIdImportModelsErrors, ThrowOnError>({
-    url: '/providers/{id}/import-models',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
+export const postProvidersByIdImportModels = <ThrowOnError extends boolean = false>(options: Options<PostProvidersByIdImportModelsData, ThrowOnError>) => (options.client ?? client).post<PostProvidersByIdImportModelsResponses, PostProvidersByIdImportModelsErrors, ThrowOnError>({ url: '/providers/{id}/import-models', ...options });
 
 /**
  * List provider models

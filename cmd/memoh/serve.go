@@ -947,7 +947,7 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memprovider.LLM, error) {
 	if err != nil {
 		return nil, err
 	}
-	clientType := string(memoryModel.ClientType)
+	clientType := memoryProvider.ClientType
 	switch clientType {
 	case "openai-responses", "openai-completions", "anthropic-messages", "google-generative-ai":
 	default:

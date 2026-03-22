@@ -159,7 +159,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if err != nil {
 		return resolvedContext{}, err
 	}
-	clientType := string(chatModel.ClientType)
+	clientType := provider.ClientType
 
 	maxCtx := coalescePositiveInt(req.MaxContextLoadTime, botSettings.MaxContextLoadTime, defaultMaxContextMinutes)
 	maxTokens := botSettings.MaxContextTokens
@@ -258,7 +258,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	)
 
 	reasoningEffort := ""
-	if chatModel.SupportsReasoning && botSettings.ReasoningEnabled {
+	if chatModel.HasCompatibility(models.CompatReasoning) && botSettings.ReasoningEnabled {
 		reasoningEffort = botSettings.ReasoningEffort
 	}
 
@@ -273,7 +273,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	modelCfg := agentpkg.ModelConfig{
 		ModelID:         chatModel.ModelID,
 		ClientType:      clientType,
-		InputModalities: chatModel.InputModalities,
 		APIKey:          provider.ApiKey,
 		BaseURL:         provider.BaseUrl,
 		ReasoningConfig: reasoningConfig,
@@ -287,7 +286,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		ReasoningEffort:    reasoningEffort,
 		Messages:           sdkMessages,
 		Query:              headerifiedQuery,
-		SupportsImageInput: chatModel.HasInputModality(models.ModelInputImage),
+		SupportsImageInput: chatModel.HasCompatibility(models.CompatVision),
 		Identity: agentpkg.SessionContext{
 			BotID:             req.BotID,
 			ChatID:            req.ChatID,
@@ -334,7 +333,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	return conversation.ChatResponse{
 		Messages: outputMessages,
 		Model:    rc.model.ModelID,
-		Provider: string(rc.model.ClientType),
+		Provider: rc.provider.ClientType,
 	}, nil
 }
 

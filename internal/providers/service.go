@@ -40,12 +40,24 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
 	}
 
+	clientType := req.ClientType
+	if clientType == "" {
+		clientType = string(models.ClientTypeOpenAICompletions)
+	}
+
+	var icon pgtype.Text
+	if req.Icon != "" {
+		icon = pgtype.Text{String: req.Icon, Valid: true}
+	}
+
 	// Create provider
 	provider, err := s.queries.CreateLlmProvider(ctx, sqlc.CreateLlmProviderParams{
-		Name:     req.Name,
-		BaseUrl:  req.BaseURL,
-		ApiKey:   req.APIKey,
-		Metadata: metadataJSON,
+		Name:       req.Name,
+		BaseUrl:    req.BaseURL,
+		ApiKey:     req.APIKey,
+		ClientType: clientType,
+		Icon:       icon,
+		Metadata:   metadataJSON,
 	})
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("create provider: %w", err)
@@ -119,6 +131,16 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 
 	apiKey := resolveUpdatedAPIKey(existing.ApiKey, req.APIKey)
 
+	clientType := existing.ClientType
+	if req.ClientType != nil {
+		clientType = *req.ClientType
+	}
+
+	icon := existing.Icon
+	if req.Icon != nil {
+		icon = pgtype.Text{String: *req.Icon, Valid: *req.Icon != ""}
+	}
+
 	metadata := existing.Metadata
 	if req.Metadata != nil {
 		metadataJSON, err := json.Marshal(req.Metadata)
@@ -130,11 +152,13 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 
 	// Update provider
 	updated, err := s.queries.UpdateLlmProvider(ctx, sqlc.UpdateLlmProviderParams{
-		ID:       providerID,
-		Name:     name,
-		BaseUrl:  baseURL,
-		ApiKey:   apiKey,
-		Metadata: metadata,
+		ID:         providerID,
+		Name:       name,
+		BaseUrl:    baseURL,
+		ApiKey:     apiKey,
+		ClientType: clientType,
+		Icon:       icon,
+		Metadata:   metadata,
 	})
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("update provider: %w", err)
@@ -182,8 +206,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 
-	// Determine client type from the first model using this provider.
-	clientType := resolveProviderClientType(ctx, s.queries, providerID)
+	clientType := models.ClientType(provider.ClientType)
 
 	sdkProvider := models.NewSDKProvider(baseURL, provider.ApiKey, clientType, probeTimeout)
 
@@ -196,18 +219,6 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		LatencyMs: latency,
 		Message:   result.Message,
 	}, nil
-}
-
-// resolveProviderClientType looks up models associated with the provider
-// and returns the first model's client_type. Falls back to openai-completions.
-func resolveProviderClientType(ctx context.Context, q *sqlc.Queries, providerID pgtype.UUID) models.ClientType {
-	rows, err := q.ListModelsByProviderID(ctx, providerID)
-	if err == nil && len(rows) > 0 {
-		if ct := rows[0].ClientType; ct.Valid && ct.String != "" {
-			return models.ClientType(ct.String)
-		}
-	}
-	return models.ClientTypeOpenAICompletions
 }
 
 // FetchRemoteModels fetches models from the provider's /v1/models endpoint.
@@ -270,14 +281,21 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 	// Mask API key (show only first 8 characters)
 	maskedAPIKey := maskAPIKey(provider.ApiKey)
 
+	var icon string
+	if provider.Icon.Valid {
+		icon = provider.Icon.String
+	}
+
 	return GetResponse{
-		ID:        provider.ID.String(),
-		Name:      provider.Name,
-		BaseURL:   provider.BaseUrl,
-		APIKey:    maskedAPIKey,
-		Metadata:  metadata,
-		CreatedAt: provider.CreatedAt.Time,
-		UpdatedAt: provider.UpdatedAt.Time,
+		ID:         provider.ID.String(),
+		Name:       provider.Name,
+		BaseURL:    provider.BaseUrl,
+		APIKey:     maskedAPIKey,
+		ClientType: provider.ClientType,
+		Icon:       icon,
+		Metadata:   metadata,
+		CreatedAt:  provider.CreatedAt.Time,
+		UpdatedAt:  provider.UpdatedAt.Time,
 	}
 }
 

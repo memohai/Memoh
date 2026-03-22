@@ -63,6 +63,48 @@
           </FormItem>
         </FormField>
       </section>
+
+      <section class="space-y-2">
+        <h4 class="scroll-m-20 font-semibold tracking-tight">
+          {{ $t('provider.clientType') }}
+        </h4>
+        <FormField
+          v-slot="{ value, handleChange }"
+          name="client_type"
+        >
+          <FormItem>
+            <FormControl>
+              <SearchableSelectPopover
+                :model-value="value"
+                :options="clientTypeOptions"
+                :placeholder="$t('models.clientTypePlaceholder')"
+                @update:model-value="handleChange"
+              />
+            </FormControl>
+          </FormItem>
+        </FormField>
+      </section>
+
+      <section class="space-y-2">
+        <h4 class="scroll-m-20 font-semibold tracking-tight">
+          {{ $t('provider.icon') }}
+        </h4>
+        <FormField
+          v-slot="{ componentField }"
+          name="icon"
+        >
+          <FormItem>
+            <FormControl>
+              <Input
+                type="text"
+                :placeholder="$t('provider.iconPlaceholder')"
+                :aria-label="$t('provider.icon')"
+                v-bind="componentField"
+              />
+            </FormControl>
+          </FormItem>
+        </FormField>
+      </section>
     </div>
 
     <section class="flex justify-between items-center mt-4">
@@ -152,6 +194,8 @@ import {
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import StatusDot from '@/components/status-dot/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
+import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
+import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
 import { computed, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -200,10 +244,21 @@ watch(() => props.provider?.id, () => {
   testError.value = ''
 })
 
+const clientTypeOptions = computed(() =>
+  CLIENT_TYPE_LIST.map((ct) => ({
+    value: ct.value,
+    label: ct.label,
+    description: ct.hint,
+    keywords: [ct.label, ct.hint, CLIENT_TYPE_META[ct.value]?.value ?? ct.value],
+  })),
+)
+
 const providerSchema = toTypedSchema(z.object({
   name: z.string().min(1),
   base_url: z.string().min(1),
   api_key: z.string().optional(),
+  client_type: z.string().min(1),
+  icon: z.string().optional(),
   metadata: z.object({
     additionalProp1: z.object({}),
   }),
@@ -219,6 +274,8 @@ watch(() => props.provider, (newVal) => {
       name: newVal.name,
       base_url: newVal.base_url,
       api_key: '',
+      client_type: newVal.client_type || 'openai-completions',
+      icon: newVal.icon || '',
     })
   }
 }, { immediate: true })
@@ -228,10 +285,14 @@ const hasChanges = computed(() => {
   const baseChanged = JSON.stringify({
     name: form.values.name,
     base_url: form.values.base_url,
+    client_type: form.values.client_type,
+    icon: form.values.icon || '',
     metadata: form.values.metadata,
   }) !== JSON.stringify({
     name: raw?.name,
     base_url: raw?.base_url,
+    client_type: raw?.client_type || 'openai-completions',
+    icon: raw?.icon || '',
     metadata: { additionalProp1: {} },
   })
 
@@ -243,6 +304,8 @@ const editProvider = form.handleSubmit(async (value) => {
   const payload: Record<string, unknown> = {
     name: value.name,
     base_url: value.base_url,
+    client_type: value.client_type,
+    icon: value.icon || '',
     metadata: value.metadata,
   }
   if (value.api_key && value.api_key.trim() !== '') {

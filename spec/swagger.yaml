@@ -1914,22 +1914,14 @@ definitions:
     type: object
   models.AddRequest:
     properties:
-      client_type:
-        $ref: '#/definitions/models.ClientType'
-      dimensions:
-        type: integer
-      input_modalities:
-        items:
-          type: string
-        type: array
+      config:
+        $ref: '#/definitions/models.ModelConfig'
       llm_provider_id:
         type: string
       model_id:
         type: string
       name:
         type: string
-      supports_reasoning:
-        type: boolean
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
@@ -1940,18 +1932,6 @@ definitions:
       model_id:
         type: string
     type: object
-  models.ClientType:
-    enum:
-    - openai-responses
-    - openai-completions
-    - anthropic-messages
-    - google-generative-ai
-    type: string
-    x-enum-varnames:
-    - ClientTypeOpenAIResponses
-    - ClientTypeOpenAICompletions
-    - ClientTypeAnthropicMessages
-    - ClientTypeGoogleGenerativeAI
   models.CountResponse:
     properties:
       count:
@@ -1959,26 +1939,29 @@ definitions:
     type: object
   models.GetResponse:
     properties:
-      client_type:
-        $ref: '#/definitions/models.ClientType'
-      dimensions:
-        type: integer
+      config:
+        $ref: '#/definitions/models.ModelConfig'
       id:
         type: string
-      input_modalities:
-        items:
-          type: string
-        type: array
       llm_provider_id:
         type: string
       model_id:
         type: string
       name:
         type: string
-      supports_reasoning:
-        type: boolean
       type:
         $ref: '#/definitions/models.ModelType'
+    type: object
+  models.ModelConfig:
+    properties:
+      compatibilities:
+        items:
+          type: string
+        type: array
+      context_window:
+        type: integer
+      dimensions:
+        type: integer
     type: object
   models.ModelType:
     enum:
@@ -2013,22 +1996,14 @@ definitions:
     - TestStatusError
   models.UpdateRequest:
     properties:
-      client_type:
-        $ref: '#/definitions/models.ClientType'
-      dimensions:
-        type: integer
-      input_modalities:
-        items:
-          type: string
-        type: array
+      config:
+        $ref: '#/definitions/models.ModelConfig'
       llm_provider_id:
         type: string
       model_id:
         type: string
       name:
         type: string
-      supports_reasoning:
-        type: boolean
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
@@ -2043,6 +2018,10 @@ definitions:
         type: string
       base_url:
         type: string
+      client_type:
+        type: string
+      icon:
+        type: string
       metadata:
         additionalProperties: {}
         type: object
@@ -2050,6 +2029,7 @@ definitions:
         type: string
     required:
     - base_url
+    - client_type
     - name
     type: object
   providers.GetResponse:
@@ -2058,7 +2038,11 @@ definitions:
         type: string
       base_url:
         type: string
+      client_type:
+        type: string
       created_at:
+        type: string
+      icon:
         type: string
       id:
         type: string
@@ -2068,11 +2052,6 @@ definitions:
       name:
         type: string
       updated_at:
-        type: string
-    type: object
-  providers.ImportModelsRequest:
-    properties:
-      client_type:
         type: string
     type: object
   providers.ImportModelsResponse:
@@ -2100,6 +2079,10 @@ definitions:
       api_key:
         type: string
       base_url:
+        type: string
+      client_type:
+        type: string
+      icon:
         type: string
       metadata:
         additionalProperties: {}
@@ -3079,7 +3062,7 @@ paths:
       - local-channel
   /bots/{bot_id}/compaction/logs:
     delete:
-      description: Delete all context compaction logs for a bot
+      description: Delete all compaction logs for a bot
       parameters:
       - description: Bot ID
         in: path
@@ -3101,7 +3084,7 @@ paths:
       tags:
       - compaction
     get:
-      description: List context compaction logs for a bot
+      description: List compaction logs for a bot
       parameters:
       - description: Bot ID
         in: path
@@ -7202,13 +7185,13 @@ paths:
   /models:
     get:
       description: Get a list of all configured models, optionally filtered by type
-        or client type
+        or provider client type
       parameters:
       - description: Model type (chat, embedding)
         in: query
         name: type
         type: string
-      - description: Client type (openai-responses, openai-completions, anthropic-messages,
+      - description: Provider client type (openai-responses, openai-completions, anthropic-messages,
           google-generative-ai)
         in: query
         name: client_type
@@ -7664,12 +7647,6 @@ paths:
         name: id
         required: true
         type: string
-      - description: Import configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/providers.ImportModelsRequest'
       produces:
       - application/json
       responses:

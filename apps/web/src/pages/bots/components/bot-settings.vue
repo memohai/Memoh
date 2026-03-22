@@ -528,7 +528,7 @@ const indexedMemoryStatusHint = computed(() =>
 const chatModelSupportsReasoning = computed(() => {
   if (!form.chat_model_id) return false
   const m = models.value.find((m) => m.id === form.chat_model_id)
-  return !!m?.supports_reasoning
+  return !!m?.config?.compatibilities?.includes('reasoning')
 })
 
 const { data: memoryStatusData, isLoading: isMemoryStatusLoading } = useQuery({

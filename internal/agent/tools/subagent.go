@@ -140,8 +140,8 @@ func (p *SubagentProvider) execQuery(ctx context.Context, session SessionContext
 	}
 	gwResp, err := p.postSubagent(ctx, session, subagentGWRequest{
 		Model: subagentModelCfg{
-			ModelID: modelCfg.ModelID, ClientType: string(modelCfg.ClientType),
-			Input: modelCfg.InputModalities, APIKey: provider.ApiKey, BaseURL: provider.BaseUrl,
+			ModelID: modelCfg.ModelID, ClientType: provider.ClientType,
+			APIKey: provider.ApiKey, BaseURL: provider.BaseUrl,
 		},
 		Identity: subagentIdentityCfg{
 			BotID: botID, ChannelIdentityID: session.ChannelIdentityID,
@@ -194,11 +194,10 @@ func (p *SubagentProvider) resolveModel(ctx context.Context, botID string) (mode
 }
 
 type subagentModelCfg struct {
-	ModelID    string   `json:"modelId"`
-	ClientType string   `json:"clientType"`
-	Input      []string `json:"input"`
-	APIKey     string   `json:"apiKey"` //nolint:gosec // forwarded to agent gateway
-	BaseURL    string   `json:"baseUrl"`
+	ModelID    string `json:"modelId"`
+	ClientType string `json:"clientType"`
+	APIKey     string `json:"apiKey"` //nolint:gosec // forwarded to agent gateway
+	BaseURL    string `json:"baseUrl"`
 }
 
 type subagentIdentityCfg struct {

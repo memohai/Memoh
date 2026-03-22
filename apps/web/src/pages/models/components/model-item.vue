@@ -23,11 +23,19 @@
           {{ model.type }}
         </Badge>
         <Badge
-          v-if="model.client_type"
-          variant="outline"
+          v-for="cap in (model.config?.compatibilities || [])"
+          :key="cap"
+          variant="secondary"
+          class="text-xs"
         >
-          {{ model.client_type }}
+          {{ $t(`models.compatibility.${cap}`, cap) }}
         </Badge>
+        <span
+          v-if="model.config?.context_window"
+          class="text-xs text-muted-foreground"
+        >
+          ctx: {{ model.config.context_window.toLocaleString() }}
+        </span>
         <span
           v-if="testResult && testResult.status !== 'ok' && testResult.message"
           class="text-destructive text-xs"

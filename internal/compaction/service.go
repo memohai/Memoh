@@ -124,8 +124,8 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
 
 	if err := s.queries.MarkMessagesCompacted(ctx, sqlc.MarkMessagesCompactedParams{
-		CompactID:  logID,
-		MessageIds: messageIDs,
+		CompactID: logID,
+		Column2:   messageIDs,
 	}); err != nil {
 		return err
 	}

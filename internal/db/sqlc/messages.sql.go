@@ -1057,7 +1057,7 @@ func (q *Queries) ListObservedConversationsByChannelIdentity(ctx context.Context
 }
 
 const listUncompactedMessagesBySession = `-- name: ListUncompactedMessagesBySession :many
-SELECT id, role, content, usage, created_at
+SELECT id, bot_id, session_id, role, content, usage, sender_channel_identity_id, compact_id, created_at
 FROM bot_history_messages
 WHERE session_id = $1
   AND compact_id IS NULL
@@ -1065,11 +1065,15 @@ ORDER BY created_at ASC
 `
 
 type ListUncompactedMessagesBySessionRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	Role      string             `json:"role"`
-	Content   []byte             `json:"content"`
-	Usage     []byte             `json:"usage"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Usage                   []byte             `json:"usage"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]ListUncompactedMessagesBySessionRow, error) {
@@ -1083,9 +1087,13 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 		var i ListUncompactedMessagesBySessionRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.BotID,
+			&i.SessionID,
 			&i.Role,
 			&i.Content,
 			&i.Usage,
+			&i.SenderChannelIdentityID,
+			&i.CompactID,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -1105,12 +1113,12 @@ WHERE id = ANY($2::uuid[])
 `
 
 type MarkMessagesCompactedParams struct {
-	CompactID  pgtype.UUID   `json:"compact_id"`
-	MessageIds []pgtype.UUID `json:"message_ids"`
+	CompactID pgtype.UUID   `json:"compact_id"`
+	Column2   []pgtype.UUID `json:"column_2"`
 }
 
 func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCompactedParams) error {
-	_, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.MessageIds)
+	_, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.Column2)
 	return err
 }
 

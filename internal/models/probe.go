@@ -41,7 +41,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 	apiKey := provider.ApiKey
-	clientType := ClientType(model.ClientType.String)
+	clientType := ClientType(provider.ClientType)
 
 	// Embedding models don't have a chat Provider in the SDK — probe
 	// the /embeddings endpoint directly.
