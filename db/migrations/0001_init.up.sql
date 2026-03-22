@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS bots (
   type TEXT NOT NULL,
   display_name TEXT,
   avatar_url TEXT,
+  timezone TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'ready',
   max_context_load_time INTEGER NOT NULL DEFAULT 1440,

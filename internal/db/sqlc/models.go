@@ -13,6 +13,7 @@ type Bot struct {
 	OwnerUserID         pgtype.UUID        `json:"owner_user_id"`
 	DisplayName         pgtype.Text        `json:"display_name"`
 	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            pgtype.Text        `json:"timezone"`
 	IsActive            bool               `json:"is_active"`
 	Status              string             `json:"status"`
 	MaxContextLoadTime  int32              `json:"max_context_load_time"`

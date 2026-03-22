@@ -307,6 +307,7 @@ export type BotsBot = {
     };
     owner_user_id?: string;
     status?: string;
+    timezone?: string;
     updated_at?: string;
 };
 
@@ -330,6 +331,7 @@ export type BotsCreateBotRequest = {
     metadata?: {
         [key: string]: unknown;
     };
+    timezone?: string;
 };
 
 export type BotsListBotsResponse = {
@@ -351,6 +353,7 @@ export type BotsUpdateBotRequest = {
     metadata?: {
         [key: string]: unknown;
     };
+    timezone?: string;
 };
 
 export type BrowsercontextsBrowserContext = {

@@ -11,6 +11,7 @@ type Bot struct {
 	OwnerUserID     string         `json:"owner_user_id"`
 	DisplayName     string         `json:"display_name"`
 	AvatarURL       string         `json:"avatar_url,omitempty"`
+	Timezone        string         `json:"timezone,omitempty"`
 	IsActive        bool           `json:"is_active"`
 	Status          string         `json:"status"`
 	CheckState      string         `json:"check_state"`
@@ -36,6 +37,7 @@ type BotCheck struct {
 type CreateBotRequest struct {
 	DisplayName string         `json:"display_name,omitempty"`
 	AvatarURL   string         `json:"avatar_url,omitempty"`
+	Timezone    *string        `json:"timezone,omitempty"`
 	IsActive    *bool          `json:"is_active,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
@@ -44,6 +46,7 @@ type CreateBotRequest struct {
 type UpdateBotRequest struct {
 	DisplayName *string        `json:"display_name,omitempty"`
 	AvatarURL   *string        `json:"avatar_url,omitempty"`
+	Timezone    *string        `json:"timezone,omitempty"`
 	IsActive    *bool          `json:"is_active,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }

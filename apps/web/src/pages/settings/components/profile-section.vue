@@ -48,13 +48,29 @@
       </div>
       <div class="space-y-2">
         <Label for="settings-timezone">{{ $t('settings.timezone') }}</Label>
-        <Input
-          id="settings-timezone"
+        <Select
           :model-value="timezone"
-          :aria-label="$t('settings.timezone')"
-          :placeholder="$t('settings.timezonePlaceholder')"
           @update:model-value="onTimezoneChange"
-        />
+        >
+          <SelectTrigger
+            id="settings-timezone"
+            class="w-full"
+            :aria-label="$t('settings.timezone')"
+          >
+            <SelectValue :placeholder="$t('settings.timezonePlaceholder')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem
+                v-for="timezoneOption in timezones"
+                :key="timezoneOption"
+                :value="timezoneOption"
+              >
+                {{ timezoneOption }}
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
       </div>
       <div class="flex justify-end">
         <Button
@@ -70,7 +86,20 @@
 </template>
 
 <script setup lang="ts">
-import { Button, Input, Label, Separator, Spinner } from '@memohai/ui'
+import {
+  Button,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Separator,
+  Spinner,
+} from '@memohai/ui'
+import { timezones } from '@/utils/timezones'
 
 defineProps<{
   displayUserId: string
@@ -97,7 +126,7 @@ function onAvatarUrlChange(value: string | number) {
   emit('update:avatarUrl', String(value))
 }
 
-function onTimezoneChange(value: string | number) {
-  emit('update:timezone', String(value))
+function onTimezoneChange(value: string | number | undefined) {
+  emit('update:timezone', String(value || 'UTC'))
 }
 </script>
