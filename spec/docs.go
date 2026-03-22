@@ -4325,448 +4325,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/subagents": {
-            "get": {
-                "description": "List subagents for current user",
-                "tags": [
-                    "subagent"
-                ],
-                "summary": "List subagents",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/subagent.ListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Create a subagent for current user",
-                "tags": [
-                    "subagent"
-                ],
-                "summary": "Create subagent",
-                "parameters": [
-                    {
-                        "description": "Subagent payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/subagent.CreateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/subagent.Subagent"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/subagents/{id}": {
-            "get": {
-                "description": "Get a subagent by ID",
-                "tags": [
-                    "subagent"
-                ],
-                "summary": "Get subagent",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subagent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/subagent.Subagent"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "description": "Update a subagent by ID",
-                "tags": [
-                    "subagent"
-                ],
-                "summary": "Update subagent",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subagent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Subagent payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/subagent.UpdateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/subagent.Subagent"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete a subagent by ID",
-                "tags": [
-                    "subagent"
-                ],
-                "summary": "Delete subagent",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subagent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/subagents/{id}/context": {
-            "get": {
-                "description": "Get a subagent's message context",
-                "tags": [
-                    "subagent"
-                ],
-                "summary": "Get subagent context",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subagent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/subagent.ContextResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "description": "Update a subagent's message context",
-                "tags": [
-                    "subagent"
-                ],
-                "summary": "Update subagent context",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subagent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Context payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/subagent.UpdateContextRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/subagent.ContextResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/subagents/{id}/skills": {
-            "get": {
-                "description": "Get a subagent's skills",
-                "tags": [
-                    "subagent"
-                ],
-                "summary": "Get subagent skills",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subagent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/subagent.SkillsResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "description": "Replace a subagent's skills",
-                "tags": [
-                    "subagent"
-                ],
-                "summary": "Update subagent skills",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subagent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Skills payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/subagent.UpdateSkillsRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/subagent.SkillsResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Add skills to a subagent",
-                "tags": [
-                    "subagent"
-                ],
-                "summary": "Add subagent skills",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Subagent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Skills payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/subagent.AddSkillsRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/subagent.SkillsResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/token-usage": {
             "get": {
                 "description": "Get daily aggregated token usage for a bot, split by chat, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
@@ -6947,7 +6505,7 @@ const docTemplate = `{
         },
         "/models": {
             "get": {
-                "description": "Get a list of all configured models, optionally filtered by type or client type",
+                "description": "Get a list of all configured models, optionally filtered by type or provider client type",
                 "tags": [
                     "models"
                 ],
@@ -6961,7 +6519,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)",
+                        "description": "Provider client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)",
                         "name": "client_type",
                         "in": "query"
                     }
@@ -7727,15 +7285,6 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "description": "Import configuration",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/providers.ImportModelsRequest"
-                        }
                     }
                 ],
                 "responses": {
@@ -12032,17 +11581,8 @@ const docTemplate = `{
         "models.AddRequest": {
             "type": "object",
             "properties": {
-                "client_type": {
-                    "$ref": "#/definitions/models.ClientType"
-                },
-                "dimensions": {
-                    "type": "integer"
-                },
-                "input_modalities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "config": {
+                    "$ref": "#/definitions/models.ModelConfig"
                 },
                 "llm_provider_id": {
                     "type": "string"
@@ -12052,9 +11592,6 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
-                },
-                "supports_reasoning": {
-                    "type": "boolean"
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
@@ -12072,21 +11609,6 @@ const docTemplate = `{
                 }
             }
         },
-        "models.ClientType": {
-            "type": "string",
-            "enum": [
-                "openai-responses",
-                "openai-completions",
-                "anthropic-messages",
-                "google-generative-ai"
-            ],
-            "x-enum-varnames": [
-                "ClientTypeOpenAIResponses",
-                "ClientTypeOpenAICompletions",
-                "ClientTypeAnthropicMessages",
-                "ClientTypeGoogleGenerativeAI"
-            ]
-        },
         "models.CountResponse": {
             "type": "object",
             "properties": {
@@ -12098,20 +11620,11 @@ const docTemplate = `{
         "models.GetResponse": {
             "type": "object",
             "properties": {
-                "client_type": {
-                    "$ref": "#/definitions/models.ClientType"
-                },
-                "dimensions": {
-                    "type": "integer"
+                "config": {
+                    "$ref": "#/definitions/models.ModelConfig"
                 },
                 "id": {
                     "type": "string"
-                },
-                "input_modalities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "llm_provider_id": {
                     "type": "string"
@@ -12122,11 +11635,25 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
-                "supports_reasoning": {
-                    "type": "boolean"
-                },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
+                }
+            }
+        },
+        "models.ModelConfig": {
+            "type": "object",
+            "properties": {
+                "compatibilities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "context_window": {
+                    "type": "integer"
+                },
+                "dimensions": {
+                    "type": "integer"
                 }
             }
         },
@@ -12176,17 +11703,8 @@ const docTemplate = `{
         "models.UpdateRequest": {
             "type": "object",
             "properties": {
-                "client_type": {
-                    "$ref": "#/definitions/models.ClientType"
-                },
-                "dimensions": {
-                    "type": "integer"
-                },
-                "input_modalities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "config": {
+                    "$ref": "#/definitions/models.ModelConfig"
                 },
                 "llm_provider_id": {
                     "type": "string"
@@ -12196,9 +11714,6 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
-                },
-                "supports_reasoning": {
-                    "type": "boolean"
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
@@ -12217,6 +11732,7 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "base_url",
+                "client_type",
                 "name"
             ],
             "properties": {
@@ -12224,6 +11740,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "base_url": {
+                    "type": "string"
+                },
+                "client_type": {
+                    "type": "string"
+                },
+                "icon": {
                     "type": "string"
                 },
                 "metadata": {
@@ -12244,7 +11766,16 @@ const docTemplate = `{
                 "base_url": {
                     "type": "string"
                 },
+                "client_type": {
+                    "type": "string"
+                },
                 "created_at": {
+                    "type": "string"
+                },
+                "enable": {
+                    "type": "boolean"
+                },
+                "icon": {
                     "type": "string"
                 },
                 "id": {
@@ -12258,14 +11789,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "providers.ImportModelsRequest": {
-            "type": "object",
-            "properties": {
-                "client_type": {
                     "type": "string"
                 }
             }
@@ -12308,6 +11831,15 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "base_url": {
+                    "type": "string"
+                },
+                "client_type": {
+                    "type": "string"
+                },
+                "enable": {
+                    "type": "boolean"
+                },
+                "icon": {
                     "type": "string"
                 },
                 "metadata": {
@@ -12622,6 +12154,9 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "parent_session_id": {
+                    "type": "string"
+                },
                 "route_conversation_type": {
                     "type": "string"
                 },
@@ -12758,175 +12293,6 @@ const docTemplate = `{
                 },
                 "tts_model_id": {
                     "type": "string"
-                }
-            }
-        },
-        "subagent.AddSkillsRequest": {
-            "type": "object",
-            "properties": {
-                "skills": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "subagent.ContextResponse": {
-            "type": "object",
-            "properties": {
-                "messages": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": {}
-                    }
-                },
-                "usage": {
-                    "type": "object",
-                    "additionalProperties": {}
-                }
-            }
-        },
-        "subagent.CreateRequest": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string"
-                },
-                "messages": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": {}
-                    }
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                },
-                "skills": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "subagent.ListResponse": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/subagent.Subagent"
-                    }
-                }
-            }
-        },
-        "subagent.SkillsResponse": {
-            "type": "object",
-            "properties": {
-                "skills": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "subagent.Subagent": {
-            "type": "object",
-            "properties": {
-                "bot_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "deleted": {
-                    "type": "boolean"
-                },
-                "deleted_at": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "messages": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": {}
-                    }
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                },
-                "skills": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "usage": {
-                    "type": "object",
-                    "additionalProperties": {}
-                }
-            }
-        },
-        "subagent.UpdateContextRequest": {
-            "type": "object",
-            "properties": {
-                "messages": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": {}
-                    }
-                },
-                "usage": {
-                    "type": "object",
-                    "additionalProperties": {}
-                }
-            }
-        },
-        "subagent.UpdateRequest": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "subagent.UpdateSkillsRequest": {
-            "type": "object",
-            "properties": {
-                "skills": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 }
             }
         },

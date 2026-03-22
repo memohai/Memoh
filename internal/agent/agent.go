@@ -417,6 +417,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, e
 	session := tools.SessionContext{
 		BotID:              cfg.Identity.BotID,
 		ChatID:             cfg.Identity.ChatID,
+		SessionID:          cfg.Identity.SessionID,
 		ChannelIdentityID:  cfg.Identity.ChannelIdentityID,
 		SessionToken:       cfg.Identity.SessionToken,
 		CurrentPlatform:    cfg.Identity.CurrentPlatform,

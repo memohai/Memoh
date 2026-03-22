@@ -145,6 +145,7 @@ function sessionIcon(session: SessionSummary): string[] {
   switch (session.type) {
     case 'heartbeat': return ['fas', 'heart-pulse']
     case 'schedule': return ['fas', 'clock']
+    case 'subagent': return ['fas', 'code-branch']
     default: return ['fas', 'message']
   }
 }
@@ -153,6 +154,7 @@ function sessionIconClass(session: SessionSummary): string {
   switch (session.type) {
     case 'heartbeat': return 'text-rose-400'
     case 'schedule': return 'text-amber-400'
+    case 'subagent': return 'text-violet-400'
     default: return 'text-muted-foreground'
   }
 }
@@ -195,6 +197,7 @@ function sessionDisplayLabel(session: SessionSummary): string {
 function sessionSubLabel(session: SessionSummary): string {
   if (session.type === 'heartbeat') return t('chat.sessionTypeHeartbeat')
   if (session.type === 'schedule') return t('chat.sessionTypeSchedule')
+  if (session.type === 'subagent') return t('chat.sessionTypeSubagent')
 
   if (!isIMSession(session)) return ''
   const meta = routeMeta(session)

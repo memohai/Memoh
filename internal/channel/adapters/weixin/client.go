@@ -58,7 +58,7 @@ func randomWechatUIN() string {
 	return base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(uint64(n), 10)))
 }
 
-func (*Client) buildHeaders(token, routeTag string, bodyLen int) http.Header {
+func (*Client) buildHeaders(token string, bodyLen int) http.Header {
 	h := http.Header{}
 	h.Set("Content-Type", "application/json")
 	h.Set("AuthorizationType", "ilink_bot_token")
@@ -66,9 +66,6 @@ func (*Client) buildHeaders(token, routeTag string, bodyLen int) http.Header {
 	h.Set("X-WECHAT-UIN", randomWechatUIN())
 	if strings.TrimSpace(token) != "" {
 		h.Set("Authorization", "Bearer "+strings.TrimSpace(token))
-	}
-	if strings.TrimSpace(routeTag) != "" {
-		h.Set("SKRouteTag", strings.TrimSpace(routeTag))
 	}
 	return h
 }
@@ -80,7 +77,7 @@ func ensureTrailingSlash(u string) string {
 	return u + "/"
 }
 
-func (c *Client) apiPost(ctx context.Context, baseURL, endpoint string, body []byte, token, routeTag string, timeout time.Duration) ([]byte, error) {
+func (c *Client) apiPost(ctx context.Context, baseURL, endpoint string, body []byte, token string, timeout time.Duration) ([]byte, error) {
 	base := ensureTrailingSlash(baseURL)
 	u, err := url.JoinPath(base, endpoint)
 	if err != nil {
@@ -93,7 +90,7 @@ func (c *Client) apiPost(ctx context.Context, baseURL, endpoint string, body []b
 	if err != nil {
 		return nil, fmt.Errorf("weixin api request: %w", err)
 	}
-	for k, vs := range c.buildHeaders(token, routeTag, len(body)) {
+	for k, vs := range c.buildHeaders(token, len(body)) {
 		for _, v := range vs {
 			req.Header.Add(k, v)
 		}
@@ -127,7 +124,7 @@ func (c *Client) GetUpdates(ctx context.Context, cfg adapterConfig, getUpdatesBu
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.apiPost(ctx, cfg.BaseURL, "ilink/bot/getupdates", body, cfg.Token, cfg.RouteTag, timeout+5*time.Second)
+	raw, err := c.apiPost(ctx, cfg.BaseURL, "ilink/bot/getupdates", body, cfg.Token, timeout+5*time.Second)
 	if err != nil {
 		if ctx.Err() != nil {
 			return &GetUpdatesResponse{Ret: 0, Msgs: nil, GetUpdatesBuf: getUpdatesBuf}, nil
@@ -148,7 +145,7 @@ func (c *Client) SendMessage(ctx context.Context, cfg adapterConfig, msg SendMes
 	if err != nil {
 		return err
 	}
-	_, err = c.apiPost(ctx, cfg.BaseURL, "ilink/bot/sendmessage", body, cfg.Token, cfg.RouteTag, defaultAPITimeout)
+	_, err = c.apiPost(ctx, cfg.BaseURL, "ilink/bot/sendmessage", body, cfg.Token, defaultAPITimeout)
 	return err
 }
 
@@ -162,7 +159,7 @@ func (c *Client) GetConfig(ctx context.Context, cfg adapterConfig, userID, conte
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.apiPost(ctx, cfg.BaseURL, "ilink/bot/getconfig", body, cfg.Token, cfg.RouteTag, defaultConfigTimeout)
+	raw, err := c.apiPost(ctx, cfg.BaseURL, "ilink/bot/getconfig", body, cfg.Token, defaultConfigTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +181,7 @@ func (c *Client) SendTyping(ctx context.Context, cfg adapterConfig, userID, typi
 	if err != nil {
 		return err
 	}
-	_, err = c.apiPost(ctx, cfg.BaseURL, "ilink/bot/sendtyping", body, cfg.Token, cfg.RouteTag, defaultConfigTimeout)
+	_, err = c.apiPost(ctx, cfg.BaseURL, "ilink/bot/sendtyping", body, cfg.Token, defaultConfigTimeout)
 	return err
 }
 
@@ -195,7 +192,7 @@ func (c *Client) GetUploadURL(ctx context.Context, cfg adapterConfig, req GetUpl
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.apiPost(ctx, cfg.BaseURL, "ilink/bot/getuploadurl", body, cfg.Token, cfg.RouteTag, defaultAPITimeout)
+	raw, err := c.apiPost(ctx, cfg.BaseURL, "ilink/bot/getuploadurl", body, cfg.Token, defaultAPITimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -207,16 +204,13 @@ func (c *Client) GetUploadURL(ctx context.Context, cfg adapterConfig, req GetUpl
 }
 
 // FetchQRCode requests a new QR code for login.
-func (c *Client) FetchQRCode(ctx context.Context, apiBaseURL, routeTag string) (*QRCodeResponse, error) {
+func (c *Client) FetchQRCode(ctx context.Context, apiBaseURL string) (*QRCodeResponse, error) {
 	base := ensureTrailingSlash(apiBaseURL)
 	u := base + "ilink/bot/get_bot_qrcode?bot_type=" + url.QueryEscape(defaultBotType)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
-	}
-	if strings.TrimSpace(routeTag) != "" {
-		req.Header.Set("SKRouteTag", strings.TrimSpace(routeTag))
 	}
 	resp, err := c.httpClient.Do(req) //nolint:gosec // URL from admin-configured baseURL
 	if err != nil {
@@ -238,7 +232,7 @@ func (c *Client) FetchQRCode(ctx context.Context, apiBaseURL, routeTag string) (
 }
 
 // PollQRStatus long-polls the QR code login status.
-func (c *Client) PollQRStatus(ctx context.Context, apiBaseURL, qrcode, routeTag string) (*QRStatusResponse, error) {
+func (c *Client) PollQRStatus(ctx context.Context, apiBaseURL, qrcode string) (*QRStatusResponse, error) {
 	base := ensureTrailingSlash(apiBaseURL)
 	u := base + "ilink/bot/get_qrcode_status?qrcode=" + url.QueryEscape(qrcode)
 
@@ -250,9 +244,6 @@ func (c *Client) PollQRStatus(ctx context.Context, apiBaseURL, qrcode, routeTag 
 		return nil, err
 	}
 	req.Header.Set("iLink-App-ClientVersion", "1")
-	if strings.TrimSpace(routeTag) != "" {
-		req.Header.Set("SKRouteTag", strings.TrimSpace(routeTag))
-	}
 	resp, err := c.httpClient.Do(req) //nolint:gosec // URL from admin-configured baseURL
 	if err != nil {
 		if ctx.Err() != nil {

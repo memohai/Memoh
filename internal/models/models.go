@@ -2,10 +2,10 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"strings"
 
 	"github.com/google/uuid"
@@ -43,39 +43,25 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 		return AddResponse{}, fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Convert to sqlc params
 	llmProviderID, err := db.ParseUUID(model.LlmProviderID)
 	if err != nil {
 		return AddResponse{}, fmt.Errorf("invalid llm provider ID: %w", err)
 	}
 
-	inputMod := []string{}
-	if model.Type == ModelTypeChat {
-		inputMod = normalizeModalities(model.InputModalities, []string{ModelInputText})
-	}
-	params := sqlc.CreateModelParams{
-		ModelID:           model.ModelID,
-		LlmProviderID:     llmProviderID,
-		InputModalities:   inputMod,
-		SupportsReasoning: model.SupportsReasoning,
-		Type:              string(model.Type),
-	}
-	if model.ClientType != "" {
-		params.ClientType = pgtype.Text{String: string(model.ClientType), Valid: true}
+	configJSON, err := json.Marshal(model.Config)
+	if err != nil {
+		return AddResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
 
-	// Handle optional name field
+	params := sqlc.CreateModelParams{
+		ModelID:       model.ModelID,
+		LlmProviderID: llmProviderID,
+		Type:          string(model.Type),
+		Config:        configJSON,
+	}
+
 	if model.Name != "" {
 		params.Name = pgtype.Text{String: model.Name, Valid: true}
-	}
-
-	// Handle optional dimensions field (only for embedding models)
-	if model.Type == ModelTypeEmbedding && model.Dimensions > 0 {
-		dimensions, err := intToInt4(model.Dimensions, "dimensions")
-		if err != nil {
-			return AddResponse{}, err
-		}
-		params.Dimensions = dimensions
 	}
 
 	created, err := s.queries.CreateModel(ctx, params)
@@ -86,7 +72,6 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 		return AddResponse{}, fmt.Errorf("failed to create model: %w", err)
 	}
 
-	// Convert pgtype.UUID to string
 	var idStr string
 	if created.ID.Valid {
 		id, err := uuid.FromBytes(created.ID.Bytes[:])
@@ -114,7 +99,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (GetResponse, error) {
 		return GetResponse{}, fmt.Errorf("failed to get model: %w", err)
 	}
 
-	return convertToGetResponse(dbModel), nil
+	return s.convertToGetResponse(dbModel), nil
 }
 
 // GetByModelID retrieves a model by its model_id field.
@@ -128,7 +113,7 @@ func (s *Service) GetByModelID(ctx context.Context, modelID string) (GetResponse
 		return GetResponse{}, fmt.Errorf("failed to get model: %w", err)
 	}
 
-	return convertToGetResponse(dbModel), nil
+	return s.convertToGetResponse(dbModel), nil
 }
 
 // List returns all models.
@@ -138,7 +123,7 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 		return nil, fmt.Errorf("failed to list models: %w", err)
 	}
 
-	return convertToGetResponseList(dbModels), nil
+	return s.convertToGetResponseList(dbModels), nil
 }
 
 // ListByType returns models filtered by type (chat or embedding).
@@ -152,21 +137,55 @@ func (s *Service) ListByType(ctx context.Context, modelType ModelType) ([]GetRes
 		return nil, fmt.Errorf("failed to list models by type: %w", err)
 	}
 
-	return convertToGetResponseList(dbModels), nil
+	return s.convertToGetResponseList(dbModels), nil
 }
 
-// ListByClientType returns models filtered by client type.
-func (s *Service) ListByClientType(ctx context.Context, clientType ClientType) ([]GetResponse, error) {
-	if !isValidClientType(clientType) {
+// ListByProviderClientType returns models whose provider has the given client_type.
+func (s *Service) ListByProviderClientType(ctx context.Context, clientType ClientType) ([]GetResponse, error) {
+	if !IsValidClientType(clientType) {
 		return nil, fmt.Errorf("invalid client type: %s", clientType)
 	}
 
-	dbModels, err := s.queries.ListModelsByClientType(ctx, pgtype.Text{String: string(clientType), Valid: true})
+	dbModels, err := s.queries.ListModelsByProviderClientType(ctx, string(clientType))
 	if err != nil {
-		return nil, fmt.Errorf("failed to list models by client type: %w", err)
+		return nil, fmt.Errorf("failed to list models by provider client type: %w", err)
 	}
 
-	return convertToGetResponseList(dbModels), nil
+	return s.convertToGetResponseList(dbModels), nil
+}
+
+// ListEnabled returns all models from enabled providers.
+func (s *Service) ListEnabled(ctx context.Context) ([]GetResponse, error) {
+	dbModels, err := s.queries.ListEnabledModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list enabled models: %w", err)
+	}
+	return s.convertToGetResponseList(dbModels), nil
+}
+
+// ListEnabledByType returns models from enabled providers filtered by type.
+func (s *Service) ListEnabledByType(ctx context.Context, modelType ModelType) ([]GetResponse, error) {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding {
+		return nil, fmt.Errorf("invalid model type: %s", modelType)
+	}
+	dbModels, err := s.queries.ListEnabledModelsByType(ctx, string(modelType))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list enabled models by type: %w", err)
+	}
+	return s.convertToGetResponseList(dbModels), nil
+}
+
+// ListEnabledByProviderClientType returns models from enabled providers with
+// the given client_type.
+func (s *Service) ListEnabledByProviderClientType(ctx context.Context, clientType ClientType) ([]GetResponse, error) {
+	if !IsValidClientType(clientType) {
+		return nil, fmt.Errorf("invalid client type: %s", clientType)
+	}
+	dbModels, err := s.queries.ListEnabledModelsByProviderClientType(ctx, string(clientType))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list enabled models by provider client type: %w", err)
+	}
+	return s.convertToGetResponseList(dbModels), nil
 }
 
 // ListByProviderID returns models filtered by provider ID.
@@ -182,7 +201,7 @@ func (s *Service) ListByProviderID(ctx context.Context, providerID string) ([]Ge
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by provider: %w", err)
 	}
-	return convertToGetResponseList(dbModels), nil
+	return s.convertToGetResponseList(dbModels), nil
 }
 
 // ListByProviderIDAndType returns models filtered by provider ID and type.
@@ -204,7 +223,7 @@ func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by provider and type: %w", err)
 	}
-	return convertToGetResponseList(dbModels), nil
+	return s.convertToGetResponseList(dbModels), nil
 }
 
 // UpdateByID updates a model by its internal UUID.
@@ -219,37 +238,26 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		return GetResponse{}, fmt.Errorf("validation failed: %w", err)
 	}
 
-	inputMod := []string{}
-	if model.Type == ModelTypeChat {
-		inputMod = normalizeModalities(model.InputModalities, []string{ModelInputText})
-	}
-	params := sqlc.UpdateModelParams{
-		ID:                uuid,
-		ModelID:           model.ModelID,
-		InputModalities:   inputMod,
-		SupportsReasoning: model.SupportsReasoning,
-		Type:              string(model.Type),
-	}
-	if model.ClientType != "" {
-		params.ClientType = pgtype.Text{String: string(model.ClientType), Valid: true}
-	}
-
 	llmProviderID, err := db.ParseUUID(model.LlmProviderID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("invalid llm provider ID: %w", err)
 	}
-	params.LlmProviderID = llmProviderID
+
+	configJSON, err := json.Marshal(model.Config)
+	if err != nil {
+		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
+	}
+
+	params := sqlc.UpdateModelParams{
+		ID:            uuid,
+		ModelID:       model.ModelID,
+		LlmProviderID: llmProviderID,
+		Type:          string(model.Type),
+		Config:        configJSON,
+	}
 
 	if model.Name != "" {
 		params.Name = pgtype.Text{String: model.Name, Valid: true}
-	}
-
-	if model.Type == ModelTypeEmbedding && model.Dimensions > 0 {
-		dimensions, err := intToInt4(model.Dimensions, "dimensions")
-		if err != nil {
-			return GetResponse{}, err
-		}
-		params.Dimensions = dimensions
 	}
 
 	updated, err := s.queries.UpdateModel(ctx, params)
@@ -260,7 +268,7 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		return GetResponse{}, fmt.Errorf("failed to update model: %w", err)
 	}
 
-	return convertToGetResponse(updated), nil
+	return s.convertToGetResponse(updated), nil
 }
 
 // UpdateByModelID updates a model by its model_id field.
@@ -278,39 +286,27 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 		return GetResponse{}, fmt.Errorf("validation failed: %w", err)
 	}
 
-	inputMod := []string{}
-	if model.Type == ModelTypeChat {
-		inputMod = normalizeModalities(model.InputModalities, []string{ModelInputText})
-	}
-	params := sqlc.UpdateModelParams{
-		ID:                current.ID,
-		InputModalities:   inputMod,
-		SupportsReasoning: model.SupportsReasoning,
-		Type:              string(model.Type),
-	}
-	if model.ClientType != "" {
-		params.ClientType = pgtype.Text{String: string(model.ClientType), Valid: true}
-	}
-
 	llmProviderID, err := db.ParseUUID(model.LlmProviderID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("invalid llm provider ID: %w", err)
 	}
-	params.LlmProviderID = llmProviderID
+
+	configJSON, err := json.Marshal(model.Config)
+	if err != nil {
+		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
+	}
+
+	params := sqlc.UpdateModelParams{
+		ID:            current.ID,
+		ModelID:       model.ModelID,
+		LlmProviderID: llmProviderID,
+		Type:          string(model.Type),
+		Config:        configJSON,
+	}
 
 	if model.Name != "" {
 		params.Name = pgtype.Text{String: model.Name, Valid: true}
 	}
-
-	if model.Type == ModelTypeEmbedding && model.Dimensions > 0 {
-		dimensions, err := intToInt4(model.Dimensions, "dimensions")
-		if err != nil {
-			return GetResponse{}, err
-		}
-		params.Dimensions = dimensions
-	}
-
-	params.ModelID = model.ModelID
 
 	updated, err := s.queries.UpdateModel(ctx, params)
 	if err != nil {
@@ -320,7 +316,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 		return GetResponse{}, fmt.Errorf("failed to update model: %w", err)
 	}
 
-	return convertToGetResponse(updated), nil
+	return s.convertToGetResponse(updated), nil
 }
 
 // DeleteByID deletes a model by its internal UUID.
@@ -376,23 +372,14 @@ func (s *Service) CountByType(ctx context.Context, modelType ModelType) (int64, 
 	return count, nil
 }
 
-// Helper functions
-
-func convertToGetResponse(dbModel sqlc.Model) GetResponse {
+func (s *Service) convertToGetResponse(dbModel sqlc.Model) GetResponse {
 	resp := GetResponse{
 		ID:      dbModel.ID.String(),
 		ModelID: dbModel.ModelID,
 		Model: Model{
-			ModelID:           dbModel.ModelID,
-			SupportsReasoning: dbModel.SupportsReasoning,
-			Type:              ModelType(dbModel.Type),
+			ModelID: dbModel.ModelID,
+			Type:    ModelType(dbModel.Type),
 		},
-	}
-	if dbModel.ClientType.Valid {
-		resp.ClientType = ClientType(dbModel.ClientType.String)
-	}
-	if resp.Type == ModelTypeChat {
-		resp.InputModalities = normalizeModalities(dbModel.InputModalities, []string{ModelInputText})
 	}
 
 	if dbModel.LlmProviderID.Valid {
@@ -403,17 +390,19 @@ func convertToGetResponse(dbModel sqlc.Model) GetResponse {
 		resp.Name = dbModel.Name.String
 	}
 
-	if dbModel.Dimensions.Valid {
-		resp.Dimensions = int(dbModel.Dimensions.Int32)
+	if len(dbModel.Config) > 0 {
+		if err := json.Unmarshal(dbModel.Config, &resp.Config); err != nil {
+			s.logger.Warn("failed to unmarshal model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
+		}
 	}
 
 	return resp
 }
 
-func convertToGetResponseList(dbModels []sqlc.Model) []GetResponse {
+func (s *Service) convertToGetResponseList(dbModels []sqlc.Model) []GetResponse {
 	responses := make([]GetResponse, 0, len(dbModels))
 	for _, dbModel := range dbModels {
-		responses = append(responses, convertToGetResponse(dbModel))
+		responses = append(responses, s.convertToGetResponse(dbModel))
 	}
 	return responses
 }
@@ -432,15 +421,8 @@ func (s *Service) findUniqueByModelID(ctx context.Context, modelID string) (sqlc
 	return rows[0], nil
 }
 
-// normalizeModalities returns modalities if non-empty, otherwise the provided fallback.
-func normalizeModalities(modalities []string, fallback []string) []string {
-	if len(modalities) == 0 {
-		return fallback
-	}
-	return modalities
-}
-
-func isValidClientType(clientType ClientType) bool {
+// IsValidClientType returns true if the given client type is supported.
+func IsValidClientType(clientType ClientType) bool {
 	switch clientType {
 	case ClientTypeOpenAIResponses,
 		ClientTypeOpenAICompletions,
@@ -472,9 +454,7 @@ func SelectMemoryModel(ctx context.Context, modelsService *Service, queries *sql
 	return selected, provider, nil
 }
 
-// SelectMemoryModelForBot selects memory model for a bot.
-// Since memory model configuration has moved to the memory provider config,
-// this now delegates directly to SelectMemoryModel.
+// SelectMemoryModelForBot delegates to SelectMemoryModel.
 func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, queries *sqlc.Queries, _ string) (GetResponse, sqlc.LlmProvider, error) {
 	return SelectMemoryModel(ctx, modelsService, queries)
 }
@@ -496,11 +476,4 @@ func FetchProviderByID(ctx context.Context, queries *sqlc.Queries, providerID st
 		channel.SetIMErrorSecrets("llm-provider:"+providerID, provider.ApiKey)
 	}
 	return provider, nil
-}
-
-func intToInt4(value int, name string) (pgtype.Int4, error) {
-	if value < math.MinInt32 || value > math.MaxInt32 {
-		return pgtype.Int4{}, fmt.Errorf("%s out of range: %d", name, value)
-	}
-	return pgtype.Int4{Int32: int32(value), Valid: true}, nil
 }

@@ -13,7 +13,10 @@ import (
 
 const getTokenUsageByDayAndType = `-- name: GetTokenUsageByDayAndType :many
 SELECT
-  COALESCE(s.type, 'chat')::text AS session_type,
+  COALESCE(
+    CASE WHEN s.type = 'subagent' THEN COALESCE(ps.type, 'chat') ELSE s.type END,
+    'chat'
+  )::text AS session_type,
   date_trunc('day', m.created_at)::date AS day,
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
@@ -22,6 +25,7 @@ SELECT
   COALESCE(SUM((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint), 0)::bigint AS reasoning_tokens
 FROM bot_history_messages m
 LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id
 WHERE m.bot_id = $1
   AND m.usage IS NOT NULL
   AND m.created_at >= $2

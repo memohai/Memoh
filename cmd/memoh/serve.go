@@ -73,13 +73,13 @@ import (
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
+	"github.com/memohai/memoh/internal/registry"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/server"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
-	"github.com/memohai/memoh/internal/subagent"
 	ttspkg "github.com/memohai/memoh/internal/tts"
 	ttsedge "github.com/memohai/memoh/internal/tts/adapter/edge"
 	"github.com/memohai/memoh/internal/version"
@@ -108,7 +108,6 @@ func runServe() {
 			searchproviders.NewService,
 			policy.NewService,
 			mcp.NewConnectionService,
-			subagent.NewService,
 			conversation.NewService,
 			identities.NewService,
 			bind.NewService,
@@ -161,7 +160,6 @@ func runServe() {
 			provideServerHandler(handlers.NewScheduleHandler),
 			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewCompactionHandler),
-			provideServerHandler(handlers.NewSubagentHandler),
 			provideServerHandler(handlers.NewChannelHandler),
 			provideServerHandler(feishu.NewWebhookServerHandler),
 			provideServerHandler(weixin.NewQRServerHandler),
@@ -187,6 +185,7 @@ func runServe() {
 		),
 		fx.Invoke(
 			injectToolProviders,
+			startRegistrySync,
 			startMemoryProviderBootstrap,
 			startScheduleService,
 			startHeartbeatService,
@@ -272,6 +271,22 @@ func provideMemoryProviderRegistry(log *slog.Logger, chatService *conversation.S
 	return registry
 }
 
+func startRegistrySync(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, queries *dbsqlc.Queries) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			defs, err := registry.Load(cfg.Registry.ProvidersPath())
+			if err != nil {
+				log.Warn("registry: failed to load provider definitions", slog.Any("error", err))
+				return nil
+			}
+			if len(defs) == 0 {
+				return nil
+			}
+			return registry.Sync(ctx, log, queries, defs)
+		},
+	})
+}
+
 func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *memprovider.Service, registry *memprovider.Registry) {
 	mpService.SetRegistry(registry)
 	lc.Append(fx.Hook{
@@ -341,8 +356,16 @@ func provideAgent(log *slog.Logger, manager *workspace.Manager) *agentpkg.Agent 
 	})
 }
 
-func injectToolProviders(a *agentpkg.Agent, providers []agenttools.ToolProvider) {
+func injectToolProviders(a *agentpkg.Agent, msgService *message.DBService, providers []agenttools.ToolProvider) {
 	a.SetToolProviders(providers)
+	for _, p := range providers {
+		if sp, ok := p.(*agenttools.SpawnProvider); ok {
+			sp.SetAgent(agentpkg.NewSpawnAdapter(a))
+			sp.SetMessageService(msgService)
+			sp.SetSystemPromptFunc(agentpkg.SpawnSystemPrompt)
+			sp.SetModelCreator(agentpkg.SpawnModelCreatorFunc())
+		}
+	}
 }
 
 func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service) *flow.Resolver {
@@ -379,7 +402,7 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	return registry
 }
 
-func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *local.RouteHub, routeService *route.DBService, sessionService *sessionpkg.Service, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, aclService *acl.Service, policyService *policy.Service, bindService *bind.Service, mediaService *media.Service, ttsService *ttspkg.Service, settingsService *settings.Service, subagentService *subagent.Service, scheduleService *schedule.Service, mcpConnService *mcp.ConnectionService, modelsService *models.Service, providersService *providers.Service, memProvService *memprovider.Service, searchProvService *searchproviders.Service, browserCtxService *browsercontexts.Service, emailService *emailpkg.Service, emailOutboxService *emailpkg.OutboxService, heartbeatService *heartbeat.Service, queries *dbsqlc.Queries, containerdHandler *handlers.ContainerdHandler, manager *workspace.Manager, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
+func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *local.RouteHub, routeService *route.DBService, sessionService *sessionpkg.Service, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, aclService *acl.Service, policyService *policy.Service, bindService *bind.Service, mediaService *media.Service, ttsService *ttspkg.Service, settingsService *settings.Service, scheduleService *schedule.Service, mcpConnService *mcp.ConnectionService, modelsService *models.Service, providersService *providers.Service, memProvService *memprovider.Service, searchProvService *searchproviders.Service, browserCtxService *browsercontexts.Service, emailService *emailpkg.Service, emailOutboxService *emailpkg.OutboxService, heartbeatService *heartbeat.Service, queries *dbsqlc.Queries, containerdHandler *handlers.ContainerdHandler, manager *workspace.Manager, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
 	adapter, ok := registry.Get(qq.Type)
 	if !ok {
 		panic("qq adapter not registered")
@@ -399,7 +422,6 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 	processor.SetCommandHandler(command.NewHandler(
 		log,
 		&command.BotMemberRoleAdapter{BotService: botService},
-		subagentService,
 		scheduleService,
 		settingsService,
 		mcpConnService,
@@ -460,7 +482,7 @@ func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederat
 	return svc
 }
 
-func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service, sessionService *sessionpkg.Service) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service, sessionService *sessionpkg.Service) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -476,7 +498,7 @@ func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *c
 		agenttools.NewReadMediaProvider(log, manager, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailManager),
 		agenttools.NewWebFetchProvider(log),
-		agenttools.NewSubagentProvider(log, subagentService, settingsService, modelsService, queries, ""),
+		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService),
 		agenttools.NewSkillProvider(log),
 		agenttools.NewBrowserProvider(log, settingsService, browserContextService, manager, cfg.BrowserGateway),
 		agenttools.NewTTSProvider(log, settingsService, ttsService, channelManager, registry),
@@ -591,7 +613,6 @@ var (
 		"/schedule",
 		"/bind",
 		"/preauth",
-		"/subagents",
 		"/ping",
 		"/health",
 	}
@@ -953,7 +974,7 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memprovider.LLM, error) {
 	if err != nil {
 		return nil, err
 	}
-	clientType := string(memoryModel.ClientType)
+	clientType := memoryProvider.ClientType
 	switch clientType {
 	case "openai-responses", "openai-completions", "anthropic-messages", "google-generative-ai":
 	default:

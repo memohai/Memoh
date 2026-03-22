@@ -107,9 +107,5 @@ const emailTools = new Set([
 
 const browserTools = new Set(['browser_action', 'browser_observe'])
 
-const subagentTools = new Set([
-  'query_subagent',
-  'list_subagents',
-  'delete_subagent',
-])
+const subagentTools = new Set(['spawn'])
 </script>

@@ -16,9 +16,9 @@ var (
 	systemChatTmpl      string
 	systemHeartbeatTmpl string
 	systemScheduleTmpl  string
+	systemSubagentTmpl  string
 	scheduleTmpl        string
 	heartbeatTmpl       string
-	subagentTmpl        string
 
 	includes map[string]string
 )
@@ -29,9 +29,9 @@ func init() {
 	systemChatTmpl = mustReadPrompt("prompts/system_chat.md")
 	systemHeartbeatTmpl = mustReadPrompt("prompts/system_heartbeat.md")
 	systemScheduleTmpl = mustReadPrompt("prompts/system_schedule.md")
+	systemSubagentTmpl = mustReadPrompt("prompts/system_subagent.md")
 	scheduleTmpl = mustReadPrompt("prompts/schedule.md")
 	heartbeatTmpl = mustReadPrompt("prompts/heartbeat.md")
-	subagentTmpl = mustReadPrompt("prompts/subagent.md")
 
 	includes = map[string]string{
 		"_memory":        mustReadPrompt("prompts/_memory.md"),
@@ -44,6 +44,7 @@ func init() {
 	systemChatTmpl = resolveIncludes(systemChatTmpl)
 	systemHeartbeatTmpl = resolveIncludes(systemHeartbeatTmpl)
 	systemScheduleTmpl = resolveIncludes(systemScheduleTmpl)
+	systemSubagentTmpl = resolveIncludes(systemSubagentTmpl)
 }
 
 func mustReadPrompt(name string) string {
@@ -84,6 +85,8 @@ func selectSystemTemplate(sessionType string) string {
 		return systemHeartbeatTmpl
 	case "schedule":
 		return systemScheduleTmpl
+	case "subagent":
+		return systemSubagentTmpl
 	default:
 		return systemChatTmpl
 	}
@@ -166,14 +169,6 @@ func GenerateHeartbeatPrompt(interval int, checklist string, lastHeartbeatAt str
 		"timeNow":          TimeNow().UTC().Format("2006-01-02T15:04:05Z"),
 		"lastHeartbeat":    lastHB,
 		"checklistSection": checklistSection,
-	})
-}
-
-// GenerateSubagentSystemPrompt builds the system prompt for a subagent.
-func GenerateSubagentSystemPrompt(name, description string) string {
-	return render(subagentTmpl, map[string]string{
-		"name":        name,
-		"description": description,
 	})
 }
 

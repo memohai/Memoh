@@ -1,0 +1,68 @@
+name: Anthropic
+client_type: anthropic-messages
+icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/anthropic.svg
+base_url: https://api.anthropic.com
+
+models:
+  - model_id: claude-opus-4-6
+    name: Claude Opus 4.6
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+
+  - model_id: claude-sonnet-4-6
+    name: Claude Sonnet 4.6
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+
+  - model_id: claude-opus-4-5-20251101
+    name: Claude Opus 4.5
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-sonnet-4-5-20250929
+    name: Claude Sonnet 4.5
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-haiku-4-5-20251001
+    name: Claude Haiku 4.5
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-opus-4-1-20250805
+    name: Claude Opus 4.1
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-opus-4-20250514
+    name: Claude Opus 4
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-sonnet-4-20250514
+    name: Claude Sonnet 4
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-3-haiku-20240307
+    name: Claude 3 Haiku
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 200000

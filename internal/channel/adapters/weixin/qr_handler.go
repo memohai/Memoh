@@ -57,7 +57,7 @@ type QRStartResponse struct {
 // @Failure 500 {object} map[string]string
 // @Router /bots/{id}/channel/weixin/qr/start [post].
 func (h *QRHandler) Start(c echo.Context) error {
-	qr, err := h.client.FetchQRCode(c.Request().Context(), defaultBaseURL, "")
+	qr, err := h.client.FetchQRCode(c.Request().Context(), defaultBaseURL)
 	if err != nil {
 		h.logger.Error("weixin qr start failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch QR code: "+err.Error())
@@ -106,7 +106,7 @@ func (h *QRHandler) Poll(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "qr_code is required")
 	}
 
-	status, err := h.client.PollQRStatus(c.Request().Context(), defaultBaseURL, qrCode, "")
+	status, err := h.client.PollQRStatus(c.Request().Context(), defaultBaseURL, qrCode)
 	if err != nil {
 		h.logger.Error("weixin qr poll failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "Poll failed: "+err.Error())

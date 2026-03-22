@@ -11,6 +11,7 @@ import (
 type SessionContext struct {
 	BotID             string
 	ChatID            string
+	SessionID         string
 	ChannelIdentityID string
 	CurrentPlatform   string
 	ReplyTarget       string
@@ -94,7 +95,6 @@ type SystemFile struct {
 type ModelConfig struct {
 	ModelID         string
 	ClientType      string
-	InputModalities []string
 	APIKey          string //nolint:gosec // carries provider credential material at runtime
 	BaseURL         string
 	ReasoningConfig *ReasoningConfig

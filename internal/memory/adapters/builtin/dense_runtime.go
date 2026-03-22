@@ -525,14 +525,20 @@ func resolveDenseEmbeddingModel(ctx context.Context, queries *dbsqlc.Queries, mo
 	if err != nil {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: get embedding provider: %w", err)
 	}
-	if !row.Dimensions.Valid || row.Dimensions.Int32 <= 0 {
+	var cfg struct {
+		Dimensions *int `json:"dimensions"`
+	}
+	if len(row.Config) > 0 {
+		_ = json.Unmarshal(row.Config, &cfg)
+	}
+	if cfg.Dimensions == nil || *cfg.Dimensions <= 0 {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: embedding model %s missing dimensions", modelRef)
 	}
 	return denseModelSpec{
 		modelID:    strings.TrimSpace(row.ModelID),
 		baseURL:    strings.TrimSpace(provider.BaseUrl),
 		apiKey:     strings.TrimSpace(provider.ApiKey),
-		dimensions: int(row.Dimensions.Int32),
+		dimensions: *cfg.Dimensions,
 	}, nil
 }
 

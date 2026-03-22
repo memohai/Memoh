@@ -1,6 +1,15 @@
 <template>
   <div class="p-4">
-    <section class="flex justify-between items-center">
+    <section class="flex items-center gap-3">
+      <Avatar class="size-10 shrink-0">
+        <AvatarImage
+          v-if="curProvider?.icon"
+          :src="curProvider.icon"
+        />
+        <AvatarFallback class="text-sm font-medium">
+          {{ getInitials(curProvider?.name) }}
+        </AvatarFallback>
+      </Avatar>
       <h4 class="scroll-m-20 tracking-tight">
         {{ curProvider?.name }}
       </h4>
@@ -28,7 +37,12 @@
 </template>
 
 <script setup lang="ts">
-import { Separator } from '@memoh/ui'
+import { Separator, Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
+
+function getInitials(name: string | undefined) {
+  const label = name?.trim() ?? ''
+  return label ? label.slice(0, 2).toUpperCase() : '?'
+}
 import ProviderForm from './components/provider-form.vue'
 import ModelList from './components/model-list.vue'
 import { computed, inject, provide, reactive, ref, toRef, watch } from 'vue'

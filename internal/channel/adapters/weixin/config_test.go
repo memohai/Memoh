@@ -27,8 +27,6 @@ func TestParseConfig(t *testing.T) {
 		cfg, err := parseConfig(map[string]any{
 			"token":              "tok",
 			"baseUrl":            "https://example.com",
-			"cdnBaseUrl":         "https://cdn.example.com",
-			"routeTag":           "tag1",
 			"pollTimeoutSeconds": 60,
 			"enableTyping":       true,
 		})
@@ -38,11 +36,8 @@ func TestParseConfig(t *testing.T) {
 		if cfg.BaseURL != "https://example.com" {
 			t.Errorf("baseURL = %q", cfg.BaseURL)
 		}
-		if cfg.CDNBaseURL != "https://cdn.example.com" {
-			t.Errorf("cdnBaseURL = %q", cfg.CDNBaseURL)
-		}
-		if cfg.RouteTag != "tag1" {
-			t.Errorf("routeTag = %q", cfg.RouteTag)
+		if cfg.CDNBaseURL != defaultCDNBaseURL {
+			t.Errorf("cdnBaseURL = %q, want %q", cfg.CDNBaseURL, defaultCDNBaseURL)
 		}
 		if cfg.PollTimeoutSeconds != 60 {
 			t.Errorf("pollTimeout = %d", cfg.PollTimeoutSeconds)
@@ -63,7 +58,6 @@ func TestParseConfig(t *testing.T) {
 		cfg, err := parseConfig(map[string]any{
 			"token":                "tok",
 			"base_url":             "https://alt.com",
-			"cdn_base_url":         "https://altcdn.com",
 			"poll_timeout_seconds": 45,
 			"enable_typing":        true,
 		})
@@ -73,7 +67,7 @@ func TestParseConfig(t *testing.T) {
 		if cfg.BaseURL != "https://alt.com" {
 			t.Errorf("baseURL = %q", cfg.BaseURL)
 		}
-		if cfg.CDNBaseURL != "https://altcdn.com" {
+		if cfg.CDNBaseURL != defaultCDNBaseURL {
 			t.Errorf("cdnBaseURL = %q", cfg.CDNBaseURL)
 		}
 		if cfg.PollTimeoutSeconds != 45 {
@@ -87,10 +81,8 @@ func TestParseConfig(t *testing.T) {
 
 func TestNormalizeConfig(t *testing.T) {
 	out, err := normalizeConfig(map[string]any{
-		"token":      "tok",
-		"baseUrl":    "https://example.com",
-		"cdnBaseUrl": "https://cdn.example.com",
-		"routeTag":   "rt",
+		"token":   "tok",
+		"baseUrl": "https://example.com",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -101,8 +93,8 @@ func TestNormalizeConfig(t *testing.T) {
 	if out["baseUrl"] != "https://example.com" {
 		t.Errorf("baseUrl = %v", out["baseUrl"])
 	}
-	if out["routeTag"] != "rt" {
-		t.Errorf("routeTag = %v", out["routeTag"])
+	if _, has := out["cdnBaseUrl"]; has {
+		t.Error("cdnBaseUrl should not be in normalized output")
 	}
 }
 

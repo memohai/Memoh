@@ -61,10 +61,14 @@ CREATE TABLE IF NOT EXISTS llm_providers (
   name TEXT NOT NULL,
   base_url TEXT NOT NULL,
   api_key TEXT NOT NULL,
+  client_type TEXT NOT NULL DEFAULT 'openai-completions',
+  icon TEXT,
+  enable BOOLEAN NOT NULL DEFAULT true,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT llm_providers_name_unique UNIQUE (name)
+  CONSTRAINT llm_providers_name_unique UNIQUE (name),
+  CONSTRAINT llm_providers_client_type_check CHECK (client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai'))
 );
 
 CREATE TABLE IF NOT EXISTS search_providers (
@@ -82,18 +86,12 @@ CREATE TABLE IF NOT EXISTS models (
   model_id TEXT NOT NULL,
   name TEXT,
   llm_provider_id UUID NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
-  client_type TEXT,
-  dimensions INTEGER,
-  input_modalities TEXT[] NOT NULL DEFAULT ARRAY['text']::TEXT[],
-  supports_reasoning BOOLEAN NOT NULL DEFAULT false,
   type TEXT NOT NULL DEFAULT 'chat',
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT models_provider_model_id_unique UNIQUE (llm_provider_id, model_id),
-  CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding')),
-  CONSTRAINT models_dimensions_check CHECK (type != 'embedding' OR dimensions IS NOT NULL),
-  CONSTRAINT models_client_type_check CHECK (client_type IS NULL OR client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai')),
-  CONSTRAINT models_chat_client_type_check CHECK (type != 'chat' OR client_type IS NOT NULL)
+  CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding'))
 );
 
 CREATE TABLE IF NOT EXISTS model_variants (
@@ -345,9 +343,10 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
   channel_type TEXT,
-  type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule')),
+  type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent')),
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at TIMESTAMPTZ
@@ -356,6 +355,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_id ON bot_sessions(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_route_id ON bot_sessions(route_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active ON bot_sessions(bot_id, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_session_id) WHERE parent_session_id IS NOT NULL;
 
 -- Add FK from routes to sessions (deferred to avoid circular dependency during CREATE).
 ALTER TABLE bot_channel_routes
@@ -466,25 +466,6 @@ CREATE TABLE IF NOT EXISTS schedule (
 
 CREATE INDEX IF NOT EXISTS idx_schedule_bot_id ON schedule(bot_id);
 CREATE INDEX IF NOT EXISTS idx_schedule_enabled ON schedule(enabled);
-
-CREATE TABLE IF NOT EXISTS subagents (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  description TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted BOOLEAN NOT NULL DEFAULT false,
-  deleted_at TIMESTAMPTZ,
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  messages JSONB NOT NULL DEFAULT '[]'::jsonb,
-  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  skills JSONB NOT NULL DEFAULT '[]'::jsonb,
-  usage JSONB NOT NULL DEFAULT '{}'::jsonb,
-  CONSTRAINT subagents_name_unique UNIQUE (bot_id, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_subagents_bot_id ON subagents(bot_id);
-CREATE INDEX IF NOT EXISTS idx_subagents_deleted ON subagents(deleted);
 
 -- storage_providers: pluggable object storage backends
 CREATE TABLE IF NOT EXISTS storage_providers (

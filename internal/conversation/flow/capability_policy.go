@@ -12,14 +12,6 @@ const (
 	gatewayTransportToolFileRef   = "tool_file_ref"
 )
 
-// attachmentModality maps an attachment type string to the input modality it requires.
-var attachmentModality = map[string]string{
-	"image": models.ModelInputImage,
-	"audio": models.ModelInputAudio,
-	"video": models.ModelInputVideo,
-	"file":  models.ModelInputFile,
-}
-
 // gatewayAttachment is the strict server-to-gateway attachment contract.
 // ContentHash is the content reference (replaces legacy assetId).
 type gatewayAttachment struct {
@@ -45,12 +37,16 @@ type capabilityRouteResult struct {
 	Fallback []gatewayAttachment
 }
 
-// routeAttachmentsByCapability splits attachments based on both model capability
-// and gateway native support. Unsupported items are routed through fallback.
-func routeAttachmentsByCapability(modalities []string, attachments []gatewayAttachment) capabilityRouteResult {
-	supported := make(map[string]struct{}, len(modalities))
-	for _, m := range modalities {
-		supported[strings.ToLower(strings.TrimSpace(m))] = struct{}{}
+// routeAttachmentsByCapability splits attachments based on model compatibilities.
+// Only images are routed natively when the model has CompatVision; everything
+// else goes through fallback.
+func routeAttachmentsByCapability(compatibilities []string, attachments []gatewayAttachment) capabilityRouteResult {
+	hasVision := false
+	for _, c := range compatibilities {
+		if c == models.CompatVision {
+			hasVision = true
+			break
+		}
 	}
 
 	result := capabilityRouteResult{
@@ -60,17 +56,7 @@ func routeAttachmentsByCapability(modalities []string, attachments []gatewayAtta
 	for _, att := range attachments {
 		att.Type = strings.ToLower(strings.TrimSpace(att.Type))
 		att.Transport = strings.ToLower(strings.TrimSpace(att.Transport))
-		requiredModality, known := attachmentModality[att.Type]
-		if !known {
-			// Unknown attachment types always go through fallback path.
-			result.Fallback = append(result.Fallback, att)
-			continue
-		}
-		if !isGatewayNativeAttachment(att) {
-			result.Fallback = append(result.Fallback, att)
-			continue
-		}
-		if _, ok := supported[requiredModality]; ok {
+		if att.Type == "image" && hasVision && isGatewayNativeAttachment(att) {
 			result.Native = append(result.Native, att)
 		} else {
 			result.Fallback = append(result.Fallback, att)

@@ -23,6 +23,7 @@ type Session struct {
 	Type                  string         `json:"type"`
 	Title                 string         `json:"title"`
 	Metadata              map[string]any `json:"metadata,omitempty"`
+	ParentSessionID       string         `json:"parent_session_id,omitempty"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 	RouteMetadata         map[string]any `json:"route_metadata,omitempty"`
@@ -33,16 +34,18 @@ const (
 	TypeChat      = "chat"
 	TypeHeartbeat = "heartbeat"
 	TypeSchedule  = "schedule"
+	TypeSubagent  = "subagent"
 )
 
 // CreateInput holds input for creating a new session.
 type CreateInput struct {
-	BotID       string
-	RouteID     string
-	ChannelType string
-	Type        string
-	Title       string
-	Metadata    map[string]any
+	BotID           string
+	RouteID         string
+	ChannelType     string
+	Type            string
+	Title           string
+	Metadata        map[string]any
+	ParentSessionID string
 }
 
 // Service manages bot chat sessions.
@@ -92,13 +95,19 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		sessionType = TypeChat
 	}
 
+	pgParentSessionID, err := parseOptionalUUID(input.ParentSessionID)
+	if err != nil {
+		return Session{}, fmt.Errorf("invalid parent session id: %w", err)
+	}
+
 	row, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
-		BotID:       pgBotID,
-		RouteID:     pgRouteID,
-		ChannelType: channelType,
-		Type:        sessionType,
-		Title:       input.Title,
-		Metadata:    metaBytes,
+		BotID:           pgBotID,
+		RouteID:         pgRouteID,
+		ChannelType:     channelType,
+		Type:            sessionType,
+		Title:           input.Title,
+		Metadata:        metaBytes,
+		ParentSessionID: pgParentSessionID,
 	})
 	if err != nil {
 		return Session{}, err
@@ -280,16 +289,21 @@ func (s *Service) EnsureActiveSession(ctx context.Context, botID, routeID, chann
 }
 
 func toSession(row sqlc.BotSession) Session {
+	parentID := ""
+	if row.ParentSessionID.Valid {
+		parentID = row.ParentSessionID.String()
+	}
 	return Session{
-		ID:          row.ID.String(),
-		BotID:       row.BotID.String(),
-		RouteID:     row.RouteID.String(),
-		ChannelType: dbpkg.TextToString(row.ChannelType),
-		Type:        row.Type,
-		Title:       row.Title,
-		Metadata:    parseJSONMap(row.Metadata),
-		CreatedAt:   row.CreatedAt.Time,
-		UpdatedAt:   row.UpdatedAt.Time,
+		ID:              row.ID.String(),
+		BotID:           row.BotID.String(),
+		RouteID:         row.RouteID.String(),
+		ChannelType:     dbpkg.TextToString(row.ChannelType),
+		Type:            row.Type,
+		Title:           row.Title,
+		Metadata:        parseJSONMap(row.Metadata),
+		ParentSessionID: parentID,
+		CreatedAt:       row.CreatedAt.Time,
+		UpdatedAt:       row.UpdatedAt.Time,
 	}
 }
 

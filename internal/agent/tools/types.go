@@ -20,6 +20,7 @@ type SkillDetail struct {
 type SessionContext struct {
 	BotID              string
 	ChatID             string
+	SessionID          string
 	ChannelIdentityID  string
 	SessionToken       string //nolint:gosec // carries session credential material at runtime
 	CurrentPlatform    string

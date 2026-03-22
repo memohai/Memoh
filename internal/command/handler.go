@@ -17,7 +17,6 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/subagent"
 )
 
 // MemberRoleResolver resolves a user's role within a bot.
@@ -45,7 +44,6 @@ func (a *BotMemberRoleAdapter) GetMemberRole(ctx context.Context, botID, channel
 type Handler struct {
 	registry        *Registry
 	roleResolver    MemberRoleResolver
-	subagentService *subagent.Service
 	scheduleService *schedule.Service
 	settingsService *settings.Service
 	mcpConnService  *mcp.ConnectionService
@@ -69,7 +67,6 @@ type Handler struct {
 func NewHandler(
 	log *slog.Logger,
 	roleResolver MemberRoleResolver,
-	subagentService *subagent.Service,
 	scheduleService *schedule.Service,
 	settingsService *settings.Service,
 	mcpConnService *mcp.ConnectionService,
@@ -90,7 +87,6 @@ func NewHandler(
 	}
 	h := &Handler{
 		roleResolver:       roleResolver,
-		subagentService:    subagentService,
 		scheduleService:    scheduleService,
 		settingsService:    settingsService,
 		mcpConnService:     mcpConnService,

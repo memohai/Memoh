@@ -107,7 +107,7 @@ func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, 
 
 	modelCfg := agentpkg.ModelConfig{
 		ModelID:    model.ModelID,
-		ClientType: string(model.ClientType),
+		ClientType: provider.ClientType,
 		APIKey:     provider.ApiKey,
 		BaseURL:    provider.BaseUrl,
 	}

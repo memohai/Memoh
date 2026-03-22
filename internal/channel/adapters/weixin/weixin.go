@@ -52,6 +52,7 @@ func (*WeixinAdapter) Descriptor() channel.Descriptor {
 			Text:           true,
 			Attachments:    true,
 			Media:          true,
+			Reply:          true,
 			BlockStreaming: true,
 			ChatTypes:      []string{channel.ConversationTypePrivate},
 		},

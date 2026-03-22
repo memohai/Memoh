@@ -10,7 +10,7 @@ import (
 
 const (
 	defaultBaseURL    = "https://ilinkai.weixin.qq.com"
-	defaultCDNBaseURL = "https://dldir1v6.qq.com"
+	defaultCDNBaseURL = "https://novac2c.cdn.weixin.qq.com/c2c"
 	defaultBotType    = "3"
 )
 
@@ -18,7 +18,6 @@ type adapterConfig struct {
 	Token              string
 	BaseURL            string
 	CDNBaseURL         string
-	RouteTag           string
 	PollTimeoutSeconds int
 	EnableTyping       bool
 }
@@ -29,12 +28,8 @@ func normalizeConfig(raw map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	out := map[string]any{
-		"token":      cfg.Token,
-		"baseUrl":    cfg.BaseURL,
-		"cdnBaseUrl": cfg.CDNBaseURL,
-	}
-	if cfg.RouteTag != "" {
-		out["routeTag"] = cfg.RouteTag
+		"token":   cfg.Token,
+		"baseUrl": cfg.BaseURL,
 	}
 	if cfg.PollTimeoutSeconds > 0 {
 		out["pollTimeoutSeconds"] = cfg.PollTimeoutSeconds
@@ -49,14 +44,10 @@ func parseConfig(raw map[string]any) (adapterConfig, error) {
 	cfg := adapterConfig{
 		Token:      strings.TrimSpace(channel.ReadString(raw, "token")),
 		BaseURL:    strings.TrimSpace(channel.ReadString(raw, "baseUrl", "base_url")),
-		CDNBaseURL: strings.TrimSpace(channel.ReadString(raw, "cdnBaseUrl", "cdn_base_url")),
-		RouteTag:   strings.TrimSpace(channel.ReadString(raw, "routeTag", "route_tag")),
+		CDNBaseURL: defaultCDNBaseURL,
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = defaultBaseURL
-	}
-	if cfg.CDNBaseURL == "" {
-		cfg.CDNBaseURL = defaultCDNBaseURL
 	}
 	if v, ok := readInt(raw, "pollTimeoutSeconds", "poll_timeout_seconds"); ok {
 		cfg.PollTimeoutSeconds = v
