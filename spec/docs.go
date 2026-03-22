@@ -12109,6 +12109,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "enable": {
+                    "type": "boolean"
+                },
                 "icon": {
                     "type": "string"
                 },
@@ -12169,6 +12172,9 @@ const docTemplate = `{
                 },
                 "client_type": {
                     "type": "string"
+                },
+                "enable": {
+                    "type": "boolean"
                 },
                 "icon": {
                     "type": "string"

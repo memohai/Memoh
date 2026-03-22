@@ -50,13 +50,13 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		icon = pgtype.Text{String: req.Icon, Valid: true}
 	}
 
-	// Create provider
 	provider, err := s.queries.CreateLlmProvider(ctx, sqlc.CreateLlmProviderParams{
 		Name:       req.Name,
 		BaseUrl:    req.BaseURL,
 		ApiKey:     req.APIKey,
 		ClientType: clientType,
 		Icon:       icon,
+		Enable:     true,
 		Metadata:   metadataJSON,
 	})
 	if err != nil {
@@ -141,6 +141,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		icon = pgtype.Text{String: *req.Icon, Valid: *req.Icon != ""}
 	}
 
+	enable := existing.Enable
+	if req.Enable != nil {
+		enable = *req.Enable
+	}
+
 	metadata := existing.Metadata
 	if req.Metadata != nil {
 		metadataJSON, err := json.Marshal(req.Metadata)
@@ -158,6 +163,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		ApiKey:     apiKey,
 		ClientType: clientType,
 		Icon:       icon,
+		Enable:     enable,
 		Metadata:   metadata,
 	})
 	if err != nil {
@@ -293,6 +299,7 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 		APIKey:     maskedAPIKey,
 		ClientType: provider.ClientType,
 		Icon:       icon,
+		Enable:     provider.Enable,
 		Metadata:   metadata,
 		CreatedAt:  provider.CreatedAt.Time,
 		UpdatedAt:  provider.UpdatedAt.Time,

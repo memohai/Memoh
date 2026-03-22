@@ -19,6 +19,7 @@ type UpdateRequest struct {
 	APIKey     *string        `json:"api_key,omitempty"` //nolint:gosec // intentional: LLM provider API key update field
 	ClientType *string        `json:"client_type,omitempty"`
 	Icon       *string        `json:"icon,omitempty"`
+	Enable     *bool          `json:"enable,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
@@ -30,6 +31,7 @@ type GetResponse struct {
 	APIKey     string         `json:"api_key,omitempty"` //nolint:gosec // intentional: partially masked API key for display
 	ClientType string         `json:"client_type"`
 	Icon       string         `json:"icon,omitempty"`
+	Enable     bool           `json:"enable"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`

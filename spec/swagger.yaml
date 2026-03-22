@@ -2042,6 +2042,8 @@ definitions:
         type: string
       created_at:
         type: string
+      enable:
+        type: boolean
       icon:
         type: string
       id:
@@ -2082,6 +2084,8 @@ definitions:
         type: string
       client_type:
         type: string
+      enable:
+        type: boolean
       icon:
         type: string
       metadata:

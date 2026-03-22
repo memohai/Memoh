@@ -219,7 +219,9 @@
     "autoImportHint": "创建后自动从服务商获取并导入模型",
     "clientType": "客户端类型",
     "icon": "图标",
-    "iconPlaceholder": "图标 URL 或标识（可选）"
+    "iconPlaceholder": "图标 URL 或标识（可选）",
+    "enable": "启用",
+    "enableHint": "只有启用的供应商的模型才会出现在可用模型列表中"
   },
   "searchProvider": {
     "title": "搜索提供方",

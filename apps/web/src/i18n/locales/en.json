@@ -223,7 +223,9 @@
     "autoImportHint": "Automatically fetch and import models from the provider after creation",
     "clientType": "Client Type",
     "icon": "Icon",
-    "iconPlaceholder": "Icon URL or identifier (optional)"
+    "iconPlaceholder": "Icon URL or identifier (optional)",
+    "enable": "Enable",
+    "enableHint": "Only models from enabled providers appear in the available model list"
   },
   "searchProvider": {
     "title": "Search Providers",

@@ -12100,6 +12100,9 @@
                 "created_at": {
                     "type": "string"
                 },
+                "enable": {
+                    "type": "boolean"
+                },
                 "icon": {
                     "type": "string"
                 },
@@ -12160,6 +12163,9 @@
                 },
                 "client_type": {
                     "type": "string"
+                },
+                "enable": {
+                    "type": "boolean"
                 },
                 "icon": {
                     "type": "string"

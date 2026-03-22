@@ -42,6 +42,7 @@ type Config struct {
 	Qdrant         QdrantConfig         `toml:"qdrant"`
 	Sparse         SparseConfig         `toml:"sparse"`
 	BrowserGateway BrowserGatewayConfig `toml:"browser_gateway"`
+	Registry       RegistryConfig       `toml:"registry"`
 }
 
 type LogConfig struct {
@@ -137,6 +138,20 @@ type QdrantConfig struct {
 
 type SparseConfig struct {
 	BaseURL string `toml:"base_url"`
+}
+
+const DefaultProvidersDir = "conf/providers"
+
+type RegistryConfig struct {
+	ProvidersDir string `toml:"providers_dir"`
+}
+
+// ProvidersPath returns the configured providers directory or the default.
+func (c RegistryConfig) ProvidersPath() string {
+	if c.ProvidersDir != "" {
+		return c.ProvidersDir
+	}
+	return DefaultProvidersDir
 }
 
 type BrowserGatewayConfig struct {

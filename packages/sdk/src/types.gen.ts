@@ -1242,6 +1242,7 @@ export type ProvidersGetResponse = {
     base_url?: string;
     client_type?: string;
     created_at?: string;
+    enable?: boolean;
     icon?: string;
     id?: string;
     metadata?: {
@@ -1267,6 +1268,7 @@ export type ProvidersUpdateRequest = {
     api_key?: string;
     base_url?: string;
     client_type?: string;
+    enable?: boolean;
     icon?: string;
     metadata?: {
         [key: string]: unknown;

@@ -45,16 +45,17 @@ func (q *Queries) CountModelsByType(ctx context.Context, type_ string) (int64, e
 }
 
 const createLlmProvider = `-- name: CreateLlmProvider :one
-INSERT INTO llm_providers (name, base_url, api_key, client_type, icon, metadata)
+INSERT INTO llm_providers (name, base_url, api_key, client_type, icon, enable, metadata)
 VALUES (
   $1,
   $2,
   $3,
   $4,
   $5,
-  $6
+  $6,
+  $7
 )
-RETURNING id, name, base_url, api_key, icon, metadata, created_at, updated_at, client_type
+RETURNING id, name, base_url, api_key, icon, enable, metadata, created_at, updated_at, client_type
 `
 
 type CreateLlmProviderParams struct {
@@ -63,6 +64,7 @@ type CreateLlmProviderParams struct {
 	ApiKey     string      `json:"api_key"`
 	ClientType string      `json:"client_type"`
 	Icon       pgtype.Text `json:"icon"`
+	Enable     bool        `json:"enable"`
 	Metadata   []byte      `json:"metadata"`
 }
 
@@ -73,6 +75,7 @@ func (q *Queries) CreateLlmProvider(ctx context.Context, arg CreateLlmProviderPa
 		arg.ApiKey,
 		arg.ClientType,
 		arg.Icon,
+		arg.Enable,
 		arg.Metadata,
 	)
 	var i LlmProvider
@@ -82,6 +85,7 @@ func (q *Queries) CreateLlmProvider(ctx context.Context, arg CreateLlmProviderPa
 		&i.BaseUrl,
 		&i.ApiKey,
 		&i.Icon,
+		&i.Enable,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -198,7 +202,7 @@ func (q *Queries) DeleteModelByModelID(ctx context.Context, modelID string) erro
 }
 
 const getLlmProviderByID = `-- name: GetLlmProviderByID :one
-SELECT id, name, base_url, api_key, icon, metadata, created_at, updated_at, client_type FROM llm_providers WHERE id = $1
+SELECT id, name, base_url, api_key, icon, enable, metadata, created_at, updated_at, client_type FROM llm_providers WHERE id = $1
 `
 
 func (q *Queries) GetLlmProviderByID(ctx context.Context, id pgtype.UUID) (LlmProvider, error) {
@@ -210,6 +214,7 @@ func (q *Queries) GetLlmProviderByID(ctx context.Context, id pgtype.UUID) (LlmPr
 		&i.BaseUrl,
 		&i.ApiKey,
 		&i.Icon,
+		&i.Enable,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -219,7 +224,7 @@ func (q *Queries) GetLlmProviderByID(ctx context.Context, id pgtype.UUID) (LlmPr
 }
 
 const getLlmProviderByName = `-- name: GetLlmProviderByName :one
-SELECT id, name, base_url, api_key, icon, metadata, created_at, updated_at, client_type FROM llm_providers WHERE name = $1
+SELECT id, name, base_url, api_key, icon, enable, metadata, created_at, updated_at, client_type FROM llm_providers WHERE name = $1
 `
 
 func (q *Queries) GetLlmProviderByName(ctx context.Context, name string) (LlmProvider, error) {
@@ -231,6 +236,7 @@ func (q *Queries) GetLlmProviderByName(ctx context.Context, name string) (LlmPro
 		&i.BaseUrl,
 		&i.ApiKey,
 		&i.Icon,
+		&i.Enable,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -279,8 +285,121 @@ func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model,
 	return i, err
 }
 
+const listEnabledModels = `-- name: ListEnabledModels :many
+SELECT m.id, m.model_id, m.name, m.llm_provider_id, m.type, m.config, m.created_at, m.updated_at
+FROM models m
+JOIN llm_providers p ON m.llm_provider_id = p.id
+WHERE p.enable = true
+ORDER BY m.created_at DESC
+`
+
+func (q *Queries) ListEnabledModels(ctx context.Context) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listEnabledModels)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.LlmProviderID,
+			&i.Type,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEnabledModelsByProviderClientType = `-- name: ListEnabledModelsByProviderClientType :many
+SELECT m.id, m.model_id, m.name, m.llm_provider_id, m.type, m.config, m.created_at, m.updated_at
+FROM models m
+JOIN llm_providers p ON m.llm_provider_id = p.id
+WHERE p.enable = true
+  AND p.client_type = $1
+ORDER BY m.created_at DESC
+`
+
+func (q *Queries) ListEnabledModelsByProviderClientType(ctx context.Context, clientType string) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listEnabledModelsByProviderClientType, clientType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.LlmProviderID,
+			&i.Type,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEnabledModelsByType = `-- name: ListEnabledModelsByType :many
+SELECT m.id, m.model_id, m.name, m.llm_provider_id, m.type, m.config, m.created_at, m.updated_at
+FROM models m
+JOIN llm_providers p ON m.llm_provider_id = p.id
+WHERE p.enable = true
+  AND m.type = $1
+ORDER BY m.created_at DESC
+`
+
+func (q *Queries) ListEnabledModelsByType(ctx context.Context, type_ string) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listEnabledModelsByType, type_)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.LlmProviderID,
+			&i.Type,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLlmProviders = `-- name: ListLlmProviders :many
-SELECT id, name, base_url, api_key, icon, metadata, created_at, updated_at, client_type FROM llm_providers
+SELECT id, name, base_url, api_key, icon, enable, metadata, created_at, updated_at, client_type FROM llm_providers
 ORDER BY created_at DESC
 `
 
@@ -299,6 +418,7 @@ func (q *Queries) ListLlmProviders(ctx context.Context) ([]LlmProvider, error) {
 			&i.BaseUrl,
 			&i.ApiKey,
 			&i.Icon,
+			&i.Enable,
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -573,10 +693,11 @@ SET
   api_key = $3,
   client_type = $4,
   icon = $5,
-  metadata = $6,
+  enable = $6,
+  metadata = $7,
   updated_at = now()
-WHERE id = $7
-RETURNING id, name, base_url, api_key, icon, metadata, created_at, updated_at, client_type
+WHERE id = $8
+RETURNING id, name, base_url, api_key, icon, enable, metadata, created_at, updated_at, client_type
 `
 
 type UpdateLlmProviderParams struct {
@@ -585,6 +706,7 @@ type UpdateLlmProviderParams struct {
 	ApiKey     string      `json:"api_key"`
 	ClientType string      `json:"client_type"`
 	Icon       pgtype.Text `json:"icon"`
+	Enable     bool        `json:"enable"`
 	Metadata   []byte      `json:"metadata"`
 	ID         pgtype.UUID `json:"id"`
 }
@@ -596,6 +718,7 @@ func (q *Queries) UpdateLlmProvider(ctx context.Context, arg UpdateLlmProviderPa
 		arg.ApiKey,
 		arg.ClientType,
 		arg.Icon,
+		arg.Enable,
 		arg.Metadata,
 		arg.ID,
 	)
@@ -606,6 +729,7 @@ func (q *Queries) UpdateLlmProvider(ctx context.Context, arg UpdateLlmProviderPa
 		&i.BaseUrl,
 		&i.ApiKey,
 		&i.Icon,
+		&i.Enable,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -655,6 +779,87 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertRegistryModel = `-- name: UpsertRegistryModel :one
+INSERT INTO models (model_id, name, llm_provider_id, type, config)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (llm_provider_id, model_id) DO UPDATE SET
+  name = EXCLUDED.name,
+  type = EXCLUDED.type,
+  config = EXCLUDED.config,
+  updated_at = now()
+RETURNING id, model_id, name, llm_provider_id, type, config, created_at, updated_at
+`
+
+type UpsertRegistryModelParams struct {
+	ModelID       string      `json:"model_id"`
+	Name          pgtype.Text `json:"name"`
+	LlmProviderID pgtype.UUID `json:"llm_provider_id"`
+	Type          string      `json:"type"`
+	Config        []byte      `json:"config"`
+}
+
+func (q *Queries) UpsertRegistryModel(ctx context.Context, arg UpsertRegistryModelParams) (Model, error) {
+	row := q.db.QueryRow(ctx, upsertRegistryModel,
+		arg.ModelID,
+		arg.Name,
+		arg.LlmProviderID,
+		arg.Type,
+		arg.Config,
+	)
+	var i Model
+	err := row.Scan(
+		&i.ID,
+		&i.ModelID,
+		&i.Name,
+		&i.LlmProviderID,
+		&i.Type,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertRegistryProvider = `-- name: UpsertRegistryProvider :one
+INSERT INTO llm_providers (name, base_url, api_key, client_type, icon, enable, metadata)
+VALUES ($1, $2, '', $3, $4, false, '{}')
+ON CONFLICT (name) DO UPDATE SET
+  icon = EXCLUDED.icon,
+  client_type = EXCLUDED.client_type,
+  updated_at = now()
+RETURNING id, name, base_url, api_key, icon, enable, metadata, created_at, updated_at, client_type
+`
+
+type UpsertRegistryProviderParams struct {
+	Name       string      `json:"name"`
+	BaseUrl    string      `json:"base_url"`
+	ClientType string      `json:"client_type"`
+	Icon       pgtype.Text `json:"icon"`
+}
+
+func (q *Queries) UpsertRegistryProvider(ctx context.Context, arg UpsertRegistryProviderParams) (LlmProvider, error) {
+	row := q.db.QueryRow(ctx, upsertRegistryProvider,
+		arg.Name,
+		arg.BaseUrl,
+		arg.ClientType,
+		arg.Icon,
+	)
+	var i LlmProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.BaseUrl,
+		&i.ApiKey,
+		&i.Icon,
+		&i.Enable,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ClientType,
 	)
 	return i, err
 }

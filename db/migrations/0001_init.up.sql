@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS llm_providers (
   api_key TEXT NOT NULL,
   client_type TEXT NOT NULL DEFAULT 'openai-completions',
   icon TEXT,
+  enable BOOLEAN NOT NULL DEFAULT true,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

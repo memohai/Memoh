@@ -154,6 +154,40 @@ func (s *Service) ListByProviderClientType(ctx context.Context, clientType Clien
 	return s.convertToGetResponseList(dbModels), nil
 }
 
+// ListEnabled returns all models from enabled providers.
+func (s *Service) ListEnabled(ctx context.Context) ([]GetResponse, error) {
+	dbModels, err := s.queries.ListEnabledModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list enabled models: %w", err)
+	}
+	return s.convertToGetResponseList(dbModels), nil
+}
+
+// ListEnabledByType returns models from enabled providers filtered by type.
+func (s *Service) ListEnabledByType(ctx context.Context, modelType ModelType) ([]GetResponse, error) {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding {
+		return nil, fmt.Errorf("invalid model type: %s", modelType)
+	}
+	dbModels, err := s.queries.ListEnabledModelsByType(ctx, string(modelType))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list enabled models by type: %w", err)
+	}
+	return s.convertToGetResponseList(dbModels), nil
+}
+
+// ListEnabledByProviderClientType returns models from enabled providers with
+// the given client_type.
+func (s *Service) ListEnabledByProviderClientType(ctx context.Context, clientType ClientType) ([]GetResponse, error) {
+	if !IsValidClientType(clientType) {
+		return nil, fmt.Errorf("invalid client type: %s", clientType)
+	}
+	dbModels, err := s.queries.ListEnabledModelsByProviderClientType(ctx, string(clientType))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list enabled models by provider client type: %w", err)
+	}
+	return s.convertToGetResponseList(dbModels), nil
+}
+
 // ListByProviderID returns models filtered by provider ID.
 func (s *Service) ListByProviderID(ctx context.Context, providerID string) ([]GetResponse, error) {
 	if strings.TrimSpace(providerID) == "" {

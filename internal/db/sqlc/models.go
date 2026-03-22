@@ -283,6 +283,7 @@ type LlmProvider struct {
 	BaseUrl    string             `json:"base_url"`
 	ApiKey     string             `json:"api_key"`
 	Icon       pgtype.Text        `json:"icon"`
+	Enable     bool               `json:"enable"`
 	Metadata   []byte             `json:"metadata"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`

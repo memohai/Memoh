@@ -54,12 +54,15 @@ const curFilterProvider = computed(() => {
   if (!Array.isArray(providerData.value)) {
     return []
   }
-  if (!searchText.value) {
-    return providerData.value
+  let list = providerData.value as ProvidersGetResponse[]
+  if (searchText.value) {
+    const keyword = searchText.value.toLowerCase()
+    list = list.filter((p) => (p.name ?? '').toLowerCase().includes(keyword))
   }
-  const keyword = searchText.value.toLowerCase()
-  return providerData.value.filter((provider: ProvidersGetResponse) => {
-    return (provider.name ?? '').toLowerCase().includes(keyword)
+  return [...list].sort((a, b) => {
+    const ae = a.enable !== false ? 1 : 0
+    const be = b.enable !== false ? 1 : 0
+    return be - ae
   })
 })
 
@@ -116,7 +119,10 @@ const openStatus = reactive({
             class="justify-start py-5! px-4"
           >
             <Toggle
-              :class="['py-4 border', curProvider?.name === providerItem.name ? 'border-border' : 'border-transparent']"
+              :class="[
+                'py-4 border',
+                curProvider?.name === providerItem.name ? 'border-border' : 'border-transparent',
+              ]"
               :model-value="selectProvider(providerItem.name ?? '').value"
               @update:model-value="(isSelect) => {
                 if (isSelect) {
@@ -124,15 +130,21 @@ const openStatus = reactive({
                 }
               }"
             >
-              <Avatar class="size-7 shrink-0">
-                <AvatarImage
-                  v-if="providerItem.icon"
-                  :src="providerItem.icon"
+              <span class="relative shrink-0">
+                <Avatar class="size-7">
+                  <AvatarImage
+                    v-if="providerItem.icon"
+                    :src="providerItem.icon"
+                  />
+                  <AvatarFallback class="text-xs font-medium">
+                    {{ getInitials(providerItem.name) }}
+                  </AvatarFallback>
+                </Avatar>
+                <span
+                  v-if="providerItem.enable !== false"
+                  class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-green-500 ring-2 ring-background"
                 />
-                <AvatarFallback class="text-xs font-medium">
-                  {{ getInitials(providerItem.name) }}
-                </AvatarFallback>
-              </Avatar>
+              </span>
               <span class="truncate">{{ providerItem.name }}</span>
             </Toggle>
           </SidebarMenuButton>

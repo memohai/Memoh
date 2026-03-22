@@ -83,11 +83,11 @@ func (h *ModelsHandler) List(c echo.Context) error {
 
 	switch {
 	case modelType != "":
-		resp, err = h.service.ListByType(c.Request().Context(), models.ModelType(modelType))
+		resp, err = h.service.ListEnabledByType(c.Request().Context(), models.ModelType(modelType))
 	case clientType != "":
-		resp, err = h.service.ListByProviderClientType(c.Request().Context(), models.ClientType(clientType))
+		resp, err = h.service.ListEnabledByProviderClientType(c.Request().Context(), models.ClientType(clientType))
 	default:
-		resp, err = h.service.List(c.Request().Context())
+		resp, err = h.service.ListEnabled(c.Request().Context())
 	}
 
 	if err != nil {
