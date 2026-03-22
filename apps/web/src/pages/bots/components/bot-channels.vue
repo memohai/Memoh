@@ -39,13 +39,24 @@
             :aria-pressed="selectedType === item.meta.type"
             class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors hover:bg-accent"
             :class="{ 'bg-accent': selectedType === item.meta.type }"
-            @click="selectedType = item.meta.type as string"
+            @click="selectedType = item.meta.type ?? ''"
           >
             <div
-              class="flex size-8 shrink-0 items-center justify-center rounded-md text-xs font-bold uppercase"
-              :class="channelBadgeClass(item.meta.type as string)"
+              v-if="getChannelImage(item.meta.type ?? '')"
+              class="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-card"
             >
-              {{ channelIcon(item.meta.type) }}
+              <img
+                :src="getChannelImage(item.meta.type ?? '')!"
+                alt=""
+                class="size-full object-contain p-0.5"
+              >
+            </div>
+            <div
+              v-else
+              class="flex size-8 shrink-0 items-center justify-center rounded-md text-xs font-bold uppercase"
+              :class="channelBadgeClass(item.meta.type ?? '')"
+            >
+              {{ channelIcon(item.meta.type ?? '') }}
             </div>
             <div class="flex-1 text-left">
               <div class="font-medium">
@@ -101,13 +112,24 @@
               :key="item.meta.type"
               type="button"
               class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors"
-              @click="addChannel(item.meta.type)"
+              @click="addChannel(item.meta.type ?? '')"
             >
               <div
-                class="flex size-7 shrink-0 items-center justify-center rounded-md text-xs font-bold uppercase"
-                :class="channelBadgeClass(item.meta.type)"
+                v-if="getChannelImage(item.meta.type ?? '')"
+                class="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-card"
               >
-                {{ channelIcon(item.meta.type) }}
+                <img
+                  :src="getChannelImage(item.meta.type ?? '')!"
+                  alt=""
+                  class="size-full object-contain p-0.5"
+                >
+              </div>
+              <div
+                v-else
+                class="flex size-7 shrink-0 items-center justify-center rounded-md text-xs font-bold uppercase"
+                :class="channelBadgeClass(item.meta.type ?? '')"
+              >
+                {{ channelIcon(item.meta.type ?? '') }}
               </div>
               <span>{{ item.meta.display_name }}</span>
             </button>
@@ -148,6 +170,7 @@ import { useQuery } from '@pinia/colada'
 import { getChannels, getBotsByIdChannelByPlatform } from '@memoh/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig } from '@memoh/sdk'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
+import { getChannelImage } from '@/utils/channel-icons'
 
 export interface BotChannelItem {
   meta: HandlersChannelMeta
@@ -173,7 +196,7 @@ const { data: channels, isLoading, refetch } = useQuery({
       configurableTypes.map(async (meta) => {
         try {
           const { data: config } = await getBotsByIdChannelByPlatform({
-            path: { id: botIdRef.value, platform: meta.type },
+            path: { id: botIdRef.value, platform: meta.type ?? '' },
             throwOnError: true,
           })
           return { meta, config: config ?? null, configured: true } as BotChannelItem
@@ -200,8 +223,9 @@ const selectedItem = computed(() =>
 )
 
 watch(configuredChannels, (list) => {
-  if (list.length > 0 && !selectedType.value) {
-    selectedType.value = list[0].meta.type
+  const first = list[0]
+  if (first && !selectedType.value) {
+    selectedType.value = first.meta.type ?? null
   }
 }, { immediate: true })
 
