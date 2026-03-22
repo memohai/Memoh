@@ -643,7 +643,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/compaction/logs": {
             "get": {
-                "description": "List context compaction logs for a bot",
+                "description": "List compaction logs for a bot",
                 "tags": [
                     "compaction"
                 ],
@@ -692,7 +692,7 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "Delete all context compaction logs for a bot",
+                "description": "Delete all compaction logs for a bot",
                 "tags": [
                     "compaction"
                 ],
@@ -5386,6 +5386,111 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{id}/channel/weixin/qr/poll": {
+            "post": {
+                "description": "Long-poll the QR code scan status. On confirmed, auto-saves credentials.",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Poll WeChat QR login status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "QR code to poll",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/weixin.QRPollRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/weixin.QRPollResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{id}/channel/weixin/qr/start": {
+            "post": {
+                "description": "Fetch a QR code from WeChat for scanning",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Start WeChat QR login",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional base URL override",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/weixin.QRStartRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/weixin.QRStartResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -13029,6 +13134,57 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "weixin.QRPollRequest": {
+            "type": "object",
+            "properties": {
+                "baseUrl": {
+                    "type": "string"
+                },
+                "qr_code": {
+                    "type": "string"
+                },
+                "routeTag": {
+                    "type": "string"
+                }
+            }
+        },
+        "weixin.QRPollResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "wait, scaned, confirmed, expired",
+                    "type": "string"
+                }
+            }
+        },
+        "weixin.QRStartRequest": {
+            "type": "object",
+            "properties": {
+                "baseUrl": {
+                    "type": "string"
+                },
+                "routeTag": {
+                    "type": "string"
+                }
+            }
+        },
+        "weixin.QRStartResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "qr_code": {
+                    "type": "string"
+                },
+                "qr_code_url": {
                     "type": "string"
                 }
             }

@@ -140,14 +140,14 @@ export const getBotsByBotIdCliWs = <ThrowOnError extends boolean = false>(option
 /**
  * Delete compaction logs
  *
- * Delete all context compaction logs for a bot
+ * Delete all compaction logs for a bot
  */
 export const deleteBotsByBotIdCompactionLogs = <ThrowOnError extends boolean = false>(options: Options<DeleteBotsByBotIdCompactionLogsData, ThrowOnError>) => (options.client ?? client).delete<DeleteBotsByBotIdCompactionLogsResponses, DeleteBotsByBotIdCompactionLogsErrors, ThrowOnError>({ url: '/bots/{bot_id}/compaction/logs', ...options });
 
 /**
  * List compaction logs
  *
- * List context compaction logs for a bot
+ * List compaction logs for a bot
  */
 export const getBotsByBotIdCompactionLogs = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdCompactionLogsData, ThrowOnError>) => (options.client ?? client).get<GetBotsByBotIdCompactionLogsResponses, GetBotsByBotIdCompactionLogsErrors, ThrowOnError>({ url: '/bots/{bot_id}/compaction/logs', ...options });
 

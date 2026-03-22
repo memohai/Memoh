@@ -1,0 +1,292 @@
+<template>
+  <div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <div>
+        <h4 class="text-sm font-medium">
+          {{ $t('bots.channels.weixinQr.title') }}
+        </h4>
+        <p class="text-xs text-muted-foreground mt-1">
+          {{ $t('bots.channels.weixinQr.description') }}
+        </p>
+      </div>
+    </div>
+
+    <!-- QR code display -->
+    <div
+      v-if="qrState === 'idle'"
+      class="flex flex-col items-center gap-3 py-4"
+    >
+      <Button
+        :disabled="isStarting"
+        @click="startLogin"
+      >
+        <Spinner
+          v-if="isStarting"
+          class="mr-1.5"
+        />
+        <FontAwesomeIcon
+          v-else
+          :icon="['fas', 'qrcode']"
+          class="mr-1.5 size-3.5"
+        />
+        {{ $t('bots.channels.weixinQr.startScan') }}
+      </Button>
+    </div>
+
+    <div
+      v-else-if="qrState === 'showing'"
+      class="flex flex-col items-center gap-4 py-4"
+    >
+      <div class="relative rounded-lg border bg-white p-3">
+        <img
+          v-if="qrImageDataUrl"
+          :src="qrImageDataUrl"
+          alt="WeChat QR Code"
+          class="size-52"
+        >
+        <div
+          v-else
+          class="size-52 flex items-center justify-center text-muted-foreground"
+        >
+          <Spinner />
+        </div>
+
+        <!-- Overlay for scanned state -->
+        <div
+          v-if="pollStatus === 'scaned'"
+          class="absolute inset-0 flex items-center justify-center rounded-lg bg-background/80"
+        >
+          <div class="text-center">
+            <FontAwesomeIcon
+              :icon="['fas', 'mobile-screen']"
+              class="size-8 text-primary mb-2"
+            />
+            <p class="text-sm font-medium text-foreground">
+              {{ $t('bots.channels.weixinQr.scanned') }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Overlay for expired state -->
+        <div
+          v-if="pollStatus === 'expired'"
+          class="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-background/80 gap-2"
+        >
+          <p class="text-sm text-muted-foreground">
+            {{ $t('bots.channels.weixinQr.expired') }}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            @click="startLogin"
+          >
+            {{ $t('bots.channels.weixinQr.refresh') }}
+          </Button>
+        </div>
+      </div>
+
+      <p class="text-sm text-muted-foreground text-center max-w-xs">
+        {{ statusText }}
+      </p>
+
+      <Button
+        variant="ghost"
+        size="sm"
+        @click="cancel"
+      >
+        {{ $t('common.cancel') }}
+      </Button>
+    </div>
+
+    <div
+      v-else-if="qrState === 'success'"
+      class="flex flex-col items-center gap-3 py-4"
+    >
+      <div class="flex size-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900">
+        <FontAwesomeIcon
+          :icon="['fas', 'check']"
+          class="size-5 text-green-600 dark:text-green-400"
+        />
+      </div>
+      <p class="text-sm font-medium">
+        {{ $t('bots.channels.weixinQr.success') }}
+      </p>
+    </div>
+
+    <div
+      v-else-if="qrState === 'error'"
+      class="flex flex-col items-center gap-3 py-4"
+    >
+      <p class="text-sm text-destructive">
+        {{ errorMessage }}
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        @click="startLogin"
+      >
+        {{ $t('bots.channels.weixinQr.retry') }}
+      </Button>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onUnmounted } from 'vue'
+import { Button, Spinner } from '@memoh/ui'
+import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
+import { client } from '@memoh/sdk/client'
+import QRCode from 'qrcode'
+
+const props = defineProps<{
+  botId: string
+}>()
+
+const emit = defineEmits<{
+  loginSuccess: []
+}>()
+
+const { t } = useI18n()
+
+type QRState = 'idle' | 'showing' | 'success' | 'error'
+
+const qrState = ref<QRState>('idle')
+const qrCode = ref('')
+const qrImageDataUrl = ref('')
+const pollStatus = ref('')
+const isStarting = ref(false)
+const errorMessage = ref('')
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+let aborted = false
+
+const statusText = computed(() => {
+  switch (pollStatus.value) {
+    case 'wait':
+      return t('bots.channels.weixinQr.waitingScan')
+    case 'scaned':
+      return t('bots.channels.weixinQr.scanned')
+    case 'expired':
+      return t('bots.channels.weixinQr.expired')
+    default:
+      return t('bots.channels.weixinQr.waitingScan')
+  }
+})
+
+async function startLogin() {
+  aborted = false
+  isStarting.value = true
+  errorMessage.value = ''
+  pollStatus.value = ''
+  qrImageDataUrl.value = ''
+
+  try {
+    const baseUrl = client.getConfig().baseUrl || ''
+    const resp = await fetch(`${baseUrl}/bots/${encodeURIComponent(props.botId)}/channel/weixin/qr/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+      },
+      body: JSON.stringify({}),
+    })
+
+    if (!resp.ok) {
+      const body = await resp.text()
+      throw new Error(body || `HTTP ${resp.status}`)
+    }
+
+    const data = await resp.json() as { qr_code_url: string; qr_code: string; message: string }
+    const qrContent = data.qr_code_url || data.qr_code || ''
+    if (!qrContent) {
+      throw new Error('No QR code data returned')
+    }
+
+    qrCode.value = data.qr_code || ''
+    qrImageDataUrl.value = await QRCode.toDataURL(qrContent, { width: 208, margin: 1 })
+    qrState.value = 'showing'
+
+    startPolling()
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : String(err)
+    qrState.value = 'error'
+  } finally {
+    isStarting.value = false
+  }
+}
+
+function startPolling() {
+  if (aborted) return
+  pollOnce()
+}
+
+async function pollOnce() {
+  if (aborted || qrState.value !== 'showing') return
+
+  try {
+    const baseUrl = client.getConfig().baseUrl || ''
+    const resp = await fetch(`${baseUrl}/bots/${encodeURIComponent(props.botId)}/channel/weixin/qr/poll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+      },
+      body: JSON.stringify({
+        qr_code: qrCode.value,
+      }),
+    })
+
+    if (!resp.ok) {
+      const body = await resp.text()
+      throw new Error(body || `HTTP ${resp.status}`)
+    }
+
+    const data = await resp.json() as { status: string; message: string }
+    pollStatus.value = data.status
+
+    switch (data.status) {
+      case 'confirmed':
+        qrState.value = 'success'
+        toast.success(t('bots.channels.weixinQr.success'))
+        emit('loginSuccess')
+        return
+      case 'expired':
+        return
+      case 'wait':
+      case 'scaned':
+        if (!aborted) {
+          pollTimer = setTimeout(pollOnce, 1500)
+        }
+        return
+      default:
+        if (!aborted) {
+          pollTimer = setTimeout(pollOnce, 2000)
+        }
+    }
+  } catch {
+    if (!aborted) {
+      pollTimer = setTimeout(pollOnce, 3000)
+    }
+  }
+}
+
+function cancel() {
+  aborted = true
+  if (pollTimer) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
+  qrState.value = 'idle'
+  qrCode.value = ''
+  qrImageDataUrl.value = ''
+  pollStatus.value = ''
+}
+
+onUnmounted(() => {
+  aborted = true
+  if (pollTimer) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
+})
+</script>

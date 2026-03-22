@@ -881,11 +881,23 @@
       "webhookCallbackHint": "将该地址配置到飞书/Lark 事件订阅的请求 URL。",
       "webhookCallbackPending": "保存平台配置后会生成回调地址。",
       "noAvailableTypes": "所有平台类型均已配置",
+      "weixinQr": {
+        "title": "扫码登录",
+        "description": "使用微信扫描二维码以连接微信账号。",
+        "startScan": "获取二维码",
+        "waitingScan": "打开微信扫描此二维码",
+        "scanned": "已扫码 — 请在手机上确认",
+        "expired": "二维码已过期",
+        "refresh": "刷新二维码",
+        "success": "微信连接成功！",
+        "retry": "重试"
+      },
       "types": {
         "feishu": "飞书",
         "discord": "Discord",
         "qq": "QQ",
         "telegram": "Telegram",
+        "weixin": "微信",
         "web": "Web",
         "local": "本地"
       },
@@ -894,6 +906,7 @@
         "discord": "DC",
         "qq": "QQ",
         "telegram": "TG",
+        "weixin": "WX",
         "web": "Web",
         "local": "CLI"
       }

@@ -885,11 +885,23 @@
       "webhookCallbackHint": "Use this URL as the event subscription request URL in Feishu/Lark.",
       "webhookCallbackPending": "Save this platform configuration to generate the callback URL.",
       "noAvailableTypes": "All platform types have been configured",
+      "weixinQr": {
+        "title": "QR Code Login",
+        "description": "Scan the QR code with WeChat to connect your account.",
+        "startScan": "Get QR Code",
+        "waitingScan": "Open WeChat and scan this QR code",
+        "scanned": "Scanned — confirm on your phone",
+        "expired": "QR code expired",
+        "refresh": "Refresh QR Code",
+        "success": "WeChat connected successfully!",
+        "retry": "Try Again"
+      },
       "types": {
         "feishu": "Feishu",
         "discord": "Discord",
         "qq": "QQ",
         "telegram": "Telegram",
+        "weixin": "WeChat",
         "web": "Web",
         "local": "Local"
       },
@@ -898,6 +910,7 @@
         "discord": "DC",
         "qq": "QQ",
         "telegram": "TG",
+        "weixin": "WX",
         "web": "Web",
         "local": "CLI"
       }

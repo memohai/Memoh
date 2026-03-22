@@ -35,6 +35,7 @@
     "monaco-editor": "^0.52.2",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
+    "qrcode": "^1.5.4",
     "shiki": "^3.21.0",
     "stream-markdown": "^0.0.13",
     "stream-monaco": "^0.0.18",
@@ -51,6 +52,7 @@
   "devDependencies": {
     "@memoh/config": "workspace:*",
     "@types/node": "^24.10.1",
+    "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^6.0.5",
     "@vue/tsconfig": "^0.8.1",
     "typescript": "~5.9.3",

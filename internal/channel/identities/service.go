@@ -201,7 +201,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]Search
 	}
 	rows, err := s.queries.SearchChannelIdentities(ctx, sqlc.SearchChannelIdentitiesParams{
 		Query:      strings.TrimSpace(query),
-		LimitCount: int32(limit),
+		LimitCount: int32(limit), //nolint:gosec // limit is capped above
 	})
 	if err != nil {
 		return nil, err

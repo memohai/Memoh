@@ -2655,6 +2655,39 @@ definitions:
       name:
         type: string
     type: object
+  weixin.QRPollRequest:
+    properties:
+      baseUrl:
+        type: string
+      qr_code:
+        type: string
+      routeTag:
+        type: string
+    type: object
+  weixin.QRPollResponse:
+    properties:
+      message:
+        type: string
+      status:
+        description: wait, scaned, confirmed, expired
+        type: string
+    type: object
+  weixin.QRStartRequest:
+    properties:
+      baseUrl:
+        type: string
+      routeTag:
+        type: string
+    type: object
+  weixin.QRStartResponse:
+    properties:
+      message:
+        type: string
+      qr_code:
+        type: string
+      qr_code_url:
+        type: string
+    type: object
 info:
   contact: {}
   title: Memoh API
@@ -3079,7 +3112,7 @@ paths:
       - local-channel
   /bots/{bot_id}/compaction/logs:
     delete:
-      description: Delete all context compaction logs for a bot
+      description: Delete all compaction logs for a bot
       parameters:
       - description: Bot ID
         in: path
@@ -3101,7 +3134,7 @@ paths:
       tags:
       - compaction
     get:
-      description: List context compaction logs for a bot
+      description: List compaction logs for a bot
       parameters:
       - description: Bot ID
         in: path
@@ -6487,6 +6520,75 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update bot channel status
+      tags:
+      - bots
+  /bots/{id}/channel/weixin/qr/poll:
+    post:
+      description: Long-poll the QR code scan status. On confirmed, auto-saves credentials.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: QR code to poll
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/weixin.QRPollRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/weixin.QRPollResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Poll WeChat QR login status
+      tags:
+      - bots
+  /bots/{id}/channel/weixin/qr/start:
+    post:
+      description: Fetch a QR code from WeChat for scanning
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Optional base URL override
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/weixin.QRStartRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/weixin.QRStartResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Start WeChat QR login
       tags:
       - bots
   /bots/{id}/checks:
