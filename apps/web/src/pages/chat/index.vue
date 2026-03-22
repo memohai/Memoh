@@ -2,33 +2,61 @@
   <div class="flex h-full">
     <MasterDetailSidebarLayout>
       <template #sidebar-header>
-        <div class="p-4 border-b">
-          <p class="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            {{ $t('sidebar.bots') }}
-          </p>
+        <div class="flex items-center gap-2">
+          <FontAwesomeIcon
+            :icon="['fas', 'comment-dots']"
+            class="size-[18px] text-foreground"
+          />
+          <span class="text-sm font-semibold text-foreground">
+            {{ $t('sidebar.chat') }}
+          </span>
         </div>
       </template>
       <template #sidebar-content>
+        <div class="px-1.5 pb-2">
+          <div class="flex items-center gap-1.5 h-[30px] rounded-lg border border-border bg-card px-2.5">
+            <FontAwesomeIcon
+              :icon="['fas', 'magnifying-glass']"
+              class="size-[11px] text-muted-foreground shrink-0"
+            />
+            <input
+              v-model="searchQuery"
+              type="text"
+              :placeholder="$t('chat.searchPlaceholder')"
+              class="flex-1 min-w-0 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+            >
+          </div>
+        </div>
+
+        <div class="px-3.5 pt-2 pb-1">
+          <p class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            {{ $t('sidebar.bots') }}
+          </p>
+        </div>
         <BotSidebar />
 
         <template v-if="currentBotId">
-          <div class="px-4 pt-4 pb-2 flex items-center justify-between">
-            <p class="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+          <div class="px-3.5 pt-3 pb-1">
+            <p class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
               {{ $t('chat.sessions') }}
             </p>
-            <button
-              class="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              :aria-label="$t('chat.newSession')"
-              @click="chatStore.createNewSession()"
-            >
-              <FontAwesomeIcon
-                :icon="['fas', 'plus']"
-                class="size-3.5"
-              />
-            </button>
           </div>
           <SessionSidebar />
         </template>
+      </template>
+      <template #sidebar-footer>
+        <div class="px-4 pb-3 pt-1">
+          <button
+            class="flex items-center gap-[7px] w-full h-[34px] rounded-lg bg-foreground text-background px-3.5 text-xs font-medium hover:bg-foreground/90 transition-colors"
+            @click="chatStore.createNewSession()"
+          >
+            <FontAwesomeIcon
+              :icon="['fas', 'plus']"
+              class="size-3"
+            />
+            <span>{{ $t('chat.newSession') }}</span>
+          </button>
+        </div>
       </template>
       <template #detail>
         <ChatArea />
@@ -38,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from 'vue'
+import { ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
@@ -51,6 +79,8 @@ const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
 const { currentBotId, sessionId } = storeToRefs(chatStore)
+
+const searchQuery = ref('')
 
 const urlSessionId = ((route.params.sessionId as string) ?? '').trim()
 if (urlSessionId) {

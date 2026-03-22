@@ -3,10 +3,10 @@
     class="min-h-[initial]! absolute inset-0"
   >
     <aside
-      class="hidden md:flex flex-col w-(--sidebar-width) border-r border-border shrink-0 h-full"
+      class="hidden md:flex flex-col w-(--sidebar-width) bg-sidebar border-r border-border shrink-0 h-full"
       data-sidebar="sidebar"
     >
-      <SidebarHeader>
+      <SidebarHeader class="h-[53px] justify-center px-3.5">
         <slot name="sidebar-header" />
       </SidebarHeader>
       <SidebarContent class="px-2 scrollbar-none">
@@ -43,7 +43,7 @@
           <SheetDescription>Sidebar navigation</SheetDescription>
         </SheetHeader>
         <div class="flex h-full w-full flex-col">
-          <SidebarHeader>
+          <SidebarHeader class="h-[53px] justify-center px-3.5">
             <slot name="sidebar-header" />
           </SidebarHeader>
           <SidebarContent class="px-2 scrollbar-none">

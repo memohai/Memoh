@@ -1,38 +1,31 @@
 <template>
-  <SidebarMenu
-    v-for="bot in bots"
-    :key="bot.id"
-  >
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        as-child
-        class="justify-start py-5! px-4"
-      >
-        <Toggle
-          :class="`p-2! border border-transparent h-[initial]! ${currentBotId === bot.id ? 'border-inherit' : ''}`"
-          :model-value="isActive(bot.id as string).value"
-          @click="handleSelect(bot)"
-        >
-          <Avatar class="size-8 shrink-0">
-            <AvatarImage
-              v-if="bot.avatar_url"
-              :src="bot.avatar_url"
-              :alt="bot.display_name"
-            />
-            <AvatarFallback class="text-xs">
-              {{ (bot.display_name || bot.id).slice(0, 2).toUpperCase() }}
-            </AvatarFallback>
-          </Avatar>
-          <div class="flex-1 text-left min-w-0">
-            <div class="font-medium truncate">
-              {{ bot.display_name || bot.id }}
-            </div>
-          </div>
-        </Toggle>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  </SidebarMenu>
-  <SidebarMenu>
+  <div class="flex flex-col gap-1 px-1.5">
+    <button
+      v-for="bot in bots"
+      :key="bot.id"
+      class="flex items-center gap-2.5 h-[58px] w-full rounded-lg px-2.5 text-left transition-colors"
+      :class="currentBotId === bot.id
+        ? 'bg-card border border-border'
+        : 'hover:bg-card/60'"
+      @click="handleSelect(bot)"
+    >
+      <Avatar class="size-[26px] shrink-0 border border-border">
+        <AvatarImage
+          v-if="bot.avatar_url"
+          :src="bot.avatar_url"
+          :alt="bot.display_name"
+        />
+        <AvatarFallback class="text-[9px] bg-secondary text-muted-foreground">
+          {{ (bot.display_name || bot.id || '').slice(0, 2).toUpperCase() }}
+        </AvatarFallback>
+      </Avatar>
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-medium text-foreground truncate">
+          {{ bot.display_name || bot.id }}
+        </div>
+      </div>
+    </button>
+
     <div
       v-if="isLoading"
       class="flex justify-center py-4"
@@ -45,11 +38,11 @@
 
     <div
       v-if="!isLoading && bots.length === 0"
-      class="px-3 py-6 text-center text-sm text-muted-foreground"
+      class="px-3 py-6 text-center text-xs text-muted-foreground"
     >
       {{ $t('bots.emptyTitle') }}
     </div>
-  </SidebarMenu>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -60,12 +53,6 @@ import { getBotsQuery } from '@memohai/sdk/colada'
 import type { BotsBot } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
-import {
-  Toggle,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
- } from '@memohai/ui'
 
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
@@ -73,11 +60,7 @@ const { currentBotId } = storeToRefs(chatStore)
 const { data: botData, isLoading } = useQuery(getBotsQuery())
 const bots = computed<BotsBot[]>(() => botData.value?.items ?? [])
 
-const isActive = (id: string) => computed(() => {
-  return currentBotId.value === id
-})
-
 function handleSelect(bot: BotsBot) {
-  chatStore.selectBot(bot.id)
+  chatStore.selectBot(bot.id!)
 }
 </script>
