@@ -1,6 +1,6 @@
 name: OpenRouter
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/openrouter.svg
+icon: openrouter
 base_url: https://openrouter.ai/api/v1
 
 models:

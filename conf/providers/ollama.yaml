@@ -1,6 +1,6 @@
 name: Ollama
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/ollama.svg
+icon: ollama
 base_url: http://127.0.0.1:11434/v1
 
 models:

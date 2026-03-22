@@ -1,6 +1,6 @@
 name: Groq
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/groq.svg
+icon: groq
 base_url: https://api.groq.com/openai/v1
 
 models:

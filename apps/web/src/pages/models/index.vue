@@ -16,13 +16,11 @@ import {
   EmptyMedia,
   EmptyTitle,
   Button,
-  Avatar,
-  AvatarImage,
-  AvatarFallback,
 } from '@memoh/ui'
 import { getProviders } from '@memoh/sdk'
 import type { ProvidersGetResponse } from '@memoh/sdk'
 import AddProvider from '@/components/add-provider/index.vue'
+import ProviderIcon from '@/components/provider-icon/index.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 function getInitials(name: string | undefined) {
@@ -131,15 +129,16 @@ const openStatus = reactive({
               }"
             >
               <span class="relative shrink-0">
-                <Avatar class="size-7">
-                  <AvatarImage
+                <span class="flex size-7 items-center justify-center rounded-full bg-muted">
+                  <ProviderIcon
                     v-if="providerItem.icon"
-                    :src="providerItem.icon"
+                    :icon="providerItem.icon"
+                    size="1.25em"
                   />
-                  <AvatarFallback class="text-xs font-medium">
+                  <span v-else class="text-xs font-medium text-muted-foreground">
                     {{ getInitials(providerItem.name) }}
-                  </AvatarFallback>
-                </Avatar>
+                  </span>
+                </span>
                 <span
                   v-if="providerItem.enable !== false"
                   class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-green-500 ring-2 ring-background"

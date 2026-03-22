@@ -1,6 +1,6 @@
 name: Moonshot
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/moonshot.svg
+icon: moonshot
 base_url: https://api.moonshot.cn/v1
 
 models:

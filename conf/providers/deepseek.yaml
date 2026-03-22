@@ -1,6 +1,6 @@
 name: DeepSeek
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/deepseek-color.svg
+icon: deepseek-color
 base_url: https://api.deepseek.com/v1
 
 models:

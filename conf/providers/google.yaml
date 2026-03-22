@@ -1,6 +1,6 @@
 name: Google
 client_type: google-generative-ai
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/google-color.svg
+icon: google-color
 base_url: https://generativelanguage.googleapis.com/v1beta
 
 models:

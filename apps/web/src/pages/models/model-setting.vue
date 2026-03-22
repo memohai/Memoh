@@ -1,15 +1,16 @@
 <template>
   <div class="p-4">
     <section class="flex items-center gap-3">
-      <Avatar class="size-10 shrink-0">
-        <AvatarImage
+      <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
+        <ProviderIcon
           v-if="curProvider?.icon"
-          :src="curProvider.icon"
+          :icon="curProvider.icon"
+          size="1.5em"
         />
-        <AvatarFallback class="text-sm font-medium">
+        <span v-else class="text-sm font-medium text-muted-foreground">
           {{ getInitials(curProvider?.name) }}
-        </AvatarFallback>
-      </Avatar>
+        </span>
+      </span>
       <h4 class="scroll-m-20 tracking-tight">
         {{ curProvider?.name }}
       </h4>
@@ -37,7 +38,8 @@
 </template>
 
 <script setup lang="ts">
-import { Separator, Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
+import { Separator } from '@memoh/ui'
+import ProviderIcon from '@/components/provider-icon/index.vue'
 
 function getInitials(name: string | undefined) {
   const label = name?.trim() ?? ''

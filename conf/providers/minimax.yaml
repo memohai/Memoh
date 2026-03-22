@@ -1,6 +1,6 @@
 name: Minimax
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/minimax-color.svg
+icon: minimax-color
 base_url: https://api.minimaxi.com/v1
 
 models:

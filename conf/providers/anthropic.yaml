@@ -1,6 +1,6 @@
 name: Anthropic
 client_type: anthropic-messages
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/anthropic.svg
+icon: anthropic
 base_url: https://api.anthropic.com
 
 models:

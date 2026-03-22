@@ -1,0 +1,50 @@
+<template>
+  <component
+    v-if="iconComponent"
+    :is="iconComponent"
+    :size="size"
+    v-bind="$attrs"
+  />
+  <span v-else v-bind="$attrs">{{ fallback }}</span>
+</template>
+
+<script setup lang="ts">
+import { computed, type Component } from 'vue'
+import {
+  Qq,
+  Telegram,
+  Discord,
+  Slack,
+  Feishu,
+  Wechat,
+  Matrix,
+} from '@memoh/icon'
+
+const channelIcons: Record<string, Component> = {
+  qq: Qq,
+  telegram: Telegram,
+  discord: Discord,
+  slack: Slack,
+  feishu: Feishu,
+  wechat: Wechat,
+  weixin: Wechat,
+  matrix: Matrix,
+}
+
+const props = withDefaults(defineProps<{
+  channel: string
+  size?: string | number
+}>(), {
+  size: '1em',
+})
+
+defineOptions({ inheritAttrs: false })
+
+const iconComponent = computed<Component | undefined>(() =>
+  channelIcons[props.channel],
+)
+
+const fallback = computed(() =>
+  props.channel.slice(0, 2).toUpperCase(),
+)
+</script>

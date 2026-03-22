@@ -2,13 +2,18 @@
   <div class="space-y-6">
     <!-- Header -->
     <div class="flex items-center justify-between">
-      <div>
-        <h3 class="text-lg font-semibold">
-          {{ channelItem.meta.display_name }}
-        </h3>
-        <p class="text-sm text-muted-foreground">
-          {{ channelItem.meta.type }}
-        </p>
+      <div class="flex items-center gap-3">
+        <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <ChannelIcon :channel="channelItem.meta.type" size="1.5em" />
+        </span>
+        <div>
+          <h3 class="text-lg font-semibold">
+            {{ channelItem.meta.display_name }}
+          </h3>
+          <p class="text-sm text-muted-foreground">
+            {{ channelItem.meta.type }}
+          </p>
+        </div>
       </div>
       <div class="flex items-center gap-2">
         <template v-if="isEditMode">
@@ -262,6 +267,7 @@ import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBot
 import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memoh/sdk'
 import { client } from '@memoh/sdk/client'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import ChannelIcon from '@/components/channel-icon/index.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
 
 interface BotChannelItem {

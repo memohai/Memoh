@@ -1,6 +1,6 @@
 name: OpenAI
 client_type: openai-responses
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/openai.svg
+icon: openai
 base_url: https://api.openai.com/v1
 
 models:

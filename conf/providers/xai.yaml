@@ -1,6 +1,6 @@
 name: xAI (Grok)
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/xai.svg
+icon: xai
 base_url: https://api.x.ai/v1
 
 models:

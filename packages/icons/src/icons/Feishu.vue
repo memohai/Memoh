@@ -1,0 +1,15 @@
+<template>
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    :width="size"
+    :height="size"
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    v-bind="$attrs"
+  ><path d="M2.616 4.29c-.395-.377-.998.07-.763.565l3.601 7.594a.75.75 0 0 0 .467.399l5.729 1.682c.362.107.362.62 0 .726l-5.729 1.683a.75.75 0 0 0-.467.399l-3.601 7.593c-.235.496.368.942.763.565L22.082 6.812a.75.75 0 0 0-.034-1.1L18.67 2.544a.75.75 0 0 0-.83-.103L2.616 4.29z"></path></svg>
+</template>
+
+<script setup lang="ts">
+withDefaults(defineProps<{ size?: string | number }>(), { size: '1em' })
+defineOptions({ inheritAttrs: false })
+</script>

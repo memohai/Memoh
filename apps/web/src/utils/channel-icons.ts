@@ -8,7 +8,6 @@ const LOCAL_CHANNEL_IMAGES: Record<string, string> = {
   feishu: '/channels/feishu.png',
   matrix: '/channels/matrix.svg',
   telegram: '/channels/telegram.webp',
-  weixin: '/channels/weixin.png',
 }
 
 const CHANNEL_ICONS: Record<string, [string, string]> = {
@@ -16,7 +15,6 @@ const CHANNEL_ICONS: Record<string, [string, string]> = {
   telegram: ['fab', 'telegram'],
   matrix: ['fas', 'hashtag'],
   feishu: ['fas', 'comment-dots'],
-  weixin: ['fab', 'weixin'],
   web: ['fas', 'globe'],
   slack: ['fab', 'slack'],
   discord: ['fab', 'discord'],

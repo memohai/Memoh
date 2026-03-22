@@ -1,6 +1,6 @@
 name: New API
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/newapi-color.svg
+icon: newapi-color
 base_url: https://your.new-api-provider.com
 
 models:

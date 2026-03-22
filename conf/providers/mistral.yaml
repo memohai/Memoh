@@ -1,6 +1,6 @@
 name: Mistral
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/mistral-color.svg
+icon: mistral-color
 base_url: https://api.mistral.ai/v1
 
 models:

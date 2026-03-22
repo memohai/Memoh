@@ -594,7 +594,6 @@ var (
 		"/logo.png":               {},
 		"/channels/telegram.webp": {},
 		"/channels/feishu.png":    {},
-		"/channels/weixin.png":    {},
 	}
 	memohJWTPrefixSkipPaths = []string{
 		"/assets/",

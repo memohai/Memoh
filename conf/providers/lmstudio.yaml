@@ -1,6 +1,6 @@
 name: LM Studio
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/lmstudio.svg
+icon: lmstudio
 base_url: http://127.0.0.1:1234/v1
 
 models:

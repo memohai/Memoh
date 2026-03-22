@@ -52,6 +52,10 @@ depends = [
 description = "Generate SQL code"
 run = "sqlc generate"
 
+[tasks.icons-generate]
+description = "Generate icon Vue components from SVG sources"
+run = "pnpm --filter @memoh/icon generate"
+
 [tasks.dev]
 description = "Start development environment"
 run = """

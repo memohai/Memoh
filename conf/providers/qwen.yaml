@@ -1,6 +1,6 @@
 name: Aliyun Bailian
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/qwen-color.svg
+icon: qwen-color
 base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 models:

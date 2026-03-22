@@ -1,6 +1,6 @@
 name: HuggingFace
 client_type: openai-completions
-icon: https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1/icons/huggingface-color.svg
+icon: huggingface-color
 base_url: https://router.huggingface.co/hf-inference/v1
 
 models:
