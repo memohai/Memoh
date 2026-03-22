@@ -9,6 +9,7 @@
     "docs:dev": "pnpm --filter @memoh/docs dev",
     "docs:build": "pnpm --filter @memoh/docs build",
     "docs:preview": "pnpm --filter @memoh/docs preview",
+    "sync:providers": "bun scripts/sync-lobehub-providers.ts",
     "release": "bumpp",
     "generate-sdk": "openapi-ts",
     "lint": "eslint .",

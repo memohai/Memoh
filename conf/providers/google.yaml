@@ -4,36 +4,199 @@ icon: https://www.gstatic.com/lamda/images/gemini_favicon_f069958c85030456e93de6
 base_url: https://generativelanguage.googleapis.com/v1beta
 
 models:
+  - model_id: gemini-pro-latest
+    name: Gemini Pro Latest
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1114112
+
+  - model_id: gemini-flash-latest
+    name: Gemini Flash Latest
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1114112
+
+  - model_id: gemini-flash-lite-latest
+    name: Gemini Flash-Lite Latest
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1114112
+
+  - model_id: gemini-3.1-flash-image-preview
+    name: Nano Banana 2
+    type: chat
+    config:
+      compatibilities: [vision, reasoning, image-output]
+      context_window: 163840
+
+  - model_id: gemini-3.1-pro-preview
+    name: Gemini 3.1 Pro Preview
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1114112
+
+  - model_id: gemini-3.1-flash-lite-preview
+    name: Gemini 3.1 Flash-Lite Preview
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1114112
+
+  - model_id: gemini-3-flash-preview
+    name: Gemini 3 Flash Preview
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1114112
+
+  - model_id: gemini-3-pro-image-preview
+    name: Nano Banana Pro
+    type: chat
+    config:
+      compatibilities: [vision, reasoning, image-output]
+      context_window: 163840
+
   - model_id: gemini-2.5-pro
     name: Gemini 2.5 Pro
     type: chat
     config:
       compatibilities: [vision, tool-call, reasoning]
-      context_window: 1048576
+      context_window: 1114112
+
+  - model_id: gemini-2.5-pro-preview-06-05
+    name: Gemini 2.5 Pro Preview 06-05
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1114112
+
+  - model_id: gemini-2.5-pro-preview-05-06
+    name: Gemini 2.5 Pro Preview 05-06
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1114112
 
   - model_id: gemini-2.5-flash
     name: Gemini 2.5 Flash
     type: chat
     config:
       compatibilities: [vision, tool-call, reasoning]
-      context_window: 1048576
+      context_window: 1114112
+
+  - model_id: gemini-2.5-flash-image
+    name: Nano Banana
+    type: chat
+    config:
+      compatibilities: [vision, image-output]
+      context_window: 98304
+
+  - model_id: gemini-2.5-flash-lite
+    name: Gemini 2.5 Flash-Lite
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1114112
+
+  - model_id: gemini-2.5-flash-lite-preview-09-2025
+    name: Gemini 2.5 Flash-Lite Preview Sep 2025
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1114112
 
   - model_id: gemini-2.0-flash
     name: Gemini 2.0 Flash
     type: chat
     config:
       compatibilities: [vision, tool-call]
-      context_window: 1048576
+      context_window: 1056768
 
-  - model_id: gemini-2.0-flash-lite
-    name: Gemini 2.0 Flash Lite
+  - model_id: gemini-2.0-flash-001
+    name: Gemini 2.0 Flash 001
     type: chat
     config:
       compatibilities: [vision, tool-call]
-      context_window: 1048576
+      context_window: 1056768
 
-  - model_id: text-embedding-004
-    name: Text Embedding 004
-    type: embedding
+  - model_id: gemini-2.0-flash-exp-image-generation
+    name: Gemini 2.0 Flash (Image Generation) Experimental
+    type: chat
     config:
-      dimensions: 768
+      compatibilities: [vision, image-output]
+      context_window: 1056768
+
+  - model_id: gemini-2.0-flash-lite
+    name: Gemini 2.0 Flash-Lite
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 1056768
+
+  - model_id: gemini-2.0-flash-lite-001
+    name: Gemini 2.0 Flash-Lite 001
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 1056768
+
+  - model_id: gemini-1.5-flash-002
+    name: Gemini 1.5 Flash 002
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 1008192
+
+  - model_id: gemini-1.5-pro-002
+    name: Gemini 1.5 Pro 002
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 2008192
+
+  - model_id: gemini-1.5-flash-8b-latest
+    name: Gemini 1.5 Flash 8B
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 1008192
+
+  - model_id: gemma-3-1b-it
+    name: Gemma 3 1B
+    type: chat
+    config:
+      context_window: 40960
+
+  - model_id: gemma-3-4b-it
+    name: Gemma 3 4B
+    type: chat
+    config:
+      context_window: 40960
+
+  - model_id: gemma-3-12b-it
+    name: Gemma 3 12B
+    type: chat
+    config:
+      context_window: 40960
+
+  - model_id: gemma-3-27b-it
+    name: Gemma 3 27B
+    type: chat
+    config:
+      context_window: 139264
+
+  - model_id: gemma-3n-e2b-it
+    name: Gemma 3n E2B
+    type: chat
+    config:
+      context_window: 10240
+
+  - model_id: gemma-3n-e4b-it
+    name: Gemma 3n E4B
+    type: chat
+    config:
+      context_window: 10240

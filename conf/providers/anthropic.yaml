@@ -4,6 +4,55 @@ icon: https://www.anthropic.com/images/icons/apple-touch-icon.png
 base_url: https://api.anthropic.com
 
 models:
+  - model_id: claude-opus-4-6
+    name: Claude Opus 4.6
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+
+  - model_id: claude-sonnet-4-6
+    name: Claude Sonnet 4.6
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+
+  - model_id: claude-opus-4-5-20251101
+    name: Claude Opus 4.5
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-sonnet-4-5-20250929
+    name: Claude Sonnet 4.5
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-haiku-4-5-20251001
+    name: Claude Haiku 4.5
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-opus-4-1-20250805
+    name: Claude Opus 4.1
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
+  - model_id: claude-opus-4-20250514
+    name: Claude Opus 4
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+
   - model_id: claude-sonnet-4-20250514
     name: Claude Sonnet 4
     type: chat
@@ -11,22 +60,8 @@ models:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 200000
 
-  - model_id: claude-4-opus-20250514
-    name: Claude 4 Opus
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 200000
-
-  - model_id: claude-3-7-sonnet-20250219
-    name: Claude 3.7 Sonnet
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 200000
-
-  - model_id: claude-3-5-haiku-20241022
-    name: Claude 3.5 Haiku
+  - model_id: claude-3-haiku-20240307
+    name: Claude 3 Haiku
     type: chat
     config:
       compatibilities: [vision, tool-call]
