@@ -240,7 +240,7 @@ import { useForm } from 'vee-validate'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { putBrowserContextsById, deleteBrowserContextsById } from '@memoh/sdk'
 import { getBrowserContextsCoresQuery } from '@memoh/sdk/colada'
-import type { BrowsercontextsBrowserContext } from '@memoh/sdk'
+import type { BrowsercontextsBrowserContext, BrowsercontextsUpdateRequest } from '@memoh/sdk'
 import { inject, watch, computed, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -314,10 +314,10 @@ watch(() => curContext?.value, (ctx) => {
 }, { immediate: true })
 
 const { mutateAsync: updateMutation, isLoading: isSaving } = useMutation({
-  mutation: async (data: { id: string; name: string; config: any }) => {
+  mutation: async (data: { id: string; name: string; config: Record<string, unknown> }) => {
     const { data: result } = await putBrowserContextsById({
       path: { id: data.id },
-      body: { name: data.name, config: data.config } as any,
+      body: { name: data.name } as BrowsercontextsUpdateRequest,
       throwOnError: true,
     })
     return result
@@ -339,7 +339,7 @@ const handleSave = form.handleSubmit(async (values) => {
   const id = curContext?.value?.id
   if (!id) return
 
-  const config: Record<string, any> = {
+  const config: Record<string, unknown> = {
     core: values.core ?? 'chromium',
   }
   if (values.viewportWidth || values.viewportHeight) {

@@ -64,8 +64,8 @@ func (f *fakeChatGateway) StreamChat(_ context.Context, req conversation.ChatReq
 	return chunks, errs
 }
 
-func (*fakeChatGateway) TriggerSchedule(_ context.Context, _ string, _ schedule.TriggerPayload, _ string) error {
-	return nil
+func (*fakeChatGateway) TriggerSchedule(_ context.Context, _ string, _ schedule.TriggerPayload, _ string) (schedule.TriggerResult, error) {
+	return schedule.TriggerResult{}, nil
 }
 
 type fakeReplySender struct {
@@ -321,10 +321,9 @@ func (f *fakeChatService) Persist(_ context.Context, input messagepkg.PersistInp
 	f.persistedIn = append(f.persistedIn, input)
 	msg := messagepkg.Message{
 		BotID:                   input.BotID,
-		RouteID:                 input.RouteID,
+		SessionID:               input.SessionID,
 		SenderChannelIdentityID: input.SenderChannelIdentityID,
 		SenderUserID:            input.SenderUserID,
-		Platform:                input.Platform,
 		ExternalMessageID:       input.ExternalMessageID,
 		SourceReplyToMessageID:  input.SourceReplyToMessageID,
 		Role:                    input.Role,
@@ -455,8 +454,11 @@ func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
 	if len(sender.sent) != 0 {
 		t.Fatalf("ACL denied guest should not send reply, got %+v", sender.sent)
 	}
-	if len(chatSvc.persistedIn) != 0 {
-		t.Fatalf("ACL denied guest should not persist trigger message, got %d", len(chatSvc.persistedIn))
+	if len(chatSvc.persistedIn) != 1 {
+		t.Fatalf("ACL denied guest should persist 1 passive message (replacing inbox), got %d", len(chatSvc.persistedIn))
+	}
+	if chatSvc.persistedIn[0].Role != "user" {
+		t.Fatalf("passive message role should be user, got %q", chatSvc.persistedIn[0].Role)
 	}
 }
 
@@ -685,8 +687,11 @@ func TestChannelInboundProcessorGroupPassiveSync(t *testing.T) {
 	if len(sender.sent) != 0 {
 		t.Fatalf("group passive sync should not send reply: %+v", sender.sent)
 	}
-	if len(chatSvc.persisted) != 0 {
-		t.Fatalf("group passive sync should not persist to messages directly, got: %d", len(chatSvc.persisted))
+	if len(chatSvc.persisted) != 1 {
+		t.Fatalf("group passive sync should persist 1 passive message (replacing inbox), got: %d", len(chatSvc.persisted))
+	}
+	if chatSvc.persisted[0].Role != "user" {
+		t.Fatalf("passive message role should be user, got %q", chatSvc.persisted[0].Role)
 	}
 }
 
@@ -1067,8 +1072,11 @@ func TestChannelInboundProcessorPersonalGroupNonOwnerIgnored(t *testing.T) {
 	if len(sender.sent) != 0 {
 		t.Fatalf("non-owner should be ignored silently: %+v", sender.sent)
 	}
-	if len(chatSvc.persisted) != 0 {
-		t.Fatalf("ignored message should not persist in passive mode")
+	if len(chatSvc.persisted) != 1 {
+		t.Fatalf("non-owner group message should persist 1 passive message (replacing inbox), got %d", len(chatSvc.persisted))
+	}
+	if chatSvc.persisted[0].Role != "user" {
+		t.Fatalf("passive message role should be user, got %q", chatSvc.persisted[0].Role)
 	}
 }
 
@@ -1109,8 +1117,11 @@ func TestChannelInboundProcessorPersonalGroupOwnerWithoutMentionUsesPassivePersi
 	if len(sender.sent) != 0 {
 		t.Fatalf("owner group message without mention should not send reply")
 	}
-	if len(chatSvc.persisted) != 0 {
-		t.Fatalf("non-mentioned message should not persist to messages (only inbox), got: %d", len(chatSvc.persisted))
+	if len(chatSvc.persisted) != 1 {
+		t.Fatalf("owner non-mentioned message should persist 1 passive message (replacing inbox), got: %d", len(chatSvc.persisted))
+	}
+	if chatSvc.persisted[0].Role != "user" {
+		t.Fatalf("passive message role should be user, got %q", chatSvc.persisted[0].Role)
 	}
 }
 

@@ -263,6 +263,7 @@ import {
   Separator,
 } from '@memoh/ui'
 import LoadingButton from '@/components/loading-button/index.vue'
+import type { TtsModelCapabilities, TtsVoiceInfo } from '@memoh/sdk'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
@@ -270,8 +271,8 @@ import { useI18n } from 'vue-i18n'
 const props = defineProps<{
   modelId: string
   modelName: string
-  config: Record<string, any>
-  capabilities: any
+  config: Record<string, unknown>
+  capabilities: TtsModelCapabilities | null
 }>()
 
 const emit = defineEmits<{
@@ -283,13 +284,14 @@ const { t } = useI18n()
 
 const caps = computed(() => props.capabilities)
 
-const configData = reactive<Record<string, any>>({})
+const configData = reactive<Record<string, unknown>>({})
 
 watch(() => props.config, (cfg) => {
   Object.keys(configData).forEach((k) => delete configData[k])
   if (cfg.voice && typeof cfg.voice === 'object') {
-    configData.voice_id = (cfg.voice as any).id ?? ''
-    configData.voice_lang = (cfg.voice as any).lang ?? ''
+    const voice = cfg.voice as Record<string, unknown>
+    configData.voice_id = voice.id ?? ''
+    configData.voice_lang = voice.lang ?? ''
   }
   if (cfg.format) configData.format = cfg.format
   if (cfg.speed != null) configData.speed = cfg.speed
@@ -299,7 +301,7 @@ watch(() => props.config, (cfg) => {
 
 const availableLanguages = computed(() => {
   if (!caps.value?.voices) return []
-  const langs = new Set(caps.value.voices.map((v: any) => v.lang ?? '').filter(Boolean))
+  const langs = new Set(caps.value.voices.map((v: TtsVoiceInfo) => v.lang ?? '').filter(Boolean))
   return [...langs].sort()
 })
 
@@ -307,13 +309,13 @@ const filteredVoices = computed(() => {
   if (!caps.value?.voices) return []
   const lang = configData.voice_lang
   if (!lang) return caps.value.voices
-  return caps.value.voices.filter((v: any) => v.lang === lang)
+  return caps.value.voices.filter((v: TtsVoiceInfo) => v.lang === lang)
 })
 
 function onLangChange(lang: string) {
   configData.voice_lang = lang
-  const voices = caps.value?.voices?.filter((v: any) => v.lang === lang)
-  if (voices && voices.length > 0 && !voices.some((v: any) => v.id === configData.voice_id)) {
+  const voices = caps.value?.voices?.filter((v: TtsVoiceInfo) => v.lang === lang)
+  if (voices && voices.length > 0 && !voices.some((v: TtsVoiceInfo) => v.id === configData.voice_id)) {
     configData.voice_id = voices[0].id ?? ''
   }
 }
@@ -395,9 +397,10 @@ async function handleTest() {
     audioUrl.value = URL.createObjectURL(blob)
     await new Promise<void>((resolve) => setTimeout(resolve, 50))
     audioEl.value?.play()
-  } catch (e: any) {
-    testError.value = e?.message || t('ttsProvider.test.failed')
-    toast.error(e?.message || t('ttsProvider.test.failed'))
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : t('ttsProvider.test.failed')
+    testError.value = msg
+    toast.error(msg)
   } finally {
     testLoading.value = false
   }

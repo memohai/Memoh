@@ -31,10 +31,6 @@
     v-else-if="block.toolName === 'search_memory'"
     :block="block"
   />
-  <ToolCallInbox
-    v-else-if="block.toolName === 'search_inbox'"
-    :block="block"
-  />
   <ToolCallWebFetch
     v-else-if="block.toolName === 'web_fetch'"
     :block="block"
@@ -79,7 +75,6 @@ import ToolCallExec from './tool-call-exec.vue'
 import ToolCallWebSearch from './tool-call-web-search.vue'
 import ToolCallSchedule from './tool-call-schedule.vue'
 import ToolCallMemory from './tool-call-memory.vue'
-import ToolCallInbox from './tool-call-inbox.vue'
 import ToolCallWebFetch from './tool-call-web-fetch.vue'
 import ToolCallMessage from './tool-call-message.vue'
 import ToolCallContacts from './tool-call-contacts.vue'

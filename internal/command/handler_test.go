@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/settings"
@@ -32,13 +31,9 @@ type fakeScheduleService struct {
 	items []schedule.Schedule
 }
 
-type fakeInboxService struct {
-	count inbox.CountResult
-}
-
 // newTestHandler creates a Handler with nil services for use in tests.
 func newTestHandler(roleResolver MemberRoleResolver) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // --- tests ---
@@ -271,7 +266,7 @@ func TestGlobalHelp_AllGroups(t *testing.T) {
 	h := newTestHandler(nil)
 	help := h.registry.GlobalHelp()
 	for _, group := range []string{
-		"subagent", "schedule", "mcp", "inbox", "settings",
+		"subagent", "schedule", "mcp", "settings",
 		"model", "memory", "search", "browser", "usage",
 		"email", "heartbeat", "skill", "fs",
 	} {
@@ -324,7 +319,6 @@ func TestNewCommands_NilServices(t *testing.T) {
 var (
 	_ = fakeSubagentService{items: []subagent.Subagent{{ID: "1", Name: "test", CreatedAt: time.Now(), UpdatedAt: time.Now()}}}
 	_ = fakeScheduleService{items: []schedule.Schedule{{ID: "1", Name: "test"}}}
-	_ = fakeInboxService{count: inbox.CountResult{Unread: 1, Total: 2}}
 	_ = mcp.Connection{}
 	_ = settings.Settings{}
 )

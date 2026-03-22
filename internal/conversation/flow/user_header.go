@@ -6,8 +6,7 @@ import (
 )
 
 // UserMessageMeta holds the structured metadata attached to every user
-// message. It is the single source of truth shared by the YAML header
-// (sent to the LLM) and the inbox content JSONB.
+// message. It is the single source of truth for the YAML header sent to the LLM.
 type UserMessageMeta struct {
 	MessageID         string   `json:"message-id,omitempty"`
 	ChannelIdentityID string   `json:"channel-identity-id"`
@@ -19,8 +18,7 @@ type UserMessageMeta struct {
 	AttachmentPaths   []string `json:"attachments"`
 }
 
-// BuildUserMessageMeta constructs a UserMessageMeta from the inbound
-// parameters. Both FormatUserHeader and inbox content use this.
+// BuildUserMessageMeta constructs a UserMessageMeta from the inbound parameters.
 func BuildUserMessageMeta(messageID, channelIdentityID, displayName, channel, conversationType, conversationName string, attachmentPaths []string) UserMessageMeta {
 	if attachmentPaths == nil {
 		attachmentPaths = []string{}
@@ -37,8 +35,7 @@ func BuildUserMessageMeta(messageID, channelIdentityID, displayName, channel, co
 	}
 }
 
-// ToMap returns the metadata as a map with the same keys used in the YAML
-// header, suitable for storing as inbox content JSONB.
+// ToMap returns the metadata as a map with the same keys used in the YAML header.
 func (m UserMessageMeta) ToMap() map[string]any {
 	result := map[string]any{
 		"channel-identity-id": m.ChannelIdentityID,

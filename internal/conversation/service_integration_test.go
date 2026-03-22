@@ -136,7 +136,6 @@ func setupObservedChatScenario(t *testing.T) (chatPresenceFixture, string, strin
 	_, err = fixture.messageSvc.Persist(ctx, message.PersistInput{
 		BotID:                   botID,
 		SenderChannelIdentityID: observedChannelIdentity.ID,
-		Platform:                "feishu",
 		ExternalMessageID:       fmt.Sprintf("ext-msg-%d", time.Now().UnixNano()),
 		Role:                    "user",
 		Content:                 []byte(`{"content":"hello from observed channelIdentity"}`),

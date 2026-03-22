@@ -3,9 +3,11 @@ package heartbeat
 import "context"
 
 type TriggerPayload struct {
-	BotID       string
-	Interval    int
-	OwnerUserID string
+	BotID           string
+	Interval        int
+	OwnerUserID     string
+	SessionID       string
+	LastHeartbeatAt string // ISO 8601; empty on first heartbeat
 }
 
 type TriggerResult struct {
@@ -14,6 +16,7 @@ type TriggerResult struct {
 	Usage      any
 	UsageBytes []byte
 	ModelID    string
+	SessionID  string
 }
 
 type Triggerer interface {

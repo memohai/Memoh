@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, provide, watch, reactive } from 'vue'
-import { useQueryCache, useQuery } from '@pinia/colada'
+import { useQuery } from '@pinia/colada'
 import {
   ScrollArea,
   SidebarMenu,
@@ -29,7 +29,6 @@ const { data: providerData } = useQuery({
     return data
   },
 })
-const queryCache = useQueryCache()
 
 const curProvider = ref<MemoryprovidersGetResponse>()
 provide('curMemoryProvider', curProvider)

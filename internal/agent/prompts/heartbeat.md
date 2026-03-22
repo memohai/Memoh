@@ -2,6 +2,7 @@
 ---
 interval: every {{interval}} minutes
 time: {{timeNow}}
+last_heartbeat: {{lastHeartbeat}}
 ---
 {{checklistSection}}
 

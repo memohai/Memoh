@@ -2,16 +2,18 @@ import type { BotsBot } from '@memoh/sdk'
 
 export type Bot = BotsBot
 
-export interface ChatSummary {
+export interface SessionSummary {
   id: string
   bot_id: string
-  kind: string
-  title?: string
+  route_id?: string
+  channel_type?: string
+  type?: string
+  title: string
+  metadata?: Record<string, unknown>
   created_at?: string
   updated_at?: string
-  access_mode?: 'participant' | 'channel_identity_observed'
-  participant_role?: string
-  last_observed_at?: string
+  route_metadata?: Record<string, unknown>
+  route_conversation_type?: string
 }
 
 export interface MessageAsset {
@@ -28,7 +30,7 @@ export interface MessageAsset {
 export interface Message {
   id: string
   bot_id: string
-  route_id?: string
+  session_id?: string
   sender_channel_identity_id?: string
   sender_user_id?: string
   sender_display_name?: string
@@ -69,11 +71,14 @@ export interface MessageStreamEvent {
   type: string
   bot_id?: string
   message?: Message
+  session_id?: string
+  title?: string
 }
 
 export interface FetchMessagesOptions {
   limit?: number
   before?: string
+  session_id?: string
 }
 
 export interface ChatAttachment {

@@ -36,8 +36,6 @@ type StreamEvent struct {
 	Speeches    []SpeechItem     `json:"speeches,omitempty"`
 	Messages    json.RawMessage  `json:"messages,omitempty"`
 	Usage       json.RawMessage  `json:"usage,omitempty"`
-	Usages      json.RawMessage  `json:"usages,omitempty"`
-	Skills      []string         `json:"skills,omitempty"`
 	Reasoning   []string         `json:"reasoning,omitempty"`
 	Error       string           `json:"error,omitempty"`
 }

@@ -13,6 +13,8 @@ import {
   deleteBotsById,
   getModels,
   type BotsBot,
+  type BotsCreateBotRequest,
+  type BotsUpdateBotRequest,
   type ModelsGetResponse,
 } from '@memoh/sdk'
 import { client } from '@memoh/sdk/client'
@@ -115,7 +117,7 @@ export const registerBotCommands = (program: Command) => {
       const spinner = ora('Creating bot...').start()
       try {
         const { data } = await postBots({
-          body: body as any,
+          body: body as BotsCreateBotRequest,
           throwOnError: true,
         })
         spinner.succeed(`Bot created: ${data.display_name || data.id}`)
@@ -173,7 +175,7 @@ export const registerBotCommands = (program: Command) => {
       try {
         await putBotsById({
           path: { id: botId },
-          body: body as any,
+          body: body as BotsUpdateBotRequest,
           throwOnError: true,
         })
         spinner.succeed('Bot updated')

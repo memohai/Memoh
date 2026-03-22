@@ -35,6 +35,11 @@ func New(deps Deps) *Agent {
 	}
 }
 
+// BridgeProvider returns the underlying bridge provider (workspace manager).
+func (a *Agent) BridgeProvider() bridge.Provider {
+	return a.bridgeProvider
+}
+
 // SetToolProviders sets the tool providers after construction.
 // This allows breaking dependency cycles in the DI graph.
 func (a *Agent) SetToolProviders(providers []tools.ToolProvider) {
@@ -63,22 +68,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		return
 	}
 	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
-
-	enabledSkills := make([]string, 0, len(cfg.EnabledSkillNames))
-	copy(enabledSkills, cfg.EnabledSkillNames)
-	enableSkill := func(name string) {
-		for _, s := range cfg.Skills {
-			if s.Name == name {
-				for _, existing := range enabledSkills {
-					if existing == name {
-						return
-					}
-				}
-				enabledSkills = append(enabledSkills, name)
-				return
-			}
-		}
-	}
 
 	// Loop detection setup
 	var textLoopGuard *TextLoopGuard
@@ -202,13 +191,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				Input:      p.Input,
 				Result:     p.Output,
 			}
-			if p.ToolName == "use_skill" {
-				if resultMap, ok := p.Output.(map[string]any); ok {
-					if skillName, ok := resultMap["skillName"].(string); ok && skillName != "" {
-						enableSkill(skillName)
-					}
-				}
-			}
 			if shouldAbort {
 				a.logger.Warn("tool loop abort triggered", slog.String("tool_call_id", p.ToolCallID))
 				aborted = true
@@ -263,24 +245,23 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	finalMessages = StripTagsFromMessages(finalMessages)
 
 	var totalUsage sdk.Usage
-	perStepUsages := make([]json.RawMessage, 0, len(streamResult.Steps))
 	for _, step := range streamResult.Steps {
 		totalUsage.InputTokens += step.Usage.InputTokens
 		totalUsage.OutputTokens += step.Usage.OutputTokens
 		totalUsage.TotalTokens += step.Usage.TotalTokens
 		totalUsage.ReasoningTokens += step.Usage.ReasoningTokens
 		totalUsage.CachedInputTokens += step.Usage.CachedInputTokens
-		stepJSON, _ := json.Marshal(step.Usage)
-		perStepUsages = append(perStepUsages, stepJSON)
+		totalUsage.InputTokenDetails.NoCacheTokens += step.Usage.InputTokenDetails.NoCacheTokens
+		totalUsage.InputTokenDetails.CacheReadTokens += step.Usage.InputTokenDetails.CacheReadTokens
+		totalUsage.InputTokenDetails.CacheWriteTokens += step.Usage.InputTokenDetails.CacheWriteTokens
+		totalUsage.OutputTokenDetails.TextTokens += step.Usage.OutputTokenDetails.TextTokens
+		totalUsage.OutputTokenDetails.ReasoningTokens += step.Usage.OutputTokenDetails.ReasoningTokens
 	}
 	usageJSON, _ := json.Marshal(totalUsage)
-	usagesJSON, _ := json.Marshal(perStepUsages)
 
 	termEvent := StreamEvent{
 		Messages: mustMarshal(finalMessages),
 		Usage:    usageJSON,
-		Usages:   usagesJSON,
-		Skills:   enabledSkills,
 	}
 	if aborted {
 		termEvent.Type = EventAgentAbort
@@ -296,22 +277,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		return nil, fmt.Errorf("assemble tools: %w", err)
 	}
 	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
-
-	enabledSkills := make([]string, 0, len(cfg.EnabledSkillNames))
-	copy(enabledSkills, cfg.EnabledSkillNames)
-	enableSkill := func(name string) {
-		for _, s := range cfg.Skills {
-			if s.Name == name {
-				for _, existing := range enabledSkills {
-					if existing == name {
-						return
-					}
-				}
-				enabledSkills = append(enabledSkills, name)
-				return
-			}
-		}
-	}
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard
@@ -340,15 +305,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 					result := textLoopGuard.Inspect(step.Text)
 					if result.Abort {
 						return nil // stop
-					}
-				}
-			}
-			for _, tr := range step.ToolResults {
-				if tr.ToolName == "use_skill" {
-					if resultMap, ok := tr.Output.(map[string]any); ok {
-						if skillName, ok := resultMap["skillName"].(string); ok && skillName != "" {
-							enableSkill(skillName)
-						}
 					}
 				}
 			}
@@ -402,7 +358,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		Attachments: attachments,
 		Reactions:   reactions,
 		Speeches:    speeches,
-		Skills:      enabledSkills,
 		Usage:       &genResult.Usage,
 	}, nil
 }
@@ -452,6 +407,13 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, e
 	if len(a.toolProviders) == 0 {
 		return nil, nil
 	}
+	skillsMap := make(map[string]tools.SkillDetail, len(cfg.Skills))
+	for _, s := range cfg.Skills {
+		skillsMap[s.Name] = tools.SkillDetail{
+			Description: s.Description,
+			Content:     s.Content,
+		}
+	}
 	session := tools.SessionContext{
 		BotID:              cfg.Identity.BotID,
 		ChatID:             cfg.Identity.ChatID,
@@ -461,6 +423,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, e
 		ReplyTarget:        cfg.Identity.ReplyTarget,
 		SupportsImageInput: cfg.SupportsImageInput,
 		IsSubagent:         cfg.Identity.IsSubagent,
+		Skills:             skillsMap,
 	}
 
 	var allTools []sdk.Tool

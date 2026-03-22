@@ -248,7 +248,7 @@ import {
   getEmailProvidersByIdOauthStatus,
   deleteEmailProvidersByIdOauthToken,
 } from '@memoh/sdk'
-import type { EmailProviderResponse, EmailFieldSchema, HandlersEmailOAuthStatusResponse } from '@memoh/sdk'
+import type { EmailProviderResponse, EmailProviderMeta, EmailFieldSchema, HandlersEmailOAuthStatusResponse } from '@memoh/sdk'
 
 const OAUTH_PROVIDERS = ['gmail']
 
@@ -266,7 +266,7 @@ const { data: metaList } = useQuery({
 
 const currentMeta = computed(() => {
   if (!metaList.value || !curProvider.value?.provider) return null
-  return (metaList.value as any[]).find((m: any) => m.provider === curProvider.value?.provider)
+  return (metaList.value as EmailProviderMeta[]).find((m) => m.provider === curProvider.value?.provider)
 })
 
 const orderedFields = computed<EmailFieldSchema[]>(() => {
@@ -346,8 +346,8 @@ const handleSave = form.handleSubmit(async (values) => {
     if (isOAuthProvider.value) {
       await fetchOAuthStatus()
     }
-  } catch (e: any) {
-    toast.error(e?.message || t('common.saveFailed'))
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
   }
 })
 
@@ -355,8 +355,8 @@ async function handleDelete() {
   try {
     await doDelete()
     toast.success(t('common.deleteSuccess'))
-  } catch (e: any) {
-    toast.error(e?.message || t('common.saveFailed'))
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
   }
 }
 
@@ -382,8 +382,8 @@ async function handleAuthorize() {
     }
     window.open(data.auth_url, '_blank', 'noopener,noreferrer')
     toast.success(t('emailProvider.oauth.authorizeOpened'))
-  } catch (e: any) {
-    toast.error(e?.message || t('emailProvider.oauth.authorizeFailed'))
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('emailProvider.oauth.authorizeFailed'))
   } finally {
     authorizeLoading.value = false
   }
@@ -403,7 +403,7 @@ async function fetchOAuthStatus() {
       throw error
     }
     oauthStatus.value = data ?? null
-  } catch (error: any) {
+  } catch (error: unknown) {
     oauthStatus.value = null
     console.error('failed to fetch email oauth status', error)
   } finally {
@@ -421,8 +421,8 @@ async function handleRevoke() {
     if (error) throw error
     toast.success(t('emailProvider.oauth.logoutSuccess'))
     await fetchOAuthStatus()
-  } catch (error: any) {
-    toast.error(error?.message || t('emailProvider.oauth.logoutFailed'))
+  } catch (error: unknown) {
+    toast.error(error instanceof Error ? error.message : t('emailProvider.oauth.logoutFailed'))
   } finally {
     revokeLoading.value = false
   }

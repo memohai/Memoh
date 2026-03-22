@@ -12,18 +12,15 @@ import { parseStreamPayload, readSSEStream } from './useChat.sse'
 
 export async function fetchMessages(
   botId: string,
-  chatId: string,
+  sessionId?: string,
   options?: FetchMessagesOptions,
 ): Promise<Message[]> {
-  if (botId.trim() !== chatId.trim()) {
-    throw new Error('chat id must match bot id')
-  }
-
   const { data } = await getBotsByBotIdMessages({
     path: { bot_id: botId },
     query: {
       limit: options?.limit ?? 30,
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
+      ...(sessionId?.trim() ? { session_id: sessionId.trim() } : {}),
     },
     throwOnError: true,
   })
@@ -106,9 +103,13 @@ export async function streamMessageEvents(
   if (!body) throw new Error('No response body')
 
   await readSSEStream(body, (payload) => {
-    const parsed = parseStreamPayload(payload)
-    if (!parsed || typeof parsed !== 'object' || !('type' in parsed)) return
-    if (typeof parsed.type !== 'string' || !parsed.type.trim()) return
-    onEvent(parsed as MessageStreamEvent)
+    try {
+      const parsed = JSON.parse(payload)
+      if (!parsed || typeof parsed !== 'object' || !('type' in parsed)) return
+      if (typeof parsed.type !== 'string' || !parsed.type.trim()) return
+      onEvent(parsed as MessageStreamEvent)
+    } catch {
+      // Ignore unparsable payloads
+    }
   })
 }

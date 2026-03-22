@@ -19,6 +19,11 @@ export default [
     rules: {
       quotes: ['error', 'single'],
       semi: ['error', 'never'],
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        destructuredArrayIgnorePattern: '^_',
+      }],
     },
   },
   {
@@ -38,6 +43,21 @@ export default [
       quotes: ['error', 'single'],
       semi: ['error', 'never'],
       'vue/multi-word-component-names': 'off',
+      'vue/require-default-prop': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        destructuredArrayIgnorePattern: '^_',
+      }],
+    },
+  },
+  {
+    files: [
+      'apps/web/src/pages/chat/components/tool-call-edit.vue',
+      'apps/web/src/pages/chat/components/tool-call-write.vue',
+    ],
+    rules: {
+      'vue/no-v-html': 'off',
     },
   },
 ]

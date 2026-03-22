@@ -32,6 +32,7 @@ import {
   deleteModelsModelByModelId,
   type ProvidersGetResponse,
   type ModelsGetResponse,
+  type ModelsAddRequest,
   type ScheduleSchedule,
   type ScheduleListResponse,
 } from '@memoh/sdk'
@@ -403,7 +404,7 @@ model
       if (modelType === 'chat' && clientType) {
         body.client_type = clientType
       }
-      await postModels({ body: body as any, throwOnError: true })
+      await postModels({ body: body as ModelsAddRequest, throwOnError: true })
       spinner.succeed('Model created')
     } catch (err: unknown) {
       spinner.fail(getErrorMessage(err) || 'Failed to create model')

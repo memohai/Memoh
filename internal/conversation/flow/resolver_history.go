@@ -8,24 +8,33 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/db"
+	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 type messageWithUsage struct {
 	Message           conversation.ModelMessage
 	UsageInputTokens  *int
 	UsageOutputTokens *int
-	RouteID           string
+	SessionID         string
 	ExternalMessageID string
 	Platform          string
 	SenderChannelID   string
+	CompactID         string
 }
 
-func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMinutes int) ([]messageWithUsage, error) {
+func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID string, maxContextMinutes int) ([]messageWithUsage, error) {
 	if r.messageService == nil {
 		return nil, nil
 	}
 	since := time.Now().UTC().Add(-time.Duration(maxContextMinutes) * time.Minute)
-	msgs, err := r.messageService.ListActiveSince(ctx, chatID, since)
+	var msgs []messagepkg.Message
+	var err error
+	if strings.TrimSpace(sessionID) != "" {
+		msgs, err = r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
+	} else {
+		msgs, err = r.messageService.ListActiveSince(ctx, chatID, since)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -52,10 +61,11 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMi
 			Message:           mm,
 			UsageInputTokens:  inputTokens,
 			UsageOutputTokens: outputTokens,
-			RouteID:           strings.TrimSpace(m.RouteID),
+			SessionID:         strings.TrimSpace(m.SessionID),
 			ExternalMessageID: strings.TrimSpace(m.ExternalMessageID),
 			Platform:          strings.TrimSpace(m.Platform),
 			SenderChannelID:   strings.TrimSpace(m.SenderChannelIdentityID),
+			CompactID:         strings.TrimSpace(m.CompactID),
 		})
 	}
 	return result, nil
@@ -66,7 +76,7 @@ func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversa
 		return messages
 	}
 
-	targetRouteID := strings.TrimSpace(req.RouteID)
+	targetSessionID := strings.TrimSpace(req.SessionID)
 	targetExternalID := strings.TrimSpace(req.ExternalMessageID)
 	targetPlatform := strings.TrimSpace(req.CurrentChannel)
 	targetSenderChannelID := strings.TrimSpace(req.SourceChannelIdentityID)
@@ -82,7 +92,7 @@ func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversa
 		if strings.TrimSpace(item.ExternalMessageID) != targetExternalID {
 			continue
 		}
-		if targetRouteID != "" && item.RouteID != "" && item.RouteID != targetRouteID {
+		if targetSessionID != "" && item.SessionID != "" && item.SessionID != targetSessionID {
 			continue
 		}
 		if targetPlatform != "" && item.Platform != "" && !strings.EqualFold(item.Platform, targetPlatform) {
@@ -155,6 +165,65 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 	result := make([]conversation.ModelMessage, 0, len(messages)-cutoff)
 	for _, m := range messages[cutoff:] {
 		result = append(result, m.Message)
+	}
+	return result
+}
+
+func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []messageWithUsage) []messageWithUsage {
+	if r.queries == nil {
+		return messages
+	}
+
+	compactGroups := make(map[string][]int) // compact_id -> indices
+	for i, m := range messages {
+		if m.CompactID != "" {
+			compactGroups[m.CompactID] = append(compactGroups[m.CompactID], i)
+		}
+	}
+	if len(compactGroups) == 0 {
+		return messages
+	}
+
+	summaries := make(map[string]string)
+	for compactID := range compactGroups {
+		cUUID, err := db.ParseUUID(compactID)
+		if err != nil {
+			continue
+		}
+		log, err := r.queries.GetCompactionLogByID(ctx, cUUID)
+		if err != nil {
+			r.logger.Warn("replaceCompactedMessages: failed to load compact log", slog.String("compact_id", compactID), slog.Any("error", err))
+			continue
+		}
+		if log.Status == "ok" && log.Summary != "" {
+			summaries[compactID] = log.Summary
+		}
+	}
+
+	var result []messageWithUsage
+	replaced := make(map[string]bool)
+	for _, m := range messages {
+		if m.CompactID == "" {
+			result = append(result, m)
+			continue
+		}
+		if replaced[m.CompactID] {
+			continue
+		}
+		replaced[m.CompactID] = true
+		summary, ok := summaries[m.CompactID]
+		if !ok || summary == "" {
+			for _, idx := range compactGroups[m.CompactID] {
+				result = append(result, messages[idx])
+			}
+			continue
+		}
+		result = append(result, messageWithUsage{
+			Message: conversation.ModelMessage{
+				Role:    "user",
+				Content: json.RawMessage(`"<summary>\n` + summary + `\n</summary>"`),
+			},
+		})
 	}
 	return result
 }

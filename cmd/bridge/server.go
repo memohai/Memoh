@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"math"
@@ -92,12 +91,12 @@ func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*p
 			line = truncateRunes(line, readMaxLineLen) + "..."
 		}
 
-		formatted := fmt.Sprintf("%6d\t%s\n", currentLine, line)
-		if bytesWritten+len(formatted) > readMaxBytes {
+		entry := line + "\n"
+		if bytesWritten+len(entry) > readMaxBytes {
 			break
 		}
-		out.WriteString(formatted)
-		bytesWritten += len(formatted)
+		out.WriteString(entry)
+		bytesWritten += len(entry)
 		linesRead++
 	}
 

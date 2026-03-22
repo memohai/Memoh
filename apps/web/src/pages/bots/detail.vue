@@ -243,6 +243,7 @@ import BotMemory from './components/bot-memory.vue'
 import BotSkills from './components/bot-skills.vue'
 import BotHistory from './components/bot-history.vue'
 import BotHeartbeat from './components/bot-heartbeat.vue'
+import BotCompaction from './components/bot-compaction.vue'
 import BotEmail from './components/bot-email.vue'
 import BotSubagents from './components/bot-subagents.vue'
 import BotOverview from './components/bot-overview.vue'
@@ -287,6 +288,7 @@ const tabList = computed(() => {
     { value: 'mcp', label: 'bots.tabs.mcp', component: BotMcp, params: { 'bot-id': bot_id } },
     { value: 'subagents', label: 'bots.tabs.subagents', component: BotSubagents, params: { 'bot-id': bot_id } },
     { value: 'heartbeat', label: 'bots.tabs.heartbeat', component: BotHeartbeat, params: { 'bot-id': bot_id } },
+    { value: 'compaction', label: 'bots.tabs.compaction', component: BotCompaction, params: { 'bot-id': bot_id } },
     { value: 'schedule', label: 'bots.tabs.schedule', component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'history', label: 'bots.tabs.history', component: BotHistory, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', component: BotSkills, params: { 'bot-id': bot_id } },

@@ -9,7 +9,7 @@
 | Category | Technology |
 |----------|-----------|
 | Framework | Vue 3 (Composition API, `<script setup>`) |
-| Build | Vite 7 + `@vitejs/plugin-vue` |
+| Build | Vite 8 + `@vitejs/plugin-vue` |
 | CSS | Tailwind CSS 4 (CSS-based config, no `tailwind.config.*`) |
 | UI Library | `@memoh/ui` (built on Reka UI + class-variance-authority) |
 | State | Pinia 3 + `pinia-plugin-persistedstate` |

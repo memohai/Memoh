@@ -24,7 +24,6 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 				{"Allow Guest", boolStr(s.AllowGuest)},
 				{"Max Context Load Time", fmt.Sprintf("%d min", s.MaxContextLoadTime)},
 				{"Max Context Tokens", strconv.Itoa(s.MaxContextTokens)},
-				{"Max Inbox Items", strconv.Itoa(s.MaxInboxItems)},
 				{"Reasoning Enabled", boolStr(s.ReasoningEnabled)},
 				{"Reasoning Effort", s.ReasoningEffort},
 				{"Heartbeat Enabled", boolStr(s.HeartbeatEnabled)},

@@ -11,5 +11,5 @@ import (
 type Runner interface {
 	Chat(ctx context.Context, req conversation.ChatRequest) (conversation.ChatResponse, error)
 	StreamChat(ctx context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error)
-	TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) error
+	TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (schedule.TriggerResult, error)
 }

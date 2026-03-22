@@ -16,8 +16,28 @@
     </div>
 
     <template v-else>
-      <!-- Bot info header -->
-
+      <!-- Session header -->
+      <div class="border-b px-4 py-2 flex items-center justify-between min-h-12">
+        <div class="flex items-center gap-2 min-w-0">
+          <h2 class="text-sm font-medium truncate">
+            {{ activeSession?.title || $t('chat.untitledSession') }}
+          </h2>
+        </div>
+        <div class="flex items-center gap-1 shrink-0">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            :aria-label="$t('chat.newSession')"
+            @click="chatStore.createNewSession()"
+          >
+            <FontAwesomeIcon
+              :icon="['fas', 'plus']"
+              class="size-3.5"
+            />
+          </Button>
+        </div>
+      </div>
 
       <!-- Messages -->
       <section class="flex-1 relative w-full">
@@ -249,7 +269,8 @@ provide(openInFileManagerKey, (path: string, isDir = false) => {
 const {
   messages,
   streaming,
-  currentBotId,  
+  currentBotId,
+  activeSession,
   activeChatReadOnly,
   loadingOlder,
   loadingChats,
@@ -268,14 +289,16 @@ const inputText = ref('')
 
 onMounted(async () => {
   try {
-    await chatStore.initialize()  
+    if (chatStore.currentBotId || chatStore.sessionId) {
+      await chatStore.initialize()
+    }
   } finally {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         isInstant.value = true
       })
-    })  
-  }  
+    })
+  }
 })
 
 const elNode = useTemplateRef('scrollContainer')

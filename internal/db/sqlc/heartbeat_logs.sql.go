@@ -20,7 +20,7 @@ SET status = $2,
     model_id = $6,
     completed_at = now()
 WHERE id = $1
-RETURNING id, bot_id, status, result_text, error_message, usage, model_id, started_at, completed_at
+RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at
 `
 
 type CompleteHeartbeatLogParams struct {
@@ -45,6 +45,7 @@ func (q *Queries) CompleteHeartbeatLog(ctx context.Context, arg CompleteHeartbea
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
+		&i.SessionID,
 		&i.Status,
 		&i.ResultText,
 		&i.ErrorMessage,
@@ -57,14 +58,20 @@ func (q *Queries) CompleteHeartbeatLog(ctx context.Context, arg CompleteHeartbea
 }
 
 const createHeartbeatLog = `-- name: CreateHeartbeatLog :one
-INSERT INTO bot_heartbeat_logs (bot_id, started_at)
-VALUES ($1, now())
-RETURNING id, bot_id, status, result_text, error_message, usage, started_at, completed_at
+INSERT INTO bot_heartbeat_logs (bot_id, session_id, started_at)
+VALUES ($1, $2::uuid, now())
+RETURNING id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 `
+
+type CreateHeartbeatLogParams struct {
+	BotID     pgtype.UUID `json:"bot_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+}
 
 type CreateHeartbeatLogRow struct {
 	ID           pgtype.UUID        `json:"id"`
 	BotID        pgtype.UUID        `json:"bot_id"`
+	SessionID    pgtype.UUID        `json:"session_id"`
 	Status       string             `json:"status"`
 	ResultText   string             `json:"result_text"`
 	ErrorMessage string             `json:"error_message"`
@@ -73,12 +80,13 @@ type CreateHeartbeatLogRow struct {
 	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
 }
 
-func (q *Queries) CreateHeartbeatLog(ctx context.Context, botID pgtype.UUID) (CreateHeartbeatLogRow, error) {
-	row := q.db.QueryRow(ctx, createHeartbeatLog, botID)
+func (q *Queries) CreateHeartbeatLog(ctx context.Context, arg CreateHeartbeatLogParams) (CreateHeartbeatLogRow, error) {
+	row := q.db.QueryRow(ctx, createHeartbeatLog, arg.BotID, arg.SessionID)
 	var i CreateHeartbeatLogRow
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
+		&i.SessionID,
 		&i.Status,
 		&i.ResultText,
 		&i.ErrorMessage,
@@ -99,7 +107,7 @@ func (q *Queries) DeleteHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUI
 }
 
 const listHeartbeatLogsByBot = `-- name: ListHeartbeatLogsByBot :many
-SELECT id, bot_id, status, result_text, error_message, usage, started_at, completed_at
+SELECT id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM bot_heartbeat_logs
 WHERE bot_id = $1
   AND ($2::timestamptz IS NULL OR started_at < $2::timestamptz)
@@ -116,6 +124,7 @@ type ListHeartbeatLogsByBotParams struct {
 type ListHeartbeatLogsByBotRow struct {
 	ID           pgtype.UUID        `json:"id"`
 	BotID        pgtype.UUID        `json:"bot_id"`
+	SessionID    pgtype.UUID        `json:"session_id"`
 	Status       string             `json:"status"`
 	ResultText   string             `json:"result_text"`
 	ErrorMessage string             `json:"error_message"`
@@ -136,6 +145,7 @@ func (q *Queries) ListHeartbeatLogsByBot(ctx context.Context, arg ListHeartbeatL
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
+			&i.SessionID,
 			&i.Status,
 			&i.ResultText,
 			&i.ErrorMessage,

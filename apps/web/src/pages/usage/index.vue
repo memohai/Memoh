@@ -1,5 +1,5 @@
 <template>
-  <div class="p-6 space-y-6  mx-auto">
+  <div class="p-6 space-y-6 mx-auto">
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-semibold tracking-tight">
         {{ $t('usage.title') }}
@@ -73,6 +73,29 @@
           type="date"
           class="w-40"
         />
+      </div>
+
+      <div class="space-y-1.5">
+        <Label>{{ $t('usage.sessionType') }}</Label>
+        <Select v-model="selectedSessionType">
+          <SelectTrigger class="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">
+              {{ $t('usage.allTypes') }}
+            </SelectItem>
+            <SelectItem value="chat">
+              {{ $t('usage.chat') }}
+            </SelectItem>
+            <SelectItem value="heartbeat">
+              {{ $t('usage.heartbeat') }}
+            </SelectItem>
+            <SelectItem value="schedule">
+              {{ $t('usage.schedule') }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div
@@ -194,7 +217,7 @@
           </CardContent>
         </Card>
 
-        <!-- Chart 1: Daily token usage stacked area -->
+        <!-- Chart: Daily token usage -->
         <Card>
           <CardHeader class="pb-2">
             <CardTitle class="text-base">
@@ -210,7 +233,7 @@
           </CardContent>
         </Card>
 
-        <!-- Chart 2: Cache breakdown stacked bar -->
+        <!-- Chart: Cache breakdown -->
         <Card>
           <CardHeader class="pb-2">
             <CardTitle class="text-base">
@@ -226,7 +249,7 @@
           </CardContent>
         </Card>
 
-        <!-- Chart 3: Cache hit rate line -->
+        <!-- Chart: Cache hit rate -->
         <Card>
           <CardHeader class="pb-2">
             <CardTitle class="text-base">
@@ -292,8 +315,9 @@ use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipCompon
 const { t } = useI18n()
 
 const selectedBotId = useSyncedQueryParam('bot', '')
-const timeRange = useSyncedQueryParam('range', '30')
+const timeRange = useSyncedQueryParam('range', '7')
 const selectedModelId = useSyncedQueryParam('model', 'all')
+const selectedSessionType = useSyncedQueryParam('type', 'all')
 const modelChartType = ref('pie')
 
 function daysAgo(days: number): string {
@@ -362,6 +386,38 @@ const modelOptions = computed(() =>
   byModelData.value.filter(m => m.model_id),
 )
 
+type SessionType = 'chat' | 'heartbeat' | 'schedule'
+
+const sessionTypeFilter = computed(() =>
+  selectedSessionType.value === 'all' ? null : selectedSessionType.value as SessionType,
+)
+
+interface TypedDayMaps {
+  chat: Map<string, HandlersDailyTokenUsage>
+  heartbeat: Map<string, HandlersDailyTokenUsage>
+  schedule: Map<string, HandlersDailyTokenUsage>
+}
+
+function buildDayMap(rows: HandlersDailyTokenUsage[] | undefined) {
+  const map = new Map<string, HandlersDailyTokenUsage>()
+  for (const r of rows ?? []) {
+    if (r.day) map.set(r.day, r)
+  }
+  return map
+}
+
+const dayMaps = computed<TypedDayMaps>(() => ({
+  chat: buildDayMap(usageData.value?.chat),
+  heartbeat: buildDayMap(usageData.value?.heartbeat),
+  schedule: buildDayMap(usageData.value?.schedule),
+}))
+
+const activeTypes = computed<SessionType[]>(() => {
+  const filter = sessionTypeFilter.value
+  if (filter) return [filter]
+  return ['chat', 'heartbeat', 'schedule']
+})
+
 const allDays = computed(() => {
   const from = new Date(dateFrom.value + 'T00:00:00')
   const toExclusive = new Date(dateTo.value + 'T00:00:00')
@@ -383,26 +439,22 @@ const allDays = computed(() => {
 const hasData = computed(() => {
   const chat = usageData.value?.chat ?? []
   const heartbeat = usageData.value?.heartbeat ?? []
-  return chat.length > 0 || heartbeat.length > 0 || byModelData.value.length > 0
+  const schedule = usageData.value?.schedule ?? []
+  return chat.length > 0 || heartbeat.length > 0 || schedule.length > 0 || byModelData.value.length > 0
 })
 
-function buildDayMap(rows: HandlersDailyTokenUsage[] | undefined) {
-  const map = new Map<string, HandlersDailyTokenUsage>()
-  for (const r of rows ?? []) {
-    if (r.day) map.set(r.day, r)
-  }
-  return map
-}
-
 const summary = computed(() => {
-  const chatMap = buildDayMap(usageData.value?.chat)
-  const hbMap = buildDayMap(usageData.value?.heartbeat)
+  const days = allDays.value
+  const types = activeTypes.value
+  const maps = dayMaps.value
   let totalInput = 0
   let totalOutput = 0
   let totalCacheRead = 0
   let totalReasoning = 0
-  for (const m of [chatMap, hbMap]) {
-    for (const r of m.values()) {
+  for (const day of days) {
+    for (const tp of types) {
+      const r = maps[tp].get(day)
+      if (!r) continue
       totalInput += r.input_tokens ?? 0
       totalOutput += r.output_tokens ?? 0
       totalCacheRead += r.cache_read_tokens ?? 0
@@ -417,6 +469,11 @@ const summary = computed(() => {
     totalReasoningTokens: totalReasoning,
   }
 })
+
+const sessionTypeInputLabel = (type: SessionType) =>
+  t(`usage.${type}Input`)
+const sessionTypeOutputLabel = (type: SessionType) =>
+  t(`usage.${type}Output`)
 
 function modelLabel(m: HandlersModelTokenUsage) {
   return `${m.model_name || m.model_slug} (${m.provider_name})`
@@ -464,7 +521,7 @@ const modelBarOption = computed(() => {
   const names = models.map(m => modelLabel(m))
   return {
     tooltip: { trigger: 'axis' as const },
-    legend: { data: [t('usage.chatInput'), t('usage.chatOutput')] },
+    legend: { data: [t('usage.inputTokens'), t('usage.outputTokens')] },
     grid: { left: 60, right: 20, bottom: 60, top: 40 },
     xAxis: {
       type: 'category' as const,
@@ -474,13 +531,13 @@ const modelBarOption = computed(() => {
     yAxis: { type: 'value' as const },
     series: [
       {
-        name: t('usage.chatInput'),
+        name: t('usage.inputTokens'),
         type: 'bar' as const,
         stack: 'tokens',
         data: models.map(m => m.input_tokens ?? 0),
       },
       {
-        name: t('usage.chatOutput'),
+        name: t('usage.outputTokens'),
         type: 'bar' as const,
         stack: 'tokens',
         data: models.map(m => m.output_tokens ?? 0),
@@ -495,59 +552,93 @@ const modelChartOption = computed(() =>
 
 const dailyTokensOption = computed(() => {
   const days = allDays.value
-  const chatMap = buildDayMap(usageData.value?.chat)
-  const hbMap = buildDayMap(usageData.value?.heartbeat)
+  const types = activeTypes.value
+  const maps = dayMaps.value
+
+  const legendItems: string[] = []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const series: any[] = []
+
+  for (const type of types) {
+    const inputName = sessionTypeInputLabel(type)
+    const outputName = sessionTypeOutputLabel(type)
+    legendItems.push(inputName, outputName)
+    const map = maps[type]
+
+    series.push({
+      name: inputName,
+      type: 'bar' as const,
+      stack: type,
+      data: days.map(d => map.get(d)?.input_tokens ?? 0),
+    })
+    series.push({
+      name: outputName,
+      type: 'bar' as const,
+      stack: type,
+      data: days.map(d => map.get(d)?.output_tokens ?? 0),
+    })
+  }
+
+  const totalInputLabel = t('usage.totalInput')
+  const totalOutputLabel = t('usage.totalOutput')
+  legendItems.push(totalInputLabel, totalOutputLabel)
+
+  series.push({
+    name: totalInputLabel,
+    type: 'line' as const,
+    smooth: true,
+    symbol: 'circle',
+    symbolSize: 4,
+    data: days.map(d => {
+      let sum = 0
+      for (const tp of types) sum += maps[tp].get(d)?.input_tokens ?? 0
+      return sum
+    }),
+  })
+  series.push({
+    name: totalOutputLabel,
+    type: 'line' as const,
+    smooth: true,
+    symbol: 'circle',
+    symbolSize: 4,
+    data: days.map(d => {
+      let sum = 0
+      for (const tp of types) sum += maps[tp].get(d)?.output_tokens ?? 0
+      return sum
+    }),
+  })
+
   return {
     tooltip: { trigger: 'axis' as const },
-    legend: { 
-      data: [t('usage.chatInput'), t('usage.chatOutput'), t('usage.heartbeatInput'), t('usage.heartbeatOutput')],
+    legend: {
+      data: legendItems,
       bottom: 0,
       left: 'center',
-      itemGap: 16,
+      itemGap: 12,
     },
-    grid: { left: 60, right: 20, bottom: 50, top: 20 },
+    grid: { left: 60, right: 20, bottom: 55, top: 20 },
     xAxis: { type: 'category' as const, data: days },
     yAxis: { type: 'value' as const },
-    series: [
-      {
-        name: t('usage.chatInput'),
-        type: 'line' as const,
-        stack: 'input',
-        areaStyle: {},
-        data: days.map(d => chatMap.get(d)?.input_tokens ?? 0),
-      },
-      {
-        name: t('usage.heartbeatInput'),
-        type: 'line' as const,
-        stack: 'input',
-        areaStyle: {},
-        data: days.map(d => hbMap.get(d)?.input_tokens ?? 0),
-      },
-      {
-        name: t('usage.chatOutput'),
-        type: 'line' as const,
-        stack: 'output',
-        areaStyle: {},
-        data: days.map(d => chatMap.get(d)?.output_tokens ?? 0),
-      },
-      {
-        name: t('usage.heartbeatOutput'),
-        type: 'line' as const,
-        stack: 'output',
-        areaStyle: {},
-        data: days.map(d => hbMap.get(d)?.output_tokens ?? 0),
-      },
-    ],
+    series,
   }
 })
 
 const cacheBreakdownOption = computed(() => {
   const days = allDays.value
-  const chatMap = buildDayMap(usageData.value?.chat)
-  const hbMap = buildDayMap(usageData.value?.heartbeat)
+  const types = activeTypes.value
+  const maps = dayMaps.value
+
+  function sumField(day: string, field: 'cache_read_tokens' | 'cache_write_tokens' | 'input_tokens') {
+    let total = 0
+    for (const tp of types) {
+      total += (maps[tp].get(day)?.[field] ?? 0) as number
+    }
+    return total
+  }
+
   return {
     tooltip: { trigger: 'axis' as const },
-    legend: { 
+    legend: {
       data: [t('usage.cacheRead'), t('usage.cacheWrite'), t('usage.noCache')],
       bottom: 0,
       left: 'center',
@@ -561,32 +652,22 @@ const cacheBreakdownOption = computed(() => {
         name: t('usage.cacheRead'),
         type: 'bar' as const,
         stack: 'cache',
-        data: days.map(d => {
-          const c = chatMap.get(d)
-          const h = hbMap.get(d)
-          return (c?.cache_read_tokens ?? 0) + (h?.cache_read_tokens ?? 0)
-        }),
+        data: days.map(d => sumField(d, 'cache_read_tokens')),
       },
       {
         name: t('usage.cacheWrite'),
         type: 'bar' as const,
         stack: 'cache',
-        data: days.map(d => {
-          const c = chatMap.get(d)
-          const h = hbMap.get(d)
-          return (c?.cache_write_tokens ?? 0) + (h?.cache_write_tokens ?? 0)
-        }),
+        data: days.map(d => sumField(d, 'cache_write_tokens')),
       },
       {
         name: t('usage.noCache'),
         type: 'bar' as const,
         stack: 'cache',
         data: days.map(d => {
-          const c = chatMap.get(d)
-          const h = hbMap.get(d)
-          const totalInput = (c?.input_tokens ?? 0) + (h?.input_tokens ?? 0)
-          const cacheRead = (c?.cache_read_tokens ?? 0) + (h?.cache_read_tokens ?? 0)
-          const cacheWrite = (c?.cache_write_tokens ?? 0) + (h?.cache_write_tokens ?? 0)
+          const totalInput = sumField(d, 'input_tokens')
+          const cacheRead = sumField(d, 'cache_read_tokens')
+          const cacheWrite = sumField(d, 'cache_write_tokens')
           return Math.max(0, totalInput - cacheRead - cacheWrite)
         }),
       },
@@ -596,8 +677,17 @@ const cacheBreakdownOption = computed(() => {
 
 const cacheHitRateOption = computed(() => {
   const days = allDays.value
-  const chatMap = buildDayMap(usageData.value?.chat)
-  const hbMap = buildDayMap(usageData.value?.heartbeat)
+  const types = activeTypes.value
+  const maps = dayMaps.value
+
+  function sumField(day: string, field: 'cache_read_tokens' | 'input_tokens') {
+    let total = 0
+    for (const tp of types) {
+      total += (maps[tp].get(day)?.[field] ?? 0) as number
+    }
+    return total
+  }
+
   return {
     tooltip: {
       trigger: 'axis' as const,
@@ -615,10 +705,8 @@ const cacheHitRateOption = computed(() => {
         type: 'line' as const,
         smooth: true,
         data: days.map(d => {
-          const c = chatMap.get(d)
-          const h = hbMap.get(d)
-          const totalInput = (c?.input_tokens ?? 0) + (h?.input_tokens ?? 0)
-          const cacheRead = (c?.cache_read_tokens ?? 0) + (h?.cache_read_tokens ?? 0)
+          const totalInput = sumField(d, 'input_tokens')
+          const cacheRead = sumField(d, 'cache_read_tokens')
           return totalInput > 0 ? parseFloat(((cacheRead / totalInput) * 100).toFixed(1)) : 0
         }),
       },

@@ -146,13 +146,26 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 
 	before, hasBefore := parseBeforeParam(c.QueryParam("before"))
 
+	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
+
 	var messages []messagepkg.Message
-	if hasBefore {
-		messages, err = h.messageService.ListBefore(c.Request().Context(), botID, before, limit)
+	if sessionID != "" {
+		if hasBefore {
+			messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
+		} else {
+			messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
+			if err == nil {
+				reverseMessages(messages)
+			}
+		}
 	} else {
-		messages, err = h.messageService.ListLatest(c.Request().Context(), botID, limit)
-		if err == nil {
-			reverseMessages(messages)
+		if hasBefore {
+			messages, err = h.messageService.ListBefore(c.Request().Context(), botID, before, limit)
+		} else {
+			messages, err = h.messageService.ListLatest(c.Request().Context(), botID, limit)
+			if err == nil {
+				reverseMessages(messages)
+			}
 		}
 	}
 	if err != nil {
@@ -296,20 +309,33 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 			if strings.TrimSpace(event.BotID) != botID {
 				continue
 			}
-			if event.Type != messageevent.EventTypeMessageCreated {
-				continue
-			}
 			if len(event.Data) == 0 {
 				continue
 			}
-			var message messagepkg.Message
-			if err := json.Unmarshal(event.Data, &message); err != nil {
-				h.logger.Warn("decode message event failed", slog.Any("error", err))
-				continue
-			}
-			h.fillAssetMimeFromStorage(c.Request().Context(), botID, []messagepkg.Message{message})
-			if err := writeCreatedEvent(message); err != nil {
-				return nil
+			switch event.Type {
+			case messageevent.EventTypeMessageCreated:
+				var message messagepkg.Message
+				if err := json.Unmarshal(event.Data, &message); err != nil {
+					h.logger.Warn("decode message event failed", slog.Any("error", err))
+					continue
+				}
+				h.fillAssetMimeFromStorage(c.Request().Context(), botID, []messagepkg.Message{message})
+				if err := writeCreatedEvent(message); err != nil {
+					return nil
+				}
+			case messageevent.EventTypeSessionTitleUpdated:
+				var payload map[string]string
+				if err := json.Unmarshal(event.Data, &payload); err != nil {
+					continue
+				}
+				if err := writeSSEJSON(writer, flusher, map[string]any{
+					"type":       string(messageevent.EventTypeSessionTitleUpdated),
+					"bot_id":     botID,
+					"session_id": payload["session_id"],
+					"title":      payload["title"],
+				}); err != nil {
+					return nil
+				}
 			}
 		}
 	}
@@ -341,8 +367,15 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 	if h.messageService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
 	}
-	if err := h.messageService.DeleteByBot(c.Request().Context(), botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
+	if sessionID != "" {
+		if err := h.messageService.DeleteBySession(c.Request().Context(), sessionID); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+	} else {
+		if err := h.messageService.DeleteByBot(c.Request().Context(), botID); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 	}
 	return c.NoContent(http.StatusNoContent)
 }

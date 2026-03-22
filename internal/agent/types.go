@@ -12,10 +12,8 @@ type SessionContext struct {
 	BotID             string
 	ChatID            string
 	ChannelIdentityID string
-	DisplayName       string
 	CurrentPlatform   string
 	ReplyTarget       string
-	ConversationType  string
 	SessionToken      string //nolint:gosec // carries session credential material at runtime
 	IsSubagent        bool
 }
@@ -26,15 +24,6 @@ type SkillEntry struct {
 	Description string
 	Content     string
 	Metadata    map[string]any
-}
-
-// InboxItem represents an unread inbox notification.
-type InboxItem struct {
-	ID        string         `json:"id"`
-	Source    string         `json:"source"`
-	Header    map[string]any `json:"header"`
-	Content   string         `json:"content"`
-	CreatedAt string         `json:"createdAt"`
 }
 
 // Schedule represents a scheduled task definition.
@@ -59,16 +48,11 @@ type RunConfig struct {
 	Messages           []sdk.Message
 	Query              string
 	System             string
-	Tools              []sdk.Tool
+	SessionType        string
 	SupportsImageInput bool
-	Channels           []string
-	CurrentChannel     string
 	Identity           SessionContext
 	Skills             []SkillEntry
-	EnabledSkillNames  []string
-	Inbox              []InboxItem
 	LoopDetection      LoopDetectionConfig
-	ActiveContextTime  int
 }
 
 // GenerateResult holds the result of a non-streaming agent invocation.
@@ -78,7 +62,6 @@ type GenerateResult struct {
 	Attachments []FileAttachment
 	Reactions   []ReactionItem
 	Speeches    []SpeechItem
-	Skills      []string
 	Usage       *sdk.Usage
 }
 

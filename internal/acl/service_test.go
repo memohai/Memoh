@@ -65,19 +65,21 @@ func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 			*dest[5].(*string) = bots.BotStatusReady
 			*dest[6].(*int32) = 30
 			*dest[7].(*int32) = 0
-			*dest[8].(*int32) = 50
-			*dest[9].(*string) = "auto"
-			*dest[10].(*bool) = false
-			*dest[11].(*string) = "medium"
+			*dest[8].(*string) = ""
+			*dest[9].(*bool) = false
+			*dest[10].(*string) = "medium"
+			*dest[11].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[12].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[13].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[14].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[15].(*bool) = false
-			*dest[16].(*int32) = 30
-			*dest[17].(*string) = ""
-			*dest[18].(*[]byte) = []byte(`{}`)
-			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[20].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[14].(*bool) = false
+			*dest[15].(*int32) = 30
+			*dest[16].(*string) = ""
+			*dest[17].(*bool) = false                // CompactionEnabled
+			*dest[18].(*int32) = 100000              // CompactionThreshold
+			*dest[19].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
+			*dest[20].(*[]byte) = []byte(`{}`)
+			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

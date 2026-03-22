@@ -1,0 +1,60 @@
+name: ESLint
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "**/*.js"
+      - "**/*.cjs"
+      - "**/*.mjs"
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.vue"
+      - "**/package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "eslint.config.mjs"
+      - "**/tsconfig*.json"
+      - ".github/workflows/eslint.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "**/*.js"
+      - "**/*.cjs"
+      - "**/*.mjs"
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.vue"
+      - "**/package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "eslint.config.mjs"
+      - "**/tsconfig*.json"
+      - ".github/workflows/eslint.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run ESLint
+        run: pnpm lint

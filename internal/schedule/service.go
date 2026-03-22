@@ -2,6 +2,7 @@ package schedule
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,28 +21,35 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
-type Service struct {
-	queries   *sqlc.Queries
-	cron      *cron.Cron
-	parser    cron.Parser
-	triggerer Triggerer
-	jwtSecret string
-	logger    *slog.Logger
-	mu        sync.Mutex
-	jobs      map[string]cron.EntryID
+// SessionCreator creates sessions for schedule runs.
+type SessionCreator interface {
+	CreateSession(ctx context.Context, botID, sessionType string) (string, error)
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, runtimeConfig *boot.RuntimeConfig) *Service {
+type Service struct {
+	queries        *sqlc.Queries
+	cron           *cron.Cron
+	parser         cron.Parser
+	triggerer      Triggerer
+	sessionCreator SessionCreator
+	jwtSecret      string
+	logger         *slog.Logger
+	mu             sync.Mutex
+	jobs           map[string]cron.EntryID
+}
+
+func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
 	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	c := cron.New(cron.WithParser(parser))
 	service := &Service{
-		queries:   queries,
-		cron:      c,
-		parser:    parser,
-		triggerer: triggerer,
-		jwtSecret: runtimeConfig.JwtSecret,
-		logger:    log.With(slog.String("service", "schedule")),
-		jobs:      map[string]cron.EntryID{},
+		queries:        queries,
+		cron:           c,
+		parser:         parser,
+		triggerer:      triggerer,
+		sessionCreator: sessionCreator,
+		jwtSecret:      runtimeConfig.JwtSecret,
+		logger:         log.With(slog.String("service", "schedule")),
+		jobs:           map[string]cron.EntryID{},
 	}
 	c.Start()
 	return service
@@ -216,49 +224,215 @@ func (s *Service) Trigger(ctx context.Context, scheduleID string) error {
 	if s.triggerer == nil {
 		return errors.New("schedule triggerer not configured")
 	}
-	schedule, err := s.Get(ctx, scheduleID)
+	sched, err := s.Get(ctx, scheduleID)
 	if err != nil {
 		return err
 	}
-	if !schedule.Enabled {
+	if !sched.Enabled {
 		return errors.New("schedule is disabled")
 	}
-	return s.runSchedule(ctx, schedule)
+	return s.runSchedule(ctx, sched)
 }
 
 const scheduleTokenTTL = 10 * time.Minute
 
-func (s *Service) runSchedule(ctx context.Context, schedule Schedule) error {
+func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	if s.triggerer == nil {
 		return errors.New("schedule triggerer not configured")
 	}
-	updated, err := s.queries.IncrementScheduleCalls(ctx, toUUID(schedule.ID))
+	updated, err := s.queries.IncrementScheduleCalls(ctx, toUUID(sched.ID))
 	if err != nil {
 		return err
 	}
 	if !updated.Enabled {
-		s.removeJob(schedule.ID)
+		s.removeJob(sched.ID)
 	}
 
-	ownerUserID, err := s.resolveBotOwner(ctx, schedule.BotID)
+	ownerUserID, err := s.resolveBotOwner(ctx, sched.BotID)
 	if err != nil {
 		return fmt.Errorf("resolve bot owner: %w", err)
 	}
 
+	var sessionID string
+	var pgSessionID pgtype.UUID
+	if s.sessionCreator != nil {
+		sid, err := s.sessionCreator.CreateSession(ctx, sched.BotID, "schedule")
+		if err != nil {
+			s.logger.Error("create schedule session failed", slog.String("bot_id", sched.BotID), slog.Any("error", err))
+		} else {
+			sessionID = sid
+			pgSessionID = db.ParseUUIDOrEmpty(sid)
+		}
+	}
+
+	pgScheduleID := toUUID(sched.ID)
+	pgBotID := toUUID(sched.BotID)
+
+	logRow, err := s.queries.CreateScheduleLog(ctx, sqlc.CreateScheduleLogParams{
+		ScheduleID: pgScheduleID,
+		BotID:      pgBotID,
+		SessionID:  pgSessionID,
+	})
+	if err != nil {
+		s.logger.Error("create schedule log failed", slog.String("schedule_id", sched.ID), slog.Any("error", err))
+	}
+
 	token, err := s.generateTriggerToken(ownerUserID)
 	if err != nil {
+		s.completeLog(ctx, logRow.ID, "error", "", err.Error(), nil, pgtype.UUID{})
 		return fmt.Errorf("generate trigger token: %w", err)
 	}
 
-	return s.triggerer.TriggerSchedule(ctx, schedule.BotID, TriggerPayload{
-		ID:          schedule.ID,
-		Name:        schedule.Name,
-		Description: schedule.Description,
-		Pattern:     schedule.Pattern,
-		MaxCalls:    schedule.MaxCalls,
-		Command:     schedule.Command,
+	result, triggerErr := s.triggerer.TriggerSchedule(ctx, sched.BotID, TriggerPayload{
+		ID:          sched.ID,
+		Name:        sched.Name,
+		Description: sched.Description,
+		Pattern:     sched.Pattern,
+		MaxCalls:    sched.MaxCalls,
+		Command:     sched.Command,
 		OwnerUserID: ownerUserID,
+		SessionID:   sessionID,
 	}, token)
+	if triggerErr != nil {
+		s.completeLog(ctx, logRow.ID, "error", "", triggerErr.Error(), nil, pgtype.UUID{})
+		return triggerErr
+	}
+
+	modelID := db.ParseUUIDOrEmpty(result.ModelID)
+	s.completeLog(ctx, logRow.ID, result.Status, result.Text, "", result.UsageBytes, modelID)
+	s.logger.Info("schedule completed", slog.String("schedule_id", sched.ID), slog.String("status", result.Status))
+	return nil
+}
+
+func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, resultText, errorMessage string, usageBytes []byte, modelID pgtype.UUID) {
+	if !logID.Valid {
+		return
+	}
+	_, err := s.queries.CompleteScheduleLog(ctx, sqlc.CompleteScheduleLogParams{
+		ID:           logID,
+		Status:       status,
+		ResultText:   resultText,
+		ErrorMessage: errorMessage,
+		Usage:        usageBytes,
+		ModelID:      modelID,
+	})
+	if err != nil {
+		s.logger.Error("complete schedule log failed", slog.Any("error", err))
+	}
+}
+
+func (s *Service) ListLogs(ctx context.Context, botID string, before *time.Time, limit int) ([]Log, error) {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	beforeTS := pgtype.Timestamptz{}
+	if before != nil {
+		beforeTS = pgtype.Timestamptz{Time: *before, Valid: true}
+	}
+	rows, err := s.queries.ListScheduleLogsByBot(ctx, sqlc.ListScheduleLogsByBotParams{
+		BotID:   pgBotID,
+		Column2: beforeTS,
+		Limit:   int32(limit), //nolint:gosec // capped to 100 above
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]Log, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toScheduleLog(row))
+	}
+	return items, nil
+}
+
+func (s *Service) ListLogsBySchedule(ctx context.Context, scheduleID string, before *time.Time, limit int) ([]Log, error) {
+	pgID, err := db.ParseUUID(scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	beforeTS := pgtype.Timestamptz{}
+	if before != nil {
+		beforeTS = pgtype.Timestamptz{Time: *before, Valid: true}
+	}
+	rows, err := s.queries.ListScheduleLogsBySchedule(ctx, sqlc.ListScheduleLogsByScheduleParams{
+		ScheduleID: pgID,
+		Column2:    beforeTS,
+		Limit:      int32(limit), //nolint:gosec // capped to 100 above
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]Log, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toScheduleLogFromSchedule(row))
+	}
+	return items, nil
+}
+
+func (s *Service) DeleteLogs(ctx context.Context, botID string) error {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return err
+	}
+	return s.queries.DeleteScheduleLogsByBot(ctx, pgBotID)
+}
+
+func toScheduleLog(row sqlc.ListScheduleLogsByBotRow) Log {
+	l := Log{
+		ID:           row.ID.String(),
+		ScheduleID:   row.ScheduleID.String(),
+		BotID:        row.BotID.String(),
+		SessionID:    row.SessionID.String(),
+		Status:       row.Status,
+		ResultText:   row.ResultText,
+		ErrorMessage: row.ErrorMessage,
+	}
+	if row.StartedAt.Valid {
+		l.StartedAt = row.StartedAt.Time
+	}
+	if row.CompletedAt.Valid {
+		t := row.CompletedAt.Time
+		l.CompletedAt = &t
+	}
+	if row.Usage != nil {
+		var usage any
+		if err := json.Unmarshal(row.Usage, &usage); err == nil {
+			l.Usage = usage
+		}
+	}
+	return l
+}
+
+func toScheduleLogFromSchedule(row sqlc.ListScheduleLogsByScheduleRow) Log {
+	l := Log{
+		ID:           row.ID.String(),
+		ScheduleID:   row.ScheduleID.String(),
+		BotID:        row.BotID.String(),
+		SessionID:    row.SessionID.String(),
+		Status:       row.Status,
+		ResultText:   row.ResultText,
+		ErrorMessage: row.ErrorMessage,
+	}
+	if row.StartedAt.Valid {
+		l.StartedAt = row.StartedAt.Time
+	}
+	if row.CompletedAt.Valid {
+		t := row.CompletedAt.Time
+		l.CompletedAt = &t
+	}
+	if row.Usage != nil {
+		var usage any
+		if err := json.Unmarshal(row.Usage, &usage); err == nil {
+			l.Usage = usage
+		}
+	}
+	return l
 }
 
 // resolveBotOwner returns the owner user ID for the given bot.

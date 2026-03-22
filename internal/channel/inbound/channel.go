@@ -24,7 +24,6 @@ import (
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
-	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
@@ -72,6 +71,19 @@ type ttsModelResolver interface {
 	ResolveTtsModelID(ctx context.Context, botID string) (string, error)
 }
 
+// SessionEnsurer resolves or creates an active session for a route.
+type SessionEnsurer interface {
+	EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
+	// CreateNewSession always creates a fresh session and sets it as the
+	// active session for the given route, replacing any previous one.
+	CreateNewSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
+}
+
+// SessionResult carries the minimum fields needed from a session.
+type SessionResult struct {
+	ID string
+}
+
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
 	runner           flow.Runner
@@ -79,7 +91,6 @@ type ChannelInboundProcessor struct {
 	message          messagepkg.Writer
 	mediaService     mediaIngestor
 	reactor          channelReactor
-	inboxService     *inbox.Service
 	commandHandler   *command.Handler
 	registry         *channel.Registry
 	logger           *slog.Logger
@@ -91,6 +102,7 @@ type ChannelInboundProcessor struct {
 	observer         channel.StreamObserver
 	ttsService       ttsSynthesizer
 	ttsModelResolver ttsModelResolver
+	sessionEnsurer   SessionEnsurer
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -167,15 +179,6 @@ func (p *ChannelInboundProcessor) SetStreamObserver(observer channel.StreamObser
 	p.observer = observer
 }
 
-// SetInboxService configures the inbox service for storing non-mentioned
-// group messages as inbox items.
-func (p *ChannelInboundProcessor) SetInboxService(service *inbox.Service) {
-	if p == nil {
-		return
-	}
-	p.inboxService = service
-}
-
 // SetTtsService configures the TTS synthesizer and settings reader for handling
 // <speech> tag events (speech_delta) that require server-side audio synthesis.
 func (p *ChannelInboundProcessor) SetTtsService(synth ttsSynthesizer, modelResolver ttsModelResolver) {
@@ -184,6 +187,14 @@ func (p *ChannelInboundProcessor) SetTtsService(synth ttsSynthesizer, modelResol
 	}
 	p.ttsService = synth
 	p.ttsModelResolver = modelResolver
+}
+
+// SetSessionEnsurer configures the session ensurer for auto-creating sessions on routes.
+func (p *ChannelInboundProcessor) SetSessionEnsurer(ensurer SessionEnsurer) {
+	if p == nil {
+		return
+	}
+	p.sessionEnsurer = ensurer
 }
 
 // SetCommandHandler configures the slash command handler for intercepting
@@ -252,6 +263,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// In group chats, only process if the message is directed at this bot
 	// (via @mention or reply) to avoid all bots responding to the same command.
 	cmdText := rawTextForCommand(msg, text)
+
+	// /new requires route context, so it is handled separately from the
+	// general command handler (which runs before route resolution).
+	if isNewSessionCommand(cmdText) && isDirectedAtBot(msg) {
+		return p.handleNewSessionCommand(ctx, cfg, msg, sender, identity)
+	}
+
 	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && isDirectedAtBot(msg) {
 		reply, err := p.commandHandler.Execute(ctx, strings.TrimSpace(identity.BotID), strings.TrimSpace(identity.ChannelIdentityID), cmdText)
 		if err != nil {
@@ -273,6 +291,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return errors.New("route resolver not configured")
 	}
 	routeMetadata := buildRouteMetadata(msg, identity)
+	p.enrichConversationAvatar(ctx, cfg, msg, routeMetadata)
 	resolved, err := p.routeResolver.ResolveConversation(ctx, route.ResolveInput{
 		BotID:             identity.BotID,
 		Platform:          msg.Channel.String(),
@@ -287,18 +306,28 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if err != nil {
 		return fmt.Errorf("resolve route conversation: %w", err)
 	}
+
+	// Resolve or auto-create the active session for this route.
+	sessionID := ""
+	if p.sessionEnsurer != nil {
+		sess, sessErr := p.sessionEnsurer.EnsureActiveSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
+		if sessErr != nil {
+			if p.logger != nil {
+				p.logger.Warn("ensure active session failed", slog.Any("error", sessErr))
+			}
+		} else {
+			sessionID = sess.ID
+		}
+	}
+
 	// Bot-centric history container:
 	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
 	activeChatID := strings.TrimSpace(identity.BotID)
 	if activeChatID == "" {
 		activeChatID = strings.TrimSpace(resolved.ChatID)
 	}
-	// Determine inbox action: trigger (immediate response) or notify (passive).
-	inboxAction := inbox.ActionNotify
-	if shouldTriggerAssistantResponse(msg) || identity.ForceReply {
-		inboxAction = inbox.ActionTrigger
-	}
-	if inboxAction == inbox.ActionTrigger && p.acl != nil {
+	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply
+	if shouldTrigger && p.acl != nil {
 		allowed, err := p.acl.CanPerformChatTrigger(ctx, acl.ChatTriggerRequest{
 			BotID:             identity.BotID,
 			UserID:            identity.UserID,
@@ -314,7 +343,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			return fmt.Errorf("authorize chat trigger: %w", err)
 		}
 		if !allowed {
-			inboxAction = inbox.ActionNotify
+			shouldTrigger = false
 			if p.logger != nil {
 				p.logger.Info(
 					"inbound trigger denied by acl",
@@ -328,10 +357,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
-	// All messages go through inbox first.
-	inboxItem := p.createInboxItem(ctx, identity, msg, text, attachments, resolved.RouteID, inboxAction)
-
-	if inboxAction != inbox.ActionTrigger {
+	if !shouldTrigger {
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID)
 		if p.logger != nil {
 			p.logger.Info(
 				"inbound not triggering assistant (group trigger condition not met)",
@@ -346,11 +373,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			)
 		}
 		return nil
-	}
-
-	// Mark the trigger inbox item as read immediately.
-	if inboxItem.ID != "" {
-		p.markInboxItemRead(ctx, inboxItem)
 	}
 
 	// Issue chat token for reply routing.
@@ -498,6 +520,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	chunkCh, streamErrCh := p.runner.StreamChat(ctx, conversation.ChatRequest{
 		BotID:                   identity.BotID,
 		ChatID:                  activeChatID,
+		SessionID:               sessionID,
 		Token:                   token,
 		UserID:                  identity.UserID,
 		SourceChannelIdentityID: identity.ChannelIdentityID,
@@ -720,69 +743,91 @@ func metadataBool(metadata map[string]any, key string) bool {
 	}
 }
 
-func (p *ChannelInboundProcessor) createInboxItem(
+// persistPassiveMessage writes a user message directly into bot_history_messages
+// for group conversations where the bot was not @mentioned. This replaces the
+// old inbox system — the message is stored in the route's active session so it
+// becomes part of the conversation history the next time the agent is triggered.
+func (p *ChannelInboundProcessor) persistPassiveMessage(
 	ctx context.Context,
 	ident InboundIdentity,
 	msg channel.InboundMessage,
 	text string,
 	attachments []conversation.ChatAttachment,
-	routeID string,
-	action string,
-) inbox.Item {
-	if p.inboxService == nil {
-		return inbox.Item{}
+	routeID, sessionID string,
+) {
+	if p.message == nil {
+		return
 	}
 	botID := strings.TrimSpace(ident.BotID)
 	if botID == "" {
-		return inbox.Item{}
+		return
 	}
 	trimmedText := strings.TrimSpace(text)
 	if trimmedText == "" && len(attachments) == 0 {
-		return inbox.Item{}
-	}
-	displayName := strings.TrimSpace(ident.DisplayName)
-	if displayName == "" {
-		displayName = "Unknown"
+		return
 	}
 
 	var attachmentPaths []string
 	for _, att := range attachments {
-		if p := strings.TrimSpace(att.Path); p != "" {
-			attachmentPaths = append(attachmentPaths, p)
+		if ap := strings.TrimSpace(att.Path); ap != "" {
+			attachmentPaths = append(attachmentPaths, ap)
 		}
 	}
 
-	meta := flow.BuildUserMessageMeta(
+	headerifiedText := flow.FormatUserHeader(
 		strings.TrimSpace(msg.Message.ID),
 		strings.TrimSpace(ident.ChannelIdentityID),
-		displayName,
+		strings.TrimSpace(ident.DisplayName),
 		msg.Channel.String(),
 		strings.TrimSpace(msg.Conversation.Type),
 		strings.TrimSpace(msg.Conversation.Name),
 		attachmentPaths,
+		trimmedText,
 	)
-	header := meta.ToMap()
-	header["route_id"] = strings.TrimSpace(routeID)
 
-	item, err := p.inboxService.Create(ctx, inbox.CreateRequest{
-		BotID:   botID,
-		Source:  msg.Channel.String(),
-		Header:  header,
-		Content: trimmedText,
-		Action:  action,
-	})
-	if err != nil && p.logger != nil {
-		p.logger.Warn("create inbox item failed", slog.Any("error", err), slog.String("bot_id", botID))
-	}
-	return item
-}
-
-func (p *ChannelInboundProcessor) markInboxItemRead(ctx context.Context, item inbox.Item) {
-	if p.inboxService == nil || item.ID == "" {
+	modelMsg := conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(headerifiedText)}
+	serialized, err := json.Marshal(modelMsg)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("marshal passive message failed", slog.Any("error", err))
+		}
 		return
 	}
-	if err := p.inboxService.MarkRead(ctx, item.BotID, []string{item.ID}); err != nil && p.logger != nil {
-		p.logger.Warn("mark inbox item read failed", slog.Any("error", err), slog.String("item_id", item.ID))
+
+	meta := map[string]any{
+		"route_id": strings.TrimSpace(routeID),
+		"platform": msg.Channel.String(),
+	}
+
+	var assets []messagepkg.AssetRef
+	for i, att := range attachments {
+		ch := strings.TrimSpace(att.ContentHash)
+		if ch == "" {
+			continue
+		}
+		assets = append(assets, messagepkg.AssetRef{
+			ContentHash: ch,
+			Role:        "attachment",
+			Ordinal:     i,
+			Mime:        strings.TrimSpace(att.Mime),
+			SizeBytes:   att.Size,
+			Name:        strings.TrimSpace(att.Name),
+			Metadata:    att.Metadata,
+		})
+	}
+
+	if _, err := p.message.Persist(ctx, messagepkg.PersistInput{
+		BotID:                   botID,
+		SessionID:               sessionID,
+		SenderChannelIdentityID: strings.TrimSpace(ident.ChannelIdentityID),
+		SenderUserID:            strings.TrimSpace(ident.UserID),
+		ExternalMessageID:       strings.TrimSpace(msg.Message.ID),
+		Role:                    "user",
+		Content:                 serialized,
+		Metadata:                meta,
+		Assets:                  assets,
+	}); err != nil && p.logger != nil {
+		p.logger.Warn("persist passive message failed", slog.Any("error", err), slog.String("bot_id", botID))
 	}
 }
 
@@ -2138,6 +2183,9 @@ func buildRouteMetadata(msg channel.InboundMessage, identity InboundIdentity) ma
 	if v := strings.TrimSpace(identity.DisplayName); v != "" {
 		m["sender_display_name"] = v
 	}
+	if v := strings.TrimSpace(identity.AvatarURL); v != "" {
+		m["sender_avatar_url"] = v
+	}
 	if v := strings.TrimSpace(msg.Sender.SubjectID); v != "" {
 		m["sender_id"] = v
 	}
@@ -2156,4 +2204,134 @@ func buildRouteMetadata(msg channel.InboundMessage, identity InboundIdentity) ma
 	}
 
 	return m
+}
+
+// enrichConversationAvatar resolves group-level metadata (avatar, handle) via
+// the directory adapter and stores them in the route metadata map.
+func (p *ChannelInboundProcessor) enrichConversationAvatar(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, meta map[string]any) {
+	convType := strings.TrimSpace(msg.Conversation.Type)
+	if convType != "group" && convType != "supergroup" && convType != "channel" {
+		return
+	}
+	if p.registry == nil {
+		return
+	}
+	directoryAdapter, ok := p.registry.DirectoryAdapter(msg.Channel)
+	if !ok || directoryAdapter == nil {
+		return
+	}
+	convID := strings.TrimSpace(msg.Conversation.ID)
+	if convID == "" {
+		return
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	entry, err := directoryAdapter.ResolveEntry(lookupCtx, cfg, convID, channel.DirectoryEntryGroup)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Debug("resolve conversation directory entry failed",
+				slog.String("channel", msg.Channel.String()),
+				slog.String("conversation_id", convID),
+				slog.Any("error", err),
+			)
+		}
+		return
+	}
+	if v := strings.TrimSpace(entry.AvatarURL); v != "" {
+		meta["conversation_avatar_url"] = v
+	}
+	if v := strings.TrimSpace(entry.Handle); v != "" {
+		meta["conversation_handle"] = v
+	}
+}
+
+// isNewSessionCommand returns true when the command text is "/new" (with
+// optional Telegram-style @botname suffix and trailing whitespace).
+func isNewSessionCommand(cmdText string) bool {
+	extracted := command.ExtractCommandText(cmdText)
+	if extracted == "" {
+		return false
+	}
+	parsed, err := command.Parse(extracted)
+	if err != nil {
+		return false
+	}
+	return parsed.Resource == "new"
+}
+
+// handleNewSessionCommand resolves the route for the current message and
+// creates a brand-new active session, effectively starting a fresh
+// conversation in the same IM thread/chat.
+func (p *ChannelInboundProcessor) handleNewSessionCommand(
+	ctx context.Context,
+	cfg channel.ChannelConfig,
+	msg channel.InboundMessage,
+	sender channel.StreamReplySender,
+	identity InboundIdentity,
+) error {
+	target := strings.TrimSpace(msg.ReplyTarget)
+	if target == "" {
+		return errors.New("reply target missing for /new command")
+	}
+
+	if p.routeResolver == nil {
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: route resolver not configured."},
+		})
+	}
+	if p.sessionEnsurer == nil {
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: session service not configured."},
+		})
+	}
+
+	threadID := extractThreadID(msg)
+	routeMetadata := buildRouteMetadata(msg, identity)
+	p.enrichConversationAvatar(ctx, cfg, msg, routeMetadata)
+	resolved, err := p.routeResolver.ResolveConversation(ctx, route.ResolveInput{
+		BotID:             identity.BotID,
+		Platform:          msg.Channel.String(),
+		ConversationID:    msg.Conversation.ID,
+		ThreadID:          threadID,
+		ConversationType:  msg.Conversation.Type,
+		ChannelIdentityID: identity.UserID,
+		ChannelConfigID:   identity.ChannelConfigID,
+		ReplyTarget:       target,
+		Metadata:          routeMetadata,
+	})
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("resolve route for /new command failed", slog.Any("error", err))
+		}
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: failed to resolve conversation route."},
+		})
+	}
+
+	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("create new session via /new command failed", slog.Any("error", err))
+		}
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: failed to create new session."},
+		})
+	}
+
+	if p.logger != nil {
+		p.logger.Info("new session created via /new command",
+			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+			slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
+			slog.String("session_id", strings.TrimSpace(sess.ID)),
+			slog.String("channel", msg.Channel.String()),
+		)
+	}
+	return sender.Send(ctx, channel.OutboundMessage{
+		Target:  target,
+		Message: channel.Message{Text: "New conversation started."},
+	})
 }

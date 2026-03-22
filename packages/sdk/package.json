@@ -5,8 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.gen.ts",
-    "./colada": "./src/@pinia/colada.gen.ts",
-    "./extra": "./src/extra/index.ts"
+    "./colada": "./src/@pinia/colada.gen.ts"
   },
   "main": "index.js",
   "scripts": {

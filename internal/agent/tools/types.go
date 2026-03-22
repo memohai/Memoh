@@ -10,6 +10,12 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
+// SkillDetail holds the description and content of a loadable skill.
+type SkillDetail struct {
+	Description string
+	Content     string
+}
+
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
 	BotID              string
@@ -20,6 +26,7 @@ type SessionContext struct {
 	ReplyTarget        string
 	SupportsImageInput bool
 	IsSubagent         bool
+	Skills             map[string]SkillDetail
 }
 
 // ToolProvider supplies a set of tools for the agent.

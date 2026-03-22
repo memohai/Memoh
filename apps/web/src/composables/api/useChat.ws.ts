@@ -4,6 +4,7 @@ import type { StreamEvent, MessageStreamEvent, ChatAttachment, StreamEventHandle
 export interface WSClientMessage {
   type: 'message' | 'abort'
   text?: string
+  session_id?: string
   attachments?: ChatAttachment[]
 }
 

@@ -24,7 +24,7 @@ import {
   postBotsByBotIdContainerStream,
   type ContainerCreateLayerStatus,
   type ContainerCreateStreamEvent,
-} from '@memoh/sdk/extra'
+} from '@/composables/api/useContainerStream'
 import { Button, Input, Label, Separator, Spinner, Switch } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ContainerCreateProgress from './container-create-progress.vue'

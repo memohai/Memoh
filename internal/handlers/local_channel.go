@@ -247,6 +247,7 @@ var wsUpgrader = websocket.Upgrader{
 type wsClientMessage struct {
 	Type        string            `json:"type"`
 	Text        string            `json:"text,omitempty"`
+	SessionID   string            `json:"session_id,omitempty"`
 	Attachments []json.RawMessage `json:"attachments,omitempty"`
 }
 
@@ -409,6 +410,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				req := conversation.ChatRequest{
 					BotID:                   botID,
 					ChatID:                  botID,
+					SessionID:               strings.TrimSpace(msg.SessionID),
 					Token:                   bearerToken,
 					UserID:                  channelIdentityID,
 					SourceChannelIdentityID: channelIdentityID,

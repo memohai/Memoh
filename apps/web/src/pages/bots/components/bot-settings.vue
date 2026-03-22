@@ -12,6 +12,21 @@
       />
     </div>
 
+    <!-- Title Model -->
+    <div class="space-y-2">
+      <Label>{{ $t('bots.settings.titleModel') }}</Label>
+      <p class="text-xs text-muted-foreground">
+        {{ $t('bots.settings.titleModelDescription') }}
+      </p>
+      <ModelSelect
+        v-model="form.title_model_id"
+        :models="models"
+        :providers="providers"
+        model-type="chat"
+        :placeholder="$t('bots.settings.titleModelPlaceholder')"
+      />
+    </div>
+
     <!-- Memory Provider -->
     <div class="space-y-2">
       <Label>{{ $t('bots.settings.memoryProvider') }}</Label>
@@ -450,6 +465,7 @@ const browserContexts = computed(() => browserContextData.value ?? [])
 // ---- Form ----
 const form = reactive({
   chat_model_id: '',
+  title_model_id: '',
   search_provider_id: '',
   memory_provider_id: '',
   tts_model_id: '',
@@ -560,6 +576,7 @@ const encoderHealthLabel = computed(() =>
 watch(settings, (val) => {
   if (val) {
     form.chat_model_id = val.chat_model_id ?? ''
+    form.title_model_id = val.title_model_id ?? ''
     form.search_provider_id = val.search_provider_id ?? ''
     form.memory_provider_id = val.memory_provider_id ?? ''
     form.tts_model_id = val.tts_model_id ?? ''
@@ -577,6 +594,7 @@ const hasChanges = computed(() => {
   const s = settings.value
   let changed =
     form.chat_model_id !== (s.chat_model_id ?? '')
+    || form.title_model_id !== (s.title_model_id ?? '')
     || form.search_provider_id !== (s.search_provider_id ?? '')
     || form.memory_provider_id !== (s.memory_provider_id ?? '')
     || form.tts_model_id !== (s.tts_model_id ?? '')

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -20,23 +21,24 @@ func NewSkillProvider(log *slog.Logger) *SkillProvider {
 }
 
 func (*SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent {
+	if session.IsSubagent || len(session.Skills) == 0 {
 		return nil, nil
 	}
+	skills := session.Skills
 	return []sdk.Tool{
 		{
 			Name:        "use_skill",
-			Description: "Use a skill if you think it is relevant to the current task",
+			Description: "Activate a skill to get its full instructions. Call this when you think a skill is relevant to the current task.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"skillName": map[string]any{
 						"type":        "string",
-						"description": "The name of the skill to use",
+						"description": "The name of the skill to activate",
 					},
 					"reason": map[string]any{
 						"type":        "string",
-						"description": "The reason why you think this skill is relevant to the current task",
+						"description": "Why this skill is relevant to the current task",
 					},
 				},
 				"required": []string{"skillName", "reason"},
@@ -44,14 +46,21 @@ func (*SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.To
 			Execute: func(_ *sdk.ToolExecContext, input any) (any, error) {
 				args := inputAsMap(input)
 				skillName := StringArg(args, "skillName")
-				reason := StringArg(args, "reason")
 				if skillName == "" {
 					return nil, errors.New("skillName is required")
 				}
+				skill, ok := skills[skillName]
+				if !ok {
+					return map[string]any{
+						"success": false,
+						"error":   fmt.Sprintf("skill %q not found — check available skills in the system prompt", skillName),
+					}, nil
+				}
 				return map[string]any{
-					"success":   true,
-					"skillName": skillName,
-					"reason":    reason,
+					"success":     true,
+					"skillName":   skillName,
+					"description": skill.Description,
+					"content":     skill.Content,
 				}, nil
 			},
 		},
