@@ -49,7 +49,7 @@ const (
 // channel abstraction domain: private/group/thread.
 func NormalizeConversationType(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case ConversationTypePrivate:
+	case "", "p2p", "direct", ConversationTypePrivate:
 		return ConversationTypePrivate
 	case ConversationTypeThread:
 		return ConversationTypeThread

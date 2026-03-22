@@ -274,6 +274,64 @@ func TestOutboundAssetRefsToMessageRefs_Empty(t *testing.T) {
 	}
 }
 
+func TestSanitizeMessagesNormalizesUserMultipartImageBytes(t *testing.T) {
+	t.Parallel()
+	content, err := json.Marshal([]map[string]any{
+		{"type": "text", "text": "> quoted reply\n\nWhere is Antelope Canyon?"},
+		{"type": "image", "image": map[string]any{"0": 137, "1": 80}, "mediaType": "image/png"},
+	})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+
+	cleaned := sanitizeMessages([]conversation.ModelMessage{{
+		Role:    "user",
+		Content: content,
+	}})
+	if len(cleaned) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(cleaned))
+	}
+	if bytes.Equal(cleaned[0].Content, content) {
+		t.Fatalf("expected user multipart content to be normalized")
+	}
+	var parts []map[string]any
+	if err := json.Unmarshal(cleaned[0].Content, &parts); err != nil {
+		t.Fatalf("unmarshal normalized content: %v", err)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts after normalization, got %d", len(parts))
+	}
+	if got := parts[0]["text"]; got != "> quoted reply\n\nWhere is Antelope Canyon?" {
+		t.Fatalf("unexpected text part: %#v", got)
+	}
+	image, _ := parts[1]["image"].(string)
+	if !strings.HasPrefix(image, "data:image/png;base64,") {
+		t.Fatalf("expected data URL image payload, got %#v", parts[1]["image"])
+	}
+}
+
+func TestSanitizeMessagesKeepsAssistantMultipartMessages(t *testing.T) {
+	t.Parallel()
+	content, err := json.Marshal([]map[string]any{
+		{"type": "text", "text": "answer"},
+		{"type": "image", "image": "data:image/png;base64,aGVsbG8="},
+	})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+
+	cleaned := sanitizeMessages([]conversation.ModelMessage{{
+		Role:    "assistant",
+		Content: content,
+	}})
+	if len(cleaned) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(cleaned))
+	}
+	if !bytes.Equal(cleaned[0].Content, content) {
+		t.Fatalf("assistant multipart content should remain unchanged")
+	}
+}
+
 func TestNormalizeImagePartsToDataURL_ConvertsIndexedObject(t *testing.T) {
 	msg := conversation.ModelMessage{
 		Role: "user",

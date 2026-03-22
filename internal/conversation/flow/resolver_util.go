@@ -17,6 +17,7 @@ import (
 func sanitizeMessages(messages []conversation.ModelMessage) []conversation.ModelMessage {
 	cleaned := make([]conversation.ModelMessage, 0, len(messages))
 	for _, msg := range messages {
+		msg = normalizeUserMessageContent(msg)
 		if normalized, ok := normalizeImagePartsToDataURL(msg); ok {
 			msg = normalized
 		}

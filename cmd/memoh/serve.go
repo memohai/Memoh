@@ -33,6 +33,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/discord"
 	"github.com/memohai/memoh/internal/channel/adapters/feishu"
 	"github.com/memohai/memoh/internal/channel/adapters/local"
+	"github.com/memohai/memoh/internal/channel/adapters/matrix"
 	"github.com/memohai/memoh/internal/channel/adapters/qq"
 	"github.com/memohai/memoh/internal/channel/adapters/telegram"
 	"github.com/memohai/memoh/internal/channel/adapters/wecom"
@@ -390,6 +391,9 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	qqAdapter := qq.NewQQAdapter(log)
 	qqAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(qqAdapter)
+	matrixAdapter := matrix.NewMatrixAdapter(log)
+	matrixAdapter.SetAssetOpener(mediaService)
+	registry.MustRegister(matrixAdapter)
 	feishuAdapter := feishu.NewFeishuAdapter(log)
 	feishuAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(feishuAdapter)
@@ -441,6 +445,11 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 }
 
 func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor) *channel.Manager {
+	if adapter, ok := registry.Get(matrix.Type); ok {
+		if matrixAdapter, ok := adapter.(*matrix.MatrixAdapter); ok {
+			matrixAdapter.SetSyncStateSaver(channelStore.SaveMatrixSyncSinceToken)
+		}
+	}
 	mgr := channel.NewManager(log, registry, channelStore, channelRouter)
 	if mw := channelRouter.IdentityMiddleware(); mw != nil {
 		mgr.Use(mw)
