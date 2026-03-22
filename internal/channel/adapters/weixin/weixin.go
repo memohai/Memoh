@@ -49,10 +49,11 @@ func (*WeixinAdapter) Descriptor() channel.Descriptor {
 		Type:        Type,
 		DisplayName: "WeChat",
 		Capabilities: channel.ChannelCapabilities{
-			Text:        true,
-			Attachments: true,
-			Media:       true,
-			ChatTypes:   []string{channel.ConversationTypePrivate},
+			Text:           true,
+			Attachments:    true,
+			Media:          true,
+			BlockStreaming: true,
+			ChatTypes:      []string{channel.ConversationTypePrivate},
 		},
 		OutboundPolicy: channel.OutboundPolicy{
 			TextChunkLimit: 4000,
@@ -234,6 +235,20 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 			}
 		}
 	}
+}
+
+// -- StreamSender (block-streaming: buffer deltas, send final as one message) --
+
+func (a *WeixinAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, _ channel.StreamOptions) (channel.OutboundStream, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return nil, errors.New("weixin target is required")
+	}
+	return &weixinBlockStream{
+		adapter: a,
+		cfg:     cfg,
+		target:  target,
+	}, nil
 }
 
 // -- Sender --
@@ -441,6 +456,62 @@ func (a *WeixinAdapter) ProcessingCompleted(ctx context.Context, cfg channel.Cha
 
 func (a *WeixinAdapter) ProcessingFailed(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, info channel.ProcessingStatusInfo, handle channel.ProcessingStatusHandle, _ error) error {
 	return a.ProcessingCompleted(ctx, cfg, msg, info, handle)
+}
+
+// weixinBlockStream buffers streaming deltas and sends the final message as one Send call.
+type weixinBlockStream struct {
+	adapter     *WeixinAdapter
+	cfg         channel.ChannelConfig
+	target      string
+	textBuilder strings.Builder
+	attachments []channel.Attachment
+	final       *channel.Message
+	closed      bool
+}
+
+func (s *weixinBlockStream) Push(_ context.Context, event channel.StreamEvent) error {
+	if s.closed {
+		return nil
+	}
+	switch event.Type {
+	case channel.StreamEventDelta:
+		if strings.TrimSpace(event.Delta) != "" && event.Phase != channel.StreamPhaseReasoning {
+			s.textBuilder.WriteString(event.Delta)
+		}
+	case channel.StreamEventAttachment:
+		s.attachments = append(s.attachments, event.Attachments...)
+	case channel.StreamEventFinal:
+		if event.Final != nil {
+			msg := event.Final.Message
+			s.final = &msg
+		}
+	}
+	return nil
+}
+
+func (s *weixinBlockStream) Close(ctx context.Context) error {
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
+	msg := channel.Message{Format: channel.MessageFormatPlain}
+	if s.final != nil {
+		msg = *s.final
+	}
+	if strings.TrimSpace(msg.Text) == "" {
+		msg.Text = strings.TrimSpace(s.textBuilder.String())
+	}
+	if len(msg.Attachments) == 0 && len(s.attachments) > 0 {
+		msg.Attachments = append(msg.Attachments, s.attachments...)
+	}
+	if msg.IsEmpty() {
+		return nil
+	}
+	return s.adapter.Send(ctx, s.cfg, channel.OutboundMessage{
+		Target:  s.target,
+		Message: msg,
+	})
 }
 
 // sleepCtx sleeps for the given duration or until the context is cancelled.
