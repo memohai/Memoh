@@ -5,14 +5,14 @@
       role="navigation"
       aria-label="Primary"
     >
-      <SidebarHeader>
-        <div class="flex items-center gap-2 px-1 py-1 group-data-[collapsible=icon]:justify-center">
+      <SidebarHeader class="h-[53px] justify-center px-3.5">
+        <div class="flex items-center gap-2.5 group-data-[collapsible=icon]:justify-center">
           <img
             src="/logo.png"
-            class="size-6 shrink-0"
+            class="size-[22px] shrink-0"
             alt="Memoh logo"
           >
-          <span class="text-lg font-bold text-muted-foreground truncate group-data-[collapsible=icon]:hidden">
+          <span class="text-sm font-semibold text-foreground truncate group-data-[collapsible=icon]:hidden">
             Memoh
           </span>
         </div>
@@ -30,6 +30,7 @@
                   :tooltip="sidebarItem.title"
                   :is-active="isItemActive(sidebarItem.name)"
                   :aria-current="isItemActive(sidebarItem.name) ? 'page' : undefined"
+                  class="text-muted-foreground"
                   @click="router.push({ name: sidebarItem.name })"
                 >
                   <FontAwesomeIcon :icon="sidebarItem.icon" />
@@ -46,6 +47,7 @@
           <SidebarMenuItem>
             <SidebarMenuButton
               :tooltip="displayTitle"
+              class="text-muted-foreground"
               @click="router.push({ name: 'settings' })"
             >
               <Avatar class="size-4 shrink-0">
