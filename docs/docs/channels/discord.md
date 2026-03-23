@@ -12,7 +12,7 @@ Connecting your Memoh Bot to Discord allows it to join servers and interact with
 ## Step 2: Configure Bot Settings
 
 1. Scroll down to the **Privileged Gateway Intents** section.
-2. Enable **Message Content Intent** (required for the bot to read user messages).
+2. Enable `Message Content Intent`, `Server Members Intent` and `Presence Intent`.
 3. Save changes.
 
 ## Step 3: Invite the Bot to Your Server
