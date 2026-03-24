@@ -143,6 +143,29 @@ CSS-based configuration (no `tailwind.config.*` file). All design tokens (CSS va
 
 All UI primitives are provided by `@memohai/ui` (40+ components built on Reka UI). Do not import Reka UI directly. For the component design specification (variants, colors, elevation, spacing), see `packages/ui/DESIGN.md`.
 
+- **Exception**: Physical UI knobs (Switch thumb, Slider thumb) may keep `bg-white` as they need to contrast against colored tracks regardless of theme.
+- **No scoped CSS modules**: Styling is done inline via utility classes.
+
+### CSS Imports (main.ts)
+
+```
+style.css                    — Tailwind + theme tokens
+markstream-vue/index.css     — Markdown rendering
+katex/dist/katex.min.css     — Math rendering
+vue-sonner/style.css         — Toast notifications (in App.vue)
+```
+
+`@memohai/ui` provides 40+ components built on Reka UI primitives + Tailwind + class-variance-authority:
+
+- **Form**: `Form`, `FormField`, `FormItem`, `FormControl`, `FormLabel`, `FormMessage`
+- **Input**: `Input`, `Textarea`, `InputGroup`, `NativeSelect`, `Combobox`, `TagsInput`
+- **Selection**: `Select`, `RadioGroup`, `Checkbox`, `Switch`
+- **Layout**: `Card`, `Separator`, `Sheet`, `Sidebar`, `ScrollArea`, `Collapsible`
+- **Overlays**: `Dialog`, `Popover`, `Tooltip`, `DropdownMenu`, `ContextMenu`
+- **Data**: `Table`, `Badge`, `Avatar`, `Skeleton`, `Empty`
+- **Navigation**: `Breadcrumb`, `Tabs`, `Pagination`
+- **Feedback**: `Button`, `ButtonGroup`, `Spinner`, `Alert`
+
 ### Form Pattern (vee-validate + Zod)
 
 ```vue
@@ -277,7 +300,7 @@ Chat responses are streamed via Server-Sent Events:
 
 - Use Vue 3 Composition API with `<script setup>` exclusively.
 - Style with Tailwind utility classes; avoid `<style>` blocks. Follow the design system in `packages/ui/DESIGN.md`.
-- Always use semantic color tokens (`text-foreground`, `bg-card`, `border-border`, etc.) — never hardcode raw colors.
+- **Always use semantic color tokens** (`text-foreground`, `bg-card`, `border-border`, `text-muted-foreground`, `bg-accent`, etc.) instead of raw colors (`gray-*`, `bg-white`, `text-black`). Never introduce hardcoded Tailwind color classes for themed elements — this breaks dark mode consistency.
 - Use `@memohai/ui` components for all UI primitives; do not import Reka UI directly.
 - Use Pinia Colada (`useQuery`/`useMutation`) for server state; use Pinia stores for client state only.
 - API calls must go through `@memohai/sdk`; never call `fetch()` directly.

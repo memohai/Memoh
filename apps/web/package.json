@@ -57,7 +57,7 @@
     "@tauri-apps/api": "^2"
   },
   "devDependencies": {
-    "@memohai/config": "workspace:*",  
+    "@memohai/config": "workspace:*",
     "@types/moment": "^2.13.0",
     "@types/node": "^24.10.1",
     "@types/qrcode": "^1.5.6",
