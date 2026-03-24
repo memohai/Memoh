@@ -4,22 +4,29 @@ import { cva } from 'class-variance-authority'
 export { default as Badge } from './Badge.vue'
 
 export const badgeVariants = cva(
-  'inline-flex items-center justify-center rounded-full border px-2.5 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none transition-all overflow-hidden',
+  'inline-flex items-center justify-center rounded-sm border px-2.5 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none transition-all overflow-hidden',
   {
     variants: {
       variant: {
         default:
-          'border-transparent bg-primary text-primary-foreground shadow-sm [a&]:hover:bg-primary/90',
+          'border-transparent bg-foreground text-background [a&]:hover:bg-foreground/90',
         secondary:
-          'border-transparent bg-secondary text-secondary-foreground shadow-sm [a&]:hover:bg-secondary/80',
+          'border-transparent bg-accent text-foreground [a&]:hover:bg-accent/80',
         destructive:
-         'border-transparent bg-destructive text-destructive-foreground shadow-sm [a&]:hover:bg-destructive/90',
+          'border-transparent bg-destructive text-destructive-foreground [a&]:hover:bg-destructive/90',
+        warning:
+          'border-transparent bg-amber-500 text-white [a&]:hover:bg-amber-500/90',
         outline:
-          'text-foreground border-border [a&]:hover:bg-accent',
+          'text-foreground border-border bg-background [a&]:hover:bg-accent',
+      },
+      size: {
+        default: 'px-2.5 py-0.5 text-xs',
+        sm: 'px-2 py-0 text-[11px]',
       },
     },
     defaultVariants: {
       variant: 'default',
+      size: 'default',
     },
   },
 )

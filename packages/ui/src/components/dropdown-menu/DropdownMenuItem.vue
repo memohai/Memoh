@@ -27,7 +27,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     :class="cn(
       'relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none transition-colors',
       'focus:bg-accent focus:text-accent-foreground',
-      'data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-red-50 dark:data-[variant=destructive]:focus:bg-red-950/20 data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive',
+      'data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-accent data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive',
       '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
       'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       'data-[inset]:pl-8',

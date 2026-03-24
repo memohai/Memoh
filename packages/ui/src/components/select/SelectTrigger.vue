@@ -21,10 +21,10 @@ const forwardedProps = useForwardProps(delegatedProps)
     :data-size="size"
     v-bind="forwardedProps"
     :class="cn(
-      'flex w-fit items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm whitespace-nowrap shadow-sm transition-all outline-none',
+      'flex w-fit items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm whitespace-nowrap transition-all outline-none',
       'data-[placeholder]:text-muted-foreground',
       '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
-      'focus:border-primary focus:ring-2 focus:ring-primary/20',
+      'focus:border-ring focus:ring-2 focus:ring-ring/20',
       'hover:bg-accent',
       'disabled:cursor-not-allowed disabled:opacity-50',
       'data-[size=default]:h-9 data-[size=sm]:h-8',

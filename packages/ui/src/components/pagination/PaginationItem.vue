@@ -23,10 +23,9 @@ const delegatedProps = reactiveOmit(props, 'class', 'size', 'isActive')
     data-slot="pagination-item"
     v-bind="delegatedProps"
     :class="cn(
-      buttonVariants({
-        variant: isActive ? 'outline' : 'ghost',
-        size,
-      }),
+      isActive
+        ? 'bg-foreground text-background border-foreground hover:bg-foreground/90'
+        : buttonVariants({ variant: 'outline', size }),
       props.class)"
   >
     <slot />
