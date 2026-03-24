@@ -2,7 +2,7 @@
 
 ## What is Memoh?
 
-Memoh is a multi-member, structured long-memory, containerized AI agent system platform. You can create your own AI bots and chat with them via Telegram, Discord, Lark (Feishu), Email, Web, or CLI. Every bot has an independent container and memory system, allowing it to edit files, execute commands, and access the network within its own container — like having its own computer and brain.
+Memoh is a multi-member, structured long-memory, containerized AI agent system platform. You can create your own AI bots and chat with them via Telegram, Discord, Lark (Feishu), Email, or Web. Every bot has an independent container and memory system, allowing it to edit files, execute commands, and access the network within its own container — like having its own computer and brain.
 
 ## Key Features
 
@@ -38,7 +38,6 @@ Unified channel adapter architecture for connecting to multiple messaging platfo
 - **Lark (Feishu)** — Full support
 - **Email** — Inbound webhook + outbound providers (Mailgun, generic SMTP)
 - **Web** — Built-in web chat interface with streaming
-- **CLI** — Command-line chat
 
 ### Agent Capabilities
 
@@ -77,10 +76,6 @@ Cross-channel inbox — messages from other channels are queued and surfaced in 
 ### Graphical Configuration
 
 Modern web UI (Vue 3 + Tailwind CSS) with real-time streaming chat, tool call visualization, container filesystem browser, and visual configuration for bots, channels, providers, models, MCP, skills, and all other settings. Dark/light theme, i18n. No coding required to set up your own AI bot.
-
-### CLI Tool
-
-A command-line tool for bot management, channel configuration, model management, streaming chat, and more — designed for developers who prefer the terminal. See [CLI documentation](/cli/).
 
 ## Installation
 

@@ -28,7 +28,7 @@
   <hr>
 </div>
 
-Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), Email, or the built-in Web/CLI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
+Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), Email, or the built-in Web UI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
 
 ## Quick Start
 
@@ -80,7 +80,7 @@ Memoh Bot can distinguish and remember requests from multiple humans and bots, w
 - 👥 **Multi-User & Identity Recognition**: Bots can distinguish individual users in group chats, remember each person's context separately, and send direct messages to specific users. Cross-platform identity binding unifies the same person across Telegram, Discord, Lark, and Web.
 - 📦 **Containerized**: Each bot runs in its own isolated containerd container. Bots can freely execute commands, edit files, and access the network within their containers — like having their own computer. Supports container snapshots for save/restore.
 - 🧠 **Memory Engineering**: Multi-provider memory architecture — Built-in (off / sparse / dense modes), [Mem0](https://mem0.ai), and OpenViking. LLM-driven fact extraction, hybrid retrieval (dense semantic search + BM25 keyword + neural sparse vectors), 24-hour context loading, memory compaction & rebuild, and multi-language auto-detection.
-- 💬 **Multi-Platform**: Supports Telegram, Discord, Lark (Feishu), Email, and built-in Web/CLI. Unified message format with rich text, media attachments, reactions, and streaming across all platforms. Cross-platform identity binding.
+- 💬 **Multi-Platform**: Supports Telegram, Discord, Lark (Feishu), Email, and the built-in Web UI. Unified message format with rich text, media attachments, reactions, and streaming across all platforms. Cross-platform identity binding.
 - 📧 **Email**: Multi-adapter email service (Mailgun, generic SMTP) with per-bot binding and outbound audit log. Bots can send and receive emails as a channel.
 - 🔧 **MCP (Model Context Protocol)**: Full MCP support (HTTP / SSE / Stdio). Built-in tools for container operations, memory search, web search, scheduling, messaging, and more. Connect external MCP servers for extensibility.
 - 🧩 **Subagents**: Create specialized sub-agents per bot with independent context and skills, enabling multi-agent collaboration.
@@ -142,10 +142,9 @@ flowchart TB
         direction LR
         CH["Channels<br/>Telegram · Discord · Feishu · QQ · Email"]
         WEB["Web UI (Vue 3 :8082)"]
-        CLI["CLI"]
     end
 
-    CH & WEB & CLI --> API
+    CH & WEB --> API
 
     subgraph Server [" Server · Go :8080 "]
         API["REST API & Channel Adapters"]

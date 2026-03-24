@@ -61,7 +61,7 @@ Memoh/
 │   ├── agent/                  #   Main backend server (main.go, FX wiring)
 │   ├── bridge/                 #   In-container gRPC bridge (UDS-based, runs inside bot containers)
 │   ├── mcp/                    #   MCP stdio transport binary
-│   └── memoh/                  #   Unified binary wrapper (Cobra CLI: serve, migrate, version)
+│   └── memoh/                  #   Unified binary wrapper (Cobra: serve, migrate, version)
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
@@ -151,7 +151,6 @@ Memoh/
 ├── packages/                   # Shared TypeScript libraries
 │   ├── ui/                     #   Shared UI component library (@memohai/ui)
 │   ├── sdk/                    #   TypeScript SDK (@memohai/sdk, auto-generated from OpenAPI)
-│   ├── cli/                    #   CLI tool (@memohai/cli, Commander.js)
 │   └── config/                 #   Shared configuration utilities (@memohai/config)
 ├── spec/                       # OpenAPI specifications (swagger.json, swagger.yaml)
 ├── db/                         # Database
@@ -202,7 +201,6 @@ Memoh/
 | `mise run lint:fix` | Run all linters with auto-fix |
 | `mise run release` | Release new version (bumpp) |
 | `mise run release-binaries` | Build release archive for target (requires TARGET_OS TARGET_ARCH) |
-| `mise run install-cli` | Install CLI locally |
 | `mise run install-socktainer` | Install socktainer (macOS container backend) |
 | `mise run install-workspace-toolkit` | Install workspace toolkit (bridge binary etc.) |
 

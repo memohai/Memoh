@@ -484,7 +484,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}()
 
 	// For non-local channels, wrap the stream so events are mirrored to the
-	// RouteHub (and thus to WebUI/CLI subscribers).
+	// RouteHub (and thus to Web UI and other local subscribers).
 	if p.observer != nil && !isLocalChannelType(msg.Channel) {
 		stream = channel.NewTeeStream(stream, p.observer, strings.TrimSpace(identity.BotID), msg.Channel)
 		// Broadcast the inbound user message so WebUI can display it.
@@ -1852,7 +1852,7 @@ func extractStorageKey(accessPath string, _ string) string {
 }
 
 // isLocalChannelType returns true for channels that already publish to RouteHub
-// natively (Web, CLI). Wrapping these with a tee would cause duplicate events.
+// natively (e.g. web, cli). Wrapping these with a tee would cause duplicate events.
 func isLocalChannelType(ct channel.ChannelType) bool {
 	s := strings.ToLower(strings.TrimSpace(string(ct)))
 	return s == "web" || s == "cli"

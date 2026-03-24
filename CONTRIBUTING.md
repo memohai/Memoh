@@ -70,7 +70,7 @@ cmd/        — Go application entry points
 internal/   — Go backend core code
 apps/       — Application services (Agent Gateway, etc.)
   agent/    — Agent Gateway (Bun/Elysia)
-packages/   — Frontend monorepo (web, ui, sdk, cli, config)
+packages/   — Frontend monorepo (web, ui, sdk, config)
 db/         — Database migrations and queries
 scripts/    — Utility scripts
 ```
