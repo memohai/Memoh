@@ -239,6 +239,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 
 	displayName := r.resolveDisplayName(ctx, req)
+	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)
 	headerifiedQuery := FormatUserHeader(
 		strings.TrimSpace(req.ExternalMessageID),
 		strings.TrimSpace(req.SourceChannelIdentityID),
@@ -246,9 +247,10 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		req.CurrentChannel,
 		strings.TrimSpace(req.ConversationType),
 		strings.TrimSpace(req.ConversationName),
-		extractFileRefPaths(r.routeAndMergeAttachments(ctx, chatModel, req)),
+		extractAttachmentPaths(mergedAttachments),
 		req.Query,
 	)
+	inlineImages := extractNativeImageParts(mergedAttachments)
 
 	reasoningEffort := ""
 	if chatModel.HasCompatibility(models.CompatReasoning) && botSettings.ReasoningEnabled {
@@ -280,6 +282,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		Messages:           sdkMessages,
 		Query:              headerifiedQuery,
 		SupportsImageInput: chatModel.HasCompatibility(models.CompatVision),
+		InlineImages:       inlineImages,
 		Identity: agentpkg.SessionContext{
 			BotID:             req.BotID,
 			ChatID:            req.ChatID,
@@ -348,7 +351,13 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 	})
 
 	if cfg.Query != "" {
-		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query))
+		var extra []sdk.MessagePart
+		for _, img := range cfg.InlineImages {
+			if strings.TrimSpace(img.Image) != "" {
+				extra = append(extra, img)
+			}
+		}
+		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query, extra...))
 	}
 
 	return cfg
@@ -510,14 +519,49 @@ func anyNumberToByte(value any) (byte, bool) {
 	return byte(parsed), true
 }
 
-// extractFileRefPaths collects container file paths from gateway attachments
-// that use the tool_file_ref transport.
-func extractFileRefPaths(attachments []any) []string {
+// extractAttachmentPaths collects container file paths from ALL gateway
+// attachments — both tool_file_ref (fallback) and native images that carry a
+// FallbackPath. This ensures the YAML user header always lists every
+// attachment the user sent, regardless of whether the model consumes the
+// image natively or via the read_media tool.
+func extractAttachmentPaths(attachments []any) []string {
 	var paths []string
 	for _, att := range attachments {
-		if ga, ok := att.(gatewayAttachment); ok && ga.Transport == gatewayTransportToolFileRef && strings.TrimSpace(ga.Payload) != "" {
+		ga, ok := att.(gatewayAttachment)
+		if !ok {
+			continue
+		}
+		if ga.Transport == gatewayTransportToolFileRef && strings.TrimSpace(ga.Payload) != "" {
 			paths = append(paths, ga.Payload)
+		} else if strings.TrimSpace(ga.FallbackPath) != "" {
+			paths = append(paths, ga.FallbackPath)
 		}
 	}
 	return paths
+}
+
+// extractNativeImageParts returns sdk.ImagePart entries for attachments that
+// the model can consume as inline multimodal input (vision-capable images with
+// an inline data URL or public URL payload).
+func extractNativeImageParts(attachments []any) []sdk.ImagePart {
+	var parts []sdk.ImagePart
+	for _, att := range attachments {
+		ga, ok := att.(gatewayAttachment)
+		if !ok || ga.Type != "image" {
+			continue
+		}
+		transport := strings.ToLower(strings.TrimSpace(ga.Transport))
+		if transport != gatewayTransportInlineDataURL && transport != gatewayTransportPublicURL {
+			continue
+		}
+		payload := strings.TrimSpace(ga.Payload)
+		if payload == "" {
+			continue
+		}
+		parts = append(parts, sdk.ImagePart{
+			Image:     payload,
+			MediaType: strings.TrimSpace(ga.Mime),
+		})
+	}
+	return parts
 }

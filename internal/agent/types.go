@@ -51,6 +51,7 @@ type RunConfig struct {
 	System             string
 	SessionType        string
 	SupportsImageInput bool
+	InlineImages       []sdk.ImagePart
 	Identity           SessionContext
 	Skills             []SkillEntry
 	LoopDetection      LoopDetectionConfig
