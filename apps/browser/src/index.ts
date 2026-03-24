@@ -1,5 +1,5 @@
 import { Elysia } from 'elysia'
-import { loadConfig } from '@memoh/config'
+import { loadConfig } from '@memohai/config'
 import { corsMiddleware } from './middlewares/cors'
 import { errorMiddleware } from './middlewares/error'
 import { initBrowsers, browsers } from './browser'

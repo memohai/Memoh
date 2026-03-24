@@ -65,10 +65,10 @@ import {
   YiColor,
   Zhipu,
   ZhipuColor,
-} from '@memoh/icon'
+} from '@memohai/icon'
 
 /**
- * Maps preset icon names (stored in DB) to @memoh/icon Vue components.
+ * Maps preset icon names (stored in DB) to @memohai/icon Vue components.
  * The key is the SVG filename without extension (e.g. 'openai', 'deepseek-color').
  */
 export const iconMap: Record<string, Component> = {

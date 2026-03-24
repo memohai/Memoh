@@ -52,9 +52,9 @@
 </template>
 
 <script setup lang="ts">
-import { Button } from '@memoh/ui'
+import { Button } from '@memohai/ui'
 import { computed } from 'vue'
-import type { SearchprovidersGetResponse } from '@memoh/sdk'
+import type { SearchprovidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'

@@ -99,13 +99,13 @@ import {
   Separator,
   Label,
   Spinner,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { watch } from 'vue'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { postBotsMutation, getBotsQueryKey } from '@memoh/sdk/colada'
+import { postBotsMutation, getBotsQueryKey } from '@memohai/sdk/colada'
 import { useI18n } from 'vue-i18n'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 

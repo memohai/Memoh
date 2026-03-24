@@ -35,7 +35,7 @@ Infrastructure dependencies:
 - **Framework**: Vue 3 (Composition API)
 - **Build Tool**: Vite
 - **State Management**: Pinia + Pinia Colada
-- **UI**: Tailwind CSS 4 + custom component library (`@memoh/ui`) + Reka UI
+- **UI**: Tailwind CSS 4 + custom component library (`@memohai/ui`) + Reka UI
 - **i18n**: vue-i18n
 - **Markdown**: markstream-vue + Shiki + Mermaid + KaTeX
 - **Package Manager**: pnpm monorepo
@@ -147,12 +147,12 @@ Memoh/
 │   │       ├── types/          #     TypeScript type definitions
 │   │       ├── storage.ts      #     Browser context storage
 │   │       └── models.ts       #     Zod request schemas
-│   └── web/                    #   Main web app (@memoh/web, Vue 3)
+│   └── web/                    #   Main web app (@memohai/web, Vue 3)
 ├── packages/                   # Shared TypeScript libraries
-│   ├── ui/                     #   Shared UI component library (@memoh/ui)
-│   ├── sdk/                    #   TypeScript SDK (@memoh/sdk, auto-generated from OpenAPI)
-│   ├── cli/                    #   CLI tool (@memoh/cli, Commander.js)
-│   └── config/                 #   Shared configuration utilities (@memoh/config)
+│   ├── ui/                     #   Shared UI component library (@memohai/ui)
+│   ├── sdk/                    #   TypeScript SDK (@memohai/sdk, auto-generated from OpenAPI)
+│   ├── cli/                    #   CLI tool (@memohai/cli, Commander.js)
+│   └── config/                 #   Shared configuration utilities (@memohai/config)
 ├── spec/                       # OpenAPI specifications (swagger.json, swagger.yaml)
 ├── db/                         # Database
 │   ├── migrations/             #   SQL migration files
@@ -247,7 +247,7 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 1. Write handlers in `internal/handlers/` with swaggo annotations.
 2. Run `mise run swagger-generate` to update the OpenAPI docs (output in `spec/`).
 3. Run `mise run sdk-generate` to update the frontend TypeScript SDK (`packages/sdk/`).
-4. The frontend calls APIs via the auto-generated `@memoh/sdk`.
+4. The frontend calls APIs via the auto-generated `@memohai/sdk`.
 
 ### Agent Development
 
@@ -265,7 +265,7 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 
 - Use Vue 3 Composition API with `<script setup>` style.
 - Shared components belong in `packages/ui/`.
-- API calls use the auto-generated `@memoh/sdk`.
+- API calls use the auto-generated `@memohai/sdk`.
 - State management uses Pinia; data fetching uses Pinia Colada.
 - i18n via vue-i18n.
 

@@ -13,7 +13,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@memoh/ui'
+} from '@memohai/ui'
 
 const props = defineProps<{
   columns: ColumnDef<TData, TValue>[]

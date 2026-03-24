@@ -193,7 +193,7 @@ import {
   FormItem,
   Label,
   Switch,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import StatusDot from '@/components/status-dot/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
@@ -203,8 +203,8 @@ import { computed, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
-import { postProvidersByIdTest } from '@memoh/sdk'
-import type { ProvidersGetResponse, ProvidersTestResponse } from '@memoh/sdk'
+import { postProvidersByIdTest } from '@memohai/sdk'
+import type { ProvidersGetResponse, ProvidersTestResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()

@@ -35,7 +35,7 @@ import {
   type ModelsAddRequest,
   type ScheduleSchedule,
   type ScheduleListResponse,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 
 // ---------------------------------------------------------------------------
 // Initialize SDK client

@@ -42,7 +42,10 @@
             @click="selectedType = item.meta.type ?? ''"
           >
             <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-              <ChannelIcon :channel="item.meta.type as string" size="1.25em" />
+              <ChannelIcon
+                :channel="item.meta.type as string"
+                size="1.25em"
+              />
             </span>
             <div class="flex-1 text-left">
               <div class="font-medium">
@@ -101,7 +104,10 @@
               @click="addChannel(item.meta.type ?? '')"
             >
               <span class="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <ChannelIcon :channel="item.meta.type" size="1em" />
+                <ChannelIcon
+                  :channel="item.meta.type"
+                  size="1em"
+                />
               </span>
               <span>{{ item.meta.display_name }}</span>
             </button>
@@ -137,10 +143,10 @@ import {
   PopoverTrigger,
   PopoverContent,
   ScrollArea
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { useQuery } from '@pinia/colada'
-import { getChannels, getBotsByIdChannelByPlatform } from '@memoh/sdk'
-import type { HandlersChannelMeta, ChannelChannelConfig } from '@memoh/sdk'
+import { getChannels, getBotsByIdChannelByPlatform } from '@memohai/sdk'
+import type { HandlersChannelMeta, ChannelChannelConfig } from '@memohai/sdk'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 

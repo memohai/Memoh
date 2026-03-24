@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getPing } from '@memoh/sdk'
+import { getPing } from '@memohai/sdk'
 
 export const useCapabilitiesStore = defineStore('capabilities', () => {
   const containerBackend = ref('containerd')

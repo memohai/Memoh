@@ -1,9 +1,9 @@
-import { client } from '@memoh/sdk/client'
-import type { Options } from '@memoh/sdk'
+import { client } from '@memohai/sdk/client'
+import type { Options } from '@memohai/sdk'
 import type {
   HandlersCreateContainerResponse,
   PostBotsByBotIdContainerData,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 
 export type ContainerCreateLayerStatus = {
   ref: string

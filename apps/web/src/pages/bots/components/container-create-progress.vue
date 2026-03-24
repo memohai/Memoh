@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Spinner } from '@memoh/ui'
+import { Spinner } from '@memohai/ui'
 
 defineProps<{
   phase: 'preserving' | 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'

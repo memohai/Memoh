@@ -98,7 +98,7 @@ import {
   SelectValue,
   Separator,
   Spinner,
-} from '@memoh/ui'
+} from '@memohai/ui'
 
 interface BindCodeValue {
   token: string

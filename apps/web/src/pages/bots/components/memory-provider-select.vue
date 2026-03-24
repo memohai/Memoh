@@ -52,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button } from '@memoh/ui'
+import { Button } from '@memohai/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'

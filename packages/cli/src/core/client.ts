@@ -1,4 +1,4 @@
-import { client } from '@memoh/sdk/client'
+import { client } from '@memohai/sdk/client'
 import { readConfig, readToken, getBaseURL } from '../utils/store'
 
 /**

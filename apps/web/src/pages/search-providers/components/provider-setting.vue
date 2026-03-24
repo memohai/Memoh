@@ -123,7 +123,7 @@ import {
   FormItem,
   Separator,
   Label,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import BraveSettings from './brave-settings.vue'
@@ -144,8 +144,8 @@ import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { putSearchProvidersById, deleteSearchProvidersById } from '@memoh/sdk'
-import type { SearchprovidersGetResponse, SearchprovidersUpdateRequest } from '@memoh/sdk'
+import { putSearchProvidersById, deleteSearchProvidersById } from '@memohai/sdk'
+import type { SearchprovidersGetResponse, SearchprovidersUpdateRequest } from '@memohai/sdk'
 
 const curProvider = inject('curSearchProvider', ref<SearchprovidersGetResponse>())
 const curProviderId = computed(() => curProvider.value?.id)

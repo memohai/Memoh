@@ -7,7 +7,10 @@
           :icon="curProvider.icon"
           size="1.5em"
         />
-        <span v-else class="text-sm font-medium text-muted-foreground">
+        <span
+          v-else
+          class="text-sm font-medium text-muted-foreground"
+        >
           {{ getInitials(curProvider?.name) }}
         </span>
       </span>
@@ -38,7 +41,7 @@
 </template>
 
 <script setup lang="ts">
-import { Separator } from '@memoh/ui'
+import { Separator } from '@memohai/ui'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 
 function getInitials(name: string | undefined) {
@@ -49,8 +52,8 @@ import ProviderForm from './components/provider-form.vue'
 import ModelList from './components/model-list.vue'
 import { computed, inject, provide, reactive, ref, toRef, watch } from 'vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { putProvidersById, deleteProvidersById, getProvidersByIdModels, deleteModelsById } from '@memoh/sdk'
-import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } from '@memoh/sdk'
+import { putProvidersById, deleteProvidersById, getProvidersByIdModels, deleteModelsById } from '@memohai/sdk'
+import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } from '@memohai/sdk'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{

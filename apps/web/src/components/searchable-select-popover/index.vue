@@ -123,7 +123,7 @@ import {
   PopoverTrigger,
   PopoverContent,
   Button,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { computed, ref, watch } from 'vue'
 
 export interface SearchableSelectOption {

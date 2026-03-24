@@ -17,4 +17,4 @@ export type {
   ScheduleSchedule,
   SettingsSettings,
   AccountsAccount,
-} from '@memoh/sdk'
+} from '@memohai/sdk'

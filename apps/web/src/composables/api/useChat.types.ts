@@ -1,4 +1,4 @@
-import type { BotsBot } from '@memoh/sdk'
+import type { BotsBot } from '@memohai/sdk'
 
 export type Bot = BotsBot
 

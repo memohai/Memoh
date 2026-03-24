@@ -15,9 +15,9 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from '@memoh/ui'
-import { getTtsProviders } from '@memoh/sdk'
-import type { TtsProviderResponse } from '@memoh/sdk'
+} from '@memohai/ui'
+import { getTtsProviders } from '@memohai/sdk'
+import type { TtsProviderResponse } from '@memohai/sdk'
 import AddTtsProvider from './components/add-tts-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'

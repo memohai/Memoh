@@ -19,13 +19,13 @@ import {
   type HandlersCreateContainerRequest,
   type HandlersGetContainerResponse,
   type HandlersListSnapshotsResponse,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import {
   postBotsByBotIdContainerStream,
   type ContainerCreateLayerStatus,
   type ContainerCreateStreamEvent,
 } from '@/composables/api/useContainerStream'
-import { Button, Input, Label, Separator, Spinner, Switch } from '@memoh/ui'
+import { Button, Input, Label, Separator, Spinner, Switch } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ContainerCreateProgress from './container-create-progress.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'

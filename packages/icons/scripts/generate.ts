@@ -56,7 +56,7 @@ defineOptions({ inheritAttrs: false })
 // Main
 // ---------------------------------------------------------------------------
 
-console.log('🎨 @memoh/icon generator\n')
+console.log('🎨 @memohai/icon generator\n')
 
 fs.mkdirSync(SRC_ICONS_DIR, { recursive: true })
 

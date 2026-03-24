@@ -1,6 +1,6 @@
-import { client } from '@memoh/sdk/client'
-import { getBotsByBotIdMessages, postBotsByBotIdWebMessages } from '@memoh/sdk'
-import type { ChannelAttachment, ChannelMessage } from '@memoh/sdk'
+import { client } from '@memohai/sdk/client'
+import { getBotsByBotIdMessages, postBotsByBotIdWebMessages } from '@memohai/sdk'
+import type { ChannelAttachment, ChannelMessage } from '@memohai/sdk'
 import type {
   ChatAttachment,
   FetchMessagesOptions,

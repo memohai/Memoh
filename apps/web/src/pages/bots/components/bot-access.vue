@@ -648,7 +648,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Avatar, AvatarFallback, AvatarImage, Button, Input, Label, NativeSelect, Separator, Spinner, Switch } from '@memoh/ui'
+import { Avatar, AvatarFallback, AvatarImage, Button, Input, Label, NativeSelect, Separator, Spinner, Switch } from '@memohai/ui'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
@@ -664,7 +664,7 @@ import {
   putBotsByBotIdBlacklist,
   putBotsByBotIdSettings,
   putBotsByBotIdWhitelist,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import type {
   AclChannelIdentityCandidate,
   AclObservedConversationCandidate,
@@ -672,7 +672,7 @@ import type {
   AclSourceScope,
   AclUpsertRuleRequest,
   AclUserCandidate,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'

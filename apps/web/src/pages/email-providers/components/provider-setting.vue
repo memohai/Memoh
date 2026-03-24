@@ -230,7 +230,7 @@ import {
   SelectItem,
   Switch,
   Label,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import { computed, inject, reactive, ref, watch } from 'vue'
@@ -247,8 +247,8 @@ import {
   getEmailProvidersByIdOauthAuthorize,
   getEmailProvidersByIdOauthStatus,
   deleteEmailProvidersByIdOauthToken,
-} from '@memoh/sdk'
-import type { EmailProviderResponse, EmailProviderMeta, EmailFieldSchema, HandlersEmailOAuthStatusResponse } from '@memoh/sdk'
+} from '@memohai/sdk'
+import type { EmailProviderResponse, EmailProviderMeta, EmailFieldSchema, HandlersEmailOAuthStatusResponse } from '@memohai/sdk'
 
 const OAUTH_PROVIDERS = ['gmail']
 

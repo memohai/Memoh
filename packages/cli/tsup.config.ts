@@ -8,8 +8,8 @@ export default defineConfig({
   bundle: true,
   splitting: false,
   clean: true,
-  // @memoh/sdk exports raw .ts, must be bundled
-  noExternal: [/^@memoh\/sdk/],
+  // @memohai/sdk exports raw .ts, must be bundled
+  noExternal: [/^@memohai\/sdk/],
   banner: {
     js: '#!/usr/bin/env node',
   },

@@ -21,7 +21,7 @@ import {
   Feishu,
   Wechat,
   Matrix,
-} from '@memoh/icon'
+} from '@memohai/icon'
 
 const channelIcons: Record<string, Component> = {
   qq: Qq,

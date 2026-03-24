@@ -16,9 +16,9 @@ import {
   EmptyMedia,
   EmptyTitle,
   Button,
-} from '@memoh/ui'
-import { getProviders } from '@memoh/sdk'
-import type { ProvidersGetResponse } from '@memoh/sdk'
+} from '@memohai/ui'
+import { getProviders } from '@memohai/sdk'
+import type { ProvidersGetResponse } from '@memohai/sdk'
 import AddProvider from '@/components/add-provider/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
@@ -135,7 +135,10 @@ const openStatus = reactive({
                     :icon="providerItem.icon"
                     size="1.25em"
                   />
-                  <span v-else class="text-xs font-medium text-muted-foreground">
+                  <span
+                    v-else
+                    class="text-xs font-medium text-muted-foreground"
+                  >
                     {{ getInitials(providerItem.name) }}
                   </span>
                 </span>

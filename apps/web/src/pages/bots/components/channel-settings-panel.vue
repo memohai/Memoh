@@ -4,7 +4,10 @@
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-3">
         <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <ChannelIcon :channel="channelItem.meta.type" size="1.5em" />
+          <ChannelIcon
+            :channel="channelItem.meta.type"
+            size="1.5em"
+          />
         </span>
         <div>
           <h3 class="text-lg font-semibold">
@@ -258,14 +261,14 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus } from '@memoh/sdk'
-import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memoh/sdk'
-import { client } from '@memoh/sdk/client'
+import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus } from '@memohai/sdk'
+import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
+import { client } from '@memohai/sdk/client'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'

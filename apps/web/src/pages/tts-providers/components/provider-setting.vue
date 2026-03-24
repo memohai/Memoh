@@ -152,7 +152,7 @@ import {
   FormItem,
   Separator,
   Label,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ModelConfigEditor from './model-config-editor.vue'
@@ -164,8 +164,8 @@ import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import { putTtsProvidersById, deleteTtsProvidersById, getTtsProvidersMeta } from '@memoh/sdk'
-import type { TtsProviderResponse, TtsProviderMetaResponse, TtsModelInfo } from '@memoh/sdk'
+import { putTtsProvidersById, deleteTtsProvidersById, getTtsProvidersMeta } from '@memohai/sdk'
+import type { TtsProviderResponse, TtsProviderMetaResponse, TtsModelInfo } from '@memohai/sdk'
 
 const { t } = useI18n()
 const curProvider = inject('curTtsProvider', ref<TtsProviderResponse>())

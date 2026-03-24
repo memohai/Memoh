@@ -91,13 +91,13 @@ import {
   SelectGroup,
   SelectItem,
   Label,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import { postEmailProviders, getEmailProvidersMeta } from '@memoh/sdk'
-import type { EmailCreateProviderRequest } from '@memoh/sdk'
+import { postEmailProviders, getEmailProvidersMeta } from '@memohai/sdk'
+import type { EmailCreateProviderRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'

@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button, Input, Label, Separator, Spinner } from '@memoh/ui'
+import { Button, Input, Label, Separator, Spinner } from '@memohai/ui'
 
 defineProps<{
   displayUserId: string

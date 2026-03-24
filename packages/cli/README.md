@@ -1,2 +1,2 @@
-# @memoh/cli
+# @memohai/cli
 

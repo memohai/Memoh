@@ -5,7 +5,7 @@ import {
   postBotsByBotIdSessions,
   deleteBotsByBotIdSessionsBySessionId,
   patchBotsByBotIdSessionsBySessionId,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import type { Bot, SessionSummary } from './useChat.types'
 
 export async function fetchBots(): Promise<Bot[]> {

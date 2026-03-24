@@ -23,7 +23,7 @@
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input, Label } from '@memoh/ui'
+import { Input, Label } from '@memohai/ui'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>

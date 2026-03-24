@@ -31,9 +31,9 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { postProvidersByIdImportModels } from '@memoh/sdk'
+import { postProvidersByIdImportModels } from '@memohai/sdk'
 import { toast } from 'vue-sonner'
-import { Button } from '@memoh/ui'
+import { Button } from '@memohai/ui'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 

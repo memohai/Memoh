@@ -15,9 +15,9 @@ import {
   EmptyMedia,
   EmptyTitle,
   Button
-} from '@memoh/ui'
-import { getMemoryProviders } from '@memoh/sdk'
-import type { MemoryprovidersGetResponse } from '@memoh/sdk'
+} from '@memohai/ui'
+import { getMemoryProviders } from '@memohai/sdk'
+import type { MemoryprovidersGetResponse } from '@memohai/sdk'
 import AddMemoryProvider from './components/add-memory-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'

@@ -87,9 +87,9 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-} from '@memoh/ui'
-import { postMemoryProviders } from '@memoh/sdk'
-import type { AdaptersProviderType } from '@memoh/sdk'
+} from '@memohai/ui'
+import { postMemoryProviders } from '@memohai/sdk'
+import type { AdaptersProviderType } from '@memohai/sdk'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQueryCache } from '@pinia/colada'

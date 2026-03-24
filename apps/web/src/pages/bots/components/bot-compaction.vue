@@ -236,15 +236,15 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import {
   Button, Badge, Spinner, NativeSelect, Label, Switch, Input, Separator,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ModelSelect from './model-select.vue'
 import {
   getBotsByBotIdSettings, putBotsByBotIdSettings,
   getBotsByBotIdCompactionLogs, deleteBotsByBotIdCompactionLogs,
   getModels, getProviders,
-} from '@memoh/sdk'
-import type { SettingsSettings, SettingsUpsertRequest, CompactionLog } from '@memoh/sdk'
+} from '@memohai/sdk'
+import type { SettingsSettings, SettingsUpsertRequest, CompactionLog } from '@memohai/sdk'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'

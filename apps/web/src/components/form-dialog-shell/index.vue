@@ -54,7 +54,7 @@ import {
   DialogTitle,
   DialogTrigger,
   Spinner
-} from '@memoh/ui'
+} from '@memohai/ui'
 
 
 withDefaults(defineProps<{

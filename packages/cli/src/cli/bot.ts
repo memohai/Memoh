@@ -16,8 +16,8 @@ import {
   type BotsCreateBotRequest,
   type BotsUpdateBotRequest,
   type ModelsGetResponse,
-} from '@memoh/sdk'
-import { client } from '@memoh/sdk/client'
+} from '@memohai/sdk'
+import { client } from '@memohai/sdk/client'
 import { ensureAuth, getErrorMessage, resolveBotId } from './shared'
 import { streamChat } from './stream'
 

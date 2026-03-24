@@ -20,7 +20,7 @@ export default defineConfig(({ command }) => {
 
   if (command !== 'build') {
     try {
-      const { loadConfig, getBaseUrl } = require('@memoh/config') as {
+      const { loadConfig, getBaseUrl } = require('@memohai/config') as {
         loadConfig: (path: string) => {
           web?: { port?: number; host?: string }
         }

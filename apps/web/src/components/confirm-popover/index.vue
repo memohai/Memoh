@@ -37,7 +37,7 @@ import {
   PopoverContent,
   PopoverTrigger,
   Spinner,
-} from '@memoh/ui'
+} from '@memohai/ui'
 
 withDefaults(defineProps<{
   message: string

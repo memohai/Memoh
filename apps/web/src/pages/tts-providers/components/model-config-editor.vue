@@ -261,9 +261,9 @@ import {
   Slider,
   Textarea,
   Separator,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import LoadingButton from '@/components/loading-button/index.vue'
-import type { TtsModelCapabilities, TtsVoiceInfo } from '@memoh/sdk'
+import type { TtsModelCapabilities, TtsVoiceInfo } from '@memohai/sdk'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'

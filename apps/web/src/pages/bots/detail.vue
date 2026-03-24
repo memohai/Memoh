@@ -218,7 +218,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   Toggle
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { computed, ref, watch, onMounted, toValue } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
@@ -229,11 +229,11 @@ import {
   getBotsByIdChecks,
   getBotsByBotIdContainer,
   getBotsByBotIdContainerSnapshots,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import type {
   BotsBotCheck, HandlersGetContainerResponse,
   HandlersListSnapshotsResponse,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import LoadingButton from '@/components/loading-button/index.vue'
 import BotSettings from './components/bot-settings.vue'

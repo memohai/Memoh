@@ -58,11 +58,11 @@ import {
   AvatarImage,
   AvatarFallback,
   Badge,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import type { BotsBot } from '@memoh/sdk'
+import type { BotsBot } from '@memohai/sdk'
 import { formatDate } from '@/utils/date-time'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'

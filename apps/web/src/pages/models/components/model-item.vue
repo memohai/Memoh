@@ -95,10 +95,10 @@ import {
   Badge,
   Button,
   Spinner,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import { postModelsByIdTest } from '@memoh/sdk'
-import type { ModelsGetResponse, ModelsTestResponse } from '@memoh/sdk'
+import { postModelsByIdTest } from '@memohai/sdk'
+import type { ModelsGetResponse, ModelsTestResponse } from '@memohai/sdk'
 import { ref, computed } from 'vue'
 
 const props = defineProps<{

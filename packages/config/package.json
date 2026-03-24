@@ -1,5 +1,5 @@
 {
-  "name": "@memoh/config",
+  "name": "@memohai/config",
   "version": "0.5.0",
   "exports": {
     ".": "./src/index.ts"

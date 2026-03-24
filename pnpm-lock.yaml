@@ -54,7 +54,7 @@ importers:
       '@elysiajs/cors':
         specifier: ^1.4.1
         version: 1.4.1(elysia@1.4.27(@sinclair/typebox@0.34.47)(@types/bun@1.3.10)(exact-mirror@0.2.6(@sinclair/typebox@0.34.47))(file-type@21.3.0)(openapi-types@12.1.3)(typescript@5.9.3))
-      '@memoh/config':
+      '@memohai/config':
         specifier: workspace:*
         version: link:../../packages/config
       elysia:
@@ -94,13 +94,13 @@ importers:
       '@fortawesome/vue-fontawesome':
         specifier: ^3.1.1
         version: 3.1.3(@fortawesome/fontawesome-svg-core@7.2.0)(vue@3.5.26(typescript@5.9.3))
-      '@memoh/icon':
+      '@memohai/icon':
         specifier: workspace:*
         version: link:../../packages/icons
-      '@memoh/sdk':
+      '@memohai/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-      '@memoh/ui':
+      '@memohai/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       '@pinia/colada':
@@ -200,7 +200,7 @@ importers:
         specifier: ^4.3.5
         version: 4.3.6
     devDependencies:
-      '@memoh/config':
+      '@memohai/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@types/node':
@@ -236,7 +236,7 @@ importers:
 
   packages/cli:
     dependencies:
-      '@memoh/sdk':
+      '@memohai/sdk':
         specifier: workspace:*
         version: link:../sdk
       chalk:

@@ -4,14 +4,14 @@ import  {
   type BotsBotCheck,
   getBotsByIdChecks,
   getBotsById
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useQuery } from '@pinia/colada'
 import { useI18n } from 'vue-i18n'
-import { Badge,Button,Spinner } from '@memoh/ui'
+import { Badge,Button,Spinner } from '@memohai/ui'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 
 

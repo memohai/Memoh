@@ -189,7 +189,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
+import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import ThinkingBlock from './thinking-block.vue'
 import ToolCallBlock from './tool-call-block.vue'

@@ -233,14 +233,14 @@ import {
   Separator,
   Button,
   Switch,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import { putBrowserContextsById, deleteBrowserContextsById } from '@memoh/sdk'
-import { getBrowserContextsCoresQuery } from '@memoh/sdk/colada'
-import type { BrowsercontextsBrowserContext, BrowsercontextsUpdateRequest } from '@memoh/sdk'
+import { putBrowserContextsById, deleteBrowserContextsById } from '@memohai/sdk'
+import { getBrowserContextsCoresQuery } from '@memohai/sdk/colada'
+import type { BrowsercontextsBrowserContext, BrowsercontextsUpdateRequest } from '@memohai/sdk'
 import { inject, watch, computed, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'

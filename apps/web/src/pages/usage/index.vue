@@ -304,10 +304,10 @@ import {
   SelectTrigger,
   SelectValue,
   Spinner,
-} from '@memoh/ui'
-import { getBotsQuery } from '@memoh/sdk/colada'
-import { getBotsByBotIdTokenUsage } from '@memoh/sdk'
-import type { HandlersDailyTokenUsage, HandlersModelTokenUsage } from '@memoh/sdk'
+} from '@memohai/ui'
+import { getBotsQuery } from '@memohai/sdk/colada'
+import { getBotsByBotIdTokenUsage } from '@memohai/sdk'
+import type { HandlersDailyTokenUsage, HandlersModelTokenUsage } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 
 use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])

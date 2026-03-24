@@ -222,7 +222,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, provide, useTemplateRef, watchEffect} from 'vue'
-import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@memoh/ui'
+import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import MessageItem from './message-item.vue'

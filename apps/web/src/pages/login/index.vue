@@ -140,7 +140,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { Sun, Moon } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -152,7 +152,7 @@ import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { postAuthLogin } from '@memoh/sdk'
+import { postAuthLogin } from '@memohai/sdk'
 import type { Locale } from '@/i18n'
 
 const router = useRouter()

@@ -32,7 +32,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memoh/ui'
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memohai/ui'
 import type { ThinkingBlock } from '@/store/chat-list'
 
 defineProps<{

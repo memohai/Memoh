@@ -2,7 +2,7 @@
 
 ## Overview
 
-`@memoh/web` is the management UI for Memoh, built with Vue 3 + Vite. It provides visual configuration for bots, models, channels, memory, and more.
+`@memohai/web` is the management UI for Memoh, built with Vue 3 + Vite. It provides visual configuration for bots, models, channels, memory, and more.
 
 ## Tech Stack
 
@@ -11,9 +11,9 @@
 | Framework | Vue 3 (Composition API, `<script setup>`) |
 | Build | Vite 8 + `@vitejs/plugin-vue` |
 | CSS | Tailwind CSS 4 (CSS-based config, no `tailwind.config.*`) |
-| UI Library | `@memoh/ui` (built on Reka UI + class-variance-authority) |
+| UI Library | `@memohai/ui` (built on Reka UI + class-variance-authority) |
 | State | Pinia 3 + `pinia-plugin-persistedstate` |
-| Data Fetching | Pinia Colada (`@pinia/colada`) + `@memoh/sdk` |
+| Data Fetching | Pinia Colada (`@pinia/colada`) + `@memohai/sdk` |
 | Forms | vee-validate + `@vee-validate/zod` + Zod |
 | i18n | vue-i18n (en / zh) |
 | Icons | FontAwesome (primary) + lucide-vue-next (secondary) |
@@ -108,7 +108,7 @@ Auth guard: all routes except `/login` require `localStorage.getItem('token')`. 
 
 Three-tier layout architecture:
 
-1. **MainLayout** (`layout/main-layout/`) — Top-level wrapper using `SidebarProvider` from `@memoh/ui`. Provides `#sidebar` and `#main` slots.
+1. **MainLayout** (`layout/main-layout/`) — Top-level wrapper using `SidebarProvider` from `@memohai/ui`. Provides `#sidebar` and `#main` slots.
 2. **Sidebar** (`components/sidebar/`) — Collapsible navigation with logo, menu items, and user avatar footer. Active route highlighting.
 3. **MainContainer** (`components/main-container/`) — Header (sidebar trigger + breadcrumb) + scrollable content area with `<KeepAlive>` wrapped `<RouterView>`.
 
@@ -178,9 +178,9 @@ katex/dist/katex.min.css     — Math rendering
 vue-sonner/style.css         — Toast notifications (in App.vue)
 ```
 
-## UI Components (@memoh/ui)
+## UI Components (@memohai/ui)
 
-`@memoh/ui` provides 40+ components built on Reka UI primitives + Tailwind + class-variance-authority:
+`@memohai/ui` provides 40+ components built on Reka UI primitives + Tailwind + class-variance-authority:
 
 - **Form**: `Form`, `FormField`, `FormItem`, `FormControl`, `FormLabel`, `FormMessage`
 - **Input**: `Input`, `Textarea`, `InputGroup`, `NativeSelect`, `Combobox`, `TagsInput`
@@ -232,7 +232,7 @@ toast.error(resolveApiErrorMessage(error, 'Failed'))
 
 ### API Client Setup (`lib/api-client.ts`)
 
-- SDK: `@memoh/sdk` auto-generated from OpenAPI via `@hey-api/openapi-ts`
+- SDK: `@memohai/sdk` auto-generated from OpenAPI via `@hey-api/openapi-ts`
 - Base URL: `VITE_API_URL` env var (defaults to `/api`, proxied by Vite dev server to backend)
 - Auth: Request interceptor attaches `Authorization: Bearer ${token}` from localStorage
 - 401 handling: Response interceptor removes token and redirects to `/login`
@@ -319,16 +319,16 @@ Chat responses are streamed via Server-Sent Events:
 - Dev server port: 8082 (from `config.toml`)
 - Proxy: `/api` → backend (default `http://localhost:8080`)
 - Aliases: `@` → `./src`, `#` → `../ui/src`
-- Config: reads from `MEMOH_CONFIG_PATH` / `CONFIG_PATH` when provided, otherwise `../../config.toml`, via `@memoh/config`
+- Config: reads from `MEMOH_CONFIG_PATH` / `CONFIG_PATH` when provided, otherwise `../../config.toml`, via `@memohai/config`
 
 ## Development Rules
 
 - Use Vue 3 Composition API with `<script setup>` exclusively.
 - Style with Tailwind utility classes; avoid `<style>` blocks.
 - **Always use semantic color tokens** (`text-foreground`, `bg-card`, `border-border`, `text-muted-foreground`, `bg-accent`, etc.) instead of raw colors (`gray-*`, `bg-white`, `text-black`). Never introduce hardcoded Tailwind color classes for themed elements — this breaks dark mode consistency.
-- Use `@memoh/ui` components for all UI primitives; do not import Reka UI directly.
+- Use `@memohai/ui` components for all UI primitives; do not import Reka UI directly.
 - Use Pinia Colada (`useQuery`/`useMutation`) for server state; use Pinia stores for client state only.
-- API calls must go through `@memoh/sdk`; never call `fetch()` directly.
+- API calls must go through `@memohai/sdk`; never call `fetch()` directly.
 - All user-facing strings must use i18n keys (`t('key')`) — never hardcode text.
 - Forms must use vee-validate + Zod schemas via `toTypedSchema()`.
 - Error messages via `resolveApiErrorMessage()` + `toast.error()`.

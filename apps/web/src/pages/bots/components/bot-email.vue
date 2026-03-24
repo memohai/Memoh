@@ -209,7 +209,7 @@ import {
   Separator,
   Spinner,
   Switch,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { computed, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
@@ -221,8 +221,8 @@ import {
   putBotsByBotIdEmailBindingsById,
   deleteBotsByBotIdEmailBindingsById,
   getBotsByBotIdEmailOutbox,
-} from '@memoh/sdk'
-import type { EmailProviderResponse, EmailBindingResponse, EmailOutboxItemResponse } from '@memoh/sdk'
+} from '@memohai/sdk'
+import type { EmailProviderResponse, EmailBindingResponse, EmailOutboxItemResponse } from '@memohai/sdk'
 import { formatDateTime } from '@/utils/date-time'
 
 const props = defineProps<{ botId: string }>()

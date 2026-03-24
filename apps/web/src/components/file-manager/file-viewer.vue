@@ -3,13 +3,13 @@ import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
-import { Button, Spinner } from '@memoh/ui'
+import { Button, Spinner } from '@memohai/ui'
 import {
   getBotsByBotIdContainerFsRead,
   postBotsByBotIdContainerFsWrite,
   getBotsByBotIdContainerFsDownload,
-} from '@memoh/sdk'
-import type { HandlersFsFileInfo } from '@memoh/sdk'
+} from '@memohai/sdk'
+import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import { isTextFile, isImageFile, formatFileSize } from './utils'

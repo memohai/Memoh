@@ -168,14 +168,14 @@ import {
   FormItem,
   Checkbox,
   Label,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { useForm } from 'vee-validate'
 import { inject, computed, watch, nextTick, type Ref, ref } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { postModels, putModelsById, putModelsModelByModelId } from '@memoh/sdk'
-import type { ModelsGetResponse, ModelsAddRequest, ModelsUpdateRequest } from '@memoh/sdk'
+import { postModels, putModelsById, putModelsModelByModelId } from '@memohai/sdk'
+import type { ModelsGetResponse, ModelsAddRequest, ModelsUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { COMPATIBILITY_OPTIONS } from '@/constants/compatibilities'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'

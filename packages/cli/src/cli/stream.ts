@@ -1,6 +1,6 @@
 import chalk from 'chalk'
-import { client } from '@memoh/sdk/client'
-import { postBotsByBotIdCliMessages } from '@memoh/sdk'
+import { client } from '@memohai/sdk/client'
+import { postBotsByBotIdCliMessages } from '@memohai/sdk'
 
 // ---------------------------------------------------------------------------
 // SSE stream types (aligned with frontend useChat.ts)

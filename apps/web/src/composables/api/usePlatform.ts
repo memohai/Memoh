@@ -1,4 +1,4 @@
-import { client } from '@memoh/sdk/client'
+import { client } from '@memohai/sdk/client'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 
 // ---- Types ----

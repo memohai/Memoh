@@ -119,7 +119,7 @@ import {
   TagsInputItemDelete,
   TagsInputItemText,
   Switch,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import z from 'zod'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'

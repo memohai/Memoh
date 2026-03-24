@@ -4,8 +4,8 @@
     :class="containerClass"
   >
     <component
-      v-if="iconComponent"
       :is="iconComponent"
+      v-if="iconComponent"
       :size="iconSize"
     />
     <FontAwesomeIcon
@@ -35,7 +35,7 @@ import {
   Searxng,
   Sogou,
   Serper,
-} from '@memoh/icon'
+} from '@memohai/icon'
 
 const searchIcons: Record<string, Component> = {
   brave: Brave,

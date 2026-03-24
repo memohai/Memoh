@@ -2,7 +2,7 @@ import chalk from 'chalk'
 import inquirer from 'inquirer'
 import ora from 'ora'
 
-import { getBots, type BotsBot } from '@memoh/sdk'
+import { getBots, type BotsBot } from '@memohai/sdk'
 import { readToken, type TokenInfo } from '../utils/store'
 
 export type BotSummary = BotsBot

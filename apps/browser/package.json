@@ -1,5 +1,5 @@
 {
-  "name": "@memoh/browser-gateway",
+  "name": "@memohai/browser-gateway",
   "type": "module",
   "version": "0.5.0",
   "scripts": {
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.1",
-    "@memoh/config": "workspace:*",
+    "@memohai/config": "workspace:*",
     "elysia": "1",
     "playwright": "1.50.0",
     "zod": "^4.3.6"

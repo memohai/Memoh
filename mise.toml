@@ -54,7 +54,7 @@ run = "sqlc generate"
 
 [tasks.icons-generate]
 description = "Generate icon Vue components from SVG sources"
-run = "pnpm --filter @memoh/icon generate"
+run = "pnpm --filter @memohai/icon generate"
 
 [tasks.dev]
 description = "Start development environment"

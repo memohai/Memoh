@@ -133,10 +133,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from 'vue'
-import { Button, Spinner } from '@memoh/ui'
+import { Button, Spinner } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { client } from '@memoh/sdk/client'
+import { client } from '@memohai/sdk/client'
 import QRCode from 'qrcode'
 
 const props = defineProps<{

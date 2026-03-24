@@ -148,13 +148,13 @@ import {
   Label,
   Switch,
   Separator,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { postProviders, postProvidersByIdImportModels } from '@memoh/sdk'
-import type { ProvidersCreateRequest } from '@memoh/sdk'
+import { postProviders, postProvidersByIdImportModels } from '@memohai/sdk'
+import type { ProvidersCreateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'

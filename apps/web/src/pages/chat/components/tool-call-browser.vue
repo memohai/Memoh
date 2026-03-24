@@ -57,7 +57,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Badge, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memoh/ui'
+import { Badge, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 
 const props = defineProps<{ block: ToolCallBlock }>()
