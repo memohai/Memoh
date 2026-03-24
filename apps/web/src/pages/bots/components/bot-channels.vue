@@ -201,6 +201,8 @@ const selectedItem = computed(() =>
 )
 
 watch(configuredChannels, (list) => {
+  if (list.length === 0) return
+
   const first = list[0]
   if (first && !selectedType.value) {
     selectedType.value = first.meta.type ?? null
