@@ -57,38 +57,9 @@
               </FormControl>
             </FormItem>
           </FormField>
-
-          <!-- Type -->
-          <FormField
-            v-slot="{ componentField }"
-            name="type"
-          >
-            <FormItem>
-              <Label class="mb-2">
-                {{ $t('common.type') }}
-              </Label>
-              <FormControl>
-                <Select v-bind="componentField">
-                  <SelectTrigger
-                    class="w-full"
-                    :aria-label="$t('common.type')"
-                  >
-                    <SelectValue :placeholder="$t('bots.typePlaceholder')" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="personal">
-                        {{ $t('bots.types.personal') }}
-                      </SelectItem>
-                      <SelectItem value="public">
-                        {{ $t('bots.types.public') }}
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </FormControl>
-            </FormItem>
-          </FormField>
+          <div class="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            {{ $t('bots.createBotWaitHint') }}
+          </div>
         </div>
 
         <DialogFooter class="mt-6">
@@ -128,19 +99,13 @@ import {
   Separator,
   Label,
   Spinner,
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { watch } from 'vue'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { postBotsMutation, getBotsQueryKey } from '@memoh/sdk/colada'
+import { postBotsMutation, getBotsQueryKey } from '@memohai/sdk/colada'
 import { useI18n } from 'vue-i18n'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
@@ -151,7 +116,6 @@ const { run } = useDialogMutation()
 const formSchema = toTypedSchema(z.object({
   display_name: z.string().min(1),
   avatar_url: z.string().optional(),
-  type: z.string(),
 }))
 
 const form = useForm({
@@ -159,7 +123,6 @@ const form = useForm({
   initialValues: {
     display_name: '',
     avatar_url: '',
-    type: 'personal',
   },
 })
 
@@ -175,7 +138,6 @@ watch(open, (val) => {
       values: {
         display_name: '',
         avatar_url: '',
-        type: 'personal',
       },
     })
   } else {
@@ -189,7 +151,6 @@ const handleSubmit = form.handleSubmit(async (values) => {
       body: {
         display_name: values.display_name,
         avatar_url: values.avatar_url || undefined,
-        type: values.type,
         is_active: true,
       },
     }),

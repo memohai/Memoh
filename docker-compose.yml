@@ -54,20 +54,6 @@ services:
     networks:
       - memoh-network
 
-  agent:
-    image: memohai/agent:latest
-    container_name: memoh-agent
-    volumes:
-      - ${MEMOH_CONFIG:-./config.toml}:/config.toml:ro
-      - /etc/localtime:/etc/localtime:ro
-    ports:
-      - "8081:8081"
-    depends_on:
-      - server
-    restart: unless-stopped
-    networks:
-      - memoh-network
-
   web:
     image: memohai/web:latest
     container_name: memoh-web
@@ -75,7 +61,6 @@ services:
       - "8082:8082"
     depends_on:
       - server
-      - agent
     restart: unless-stopped
     networks:
       - memoh-network

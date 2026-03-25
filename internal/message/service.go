@@ -46,9 +46,9 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		return Message{}, fmt.Errorf("invalid bot id: %w", err)
 	}
 
-	pgRouteID, err := parseOptionalUUID(input.RouteID)
+	pgSessionID, err := parseOptionalUUID(input.SessionID)
 	if err != nil {
-		return Message{}, fmt.Errorf("invalid route id: %w", err)
+		return Message{}, fmt.Errorf("invalid session id: %w", err)
 	}
 	pgSenderChannelIdentityID, err := parseOptionalUUID(input.SenderChannelIdentityID)
 	if err != nil {
@@ -75,10 +75,9 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 
 	row, err := s.queries.CreateMessage(ctx, sqlc.CreateMessageParams{
 		BotID:                   pgBotID,
-		RouteID:                 pgRouteID,
+		SessionID:               pgSessionID,
 		SenderChannelIdentityID: pgSenderChannelIdentityID,
 		SenderUserID:            pgSenderUserID,
-		Platform:                toPgText(input.Platform),
 		ExternalMessageID:       toPgText(input.ExternalMessageID),
 		SourceReplyToMessageID:  toPgText(input.SourceReplyToMessageID),
 		Role:                    input.Role,
@@ -93,7 +92,6 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 
 	result := toMessageFromCreate(row)
 
-	// Persist asset links if provided.
 	for _, ref := range input.Assets {
 		pgMsgID := row.ID
 		role := ref.Role
@@ -113,13 +111,13 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 			Role:        role,
 			Ordinal:     int32(ref.Ordinal),
 			ContentHash: contentHash,
+			Name:        ref.Name,
+			Metadata:    marshalMetadata(ref.Metadata),
 		}); assetErr != nil {
 			s.logger.Warn("create message asset link failed", slog.String("message_id", result.ID), slog.Any("error", assetErr))
 		}
 	}
 
-	// Populate assets from input refs for SSE so consumers see them immediately.
-	// DB only stores the link (content_hash); mime/size/storage_key come from the caller.
 	if len(input.Assets) > 0 {
 		assets := make([]MessageAsset, 0, len(input.Assets))
 		for _, ref := range input.Assets {
@@ -134,6 +132,8 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 				Mime:        ref.Mime,
 				SizeBytes:   ref.SizeBytes,
 				StorageKey:  ref.StorageKey,
+				Name:        ref.Name,
+				Metadata:    ref.Metadata,
 			})
 		}
 		result.Assets = assets
@@ -231,6 +231,128 @@ func (s *DBService) ListBefore(ctx context.Context, botID string, before time.Ti
 	return msgs, nil
 }
 
+// --- Session-scoped queries ---
+
+// ListBySession returns all messages for a session.
+func (s *DBService) ListBySession(ctx context.Context, sessionID string) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListMessagesBySession(ctx, pgSessionID)
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromSessionList(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
+// ListSinceBySession returns session messages since a given time.
+func (s *DBService) ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListMessagesSinceBySession(ctx, sqlc.ListMessagesSinceBySessionParams{
+		SessionID: pgSessionID,
+		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromSinceBySession(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
+// ListActiveSinceBySession returns session messages since a given time, excluding passive_sync messages.
+func (s *DBService) ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListActiveMessagesSinceBySession(ctx, sqlc.ListActiveMessagesSinceBySessionParams{
+		SessionID: pgSessionID,
+		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromActiveSinceBySession(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
+// ListLatestBySession returns the latest N session messages.
+func (s *DBService) ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListMessagesLatestBySession(ctx, sqlc.ListMessagesLatestBySessionParams{
+		SessionID: pgSessionID,
+		MaxCount:  limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromLatestBySession(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
+// ListBeforeBySession returns up to limit session messages older than before.
+func (s *DBService) ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListMessagesBeforeBySession(ctx, sqlc.ListMessagesBeforeBySessionParams{
+		SessionID: pgSessionID,
+		CreatedAt: pgtype.Timestamptz{Time: before, Valid: true},
+		MaxCount:  limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromBeforeBySession(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
+// LinkAssets links asset refs to an existing persisted message.
+func (s *DBService) LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error {
+	pgMsgID, err := dbpkg.ParseUUID(messageID)
+	if err != nil {
+		return fmt.Errorf("invalid message id: %w", err)
+	}
+	for _, ref := range assets {
+		contentHash := strings.TrimSpace(ref.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		role := ref.Role
+		if strings.TrimSpace(role) == "" {
+			role = "attachment"
+		}
+		if ref.Ordinal < math.MinInt32 || ref.Ordinal > math.MaxInt32 {
+			return fmt.Errorf("asset ordinal out of range: %d", ref.Ordinal)
+		}
+		if _, assetErr := s.queries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
+			MessageID:   pgMsgID,
+			Role:        role,
+			Ordinal:     int32(ref.Ordinal),
+			ContentHash: contentHash,
+			Name:        ref.Name,
+			Metadata:    marshalMetadata(ref.Metadata),
+		}); assetErr != nil {
+			s.logger.Warn("link asset failed", slog.String("message_id", messageID), slog.Any("error", assetErr))
+		}
+	}
+	return nil
+}
+
 // DeleteByBot deletes all messages for a bot.
 func (s *DBService) DeleteByBot(ctx context.Context, botID string) error {
 	pgBotID, err := dbpkg.ParseUUID(botID)
@@ -240,15 +362,54 @@ func (s *DBService) DeleteByBot(ctx context.Context, botID string) error {
 	return s.queries.DeleteMessagesByBot(ctx, pgBotID)
 }
 
+// DeleteBySession deletes all messages for a session.
+func (s *DBService) DeleteBySession(ctx context.Context, sessionID string) error {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return err
+	}
+	return s.queries.DeleteMessagesBySession(ctx, pgSessionID)
+}
+
+// --- Conversion helpers ---
+
 func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
-		row.RouteID,
+		row.SessionID,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		pgtype.Text{},
 		pgtype.Text{},
+		extractPlatformFromMetadata(row.Metadata),
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.CreatedAt,
+	)
+}
+
+func extractPlatformFromMetadata(metadata []byte) pgtype.Text {
+	m := parseJSONMap(metadata)
+	if v, ok := m["platform"].(string); ok && strings.TrimSpace(v) != "" {
+		return pgtype.Text{String: strings.TrimSpace(v), Valid: true}
+	}
+	return pgtype.Text{}
+}
+
+func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
 		row.Platform,
 		row.ExternalMessageID,
 		row.SourceReplyToMessageID,
@@ -260,11 +421,11 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 	)
 }
 
-func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
+func toMessageFromSessionListRow(row sqlc.ListMessagesBySessionRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
-		row.RouteID,
+		row.SessionID,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -284,7 +445,27 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
-		row.RouteID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.CreatedAt,
+	)
+}
+
+func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -301,10 +482,58 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 }
 
 func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
+	m := toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.CreatedAt,
+	)
+	if row.CompactID.Valid {
+		m.CompactID = row.CompactID.String()
+	}
+	return m
+}
+
+func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
+	m := toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.CreatedAt,
+	)
+	if row.CompactID.Valid {
+		m.CompactID = row.CompactID.String()
+	}
+	return m
+}
+
+func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
-		row.RouteID,
+		row.SessionID,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -320,11 +549,51 @@ func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
 	)
 }
 
-func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
+func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
-		row.RouteID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.CreatedAt,
+	)
+}
+
+func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.CreatedAt,
+	)
+}
+
+func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -343,7 +612,7 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 func toMessageFields(
 	id pgtype.UUID,
 	botID pgtype.UUID,
-	routeID pgtype.UUID,
+	sessionID pgtype.UUID,
 	senderChannelIdentityID pgtype.UUID,
 	senderUserID pgtype.UUID,
 	senderDisplayName pgtype.Text,
@@ -360,7 +629,7 @@ func toMessageFields(
 	return Message{
 		ID:                      id.String(),
 		BotID:                   botID.String(),
-		RouteID:                 routeID.String(),
+		SessionID:               sessionID.String(),
 		SenderChannelIdentityID: senderChannelIdentityID.String(),
 		SenderUserID:            senderUserID.String(),
 		SenderDisplayName:       dbpkg.TextToString(senderDisplayName),
@@ -384,10 +653,26 @@ func toMessagesFromList(rows []sqlc.ListMessagesRow) []Message {
 	return messages
 }
 
+func toMessagesFromSessionList(rows []sqlc.ListMessagesBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromSessionListRow(row))
+	}
+	return messages
+}
+
 func toMessagesFromSince(rows []sqlc.ListMessagesSinceRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, toMessageFromSinceRow(row))
+	}
+	return messages
+}
+
+func toMessagesFromSinceBySession(rows []sqlc.ListMessagesSinceBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromSinceBySessionRow(row))
 	}
 	return messages
 }
@@ -400,6 +685,14 @@ func toMessagesFromActiveSince(rows []sqlc.ListActiveMessagesSinceRow) []Message
 	return messages
 }
 
+func toMessagesFromActiveSinceBySession(rows []sqlc.ListActiveMessagesSinceBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromActiveSinceBySessionRow(row))
+	}
+	return messages
+}
+
 func toMessagesFromLatest(rows []sqlc.ListMessagesLatestRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
@@ -408,24 +701,12 @@ func toMessagesFromLatest(rows []sqlc.ListMessagesLatestRow) []Message {
 	return messages
 }
 
-func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
-	return toMessageFields(
-		row.ID,
-		row.BotID,
-		row.RouteID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
-		row.SenderDisplayName,
-		row.SenderAvatarUrl,
-		row.Platform,
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.CreatedAt,
-	)
+func toMessagesFromLatestBySession(rows []sqlc.ListMessagesLatestBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromLatestBySessionRow(row))
+	}
+	return messages
 }
 
 // toMessagesFromBefore returns messages in oldest-first order (ListMessagesBefore returns DESC; we reverse).
@@ -433,6 +714,14 @@ func toMessagesFromBefore(rows []sqlc.ListMessagesBeforeRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- {
 		messages = append(messages, toMessageFromBeforeRow(rows[i]))
+	}
+	return messages
+}
+
+func toMessagesFromBeforeBySession(rows []sqlc.ListMessagesBeforeBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for i := len(rows) - 1; i >= 0; i-- {
+		messages = append(messages, toMessageFromBeforeBySessionRow(rows[i]))
 	}
 	return messages
 }
@@ -496,8 +785,6 @@ func (s *DBService) publishMessageCreated(message Message) {
 }
 
 // enrichAssets batch-loads asset links for a list of messages (single-table query).
-// On DB error (e.g. missing content_hash column), we skip enrichment and leave Assets empty
-// so the list request still returns all messages and does not fail.
 func (s *DBService) enrichAssets(ctx context.Context, messages []Message) {
 	if len(messages) == 0 {
 		return
@@ -530,9 +817,8 @@ func (s *DBService) enrichAssets(ctx context.Context, messages []Message) {
 			ContentHash: contentHash,
 			Role:        row.Role,
 			Ordinal:     int(row.Ordinal),
-			Mime:        "",
-			SizeBytes:   0,
-			StorageKey:  "",
+			Name:        row.Name,
+			Metadata:    unmarshalMetadata(row.Metadata),
 		})
 	}
 	for i := range messages {
@@ -544,12 +830,32 @@ func (s *DBService) enrichAssets(ctx context.Context, messages []Message) {
 	}
 }
 
-// ensureAssetsSlice sets Assets to a non-nil empty slice for each message so JSON is "assets": [].
-// Used when enrich fails so frontend gets a consistent shape and does not treat missing assets as broken.
 func ensureAssetsSlice(messages []Message) {
 	for i := range messages {
 		if messages[i].Assets == nil {
 			messages[i].Assets = []MessageAsset{}
 		}
 	}
+}
+
+func marshalMetadata(m map[string]any) []byte {
+	if len(m) == 0 {
+		return []byte("{}")
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
+}
+
+func unmarshalMetadata(b []byte) map[string]any {
+	if len(b) == 0 {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil || len(m) == 0 {
+		return nil
+	}
+	return m
 }

@@ -2,17 +2,12 @@ package builtin
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"path"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/memohai/memoh/internal/config"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
@@ -92,36 +87,36 @@ func (*sparseRuntime) Mode() string {
 }
 
 func (r *sparseRuntime) Add(ctx context.Context, req adapters.AddRequest) (adapters.SearchResponse, error) {
-	botID, err := sparseRuntimeBotID(req.BotID, req.Filters)
+	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
-	text := sparseRuntimeText(req.Message, req.Messages)
+	text := runtimeText(req.Message, req.Messages)
 	if text == "" {
 		return adapters.SearchResponse{}, errors.New("sparse runtime: message is required")
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	item := adapters.MemoryItem{
-		ID:        sparseRuntimeMemoryID(botID, time.Now().UTC()),
+		ID:        runtimeMemoryID(botID, time.Now().UTC()),
 		Memory:    text,
-		Hash:      sparseRuntimeHash(text),
+		Hash:      runtimeHash(text),
 		Metadata:  req.Metadata,
 		BotID:     botID,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := r.store.PersistMemories(ctx, botID, []storefs.MemoryItem{sparseStoreItemFromMemoryItem(item)}, req.Filters); err != nil {
+	if err := r.store.PersistMemories(ctx, botID, []storefs.MemoryItem{storeItemFromMemoryItem(item)}, req.Filters); err != nil {
 		return adapters.SearchResponse{}, err
 	}
-	if err := r.upsertSourceItems(ctx, botID, []storefs.MemoryItem{sparseStoreItemFromMemoryItem(item)}); err != nil {
+	if err := r.upsertSourceItems(ctx, botID, []storefs.MemoryItem{storeItemFromMemoryItem(item)}); err != nil {
 		return adapters.SearchResponse{}, err
 	}
 	return adapters.SearchResponse{Results: []adapters.MemoryItem{item}}, nil
 }
 
 func (r *sparseRuntime) Search(ctx context.Context, req adapters.SearchRequest) (adapters.SearchResponse, error) {
-	botID, err := sparseRuntimeBotID(req.BotID, req.Filters)
+	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
@@ -147,13 +142,13 @@ func (r *sparseRuntime) Search(ctx context.Context, req adapters.SearchRequest) 
 	}
 	items := make([]adapters.MemoryItem, 0, len(results))
 	for _, r := range results {
-		items = append(items, sparseResultToItem(r))
+		items = append(items, resultToItem(r))
 	}
 	return adapters.SearchResponse{Results: items}, nil
 }
 
 func (r *sparseRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) (adapters.SearchResponse, error) {
-	botID, err := sparseRuntimeBotID(req.BotID, req.Filters)
+	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
@@ -163,7 +158,7 @@ func (r *sparseRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) 
 	}
 	result := make([]adapters.MemoryItem, 0, len(items))
 	for _, item := range items {
-		mem := sparseMemoryItemFromStore(item)
+		mem := memoryItemFromStore(item)
 		mem.BotID = botID
 		result = append(result, mem)
 	}
@@ -184,7 +179,7 @@ func (r *sparseRuntime) Update(ctx context.Context, req adapters.UpdateRequest) 
 	if text == "" {
 		return adapters.MemoryItem{}, errors.New("sparse runtime: memory is required")
 	}
-	botID := sparseRuntimeBotIDFromMemoryID(memoryID)
+	botID := runtimeBotIDFromMemoryID(memoryID)
 	if botID == "" {
 		return adapters.MemoryItem{}, errors.New("sparse runtime: invalid memory_id")
 	}
@@ -204,7 +199,7 @@ func (r *sparseRuntime) Update(ctx context.Context, req adapters.UpdateRequest) 
 		return adapters.MemoryItem{}, errors.New("sparse runtime: memory not found")
 	}
 	existing.Memory = text
-	existing.Hash = sparseRuntimeHash(text)
+	existing.Hash = runtimeHash(text)
 	existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := r.store.PersistMemories(ctx, botID, []storefs.MemoryItem{*existing}, nil); err != nil {
 		return adapters.MemoryItem{}, err
@@ -212,7 +207,7 @@ func (r *sparseRuntime) Update(ctx context.Context, req adapters.UpdateRequest) 
 	if err := r.upsertSourceItems(ctx, botID, []storefs.MemoryItem{*existing}); err != nil {
 		return adapters.MemoryItem{}, err
 	}
-	item := sparseMemoryItemFromStore(*existing)
+	item := memoryItemFromStore(*existing)
 	item.BotID = botID
 	return item, nil
 }
@@ -229,12 +224,12 @@ func (r *sparseRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ad
 		if memoryID == "" {
 			continue
 		}
-		botID := sparseRuntimeBotIDFromMemoryID(memoryID)
+		botID := runtimeBotIDFromMemoryID(memoryID)
 		if botID == "" {
 			continue
 		}
 		grouped[botID] = append(grouped[botID], memoryID)
-		pointIDs = append(pointIDs, sparsePointID(botID, memoryID))
+		pointIDs = append(pointIDs, runtimePointID(botID, memoryID))
 	}
 	for botID, ids := range grouped {
 		if err := r.store.RemoveMemories(ctx, botID, ids); err != nil {
@@ -251,7 +246,7 @@ func (r *sparseRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ad
 }
 
 func (r *sparseRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequest) (adapters.DeleteResponse, error) {
-	botID, err := sparseRuntimeBotID(req.BotID, req.Filters)
+	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
 		return adapters.DeleteResponse{}, err
 	}
@@ -268,7 +263,7 @@ func (r *sparseRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllReq
 }
 
 func (r *sparseRuntime) Compact(ctx context.Context, filters map[string]any, ratio float64, _ int) (adapters.CompactResult, error) {
-	botID, err := sparseRuntimeBotID("", filters)
+	botID, err := runtimeBotID("", filters)
 	if err != nil {
 		return adapters.CompactResult{}, err
 	}
@@ -300,7 +295,7 @@ func (r *sparseRuntime) Compact(ctx context.Context, filters map[string]any, rat
 	}
 	kept := make([]adapters.MemoryItem, 0, len(keptStore))
 	for _, item := range keptStore {
-		kept = append(kept, sparseMemoryItemFromStore(item))
+		kept = append(kept, memoryItemFromStore(item))
 	}
 	return adapters.CompactResult{
 		BeforeCount: before,
@@ -311,7 +306,7 @@ func (r *sparseRuntime) Compact(ctx context.Context, filters map[string]any, rat
 }
 
 func (r *sparseRuntime) Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error) {
-	botID, err := sparseRuntimeBotID("", filters)
+	botID, err := runtimeBotID("", filters)
 	if err != nil {
 		return adapters.UsageResponse{}, err
 	}
@@ -411,13 +406,13 @@ func (r *sparseRuntime) syncSourceItems(ctx context.Context, botID string, items
 	missingCount := 0
 	restoredCount := 0
 	for _, item := range items {
-		item = sparseCanonicalStoreItem(item)
+		item = canonicalStoreItem(item)
 		if item.ID == "" || item.Memory == "" {
 			continue
 		}
 		canonical = append(canonical, item)
 		sourceIDs[item.ID] = struct{}{}
-		payload := sparsePayload(botID, item)
+		payload := runtimePayload(botID, item)
 		existingItem, ok := existingBySource[item.ID]
 		if !ok {
 			missingCount++
@@ -425,7 +420,7 @@ func (r *sparseRuntime) syncSourceItems(ctx context.Context, botID string, items
 			toUpsert = append(toUpsert, item)
 			continue
 		}
-		if !sparsePayloadMatches(existingItem.Payload, payload) {
+		if !payloadMatches(existingItem.Payload, payload) {
 			restoredCount++
 			toUpsert = append(toUpsert, item)
 		}
@@ -473,7 +468,7 @@ func (r *sparseRuntime) upsertSourceItems(ctx context.Context, botID string, ite
 	texts := make([]string, 0, len(items))
 	canonical := make([]storefs.MemoryItem, 0, len(items))
 	for _, item := range items {
-		item = sparseCanonicalStoreItem(item)
+		item = canonicalStoreItem(item)
 		if item.ID == "" || item.Memory == "" {
 			continue
 		}
@@ -492,32 +487,14 @@ func (r *sparseRuntime) upsertSourceItems(ctx context.Context, botID string, ite
 	}
 	for i, item := range canonical {
 		vec := vectors[i]
-		if err := r.qdrant.Upsert(ctx, sparsePointID(botID, item.ID), qdrantclient.SparseVector{
+		if err := r.qdrant.Upsert(ctx, runtimePointID(botID, item.ID), qdrantclient.SparseVector{
 			Indices: vec.Indices,
 			Values:  vec.Values,
-		}, sparsePayload(botID, item)); err != nil {
+		}, runtimePayload(botID, item)); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func sparseResultToItem(r qdrantclient.SearchResult) adapters.MemoryItem {
-	item := adapters.MemoryItem{
-		ID:    r.ID,
-		Score: r.Score,
-	}
-	if r.Payload != nil {
-		if sourceID := strings.TrimSpace(r.Payload["source_entry_id"]); sourceID != "" {
-			item.ID = sourceID
-		}
-		item.Memory = r.Payload["memory"]
-		item.Hash = r.Payload["hash"]
-		item.BotID = r.Payload["bot_id"]
-		item.CreatedAt = r.Payload["created_at"]
-		item.UpdatedAt = r.Payload["updated_at"]
-	}
-	return item
 }
 
 func (r *sparseRuntime) populateExplainStats(ctx context.Context, items []*adapters.MemoryItem) {
@@ -607,136 +584,4 @@ func sparseMemoryItemPointers(items []adapters.MemoryItem) []*adapters.MemoryIte
 		pointers = append(pointers, &items[i])
 	}
 	return pointers
-}
-
-func sparseCanonicalStoreItem(item storefs.MemoryItem) storefs.MemoryItem {
-	item.ID = strings.TrimSpace(item.ID)
-	item.Memory = strings.TrimSpace(item.Memory)
-	if item.Memory != "" && strings.TrimSpace(item.Hash) == "" {
-		item.Hash = sparseRuntimeHash(item.Memory)
-	}
-	return item
-}
-
-func sparsePayload(botID string, item storefs.MemoryItem) map[string]string {
-	item = sparseCanonicalStoreItem(item)
-	payload := map[string]string{
-		"memory":          item.Memory,
-		"bot_id":          strings.TrimSpace(botID),
-		"source_entry_id": item.ID,
-		"hash":            item.Hash,
-	}
-	if item.CreatedAt != "" {
-		payload["created_at"] = item.CreatedAt
-	}
-	if item.UpdatedAt != "" {
-		payload["updated_at"] = item.UpdatedAt
-	}
-	return payload
-}
-
-func sparsePayloadMatches(existing, expected map[string]string) bool {
-	for key, value := range expected {
-		if strings.TrimSpace(existing[key]) != strings.TrimSpace(value) {
-			return false
-		}
-	}
-	return true
-}
-
-func sparseMemoryItemFromStore(item storefs.MemoryItem) adapters.MemoryItem {
-	item = sparseCanonicalStoreItem(item)
-	return adapters.MemoryItem{
-		ID:        item.ID,
-		Memory:    item.Memory,
-		Hash:      item.Hash,
-		CreatedAt: item.CreatedAt,
-		UpdatedAt: item.UpdatedAt,
-		Score:     item.Score,
-		Metadata:  item.Metadata,
-		BotID:     item.BotID,
-		AgentID:   item.AgentID,
-		RunID:     item.RunID,
-	}
-}
-
-func sparseStoreItemFromMemoryItem(item adapters.MemoryItem) storefs.MemoryItem {
-	return sparseCanonicalStoreItem(storefs.MemoryItem{
-		ID:        item.ID,
-		Memory:    item.Memory,
-		Hash:      item.Hash,
-		CreatedAt: item.CreatedAt,
-		UpdatedAt: item.UpdatedAt,
-		Score:     item.Score,
-		Metadata:  item.Metadata,
-		BotID:     item.BotID,
-		AgentID:   item.AgentID,
-		RunID:     item.RunID,
-	})
-}
-
-func sparseRuntimeText(message string, messages []adapters.Message) string {
-	text := strings.TrimSpace(message)
-	if text == "" && len(messages) > 0 {
-		parts := make([]string, 0, len(messages))
-		for _, m := range messages {
-			content := strings.TrimSpace(m.Content)
-			if content == "" {
-				continue
-			}
-			role := strings.ToUpper(strings.TrimSpace(m.Role))
-			if role == "" {
-				role = "MESSAGE"
-			}
-			parts = append(parts, "["+role+"] "+content)
-		}
-		text = strings.Join(parts, "\n")
-	}
-	return strings.TrimSpace(text)
-}
-
-func sparseRuntimeMemoryID(botID string, now time.Time) string {
-	return botID + ":" + "mem_" + strconv.FormatInt(now.UnixNano(), 10)
-}
-
-func sparseRuntimeHash(text string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
-	return hex.EncodeToString(sum[:])
-}
-
-func sparseRuntimeBotID(botID string, filters map[string]any) (string, error) {
-	botID = strings.TrimSpace(botID)
-	if botID == "" {
-		botID = strings.TrimSpace(sparseRuntimeAny(filters, "bot_id"))
-	}
-	if botID == "" {
-		botID = strings.TrimSpace(sparseRuntimeAny(filters, "scopeId"))
-	}
-	if botID == "" {
-		return "", errors.New("bot_id is required")
-	}
-	return botID, nil
-}
-
-func sparseRuntimeBotIDFromMemoryID(memoryID string) string {
-	parts := strings.SplitN(strings.TrimSpace(memoryID), ":", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-	return strings.TrimSpace(parts[0])
-}
-
-func sparseRuntimeAny(m map[string]any, key string) string {
-	if m == nil {
-		return ""
-	}
-	v, ok := m[key]
-	if !ok || v == nil {
-		return ""
-	}
-	return strings.TrimSpace(fmt.Sprint(v))
-}
-
-func sparsePointID(botID, sourceID string) string {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.TrimSpace(botID)+"\n"+strings.TrimSpace(sourceID))).String()
 }

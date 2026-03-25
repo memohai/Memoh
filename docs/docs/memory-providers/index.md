@@ -4,11 +4,11 @@ Memoh uses a **Memory Provider** to define how a bot stores, retrieves, and mana
 
 ## Available Providers
 
-Memoh currently includes the following memory provider:
+Memoh supports the following memory providers:
 
-- [Built-in](/memory-providers/builtin.md): The default memory system included with Memoh.
-
-More provider types may be added in future versions, but right now `builtin` is the only supported provider type in the product and web UI.
+- [Built-in](/memory-providers/builtin.md): The default memory system included with Memoh. Supports three modes — off (file-based), sparse (neural sparse vectors), and dense (embedding-based semantic search). Fully self-hosted.
+- [Mem0](/memory-providers/mem0.md): SaaS memory provider via the Mem0 API. Requires an API key.
+- [OpenViking](/memory-providers/openviking.md): Self-hosted or SaaS memory provider with its own API.
 
 ---
 
@@ -24,5 +24,7 @@ More provider types may be added in future versions, but right now `builtin` is 
 
 ## Next Steps
 
-- To configure the currently supported provider, continue with [Built-in Memory Provider](/memory-providers/builtin.md).
-- To manage memory entries after the provider is assigned, see [Bot Memory Management](/getting-started/memory.md).
+- [Built-in Memory Provider](/memory-providers/builtin.md) — Default, self-hosted with three memory modes.
+- [Mem0 Memory Provider](/memory-providers/mem0.md) — SaaS via Mem0 API.
+- [OpenViking Memory Provider](/memory-providers/openviking.md) — Self-hosted or SaaS.
+- [Bot Memory Management](/getting-started/memory.md) — Manage memory entries after the provider is assigned.

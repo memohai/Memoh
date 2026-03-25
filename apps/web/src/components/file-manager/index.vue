@@ -15,15 +15,15 @@ import {
   DialogFooter,
   Spinner,
   ScrollArea
-} from '@memoh/ui'
+} from '@memohai/ui'
 import {
   getBotsByBotIdContainerFsList,
   postBotsByBotIdContainerFsUpload,
   postBotsByBotIdContainerFsMkdir,
   postBotsByBotIdContainerFsDelete,
   postBotsByBotIdContainerFsRename,
-} from '@memoh/sdk'
-import type { HandlersFsFileInfo } from '@memoh/sdk'
+} from '@memohai/sdk'
+import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { pathSegments, joinPath } from './utils'
 import FileList from './file-list.vue'

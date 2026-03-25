@@ -681,7 +681,7 @@ import {
   TagsInputItemDelete,
   TagsInputItemText,
   Toggle,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import KeyValueEditor from '@/components/key-value-editor/index.vue'
@@ -698,14 +698,14 @@ import {
   postBotsByBotIdMcpByIdOauthDiscover,
   postBotsByBotIdMcpByIdOauthAuthorize,
   deleteBotsByBotIdMcpByIdOauthToken,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import type {
   McpUpsertRequest,
   McpImportRequest,
   McpToolDescriptor,
   McpMcpServerEntry,
   McpOAuthStatus,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useClipboard } from '@/composables/useClipboard'
 

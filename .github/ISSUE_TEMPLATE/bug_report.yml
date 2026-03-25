@@ -1,0 +1,88 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the information below to help us investigate the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is and what you expected to happen.
+      placeholder: Describe the bug...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error Messages / Logs
+      description: If applicable, paste any error messages or relevant log output here.
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What version of Memoh are you running?
+      placeholder: e.g. v0.5.0
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model Used
+      description: Which LLM model were you using when the bug occurred?
+      placeholder: e.g. gpt-4o, claude-sonnet-4-20250514, gemini-2.0-flash
+    validations:
+      required: false
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel
+      description: Which channel were you using?
+      options:
+        - Telegram
+        - Discord
+        - Lark (Feishu)
+        - Email
+        - QQ
+        - Local
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context, screenshots, or information about the problem here.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: pr
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to submit a pull request to fix this bug

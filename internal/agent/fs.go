@@ -1,0 +1,73 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/memohai/memoh/internal/workspace/bridge"
+)
+
+// FSClient provides file operations against a bot's container filesystem.
+type FSClient struct {
+	provider bridge.Provider
+	botID    string
+}
+
+// NewFSClient creates a new container filesystem client.
+func NewFSClient(provider bridge.Provider, botID string) *FSClient {
+	return &FSClient{provider: provider, botID: botID}
+}
+
+// ReadText reads a text file from the container, returning its content as a string.
+// Returns an empty string if the file does not exist or cannot be read.
+func (f *FSClient) ReadText(ctx context.Context, path string) (string, error) {
+	if f.provider == nil {
+		return "", nil
+	}
+	client, err := f.provider.MCPClient(ctx, f.botID)
+	if err != nil {
+		return "", fmt.Errorf("mcp client: %w", err)
+	}
+	resp, err := client.ReadFile(ctx, path, 0, 0)
+	if err != nil {
+		return "", err
+	}
+	return resp.GetContent(), nil
+}
+
+// ReadTextSafe reads a text file, returning empty string on any error.
+func (f *FSClient) ReadTextSafe(ctx context.Context, path string) string {
+	content, _ := f.ReadText(ctx, path)
+	return content
+}
+
+// LoadSystemFiles loads the standard set of system files from the bot container.
+func (f *FSClient) LoadSystemFiles(ctx context.Context) []SystemFile {
+	home := "/data"
+	now := TimeNow()
+	pad := func(n int) string { return fmt.Sprintf("%02d", n) }
+	today := fmt.Sprintf("%d-%s-%s", now.Year(), pad(int(now.Month())), pad(now.Day()))
+	yesterday := now.AddDate(0, 0, -1)
+	yesterdayStr := fmt.Sprintf("%d-%s-%s", yesterday.Year(), pad(int(yesterday.Month())), pad(yesterday.Day()))
+
+	filenames := []string{
+		"IDENTITY.md",
+		"SOUL.md",
+		"TOOLS.md",
+		"MEMORY.md",
+		"PROFILES.md",
+		"memory/" + today + ".md",
+		"memory/" + yesterdayStr + ".md",
+	}
+
+	files := make([]SystemFile, len(filenames))
+	for i, name := range filenames {
+		content := f.ReadTextSafe(ctx, home+"/"+name)
+		files[i] = SystemFile{
+			Filename: name,
+			Content:  strings.TrimSpace(content),
+		}
+	}
+	return files
+}

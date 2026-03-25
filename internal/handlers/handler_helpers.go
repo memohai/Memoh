@@ -25,8 +25,8 @@ func RequireChannelIdentityID(c echo.Context) (string, error) {
 	return channelIdentityID, nil
 }
 
-// AuthorizeBotAccess validates that the given identity has access to the specified bot.
-func AuthorizeBotAccess(ctx context.Context, botService *bots.Service, accountService *accounts.Service, channelIdentityID, botID string, policy bots.AccessPolicy) (bots.Bot, error) {
+// AuthorizeBotAccess validates that the given identity has owner/admin access to the specified bot.
+func AuthorizeBotAccess(ctx context.Context, botService *bots.Service, accountService *accounts.Service, channelIdentityID, botID string) (bots.Bot, error) {
 	if botService == nil || accountService == nil {
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
@@ -34,7 +34,7 @@ func AuthorizeBotAccess(ctx context.Context, botService *bots.Service, accountSe
 	if err != nil {
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	bot, err := botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin, policy)
+	bot, err := botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin)
 	if err != nil {
 		if errors.Is(err, bots.ErrBotNotFound) {
 			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")

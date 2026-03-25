@@ -207,7 +207,7 @@ import {
   SelectTrigger,
   SelectValue,
   Separator,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
@@ -217,9 +217,9 @@ import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ProfileSection from './components/profile-section.vue'
 import PasswordSection from './components/password-section.vue'
 import BindCodeSection from './components/bind-code-section.vue'
-import { getUsersMe, putUsersMe, putUsersMePassword, getUsersMeIdentities } from '@memoh/sdk'
-import { client } from '@memoh/sdk/client'
-import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest, IdentitiesChannelIdentity } from '@memoh/sdk'
+import { getUsersMe, putUsersMe, putUsersMePassword, getUsersMeIdentities } from '@memohai/sdk'
+import { client } from '@memohai/sdk/client'
+import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest, IdentitiesChannelIdentity } from '@memohai/sdk'
 import { useUserStore } from '@/store/user'
 import { useSettingsStore } from '@/store/settings'
 import type { Locale } from '@/i18n'
@@ -292,7 +292,7 @@ function platformLabel(platformKey: string): string {
 }
 
 const platformOptions = computed(() => {
-  const options = new Set<string>(['telegram', 'feishu', 'discord', 'qq'])
+  const options = new Set<string>(['telegram', 'feishu', 'discord', 'qq', 'matrix'])
   for (const identity of identities.value) {
     const platform = identity.channel.trim()
     if (platform) {

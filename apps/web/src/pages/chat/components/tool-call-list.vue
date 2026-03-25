@@ -37,7 +37,7 @@
 
 <script setup lang="ts">
 import { computed, inject } from 'vue'
-import { Badge } from '@memoh/ui'
+import { Badge } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 

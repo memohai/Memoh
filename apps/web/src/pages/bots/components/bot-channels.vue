@@ -39,14 +39,14 @@
             :aria-pressed="selectedType === item.meta.type"
             class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors hover:bg-accent"
             :class="{ 'bg-accent': selectedType === item.meta.type }"
-            @click="selectedType = item.meta.type as string"
+            @click="selectedType = item.meta.type ?? ''"
           >
-            <div
-              class="flex size-8 shrink-0 items-center justify-center rounded-md text-xs font-bold uppercase"
-              :class="channelBadgeClass(item.meta.type as string)"
-            >
-              {{ channelIcon(item.meta.type) }}
-            </div>
+            <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <ChannelIcon
+                :channel="item.meta.type as string"
+                size="1.25em"
+              />
+            </span>
             <div class="flex-1 text-left">
               <div class="font-medium">
                 {{ item.meta.display_name }}
@@ -101,14 +101,14 @@
               :key="item.meta.type"
               type="button"
               class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors"
-              @click="addChannel(item.meta.type)"
+              @click="addChannel(item.meta.type ?? '')"
             >
-              <div
-                class="flex size-7 shrink-0 items-center justify-center rounded-md text-xs font-bold uppercase"
-                :class="channelBadgeClass(item.meta.type)"
-              >
-                {{ channelIcon(item.meta.type) }}
-              </div>
+              <span class="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <ChannelIcon
+                  :channel="item.meta.type"
+                  size="1em"
+                />
+              </span>
               <span>{{ item.meta.display_name }}</span>
             </button>
           </PopoverContent>
@@ -143,11 +143,12 @@ import {
   PopoverTrigger,
   PopoverContent,
   ScrollArea
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { useQuery } from '@pinia/colada'
-import { getChannels, getBotsByIdChannelByPlatform } from '@memoh/sdk'
-import type { HandlersChannelMeta, ChannelChannelConfig } from '@memoh/sdk'
+import { getChannels, getBotsByIdChannelByPlatform } from '@memohai/sdk'
+import type { HandlersChannelMeta, ChannelChannelConfig } from '@memohai/sdk'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
+import ChannelIcon from '@/components/channel-icon/index.vue'
 
 export interface BotChannelItem {
   meta: HandlersChannelMeta
@@ -173,7 +174,7 @@ const { data: channels, isLoading, refetch } = useQuery({
       configurableTypes.map(async (meta) => {
         try {
           const { data: config } = await getBotsByIdChannelByPlatform({
-            path: { id: botIdRef.value, platform: meta.type },
+            path: { id: botIdRef.value, platform: meta.type ?? '' },
             throwOnError: true,
           })
           return { meta, config: config ?? null, configured: true } as BotChannelItem
@@ -200,31 +201,24 @@ const selectedItem = computed(() =>
 )
 
 watch(configuredChannels, (list) => {
-  if (list.length > 0 && !selectedType.value) {
-    selectedType.value = list[0].meta.type
+  if (list.length === 0) return
+
+  const first = list[0]
+  if (first && !selectedType.value) {
+    selectedType.value = first.meta.type ?? null
   }
+
+  const current = selectedType.value
+  if (current && list.some((item) => item.meta.type === current)) {
+    return
+  }
+
+  const configured = list.find((item) => item.configured)
+  selectedType.value = configured?.meta.type ?? list[0].meta.type
 }, { immediate: true })
 
 function addChannel(type: string) {
   addPopoverOpen.value = false
   selectedType.value = type
-}
-
-function channelIcon(type: string): string {
-  const icons: Record<string, string> = {
-    qq: 'QQ',
-    telegram: 'TG',
-    feishu: '飞',
-  }
-  return icons[type] ?? type.slice(0, 2).toUpperCase()
-}
-
-function channelBadgeClass(type: string): string {
-  const classes: Record<string, string> = {
-    qq: 'bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300',
-    telegram: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-    feishu: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300',
-  }
-  return classes[type] ?? 'bg-secondary text-secondary-foreground'
 }
 </script>

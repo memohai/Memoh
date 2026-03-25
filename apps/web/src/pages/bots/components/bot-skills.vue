@@ -156,7 +156,7 @@ import {
   Button, Card, CardHeader, CardTitle, CardDescription,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
   Spinner,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import {
@@ -164,7 +164,7 @@ import {
   postBotsByBotIdContainerSkills,
   deleteBotsByBotIdContainerSkills,
   type HandlersSkillItem,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{

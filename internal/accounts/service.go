@@ -114,7 +114,7 @@ func (s *Service) SearchAccounts(ctx context.Context, query string, limit int) (
 	}
 	rows, err := s.queries.SearchAccounts(ctx, sqlc.SearchAccountsParams{
 		Query:      strings.TrimSpace(query),
-		LimitCount: int32(limit),
+		LimitCount: int32(limit), //nolint:gosec // limit is capped above
 	})
 	if err != nil {
 		return nil, err

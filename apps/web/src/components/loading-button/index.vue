@@ -14,8 +14,8 @@
 </template>
 
 <script setup lang="ts">
-import { Button, Spinner } from '@memoh/ui'
-import type { ButtonVariants } from '@memoh/ui'
+import { Button, Spinner } from '@memohai/ui'
+import type { ButtonVariants } from '@memohai/ui'
 
 defineOptions({ inheritAttrs: false })
 

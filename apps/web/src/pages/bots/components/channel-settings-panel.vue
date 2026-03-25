@@ -2,13 +2,21 @@
   <div class="space-y-6">
     <!-- Header -->
     <div class="flex items-center justify-between">
-      <div>
-        <h3 class="text-lg font-semibold">
-          {{ channelItem.meta.display_name }}
-        </h3>
-        <p class="text-sm text-muted-foreground">
-          {{ channelItem.meta.type }}
-        </p>
+      <div class="flex items-center gap-3">
+        <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <ChannelIcon
+            :channel="channelItem.meta.type"
+            size="1.5em"
+          />
+        </span>
+        <div>
+          <h3 class="text-lg font-semibold">
+            {{ channelItem.meta.display_name }}
+          </h3>
+          <p class="text-sm text-muted-foreground">
+            {{ channelItem.meta.type }}
+          </p>
+        </div>
       </div>
       <div class="flex items-center gap-2">
         <template v-if="isEditMode">
@@ -81,13 +89,28 @@
       </p>
     </div>
 
-    <Separator />
+    <!-- WeChat QR Login -->
+    <div v-if="channelItem.meta.type === 'weixin'">
+      <WeixinQrLogin
+        :bot-id="botId"
+        @login-success="handleWeixinLoginSuccess"
+      />
+      <Separator class="mt-4" />
+    </div>
+
+    <Separator v-else />
 
     <!-- Credentials form (dynamic from config_schema) -->
     <div class="space-y-4">
       <h4 class="text-sm font-medium">
         {{ $t('bots.channels.credentials') }}
       </h4>
+      <p
+        v-if="showWebhookCallback"
+        class="text-xs text-muted-foreground"
+      >
+        {{ $t('bots.channels.feishuWebhookSecurityHint') }}
+      </p>
 
       <div
         v-for="(field, key) in orderedFields"
@@ -115,14 +138,15 @@
         >
           <Input
             :id="`channel-field-${key}`"
-            v-model="form.credentials[key]"
+            :model-value="credentialStringValue(key)"
             :type="visibleSecrets[key] ? 'text' : 'password'"
             :placeholder="field.example ? String(field.example) : ''"
+            @update:model-value="(val) => setCredentialStringValue(key, val)"
           />
           <button
             type="button"
             class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            :aria-label="`${visibleSecrets[key] ? 'Hide' : 'Show'} ${field.title || key}`"
+            :aria-label="secretToggleLabel(key, field.title || key)"
             :aria-pressed="!!visibleSecrets[key]"
             @click="visibleSecrets[key] = !visibleSecrets[key]"
           >
@@ -144,9 +168,10 @@
         <Input
           v-else-if="field.type === 'number'"
           :id="`channel-field-${key}`"
-          v-model.number="form.credentials[key]"
+          :model-value="credentialNumberValue(key)"
           type="number"
           :placeholder="field.example ? String(field.example) : ''"
+          @update:model-value="(val) => setCredentialNumberValue(key, val)"
         />
 
         <!-- Enum field -->
@@ -173,9 +198,10 @@
         <Input
           v-else
           :id="`channel-field-${key}`"
-          v-model="form.credentials[key]"
+          :model-value="credentialStringValue(key)"
           type="text"
           :placeholder="field.example ? String(field.example) : ''"
+          @update:model-value="(val) => setCredentialStringValue(key, val)"
         />
       </div>
     </div>
@@ -235,15 +261,17 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus } from '@memoh/sdk'
-import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memoh/sdk'
-import { client } from '@memoh/sdk/client'
+import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus } from '@memohai/sdk'
+import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
+import { client } from '@memohai/sdk/client'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import ChannelIcon from '@/components/channel-icon/index.vue'
+import WeixinQrLogin from './weixin-qr-login.vue'
 
 interface BotChannelItem {
   meta: HandlersChannelMeta
@@ -262,6 +290,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const botIdRef = computed(() => props.botId)
+const platformType = computed(() => String(props.channelItem.meta.type || '').trim())
 const queryCache = useQueryCache()
 const { mutateAsync: upsertChannel, isLoading } = useMutation({
   mutation: async ({ platform, data }: { platform: string; data: ChannelUpsertConfigRequest }) => {
@@ -305,7 +334,8 @@ const visibleSecrets = reactive<Record<string, boolean>>({})
 // Schema fields sorted: required first. Exclude "status"/"disabled" from credential form.
 const orderedFields = computed(() => {
   const fields = props.channelItem.meta.config_schema?.fields ?? {}
-  const entries = Object.entries(fields).filter(([key]) => key !== 'status' && key !== 'disabled')
+  const hiddenFields = new Set(['status', 'disabled'])
+  const entries = Object.entries(fields).filter(([key]) => !hiddenFields.has(key))
   entries.sort(([, a], [, b]) => {
     if (a.required && !b.required) return -1
     if (!a.required && b.required) return 1
@@ -336,8 +366,17 @@ function initForm() {
   const existingCredentials = props.channelItem.config?.credentials ?? {}
 
   const creds: Record<string, unknown> = {}
-  for (const key of Object.keys(schema)) {
-    creds[key] = existingCredentials[key] ?? ''
+  for (const [key, field] of Object.entries(schema)) {
+    const existingValue = existingCredentials[key]
+    if (existingValue !== undefined) {
+      creds[key] = existingValue
+      continue
+    }
+    if (field.type === 'bool') {
+      creds[key] = undefined
+      continue
+    }
+    creds[key] = ''
   }
   form.credentials = creds
   form.disabled = props.channelItem.config?.disabled ?? false
@@ -364,6 +403,19 @@ function validateRequired(): boolean {
   return true
 }
 
+function validateFeishuWebhookSecrets(): boolean {
+  if (props.channelItem.meta.type !== 'feishu' || currentInboundMode.value !== 'webhook') {
+    return true
+  }
+  const encryptKey = String(form.credentials.encryptKey ?? form.credentials.encrypt_key ?? '').trim()
+  const verificationToken = String(form.credentials.verificationToken ?? form.credentials.verification_token ?? '').trim()
+  if (encryptKey !== '' || verificationToken !== '') {
+    return true
+  }
+  toast.error(t('bots.channels.feishuWebhookSecretRequired'))
+  return false
+}
+
 function buildCredentials(): Record<string, unknown> {
   const credentials: Record<string, unknown> = {}
   for (const [key, val] of Object.entries(form.credentials)) {
@@ -374,12 +426,48 @@ function buildCredentials(): Record<string, unknown> {
   return credentials
 }
 
+function credentialStringValue(key: string): string | number | undefined {
+  const value = form.credentials[key]
+  if (typeof value === 'string' || typeof value === 'number') {
+    return value
+  }
+  return undefined
+}
+
+function setCredentialStringValue(key: string, value: string | number) {
+  form.credentials[key] = value
+}
+
+function credentialNumberValue(key: string): string | number | undefined {
+  const value = form.credentials[key]
+  if (typeof value === 'number' || typeof value === 'string') {
+    return value
+  }
+  return undefined
+}
+
+function setCredentialNumberValue(key: string, value: string | number) {
+  if (value === '') {
+    form.credentials[key] = ''
+    return
+  }
+  const numericValue = typeof value === 'number' ? value : Number(value)
+  form.credentials[key] = Number.isNaN(numericValue) ? '' : numericValue
+}
+
+function secretToggleLabel(key: string, label: string): string {
+  return visibleSecrets[key]
+    ? t('bots.channels.hideSecretField', { field: label })
+    : t('bots.channels.showSecretField', { field: label })
+}
+
 async function saveChannel(disabled: boolean, nextAction: 'save' | 'toggle') {
   if (!validateRequired()) return
+  if (!validateFeishuWebhookSecrets()) return
   action.value = nextAction
   try {
     const result = await upsertChannel({
-      platform: props.channelItem.meta.type,
+      platform: platformType.value,
       data: {
         credentials: buildCredentials(),
         disabled,
@@ -413,11 +501,12 @@ async function handleEditSave() {
 }
 
 async function handleToggleDisabled() {
-  action.value = 'toggle'
   try {
     const nextDisabled = !form.disabled
+    if (!nextDisabled && !validateFeishuWebhookSecrets()) return
+    action.value = 'toggle'
     const result = await updateChannelStatus({
-      platform: props.channelItem.meta.type,
+      platform: platformType.value,
       disabled: nextDisabled,
     })
     form.disabled = !!result?.disabled
@@ -435,7 +524,7 @@ async function handleDelete() {
   action.value = 'delete'
   try {
     await deleteBotsByIdChannelByPlatform({
-      path: { id: botIdRef.value, platform: props.channelItem.meta.type },
+      path: { id: botIdRef.value, platform: platformType.value },
       throwOnError: true,
     })
     lastSavedConfigId.value = ''
@@ -493,6 +582,11 @@ function resolveWebhookCallbackBaseUrl(): string {
 
 function isAbsoluteHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value)
+}
+
+function handleWeixinLoginSuccess() {
+  queryCache.invalidateQueries({ key: ['bot-channels', botIdRef.value] })
+  emit('saved')
 }
 
 async function copyWebhookCallback() {

@@ -14,10 +14,8 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install
 
 ARG VITE_API_URL=/api
-ARG VITE_AGENT_URL=/agent
 
 ENV VITE_API_URL=$VITE_API_URL
-ENV VITE_AGENT_URL=$VITE_AGENT_URL
 
 WORKDIR /build/apps/web
 RUN pnpm build

@@ -21,25 +21,32 @@ import (
 
 const heartbeatTokenTTL = 10 * time.Minute
 
-type Service struct {
-	queries   *sqlc.Queries
-	cron      *cron.Cron
-	triggerer Triggerer
-	jwtSecret string
-	logger    *slog.Logger
-	mu        sync.Mutex
-	jobs      map[string]cron.EntryID
+// SessionCreator creates sessions for heartbeat runs.
+type SessionCreator interface {
+	CreateSession(ctx context.Context, botID, sessionType string) (string, error)
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, runtimeConfig *boot.RuntimeConfig) *Service {
+type Service struct {
+	queries        *sqlc.Queries
+	cron           *cron.Cron
+	triggerer      Triggerer
+	sessionCreator SessionCreator
+	jwtSecret      string
+	logger         *slog.Logger
+	mu             sync.Mutex
+	jobs           map[string]cron.EntryID
+}
+
+func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
 	c := cron.New()
 	service := &Service{
-		queries:   queries,
-		cron:      c,
-		triggerer: triggerer,
-		jwtSecret: runtimeConfig.JwtSecret,
-		logger:    log.With(slog.String("service", "heartbeat")),
-		jobs:      map[string]cron.EntryID{},
+		queries:        queries,
+		cron:           c,
+		triggerer:      triggerer,
+		sessionCreator: sessionCreator,
+		jwtSecret:      runtimeConfig.JwtSecret,
+		logger:         log.With(slog.String("service", "heartbeat")),
+		jobs:           map[string]cron.EntryID{},
 	}
 	c.Start()
 	return service
@@ -107,7 +114,30 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 		return
 	}
 
-	logRow, err := s.queries.CreateHeartbeatLog(ctx, pgBotID)
+	var sessionID string
+	var pgSessionID pgtype.UUID
+	if s.sessionCreator != nil {
+		sid, err := s.sessionCreator.CreateSession(ctx, cfg.BotID, "heartbeat")
+		if err != nil {
+			s.logger.Error("create heartbeat session failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
+		} else {
+			sessionID = sid
+			pgSessionID = db.ParseUUIDOrEmpty(sid)
+		}
+	}
+
+	var lastHeartbeatAt string
+	if prevLogs, listErr := s.queries.ListHeartbeatLogsByBot(ctx, sqlc.ListHeartbeatLogsByBotParams{
+		BotID: pgBotID,
+		Limit: 1,
+	}); listErr == nil && len(prevLogs) > 0 {
+		lastHeartbeatAt = prevLogs[0].StartedAt.Time.UTC().Format("2006-01-02T15:04:05Z")
+	}
+
+	logRow, err := s.queries.CreateHeartbeatLog(ctx, sqlc.CreateHeartbeatLogParams{
+		BotID:     pgBotID,
+		SessionID: pgSessionID,
+	})
 	if err != nil {
 		s.logger.Error("create heartbeat log failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
 		return
@@ -121,9 +151,11 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 	}
 
 	result, err := s.triggerer.TriggerHeartbeat(ctx, cfg.BotID, TriggerPayload{
-		BotID:       cfg.BotID,
-		Interval:    cfg.Interval,
-		OwnerUserID: cfg.OwnerUserID,
+		BotID:           cfg.BotID,
+		Interval:        cfg.Interval,
+		OwnerUserID:     cfg.OwnerUserID,
+		SessionID:       sessionID,
+		LastHeartbeatAt: lastHeartbeatAt,
 	}, token)
 	if err != nil {
 		s.completeLog(ctx, logRow.ID, "error", "", err.Error(), nil, pgtype.UUID{})
@@ -229,6 +261,7 @@ func toLog(row sqlc.ListHeartbeatLogsByBotRow) Log {
 	l := Log{
 		ID:           row.ID.String(),
 		BotID:        row.BotID.String(),
+		SessionID:    row.SessionID.String(),
 		Status:       row.Status,
 		ResultText:   row.ResultText,
 		ErrorMessage: row.ErrorMessage,

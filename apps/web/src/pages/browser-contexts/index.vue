@@ -15,9 +15,9 @@ import {
   EmptyMedia,
   EmptyTitle,
   Button,
-} from '@memoh/ui'
-import { getBrowserContexts } from '@memoh/sdk'
-import type { BrowsercontextsBrowserContext } from '@memoh/sdk'
+} from '@memohai/ui'
+import { getBrowserContexts } from '@memohai/sdk'
+import type { BrowsercontextsBrowserContext } from '@memohai/sdk'
 import AddBrowserContext from './components/add-browser-context.vue'
 import ContextSetting from './components/context-setting.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'

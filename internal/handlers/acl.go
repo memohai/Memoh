@@ -304,7 +304,7 @@ func (h *ACLHandler) requireManageAccess(c echo.Context) (string, string, error)
 	if botID == "" {
 		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID, bots.AccessPolicy{}); err != nil {
+	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
 		return "", "", err
 	}
 	return botID, actorID, nil

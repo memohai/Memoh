@@ -70,7 +70,7 @@ import {
   SidebarFooter,
   SidebarHeader,
   SidebarProvider,
-} from '@memoh/ui'
+} from '@memohai/ui'
 
 const mobileOpen = ref(false)
 </script>

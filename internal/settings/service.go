@@ -24,9 +24,8 @@ type Service struct {
 }
 
 var (
-	ErrPersonalBotGuestAccessUnsupported = errors.New("personal bots do not support guest access")
-	ErrModelIDAmbiguous                  = errors.New("model_id is ambiguous across providers")
-	ErrInvalidModelRef                   = errors.New("invalid model reference")
+	ErrModelIDAmbiguous = errors.New("model_id is ambiguous across providers")
+	ErrInvalidModelRef  = errors.New("invalid model reference")
 )
 
 func NewService(log *slog.Logger, queries *sqlc.Queries, aclService *acl.Service) *Service {
@@ -67,31 +66,21 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	isPersonalBot := strings.EqualFold(strings.TrimSpace(botRow.Type), "personal")
-
 	allowGuest, err := s.allowGuestEnabled(ctx, botID)
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting(botRow.MaxContextLoadTime, botRow.MaxContextTokens, botRow.MaxInboxItems, botRow.Language, allowGuest, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval)
+	current := normalizeBotSetting(botRow.MaxContextLoadTime, botRow.MaxContextTokens, botRow.Language, allowGuest, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold)
 	if req.MaxContextLoadTime != nil && *req.MaxContextLoadTime > 0 {
 		current.MaxContextLoadTime = *req.MaxContextLoadTime
 	}
 	if req.MaxContextTokens != nil && *req.MaxContextTokens >= 0 {
 		current.MaxContextTokens = *req.MaxContextTokens
 	}
-	if req.MaxInboxItems != nil && *req.MaxInboxItems >= 0 {
-		current.MaxInboxItems = *req.MaxInboxItems
-	}
 	if strings.TrimSpace(req.Language) != "" {
 		current.Language = strings.TrimSpace(req.Language)
 	}
-	if isPersonalBot {
-		if req.AllowGuest != nil && *req.AllowGuest {
-			return Settings{}, ErrPersonalBotGuestAccessUnsupported
-		}
-		current.AllowGuest = false
-	} else if req.AllowGuest != nil {
+	if req.AllowGuest != nil {
 		current.AllowGuest = *req.AllowGuest
 	}
 	if req.ReasoningEnabled != nil {
@@ -105,6 +94,12 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if req.HeartbeatInterval != nil && *req.HeartbeatInterval > 0 {
 		current.HeartbeatInterval = *req.HeartbeatInterval
+	}
+	if req.CompactionEnabled != nil {
+		current.CompactionEnabled = *req.CompactionEnabled
+	}
+	if req.CompactionThreshold != nil && *req.CompactionThreshold >= 0 {
+		current.CompactionThreshold = *req.CompactionThreshold
 	}
 	chatModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.ChatModelID); value != "" {
@@ -121,6 +116,24 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			return Settings{}, err
 		}
 		heartbeatModelUUID = modelID
+	}
+	compactionModelUUID := pgtype.UUID{}
+	if req.CompactionModelID != nil {
+		if value := strings.TrimSpace(*req.CompactionModelID); value != "" {
+			modelID, err := s.resolveModelUUID(ctx, value)
+			if err != nil {
+				return Settings{}, err
+			}
+			compactionModelUUID = modelID
+		}
+	}
+	titleModelUUID := pgtype.UUID{}
+	if value := strings.TrimSpace(req.TitleModelID); value != "" {
+		modelID, err := s.resolveModelUUID(ctx, value)
+		if err != nil {
+			return Settings{}, err
+		}
+		titleModelUUID = modelID
 	}
 	searchProviderUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.SearchProviderID); value != "" {
@@ -156,28 +169,31 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if current.MaxContextLoadTime < math.MinInt32 || current.MaxContextLoadTime > math.MaxInt32 ||
 		current.MaxContextTokens < math.MinInt32 || current.MaxContextTokens > math.MaxInt32 ||
-		current.MaxInboxItems < math.MinInt32 || current.MaxInboxItems > math.MaxInt32 ||
-		current.HeartbeatInterval < math.MinInt32 || current.HeartbeatInterval > math.MaxInt32 {
+		current.HeartbeatInterval < math.MinInt32 || current.HeartbeatInterval > math.MaxInt32 ||
+		current.CompactionThreshold < math.MinInt32 || current.CompactionThreshold > math.MaxInt32 {
 		return Settings{}, errors.New("settings numeric value out of int32 range")
 	}
 
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
-		ID:                 pgID,
-		MaxContextLoadTime: int32(current.MaxContextLoadTime), //nolint:gosec // range validated above
-		MaxContextTokens:   int32(current.MaxContextTokens),
-		MaxInboxItems:      int32(current.MaxInboxItems),
-		Language:           current.Language,
-		ReasoningEnabled:   current.ReasoningEnabled,
-		ReasoningEffort:    current.ReasoningEffort,
-		HeartbeatEnabled:   current.HeartbeatEnabled,
-		HeartbeatInterval:  int32(current.HeartbeatInterval),
-		HeartbeatPrompt:    "",
-		ChatModelID:        chatModelUUID,
-		HeartbeatModelID:   heartbeatModelUUID,
-		SearchProviderID:   searchProviderUUID,
-		MemoryProviderID:   memoryProviderUUID,
-		TtsModelID:         ttsModelUUID,
-		BrowserContextID:   browserContextUUID,
+		ID:                  pgID,
+		MaxContextLoadTime:  int32(current.MaxContextLoadTime), //nolint:gosec // range validated above
+		MaxContextTokens:    int32(current.MaxContextTokens),
+		Language:            current.Language,
+		ReasoningEnabled:    current.ReasoningEnabled,
+		ReasoningEffort:     current.ReasoningEffort,
+		HeartbeatEnabled:    current.HeartbeatEnabled,
+		HeartbeatInterval:   int32(current.HeartbeatInterval),
+		HeartbeatPrompt:     "",
+		CompactionEnabled:   current.CompactionEnabled,
+		CompactionThreshold: int32(current.CompactionThreshold), //nolint:gosec // range validated above
+		ChatModelID:         chatModelUUID,
+		HeartbeatModelID:    heartbeatModelUUID,
+		CompactionModelID:   compactionModelUUID,
+		TitleModelID:        titleModelUUID,
+		SearchProviderID:    searchProviderUUID,
+		MemoryProviderID:    memoryProviderUUID,
+		TtsModelID:          ttsModelUUID,
+		BrowserContextID:    browserContextUUID,
 	})
 	if err != nil {
 		return Settings{}, err
@@ -208,26 +224,24 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return s.setAllowGuest(ctx, botID, "", false)
 }
 
-func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, maxInboxItems int32, language string, allowGuest bool, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32) Settings {
+func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, language string, allowGuest bool, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32) Settings {
 	settings := Settings{
-		MaxContextLoadTime: int(maxContextLoadTime),
-		MaxContextTokens:   int(maxContextTokens),
-		MaxInboxItems:      int(maxInboxItems),
-		Language:           strings.TrimSpace(language),
-		AllowGuest:         allowGuest,
-		ReasoningEnabled:   reasoningEnabled,
-		ReasoningEffort:    strings.TrimSpace(reasoningEffort),
-		HeartbeatEnabled:   heartbeatEnabled,
-		HeartbeatInterval:  int(heartbeatInterval),
+		MaxContextLoadTime:  int(maxContextLoadTime),
+		MaxContextTokens:    int(maxContextTokens),
+		Language:            strings.TrimSpace(language),
+		AllowGuest:          allowGuest,
+		ReasoningEnabled:    reasoningEnabled,
+		ReasoningEffort:     strings.TrimSpace(reasoningEffort),
+		HeartbeatEnabled:    heartbeatEnabled,
+		HeartbeatInterval:   int(heartbeatInterval),
+		CompactionEnabled:   compactionEnabled,
+		CompactionThreshold: int(compactionThreshold),
 	}
 	if settings.MaxContextLoadTime <= 0 {
 		settings.MaxContextLoadTime = DefaultMaxContextLoadTime
 	}
 	if settings.MaxContextTokens < 0 {
 		settings.MaxContextTokens = 0
-	}
-	if settings.MaxInboxItems <= 0 {
-		settings.MaxInboxItems = DefaultMaxInboxItems
 	}
 	if settings.Language == "" {
 		settings.Language = DefaultLanguage
@@ -237,6 +251,9 @@ func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, maxIn
 	}
 	if settings.HeartbeatInterval <= 0 {
 		settings.HeartbeatInterval = DefaultHeartbeatInterval
+	}
+	if settings.CompactionThreshold < 0 {
+		settings.CompactionThreshold = 0
 	}
 	return settings
 }
@@ -254,14 +271,17 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 	return normalizeBotSettingsFields(
 		row.MaxContextLoadTime,
 		row.MaxContextTokens,
-		row.MaxInboxItems,
 		row.Language,
 		row.ReasoningEnabled,
 		row.ReasoningEffort,
 		row.HeartbeatEnabled,
 		row.HeartbeatInterval,
+		row.CompactionEnabled,
+		row.CompactionThreshold,
 		row.ChatModelID,
 		row.HeartbeatModelID,
+		row.CompactionModelID,
+		row.TitleModelID,
 		row.SearchProviderID,
 		row.MemoryProviderID,
 		row.TtsModelID,
@@ -273,14 +293,17 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 	return normalizeBotSettingsFields(
 		row.MaxContextLoadTime,
 		row.MaxContextTokens,
-		row.MaxInboxItems,
 		row.Language,
 		row.ReasoningEnabled,
 		row.ReasoningEffort,
 		row.HeartbeatEnabled,
 		row.HeartbeatInterval,
+		row.CompactionEnabled,
+		row.CompactionThreshold,
 		row.ChatModelID,
 		row.HeartbeatModelID,
+		row.CompactionModelID,
+		row.TitleModelID,
 		row.SearchProviderID,
 		row.MemoryProviderID,
 		row.TtsModelID,
@@ -291,25 +314,34 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 func normalizeBotSettingsFields(
 	maxContextLoadTime int32,
 	maxContextTokens int32,
-	maxInboxItems int32,
 	language string,
 	reasoningEnabled bool,
 	reasoningEffort string,
 	heartbeatEnabled bool,
 	heartbeatInterval int32,
+	compactionEnabled bool,
+	compactionThreshold int32,
 	chatModelID pgtype.UUID,
 	heartbeatModelID pgtype.UUID,
+	compactionModelID pgtype.UUID,
+	titleModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
 	browserContextID pgtype.UUID,
 ) Settings {
-	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, maxInboxItems, language, false, reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval)
+	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, language, false, reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold)
 	if chatModelID.Valid {
 		settings.ChatModelID = uuid.UUID(chatModelID.Bytes).String()
 	}
 	if heartbeatModelID.Valid {
 		settings.HeartbeatModelID = uuid.UUID(heartbeatModelID.Bytes).String()
+	}
+	if compactionModelID.Valid {
+		settings.CompactionModelID = uuid.UUID(compactionModelID.Bytes).String()
+	}
+	if titleModelID.Valid {
+		settings.TitleModelID = uuid.UUID(titleModelID.Bytes).String()
 	}
 	if searchProviderID.Valid {
 		settings.SearchProviderID = uuid.UUID(searchProviderID.Bytes).String()

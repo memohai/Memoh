@@ -27,14 +27,9 @@ type ToolDescriptor struct {
 	InputSchema map[string]any `json:"inputSchema"`
 }
 
-// ToolExecutor represents business-facing tools (message/schedule/memory).
-type ToolExecutor interface {
-	ListTools(ctx context.Context, session ToolSessionContext) ([]ToolDescriptor, error)
-	CallTool(ctx context.Context, session ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error)
-}
-
-// ToolSource represents infrastructure-level tool sources (federation/connectors).
-// A source is not a business tool itself; it supplies and routes downstream tools.
+// ToolSource represents external tool sources (federation/connectors).
+// Built-in tools are no longer managed through this interface — they are
+// loaded directly via agent ToolProviders.
 type ToolSource interface {
 	ListTools(ctx context.Context, session ToolSessionContext) ([]ToolDescriptor, error)
 	CallTool(ctx context.Context, session ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error)

@@ -54,12 +54,13 @@ import {
   FormControl,
   FormItem,
   Label,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { postBrowserContexts } from '@memoh/sdk'
+import { postBrowserContexts } from '@memohai/sdk'
+import type { BrowsercontextsCreateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
@@ -72,7 +73,7 @@ const queryCache = useQueryCache()
 const { mutateAsync: createMutation, isLoading } = useMutation({
   mutation: async (data: { name: string }) => {
     const { data: result } = await postBrowserContexts({
-      body: { name: data.name, config: {} } as any,
+      body: { name: data.name } as BrowsercontextsCreateRequest,
       throwOnError: true,
     })
     return result

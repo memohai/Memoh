@@ -100,11 +100,11 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import CreateModel from '@/components/create-model/index.vue'
 import ImportModelsDialog from '@/components/import-models-dialog/index.vue'
 import ModelItem from './model-item.vue'
-import type { ModelsGetResponse } from '@memoh/sdk'
+import type { ModelsGetResponse } from '@memohai/sdk'
 
 const PAGE_SIZE = 30
 

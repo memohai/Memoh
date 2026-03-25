@@ -58,7 +58,7 @@ jobs:
         run: pnpm install --no-frozen-lockfile
       
       - name: Build with VitePress
-        run: pnpm --filter @memoh/docs build
+        run: pnpm --filter @memohai/docs build
       
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

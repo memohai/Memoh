@@ -74,7 +74,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Badge } from '@memoh/ui'
+import { Badge } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 
 const props = defineProps<{ block: ToolCallBlock }>()

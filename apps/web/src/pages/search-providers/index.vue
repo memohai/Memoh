@@ -15,9 +15,9 @@ import {
   EmptyMedia,
   EmptyTitle,
   Button
-} from '@memoh/ui'
-import { getSearchProviders } from '@memoh/sdk'
-import type { SearchprovidersGetResponse } from '@memoh/sdk'
+} from '@memohai/ui'
+import { getSearchProviders } from '@memohai/sdk'
+import type { SearchprovidersGetResponse } from '@memohai/sdk'
 import AddSearchProvider from './components/add-search-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'

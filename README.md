@@ -28,7 +28,7 @@
   <hr>
 </div>
 
-Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), Email, or the built-in Web/CLI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
+Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), Email, or the built-in Web UI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
 
 ## Quick Start
 
@@ -79,8 +79,8 @@ Memoh Bot can distinguish and remember requests from multiple humans and bots, w
 - 🤖 **Multi-Bot Management**: Create multiple bots; humans and bots, or bots with each other, can chat privately, in groups, or collaborate. Supports role-based access control (owner / admin / member) with ownership transfer.
 - 👥 **Multi-User & Identity Recognition**: Bots can distinguish individual users in group chats, remember each person's context separately, and send direct messages to specific users. Cross-platform identity binding unifies the same person across Telegram, Discord, Lark, and Web.
 - 📦 **Containerized**: Each bot runs in its own isolated containerd container. Bots can freely execute commands, edit files, and access the network within their containers — like having their own computer. Supports container snapshots for save/restore.
-- 🧠 **Memory Engineering**: Hybrid retrieval (dense vector search + BM25 keyword search) with LLM-driven fact extraction. Last 24 hours of context loaded by default, with memory compaction and rebuild capabilities.
-- 💬 **Multi-Platform**: Supports Telegram, Discord, Lark (Feishu), Email, and built-in Web/CLI. Unified message format with rich text, media attachments, reactions, and streaming across all platforms. Cross-platform identity binding.
+- 🧠 **Memory Engineering**: Multi-provider memory architecture — Built-in (off / sparse / dense modes), [Mem0](https://mem0.ai), and OpenViking. LLM-driven fact extraction, hybrid retrieval (dense semantic search + BM25 keyword + neural sparse vectors), 24-hour context loading, memory compaction & rebuild, and multi-language auto-detection.
+- 💬 **Multi-Platform**: Supports Telegram, Discord, Lark (Feishu), Email, and the built-in Web UI. Unified message format with rich text, media attachments, reactions, and streaming across all platforms. Cross-platform identity binding.
 - 📧 **Email**: Multi-adapter email service (Mailgun, generic SMTP) with per-bot binding and outbound audit log. Bots can send and receive emails as a channel.
 - 🔧 **MCP (Model Context Protocol)**: Full MCP support (HTTP / SSE / Stdio). Built-in tools for container operations, memory search, web search, scheduling, messaging, and more. Connect external MCP servers for extensibility.
 - 🧩 **Subagents**: Create specialized sub-agents per bot with independent context and skills, enabling multi-agent collaboration.
@@ -94,6 +94,20 @@ Memoh Bot can distinguish and remember requests from multiple humans and bots, w
 - 🧪 **Multi-Model**: Works with any OpenAI-compatible, Anthropic, or Google Generative AI provider. Per-bot model assignment for chat, memory, and embedding.
 - 🖥️ **Web UI**: Modern dashboard (Vue 3 + Tailwind CSS) with real-time streaming chat, tool call visualization, in-chat file manager, container filesystem browser, and visual configuration for all settings. Dark/light theme, i18n.
 - 🚀 **One-Click Deploy**: Docker Compose with automatic migration, containerd setup, and CNI networking. Interactive install script included.
+
+## Memory System
+
+Memoh's memory system is built around **Memory Providers** — pluggable backends that control how a bot stores, retrieves, and manages long-term memory.
+
+| Provider | Description |
+|----------|-------------|
+| **Built-in** | Self-hosted, ships with Memoh. Three modes: **Off** (file-based, no vector search), **Sparse** (neural sparse vectors via local model, no API cost), **Dense** (embedding-based semantic search via Qdrant). |
+| **Mem0** | SaaS memory via the [Mem0](https://mem0.ai) API. |
+| **OpenViking** | Self-hosted or SaaS memory with its own API. |
+
+Each bot binds one provider. During chat, the bot automatically extracts key facts from every conversation turn and stores them as structured memories. On each new message, the most relevant memories are retrieved via hybrid search and injected into the bot's context — giving it personalized, long-term recall across conversations.
+
+Additional capabilities include memory compaction (merge redundant entries), rebuild, manual creation/editing, and vector manifold visualization (Top-K distribution & CDF curves). See the [documentation](https://docs.memoh.ai/memory-providers/) for setup details.
 
 ## Gallery
 
@@ -120,45 +134,53 @@ Memoh Bot can distinguish and remember requests from multiple humans and bots, w
   </tr>
 </table>
 
-## Tech Stack
-
-| Layer | Stack |
-|-------|-------|
-| Backend | Go, Echo, sqlc, Uber FX, pgx/v5, containerd v2 |
-| Agent Gateway | Bun, Elysia |
-| Browser Gateway | Bun, Elysia, Playwright (Chromium) |
-| Frontend | Vue 3, Vite, Pinia, Tailwind CSS, Reka UI |
-| Storage | PostgreSQL, Qdrant |
-| Infra | Docker, containerd, CNI |
-| Tooling | mise, pnpm, swaggo, sqlc |
-
 ## Architecture
 
+```mermaid
+flowchart TB
+    subgraph Clients [" Clients "]
+        direction LR
+        CH["Channels<br/>Telegram · Discord · Feishu · QQ · Email"]
+        WEB["Web UI (Vue 3 :8082)"]
+    end
+
+    CH & WEB --> API
+
+    subgraph Server [" Server · Go :8080 "]
+        API["REST API & Channel Adapters"]
+
+        subgraph Agent [" In-process AI Agent "]
+            TWILIGHT["Twilight AI SDK<br/>OpenAI · Anthropic · Google"]
+            CONV["Conversation Flow<br/>Streaming · Sential · Loop Detection"]
+        end
+
+        subgraph ToolProviders [" Tool Providers "]
+            direction LR
+            T_CORE["Memory · Web Search<br/>Schedule · Contacts · Inbox"]
+            T_EXT["Container · Email · Browser<br/>Subagent · Skill · TTS<br/>MCP Federation"]
+        end
+
+        API --> Agent --> ToolProviders
+    end
+
+    PG[("PostgreSQL")]
+    QD[("Qdrant")]
+    BROWSER["Browser Gateway<br/>(Playwright :8083)"]
+
+    subgraph Workspace [" Workspace Containers · containerd "]
+        direction LR
+        BA["Bot A"] ~~~ BB["Bot B"] ~~~ BC["Bot C"]
+    end
+
+    Server --- PG
+    Server --- QD
+    ToolProviders -.-> BROWSER
+    ToolProviders -- "gRPC Bridge over UDS" --> Workspace
 ```
-┌──────────────────┐  ┌─────────────────┐  ┌──────────────┐
-│     Channels     │  │      Web UI     │  │   CLI        │
-│ (TG/DC/FS/Email) │  │  (Vue 3 :8082)  │  │              │
-└────────┬─────────┘  └────────┬────────┘  └──────┬───────┘
-         │                     │                  │
-         ▼                     ▼                  ▼
-┌──────────────────────────────────────────────────────────┐
-│                   Server (Go :8080)                       │
-│  Auth · Bots · Channels · Memory · Containers · MCP      │
-└──────────────────────┬───────────────────────────────────┘
-                       │
-           ┌───────────┼───────────┬───────────┐
-           ▼           ▼           ▼           ▼
-     ┌──────────┐ ┌─────────┐ ┌──────────────────┐ ┌───────────────────┐
-     │ PostgreSQL│ │ Qdrant  │ │ Agent Gateway     │ │ Browser Gateway    │
-     │          │ │ (Vector)│ │ (Bun/Elysia :8081)│ │ (Playwright :8083) │
-     └──────────┘ └─────────┘ └────────┬──────────┘ └───────────────────┘
-                                       │
-                               ┌───────┼───────┐
-                               ▼       ▼       ▼
-                          ┌─────┐ ┌─────┐ ┌─────┐
-                          │Bot A│ │Bot B│ │Bot C│  ← containerd
-                          └─────┘ └─────┘ └─────┘
-```
+
+## Sub-projects Born for This Project
+
+- [**Twilight AI**](https://github.com/memohai/twilight-ai) — A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://sdk.vercel.ai/). Provider-agnostic (OpenAI, Anthropic, Google), with first-class streaming, tool calling, MCP support, and embeddings.
 
 ## Roadmap
 

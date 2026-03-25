@@ -12,8 +12,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/mcp/mcpclient"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
+
+const mediaContainerRoot = "/data/media"
 
 // ---------- request / response types ----------
 
@@ -83,8 +85,13 @@ func resolveContainerPath(rawPath string) (string, error) {
 	return cleaned, nil
 }
 
+func isContainerMediaPath(containerPath string) bool {
+	cleaned := filepath.Clean("/" + strings.TrimSpace(containerPath))
+	return cleaned == mediaContainerRoot || strings.HasPrefix(cleaned, mediaContainerRoot+"/")
+}
+
 // getGRPCClient returns the gRPC client for the bot's container.
-func (h *ContainerdHandler) getGRPCClient(ctx context.Context, botID string) (*mcpclient.Client, error) {
+func (h *ContainerdHandler) getGRPCClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	return h.manager.MCPClient(ctx, botID)
 }
 
@@ -103,13 +110,13 @@ func fsFileInfoFromEntry(containerPath, name string, isDir bool, size int64, mod
 // fsHTTPError maps mcpclient domain errors to HTTP status codes.
 func fsHTTPError(err error) *echo.HTTPError {
 	switch {
-	case errors.Is(err, mcpclient.ErrNotFound):
+	case errors.Is(err, bridge.ErrNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	case errors.Is(err, mcpclient.ErrBadRequest):
+	case errors.Is(err, bridge.ErrBadRequest):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	case errors.Is(err, mcpclient.ErrForbidden):
+	case errors.Is(err, bridge.ErrForbidden):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
-	case errors.Is(err, mcpclient.ErrUnavailable):
+	case errors.Is(err, bridge.ErrUnavailable):
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -287,10 +294,6 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/download [get].
 func (h *ContainerdHandler) FSDownload(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
-	if err != nil {
-		return err
-	}
 	rawPath := c.QueryParam("path")
 	if strings.TrimSpace(rawPath) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
@@ -299,6 +302,15 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 	containerPath, err := resolveContainerPath(rawPath)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	requireAccess := h.requireBotAccess
+	if isContainerMediaPath(containerPath) {
+		requireAccess = h.requireBotAccessWithGuest
+	}
+	botID, err := requireAccess(c)
+	if err != nil {
+		return err
 	}
 
 	ctx := c.Request().Context()

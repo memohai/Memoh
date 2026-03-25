@@ -1,9 +1,15 @@
 import { parse } from 'toml'
 import { readFileSync } from 'fs'
-import type { Config } from './types.ts'
+import type { Config } from './types'
 
 export const loadConfig = (path: string = './config.toml'): Config => {
   const config = parse(readFileSync(path, 'utf-8'))
+  if ('mcp' in config) {
+    if ('workspace' in config) {
+      throw new Error('config uses both [mcp] and [workspace]; remove [mcp] and keep only [workspace]')
+    }
+    throw new Error('config section [mcp] has been renamed to [workspace]; update your config.toml and restart')
+  }
   return config satisfies Config
 }
 
@@ -25,4 +31,4 @@ export const getBaseUrl = (config: Config) => {
   return `http://${rawAddr}`
 }
 
-export * from './types.ts'
+export * from './types'

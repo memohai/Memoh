@@ -61,10 +61,14 @@ CREATE TABLE IF NOT EXISTS llm_providers (
   name TEXT NOT NULL,
   base_url TEXT NOT NULL,
   api_key TEXT NOT NULL,
+  client_type TEXT NOT NULL DEFAULT 'openai-completions',
+  icon TEXT,
+  enable BOOLEAN NOT NULL DEFAULT true,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT llm_providers_name_unique UNIQUE (name)
+  CONSTRAINT llm_providers_name_unique UNIQUE (name),
+  CONSTRAINT llm_providers_client_type_check CHECK (client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai'))
 );
 
 CREATE TABLE IF NOT EXISTS search_providers (
@@ -82,18 +86,12 @@ CREATE TABLE IF NOT EXISTS models (
   model_id TEXT NOT NULL,
   name TEXT,
   llm_provider_id UUID NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
-  client_type TEXT,
-  dimensions INTEGER,
-  input_modalities TEXT[] NOT NULL DEFAULT ARRAY['text']::TEXT[],
-  supports_reasoning BOOLEAN NOT NULL DEFAULT false,
   type TEXT NOT NULL DEFAULT 'chat',
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT models_provider_model_id_unique UNIQUE (llm_provider_id, model_id),
-  CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding')),
-  CONSTRAINT models_dimensions_check CHECK (type != 'embedding' OR dimensions IS NOT NULL),
-  CONSTRAINT models_client_type_check CHECK (client_type IS NULL OR client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai')),
-  CONSTRAINT models_chat_client_type_check CHECK (type != 'chat' OR client_type IS NOT NULL)
+  CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding'))
 );
 
 CREATE TABLE IF NOT EXISTS model_variants (
@@ -165,7 +163,6 @@ CREATE TABLE IF NOT EXISTS bots (
   language TEXT NOT NULL DEFAULT 'auto',
   reasoning_enabled BOOLEAN NOT NULL DEFAULT false,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
-  max_inbox_items INTEGER NOT NULL DEFAULT 50,
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   search_provider_id UUID REFERENCES search_providers(id) ON DELETE SET NULL,
   memory_provider_id UUID REFERENCES memory_providers(id) ON DELETE SET NULL,
@@ -173,6 +170,10 @@ CREATE TABLE IF NOT EXISTS bots (
   heartbeat_interval INTEGER NOT NULL DEFAULT 30,
   heartbeat_prompt TEXT NOT NULL DEFAULT '',
   heartbeat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  compaction_enabled BOOLEAN NOT NULL DEFAULT false,
+  compaction_threshold INTEGER NOT NULL DEFAULT 100000,
+  compaction_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  title_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id UUID REFERENCES tts_models(id) ON DELETE SET NULL,
   browser_context_id UUID REFERENCES browser_contexts(id) ON DELETE SET NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -326,6 +327,7 @@ CREATE TABLE IF NOT EXISTS bot_channel_routes (
   external_thread_id TEXT,
   conversation_type TEXT,
   default_reply_target TEXT,
+  active_session_id UUID,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -335,14 +337,38 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_channel_routes_unique
   ON bot_channel_routes (bot_id, channel_type, external_conversation_id, COALESCE(external_thread_id, ''));
 CREATE INDEX IF NOT EXISTS idx_bot_channel_routes_bot ON bot_channel_routes(bot_id);
 
+-- bot_sessions: chat sessions within a bot, optionally linked to a channel route.
+CREATE TABLE IF NOT EXISTS bot_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
+  channel_type TEXT,
+  type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent')),
+  title TEXT NOT NULL DEFAULT '',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_id ON bot_sessions(bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_route_id ON bot_sessions(route_id);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active ON bot_sessions(bot_id, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_session_id) WHERE parent_session_id IS NOT NULL;
+
+-- Add FK from routes to sessions (deferred to avoid circular dependency during CREATE).
+ALTER TABLE bot_channel_routes
+  ADD CONSTRAINT fk_bot_channel_routes_active_session
+  FOREIGN KEY (active_session_id) REFERENCES bot_sessions(id) ON DELETE SET NULL;
+
 -- bot_history_messages: unified message history under bot scope.
 CREATE TABLE IF NOT EXISTS bot_history_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
+  session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   sender_channel_identity_id UUID REFERENCES channel_identities(id),
   sender_account_user_id UUID REFERENCES users(id),
-  channel_type TEXT,
   source_message_id TEXT,
   source_reply_to_message_id TEXT,
   role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
@@ -350,17 +376,18 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   usage JSONB,
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  compact_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_messages(bot_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_route ON bot_history_messages(route_id);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_source_lookup
-  ON bot_history_messages(channel_type, source_message_id);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_reply_lookup
-  ON bot_history_messages(channel_type, source_reply_to_message_id);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_identity_route_created
-  ON bot_history_messages(bot_id, sender_channel_identity_id, route_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_compact ON bot_history_messages(compact_id);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session
+  ON bot_history_messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
+  ON bot_history_messages(session_id, source_message_id);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
+  ON bot_history_messages(session_id, source_reply_to_message_id);
 
 CREATE TABLE IF NOT EXISTS containers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -440,25 +467,6 @@ CREATE TABLE IF NOT EXISTS schedule (
 CREATE INDEX IF NOT EXISTS idx_schedule_bot_id ON schedule(bot_id);
 CREATE INDEX IF NOT EXISTS idx_schedule_enabled ON schedule(enabled);
 
-CREATE TABLE IF NOT EXISTS subagents (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  description TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted BOOLEAN NOT NULL DEFAULT false,
-  deleted_at TIMESTAMPTZ,
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  messages JSONB NOT NULL DEFAULT '[]'::jsonb,
-  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  skills JSONB NOT NULL DEFAULT '[]'::jsonb,
-  usage JSONB NOT NULL DEFAULT '{}'::jsonb,
-  CONSTRAINT subagents_name_unique UNIQUE (bot_id, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_subagents_bot_id ON subagents(bot_id);
-CREATE INDEX IF NOT EXISTS idx_subagents_deleted ON subagents(deleted);
-
 -- storage_providers: pluggable object storage backends
 CREATE TABLE IF NOT EXISTS storage_providers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -492,32 +500,20 @@ CREATE TABLE IF NOT EXISTS bot_history_message_assets (
   role TEXT NOT NULL DEFAULT 'attachment',
   ordinal INTEGER NOT NULL DEFAULT 0,
   content_hash TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT message_asset_content_unique UNIQUE (message_id, content_hash)
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_assets_message_id ON bot_history_message_assets(message_id);
 
--- bot_inbox: per-bot message inbox for channel messages, notifications, etc.
-CREATE TABLE IF NOT EXISTS bot_inbox (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  source TEXT NOT NULL DEFAULT '',
-  header JSONB NOT NULL DEFAULT '{}'::jsonb,
-  content TEXT NOT NULL DEFAULT '',
-  action TEXT NOT NULL DEFAULT 'notify',
-  is_read BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  read_at TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS idx_bot_inbox_bot_unread ON bot_inbox(bot_id, created_at DESC) WHERE is_read = FALSE;
-CREATE INDEX IF NOT EXISTS idx_bot_inbox_bot_created ON bot_inbox(bot_id, created_at DESC);
 
 -- bot_heartbeat_logs: structured execution records for periodic heartbeat checks.
 CREATE TABLE IF NOT EXISTS bot_heartbeat_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'alert', 'error')),
   result_text TEXT NOT NULL DEFAULT '',
   error_message TEXT NOT NULL DEFAULT '',
@@ -528,6 +524,41 @@ CREATE TABLE IF NOT EXISTS bot_heartbeat_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_bot_started ON bot_heartbeat_logs(bot_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'ok', 'error')),
+  summary TEXT NOT NULL DEFAULT '',
+  message_count INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT NOT NULL DEFAULT '',
+  usage JSONB,
+  model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_compacts_bot_session ON bot_history_message_compacts(bot_id, session_id, started_at DESC);
+
+ALTER TABLE bot_history_messages ADD CONSTRAINT fk_compact_id FOREIGN KEY (compact_id) REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL;
+
+-- schedule_logs: structured execution records for scheduled tasks.
+CREATE TABLE IF NOT EXISTS schedule_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  schedule_id UUID NOT NULL REFERENCES schedule(id) ON DELETE CASCADE,
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error')),
+  result_text TEXT NOT NULL DEFAULT '',
+  error_message TEXT NOT NULL DEFAULT '',
+  usage JSONB,
+  model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_logs_schedule ON schedule_logs(schedule_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_schedule_logs_bot ON schedule_logs(bot_id, started_at DESC);
 
 -- email_providers: pluggable email service backends
 CREATE TABLE IF NOT EXISTS email_providers (

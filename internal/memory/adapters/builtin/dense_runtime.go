@@ -1,20 +1,18 @@
 package builtin
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"path"
 	"sort"
 	"strings"
 	"time"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
@@ -22,28 +20,17 @@ import (
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	"github.com/memohai/memoh/internal/models"
 )
+
+const denseEmbedTimeout = 30 * time.Second
 
 type denseRuntime struct {
 	qdrant     *qdrantclient.Client
 	store      *storefs.Service
-	embedder   *denseEmbeddingClient
-	collection string
-}
-
-type denseEmbeddingClient struct {
-	baseURL    string
-	apiKey     string
-	modelID    string
+	embedModel *sdk.EmbeddingModel
 	dimensions int
-	httpClient *http.Client
-}
-
-type denseEmbeddingResponse struct {
-	Data []struct {
-		Embedding []float32 `json:"embedding"`
-		Index     int       `json:"index"`
-	} `json:"data"`
+	collection string
 }
 
 type denseModelSpec struct {
@@ -66,7 +53,7 @@ func newDenseRuntime(providerConfig map[string]any, queries *dbsqlc.Queries, cfg
 		return nil, errors.New("dense runtime: embedding_model_id is required")
 	}
 
-	modelSpec, err := resolveDenseEmbeddingModel(context.Background(), queries, modelRef)
+	spec, err := resolveDenseEmbeddingModel(context.Background(), queries, modelRef)
 	if err != nil {
 		return nil, err
 	}
@@ -87,63 +74,105 @@ func newDenseRuntime(providerConfig map[string]any, queries *dbsqlc.Queries, cfg
 		return nil, fmt.Errorf("dense runtime: %w", err)
 	}
 
+	embedModel := models.NewSDKEmbeddingModel(spec.baseURL, spec.apiKey, spec.modelID, denseEmbedTimeout)
+
 	return &denseRuntime{
-		qdrant: qClient,
-		store:  store,
-		embedder: &denseEmbeddingClient{
-			baseURL:    strings.TrimRight(modelSpec.baseURL, "/"),
-			apiKey:     modelSpec.apiKey,
-			modelID:    modelSpec.modelID,
-			dimensions: modelSpec.dimensions,
-			httpClient: &http.Client{Timeout: 30 * time.Second},
-		},
+		qdrant:     qClient,
+		store:      store,
+		embedModel: embedModel,
+		dimensions: spec.dimensions,
 		collection: collection,
 	}, nil
 }
 
+// --- embedder helpers using Twilight SDK ---
+
+func (r *denseRuntime) embedQuery(ctx context.Context, text string) ([]float32, error) {
+	client := sdk.NewClient()
+	vec, err := client.Embed(ctx, text, sdk.WithEmbeddingModel(r.embedModel))
+	if err != nil {
+		return nil, fmt.Errorf("dense embed query: %w", err)
+	}
+	return float64sToFloat32s(vec), nil
+}
+
+func (r *denseRuntime) embedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
+	client := sdk.NewClient()
+	result, err := client.EmbedMany(ctx, texts, sdk.WithEmbeddingModel(r.embedModel))
+	if err != nil {
+		return nil, fmt.Errorf("dense embed documents: %w", err)
+	}
+	out := make([][]float32, len(result.Embeddings))
+	for i, emb := range result.Embeddings {
+		out[i] = float64sToFloat32s(emb)
+	}
+	return out, nil
+}
+
+// embedHealth performs a minimal smoke-test embedding to verify that the
+// configured embedding model is reachable and functional.
+func (r *denseRuntime) embedHealth(ctx context.Context) error {
+	client := sdk.NewClient()
+	_, err := client.Embed(ctx, "health", sdk.WithEmbeddingModel(r.embedModel))
+	if err != nil {
+		return fmt.Errorf("dense embedding health check failed: %w", err)
+	}
+	return nil
+}
+
+func float64sToFloat32s(in []float64) []float32 {
+	out := make([]float32, len(in))
+	for i, v := range in {
+		out[i] = float32(v)
+	}
+	return out
+}
+
+// --- memoryRuntime interface ---
+
 func (r *denseRuntime) Add(ctx context.Context, req adapters.AddRequest) (adapters.SearchResponse, error) {
-	botID, err := sparseRuntimeBotID(req.BotID, req.Filters)
+	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
-	text := sparseRuntimeText(req.Message, req.Messages)
+	text := runtimeText(req.Message, req.Messages)
 	if text == "" {
 		return adapters.SearchResponse{}, errors.New("dense runtime: message is required")
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	item := adapters.MemoryItem{
-		ID:        sparseRuntimeMemoryID(botID, time.Now().UTC()),
+		ID:        runtimeMemoryID(botID, time.Now().UTC()),
 		Memory:    text,
-		Hash:      denseRuntimeHash(text),
+		Hash:      runtimeHash(text),
 		Metadata:  req.Metadata,
 		BotID:     botID,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := r.store.PersistMemories(ctx, botID, []storefs.MemoryItem{denseStoreItemFromMemoryItem(item)}, req.Filters); err != nil {
+	if err := r.store.PersistMemories(ctx, botID, []storefs.MemoryItem{storeItemFromMemoryItem(item)}, req.Filters); err != nil {
 		return adapters.SearchResponse{}, err
 	}
-	if err := r.upsertSourceItems(ctx, botID, []storefs.MemoryItem{denseStoreItemFromMemoryItem(item)}); err != nil {
+	if err := r.upsertSourceItems(ctx, botID, []storefs.MemoryItem{storeItemFromMemoryItem(item)}); err != nil {
 		return adapters.SearchResponse{}, err
 	}
 	return adapters.SearchResponse{Results: []adapters.MemoryItem{item}}, nil
 }
 
 func (r *denseRuntime) Search(ctx context.Context, req adapters.SearchRequest) (adapters.SearchResponse, error) {
-	botID, err := sparseRuntimeBotID(req.BotID, req.Filters)
+	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
-	if err := r.qdrant.EnsureDenseCollection(ctx, r.embedder.dimensions); err != nil {
+	if err := r.qdrant.EnsureDenseCollection(ctx, r.dimensions); err != nil {
 		return adapters.SearchResponse{}, err
 	}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = 10
 	}
-	vec, err := r.embedder.EmbedQuery(ctx, req.Query)
+	vec, err := r.embedQuery(ctx, req.Query)
 	if err != nil {
-		return adapters.SearchResponse{}, fmt.Errorf("dense embed query: %w", err)
+		return adapters.SearchResponse{}, err
 	}
 	results, err := r.qdrant.SearchDense(ctx, qdrantclient.DenseVector{Values: vec}, botID, limit)
 	if err != nil {
@@ -151,13 +180,13 @@ func (r *denseRuntime) Search(ctx context.Context, req adapters.SearchRequest) (
 	}
 	items := make([]adapters.MemoryItem, 0, len(results))
 	for _, result := range results {
-		items = append(items, denseResultToItem(result))
+		items = append(items, resultToItem(result))
 	}
 	return adapters.SearchResponse{Results: items}, nil
 }
 
 func (r *denseRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) (adapters.SearchResponse, error) {
-	botID, err := sparseRuntimeBotID(req.BotID, req.Filters)
+	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
@@ -167,7 +196,7 @@ func (r *denseRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) (
 	}
 	result := make([]adapters.MemoryItem, 0, len(items))
 	for _, item := range items {
-		mem := denseMemoryItemFromStore(item)
+		mem := memoryItemFromStore(item)
 		mem.BotID = botID
 		result = append(result, mem)
 	}
@@ -187,7 +216,7 @@ func (r *denseRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 	if text == "" {
 		return adapters.MemoryItem{}, errors.New("dense runtime: memory is required")
 	}
-	botID := sparseRuntimeBotIDFromMemoryID(memoryID)
+	botID := runtimeBotIDFromMemoryID(memoryID)
 	if botID == "" {
 		return adapters.MemoryItem{}, errors.New("dense runtime: invalid memory_id")
 	}
@@ -207,7 +236,7 @@ func (r *denseRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 		return adapters.MemoryItem{}, errors.New("dense runtime: memory not found")
 	}
 	existing.Memory = text
-	existing.Hash = denseRuntimeHash(text)
+	existing.Hash = runtimeHash(text)
 	existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := r.store.PersistMemories(ctx, botID, []storefs.MemoryItem{*existing}, nil); err != nil {
 		return adapters.MemoryItem{}, err
@@ -215,7 +244,7 @@ func (r *denseRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 	if err := r.upsertSourceItems(ctx, botID, []storefs.MemoryItem{*existing}); err != nil {
 		return adapters.MemoryItem{}, err
 	}
-	item := denseMemoryItemFromStore(*existing)
+	item := memoryItemFromStore(*existing)
 	item.BotID = botID
 	return item, nil
 }
@@ -232,12 +261,12 @@ func (r *denseRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ada
 		if memoryID == "" {
 			continue
 		}
-		botID := sparseRuntimeBotIDFromMemoryID(memoryID)
+		botID := runtimeBotIDFromMemoryID(memoryID)
 		if botID == "" {
 			continue
 		}
 		grouped[botID] = append(grouped[botID], memoryID)
-		pointIDs = append(pointIDs, sparsePointID(botID, memoryID))
+		pointIDs = append(pointIDs, runtimePointID(botID, memoryID))
 	}
 	for botID, ids := range grouped {
 		if err := r.store.RemoveMemories(ctx, botID, ids); err != nil {
@@ -251,7 +280,7 @@ func (r *denseRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ada
 }
 
 func (r *denseRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequest) (adapters.DeleteResponse, error) {
-	botID, err := sparseRuntimeBotID(req.BotID, req.Filters)
+	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
 		return adapters.DeleteResponse{}, err
 	}
@@ -265,7 +294,7 @@ func (r *denseRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequ
 }
 
 func (r *denseRuntime) Compact(ctx context.Context, filters map[string]any, ratio float64, _ int) (adapters.CompactResult, error) {
-	botID, err := sparseRuntimeBotID("", filters)
+	botID, err := runtimeBotID("", filters)
 	if err != nil {
 		return adapters.CompactResult{}, err
 	}
@@ -297,7 +326,7 @@ func (r *denseRuntime) Compact(ctx context.Context, filters map[string]any, rati
 	}
 	kept := make([]adapters.MemoryItem, 0, len(keptStore))
 	for _, item := range keptStore {
-		kept = append(kept, denseMemoryItemFromStore(item))
+		kept = append(kept, memoryItemFromStore(item))
 	}
 	return adapters.CompactResult{
 		BeforeCount: before,
@@ -308,7 +337,7 @@ func (r *denseRuntime) Compact(ctx context.Context, filters map[string]any, rati
 }
 
 func (r *denseRuntime) Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error) {
-	botID, err := sparseRuntimeBotID("", filters)
+	botID, err := runtimeBotID("", filters)
 	if err != nil {
 		return adapters.UsageResponse{}, err
 	}
@@ -351,7 +380,7 @@ func (r *denseRuntime) Status(ctx context.Context, botID string) (adapters.Memor
 		SourceCount:       len(items),
 		QdrantCollection:  r.collection,
 	}
-	if err := r.embedder.Health(ctx); err != nil {
+	if err := r.embedHealth(ctx); err != nil {
 		status.Encoder.Error = err.Error()
 	} else {
 		status.Encoder.OK = true
@@ -386,7 +415,7 @@ func (r *denseRuntime) Rebuild(ctx context.Context, botID string) (adapters.Rebu
 }
 
 func (r *denseRuntime) syncSourceItems(ctx context.Context, botID string, items []storefs.MemoryItem) (adapters.RebuildResult, error) {
-	if err := r.qdrant.EnsureDenseCollection(ctx, r.embedder.dimensions); err != nil {
+	if err := r.qdrant.EnsureDenseCollection(ctx, r.dimensions); err != nil {
 		return adapters.RebuildResult{}, err
 	}
 	existing, err := r.qdrant.Scroll(ctx, botID, 10000)
@@ -408,12 +437,12 @@ func (r *denseRuntime) syncSourceItems(ctx context.Context, botID string, items 
 	missingCount := 0
 	restoredCount := 0
 	for _, item := range items {
-		item = denseCanonicalStoreItem(item)
+		item = canonicalStoreItem(item)
 		if item.ID == "" || item.Memory == "" {
 			continue
 		}
 		sourceIDs[item.ID] = struct{}{}
-		payload := densePayload(botID, item)
+		payload := runtimePayload(botID, item)
 		existingItem, ok := existingBySource[item.ID]
 		if !ok {
 			missingCount++
@@ -421,7 +450,7 @@ func (r *denseRuntime) syncSourceItems(ctx context.Context, botID string, items 
 			toUpsert = append(toUpsert, item)
 			continue
 		}
-		if !densePayloadMatches(existingItem.Payload, payload) {
+		if !payloadMatches(existingItem.Payload, payload) {
 			restoredCount++
 			toUpsert = append(toUpsert, item)
 		}
@@ -463,13 +492,13 @@ func (r *denseRuntime) upsertSourceItems(ctx context.Context, botID string, item
 	if len(items) == 0 {
 		return nil
 	}
-	if err := r.qdrant.EnsureDenseCollection(ctx, r.embedder.dimensions); err != nil {
+	if err := r.qdrant.EnsureDenseCollection(ctx, r.dimensions); err != nil {
 		return err
 	}
 	canonical := make([]storefs.MemoryItem, 0, len(items))
 	texts := make([]string, 0, len(items))
 	for _, item := range items {
-		item = denseCanonicalStoreItem(item)
+		item = canonicalStoreItem(item)
 		if item.ID == "" || item.Memory == "" {
 			continue
 		}
@@ -479,17 +508,17 @@ func (r *denseRuntime) upsertSourceItems(ctx context.Context, botID string, item
 	if len(canonical) == 0 {
 		return nil
 	}
-	vectors, err := r.embedder.EmbedDocuments(ctx, texts)
+	vectors, err := r.embedDocuments(ctx, texts)
 	if err != nil {
-		return fmt.Errorf("dense embed documents: %w", err)
+		return err
 	}
 	if len(vectors) != len(canonical) {
 		return fmt.Errorf("dense embed documents: expected %d vectors, got %d", len(canonical), len(vectors))
 	}
 	for i, item := range canonical {
-		if err := r.qdrant.UpsertDense(ctx, sparsePointID(botID, item.ID), qdrantclient.DenseVector{
+		if err := r.qdrant.UpsertDense(ctx, runtimePointID(botID, item.ID), qdrantclient.DenseVector{
 			Values: vectors[i],
-		}, densePayload(botID, item)); err != nil {
+		}, runtimePayload(botID, item)); err != nil {
 			return err
 		}
 	}
@@ -525,212 +554,26 @@ func resolveDenseEmbeddingModel(ctx context.Context, queries *dbsqlc.Queries, mo
 	if err != nil {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: get embedding provider: %w", err)
 	}
-	if !row.Dimensions.Valid || row.Dimensions.Int32 <= 0 {
+	var cfg struct {
+		Dimensions *int `json:"dimensions"`
+	}
+	if len(row.Config) > 0 {
+		_ = json.Unmarshal(row.Config, &cfg)
+	}
+	if cfg.Dimensions == nil || *cfg.Dimensions <= 0 {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: embedding model %s missing dimensions", modelRef)
 	}
 	return denseModelSpec{
 		modelID:    strings.TrimSpace(row.ModelID),
 		baseURL:    strings.TrimSpace(provider.BaseUrl),
 		apiKey:     strings.TrimSpace(provider.ApiKey),
-		dimensions: int(row.Dimensions.Int32),
+		dimensions: *cfg.Dimensions,
 	}, nil
 }
 
-func joinDenseEmbeddingEndpointURL(baseURL, endpointPath string) (string, error) {
-	baseURL = strings.TrimSpace(baseURL)
-	if baseURL == "" {
-		return "", errors.New("dense embedding base URL is required")
-	}
+// --- shared helpers (used by both dense and sparse runtimes) ---
 
-	base, err := url.Parse(baseURL)
-	if err != nil {
-		return "", fmt.Errorf("invalid dense embedding base URL: %w", err)
-	}
-	if base.Scheme != "http" && base.Scheme != "https" {
-		return "", fmt.Errorf("invalid dense embedding base URL scheme: %q", base.Scheme)
-	}
-	if base.Host == "" {
-		return "", errors.New("invalid dense embedding base URL: host is required")
-	}
-
-	ref, err := url.Parse(endpointPath)
-	if err != nil {
-		return "", fmt.Errorf("invalid dense embedding path: %w", err)
-	}
-	return base.ResolveReference(ref).String(), nil
-}
-
-func (c *denseEmbeddingClient) Health(ctx context.Context) error {
-	endpoint, err := joinDenseEmbeddingEndpointURL(c.baseURL, "/models")
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return err
-	}
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-	resp, err := c.httpClient.Do(req) //nolint:gosec // G704: URL is validated and derived from operator-configured embedding provider base URL
-	if err != nil {
-		return fmt.Errorf("dense embedding health check failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("dense embedding health error (status %d): %s", resp.StatusCode, string(body))
-	}
-	return nil
-}
-
-func (c *denseEmbeddingClient) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
-	vectors, err := c.EmbedDocuments(ctx, []string{text})
-	if err != nil {
-		return nil, err
-	}
-	if len(vectors) == 0 {
-		return nil, errors.New("dense embed query: empty embedding response")
-	}
-	return vectors[0], nil
-}
-
-func (c *denseEmbeddingClient) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
-	body, err := json.Marshal(map[string]any{
-		"model": c.modelID,
-		"input": texts,
-	})
-	if err != nil {
-		return nil, err
-	}
-	endpoint, err := joinDenseEmbeddingEndpointURL(c.baseURL, "/embeddings")
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-	resp, err := c.httpClient.Do(req) //nolint:gosec // G704: URL is validated and derived from operator-configured embedding provider base URL
-	if err != nil {
-		return nil, fmt.Errorf("dense embed request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("dense embed read response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("dense embed api error %d: %s", resp.StatusCode, string(respBody))
-	}
-	var parsed denseEmbeddingResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return nil, fmt.Errorf("dense embed decode response: %w", err)
-	}
-	vectors := make([][]float32, len(parsed.Data))
-	for _, item := range parsed.Data {
-		if item.Index >= 0 && item.Index < len(vectors) {
-			vectors[item.Index] = item.Embedding
-		}
-	}
-	out := make([][]float32, 0, len(vectors))
-	for _, vector := range vectors {
-		if len(vector) > 0 {
-			out = append(out, vector)
-		}
-	}
-	return out, nil
-}
-
-func denseCanonicalStoreItem(item storefs.MemoryItem) storefs.MemoryItem {
-	item.ID = strings.TrimSpace(item.ID)
-	item.Memory = strings.TrimSpace(item.Memory)
-	if item.Memory != "" && strings.TrimSpace(item.Hash) == "" {
-		item.Hash = denseRuntimeHash(item.Memory)
-	}
-	return item
-}
-
-func densePayload(botID string, item storefs.MemoryItem) map[string]string {
-	item = denseCanonicalStoreItem(item)
-	payload := map[string]string{
-		"memory":          item.Memory,
-		"bot_id":          strings.TrimSpace(botID),
-		"source_entry_id": item.ID,
-		"hash":            item.Hash,
-	}
-	if item.CreatedAt != "" {
-		payload["created_at"] = item.CreatedAt
-	}
-	if item.UpdatedAt != "" {
-		payload["updated_at"] = item.UpdatedAt
-	}
-	return payload
-}
-
-func densePayloadMatches(existing, expected map[string]string) bool {
-	for key, value := range expected {
-		if strings.TrimSpace(existing[key]) != strings.TrimSpace(value) {
-			return false
-		}
-	}
-	return true
-}
-
-func denseStoreItemFromMemoryItem(item adapters.MemoryItem) storefs.MemoryItem {
-	return denseCanonicalStoreItem(storefs.MemoryItem{
-		ID:        item.ID,
-		Memory:    item.Memory,
-		Hash:      item.Hash,
-		CreatedAt: item.CreatedAt,
-		UpdatedAt: item.UpdatedAt,
-		Score:     item.Score,
-		Metadata:  item.Metadata,
-		BotID:     item.BotID,
-		AgentID:   item.AgentID,
-		RunID:     item.RunID,
-	})
-}
-
-func denseMemoryItemFromStore(item storefs.MemoryItem) adapters.MemoryItem {
-	item = denseCanonicalStoreItem(item)
-	return adapters.MemoryItem{
-		ID:        item.ID,
-		Memory:    item.Memory,
-		Hash:      item.Hash,
-		CreatedAt: item.CreatedAt,
-		UpdatedAt: item.UpdatedAt,
-		Score:     item.Score,
-		Metadata:  item.Metadata,
-		BotID:     item.BotID,
-		AgentID:   item.AgentID,
-		RunID:     item.RunID,
-	}
-}
-
-func denseResultToItem(r qdrantclient.SearchResult) adapters.MemoryItem {
-	item := adapters.MemoryItem{
-		ID:    r.ID,
-		Score: r.Score,
-	}
-	if r.Payload != nil {
-		if sourceID := strings.TrimSpace(r.Payload["source_entry_id"]); sourceID != "" {
-			item.ID = sourceID
-		}
-		item.Memory = r.Payload["memory"]
-		item.Hash = r.Payload["hash"]
-		item.BotID = r.Payload["bot_id"]
-		item.CreatedAt = r.Payload["created_at"]
-		item.UpdatedAt = r.Payload["updated_at"]
-	}
-	return item
-}
-
-func denseRuntimeHash(text string) string {
+func runtimeHash(text string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
 	return hex.EncodeToString(sum[:])
 }

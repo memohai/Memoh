@@ -10,7 +10,6 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
@@ -18,7 +17,6 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/subagent"
 )
 
 // MemberRoleResolver resolves a user's role within a bot.
@@ -46,11 +44,9 @@ func (a *BotMemberRoleAdapter) GetMemberRole(ctx context.Context, botID, channel
 type Handler struct {
 	registry        *Registry
 	roleResolver    MemberRoleResolver
-	subagentService *subagent.Service
 	scheduleService *schedule.Service
 	settingsService *settings.Service
 	mcpConnService  *mcp.ConnectionService
-	inboxService    *inbox.Service
 
 	modelsService      *models.Service
 	providersService   *providers.Service
@@ -71,11 +67,9 @@ type Handler struct {
 func NewHandler(
 	log *slog.Logger,
 	roleResolver MemberRoleResolver,
-	subagentService *subagent.Service,
 	scheduleService *schedule.Service,
 	settingsService *settings.Service,
 	mcpConnService *mcp.ConnectionService,
-	inboxService *inbox.Service,
 	modelsService *models.Service,
 	providersService *providers.Service,
 	memProvService *memprovider.Service,
@@ -93,11 +87,9 @@ func NewHandler(
 	}
 	h := &Handler{
 		roleResolver:       roleResolver,
-		subagentService:    subagentService,
 		scheduleService:    scheduleService,
 		settingsService:    settingsService,
 		mcpConnService:     mcpConnService,
-		inboxService:       inboxService,
 		modelsService:      modelsService,
 		providersService:   providersService,
 		memProvService:     memProvService,
@@ -115,6 +107,14 @@ func NewHandler(
 	return h
 }
 
+// topLevelCommands are standalone commands (no sub-actions) that are
+// recognised by IsCommand and listed in /help. They are handled outside
+// the regular resource-group dispatch (e.g. in the channel inbound
+// processor which has the required routing context).
+var topLevelCommands = map[string]string{
+	"new": "Start a new conversation (resets session context)",
+}
+
 // IsCommand reports whether the text contains a slash command.
 // Handles both direct commands ("/help") and mention-prefixed commands ("@bot /help").
 func (h *Handler) IsCommand(text string) bool {
@@ -128,6 +128,9 @@ func (h *Handler) IsCommand(text string) bool {
 		return false
 	}
 	if parsed.Resource == "help" {
+		return true
+	}
+	if _, ok := topLevelCommands[parsed.Resource]; ok {
 		return true
 	}
 	_, ok := h.registry.groups[parsed.Resource]
@@ -170,6 +173,13 @@ func (h *Handler) Execute(ctx context.Context, botID, channelIdentityID, text st
 	// /help
 	if parsed.Resource == "help" {
 		return h.registry.GlobalHelp(), nil
+	}
+
+	// Top-level commands (e.g. /new) are handled by the channel inbound
+	// processor which has the required routing context. If Execute is
+	// called for one of these, return a short usage hint.
+	if desc, ok := topLevelCommands[parsed.Resource]; ok {
+		return fmt.Sprintf("/%s - %s", parsed.Resource, desc), nil
 	}
 
 	group, ok := h.registry.groups[parsed.Resource]

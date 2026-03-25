@@ -11,6 +11,7 @@ type Config struct {
 type Log struct {
 	ID           string     `json:"id"`
 	BotID        string     `json:"bot_id"`
+	SessionID    string     `json:"session_id,omitempty"`
 	Status       string     `json:"status"`
 	ResultText   string     `json:"result_text"`
 	ErrorMessage string     `json:"error_message"`

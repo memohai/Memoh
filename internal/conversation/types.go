@@ -95,6 +95,7 @@ type UpdateSettingsRequest struct {
 type ModelMessage struct {
 	Role       string          `json:"role"`
 	Content    json.RawMessage `json:"content,omitempty"`
+	Usage      json.RawMessage `json:"-"`
 	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
 	Name       string          `json:"name,omitempty"`
@@ -115,6 +116,10 @@ func (m ModelMessage) TextContent() string {
 	if err := json.Unmarshal(m.Content, &parts); err == nil {
 		texts := make([]string, 0, len(parts))
 		for _, p := range parts {
+			// Ignore Reasoning parts
+			if p.Type == "reasoning" {
+				continue
+			}
 			if strings.TrimSpace(p.Text) != "" {
 				texts = append(texts, p.Text)
 			}
@@ -211,16 +216,18 @@ type OutboundAssetRef struct {
 	Mime        string
 	SizeBytes   int64
 	StorageKey  string
+	Name        string
+	Metadata    map[string]any
 }
 
 // ChatRequest is the input for Chat and StreamChat.
 type ChatRequest struct {
 	BotID                   string `json:"-"`
 	ChatID                  string `json:"-"`
+	SessionID               string `json:"-"`
 	Token                   string `json:"-"`
 	UserID                  string `json:"-"`
 	SourceChannelIdentityID string `json:"-"`
-	ContainerID             string `json:"-"`
 	DisplayName             string `json:"-"`
 	RouteID                 string `json:"-"`
 	ChatToken               string `json:"-"`
@@ -241,14 +248,12 @@ type ChatRequest struct {
 	Channels           []string         `json:"channels,omitempty"`
 	CurrentChannel     string           `json:"current_channel,omitempty"`
 	Messages           []ModelMessage   `json:"messages,omitempty"`
-	Skills             []string         `json:"skills,omitempty"`
 	Attachments        []ChatAttachment `json:"attachments,omitempty"`
 }
 
 // ChatResponse is the output of a non-streaming chat call.
 type ChatResponse struct {
 	Messages []ModelMessage `json:"messages"`
-	Skills   []string       `json:"skills,omitempty"`
 	Model    string         `json:"model,omitempty"`
 	Provider string         `json:"provider,omitempty"`
 }

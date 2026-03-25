@@ -28,7 +28,6 @@ type InboundIdentity struct {
 	UserID            string
 	DisplayName       string
 	AvatarURL         string
-	BotType           string
 	ForceReply        bool
 }
 
@@ -68,7 +67,6 @@ type ChannelIdentityService interface {
 
 // PolicyService resolves access policy for a bot.
 type PolicyService interface {
-	BotType(ctx context.Context, botID string) (string, error)
 	BotOwnerUserID(ctx context.Context, botID string) (string, error)
 }
 
@@ -182,57 +180,18 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 		return state, err
 	}
 
-	// Personal bots are owner-only and must not depend on member/guest/preauth bypass.
-	if r.policy != nil {
-		botType, err := r.policy.BotType(ctx, botID)
-		if err != nil {
-			return state, err
-		}
-		state.Identity.BotType = botType
-		if strings.EqualFold(strings.TrimSpace(botType), "personal") {
-			ownerUserID, err := r.policy.BotOwnerUserID(ctx, botID)
-			if err != nil {
-				return state, err
-			}
-			isOwner := strings.TrimSpace(state.Identity.UserID) != "" &&
-				strings.TrimSpace(ownerUserID) == strings.TrimSpace(state.Identity.UserID)
-			if !isOwner {
-				// Ignore all non-owner messages for personal bots.
-				state.Decision = &IdentityDecision{Stop: true}
-				return state, nil
-			}
-			// Owner is authorized, but group trigger policy is still decided by
-			// shouldTriggerAssistantResponse in channel routing.
-			return state, nil
-		}
-	}
-
+	// Owner bypass — owner messages always pass identity resolution.
 	if r.policy != nil && strings.TrimSpace(state.Identity.UserID) != "" {
 		ownerUserID, err := r.policy.BotOwnerUserID(ctx, botID)
 		if err != nil {
 			return state, err
 		}
-		// Bot owner should not depend on bot_members linkage.
 		if strings.TrimSpace(ownerUserID) == strings.TrimSpace(state.Identity.UserID) {
 			return state, nil
 		}
 	}
 
-	if strings.EqualFold(strings.TrimSpace(state.Identity.BotType), "public") {
-		return state, nil
-	}
-
-	// In group conversations, silently drop unauthorized messages to avoid spamming
-	// the channel with "access denied" replies (same behavior as personal bot non-owner).
-	if isGroupConversationType(msg.Conversation.Type) {
-		state.Decision = &IdentityDecision{Stop: true}
-		return state, nil
-	}
-
-	state.Decision = &IdentityDecision{
-		Stop:  true,
-		Reply: channel.Message{Text: r.unboundReply},
-	}
+	// Non-owner messages pass identity resolution; downstream ACL decides allow/deny.
 	return state, nil
 }
 
@@ -442,10 +401,6 @@ func extractThreadID(msg channel.InboundMessage) string {
 		return strings.TrimSpace(msg.Conversation.ThreadID)
 	}
 	return ""
-}
-
-func isGroupConversationType(conversationType string) bool {
-	return channel.NormalizeConversationType(conversationType) != channel.ConversationTypePrivate
 }
 
 func (r *IdentityResolver) tryLinkConfiglessChannelIdentityToUser(ctx context.Context, msg channel.InboundMessage, channelIdentityID string) string {

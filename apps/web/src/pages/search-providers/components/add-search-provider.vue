@@ -99,12 +99,13 @@ import {
   SelectGroup,
   SelectItem,
   Label,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { postSearchProviders } from '@memoh/sdk'
+import { postSearchProviders } from '@memohai/sdk'
+import type { SearchprovidersCreateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
@@ -118,7 +119,7 @@ const { run } = useDialogMutation()
 const queryCache = useQueryCache()
 const { mutateAsync: createProviderMutation, isLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
-    const { data: result } = await postSearchProviders({ body: data as any, throwOnError: true })
+    const { data: result } = await postSearchProviders({ body: data as SearchprovidersCreateRequest, throwOnError: true })
     return result
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['search-providers'] }),

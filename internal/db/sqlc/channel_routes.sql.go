@@ -35,6 +35,7 @@ RETURNING
   external_thread_id AS thread_id,
   conversation_type,
   default_reply_target AS reply_target,
+  active_session_id,
   metadata,
   created_at,
   updated_at
@@ -62,6 +63,7 @@ type CreateChatRouteRow struct {
 	ThreadID         pgtype.Text        `json:"thread_id"`
 	ConversationType pgtype.Text        `json:"conversation_type"`
 	ReplyTarget      pgtype.Text        `json:"reply_target"`
+	ActiveSessionID  pgtype.UUID        `json:"active_session_id"`
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
@@ -90,6 +92,7 @@ func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams
 		&i.ThreadID,
 		&i.ConversationType,
 		&i.ReplyTarget,
+		&i.ActiveSessionID,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -118,6 +121,7 @@ SELECT
   external_thread_id AS thread_id,
   conversation_type,
   default_reply_target AS reply_target,
+  active_session_id,
   metadata,
   created_at,
   updated_at
@@ -146,6 +150,7 @@ type FindChatRouteRow struct {
 	ThreadID         pgtype.Text        `json:"thread_id"`
 	ConversationType pgtype.Text        `json:"conversation_type"`
 	ReplyTarget      pgtype.Text        `json:"reply_target"`
+	ActiveSessionID  pgtype.UUID        `json:"active_session_id"`
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
@@ -169,6 +174,7 @@ func (q *Queries) FindChatRoute(ctx context.Context, arg FindChatRouteParams) (F
 		&i.ThreadID,
 		&i.ConversationType,
 		&i.ReplyTarget,
+		&i.ActiveSessionID,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -187,6 +193,7 @@ SELECT
   external_thread_id AS thread_id,
   conversation_type,
   default_reply_target AS reply_target,
+  active_session_id,
   metadata,
   created_at,
   updated_at
@@ -204,6 +211,7 @@ type GetChatRouteByIDRow struct {
 	ThreadID         pgtype.Text        `json:"thread_id"`
 	ConversationType pgtype.Text        `json:"conversation_type"`
 	ReplyTarget      pgtype.Text        `json:"reply_target"`
+	ActiveSessionID  pgtype.UUID        `json:"active_session_id"`
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
@@ -222,6 +230,7 @@ func (q *Queries) GetChatRouteByID(ctx context.Context, id pgtype.UUID) (GetChat
 		&i.ThreadID,
 		&i.ConversationType,
 		&i.ReplyTarget,
+		&i.ActiveSessionID,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -240,6 +249,7 @@ SELECT
   external_thread_id AS thread_id,
   conversation_type,
   default_reply_target AS reply_target,
+  active_session_id,
   metadata,
   created_at,
   updated_at
@@ -258,6 +268,7 @@ type ListChatRoutesRow struct {
 	ThreadID         pgtype.Text        `json:"thread_id"`
 	ConversationType pgtype.Text        `json:"conversation_type"`
 	ReplyTarget      pgtype.Text        `json:"reply_target"`
+	ActiveSessionID  pgtype.UUID        `json:"active_session_id"`
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
@@ -282,6 +293,7 @@ func (q *Queries) ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]Lis
 			&i.ThreadID,
 			&i.ConversationType,
 			&i.ReplyTarget,
+			&i.ActiveSessionID,
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -294,6 +306,22 @@ func (q *Queries) ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]Lis
 		return nil, err
 	}
 	return items, nil
+}
+
+const setRouteActiveSession = `-- name: SetRouteActiveSession :exec
+UPDATE bot_channel_routes
+SET active_session_id = $1::uuid, updated_at = now()
+WHERE id = $2
+`
+
+type SetRouteActiveSessionParams struct {
+	ActiveSessionID pgtype.UUID `json:"active_session_id"`
+	ID              pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) SetRouteActiveSession(ctx context.Context, arg SetRouteActiveSessionParams) error {
+	_, err := q.db.Exec(ctx, setRouteActiveSession, arg.ActiveSessionID, arg.ID)
+	return err
 }
 
 const updateChatRouteMetadata = `-- name: UpdateChatRouteMetadata :exec

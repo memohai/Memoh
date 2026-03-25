@@ -58,14 +58,9 @@ jobs:
         with:
           node-version: lts/*
 
-      - uses: oven-sh/setup-bun@v2
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
-      - name: Install UPX
-        run: sudo apt-get update && sudo apt-get install -y upx-ucl
 
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
@@ -77,9 +72,6 @@ jobs:
           VERSION: ${{ github.ref_name }}
           COMMIT_HASH: ${{ github.sha }}
           OUTPUT_DIR: dist
-          UPX_COMPRESS_AGENT_BIN: "true"
-          AUTO_INSTALL_UPX: "true"
-          UPX_ARGS: "-3"
         run: scripts/release.sh
 
       - name: Upload release assets

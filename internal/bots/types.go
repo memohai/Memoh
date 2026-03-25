@@ -9,7 +9,6 @@ import (
 type Bot struct {
 	ID              string         `json:"id"`
 	OwnerUserID     string         `json:"owner_user_id"`
-	Type            string         `json:"type"`
 	DisplayName     string         `json:"display_name"`
 	AvatarURL       string         `json:"avatar_url,omitempty"`
 	IsActive        bool           `json:"is_active"`
@@ -35,7 +34,6 @@ type BotCheck struct {
 
 // CreateBotRequest is the input for creating a bot.
 type CreateBotRequest struct {
-	Type        string         `json:"type"`
 	DisplayName string         `json:"display_name,omitempty"`
 	AvatarURL   string         `json:"avatar_url,omitempty"`
 	IsActive    *bool          `json:"is_active,omitempty"`
@@ -76,11 +74,6 @@ type RuntimeChecker interface {
 	// ListChecks evaluates dynamic runtime checks for a bot.
 	ListChecks(ctx context.Context, botID string) []BotCheck
 }
-
-const (
-	BotTypePersonal = "personal"
-	BotTypePublic   = "public"
-)
 
 const (
 	BotStatusCreating = "creating"

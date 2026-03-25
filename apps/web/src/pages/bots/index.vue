@@ -60,12 +60,12 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { ref, computed, watch, onUnmounted } from 'vue'
 import BotCard from './components/bot-card.vue'
 import CreateBot from './components/create-bot.vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getBotsQuery, getBotsQueryKey } from '@memoh/sdk/colada'
+import { getBotsQuery, getBotsQueryKey } from '@memohai/sdk/colada'
 
 const searchText = ref('')
 const dialogOpen = ref(false)
@@ -82,8 +82,7 @@ const filteredBots = computed(() => {
   if (!keyword) return allBots.value
   return allBots.value.filter((bot) =>
     bot.display_name?.toLowerCase().includes(keyword)
-    || bot.id?.toLowerCase().includes(keyword)
-    || bot.type?.toLowerCase().includes(keyword),
+    || bot.id?.toLowerCase().includes(keyword),
   )
 })
 

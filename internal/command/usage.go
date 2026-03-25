@@ -28,46 +28,52 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 			toTS := pgtype.Timestamptz{Time: now, Valid: true}
 			nullModel := pgtype.UUID{Valid: false}
 
-			chatRows, err := h.queries.GetMessageTokenUsageByDay(cc.Ctx, dbsqlc.GetMessageTokenUsageByDayParams{
+			rows, err := h.queries.GetTokenUsageByDayAndType(cc.Ctx, dbsqlc.GetTokenUsageByDayAndTypeParams{
 				BotID: botUUID, FromTime: fromTS, ToTime: toTS, ModelID: nullModel,
 			})
 			if err != nil {
 				return "", err
 			}
 
-			hbRows, err := h.queries.GetHeartbeatTokenUsageByDay(cc.Ctx, dbsqlc.GetHeartbeatTokenUsageByDayParams{
-				BotID: botUUID, FromTime: fromTS, ToTime: toTS, ModelID: nullModel,
-			})
-			if err != nil {
-				return "", err
-			}
-
-			if len(chatRows) == 0 && len(hbRows) == 0 {
+			if len(rows) == 0 {
 				return "No token usage in the last 7 days.", nil
+			}
+
+			type bucket struct {
+				label string
+				rows  []dbsqlc.GetTokenUsageByDayAndTypeRow
+			}
+			buckets := []bucket{
+				{label: "Chat"},
+				{label: "Heartbeat"},
+				{label: "Schedule"},
+			}
+			for _, r := range rows {
+				switch r.SessionType {
+				case "heartbeat":
+					buckets[1].rows = append(buckets[1].rows, r)
+				case "schedule":
+					buckets[2].rows = append(buckets[2].rows, r)
+				default:
+					buckets[0].rows = append(buckets[0].rows, r)
+				}
 			}
 
 			var b strings.Builder
 			b.WriteString("Token usage (last 7 days):\n\n")
 
-			if len(chatRows) > 0 {
-				b.WriteString("Chat:\n")
-				var totalIn, totalOut int64
-				for _, r := range chatRows {
-					day := r.Day.Time.Format("01-02")
-					fmt.Fprintf(&b, "  %s: in=%d out=%d\n", day, r.InputTokens, r.OutputTokens)
-					totalIn += r.InputTokens
-					totalOut += r.OutputTokens
+			first := true
+			for _, bk := range buckets {
+				if len(bk.rows) == 0 {
+					continue
 				}
-				fmt.Fprintf(&b, "  Total: in=%d out=%d\n", totalIn, totalOut)
-			}
-
-			if len(hbRows) > 0 {
-				if len(chatRows) > 0 {
+				if !first {
 					b.WriteByte('\n')
 				}
-				b.WriteString("Heartbeat:\n")
+				first = false
+				b.WriteString(bk.label + ":\n")
 				var totalIn, totalOut int64
-				for _, r := range hbRows {
+				for _, r := range bk.rows {
 					day := r.Day.Time.Format("01-02")
 					fmt.Fprintf(&b, "  %s: in=%d out=%d\n", day, r.InputTokens, r.OutputTokens)
 					totalIn += r.InputTokens
@@ -92,41 +98,22 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 			fromTS := pgtype.Timestamptz{Time: from, Valid: true}
 			toTS := pgtype.Timestamptz{Time: now, Valid: true}
 
-			chatRows, err := h.queries.GetMessageTokenUsageByModel(cc.Ctx, dbsqlc.GetMessageTokenUsageByModelParams{
-				BotID: botUUID, FromTime: fromTS, ToTime: toTS,
-			})
-			if err != nil {
-				return "", err
-			}
-			hbRows, err := h.queries.GetHeartbeatTokenUsageByModel(cc.Ctx, dbsqlc.GetHeartbeatTokenUsageByModelParams{
+			rows, err := h.queries.GetTokenUsageByModel(cc.Ctx, dbsqlc.GetTokenUsageByModelParams{
 				BotID: botUUID, FromTime: fromTS, ToTime: toTS,
 			})
 			if err != nil {
 				return "", err
 			}
 
-			if len(chatRows) == 0 && len(hbRows) == 0 {
+			if len(rows) == 0 {
 				return "No token usage in the last 7 days.", nil
 			}
 
 			var b strings.Builder
 			b.WriteString("Token usage by model (last 7 days):\n\n")
 
-			if len(chatRows) > 0 {
-				b.WriteString("Chat:\n")
-				for _, r := range chatRows {
-					fmt.Fprintf(&b, "  %s (%s): in=%d out=%d\n", r.ModelName, r.ProviderName, r.InputTokens, r.OutputTokens)
-				}
-			}
-
-			if len(hbRows) > 0 {
-				if len(chatRows) > 0 {
-					b.WriteByte('\n')
-				}
-				b.WriteString("Heartbeat:\n")
-				for _, r := range hbRows {
-					fmt.Fprintf(&b, "  %s (%s): in=%d out=%d\n", r.ModelName, r.ProviderName, r.InputTokens, r.OutputTokens)
-				}
+			for _, r := range rows {
+				fmt.Fprintf(&b, "  %s (%s): in=%d out=%d\n", r.ModelName, r.ProviderName, r.InputTokens, r.OutputTokens)
 			}
 
 			return strings.TrimRight(b.String(), "\n"), nil

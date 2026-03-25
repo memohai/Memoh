@@ -482,8 +482,6 @@ definitions:
         type: string
       status:
         type: string
-      type:
-        type: string
       updated_at:
         type: string
     type: object
@@ -518,8 +516,6 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
-      type:
-        type: string
     type: object
   bots.ListBotsResponse:
     properties:
@@ -919,6 +915,37 @@ definitions:
       verified_at:
         type: string
     type: object
+  compaction.ListLogsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/compaction.Log'
+        type: array
+    type: object
+  compaction.Log:
+    properties:
+      bot_id:
+        type: string
+      completed_at:
+        type: string
+      error_message:
+        type: string
+      id:
+        type: string
+      message_count:
+        type: integer
+      model_id:
+        type: string
+      session_id:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      usage: {}
+    type: object
   email.BindingResponse:
     properties:
       bot_id:
@@ -1144,6 +1171,8 @@ definitions:
     type: object
   handlers.CreateContainerRequest:
     properties:
+      image:
+        type: string
       restore_data:
         type: boolean
       snapshotter:
@@ -1284,6 +1313,8 @@ definitions:
         type: boolean
       image:
         type: string
+      legacy:
+        type: boolean
       namespace:
         type: string
       status:
@@ -1488,6 +1519,20 @@ definitions:
         items:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
+      schedule:
+        items:
+          $ref: '#/definitions/handlers.DailyTokenUsage'
+        type: array
+    type: object
+  handlers.createSessionRequest:
+    properties:
+      channel_type:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      title:
+        type: string
     type: object
   handlers.emailOAuthStatusResponse:
     properties:
@@ -1517,13 +1562,6 @@ definitions:
         type: array
       user_id:
         type: string
-    type: object
-  handlers.markReadRequest:
-    properties:
-      ids:
-        items:
-          type: string
-        type: array
     type: object
   handlers.memoryAddPayload:
     properties:
@@ -1629,6 +1667,14 @@ definitions:
       shell:
         type: string
     type: object
+  handlers.updateSessionRequest:
+    properties:
+      metadata:
+        additionalProperties: {}
+        type: object
+      title:
+        type: string
+    type: object
   heartbeat.ListLogsResponse:
     properties:
       items:
@@ -1647,6 +1693,8 @@ definitions:
       id:
         type: string
       result_text:
+        type: string
+      session_id:
         type: string
       started_at:
         type: string
@@ -1674,49 +1722,6 @@ definitions:
       updated_at:
         type: string
       user_id:
-        type: string
-    type: object
-  inbox.CountResult:
-    properties:
-      total:
-        type: integer
-      unread:
-        type: integer
-    type: object
-  inbox.CreateRequest:
-    properties:
-      action:
-        type: string
-      bot_id:
-        type: string
-      content:
-        type: string
-      header:
-        additionalProperties: {}
-        type: object
-      source:
-        type: string
-    type: object
-  inbox.Item:
-    properties:
-      action:
-        type: string
-      bot_id:
-        type: string
-      content:
-        type: string
-      created_at:
-        type: string
-      header:
-        additionalProperties: {}
-        type: object
-      id:
-        type: string
-      is_read:
-        type: boolean
-      read_at:
-        type: string
-      source:
         type: string
     type: object
   mcp.AuthorizeResult:
@@ -1851,6 +1856,8 @@ definitions:
         type: array
       bot_id:
         type: string
+      compact_id:
+        type: string
       content:
         items:
           type: integer
@@ -1868,8 +1875,6 @@ definitions:
         type: string
       role:
         type: string
-      route_id:
-        type: string
       sender_avatar_url:
         type: string
       sender_channel_identity_id:
@@ -1877,6 +1882,8 @@ definitions:
       sender_display_name:
         type: string
       sender_user_id:
+        type: string
+      session_id:
         type: string
       source_reply_to_message_id:
         type: string
@@ -1889,7 +1896,12 @@ definitions:
     properties:
       content_hash:
         type: string
+      metadata:
+        additionalProperties: {}
+        type: object
       mime:
+        type: string
+      name:
         type: string
       ordinal:
         type: integer
@@ -1902,22 +1914,14 @@ definitions:
     type: object
   models.AddRequest:
     properties:
-      client_type:
-        $ref: '#/definitions/models.ClientType'
-      dimensions:
-        type: integer
-      input_modalities:
-        items:
-          type: string
-        type: array
+      config:
+        $ref: '#/definitions/models.ModelConfig'
       llm_provider_id:
         type: string
       model_id:
         type: string
       name:
         type: string
-      supports_reasoning:
-        type: boolean
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
@@ -1928,18 +1932,6 @@ definitions:
       model_id:
         type: string
     type: object
-  models.ClientType:
-    enum:
-    - openai-responses
-    - openai-completions
-    - anthropic-messages
-    - google-generative-ai
-    type: string
-    x-enum-varnames:
-    - ClientTypeOpenAIResponses
-    - ClientTypeOpenAICompletions
-    - ClientTypeAnthropicMessages
-    - ClientTypeGoogleGenerativeAI
   models.CountResponse:
     properties:
       count:
@@ -1947,26 +1939,29 @@ definitions:
     type: object
   models.GetResponse:
     properties:
-      client_type:
-        $ref: '#/definitions/models.ClientType'
-      dimensions:
-        type: integer
+      config:
+        $ref: '#/definitions/models.ModelConfig'
       id:
         type: string
-      input_modalities:
-        items:
-          type: string
-        type: array
       llm_provider_id:
         type: string
       model_id:
         type: string
       name:
         type: string
-      supports_reasoning:
-        type: boolean
       type:
         $ref: '#/definitions/models.ModelType'
+    type: object
+  models.ModelConfig:
+    properties:
+      compatibilities:
+        items:
+          type: string
+        type: array
+      context_window:
+        type: integer
+      dimensions:
+        type: integer
     type: object
   models.ModelType:
     enum:
@@ -1991,30 +1986,24 @@ definitions:
     enum:
     - ok
     - auth_error
+    - model_not_supported
     - error
     type: string
     x-enum-varnames:
     - TestStatusOK
     - TestStatusAuthError
+    - TestStatusModelNotSupported
     - TestStatusError
   models.UpdateRequest:
     properties:
-      client_type:
-        $ref: '#/definitions/models.ClientType'
-      dimensions:
-        type: integer
-      input_modalities:
-        items:
-          type: string
-        type: array
+      config:
+        $ref: '#/definitions/models.ModelConfig'
       llm_provider_id:
         type: string
       model_id:
         type: string
       name:
         type: string
-      supports_reasoning:
-        type: boolean
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
@@ -2029,6 +2018,10 @@ definitions:
         type: string
       base_url:
         type: string
+      client_type:
+        type: string
+      icon:
+        type: string
       metadata:
         additionalProperties: {}
         type: object
@@ -2036,6 +2029,7 @@ definitions:
         type: string
     required:
     - base_url
+    - client_type
     - name
     type: object
   providers.GetResponse:
@@ -2044,7 +2038,13 @@ definitions:
         type: string
       base_url:
         type: string
+      client_type:
+        type: string
       created_at:
+        type: string
+      enable:
+        type: boolean
+      icon:
         type: string
       id:
         type: string
@@ -2054,11 +2054,6 @@ definitions:
       name:
         type: string
       updated_at:
-        type: string
-    type: object
-  providers.ImportModelsRequest:
-    properties:
-      client_type:
         type: string
     type: object
   providers.ImportModelsResponse:
@@ -2087,6 +2082,12 @@ definitions:
         type: string
       base_url:
         type: string
+      client_type:
+        type: string
+      enable:
+        type: boolean
+      icon:
+        type: string
       metadata:
         additionalProperties: {}
         type: object
@@ -2108,12 +2109,41 @@ definitions:
       pattern:
         type: string
     type: object
+  schedule.ListLogsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/schedule.Log'
+        type: array
+    type: object
   schedule.ListResponse:
     properties:
       items:
         items:
           $ref: '#/definitions/schedule.Schedule'
         type: array
+    type: object
+  schedule.Log:
+    properties:
+      bot_id:
+        type: string
+      completed_at:
+        type: string
+      error_message:
+        type: string
+      id:
+        type: string
+      result_text:
+        type: string
+      schedule_id:
+        type: string
+      session_id:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      usage: {}
     type: object
   schedule.NullableInt:
     properties:
@@ -2258,6 +2288,35 @@ definitions:
       provider:
         $ref: '#/definitions/searchproviders.ProviderName'
     type: object
+  session.Session:
+    properties:
+      bot_id:
+        type: string
+      channel_type:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      parent_session_id:
+        type: string
+      route_conversation_type:
+        type: string
+      route_id:
+        type: string
+      route_metadata:
+        additionalProperties: {}
+        type: object
+      title:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
   settings.Settings:
     properties:
       allow_guest:
@@ -2266,6 +2325,12 @@ definitions:
         type: string
       chat_model_id:
         type: string
+      compaction_enabled:
+        type: boolean
+      compaction_model_id:
+        type: string
+      compaction_threshold:
+        type: integer
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -2278,8 +2343,6 @@ definitions:
         type: integer
       max_context_tokens:
         type: integer
-      max_inbox_items:
-        type: integer
       memory_provider_id:
         type: string
       reasoning_effort:
@@ -2287,6 +2350,8 @@ definitions:
       reasoning_enabled:
         type: boolean
       search_provider_id:
+        type: string
+      title_model_id:
         type: string
       tts_model_id:
         type: string
@@ -2299,6 +2364,12 @@ definitions:
         type: string
       chat_model_id:
         type: string
+      compaction_enabled:
+        type: boolean
+      compaction_model_id:
+        type: string
+      compaction_threshold:
+        type: integer
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -2311,8 +2382,6 @@ definitions:
         type: integer
       max_context_tokens:
         type: integer
-      max_inbox_items:
-        type: integer
       memory_provider_id:
         type: string
       reasoning_effort:
@@ -2321,121 +2390,10 @@ definitions:
         type: boolean
       search_provider_id:
         type: string
+      title_model_id:
+        type: string
       tts_model_id:
         type: string
-    type: object
-  subagent.AddSkillsRequest:
-    properties:
-      skills:
-        items:
-          type: string
-        type: array
-    type: object
-  subagent.ContextResponse:
-    properties:
-      messages:
-        items:
-          additionalProperties: {}
-          type: object
-        type: array
-      usage:
-        additionalProperties: {}
-        type: object
-    type: object
-  subagent.CreateRequest:
-    properties:
-      description:
-        type: string
-      messages:
-        items:
-          additionalProperties: {}
-          type: object
-        type: array
-      metadata:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-      skills:
-        items:
-          type: string
-        type: array
-    type: object
-  subagent.ListResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/subagent.Subagent'
-        type: array
-    type: object
-  subagent.SkillsResponse:
-    properties:
-      skills:
-        items:
-          type: string
-        type: array
-    type: object
-  subagent.Subagent:
-    properties:
-      bot_id:
-        type: string
-      created_at:
-        type: string
-      deleted:
-        type: boolean
-      deleted_at:
-        type: string
-      description:
-        type: string
-      id:
-        type: string
-      messages:
-        items:
-          additionalProperties: {}
-          type: object
-        type: array
-      metadata:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-      skills:
-        items:
-          type: string
-        type: array
-      updated_at:
-        type: string
-      usage:
-        additionalProperties: {}
-        type: object
-    type: object
-  subagent.UpdateContextRequest:
-    properties:
-      messages:
-        items:
-          additionalProperties: {}
-          type: object
-        type: array
-      usage:
-        additionalProperties: {}
-        type: object
-    type: object
-  subagent.UpdateRequest:
-    properties:
-      description:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-    type: object
-  subagent.UpdateSkillsRequest:
-    properties:
-      skills:
-        items:
-          type: string
-        type: array
     type: object
   tts.CreateModelRequest:
     properties:
@@ -2571,6 +2529,39 @@ definitions:
       lang:
         type: string
       name:
+        type: string
+    type: object
+  weixin.QRPollRequest:
+    properties:
+      baseUrl:
+        type: string
+      qr_code:
+        type: string
+      routeTag:
+        type: string
+    type: object
+  weixin.QRPollResponse:
+    properties:
+      message:
+        type: string
+      status:
+        description: wait, scaned, confirmed, expired
+        type: string
+    type: object
+  weixin.QRStartRequest:
+    properties:
+      baseUrl:
+        type: string
+      routeTag:
+        type: string
+    type: object
+  weixin.QRStartResponse:
+    properties:
+      message:
+        type: string
+      qr_code:
+        type: string
+      qr_code_url:
         type: string
     type: object
 info:
@@ -2995,6 +2986,62 @@ paths:
       summary: WebSocket chat endpoint
       tags:
       - local-channel
+  /bots/{bot_id}/compaction/logs:
+    delete:
+      description: Delete all compaction logs for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete compaction logs
+      tags:
+      - compaction
+    get:
+      description: List compaction logs for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Before timestamp (RFC3339)
+        in: query
+        name: before
+        type: string
+      - default: 50
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/compaction.ListLogsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List compaction logs
+      tags:
+      - compaction
   /bots/{bot_id}/container:
     delete:
       parameters:
@@ -3059,7 +3106,7 @@ paths:
           $ref: '#/definitions/handlers.CreateContainerRequest'
       responses:
         "200":
-          description: OK
+          description: SSE stream of container creation events
           schema:
             $ref: '#/definitions/handlers.CreateContainerResponse'
         "400":
@@ -4001,196 +4048,6 @@ paths:
       summary: List heartbeat logs
       tags:
       - heartbeat
-  /bots/{bot_id}/inbox:
-    get:
-      description: List inbox items for a bot with optional filters
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Filter by read status (true/false)
-        in: query
-        name: is_read
-        type: string
-      - description: Filter by source
-        in: query
-        name: source
-        type: string
-      - default: 50
-        description: Max items to return
-        in: query
-        name: limit
-        type: integer
-      - default: 0
-        description: Offset for pagination
-        in: query
-        name: offset
-        type: integer
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/inbox.Item'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List inbox items
-      tags:
-      - inbox
-    post:
-      description: Create a new inbox item (for external integrations)
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Inbox item payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/inbox.CreateRequest'
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/inbox.Item'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create inbox item
-      tags:
-      - inbox
-  /bots/{bot_id}/inbox/{id}:
-    delete:
-      description: Delete a single inbox item
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Inbox item ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete inbox item
-      tags:
-      - inbox
-    get:
-      description: Get a single inbox item by ID
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Inbox item ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/inbox.Item'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get inbox item
-      tags:
-      - inbox
-  /bots/{bot_id}/inbox/count:
-    get:
-      description: Count unread and total inbox items
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/inbox.CountResult'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Count inbox items
-      tags:
-      - inbox
-  /bots/{bot_id}/inbox/mark-read:
-    post:
-      description: Batch mark inbox items as read
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Item IDs to mark as read
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.markReadRequest'
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Mark inbox items as read
-      tags:
-      - inbox
   /bots/{bot_id}/mcp:
     get:
       description: List MCP connections for a bot
@@ -5247,6 +5104,255 @@ paths:
       summary: Update schedule
       tags:
       - schedule
+  /bots/{bot_id}/schedule/{id}/logs:
+    get:
+      description: List execution logs for a specific schedule
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Schedule ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Before timestamp (RFC3339)
+        in: query
+        name: before
+        type: string
+      - default: 50
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/schedule.ListLogsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List schedule logs by schedule
+      tags:
+      - schedule
+  /bots/{bot_id}/schedule/logs:
+    delete:
+      description: Delete all schedule execution logs for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete schedule logs
+      tags:
+      - schedule
+    get:
+      description: List schedule execution logs for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Before timestamp (RFC3339)
+        in: query
+        name: before
+        type: string
+      - default: 50
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/schedule.ListLogsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List schedule logs
+      tags:
+      - schedule
+  /bots/{bot_id}/sessions:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                $ref: '#/definitions/session.Session'
+              type: array
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List bot sessions
+      tags:
+      - sessions
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.createSessionRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/session.Session'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a new chat session
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Soft-delete a session
+      tags:
+      - sessions
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/session.Session'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a session by ID
+      tags:
+      - sessions
+    patch:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.updateSessionRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/session.Session'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a session
+      tags:
+      - sessions
   /bots/{bot_id}/settings:
     delete:
       description: Remove agent settings for current user
@@ -5332,303 +5438,10 @@ paths:
       summary: Update user settings
       tags:
       - settings
-  /bots/{bot_id}/subagents:
-    get:
-      description: List subagents for current user
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/subagent.ListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List subagents
-      tags:
-      - subagent
-    post:
-      description: Create a subagent for current user
-      parameters:
-      - description: Subagent payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/subagent.CreateRequest'
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/subagent.Subagent'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create subagent
-      tags:
-      - subagent
-  /bots/{bot_id}/subagents/{id}:
-    delete:
-      description: Delete a subagent by ID
-      parameters:
-      - description: Subagent ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete subagent
-      tags:
-      - subagent
-    get:
-      description: Get a subagent by ID
-      parameters:
-      - description: Subagent ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/subagent.Subagent'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get subagent
-      tags:
-      - subagent
-    put:
-      description: Update a subagent by ID
-      parameters:
-      - description: Subagent ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Subagent payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/subagent.UpdateRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/subagent.Subagent'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update subagent
-      tags:
-      - subagent
-  /bots/{bot_id}/subagents/{id}/context:
-    get:
-      description: Get a subagent's message context
-      parameters:
-      - description: Subagent ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/subagent.ContextResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get subagent context
-      tags:
-      - subagent
-    put:
-      description: Update a subagent's message context
-      parameters:
-      - description: Subagent ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Context payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/subagent.UpdateContextRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/subagent.ContextResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update subagent context
-      tags:
-      - subagent
-  /bots/{bot_id}/subagents/{id}/skills:
-    get:
-      description: Get a subagent's skills
-      parameters:
-      - description: Subagent ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/subagent.SkillsResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get subagent skills
-      tags:
-      - subagent
-    post:
-      description: Add skills to a subagent
-      parameters:
-      - description: Subagent ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Skills payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/subagent.AddSkillsRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/subagent.SkillsResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Add subagent skills
-      tags:
-      - subagent
-    put:
-      description: Replace a subagent's skills
-      parameters:
-      - description: Subagent ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Skills payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/subagent.UpdateSkillsRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/subagent.SkillsResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update subagent skills
-      tags:
-      - subagent
   /bots/{bot_id}/token-usage:
     get:
-      description: Get daily aggregated token usage for a bot, split by chat and heartbeat,
-        with optional model filter and per-model breakdown
+      description: Get daily aggregated token usage for a bot, split by chat, heartbeat,
+        and schedule session types, with optional model filter and per-model breakdown
       parameters:
       - description: Bot ID
         in: path
@@ -6290,6 +6103,75 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update bot channel status
+      tags:
+      - bots
+  /bots/{id}/channel/weixin/qr/poll:
+    post:
+      description: Long-poll the QR code scan status. On confirmed, auto-saves credentials.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: QR code to poll
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/weixin.QRPollRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/weixin.QRPollResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Poll WeChat QR login status
+      tags:
+      - bots
+  /bots/{id}/channel/weixin/qr/start:
+    post:
+      description: Fetch a QR code from WeChat for scanning
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Optional base URL override
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/weixin.QRStartRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/weixin.QRStartResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Start WeChat QR login
       tags:
       - bots
   /bots/{id}/checks:
@@ -7005,13 +6887,13 @@ paths:
   /models:
     get:
       description: Get a list of all configured models, optionally filtered by type
-        or client type
+        or provider client type
       parameters:
       - description: Model type (chat, embedding)
         in: query
         name: type
         type: string
-      - description: Client type (openai-responses, openai-completions, anthropic-messages,
+      - description: Provider client type (openai-responses, openai-completions, anthropic-messages,
           google-generative-ai)
         in: query
         name: client_type
@@ -7467,12 +7349,6 @@ paths:
         name: id
         required: true
         type: string
-      - description: Import configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/providers.ImportModelsRequest'
       produces:
       - application/json
       responses:

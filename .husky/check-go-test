@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+
+export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+echo "Check Go test..."
+go test ./...

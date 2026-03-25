@@ -20,9 +20,12 @@ const (
 	ModeDense  BuiltinMemoryMode = "dense"
 )
 
-// NewBuiltinRuntimeFromConfig returns the appropriate memoryRuntime based on the
-// provider's persisted config (memory_mode field). Falls back to the file runtime for "off" or unknown.
-func NewBuiltinRuntimeFromConfig(log *slog.Logger, providerConfig map[string]any, fileRuntime any, store *storefs.Service, queries *dbsqlc.Queries, cfg config.Config) (any, error) {
+// NewBuiltinRuntimeFromConfig returns the appropriate memoryRuntime based on
+// the provider's persisted config (memory_mode field). Returns the file
+// runtime for "off" or unknown modes. Returns an error if a sparse or dense
+// runtime was explicitly requested but failed to initialise, so that callers
+// can surface configuration problems rather than silently degrading.
+func NewBuiltinRuntimeFromConfig(_ *slog.Logger, providerConfig map[string]any, fileRuntime any, store *storefs.Service, queries *dbsqlc.Queries, cfg config.Config) (any, error) {
 	mode := BuiltinMemoryMode(strings.TrimSpace(adapters.StringFromConfig(providerConfig, "memory_mode")))
 
 	switch mode {
@@ -38,7 +41,7 @@ func NewBuiltinRuntimeFromConfig(log *slog.Logger, providerConfig map[string]any
 		if collection == "" {
 			collection = "memory_sparse"
 		}
-		rt, err := newSparseRuntime(
+		return newSparseRuntime(
 			host,
 			port,
 			cfg.Qdrant.APIKey,
@@ -46,23 +49,9 @@ func NewBuiltinRuntimeFromConfig(log *slog.Logger, providerConfig map[string]any
 			strings.TrimSpace(cfg.Sparse.BaseURL),
 			store,
 		)
-		if err != nil {
-			if log != nil {
-				log.Warn("sparse runtime init failed, falling back to file runtime", slog.Any("error", err))
-			}
-			return fileRuntime, nil
-		}
-		return rt, nil
 
 	case ModeDense:
-		rt, err := newDenseRuntime(providerConfig, queries, cfg, store)
-		if err != nil {
-			if log != nil {
-				log.Warn("dense runtime init failed, falling back to file runtime", slog.Any("error", err))
-			}
-			return fileRuntime, nil
-		}
-		return rt, nil
+		return newDenseRuntime(providerConfig, queries, cfg, store)
 
 	default:
 		return fileRuntime, nil

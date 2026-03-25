@@ -5,7 +5,7 @@ import (
 	"io/fs"
 )
 
-//go:embed all:web all:agent
+//go:embed all:web
 var assetsFS embed.FS
 
 func AssetsFS() fs.FS {
@@ -14,8 +14,4 @@ func AssetsFS() fs.FS {
 
 func WebFS() (fs.FS, error) {
 	return fs.Sub(assetsFS, "web")
-}
-
-func AgentFS() (fs.FS, error) {
-	return fs.Sub(assetsFS, "agent")
 }

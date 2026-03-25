@@ -87,7 +87,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Badge } from '@memoh/ui'
+import { Badge } from '@memohai/ui'
 import { formatDateTime } from '@/utils/date-time'
 
 export interface MessageItem {

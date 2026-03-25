@@ -15,10 +15,7 @@ import (
 const (
 	BuiltinType = "builtin"
 
-	sharedMemoryNamespace      = "bot"
-	memoryContextLimitPerScope = 4
-	memoryContextMaxItems      = 8
-	memoryContextItemMaxChars  = 220
+	sharedMemoryNamespace = "bot"
 
 	defaultMemoryToolLimit = 8
 	maxMemoryToolLimit     = 50
@@ -28,9 +25,11 @@ const (
 // BuiltinProvider wraps the existing Service as a Provider.
 type BuiltinProvider struct {
 	service      memoryRuntime
+	llm          adapters.LLM
 	chatAccessor conversation.Accessor
 	adminChecker AdminChecker
 	logger       *slog.Logger
+	packer       contextPackerConfig
 }
 
 // memoryRuntime is the runtime memory backend required by the builtin provider.
@@ -60,16 +59,96 @@ func NewBuiltinProvider(log *slog.Logger, service any, chatAccessor conversation
 	if log == nil {
 		log = slog.Default()
 	}
-	runtimeService, _ := service.(memoryRuntime)
+	logger := log.With(slog.String("provider", BuiltinType))
+	runtimeService, ok := service.(memoryRuntime)
+	if service != nil && !ok {
+		logger.Warn("service does not implement memoryRuntime; provider will operate without a backend")
+	}
 	return &BuiltinProvider{
 		service:      runtimeService,
 		chatAccessor: chatAccessor,
 		adminChecker: adminChecker,
-		logger:       log.With(slog.String("provider", BuiltinType)),
+		logger:       logger,
+		packer:       defaultPackerConfig,
 	}
 }
 
+// SetLLM injects the LLM client used for Extract/Decide in memory formation.
+func (p *BuiltinProvider) SetLLM(llm adapters.LLM) {
+	p.llm = llm
+}
+
+// SetPackerConfig overrides the default context packing configuration.
+// Zero-valued fields fall back to defaults.
+func (p *BuiltinProvider) SetPackerConfig(cfg contextPackerConfig) {
+	if cfg.TargetItems > 0 {
+		p.packer.TargetItems = cfg.TargetItems
+	}
+	if cfg.MaxTotalChars > 0 {
+		p.packer.MaxTotalChars = cfg.MaxTotalChars
+	}
+	if cfg.MinItemChars > 0 {
+		p.packer.MinItemChars = cfg.MinItemChars
+	}
+	if cfg.MaxItemChars > 0 {
+		p.packer.MaxItemChars = cfg.MaxItemChars
+	}
+	if cfg.OverfetchRatio > 0 {
+		p.packer.OverfetchRatio = cfg.OverfetchRatio
+	}
+}
+
+// ApplyProviderConfig reads context packing knobs from a provider config map
+// and applies any non-zero values to the provider's packer configuration.
+func (p *BuiltinProvider) ApplyProviderConfig(providerConfig map[string]any) {
+	p.SetPackerConfig(contextPackerConfig{
+		TargetItems:   intFromConfig(providerConfig, "context_target_items"),
+		MaxTotalChars: intFromConfig(providerConfig, "context_max_total_chars"),
+	})
+}
+
+func intFromConfig(m map[string]any, key string) int {
+	if m == nil {
+		return 0
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	}
+	return 0
+}
+
 func (*BuiltinProvider) Type() string { return BuiltinType }
+
+func memorySourceLabel(item adapters.MemoryItem) string {
+	var parts []string
+	if item.Metadata != nil {
+		if name, ok := item.Metadata["profile_display_name"].(string); ok {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				parts = append(parts, name)
+			}
+		}
+	}
+	if ts := strings.TrimSpace(item.CreatedAt); ts != "" {
+		if len(ts) > 10 {
+			ts = ts[:10]
+		}
+		parts = append(parts, ts)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, ", ")
+}
 
 // --- Conversation Hooks ---
 
@@ -81,10 +160,11 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 		return nil, nil
 	}
 
+	fetchLimit := overfetchLimit(p.packer)
 	resp, err := p.service.Search(ctx, adapters.SearchRequest{
 		Query: req.Query,
 		BotID: req.BotID,
-		Limit: memoryContextLimitPerScope,
+		Limit: fetchLimit,
 		Filters: map[string]any{
 			"namespace": sharedMemoryNamespace,
 			"scopeId":   req.BotID,
@@ -97,48 +177,26 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 		return nil, nil
 	}
 
-	seen := map[string]struct{}{}
-	type contextItem struct {
-		namespace string
-		item      adapters.MemoryItem
-	}
-	results := make([]contextItem, 0, memoryContextLimitPerScope)
-	for _, item := range resp.Results {
-		key := strings.TrimSpace(item.ID)
-		if key == "" {
-			key = sharedMemoryNamespace + ":" + strings.TrimSpace(item.Memory)
-		}
-		if key == "" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		results = append(results, contextItem{namespace: sharedMemoryNamespace, item: item})
-	}
-	if len(results) == 0 {
+	candidates := deduplicateAndSort(resp.Results)
+	if len(candidates) == 0 {
 		return nil, nil
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].item.Score > results[j].item.Score
-	})
-	if len(results) > memoryContextMaxItems {
-		results = results[:memoryContextMaxItems]
+	packed := packContext(candidates, p.packer)
+	if len(packed.Items) == 0 {
+		return nil, nil
 	}
 
 	var sb strings.Builder
 	sb.WriteString("<memory-context>\nRelevant memory context (use when helpful):\n")
-	for _, entry := range results {
-		text := strings.TrimSpace(entry.item.Memory)
-		if text == "" {
-			continue
+	for _, entry := range packed.Items {
+		sb.WriteString("- ")
+		if label := memorySourceLabel(entry.Item); label != "" {
+			sb.WriteString("[")
+			sb.WriteString(label)
+			sb.WriteString("] ")
 		}
-		sb.WriteString("- [")
-		sb.WriteString(entry.namespace)
-		sb.WriteString("] ")
-		sb.WriteString(adapters.TruncateSnippet(text, memoryContextItemMaxChars))
+		sb.WriteString(entry.Snippet)
 		sb.WriteString("\n")
 	}
 	sb.WriteString("</memory-context>")
@@ -160,6 +218,21 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterCha
 	if len(req.Messages) == 0 {
 		return nil
 	}
+
+	if p.llm != nil {
+		result := runFormation(ctx, p.logger, p.llm, p.service, req)
+		p.logger.Debug("memory formation completed",
+			slog.String("bot_id", botID),
+			slog.Int("extracted", result.ExtractedFacts),
+			slog.Int("added", result.Added),
+			slog.Int("updated", result.Updated),
+			slog.Int("deleted", result.Deleted),
+			slog.Int("skipped", result.Skipped),
+		)
+		return nil
+	}
+
+	// Fallback: no LLM configured, store raw transcript (legacy path).
 	filters := map[string]any{
 		"namespace": sharedMemoryNamespace,
 		"scopeId":   botID,

@@ -15,7 +15,6 @@ func TestDedupePersistedCurrentUserMessageRemovesCurrentInboundFromHistory(t *te
 				Role:    "user",
 				Content: conversation.NewTextContent("---\nmessage-id: qq-msg-1\nchannel: qq\n---\nhello"),
 			},
-			RouteID:           "route-1",
 			ExternalMessageID: "qq-msg-1",
 			Platform:          "qq",
 			SenderChannelID:   "channel-identity-1",

@@ -63,7 +63,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Badge, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memoh/ui'
+import { Badge, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 
 defineProps<{

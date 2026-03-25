@@ -15,7 +15,7 @@ const createChat = `-- name: CreateChat :one
 SELECT
   b.id AS id,
   b.id AS bot_id,
-  (COALESCE(NULLIF($1::text, ''), CASE WHEN b.type = 'public' THEN 'group' ELSE 'direct' END))::text AS kind,
+  (COALESCE(NULLIF($1::text, ''), 'direct'))::text AS kind,
   CASE WHEN $1 = 'thread' THEN $2::uuid ELSE NULL::uuid END AS parent_chat_id,
   COALESCE(NULLIF($3::text, ''), b.display_name) AS title,
   COALESCE($4::uuid, b.owner_user_id) AS created_by_user_id,
@@ -80,6 +80,10 @@ const deleteChat = `-- name: DeleteChat :exec
 WITH deleted_messages AS (
   DELETE FROM bot_history_messages
   WHERE bot_id = $1
+),
+deleted_sessions AS (
+  DELETE FROM bot_sessions
+  WHERE bot_id = $1
 )
 DELETE FROM bot_channel_routes bcr
 WHERE bcr.bot_id = $1
@@ -94,7 +98,7 @@ const getChatByID = `-- name: GetChatByID :one
 SELECT
   b.id AS id,
   b.id AS bot_id,
-  CASE WHEN b.type = 'public' THEN 'group' ELSE 'direct' END AS kind,
+  'direct'::text AS kind,
   NULL::uuid AS parent_chat_id,
   b.display_name AS title,
   b.owner_user_id AS created_by_user_id,
@@ -264,7 +268,7 @@ const listChatsByBotAndUser = `-- name: ListChatsByBotAndUser :many
 SELECT
   b.id AS id,
   b.id AS bot_id,
-  CASE WHEN b.type = 'public' THEN 'group' ELSE 'direct' END AS kind,
+  'direct'::text AS kind,
   NULL::uuid AS parent_chat_id,
   b.display_name AS title,
   b.owner_user_id AS created_by_user_id,
@@ -332,7 +336,7 @@ const listThreadsByParent = `-- name: ListThreadsByParent :many
 SELECT
   b.id AS id,
   b.id AS bot_id,
-  CASE WHEN b.type = 'public' THEN 'group' ELSE 'direct' END AS kind,
+  'direct'::text AS kind,
   NULL::uuid AS parent_chat_id,
   b.display_name AS title,
   b.owner_user_id AS created_by_user_id,
@@ -394,7 +398,7 @@ const listVisibleChatsByBotAndUser = `-- name: ListVisibleChatsByBotAndUser :man
 SELECT
   b.id AS id,
   b.id AS bot_id,
-  CASE WHEN b.type = 'public' THEN 'group' ELSE 'direct' END AS kind,
+  'direct'::text AS kind,
   NULL::uuid AS parent_chat_id,
   b.display_name AS title,
   b.owner_user_id AS created_by_user_id,
@@ -405,7 +409,7 @@ SELECT
   'participant'::text AS access_mode,
   (CASE
     WHEN b.owner_user_id = $1 THEN 'owner'
-    ELSE COALESCE(bm.role, ''::text)
+    ELSE ''::text
   END)::text AS participant_role,
   NULL::timestamptz AS last_observed_at
 FROM bots b
@@ -507,12 +511,12 @@ WITH updated AS (
   SET display_name = $1,
       updated_at = now()
   WHERE bots.id = $2
-  RETURNING id, owner_user_id, type, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, max_inbox_items, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id, tts_model_id, browser_context_id, metadata, created_at, updated_at
+  RETURNING id, owner_user_id, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id, compaction_enabled, compaction_threshold, compaction_model_id, title_model_id, tts_model_id, browser_context_id, metadata, created_at, updated_at
 )
 SELECT
   updated.id AS id,
   updated.id AS bot_id,
-  CASE WHEN updated.type = 'public' THEN 'group' ELSE 'direct' END AS kind,
+  'direct'::text AS kind,
   NULL::uuid AS parent_chat_id,
   updated.display_name AS title,
   updated.owner_user_id AS created_by_user_id,

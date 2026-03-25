@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 
-	pb "github.com/memohai/memoh/internal/mcp/mcpcontainer"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
 var terminalUpgrader = websocket.Upgrader{

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Input } from '@memoh/ui'
+import { Button, Input } from '@memohai/ui'
 
 export interface KeyValuePair {
   key: string

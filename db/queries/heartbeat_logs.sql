@@ -1,7 +1,7 @@
 -- name: CreateHeartbeatLog :one
-INSERT INTO bot_heartbeat_logs (bot_id, started_at)
-VALUES ($1, now())
-RETURNING id, bot_id, status, result_text, error_message, usage, started_at, completed_at;
+INSERT INTO bot_heartbeat_logs (bot_id, session_id, started_at)
+VALUES ($1, sqlc.narg(session_id)::uuid, now())
+RETURNING id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at;
 
 -- name: CompleteHeartbeatLog :one
 UPDATE bot_heartbeat_logs
@@ -12,10 +12,10 @@ SET status = $2,
     model_id = $6,
     completed_at = now()
 WHERE id = $1
-RETURNING id, bot_id, status, result_text, error_message, usage, model_id, started_at, completed_at;
+RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at;
 
 -- name: ListHeartbeatLogsByBot :many
-SELECT id, bot_id, status, result_text, error_message, usage, started_at, completed_at
+SELECT id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM bot_heartbeat_logs
 WHERE bot_id = $1
   AND ($2::timestamptz IS NULL OR started_at < $2::timestamptz)

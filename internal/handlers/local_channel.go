@@ -10,7 +10,9 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -24,6 +26,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/media"
+	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 // localTtsSynthesizer synthesizes text to speech audio.
@@ -244,6 +247,7 @@ var wsUpgrader = websocket.Upgrader{
 type wsClientMessage struct {
 	Type        string            `json:"type"`
 	Text        string            `json:"text,omitempty"`
+	SessionID   string            `json:"session_id,omitempty"`
 	Attachments []json.RawMessage `json:"attachments,omitempty"`
 }
 
@@ -395,12 +399,18 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			activeCancel = streamCancel
 			eventCh := make(chan flow.WSStreamEvent, 64)
 
+			var (
+				outboundAssetMu   sync.Mutex
+				outboundAssetRefs []messagepkg.AssetRef
+			)
+
 			go func() {
 				defer streamCancel()
 				defer close(eventCh)
 				req := conversation.ChatRequest{
 					BotID:                   botID,
 					ChatID:                  botID,
+					SessionID:               strings.TrimSpace(msg.SessionID),
 					Token:                   bearerToken,
 					UserID:                  channelIdentityID,
 					SourceChannelIdentityID: channelIdentityID,
@@ -420,9 +430,21 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 			go func() {
 				for event := range eventCh {
-					for _, processed := range h.processWSEvent(streamCtx, botID, event) {
-						writer.Send(processed)
+					processed := h.processWSEvent(streamCtx, botID, event)
+					for _, p := range processed {
+						writer.Send(p)
+						if refs := extractAssetRefsFromProcessedEvent(p); len(refs) > 0 {
+							outboundAssetMu.Lock()
+							outboundAssetRefs = append(outboundAssetRefs, refs...)
+							outboundAssetMu.Unlock()
+						}
 					}
+				}
+				outboundAssetMu.Lock()
+				refs := outboundAssetRefs
+				outboundAssetMu.Unlock()
+				if len(refs) > 0 {
+					h.resolver.LinkOutboundAssets(context.WithoutCancel(ctx), botID, refs)
 				}
 			}()
 
@@ -453,7 +475,7 @@ func (*LocalChannelHandler) requireChannelIdentityID(c echo.Context) (string, er
 }
 
 func (h *LocalChannelHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowGuest: true})
+	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID)
 }
 
 // ---------------------------------------------------------------------------
@@ -650,10 +672,40 @@ func (h *LocalChannelHandler) buildTtsAttachment(ctx context.Context, botID, con
 
 func applyAssetToItem(item map[string]any, botID string, asset media.Asset) map[string]any {
 	result := maps.Clone(item)
+
+	sourcePath := strings.TrimSpace(itemStr(item, "path"))
+	sourceURL := strings.TrimSpace(itemStr(item, "url"))
+
+	existingName, _ := result["name"].(string)
+	if strings.TrimSpace(existingName) == "" {
+		if sourcePath != "" {
+			result["name"] = filepath.Base(sourcePath)
+		} else if sourceURL != "" {
+			result["name"] = filepath.Base(sourceURL)
+		}
+	}
+
 	delete(result, "path")
 	result["url"] = ""
 	applyAssetToMap(result, botID, asset)
+
+	if meta, ok := result["metadata"].(map[string]any); ok {
+		if n, _ := result["name"].(string); n != "" {
+			meta["name"] = n
+		}
+		if sourcePath != "" {
+			meta["source_path"] = sourcePath
+		}
+		if sourceURL != "" {
+			meta["source_url"] = sourceURL
+		}
+	}
 	return result
+}
+
+func itemStr(m map[string]any, key string) string {
+	v, _ := m[key].(string)
+	return v
 }
 
 func applyAssetToMap(m map[string]any, botID string, asset media.Asset) {
@@ -668,4 +720,49 @@ func applyAssetToMap(m map[string]any, botID string, asset media.Asset) {
 	if size, _ := m["size"].(float64); size == 0 && asset.SizeBytes > 0 {
 		m["size"] = asset.SizeBytes
 	}
+}
+
+// extractAssetRefsFromProcessedEvent parses a processed attachment_delta
+// event to collect asset refs for post-persist linking.
+func extractAssetRefsFromProcessedEvent(event json.RawMessage) []messagepkg.AssetRef {
+	var envelope struct {
+		Type        string `json:"type"`
+		Attachments []struct {
+			ContentHash string         `json:"content_hash"`
+			Name        string         `json:"name"`
+			Mime        string         `json:"mime"`
+			Size        float64        `json:"size"`
+			Metadata    map[string]any `json:"metadata"`
+		} `json:"attachments"`
+	}
+	if err := json.Unmarshal(event, &envelope); err != nil || envelope.Type != "attachment_delta" {
+		return nil
+	}
+	var refs []messagepkg.AssetRef
+	for i, att := range envelope.Attachments {
+		ch := strings.TrimSpace(att.ContentHash)
+		if ch == "" {
+			continue
+		}
+		name := strings.TrimSpace(att.Name)
+		if name == "" && att.Metadata != nil {
+			name, _ = att.Metadata["name"].(string)
+		}
+		ref := messagepkg.AssetRef{
+			ContentHash: ch,
+			Role:        "attachment",
+			Ordinal:     i,
+			Name:        name,
+			Mime:        strings.TrimSpace(att.Mime),
+			SizeBytes:   int64(att.Size),
+			Metadata:    att.Metadata,
+		}
+		if att.Metadata != nil {
+			if sk, ok := att.Metadata["storage_key"].(string); ok {
+				ref.StorageKey = sk
+			}
+		}
+		refs = append(refs, ref)
+	}
+	return refs
 }

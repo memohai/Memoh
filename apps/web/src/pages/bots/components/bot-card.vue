@@ -40,16 +40,6 @@
           </Badge>
         </div>
         <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-          <span
-            v-if="bot.type"
-            class="truncate"
-          >
-            {{ botTypeLabel }}
-          </span>
-          <span
-            v-if="bot.type && formattedDate"
-            class="text-muted-foreground/60"
-          >·</span>
           <span v-if="formattedDate">
             {{ $t('common.createdAt') }} {{ formattedDate }}
           </span>
@@ -68,11 +58,11 @@ import {
   AvatarImage,
   AvatarFallback,
   Badge,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import type { BotsBot } from '@memoh/sdk'
+import type { BotsBot } from '@memohai/sdk'
 import { formatDate } from '@/utils/date-time'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
@@ -94,12 +84,6 @@ const formattedDate = computed(() => {
 })
 
 const { hasIssue, isPending, issueTitle, statusLabel, statusVariant } = useBotStatusMeta(botRef, t)
-
-const botTypeLabel = computed(() => {
-  const type = props.bot.type
-  if (type === 'personal' || type === 'public') return t('bots.types.' + type)
-  return type ?? ''
-})
 
 function onOpenDetail() {
   if (isPending.value) return

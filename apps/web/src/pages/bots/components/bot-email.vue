@@ -209,7 +209,7 @@ import {
   Separator,
   Spinner,
   Switch,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { computed, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
@@ -221,8 +221,8 @@ import {
   putBotsByBotIdEmailBindingsById,
   deleteBotsByBotIdEmailBindingsById,
   getBotsByBotIdEmailOutbox,
-} from '@memoh/sdk'
-import type { EmailProviderResponse, EmailBindingResponse, EmailOutboxItemResponse } from '@memoh/sdk'
+} from '@memohai/sdk'
+import type { EmailProviderResponse, EmailBindingResponse, EmailOutboxItemResponse } from '@memohai/sdk'
 import { formatDateTime } from '@/utils/date-time'
 
 const props = defineProps<{ botId: string }>()
@@ -273,7 +273,7 @@ async function loadOutbox() {
       query: { limit: 50, offset: 0 },
       throwOnError: true,
     })
-    outboxItems.value = (data as any)?.items ?? []
+    outboxItems.value = (data as Record<string, unknown>)?.items as typeof outboxItems.value ?? []
   } finally {
     outboxLoading.value = false
   }
@@ -282,7 +282,7 @@ async function loadOutbox() {
 async function handleAddBinding(provider: EmailProviderResponse) {
   addingBinding.value = true
   addingProviderId.value = provider.id!
-  const emailAddr = (provider.config as any)?.username || provider.name || ''
+  const emailAddr = (provider.config as Record<string, unknown>)?.username as string || provider.name || ''
   try {
     await postBotsByBotIdEmailBindings({
       path: { bot_id: props.botId },
@@ -297,8 +297,8 @@ async function handleAddBinding(provider: EmailProviderResponse) {
     })
     await loadBindings()
     toast.success(t('bots.email.bindSuccess'))
-  } catch (e: any) {
-    toast.error(e?.message || t('common.saveFailed'))
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
   } finally {
     addingBinding.value = false
     addingProviderId.value = ''
@@ -313,8 +313,8 @@ async function handleTogglePerm(binding: EmailBindingResponse, field: string, va
       throwOnError: true,
     })
     await loadBindings()
-  } catch (e: any) {
-    toast.error(e?.message || t('common.saveFailed'))
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
   }
 }
 
@@ -327,8 +327,8 @@ async function handleDeleteBinding(id: string) {
     })
     await loadBindings()
     toast.success(t('bots.email.unbindSuccess'))
-  } catch (e: any) {
-    toast.error(e?.message || t('common.saveFailed'))
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
   } finally {
     deletingId.value = ''
   }

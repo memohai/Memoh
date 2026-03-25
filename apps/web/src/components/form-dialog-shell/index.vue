@@ -54,8 +54,8 @@ import {
   DialogTitle,
   DialogTrigger,
   Spinner
-} from '@memoh/ui'
-import { Form, Field } from 'vee-validate'
+} from '@memohai/ui'
+
 
 withDefaults(defineProps<{
   title: string

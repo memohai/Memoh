@@ -1,9 +1,10 @@
-import { client } from '@memoh/sdk/client'
+import { client } from '@memohai/sdk/client'
 import type { StreamEvent, MessageStreamEvent, ChatAttachment, StreamEventHandler } from './useChat.types'
 
 export interface WSClientMessage {
   type: 'message' | 'abort'
   text?: string
+  session_id?: string
   attachments?: ChatAttachment[]
 }
 

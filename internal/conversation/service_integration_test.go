@@ -80,7 +80,6 @@ func createBotForChatPresence(ctx context.Context, queries *sqlc.Queries, ownerU
 	}
 	row, err := queries.CreateBot(ctx, sqlc.CreateBotParams{
 		OwnerUserID: pgOwnerID,
-		Type:        "personal",
 		DisplayName: pgtype.Text{String: "presence-test-bot", Valid: true},
 		IsActive:    true,
 		Metadata:    meta,
@@ -137,7 +136,6 @@ func setupObservedChatScenario(t *testing.T) (chatPresenceFixture, string, strin
 	_, err = fixture.messageSvc.Persist(ctx, message.PersistInput{
 		BotID:                   botID,
 		SenderChannelIdentityID: observedChannelIdentity.ID,
-		Platform:                "feishu",
 		ExternalMessageID:       fmt.Sprintf("ext-msg-%d", time.Now().UnixNano()),
 		Role:                    "user",
 		Content:                 []byte(`{"content":"hello from observed channelIdentity"}`),

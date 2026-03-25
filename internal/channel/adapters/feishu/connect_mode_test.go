@@ -16,9 +16,10 @@ func TestConnectWebhookModeDoesNotStartWebsocket(t *testing.T) {
 		BotID:       "bot-1",
 		ChannelType: Type,
 		Credentials: map[string]any{
-			"app_id":       "app",
-			"app_secret":   "secret",
-			"inbound_mode": "webhook",
+			"app_id":             "app",
+			"app_secret":         "secret",
+			"verification_token": "verify-token",
+			"inbound_mode":       "webhook",
 		},
 	}
 	conn, err := adapter.Connect(context.Background(), cfg, func(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage) error {

@@ -22,9 +22,9 @@ jwt_expires_in = "168h"
 socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
 
-[mcp]
+[workspace]
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
-image = "memohai/mcp:latest"
+default_image = "debian:bookworm-slim"
 snapshotter = "overlayfs"
 data_root = "data"
 cni_bin_dir = "/opt/cni/bin"
@@ -46,10 +46,8 @@ timeout_seconds = 10
 [sparse]
 base_url = "http://127.0.0.1:8085"
 
-[agent_gateway]
-host = "127.0.0.1"
-port = 8081
-server_addr = ":8080"
+[registry]
+providers_dir = "conf/providers"
 
 [browser_gateway]
 host = "127.0.0.1"

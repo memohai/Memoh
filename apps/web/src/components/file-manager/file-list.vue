@@ -8,8 +8,8 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from '@memoh/ui'
-import type { HandlersFsFileInfo } from '@memoh/sdk'
+} from '@memohai/ui'
+import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { formatFileSize, formatRelativeTime } from './utils'
 
 const props = defineProps<{

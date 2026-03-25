@@ -8,7 +8,7 @@ import (
 
 // RouteHubBroadcaster implements channel.StreamObserver by forwarding events
 // to the RouteHub. This enables cross-channel visibility: events from external
-// channels (Telegram, Feishu, …) are mirrored to WebUI/CLI subscribers.
+// channels (Telegram, Feishu, …) are mirrored to RouteHub subscribers.
 type RouteHubBroadcaster struct {
 	hub *RouteHub
 }

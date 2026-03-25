@@ -96,14 +96,21 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 	if int64(len(payload)) > webhookMaxBodyBytes {
 		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, fmt.Sprintf("payload too large: max %d bytes", webhookMaxBodyBytes))
 	}
-	if err := validateWebhookCallbackAuth(payload, feishuCfg); err != nil {
-		return err
-	}
 
 	botOpenID := h.adapter.resolveBotOpenID(context.WithoutCancel(c.Request().Context()), cfg)
 
 	reqCtx := c.Request().Context()
 	eventDispatcher := dispatcher.NewEventDispatcher(feishuCfg.VerificationToken, feishuCfg.EncryptKey)
+	webhookReq, err := inspectWebhookRequest(reqCtx, eventDispatcher, c.Request(), payload)
+	if err != nil {
+		return err
+	}
+	if err := validateWebhookCallbackAuth(webhookReq, feishuCfg); err != nil {
+		return err
+	}
+	if challengeResp := buildWebhookChallengeResponse(webhookReq); challengeResp != nil {
+		return writeEventResponse(c, challengeResp)
+	}
 	eventDispatcher.OnP2MessageReceiveV1(func(_ context.Context, event *larkim.P2MessageReceiveV1) error {
 		msg := extractFeishuInbound(event, botOpenID, h.adapter.logger)
 		if strings.TrimSpace(msg.Message.PlainText()) == "" && len(msg.Message.Attachments) == 0 {
@@ -123,6 +130,75 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 	if resp == nil {
 		return c.NoContent(http.StatusOK)
 	}
+	return writeEventResponse(c, resp)
+}
+
+func inspectWebhookRequest(ctx context.Context, eventDispatcher *dispatcher.EventDispatcher, req *http.Request, payload []byte) (larkevent.EventFuzzy, error) {
+	plainPayload, err := parseWebhookPayload(ctx, eventDispatcher, req, payload)
+	if err != nil {
+		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid feishu webhook payload: %v", err))
+	}
+
+	var fuzzy larkevent.EventFuzzy
+	if err := json.Unmarshal([]byte(plainPayload), &fuzzy); err != nil {
+		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid feishu webhook payload: %v", err))
+	}
+	return fuzzy, nil
+}
+
+func validateWebhookCallbackAuth(fuzzy larkevent.EventFuzzy, cfg Config) error {
+	expectedToken := strings.TrimSpace(cfg.VerificationToken)
+	encryptKey := strings.TrimSpace(cfg.EncryptKey)
+	if expectedToken == "" && encryptKey == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "feishu webhook requires encrypt_key or verification_token")
+	}
+
+	requestToken := webhookRequestToken(fuzzy)
+	if expectedToken == "" {
+		return nil
+	}
+	if requestToken == "" || requestToken != expectedToken {
+		return echo.NewHTTPError(http.StatusUnauthorized, "invalid feishu webhook token")
+	}
+	return nil
+}
+
+func buildWebhookChallengeResponse(fuzzy larkevent.EventFuzzy) *larkevent.EventResp {
+	if webhookRequestType(fuzzy) != larkevent.ReqTypeChallenge {
+		return nil
+	}
+	return &larkevent.EventResp{
+		Header:     http.Header{larkevent.ContentTypeHeader: []string{larkevent.DefaultContentType}},
+		Body:       []byte(fmt.Sprintf(larkevent.ChallengeResponseFormat, fuzzy.Challenge)),
+		StatusCode: http.StatusOK,
+	}
+}
+
+func webhookRequestToken(fuzzy larkevent.EventFuzzy) string {
+	requestToken := strings.TrimSpace(fuzzy.Token)
+	if fuzzy.Header != nil && strings.TrimSpace(fuzzy.Header.Token) != "" {
+		requestToken = strings.TrimSpace(fuzzy.Header.Token)
+	}
+	return requestToken
+}
+
+func webhookRequestType(fuzzy larkevent.EventFuzzy) larkevent.ReqType {
+	return larkevent.ReqType(strings.TrimSpace(fuzzy.Type))
+}
+
+func parseWebhookPayload(ctx context.Context, eventDispatcher *dispatcher.EventDispatcher, req *http.Request, payload []byte) (string, error) {
+	cipherPayload, err := eventDispatcher.ParseReq(ctx, &larkevent.EventReq{
+		Header:     req.Header,
+		Body:       payload,
+		RequestURI: req.RequestURI,
+	})
+	if err != nil {
+		return "", err
+	}
+	return eventDispatcher.DecryptEvent(ctx, cipherPayload)
+}
+
+func writeEventResponse(c echo.Context, resp *larkevent.EventResp) error {
 	for key, values := range resp.Header {
 		for _, value := range values {
 			c.Response().Header().Add(key, value)
@@ -132,34 +208,8 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 	if len(resp.Body) == 0 {
 		return nil
 	}
-	_, err = c.Response().Write(resp.Body)
+	_, err := c.Response().Write(resp.Body)
 	return err
-}
-
-func validateWebhookCallbackAuth(payload []byte, cfg Config) error {
-	if strings.TrimSpace(cfg.EncryptKey) != "" {
-		// Lark SDK signature verification is enabled only when encryptKey is configured.
-		return nil
-	}
-	var fuzzy larkevent.EventFuzzy
-	if err := json.Unmarshal(payload, &fuzzy); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid feishu webhook payload: %v", err))
-	}
-	if larkevent.ReqType(strings.TrimSpace(fuzzy.Type)) == larkevent.ReqTypeChallenge {
-		return nil
-	}
-	expectedToken := strings.TrimSpace(cfg.VerificationToken)
-	if expectedToken == "" {
-		return echo.NewHTTPError(http.StatusForbidden, "feishu webhook requires verification_token when encrypt_key is empty")
-	}
-	requestToken := strings.TrimSpace(fuzzy.Token)
-	if fuzzy.Header != nil && strings.TrimSpace(fuzzy.Header.Token) != "" {
-		requestToken = strings.TrimSpace(fuzzy.Header.Token)
-	}
-	if requestToken == "" || requestToken != expectedToken {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid feishu webhook token")
-	}
-	return nil
 }
 
 func (h *WebhookHandler) findConfigByID(ctx context.Context, configID string) (channel.ChannelConfig, error) {

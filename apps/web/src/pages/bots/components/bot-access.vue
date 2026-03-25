@@ -165,6 +165,7 @@
             <NativeSelect
               v-else
               v-model="whitelistSelection.sourceChannel"
+              :disabled="isObservedConversationLocked(whitelistSelection)"
               class="h-9 w-full text-sm"
             >
               <option value="">
@@ -184,6 +185,7 @@
             <Label>{{ $t('bots.access.conversationType') }}</Label>
             <NativeSelect
               v-model="whitelistSelection.sourceConversationType"
+              :disabled="isObservedConversationLocked(whitelistSelection)"
               class="h-9 w-full text-sm"
             >
               <option value="">
@@ -201,7 +203,10 @@
             </NativeSelect>
           </div>
 
-          <div class="space-y-2 md:col-span-2">
+          <div
+            v-if="whitelistSelection.sourceConversationType !== 'private'"
+            class="space-y-2 md:col-span-2"
+          >
             <Label>{{ $t('bots.access.observedConversation') }}</Label>
             <SearchableSelectPopover
               v-if="whitelistSelection.channelIdentityId"
@@ -229,18 +234,26 @@
             </p>
           </div>
 
-          <div class="space-y-2">
+          <div
+            v-if="whitelistSelection.sourceConversationType !== 'private'"
+            class="space-y-2"
+          >
             <Label>{{ $t('bots.access.conversationId') }}</Label>
             <Input
               v-model="whitelistSelection.sourceConversationId"
+              :disabled="isObservedConversationLocked(whitelistSelection)"
               :placeholder="$t('bots.access.conversationIdPlaceholder')"
             />
           </div>
 
-          <div class="space-y-2">
+          <div
+            v-if="whitelistSelection.sourceConversationType !== 'private'"
+            class="space-y-2"
+          >
             <Label>{{ $t('bots.access.threadId') }}</Label>
             <Input
               v-model="whitelistSelection.sourceThreadId"
+              :disabled="isObservedConversationLocked(whitelistSelection)"
               :placeholder="$t('bots.access.threadIdPlaceholder')"
             />
           </div>
@@ -447,6 +460,7 @@
             <NativeSelect
               v-else
               v-model="blacklistSelection.sourceChannel"
+              :disabled="isObservedConversationLocked(blacklistSelection)"
               class="h-9 w-full text-sm"
             >
               <option value="">
@@ -466,6 +480,7 @@
             <Label>{{ $t('bots.access.conversationType') }}</Label>
             <NativeSelect
               v-model="blacklistSelection.sourceConversationType"
+              :disabled="isObservedConversationLocked(blacklistSelection)"
               class="h-9 w-full text-sm"
             >
               <option value="">
@@ -483,7 +498,10 @@
             </NativeSelect>
           </div>
 
-          <div class="space-y-2 md:col-span-2">
+          <div
+            v-if="blacklistSelection.sourceConversationType !== 'private'"
+            class="space-y-2 md:col-span-2"
+          >
             <Label>{{ $t('bots.access.observedConversation') }}</Label>
             <SearchableSelectPopover
               v-if="blacklistSelection.channelIdentityId"
@@ -511,18 +529,26 @@
             </p>
           </div>
 
-          <div class="space-y-2">
+          <div
+            v-if="blacklistSelection.sourceConversationType !== 'private'"
+            class="space-y-2"
+          >
             <Label>{{ $t('bots.access.conversationId') }}</Label>
             <Input
               v-model="blacklistSelection.sourceConversationId"
+              :disabled="isObservedConversationLocked(blacklistSelection)"
               :placeholder="$t('bots.access.conversationIdPlaceholder')"
             />
           </div>
 
-          <div class="space-y-2">
+          <div
+            v-if="blacklistSelection.sourceConversationType !== 'private'"
+            class="space-y-2"
+          >
             <Label>{{ $t('bots.access.threadId') }}</Label>
             <Input
               v-model="blacklistSelection.sourceThreadId"
+              :disabled="isObservedConversationLocked(blacklistSelection)"
               :placeholder="$t('bots.access.threadIdPlaceholder')"
             />
           </div>
@@ -622,7 +648,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Avatar, AvatarFallback, AvatarImage, Button, Input, Label, NativeSelect, Separator, Spinner, Switch } from '@memoh/ui'
+import { Avatar, AvatarFallback, AvatarImage, Button, Input, Label, NativeSelect, Separator, Spinner, Switch } from '@memohai/ui'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
@@ -638,7 +664,7 @@ import {
   putBotsByBotIdBlacklist,
   putBotsByBotIdSettings,
   putBotsByBotIdWhitelist,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import type {
   AclChannelIdentityCandidate,
   AclObservedConversationCandidate,
@@ -646,7 +672,7 @@ import type {
   AclSourceScope,
   AclUpsertRuleRequest,
   AclUserCandidate,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -716,6 +742,16 @@ function bindSelectionWatchers(selection: RuleSelection) {
     if (value !== previous) {
       selection.observedConversationRouteId = ''
       selection.sourceConversationId = ''
+      selection.sourceThreadId = ''
+    }
+  })
+  watch(() => selection.sourceConversationType, (value) => {
+    if (value === 'private') {
+      selection.observedConversationRouteId = ''
+      selection.sourceConversationId = ''
+      selection.sourceThreadId = ''
+    }
+    if (value !== 'thread') {
       selection.sourceThreadId = ''
     }
   })
@@ -939,12 +975,21 @@ function buildSourceScope(selection: RuleSelection): AclSourceScope | undefined 
 function normalizePayload(selection: RuleSelection): AclUpsertRuleRequest | null {
   const user_id = selection.userId.trim()
   const channel_identity_id = selection.channelIdentityId.trim()
+  const sourceConversationType = selection.sourceConversationType.trim()
   if ((user_id && channel_identity_id) || (!user_id && !channel_identity_id)) {
     toast.error(t('bots.access.validation'))
     return null
   }
+  if (selection.sourceConversationId.trim() && !['group', 'thread'].includes(sourceConversationType)) {
+    toast.error(t('bots.access.validationConversationRequiresGroupOrThread'))
+    return null
+  }
   if (selection.sourceThreadId.trim() && !selection.sourceConversationId.trim()) {
     toast.error(t('bots.access.validationThreadRequiresConversation'))
+    return null
+  }
+  if (selection.sourceThreadId.trim() && sourceConversationType !== 'thread') {
+    toast.error(t('bots.access.validationThreadRequiresThreadType'))
     return null
   }
   if ((selection.sourceConversationId.trim() || selection.sourceThreadId.trim()) && !selection.sourceChannel.trim()) {
@@ -1037,6 +1082,10 @@ function clearSourceScope(selection: RuleSelection) {
   selection.sourceConversationType = ''
   selection.sourceConversationId = ''
   selection.sourceThreadId = ''
+}
+
+function isObservedConversationLocked(selection: RuleSelection): boolean {
+  return !!selection.observedConversationRouteId
 }
 
 function formatRuleLabel(item: AclRule): string {

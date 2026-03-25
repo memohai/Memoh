@@ -469,7 +469,7 @@ import {
   Label,
   RadioGroup,
   RadioGroupItem,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import {
   getBotsByBotIdMemory,
   getBotsByBotIdMemoryStatus,
@@ -478,14 +478,14 @@ import {
   postBotsByBotIdMemoryCompact,
   getBotsByBotIdMessages,
   postBotsByBotIdMemorySearch,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import type {
   AdaptersCdfPoint as MemoryCdfPoint,
   AdaptersMemoryItem,
   AdaptersMemoryStatusResponse,
   AdaptersTopKBucket as MemoryTopKBucket,
   MessageMessage,
-} from '@memoh/sdk'
+} from '@memohai/sdk'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'

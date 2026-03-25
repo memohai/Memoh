@@ -1,2 +1,2 @@
-# @memoh/config
+# @memohai/config
 

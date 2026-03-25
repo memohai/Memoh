@@ -220,7 +220,7 @@ func TestSparseRuntimeAddWritesSourceAndSupportsRecall(t *testing.T) {
 	if _, ok := store.items[item.ID]; !ok {
 		t.Fatalf("expected memory %q to be written to markdown source", item.ID)
 	}
-	point, ok := index.points[sparsePointID("bot-1", item.ID)]
+	point, ok := index.points[runtimePointID("bot-1", item.ID)]
 	if !ok {
 		t.Fatalf("expected qdrant point for source memory %q", item.ID)
 	}
@@ -258,14 +258,14 @@ func TestSparseRuntimeRebuildSyncsSourceAndRemovesStalePoints(t *testing.T) {
 		storefs.MemoryItem{
 			ID:        "bot-1:mem_1",
 			Memory:    "Ran likes tea",
-			Hash:      sparseRuntimeHash("Ran likes tea"),
+			Hash:      runtimeHash("Ran likes tea"),
 			CreatedAt: "2026-03-13T09:00:00Z",
 			UpdatedAt: "2026-03-13T09:00:00Z",
 		},
 		storefs.MemoryItem{
 			ID:        "bot-1:mem_2",
 			Memory:    "Ran works in Berlin",
-			Hash:      sparseRuntimeHash("Ran works in Berlin"),
+			Hash:      runtimeHash("Ran works in Berlin"),
 			CreatedAt: "2026-03-13T10:00:00Z",
 			UpdatedAt: "2026-03-13T10:00:00Z",
 		},
@@ -276,8 +276,8 @@ func TestSparseRuntimeRebuildSyncsSourceAndRemovesStalePoints(t *testing.T) {
 		store:   store,
 	}
 
-	index.points[sparsePointID("bot-1", "bot-1:mem_1")] = qdrantclient.SearchResult{
-		ID: sparsePointID("bot-1", "bot-1:mem_1"),
+	index.points[runtimePointID("bot-1", "bot-1:mem_1")] = qdrantclient.SearchResult{
+		ID: runtimePointID("bot-1", "bot-1:mem_1"),
 		Payload: map[string]string{
 			"bot_id":          "bot-1",
 			"memory":          "Ran likes tea",
@@ -287,8 +287,8 @@ func TestSparseRuntimeRebuildSyncsSourceAndRemovesStalePoints(t *testing.T) {
 			"updated_at":      "2026-03-13T09:00:00Z",
 		},
 	}
-	index.points[sparsePointID("bot-1", "bot-1:stale")] = qdrantclient.SearchResult{
-		ID: sparsePointID("bot-1", "bot-1:stale"),
+	index.points[runtimePointID("bot-1", "bot-1:stale")] = qdrantclient.SearchResult{
+		ID: runtimePointID("bot-1", "bot-1:stale"),
 		Payload: map[string]string{
 			"bot_id":          "bot-1",
 			"memory":          "stale memory",
@@ -312,7 +312,7 @@ func TestSparseRuntimeRebuildSyncsSourceAndRemovesStalePoints(t *testing.T) {
 	if result.RestoredCount != 2 {
 		t.Fatalf("expected restored_count=2, got %d", result.RestoredCount)
 	}
-	if _, ok := index.points[sparsePointID("bot-1", "bot-1:stale")]; ok {
+	if _, ok := index.points[runtimePointID("bot-1", "bot-1:stale")]; ok {
 		t.Fatal("expected stale qdrant point to be removed")
 	}
 }
@@ -326,7 +326,7 @@ func TestSparseRuntimeGetAllIncludesExplainStats(t *testing.T) {
 		storefs.MemoryItem{
 			ID:        "bot-1:mem_1",
 			Memory:    "Ran likes tea",
-			Hash:      sparseRuntimeHash("Ran likes tea"),
+			Hash:      runtimeHash("Ran likes tea"),
 			CreatedAt: "2026-03-13T09:00:00Z",
 			UpdatedAt: "2026-03-13T09:00:00Z",
 		},

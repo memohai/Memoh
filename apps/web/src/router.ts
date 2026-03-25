@@ -15,7 +15,7 @@ const routes = [
     children: [
       {
         name: 'chat',
-        path: '/chat',
+        path: '/chat/:sessionId?',
         component: () => import('@/pages/chat/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.chat'),

@@ -91,12 +91,13 @@ import {
   SelectGroup,
   SelectItem,
   Label,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import { postEmailProviders, getEmailProvidersMeta } from '@memoh/sdk'
+import { postEmailProviders, getEmailProvidersMeta } from '@memohai/sdk'
+import type { EmailCreateProviderRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
@@ -116,7 +117,7 @@ const { data: providerMetas } = useQuery({
 const queryCache = useQueryCache()
 const { mutateAsync: createMutation, isLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
-    const { data: result } = await postEmailProviders({ body: data as any, throwOnError: true })
+    const { data: result } = await postEmailProviders({ body: data as EmailCreateProviderRequest, throwOnError: true })
     return result
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['email-providers'] }),

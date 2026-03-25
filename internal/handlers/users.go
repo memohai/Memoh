@@ -938,7 +938,7 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 }
 
 func (h *UsersHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.service, channelIdentityID, botID, bots.AccessPolicy{})
+	return AuthorizeBotAccess(ctx, h.botService, h.service, channelIdentityID, botID)
 }
 
 func (*UsersHandler) requireChannelIdentityID(c echo.Context) (string, error) {

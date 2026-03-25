@@ -1,0 +1,9 @@
+#!/bin/sh
+TOOLKIT=/opt/memoh/toolkit
+if [ -f /lib/ld-musl-*.so.1 ] 2>/dev/null; then
+  NODEDIR="$TOOLKIT/node-musl"
+  export LD_LIBRARY_PATH="$NODEDIR/runtime-lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+else
+  NODEDIR="$TOOLKIT/node-glibc"
+fi
+exec "$NODEDIR/bin/node" "$@"

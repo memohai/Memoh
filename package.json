@@ -1,17 +1,14 @@
 {
-  "name": "@memoh/monorepo",
+  "name": "@memohai/monorepo",
   "private": true,
-  "version": "0.5.0-beta.1",
+  "version": "0.5.0",
   "scripts": {
-    "web:dev": "pnpm --filter @memoh/web dev",
-    "web:build": "pnpm --filter @memoh/web build",
-    "web:start": "pnpm --filter @memoh/web start",
-    "docs:dev": "pnpm --filter @memoh/docs dev",
-    "docs:build": "pnpm --filter @memoh/docs build",
-    "docs:preview": "pnpm --filter @memoh/docs preview",
-    "agent:dev": "pnpm --filter @memoh/agent-gateway dev",
-    "agent:build": "pnpm --filter @memoh/agent-gateway build",
-    "agent:start": "pnpm --filter @memoh/agent-gateway start",
+    "web:dev": "pnpm --filter @memohai/web dev",
+    "web:build": "pnpm --filter @memohai/web build",
+    "web:start": "pnpm --filter @memohai/web start",
+    "docs:dev": "pnpm --filter @memohai/docs dev",
+    "docs:build": "pnpm --filter @memohai/docs build",
+    "docs:preview": "pnpm --filter @memohai/docs preview",
     "release": "bumpp",
     "generate-sdk": "openapi-ts",
     "lint": "eslint .",
@@ -29,6 +26,7 @@
     "eslint": "^9.39.2",
     "eslint-plugin-vue": "^10.6.2",
     "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.52.0",
     "vitest": "^4.0.16",
@@ -37,6 +35,11 @@
   "dependencies": {
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.8"
+  },
+  "lint-staged": {
+    "*.{vue,js,ts,md,json,scss}": [
+      "eslint --fix --concurrency=auto"   
+    ]
   },
   "pnpm": {
     "peerDependencyRules": {

@@ -87,8 +87,9 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-} from '@memoh/ui'
-import { postMemoryProviders } from '@memoh/sdk'
+} from '@memohai/ui'
+import { postMemoryProviders } from '@memohai/sdk'
+import type { AdaptersProviderType } from '@memohai/sdk'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQueryCache } from '@pinia/colada'
@@ -109,7 +110,7 @@ async function handleCreate() {
     await postMemoryProviders({
       body: {
         name: form.name.trim(),
-        provider: form.provider as any,
+        provider: form.provider as AdaptersProviderType,
         config: {},
       },
       throwOnError: true,

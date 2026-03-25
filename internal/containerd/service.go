@@ -34,6 +34,7 @@ var (
 type PullImageOptions struct {
 	Unpack      bool
 	Snapshotter string
+	OnProgress  func(PullProgress) // optional, nil = no progress reporting
 }
 
 type DeleteImageOptions struct {
@@ -138,6 +139,39 @@ func (s *DefaultService) PullImage(ctx context.Context, ref string, opts *PullIm
 	}
 	if opts != nil && opts.Snapshotter != "" {
 		pullOpts = append(pullOpts, containerd.WithPullSnapshotter(opts.Snapshotter))
+	}
+
+	// When OnProgress is set, poll content store for active download statuses.
+	if opts != nil && opts.OnProgress != nil {
+		stop := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+			cs := s.client.ContentStore()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					statuses, err := cs.ListStatuses(ctx)
+					if err != nil {
+						continue
+					}
+					layers := make([]LayerStatus, len(statuses))
+					for i, st := range statuses {
+						layers[i] = LayerStatus{
+							Ref:    st.Ref,
+							Offset: st.Offset,
+							Total:  st.Total,
+						}
+					}
+					opts.OnProgress(PullProgress{Layers: layers})
+				}
+			}
+		}()
+		defer close(stop)
 	}
 
 	img, err := s.client.Pull(ctx, ref, pullOpts...)

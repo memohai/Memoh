@@ -1,9 +1,12 @@
 -- name: CreateLlmProvider :one
-INSERT INTO llm_providers (name, base_url, api_key, metadata)
+INSERT INTO llm_providers (name, base_url, api_key, client_type, icon, enable, metadata)
 VALUES (
   sqlc.arg(name),
   sqlc.arg(base_url),
   sqlc.arg(api_key),
+  sqlc.arg(client_type),
+  sqlc.arg(icon),
+  sqlc.arg(enable),
   sqlc.arg(metadata)
 )
 RETURNING *;
@@ -24,6 +27,9 @@ SET
   name = sqlc.arg(name),
   base_url = sqlc.arg(base_url),
   api_key = sqlc.arg(api_key),
+  client_type = sqlc.arg(client_type),
+  icon = sqlc.arg(icon),
+  enable = sqlc.arg(enable),
   metadata = sqlc.arg(metadata),
   updated_at = now()
 WHERE id = sqlc.arg(id)
@@ -36,16 +42,13 @@ DELETE FROM llm_providers WHERE id = sqlc.arg(id);
 SELECT COUNT(*) FROM llm_providers;
 
 -- name: CreateModel :one
-INSERT INTO models (model_id, name, llm_provider_id, client_type, dimensions, input_modalities, supports_reasoning, type)
+INSERT INTO models (model_id, name, llm_provider_id, type, config)
 VALUES (
   sqlc.arg(model_id),
   sqlc.arg(name),
   sqlc.arg(llm_provider_id),
-  sqlc.narg(client_type),
-  sqlc.arg(dimensions),
-  sqlc.arg(input_modalities),
-  sqlc.arg(supports_reasoning),
-  sqlc.arg(type)
+  sqlc.arg(type),
+  sqlc.arg(config)
 )
 RETURNING *;
 
@@ -69,11 +72,6 @@ SELECT * FROM models
 WHERE type = sqlc.arg(type)
 ORDER BY created_at DESC;
 
--- name: ListModelsByClientType :many
-SELECT * FROM models
-WHERE client_type = sqlc.arg(client_type)
-ORDER BY created_at DESC;
-
 -- name: ListModelsByProviderID :many
 SELECT * FROM models
 WHERE llm_provider_id = sqlc.arg(llm_provider_id)
@@ -85,34 +83,23 @@ WHERE llm_provider_id = sqlc.arg(llm_provider_id)
   AND type = sqlc.arg(type)
 ORDER BY created_at DESC;
 
+-- name: ListModelsByProviderClientType :many
+SELECT m.*
+FROM models m
+JOIN llm_providers p ON m.llm_provider_id = p.id
+WHERE p.client_type = sqlc.arg(client_type)
+ORDER BY m.created_at DESC;
+
 -- name: UpdateModel :one
 UPDATE models
 SET
   model_id = sqlc.arg(model_id),
   name = sqlc.arg(name),
   llm_provider_id = sqlc.arg(llm_provider_id),
-  client_type = sqlc.narg(client_type),
-  dimensions = sqlc.arg(dimensions),
-  input_modalities = sqlc.arg(input_modalities),
-  supports_reasoning = sqlc.arg(supports_reasoning),
   type = sqlc.arg(type),
+  config = sqlc.arg(config),
   updated_at = now()
 WHERE id = sqlc.arg(id)
-RETURNING *;
-
--- name: UpdateModelByModelID :one
-UPDATE models
-SET
-  model_id = sqlc.arg(new_model_id),
-  name = sqlc.arg(name),
-  llm_provider_id = sqlc.arg(llm_provider_id),
-  client_type = sqlc.narg(client_type),
-  dimensions = sqlc.arg(dimensions),
-  input_modalities = sqlc.arg(input_modalities),
-  supports_reasoning = sqlc.arg(supports_reasoning),
-  type = sqlc.arg(type),
-  updated_at = now()
-WHERE model_id = sqlc.arg(model_id)
 RETURNING *;
 
 -- name: DeleteModel :exec
@@ -127,6 +114,48 @@ SELECT COUNT(*) FROM models;
 -- name: CountModelsByType :one
 SELECT COUNT(*) FROM models WHERE type = sqlc.arg(type);
 
+
+-- name: UpsertRegistryProvider :one
+INSERT INTO llm_providers (name, base_url, api_key, client_type, icon, enable, metadata)
+VALUES (sqlc.arg(name), sqlc.arg(base_url), '', sqlc.arg(client_type), sqlc.arg(icon), false, '{}')
+ON CONFLICT (name) DO UPDATE SET
+  icon = EXCLUDED.icon,
+  client_type = EXCLUDED.client_type,
+  updated_at = now()
+RETURNING *;
+
+-- name: UpsertRegistryModel :one
+INSERT INTO models (model_id, name, llm_provider_id, type, config)
+VALUES (sqlc.arg(model_id), sqlc.arg(name), sqlc.arg(llm_provider_id), sqlc.arg(type), sqlc.arg(config))
+ON CONFLICT (llm_provider_id, model_id) DO UPDATE SET
+  name = EXCLUDED.name,
+  type = EXCLUDED.type,
+  config = EXCLUDED.config,
+  updated_at = now()
+RETURNING *;
+
+-- name: ListEnabledModels :many
+SELECT m.*
+FROM models m
+JOIN llm_providers p ON m.llm_provider_id = p.id
+WHERE p.enable = true
+ORDER BY m.created_at DESC;
+
+-- name: ListEnabledModelsByType :many
+SELECT m.*
+FROM models m
+JOIN llm_providers p ON m.llm_provider_id = p.id
+WHERE p.enable = true
+  AND m.type = sqlc.arg(type)
+ORDER BY m.created_at DESC;
+
+-- name: ListEnabledModelsByProviderClientType :many
+SELECT m.*
+FROM models m
+JOIN llm_providers p ON m.llm_provider_id = p.id
+WHERE p.enable = true
+  AND p.client_type = sqlc.arg(client_type)
+ORDER BY m.created_at DESC;
 
 -- name: CreateModelVariant :one
 INSERT INTO model_variants (model_uuid, variant_id, weight, metadata)

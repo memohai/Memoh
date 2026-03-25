@@ -2,7 +2,6 @@ package models
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/google/uuid"
 )
@@ -14,14 +13,6 @@ const (
 	ModelTypeEmbedding ModelType = "embedding"
 )
 
-const (
-	ModelInputText  = "text"
-	ModelInputImage = "image"
-	ModelInputAudio = "audio"
-	ModelInputVideo = "video"
-	ModelInputFile  = "file"
-)
-
 type ClientType string
 
 const (
@@ -31,21 +22,31 @@ const (
 	ClientTypeGoogleGenerativeAI ClientType = "google-generative-ai"
 )
 
-type Model struct {
-	ModelID           string     `json:"model_id"`
-	Name              string     `json:"name"`
-	LlmProviderID     string     `json:"llm_provider_id"`
-	ClientType        ClientType `json:"client_type,omitempty"`
-	InputModalities   []string   `json:"input_modalities,omitempty"`
-	SupportsReasoning bool       `json:"supports_reasoning"`
-	Type              ModelType  `json:"type"`
-	Dimensions        int        `json:"dimensions"`
+const (
+	CompatVision      = "vision"
+	CompatToolCall    = "tool-call"
+	CompatImageOutput = "image-output"
+	CompatReasoning   = "reasoning"
+)
+
+// validCompatibilities enumerates accepted compatibility tokens.
+var validCompatibilities = map[string]struct{}{
+	CompatVision: {}, CompatToolCall: {}, CompatImageOutput: {}, CompatReasoning: {},
 }
 
-// validInputModalities is the set of recognised input modality tokens.
-var validInputModalities = map[string]struct{}{
-	ModelInputText: {}, ModelInputImage: {}, ModelInputAudio: {},
-	ModelInputVideo: {}, ModelInputFile: {},
+// ModelConfig holds the JSONB config stored per model.
+type ModelConfig struct {
+	Dimensions      *int     `json:"dimensions,omitempty"`
+	Compatibilities []string `json:"compatibilities,omitempty"`
+	ContextWindow   *int     `json:"context_window,omitempty"`
+}
+
+type Model struct {
+	ModelID       string      `json:"model_id"`
+	Name          string      `json:"name"`
+	LlmProviderID string      `json:"llm_provider_id"`
+	Type          ModelType   `json:"type"`
+	Config        ModelConfig `json:"config"`
 }
 
 func (m *Model) Validate() error {
@@ -61,41 +62,23 @@ func (m *Model) Validate() error {
 	if m.Type != ModelTypeChat && m.Type != ModelTypeEmbedding {
 		return errors.New("invalid model type")
 	}
-	if m.Type == ModelTypeChat {
-		if m.ClientType == "" {
-			return errors.New("client_type is required for chat models")
-		}
-		if !isValidClientType(m.ClientType) {
-			return fmt.Errorf("invalid client_type: %s", m.ClientType)
+	if m.Type == ModelTypeEmbedding {
+		if m.Config.Dimensions == nil || *m.Config.Dimensions <= 0 {
+			return errors.New("dimensions must be greater than 0 for embedding models")
 		}
 	}
-	if m.Type == ModelTypeEmbedding && m.Dimensions <= 0 {
-		return errors.New("dimensions must be greater than 0")
-	}
-	if m.Type == ModelTypeChat {
-		for _, mod := range m.InputModalities {
-			if _, ok := validInputModalities[mod]; !ok {
-				return fmt.Errorf("invalid input modality: %s", mod)
-			}
+	for _, c := range m.Config.Compatibilities {
+		if _, ok := validCompatibilities[c]; !ok {
+			return errors.New("invalid compatibility: " + c)
 		}
 	}
 	return nil
 }
 
-// HasInputModality checks whether the model supports a given input modality.
-func (m *Model) HasInputModality(mod string) bool {
-	for _, v := range m.InputModalities {
-		if v == mod {
-			return true
-		}
-	}
-	return false
-}
-
-// IsMultimodal returns true if the model supports any input modality beyond text.
-func (m *Model) IsMultimodal() bool {
-	for _, v := range m.InputModalities {
-		if v != ModelInputText {
+// HasCompatibility checks whether the model config includes the given capability.
+func (m *Model) HasCompatibility(c string) bool {
+	for _, v := range m.Config.Compatibilities {
+		if v == c {
 			return true
 		}
 	}
@@ -122,8 +105,7 @@ type GetResponse struct {
 type UpdateRequest Model
 
 type ListRequest struct {
-	Type       ModelType  `json:"type,omitempty"`
-	ClientType ClientType `json:"client_type,omitempty"`
+	Type ModelType `json:"type,omitempty"`
 }
 
 type DeleteRequest struct {
@@ -143,9 +125,10 @@ type CountResponse struct {
 type TestStatus string
 
 const (
-	TestStatusOK        TestStatus = "ok"
-	TestStatusAuthError TestStatus = "auth_error"
-	TestStatusError     TestStatus = "error"
+	TestStatusOK                TestStatus = "ok"
+	TestStatusAuthError         TestStatus = "auth_error"
+	TestStatusModelNotSupported TestStatus = "model_not_supported"
+	TestStatusError             TestStatus = "error"
 )
 
 // TestResponse is returned by POST /models/:id/test.

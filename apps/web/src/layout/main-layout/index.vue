@@ -10,7 +10,7 @@
   </section>
 </template>
 <script setup lang="ts">
-import { SidebarProvider } from '@memoh/ui'
+import { SidebarProvider } from '@memohai/ui'
 
 const sidebarDefaultOpen = document.cookie.includes('sidebar_state=true')
 </script>

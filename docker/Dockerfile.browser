@@ -6,7 +6,7 @@ WORKDIR /build
 COPY apps/browser/package.json apps/browser/bun.lock* ./apps/browser/
 COPY packages/config/package.json ./packages/config/package.json
 
-RUN echo '{"name":"@memoh/monorepo","private":true,"workspaces":["apps/*","packages/*"]}' > package.json
+RUN echo '{"name":"@memohai/monorepo","private":true,"workspaces":["apps/*","packages/*"]}' > package.json
 
 RUN cd apps/browser && bun install
 

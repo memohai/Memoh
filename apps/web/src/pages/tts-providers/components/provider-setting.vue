@@ -152,7 +152,7 @@ import {
   FormItem,
   Separator,
   Label,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ModelConfigEditor from './model-config-editor.vue'
@@ -164,8 +164,8 @@ import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import { putTtsProvidersById, deleteTtsProvidersById, getTtsProvidersMeta } from '@memoh/sdk'
-import type { TtsProviderResponse, TtsProviderMetaResponse } from '@memoh/sdk'
+import { putTtsProvidersById, deleteTtsProvidersById, getTtsProvidersMeta } from '@memohai/sdk'
+import type { TtsProviderResponse, TtsProviderMetaResponse, TtsModelInfo } from '@memohai/sdk'
 
 const { t } = useI18n()
 const curProvider = inject('curTtsProvider', ref<TtsProviderResponse>())
@@ -191,9 +191,9 @@ const currentMeta = computed<TtsProviderMetaResponse | null>(() => {
 })
 
 function getModelCapabilities(modelId: string) {
-  const meta = currentMeta.value as any
+  const meta = currentMeta.value
   if (!meta?.models) return null
-  return meta.models.find((m: any) => m.id === modelId)?.capabilities ?? null
+  return meta.models.find((m: TtsModelInfo) => m.id === modelId)?.capabilities ?? null
 }
 
 // Provider models
@@ -264,8 +264,8 @@ const handleSave = form.handleSubmit(async (values) => {
   try {
     await submitUpdate({ name: values.name })
     toast.success(t('provider.saveChanges'))
-  } catch (e: any) {
-    toast.error(e?.message || t('common.saveFailed'))
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
   }
 })
 
@@ -273,8 +273,8 @@ async function handleDelete() {
   try {
     await doDelete()
     toast.success(t('common.deleteSuccess'))
-  } catch (e: any) {
-    toast.error(e?.message || t('common.saveFailed'))
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
   }
 }
 
@@ -292,8 +292,8 @@ async function handleImportModels() {
     toast.success(t('ttsProvider.importSuccess'))
     refreshModels()
     queryCache.invalidateQueries({ key: ['tts-models'] })
-  } catch (e: any) {
-    toast.error(e?.message || t('ttsProvider.importFailed'))
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('ttsProvider.importFailed'))
   } finally {
     importLoading.value = false
   }
@@ -311,8 +311,8 @@ async function handleSaveModelConfig(modelId: string, config: Record<string, unk
     toast.success(t('provider.saveChanges'))
     refreshModels()
     queryCache.invalidateQueries({ key: ['tts-models'] })
-  } catch (e: any) {
-    toast.error(e?.message || t('common.saveFailed'))
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
   }
 }
 

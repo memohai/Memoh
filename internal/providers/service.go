@@ -10,8 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/models"
 )
 
 // Service handles provider operations.
@@ -36,12 +40,24 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
 	}
 
-	// Create provider
+	clientType := req.ClientType
+	if clientType == "" {
+		clientType = string(models.ClientTypeOpenAICompletions)
+	}
+
+	var icon pgtype.Text
+	if req.Icon != "" {
+		icon = pgtype.Text{String: req.Icon, Valid: true}
+	}
+
 	provider, err := s.queries.CreateLlmProvider(ctx, sqlc.CreateLlmProviderParams{
-		Name:     req.Name,
-		BaseUrl:  req.BaseURL,
-		ApiKey:   req.APIKey,
-		Metadata: metadataJSON,
+		Name:       req.Name,
+		BaseUrl:    req.BaseURL,
+		ApiKey:     req.APIKey,
+		ClientType: clientType,
+		Icon:       icon,
+		Enable:     true,
+		Metadata:   metadataJSON,
 	})
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("create provider: %w", err)
@@ -115,6 +131,21 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 
 	apiKey := resolveUpdatedAPIKey(existing.ApiKey, req.APIKey)
 
+	clientType := existing.ClientType
+	if req.ClientType != nil {
+		clientType = *req.ClientType
+	}
+
+	icon := existing.Icon
+	if req.Icon != nil {
+		icon = pgtype.Text{String: *req.Icon, Valid: *req.Icon != ""}
+	}
+
+	enable := existing.Enable
+	if req.Enable != nil {
+		enable = *req.Enable
+	}
+
 	metadata := existing.Metadata
 	if req.Metadata != nil {
 		metadataJSON, err := json.Marshal(req.Metadata)
@@ -126,11 +157,14 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 
 	// Update provider
 	updated, err := s.queries.UpdateLlmProvider(ctx, sqlc.UpdateLlmProviderParams{
-		ID:       providerID,
-		Name:     name,
-		BaseUrl:  baseURL,
-		ApiKey:   apiKey,
-		Metadata: metadata,
+		ID:         providerID,
+		Name:       name,
+		BaseUrl:    baseURL,
+		ApiKey:     apiKey,
+		ClientType: clientType,
+		Icon:       icon,
+		Enable:     enable,
+		Metadata:   metadata,
 	})
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("update provider: %w", err)
@@ -163,7 +197,8 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 
 const probeTimeout = 5 * time.Second
 
-// Test probes the provider's base URL to check reachability.
+// Test probes the provider using the Twilight AI SDK to check
+// reachability and authentication.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -177,14 +212,18 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 
+	clientType := models.ClientType(provider.ClientType)
+
+	sdkProvider := models.NewSDKProvider(baseURL, provider.ApiKey, clientType, probeTimeout)
+
 	start := time.Now()
-	reachable, msg := probeReachable(ctx, baseURL)
+	result := sdkProvider.Test(ctx)
 	latency := time.Since(start).Milliseconds()
 
 	return TestResponse{
-		Reachable: reachable,
+		Reachable: result.Status != sdk.ProviderStatusUnreachable,
 		LatencyMs: latency,
-		Message:   msg,
+		Message:   result.Message,
 	}, nil
 }
 
@@ -234,23 +273,6 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	return fetchResp.Data, nil
 }
 
-func probeReachable(ctx context.Context, baseURL string) (bool, string) {
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
-	if err != nil {
-		return false, err.Error()
-	}
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
-	if err != nil {
-		return false, err.Error()
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
-	return true, ""
-}
-
 // toGetResponse converts a database provider to a response.
 func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 	var metadata map[string]any
@@ -265,14 +287,22 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 	// Mask API key (show only first 8 characters)
 	maskedAPIKey := maskAPIKey(provider.ApiKey)
 
+	var icon string
+	if provider.Icon.Valid {
+		icon = provider.Icon.String
+	}
+
 	return GetResponse{
-		ID:        provider.ID.String(),
-		Name:      provider.Name,
-		BaseURL:   provider.BaseUrl,
-		APIKey:    maskedAPIKey,
-		Metadata:  metadata,
-		CreatedAt: provider.CreatedAt.Time,
-		UpdatedAt: provider.UpdatedAt.Time,
+		ID:         provider.ID.String(),
+		Name:       provider.Name,
+		BaseURL:    provider.BaseUrl,
+		APIKey:     maskedAPIKey,
+		ClientType: provider.ClientType,
+		Icon:       icon,
+		Enable:     provider.Enable,
+		Metadata:   metadata,
+		CreatedAt:  provider.CreatedAt.Time,
+		UpdatedAt:  provider.UpdatedAt.Time,
 	}
 }
 

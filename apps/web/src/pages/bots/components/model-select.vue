@@ -12,7 +12,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ModelsGetResponse, ProvidersGetResponse } from '@memoh/sdk'
+import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 

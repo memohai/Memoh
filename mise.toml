@@ -8,14 +8,12 @@ config_roots = ["apps/web", "cmd/agent"]
 go = "1.25.6"
 # Node.js for frontend packages
 node = "25"
-# Bun for agent gateway
+# Bun for browser gateway
 bun = "latest"
 # pnpm for workspace management
 pnpm = "10"
 # sqlc for sql management
 sqlc = "latest"
-# typos for spell check
-typos = "latest"
 # golangci-lint for Go linting
 "golangci-lint" = "2.10.1"
 
@@ -29,6 +27,10 @@ experimental = true
 description = "Install dependencies"
 env = { CI = "true" }
 run = "pnpm install"
+
+[tasks.docs]
+description = "start documentation"
+run = "pnpm docs:dev"
 
 [tasks.go-install]
 description = "Install Go dependencies"
@@ -53,12 +55,15 @@ depends = [
 description = "Generate SQL code"
 run = "sqlc generate"
 
+[tasks.icons-generate]
+description = "Generate icon Vue components from SVG sources"
+run = "pnpm --filter @memohai/icon generate"
+
 [tasks.dev]
 description = "Start development environment"
 run = """
 #!/bin/bash
 set -e
-cp devenv/app.dev.toml config.toml
 docker compose -f devenv/docker-compose.yml up --build
 """
 
@@ -67,7 +72,6 @@ description = "Start development environment on SELinux systems"
 run = """
 #!/bin/bash
 set -e
-cp devenv/app.dev.toml config.toml
 docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml up --build
 """
 
@@ -95,22 +99,22 @@ run = "docker compose -f devenv/docker-compose.yml restart $@"
 description = "Restart a service on SELinux systems (usage: mise run dev:restart:selinux -- server)"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml restart $@"
 
-[tasks."mcp:build"]
-description = "Manually build MCP dev binary (normally auto-triggered by air)"
+[tasks."bridge:build"]
+description = "Manually rebuild bridge binary in dev container (normally auto-triggered by air)"
 run = """
 #!/bin/bash
 set -e
 docker compose -f devenv/docker-compose.yml exec server \
-  sh -c 'cd /workspace && sh devenv/mcp-build.sh'
+  sh -c 'cd /workspace && sh devenv/bridge-build.sh'
 """
 
-[tasks."mcp:build:selinux"]
-description = "Manually build MCP dev binary on SELinux systems"
+[tasks."bridge:build:selinux"]
+description = "Manually rebuild bridge binary in SELinux dev container"
 run = """
 #!/bin/bash
 set -e
 docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml exec server \
-  sh -c 'cd /workspace && sh devenv/mcp-build.sh'
+  sh -c 'cd /workspace && sh devenv/bridge-build.sh'
 """
 
 [tasks.db-up]
@@ -126,7 +130,7 @@ description = "Release new version"
 run = "pnpm release"
 
 [tasks.build-embedded-assets]
-description = "Build and stage embedded web/agent/bun assets"
+description = "Build and stage embedded web assets"
 run = "scripts/release.sh --prepare-assets"
 depends = ["//:pnpm-install"]
 
@@ -140,14 +144,27 @@ description = "Build release archive for one target (requires TARGET_OS TARGET_A
 depends = ["//:pnpm-install"]
 run = "scripts/release.sh"
 
-[tasks.install-cli]
-description = "Install CLI"
-depends = ["//:pnpm-install"]
-run = "cd packages/cli && npm install -g"
-
 [tasks.install-socktainer]
 description = "Install socktainer"
 run = "brew tap socktainer/tap && brew install socktainer"
+
+[tasks.install-workspace-toolkit]
+description = "Install workspace toolkit"
+run = "cd docker/toolkit && ./install.sh"
+
+[tasks.lint]
+description = "Run all linters"
+depends = [
+  "//:lint:go",
+  "//:lint:es",
+]
+
+[tasks."lint:fix"]
+description = "Run all linters with auto-fix"
+depends = [
+  "//:lint:go:fix",
+  "//:lint:es:fix",
+]
 
 [tasks."lint:go"]
 description = "Run Go linter"
@@ -157,17 +174,25 @@ run = "golangci-lint run ./..."
 description = "Run Go linter with auto-fix"
 run = "golangci-lint run --fix ./..."
 
+[tasks."lint:es"]
+description = "Run ESLint"
+run = "pnpm lint"
+
+[tasks."lint:es:fix"]
+description = "Run ESLint with auto-fix"
+run = "pnpm lint:fix"
+
 [tasks.setup]
 description = "Setup development environment"
 depends = [
+  "//:install-workspace-toolkit",
   "//:sqlc-generate",
   "//:pnpm-install",
   "//:go-install",
-  "//:install-cli",
 ]
 run = """
 #!/bin/bash
 set -e
-cp devenv/app.dev.toml config.toml
 echo '✓ Setup complete! Run: mise run dev'
+echo '  Dev web UI will be available at http://localhost:18082'
 """

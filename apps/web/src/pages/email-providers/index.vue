@@ -15,9 +15,9 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from '@memoh/ui'
-import { getEmailProviders } from '@memoh/sdk'
-import type { EmailProviderResponse } from '@memoh/sdk'
+} from '@memohai/ui'
+import { getEmailProviders } from '@memohai/sdk'
+import type { EmailProviderResponse } from '@memohai/sdk'
 import AddEmailProvider from './components/add-email-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'

@@ -60,7 +60,7 @@ import {
   BreadcrumbSeparator,
   Separator,
   ScrollArea,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { useRoute } from 'vue-router'
 import { computed, unref } from 'vue'
 

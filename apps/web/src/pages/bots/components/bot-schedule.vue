@@ -167,9 +167,9 @@ import {
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
-} from '@memoh/ui'
-import { getBotsByBotIdSchedule } from '@memoh/sdk'
-import type { ScheduleSchedule } from '@memoh/sdk'
+} from '@memohai/ui'
+import { getBotsByBotIdSchedule } from '@memohai/sdk'
+import type { ScheduleSchedule } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 

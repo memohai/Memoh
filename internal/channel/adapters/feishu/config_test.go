@@ -45,6 +45,7 @@ func TestNormalizeConfigSupportsLarkAndWebhook(t *testing.T) {
 		"app_secret":   "secret",
 		"region":       "lark",
 		"inbound_mode": "webhook",
+		"encrypt_key":  "enc",
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -54,6 +55,19 @@ func TestNormalizeConfigSupportsLarkAndWebhook(t *testing.T) {
 	}
 	if got["inboundMode"] != inboundModeWebhook {
 		t.Fatalf("unexpected inbound mode: %#v", got["inboundMode"])
+	}
+}
+
+func TestNormalizeConfigRejectsWebhookWithoutSecrets(t *testing.T) {
+	t.Parallel()
+
+	_, err := normalizeConfig(map[string]any{
+		"app_id":       "app",
+		"app_secret":   "secret",
+		"inbound_mode": "webhook",
+	})
+	if err == nil {
+		t.Fatal("expected webhook secret error")
 	}
 }
 

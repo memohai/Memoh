@@ -12,6 +12,21 @@
       />
     </div>
 
+    <!-- Title Model -->
+    <div class="space-y-2">
+      <Label>{{ $t('bots.settings.titleModel') }}</Label>
+      <p class="text-xs text-muted-foreground">
+        {{ $t('bots.settings.titleModelDescription') }}
+      </p>
+      <ModelSelect
+        v-model="form.title_model_id"
+        :models="models"
+        :providers="providers"
+        model-type="chat"
+        :placeholder="$t('bots.settings.titleModelPlaceholder')"
+      />
+    </div>
+
     <!-- Memory Provider -->
     <div class="space-y-2">
       <Label>{{ $t('bots.settings.memoryProvider') }}</Label>
@@ -318,7 +333,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@memoh/ui'
+} from '@memohai/ui'
 import { reactive, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
@@ -330,14 +345,13 @@ import MemoryProviderSelect from './memory-provider-select.vue'
 import TtsModelSelect from './tts-model-select.vue'
 import BrowserContextSelect from './browser-context-select.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getTtsProviders, getBrowserContexts, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memoh/sdk'
-import type { SettingsSettings } from '@memoh/sdk'
+import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getTtsProviders, getBrowserContexts, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
+import type { SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{
   botId: string
-  botType?: string
 }>()
 
 const { t } = useI18n()
@@ -447,6 +461,22 @@ const memoryProviders = computed(() => memoryProviderData.value ?? [])
 const ttsProviders = computed(() => ttsProviderData.value ?? [])
 const ttsModels = computed(() => ttsModelData.value ?? [])
 const browserContexts = computed(() => browserContextData.value ?? [])
+
+// ---- Form ----
+const form = reactive({
+  chat_model_id: '',
+  title_model_id: '',
+  search_provider_id: '',
+  memory_provider_id: '',
+  tts_model_id: '',
+  browser_context_id: '',
+  max_context_load_time: 0,
+  max_context_tokens: 0,
+  language: '',
+  reasoning_enabled: false,
+  reasoning_effort: 'medium',
+})
+
 const selectedMemoryProvider = computed(() =>
   memoryProviders.value.find((provider) => provider.id === form.memory_provider_id),
 )
@@ -498,7 +528,7 @@ const indexedMemoryStatusHint = computed(() =>
 const chatModelSupportsReasoning = computed(() => {
   if (!form.chat_model_id) return false
   const m = models.value.find((m) => m.id === form.chat_model_id)
-  return !!m?.supports_reasoning
+  return !!m?.config?.compatibilities?.includes('reasoning')
 })
 
 const { data: memoryStatusData, isLoading: isMemoryStatusLoading } = useQuery({
@@ -543,23 +573,10 @@ const encoderHealthLabel = computed(() =>
     : t('bots.settings.memoryEncoderHealth'),
 )
 
-// ---- Form ----
-const form = reactive({
-  chat_model_id: '',
-  search_provider_id: '',
-  memory_provider_id: '',
-  tts_model_id: '',
-  browser_context_id: '',
-  max_context_load_time: 0,
-  max_context_tokens: 0,
-  language: '',
-  reasoning_enabled: false,
-  reasoning_effort: 'medium',
-})
-
 watch(settings, (val) => {
   if (val) {
     form.chat_model_id = val.chat_model_id ?? ''
+    form.title_model_id = val.title_model_id ?? ''
     form.search_provider_id = val.search_provider_id ?? ''
     form.memory_provider_id = val.memory_provider_id ?? ''
     form.tts_model_id = val.tts_model_id ?? ''
@@ -577,6 +594,7 @@ const hasChanges = computed(() => {
   const s = settings.value
   let changed =
     form.chat_model_id !== (s.chat_model_id ?? '')
+    || form.title_model_id !== (s.title_model_id ?? '')
     || form.search_provider_id !== (s.search_provider_id ?? '')
     || form.memory_provider_id !== (s.memory_provider_id ?? '')
     || form.tts_model_id !== (s.tts_model_id ?? '')

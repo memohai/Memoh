@@ -27,12 +27,6 @@
             <div class="font-medium truncate">
               {{ bot.display_name || bot.id }}
             </div>
-            <div
-              v-if="bot.type"
-              class="text-xs text-muted-foreground truncate"
-            >
-              {{ botTypeLabel(bot.type) }}
-            </div>
           </div>
         </Toggle>
       </SidebarMenuButton>
@@ -60,11 +54,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { Avatar, AvatarImage, AvatarFallback } from '@memoh/ui'
+import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import { useQuery } from '@pinia/colada'
-import { getBotsQuery } from '@memoh/sdk/colada'
-import type { BotsBot } from '@memoh/sdk'
+import { getBotsQuery } from '@memohai/sdk/colada'
+import type { BotsBot } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import {
@@ -72,11 +65,8 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarHeader
- } from '@memoh/ui'
+ } from '@memohai/ui'
 
-
-const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 
@@ -86,13 +76,6 @@ const bots = computed<BotsBot[]>(() => botData.value?.items ?? [])
 const isActive = (id: string) => computed(() => {
   return currentBotId.value === id
 })
-
-function botTypeLabel(type: string): string {
-  if (!type) return ''
-  const key = `bots.types.${type}`
-  const out = t(key)
-  return out !== key ? out : type
-}
 
 function handleSelect(bot: BotsBot) {
   chatStore.selectBot(bot.id)

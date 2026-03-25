@@ -4,29 +4,37 @@ import "time"
 
 // CreateRequest represents a request to create a new LLM provider.
 type CreateRequest struct {
-	Name     string         `json:"name" validate:"required"`
-	BaseURL  string         `json:"base_url" validate:"required,url"`
-	APIKey   string         `json:"api_key"` //nolint:gosec // intentional: LLM provider API key supplied by operator
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Name       string         `json:"name" validate:"required"`
+	BaseURL    string         `json:"base_url" validate:"required,url"`
+	APIKey     string         `json:"api_key"` //nolint:gosec // intentional: LLM provider API key supplied by operator
+	ClientType string         `json:"client_type" validate:"required"`
+	Icon       string         `json:"icon,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 // UpdateRequest represents a request to update an existing LLM provider.
 type UpdateRequest struct {
-	Name     *string        `json:"name,omitempty"`
-	BaseURL  *string        `json:"base_url,omitempty"`
-	APIKey   *string        `json:"api_key,omitempty"` //nolint:gosec // intentional: LLM provider API key update field
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Name       *string        `json:"name,omitempty"`
+	BaseURL    *string        `json:"base_url,omitempty"`
+	APIKey     *string        `json:"api_key,omitempty"` //nolint:gosec // intentional: LLM provider API key update field
+	ClientType *string        `json:"client_type,omitempty"`
+	Icon       *string        `json:"icon,omitempty"`
+	Enable     *bool          `json:"enable,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 // GetResponse represents the response for getting a provider.
 type GetResponse struct {
-	ID        string         `json:"id"`
-	Name      string         `json:"name"`
-	BaseURL   string         `json:"base_url"`
-	APIKey    string         `json:"api_key,omitempty"` //nolint:gosec // intentional: partially masked API key for display
-	Metadata  map[string]any `json:"metadata,omitempty"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	BaseURL    string         `json:"base_url"`
+	APIKey     string         `json:"api_key,omitempty"` //nolint:gosec // intentional: partially masked API key for display
+	ClientType string         `json:"client_type"`
+	Icon       string         `json:"icon,omitempty"`
+	Enable     bool           `json:"enable"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
 }
 
 // ListResponse represents the response for listing providers.
@@ -59,11 +67,6 @@ type RemoteModel struct {
 type FetchModelsResponse struct {
 	Object string        `json:"object"`
 	Data   []RemoteModel `json:"data"`
-}
-
-// ImportModelsRequest represents a request to import models from a provider.
-type ImportModelsRequest struct {
-	ClientType string `json:"client_type"`
 }
 
 // ImportModelsResponse represents the response for importing models.

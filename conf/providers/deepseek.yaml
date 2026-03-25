@@ -1,0 +1,19 @@
+name: DeepSeek
+client_type: openai-completions
+icon: deepseek-color
+base_url: https://api.deepseek.com/v1
+
+models:
+  - model_id: deepseek-chat
+    name: DeepSeek V3.2
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 131072
+
+  - model_id: deepseek-reasoner
+    name: DeepSeek V3.2 Thinking
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072

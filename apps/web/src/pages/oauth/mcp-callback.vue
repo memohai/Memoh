@@ -26,8 +26,8 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Spinner } from '@memoh/ui'
-import { postBotsByBotIdMcpByIdOauthExchange } from '@memoh/sdk'
+import { Spinner } from '@memohai/ui'
+import { postBotsByBotIdMcpByIdOauthExchange } from '@memohai/sdk'
 
 const route = useRoute()
 const { t } = useI18n()

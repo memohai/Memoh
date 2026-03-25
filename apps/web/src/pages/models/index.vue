@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, provide, watch, reactive } from 'vue'
 import modelSetting from './model-setting.vue'
-import { useQueryCache } from '@pinia/colada'
+import { useQuery } from '@pinia/colada'
 import {
   ScrollArea,
   InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput,
@@ -15,13 +15,18 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-  Button
-} from '@memoh/ui'
-import { getProviders } from '@memoh/sdk'
-import type { ProvidersGetResponse } from '@memoh/sdk'
+  Button,
+} from '@memohai/ui'
+import { getProviders } from '@memohai/sdk'
+import type { ProvidersGetResponse } from '@memohai/sdk'
 import AddProvider from '@/components/add-provider/index.vue'
+import ProviderIcon from '@/components/provider-icon/index.vue'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
-import { useQuery } from '@pinia/colada'
+
+function getInitials(name: string | undefined) {
+  const label = name?.trim() ?? ''
+  return label ? label.slice(0, 2).toUpperCase() : '?'
+}
 
 const { data: providerData } = useQuery({
   key: () => ['providers'],
@@ -32,7 +37,6 @@ const { data: providerData } = useQuery({
     return data
   },
 })
-const queryCache = useQueryCache()
 
 const curProvider = ref<ProvidersGetResponse>()
 provide('curProvider', curProvider)
@@ -48,12 +52,15 @@ const curFilterProvider = computed(() => {
   if (!Array.isArray(providerData.value)) {
     return []
   }
-  if (!searchText.value) {
-    return providerData.value
+  let list = providerData.value as ProvidersGetResponse[]
+  if (searchText.value) {
+    const keyword = searchText.value.toLowerCase()
+    list = list.filter((p) => (p.name ?? '').toLowerCase().includes(keyword))
   }
-  const keyword = searchText.value.toLowerCase()
-  return providerData.value.filter((provider: ProvidersGetResponse) => {
-    return (provider.name ?? '').toLowerCase().includes(keyword)
+  return [...list].sort((a, b) => {
+    const ae = a.enable !== false ? 1 : 0
+    const be = b.enable !== false ? 1 : 0
+    return be - ae
   })
 })
 
@@ -110,7 +117,10 @@ const openStatus = reactive({
             class="justify-start py-5! px-4"
           >
             <Toggle
-              :class="['py-4 border', curProvider?.name === providerItem.name ? 'border-border' : 'border-transparent']"
+              :class="[
+                'py-4 border',
+                curProvider?.name === providerItem.name ? 'border-border' : 'border-transparent',
+              ]"
               :model-value="selectProvider(providerItem.name ?? '').value"
               @update:model-value="(isSelect) => {
                 if (isSelect) {
@@ -118,7 +128,26 @@ const openStatus = reactive({
                 }
               }"
             >
-              {{ providerItem.name }}
+              <span class="relative shrink-0">
+                <span class="flex size-7 items-center justify-center rounded-full bg-muted">
+                  <ProviderIcon
+                    v-if="providerItem.icon"
+                    :icon="providerItem.icon"
+                    size="1.25em"
+                  />
+                  <span
+                    v-else
+                    class="text-xs font-medium text-muted-foreground"
+                  >
+                    {{ getInitials(providerItem.name) }}
+                  </span>
+                </span>
+                <span
+                  v-if="providerItem.enable !== false"
+                  class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-green-500 ring-2 ring-background"
+                />
+              </span>
+              <span class="truncate">{{ providerItem.name }}</span>
             </Toggle>
           </SidebarMenuButton>
         </SidebarMenuItem>
