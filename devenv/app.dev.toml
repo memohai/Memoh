@@ -17,6 +17,8 @@ email = "dev@memoh.local"
 jwt_secret = "memoh-dev-secret-do-not-use-in-production"
 jwt_expires_in = "168h"
 
+timezone = "UTC"
+
 [containerd]
 socket_path = "/run/containerd/containerd.sock"
 namespace = "default"

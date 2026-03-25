@@ -40,7 +40,11 @@ type Service struct {
 
 func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
 	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-	c := cron.New(cron.WithParser(parser))
+	location := time.UTC
+	if runtimeConfig != nil && runtimeConfig.TimezoneLocation != nil {
+		location = runtimeConfig.TimezoneLocation
+	}
+	c := cron.New(cron.WithParser(parser), cron.WithLocation(location))
 	service := &Service{
 		queries:        queries,
 		cron:           c,

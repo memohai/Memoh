@@ -81,7 +81,8 @@ LIMIT sqlc.arg(limit_count);
 UPDATE users
 SET display_name = $2,
     avatar_url = $3,
-    is_active = $4,
+    timezone = $4,
+    is_active = $5,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

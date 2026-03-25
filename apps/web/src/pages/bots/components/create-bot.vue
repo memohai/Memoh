@@ -57,6 +57,42 @@
               </FormControl>
             </FormItem>
           </FormField>
+
+          <FormField
+            v-slot="{ componentField }"
+            name="timezone"
+          >
+            <FormItem>
+              <Label class="mb-2">
+                {{ $t('bots.timezone') }}
+                <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+              </Label>
+              <FormControl>
+                <Select
+                  :model-value="componentField.modelValue || emptyTimezoneValue"
+                  @update:model-value="(value) => componentField['onUpdate:modelValue'](value === emptyTimezoneValue ? '' : value)"
+                >
+                  <SelectTrigger class="w-full">
+                    <SelectValue :placeholder="$t('bots.timezonePlaceholder')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem :value="emptyTimezoneValue">
+                        {{ $t('bots.timezoneInherited') }}
+                      </SelectItem>
+                      <SelectItem
+                        v-for="timezoneOption in timezones"
+                        :key="timezoneOption"
+                        :value="timezoneOption"
+                      >
+                        {{ timezoneOption }}
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </FormControl>
+            </FormItem>
+          </FormField>
           <div class="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
             {{ $t('bots.createBotWaitHint') }}
           </div>
@@ -98,6 +134,12 @@ import {
   FormItem,
   Separator,
   Label,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Spinner,
 } from '@memohai/ui'
 import { useForm } from 'vee-validate'
@@ -108,6 +150,7 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { postBotsMutation, getBotsQueryKey } from '@memohai/sdk/colada'
 import { useI18n } from 'vue-i18n'
 import { useDialogMutation } from '@/composables/useDialogMutation'
+import { emptyTimezoneValue, timezones } from '@/utils/timezones'
 
 const open = defineModel<boolean>('open', { default: false })
 const { t } = useI18n()
@@ -116,6 +159,7 @@ const { run } = useDialogMutation()
 const formSchema = toTypedSchema(z.object({
   display_name: z.string().min(1),
   avatar_url: z.string().optional(),
+  timezone: z.string().optional(),
 }))
 
 const form = useForm({
@@ -123,6 +167,7 @@ const form = useForm({
   initialValues: {
     display_name: '',
     avatar_url: '',
+    timezone: '',
   },
 })
 
@@ -138,6 +183,7 @@ watch(open, (val) => {
       values: {
         display_name: '',
         avatar_url: '',
+        timezone: '',
       },
     })
   } else {
@@ -151,6 +197,7 @@ const handleSubmit = form.handleSubmit(async (values) => {
       body: {
         display_name: values.display_name,
         avatar_url: values.avatar_url || undefined,
+        timezone: values.timezone || undefined,
         is_active: true,
       },
     }),

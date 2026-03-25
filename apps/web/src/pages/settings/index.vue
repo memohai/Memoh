@@ -106,10 +106,12 @@
         :display-username="displayUsername"
         :display-name="profileForm.display_name"
         :avatar-url="profileForm.avatar_url"
+        :timezone="profileForm.timezone"
         :saving="savingProfile"
         :loading="loadingInitial"
         @update:display-name="profileForm.display_name = $event"
         @update:avatar-url="profileForm.avatar_url = $event"
+        @update:timezone="profileForm.timezone = $event"
         @save="onSaveProfile"
       />
 
@@ -263,6 +265,7 @@ const generatingBindCode = ref(false)
 const profileForm = reactive({
   display_name: '',
   avatar_url: '',
+  timezone: '',
 })
 
 const passwordForm = reactive({
@@ -322,12 +325,14 @@ async function loadMyAccount() {
   account.value = data
   profileForm.display_name = data.display_name || ''
   profileForm.avatar_url = data.avatar_url || ''
+  profileForm.timezone = data.timezone || 'UTC'
   patchUserInfo({
     id: data.id,
     username: data.username,
     role: data.role,
     displayName: data.display_name || '',
     avatarUrl: data.avatar_url || '',
+    timezone: data.timezone || 'UTC',
   })
 }
 
@@ -347,14 +352,17 @@ async function onSaveProfile() {
     const body: AccountsUpdateProfileRequest = {
       display_name: profileForm.display_name.trim(),
       avatar_url: profileForm.avatar_url.trim(),
+      timezone: profileForm.timezone.trim(),
     }
     const { data } = await putUsersMe({ body, throwOnError: true })
     account.value = data
     profileForm.display_name = data.display_name || ''
     profileForm.avatar_url = data.avatar_url || ''
+    profileForm.timezone = data.timezone || 'UTC'
     patchUserInfo({
       displayName: data.display_name || '',
       avatarUrl: data.avatar_url || '',
+      timezone: data.timezone || 'UTC',
     })
     toast.success(t('settings.profileUpdated'))
   } catch (error) {

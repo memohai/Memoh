@@ -12,15 +12,16 @@ import (
 )
 
 const createBot = `-- name: CreateBot :one
-INSERT INTO bots (owner_user_id, display_name, avatar_url, is_active, metadata, status)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, owner_user_id, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+INSERT INTO bots (owner_user_id, display_name, avatar_url, timezone, is_active, metadata, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, owner_user_id, display_name, avatar_url, timezone, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type CreateBotParams struct {
 	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 	DisplayName pgtype.Text `json:"display_name"`
 	AvatarUrl   pgtype.Text `json:"avatar_url"`
+	Timezone    pgtype.Text `json:"timezone"`
 	IsActive    bool        `json:"is_active"`
 	Metadata    []byte      `json:"metadata"`
 	Status      string      `json:"status"`
@@ -31,6 +32,7 @@ type CreateBotRow struct {
 	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
 	DisplayName        pgtype.Text        `json:"display_name"`
 	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	Timezone           pgtype.Text        `json:"timezone"`
 	IsActive           bool               `json:"is_active"`
 	Status             string             `json:"status"`
 	MaxContextLoadTime int32              `json:"max_context_load_time"`
@@ -54,6 +56,7 @@ func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (CreateBot
 		arg.OwnerUserID,
 		arg.DisplayName,
 		arg.AvatarUrl,
+		arg.Timezone,
 		arg.IsActive,
 		arg.Metadata,
 		arg.Status,
@@ -64,6 +67,7 @@ func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (CreateBot
 		&i.OwnerUserID,
 		&i.DisplayName,
 		&i.AvatarUrl,
+		&i.Timezone,
 		&i.IsActive,
 		&i.Status,
 		&i.MaxContextLoadTime,
@@ -94,7 +98,7 @@ func (q *Queries) DeleteBotByID(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getBotByID = `-- name: GetBotByID :one
-SELECT id, owner_user_id, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_model_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, display_name, avatar_url, timezone, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_model_id, metadata, created_at, updated_at
 FROM bots
 WHERE id = $1
 `
@@ -104,6 +108,7 @@ type GetBotByIDRow struct {
 	OwnerUserID         pgtype.UUID        `json:"owner_user_id"`
 	DisplayName         pgtype.Text        `json:"display_name"`
 	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            pgtype.Text        `json:"timezone"`
 	IsActive            bool               `json:"is_active"`
 	Status              string             `json:"status"`
 	MaxContextLoadTime  int32              `json:"max_context_load_time"`
@@ -133,6 +138,7 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (GetBotByIDRow
 		&i.OwnerUserID,
 		&i.DisplayName,
 		&i.AvatarUrl,
+		&i.Timezone,
 		&i.IsActive,
 		&i.Status,
 		&i.MaxContextLoadTime,
@@ -157,7 +163,7 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (GetBotByIDRow
 }
 
 const listBotsByOwner = `-- name: ListBotsByOwner :many
-SELECT id, owner_user_id, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+SELECT id, owner_user_id, display_name, avatar_url, timezone, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 FROM bots
 WHERE owner_user_id = $1
 ORDER BY created_at DESC
@@ -168,6 +174,7 @@ type ListBotsByOwnerRow struct {
 	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
 	DisplayName        pgtype.Text        `json:"display_name"`
 	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	Timezone           pgtype.Text        `json:"timezone"`
 	IsActive           bool               `json:"is_active"`
 	Status             string             `json:"status"`
 	MaxContextLoadTime int32              `json:"max_context_load_time"`
@@ -200,6 +207,7 @@ func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID pgtype.UUID) 
 			&i.OwnerUserID,
 			&i.DisplayName,
 			&i.AvatarUrl,
+			&i.Timezone,
 			&i.IsActive,
 			&i.Status,
 			&i.MaxContextLoadTime,
@@ -272,7 +280,7 @@ UPDATE bots
 SET owner_user_id = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, owner_user_id, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+RETURNING id, owner_user_id, display_name, avatar_url, timezone, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type UpdateBotOwnerParams struct {
@@ -285,6 +293,7 @@ type UpdateBotOwnerRow struct {
 	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
 	DisplayName        pgtype.Text        `json:"display_name"`
 	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	Timezone           pgtype.Text        `json:"timezone"`
 	IsActive           bool               `json:"is_active"`
 	Status             string             `json:"status"`
 	MaxContextLoadTime int32              `json:"max_context_load_time"`
@@ -311,6 +320,7 @@ func (q *Queries) UpdateBotOwner(ctx context.Context, arg UpdateBotOwnerParams) 
 		&i.OwnerUserID,
 		&i.DisplayName,
 		&i.AvatarUrl,
+		&i.Timezone,
 		&i.IsActive,
 		&i.Status,
 		&i.MaxContextLoadTime,
@@ -335,17 +345,19 @@ const updateBotProfile = `-- name: UpdateBotProfile :one
 UPDATE bots
 SET display_name = $2,
     avatar_url = $3,
-    is_active = $4,
-    metadata = $5,
+    timezone = $4,
+    is_active = $5,
+    metadata = $6,
     updated_at = now()
 WHERE id = $1
-RETURNING id, owner_user_id, display_name, avatar_url, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+RETURNING id, owner_user_id, display_name, avatar_url, timezone, is_active, status, max_context_load_time, max_context_tokens, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type UpdateBotProfileParams struct {
 	ID          pgtype.UUID `json:"id"`
 	DisplayName pgtype.Text `json:"display_name"`
 	AvatarUrl   pgtype.Text `json:"avatar_url"`
+	Timezone    pgtype.Text `json:"timezone"`
 	IsActive    bool        `json:"is_active"`
 	Metadata    []byte      `json:"metadata"`
 }
@@ -355,6 +367,7 @@ type UpdateBotProfileRow struct {
 	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
 	DisplayName        pgtype.Text        `json:"display_name"`
 	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	Timezone           pgtype.Text        `json:"timezone"`
 	IsActive           bool               `json:"is_active"`
 	Status             string             `json:"status"`
 	MaxContextLoadTime int32              `json:"max_context_load_time"`
@@ -378,6 +391,7 @@ func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfilePara
 		arg.ID,
 		arg.DisplayName,
 		arg.AvatarUrl,
+		arg.Timezone,
 		arg.IsActive,
 		arg.Metadata,
 	)
@@ -387,6 +401,7 @@ func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfilePara
 		&i.OwnerUserID,
 		&i.DisplayName,
 		&i.AvatarUrl,
+		&i.Timezone,
 		&i.IsActive,
 		&i.Status,
 		&i.MaxContextLoadTime,

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed prompts/*.md
@@ -100,6 +101,14 @@ func selectSystemTemplate(sessionType string) string {
 // GenerateSystemPrompt builds the complete system prompt from files, skills, and context.
 func GenerateSystemPrompt(params SystemPromptParams) string {
 	home := "/data"
+	now := params.Now
+	if now.IsZero() {
+		now = TimeNow()
+	}
+	timezoneName := strings.TrimSpace(params.Timezone)
+	if timezoneName == "" {
+		timezoneName = "UTC"
+	}
 
 	basicTools := []string{
 		"- `read`: read file content",
@@ -130,6 +139,8 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 
 	return render(tmpl, map[string]string{
 		"home":          home,
+		"currentTime":   now.Format(time.RFC3339),
+		"timezone":      timezoneName,
 		"basicTools":    strings.Join(basicTools, "\n"),
 		"skillsSection": skillsSection,
 		"fileSections":  fileSections,
@@ -141,6 +152,8 @@ type SystemPromptParams struct {
 	SessionType        string
 	Skills             []SkillEntry
 	Files              []SystemFile
+	Now                time.Time
+	Timezone           string
 	SupportsImageInput bool
 }
 
@@ -160,7 +173,7 @@ func GenerateSchedulePrompt(s Schedule) string {
 }
 
 // GenerateHeartbeatPrompt builds the user message for a heartbeat trigger.
-func GenerateHeartbeatPrompt(interval int, checklist string, lastHeartbeatAt string) string {
+func GenerateHeartbeatPrompt(interval int, checklist string, now time.Time, lastHeartbeatAt string) string {
 	checklistSection := ""
 	if strings.TrimSpace(checklist) != "" {
 		checklistSection = "\n## HEARTBEAT.md (checklist)\n\n" + strings.TrimSpace(checklist) + "\n"
@@ -171,7 +184,7 @@ func GenerateHeartbeatPrompt(interval int, checklist string, lastHeartbeatAt str
 	}
 	return render(heartbeatTmpl, map[string]string{
 		"interval":         strconv.Itoa(interval),
-		"timeNow":          TimeNow().UTC().Format("2006-01-02T15:04:05Z"),
+		"timeNow":          now.Format(time.RFC3339),
 		"lastHeartbeat":    lastHB,
 		"checklistSection": checklistSection,
 	})

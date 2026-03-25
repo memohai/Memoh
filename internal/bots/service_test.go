@@ -41,7 +41,7 @@ func (d *fakeDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 }
 
 // makeBotRow creates a fakeRow that populates a sqlc.GetBotByIDRow via Scan.
-// Column order: id, owner_user_id, display_name, avatar_url, is_active, status,
+// Column order: id, owner_user_id, display_name, avatar_url, timezone, is_active, status,
 // max_context_load_time, max_context_tokens, language,
 // reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id,
 // heartbeat_enabled, heartbeat_interval, heartbeat_prompt,
@@ -50,32 +50,33 @@ func (d *fakeDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) < 23 {
+			if len(dest) < 24 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
 			*dest[1].(*pgtype.UUID) = ownerUserID
 			*dest[2].(*pgtype.Text) = pgtype.Text{String: "test-bot", Valid: true}
 			*dest[3].(*pgtype.Text) = pgtype.Text{}
-			*dest[4].(*bool) = true
-			*dest[5].(*string) = BotStatusReady
-			*dest[6].(*int32) = 30                   // MaxContextLoadTime
-			*dest[7].(*int32) = 4096                 // MaxContextTokens
-			*dest[8].(*string) = "en"                // Language
-			*dest[9].(*bool) = false                 // ReasoningEnabled
-			*dest[10].(*string) = "medium"           // ReasoningEffort
-			*dest[11].(*pgtype.UUID) = pgtype.UUID{} // ChatModelID
-			*dest[12].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
-			*dest[13].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
-			*dest[14].(*bool) = false                // HeartbeatEnabled
-			*dest[15].(*int32) = 30                  // HeartbeatInterval
-			*dest[16].(*string) = ""                 // HeartbeatPrompt
-			*dest[17].(*bool) = false                // CompactionEnabled
-			*dest[18].(*int32) = 100000              // CompactionThreshold
-			*dest[19].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
-			*dest[20].(*[]byte) = []byte(`{}`)
-			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[4].(*pgtype.Text) = pgtype.Text{}
+			*dest[5].(*bool) = true
+			*dest[6].(*string) = BotStatusReady
+			*dest[7].(*int32) = 30                   // MaxContextLoadTime
+			*dest[8].(*int32) = 4096                 // MaxContextTokens
+			*dest[9].(*string) = "en"                // Language
+			*dest[10].(*bool) = false                // ReasoningEnabled
+			*dest[11].(*string) = "medium"           // ReasoningEffort
+			*dest[12].(*pgtype.UUID) = pgtype.UUID{} // ChatModelID
+			*dest[13].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
+			*dest[14].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
+			*dest[15].(*bool) = false                // HeartbeatEnabled
+			*dest[16].(*int32) = 30                  // HeartbeatInterval
+			*dest[17].(*string) = ""                 // HeartbeatPrompt
+			*dest[18].(*bool) = false                // CompactionEnabled
+			*dest[19].(*int32) = 100000              // CompactionThreshold
+			*dest[20].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
+			*dest[21].(*[]byte) = []byte(`{}`)
 			*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[23].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

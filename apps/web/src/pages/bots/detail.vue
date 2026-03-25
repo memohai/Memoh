@@ -93,6 +93,22 @@
           </Badge>
           <span v-if="bot?.type">{{ botTypeLabel }}</span>
         </div>
+        <div
+          v-if="bot"
+          class="mt-1 flex items-center gap-2 text-sm text-muted-foreground"
+        >
+          <span>{{ $t('bots.timezone') }}: {{ bot.timezone || $t('bots.timezoneInherited') }}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            class="h-7 px-2"
+            :disabled="botLifecyclePending"
+            @click="handleEditTimezone"
+          >
+            {{ $t('common.edit') }}
+          </Button>
+        </div>
       </div>
     </div>
     <Separator />
@@ -193,6 +209,67 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <Dialog v-model:open="timezoneDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ $t('bots.editTimezone') }}</DialogTitle>
+          <DialogDescription>
+            {{ $t('bots.editTimezoneDescription') }}
+          </DialogDescription>
+        </DialogHeader>
+        <div class="mt-4 flex flex-col gap-2">
+          <Select
+            :model-value="timezoneDraft || emptyTimezoneValue"
+            @update:model-value="(value) => timezoneDraft = value === emptyTimezoneValue ? '' : String(value)"
+          >
+            <SelectTrigger
+              class="w-full"
+              :disabled="timezoneSaving"
+            >
+              <SelectValue :placeholder="$t('bots.timezonePlaceholder')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem :value="emptyTimezoneValue">
+                  {{ $t('bots.timezoneInherited') }}
+                </SelectItem>
+                <SelectItem
+                  v-for="timezoneOption in timezones"
+                  :key="timezoneOption"
+                  :value="timezoneOption"
+                >
+                  {{ timezoneOption }}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <p class="text-sm text-muted-foreground">
+            {{ $t('bots.timezoneInheritedHint') }}
+          </p>
+        </div>
+        <DialogFooter class="mt-6">
+          <DialogClose as-child>
+            <Button
+              variant="outline"
+              :disabled="timezoneSaving"
+            >
+              {{ $t('common.cancel') }}
+            </Button>
+          </DialogClose>
+          <Button
+            :disabled="timezoneSaving || !canConfirmTimezone"
+            @click="handleConfirmTimezone"
+          >
+            <Spinner
+              v-if="timezoneSaving"
+              class="mr-1.5"
+            />
+            {{ $t('common.confirm') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </section>
 </template>
 
@@ -211,6 +288,12 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Separator,
   Spinner,
   ScrollArea,
@@ -255,6 +338,7 @@ import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
+import { emptyTimezoneValue, timezones } from '@/utils/timezones'
 type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
@@ -344,9 +428,12 @@ watch(bot, (val) => {
 const activeTab = useSyncedQueryParam('tab', 'overview')
 const avatarDialogOpen = ref(false)
 const avatarUrlDraft = ref('')
+const timezoneDialogOpen = ref(false)
+const timezoneDraft = ref('')
 const avatarFallback = useAvatarInitials(() => bot.value?.display_name || botId.value || '')
 const isSavingBotName = computed(() => updateBotLoading.value)
 const avatarSaving = computed(() => updateBotLoading.value)
+const timezoneSaving = computed(() => updateBotLoading.value)
 const canConfirmAvatar = computed(() => {
   if (!bot.value) return false
   const next = avatarUrlDraft.value.trim()
@@ -358,6 +445,10 @@ const canConfirmBotName = computed(() => {
   const nextName = botNameDraft.value.trim()
   if (!nextName) return false
   return nextName !== (bot.value.display_name || '').trim()
+})
+const canConfirmTimezone = computed(() => {
+  if (!bot.value) return false
+  return timezoneDraft.value.trim() !== (bot.value.timezone || '').trim()
 })
 const {
   hasIssue,
@@ -412,6 +503,12 @@ function handleEditAvatar() {
   avatarDialogOpen.value = true
 }
 
+function handleEditTimezone() {
+  if (!bot.value || botLifecyclePending.value) return
+  timezoneDraft.value = bot.value.timezone || ''
+  timezoneDialogOpen.value = true
+}
+
 async function handleConfirmAvatar() {
   if (!bot.value || !canConfirmAvatar.value || avatarSaving.value) return
   const nextUrl = avatarUrlDraft.value.trim()
@@ -424,6 +521,21 @@ async function handleConfirmAvatar() {
     toast.success(t('bots.avatarUpdateSuccess'))
   } catch (error) {
     toast.error(resolveErrorMessage(error, t('bots.avatarUpdateFailed')))
+  }
+}
+
+async function handleConfirmTimezone() {
+  if (!bot.value || !canConfirmTimezone.value || timezoneSaving.value) return
+  const nextTimezone = timezoneDraft.value.trim()
+  try {
+    await updateBot({
+      id: bot.value.id as string,
+      timezone: nextTimezone,
+    })
+    timezoneDialogOpen.value = false
+    toast.success(t('bots.timezoneUpdateSuccess'))
+  } catch (error) {
+    toast.error(resolveErrorMessage(error, t('bots.timezoneUpdateFailed')))
   }
 }
 
