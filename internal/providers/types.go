@@ -2,12 +2,18 @@ package providers
 
 import "time"
 
+const (
+	AuthTypeAPIKey           = "api_key"
+	AuthTypeOpenAICodexOAuth = "openai-codex-oauth"
+)
+
 // CreateRequest represents a request to create a new LLM provider.
 type CreateRequest struct {
 	Name       string         `json:"name" validate:"required"`
 	BaseURL    string         `json:"base_url" validate:"required,url"`
 	APIKey     string         `json:"api_key"` //nolint:gosec // intentional: LLM provider API key supplied by operator
 	ClientType string         `json:"client_type" validate:"required"`
+	AuthType   string         `json:"auth_type,omitempty"`
 	Icon       string         `json:"icon,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
@@ -18,6 +24,7 @@ type UpdateRequest struct {
 	BaseURL    *string        `json:"base_url,omitempty"`
 	APIKey     *string        `json:"api_key,omitempty"` //nolint:gosec // intentional: LLM provider API key update field
 	ClientType *string        `json:"client_type,omitempty"`
+	AuthType   *string        `json:"auth_type,omitempty"`
 	Icon       *string        `json:"icon,omitempty"`
 	Enable     *bool          `json:"enable,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
@@ -30,6 +37,7 @@ type GetResponse struct {
 	BaseURL    string         `json:"base_url"`
 	APIKey     string         `json:"api_key,omitempty"` //nolint:gosec // intentional: partially masked API key for display
 	ClientType string         `json:"client_type"`
+	AuthType   string         `json:"auth_type"`
 	Icon       string         `json:"icon,omitempty"`
 	Enable     bool           `json:"enable"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
@@ -55,12 +63,26 @@ type TestResponse struct {
 	Message   string `json:"message,omitempty"`
 }
 
+// OAuthStatus is returned by GET /providers/:id/oauth/status.
+type OAuthStatus struct {
+	AuthType    string     `json:"auth_type"`
+	Configured  bool       `json:"configured"`
+	HasToken    bool       `json:"has_token"`
+	Expired     bool       `json:"expired"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	CallbackURL string     `json:"callback_url"`
+}
+
 // RemoteModel represents a model returned by the provider's /v1/models endpoint.
 type RemoteModel struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	OwnedBy string `json:"owned_by"`
+	ID               string   `json:"id"`
+	Object           string   `json:"object"`
+	Created          int64    `json:"created"`
+	OwnedBy          string   `json:"owned_by"`
+	Name             string   `json:"name,omitempty"`
+	Type             string   `json:"type,omitempty"`
+	Compatibilities  []string `json:"compatibilities,omitempty"`
+	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 }
 
 // FetchModelsResponse represents the response from the provider's /v1/models endpoint.

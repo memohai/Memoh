@@ -34,9 +34,7 @@
     "loadFailed": "Failed to load",
     "saveFailed": "Failed to save",
     "createdAt": "Created at",
-    "none": "None",
-    "searchTimezone": "Search timezones…",
-    "noTimezoneFound": "No timezone found."
+    "none": "None"
   },
   "auth": {
     "welcome": "Welcome Back",
@@ -811,9 +809,11 @@
       "language": "Language",
       "reasoningEnabled": "Enable Reasoning",
       "reasoningEffort": "Reasoning Effort",
+      "reasoningEffortNone": "None",
       "reasoningEffortLow": "Low",
       "reasoningEffortMedium": "Medium",
       "reasoningEffortHigh": "High",
+      "reasoningEffortXHigh": "X-High",
       "heartbeatEnabled": "Enable Heartbeat",
       "heartbeatDescription": "Periodically trigger agent to check for items that need attention",
       "heartbeatInterval": "Heartbeat Interval (minutes)",

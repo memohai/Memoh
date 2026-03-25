@@ -29,16 +29,33 @@ const (
 	CompatReasoning   = "reasoning"
 )
 
+const (
+	ReasoningEffortNone   = "none"
+	ReasoningEffortLow    = "low"
+	ReasoningEffortMedium = "medium"
+	ReasoningEffortHigh   = "high"
+	ReasoningEffortXHigh  = "xhigh"
+)
+
 // validCompatibilities enumerates accepted compatibility tokens.
 var validCompatibilities = map[string]struct{}{
 	CompatVision: {}, CompatToolCall: {}, CompatImageOutput: {}, CompatReasoning: {},
 }
 
+var validReasoningEfforts = map[string]struct{}{
+	ReasoningEffortNone:   {},
+	ReasoningEffortLow:    {},
+	ReasoningEffortMedium: {},
+	ReasoningEffortHigh:   {},
+	ReasoningEffortXHigh:  {},
+}
+
 // ModelConfig holds the JSONB config stored per model.
 type ModelConfig struct {
-	Dimensions      *int     `json:"dimensions,omitempty"`
-	Compatibilities []string `json:"compatibilities,omitempty"`
-	ContextWindow   *int     `json:"context_window,omitempty"`
+	Dimensions       *int     `json:"dimensions,omitempty"`
+	Compatibilities  []string `json:"compatibilities,omitempty"`
+	ContextWindow    *int     `json:"context_window,omitempty"`
+	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 }
 
 type Model struct {
@@ -70,6 +87,11 @@ func (m *Model) Validate() error {
 	for _, c := range m.Config.Compatibilities {
 		if _, ok := validCompatibilities[c]; !ok {
 			return errors.New("invalid compatibility: " + c)
+		}
+	}
+	for _, effort := range m.Config.ReasoningEfforts {
+		if _, ok := validReasoningEfforts[effort]; !ok {
+			return errors.New("invalid reasoning effort: " + effort)
 		}
 	}
 	return nil

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -24,6 +25,7 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -158,7 +160,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		return resolvedContext{}, err
 	}
 	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, req.BotID)
-	userTimezoneName, userClockLocation := r.resolveTimezone(ctx, req.BotID, req.UserID)
+	userTimezoneName, userClockLocation := r.resolveUserTimezone(ctx, req.UserID)
 
 	var chatSettings conversation.Settings
 	if r.conversationSvc != nil {
@@ -270,23 +272,31 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		reasoningEffort = botSettings.ReasoningEffort
 	}
 
-	var reasoningConfig *models.ReasoningConfig
+	var reasoningConfig *agentpkg.ReasoningConfig
 	if reasoningEffort != "" {
-		reasoningConfig = &models.ReasoningConfig{
+		reasoningConfig = &agentpkg.ReasoningConfig{
 			Enabled: true,
 			Effort:  reasoningEffort,
 		}
 	}
 
-	modelCfg := models.SDKModelConfig{
+	authResolver := providers.NewService(nil, r.queries, "")
+	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return resolvedContext{}, fmt.Errorf("resolve provider credentials: %w", err)
+	}
+
+	modelCfg := agentpkg.ModelConfig{
 		ModelID:         chatModel.ModelID,
 		ClientType:      clientType,
-		APIKey:          provider.ApiKey,
+		AuthType:        creds.AuthType,
+		APIKey:          creds.APIKey,
+		CodexAccountID:  creds.CodexAccountID,
 		BaseURL:         provider.BaseUrl,
 		ReasoningConfig: reasoningConfig,
 	}
 
-	sdkModel := models.NewSDKChatModel(modelCfg)
+	sdkModel := agentpkg.CreateModel(modelCfg)
 	sdkMessages := modelMessagesToSDKMessages(nonNilModelMessages(messages))
 
 	runCfg := agentpkg.RunConfig{

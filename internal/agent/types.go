@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"net/http"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -93,6 +94,24 @@ type SpeechItem struct {
 type SystemFile struct {
 	Filename string
 	Content  string
+}
+
+// ModelConfig holds provider and model information resolved from DB.
+type ModelConfig struct {
+	ModelID         string
+	ClientType      string
+	AuthType        string
+	APIKey          string //nolint:gosec // carries provider credential material at runtime
+	CodexAccountID  string
+	BaseURL         string
+	HTTPClient      *http.Client
+	ReasoningConfig *ReasoningConfig
+}
+
+// ReasoningConfig controls extended thinking/reasoning behavior.
+type ReasoningConfig struct {
+	Enabled bool
+	Effort  string
 }
 
 func mustMarshal(v any) json.RawMessage {

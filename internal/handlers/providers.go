@@ -309,20 +309,31 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("fetch remote models: %v", err))
 	}
 
-	defaultCompat := []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning}
-
 	resp := providers.ImportModelsResponse{
 		Models: make([]string, 0),
 	}
 
 	for _, m := range remoteModels {
+		modelType := models.ModelTypeChat
+		if strings.TrimSpace(m.Type) == string(models.ModelTypeEmbedding) {
+			modelType = models.ModelTypeEmbedding
+		}
+		compatibilities := m.Compatibilities
+		if len(compatibilities) == 0 {
+			compatibilities = []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning}
+		}
+		name := strings.TrimSpace(m.Name)
+		if name == "" {
+			name = m.ID
+		}
 		_, err := h.modelsService.Create(c.Request().Context(), models.AddRequest{
 			ModelID:       m.ID,
-			Name:          m.ID,
+			Name:          name,
 			LlmProviderID: id,
-			Type:          models.ModelTypeChat,
+			Type:          modelType,
 			Config: models.ModelConfig{
-				Compatibilities: defaultCompat,
+				Compatibilities:  compatibilities,
+				ReasoningEfforts: m.ReasoningEfforts,
 			},
 		})
 		if err != nil {

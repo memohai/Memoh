@@ -197,21 +197,6 @@
       />
     </div>
 
-    <!-- Timezone -->
-    <div class="space-y-2">
-      <Label>{{ $t('bots.timezone') }}</Label>
-      <TimezoneSelect
-        :model-value="timezoneModel"
-        :placeholder="$t('bots.timezonePlaceholder')"
-        allow-empty
-        :empty-label="$t('bots.timezoneInherited')"
-        @update:model-value="onTimezoneChange"
-      />
-      <p class="text-xs text-muted-foreground">
-        {{ $t('bots.timezoneInheritedHint') }}
-      </p>
-    </div>
-
     <Separator />
 
     <!-- Max Context Load Time -->
@@ -272,14 +257,35 @@
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="low">
+                <SelectItem
+                  v-if="availableReasoningEfforts.includes('none')"
+                  value="none"
+                >
+                  {{ $t('bots.settings.reasoningEffortNone') }}
+                </SelectItem>
+                <SelectItem
+                  v-if="availableReasoningEfforts.includes('low')"
+                  value="low"
+                >
                   {{ $t('bots.settings.reasoningEffortLow') }}
                 </SelectItem>
-                <SelectItem value="medium">
+                <SelectItem
+                  v-if="availableReasoningEfforts.includes('medium')"
+                  value="medium"
+                >
                   {{ $t('bots.settings.reasoningEffortMedium') }}
                 </SelectItem>
-                <SelectItem value="high">
+                <SelectItem
+                  v-if="availableReasoningEfforts.includes('high')"
+                  value="high"
+                >
                   {{ $t('bots.settings.reasoningEffortHigh') }}
+                </SelectItem>
+                <SelectItem
+                  v-if="availableReasoningEfforts.includes('xhigh')"
+                  value="xhigh"
+                >
+                  {{ $t('bots.settings.reasoningEffortXHigh') }}
                 </SelectItem>
               </SelectGroup>
             </SelectContent>
@@ -349,20 +355,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@memohai/ui'
-import { reactive, computed, watch, ref } from 'vue'
+import { reactive, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import TimezoneSelect from '@/components/timezone-select/index.vue'
-import { emptyTimezoneValue } from '@/utils/timezones'
 import ModelSelect from './model-select.vue'
 import SearchProviderSelect from './search-provider-select.vue'
 import MemoryProviderSelect from './memory-provider-select.vue'
 import TtsModelSelect from './tts-model-select.vue'
 import BrowserContextSelect from './browser-context-select.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getTtsProviders, getBrowserContexts, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
+import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getTtsProviders, getBrowserContexts, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -378,15 +382,6 @@ const botIdRef = computed(() => props.botId) as Ref<string>
 
 // ---- Data ----
 const queryCache = useQueryCache()
-
-const { data: bot } = useQuery({
-  key: () => ['bot', botIdRef.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: botIdRef.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!botIdRef.value,
-})
 
 const { data: settings } = useQuery({
   key: () => ['bot-settings', botIdRef.value],
@@ -503,31 +498,6 @@ const form = reactive({
   reasoning_effort: 'medium',
 })
 
-const timezone = ref('')
-
-const timezoneModel = computed(() => timezone.value || emptyTimezoneValue)
-
-function onTimezoneChange(value: string) {
-  timezone.value = value === emptyTimezoneValue ? '' : value
-}
-
-watch(bot, (val) => {
-  if (val) {
-    timezone.value = val.timezone || ''
-  }
-}, { immediate: true })
-
-const { mutateAsync: updateBot } = useMutation({
-  mutation: async ({ id, ...body }: Record<string, unknown> & { id: string }) => {
-    const { data } = await putBotsById({ path: { id }, body, throwOnError: true })
-    return data
-  },
-  onSettled: () => {
-    queryCache.invalidateQueries({ key: ['bots'] })
-    queryCache.invalidateQueries({ key: ['bot'] })
-  },
-})
-
 const selectedMemoryProvider = computed(() =>
   memoryProviders.value.find((provider) => provider.id === form.memory_provider_id),
 )
@@ -581,6 +551,20 @@ const chatModelSupportsReasoning = computed(() => {
   const m = models.value.find((m) => m.id === form.chat_model_id)
   return !!m?.config?.compatibilities?.includes('reasoning')
 })
+
+const availableReasoningEfforts = computed(() => {
+  if (!form.chat_model_id) return ['low', 'medium', 'high']
+  const model = models.value.find((m) => m.id === form.chat_model_id)
+  const efforts = ((model?.config as { reasoning_efforts?: string[] } | undefined)?.reasoning_efforts ?? [])
+    .filter((effort) => ['none', 'low', 'medium', 'high', 'xhigh'].includes(effort))
+  return efforts.length > 0 ? efforts : ['low', 'medium', 'high']
+})
+
+watch(availableReasoningEfforts, (efforts) => {
+  if (!efforts.includes(form.reasoning_effort)) {
+    form.reasoning_effort = efforts.includes('medium') ? 'medium' : efforts[0] ?? 'medium'
+  }
+}, { immediate: true })
 
 const { data: memoryStatusData, isLoading: isMemoryStatusLoading } = useQuery({
   key: () => ['bot-memory-status', botIdRef.value, persistedMemoryProviderID.value],
@@ -641,12 +625,10 @@ watch(settings, (val) => {
 }, { immediate: true })
 
 const hasChanges = computed(() => {
-  const timezoneChanged = timezone.value !== (bot.value?.timezone || '')
   if (!settings.value) return true
   const s = settings.value
   let changed =
-    timezoneChanged
-    || form.chat_model_id !== (s.chat_model_id ?? '')
+    form.chat_model_id !== (s.chat_model_id ?? '')
     || form.title_model_id !== (s.title_model_id ?? '')
     || form.search_provider_id !== (s.search_provider_id ?? '')
     || form.memory_provider_id !== (s.memory_provider_id ?? '')
@@ -662,11 +644,7 @@ const hasChanges = computed(() => {
 
 async function handleSave() {
   try {
-    const promises: Promise<unknown>[] = [updateSettings({ ...form })]
-    if (timezone.value !== (bot.value?.timezone || '')) {
-      promises.push(updateBot({ id: botIdRef.value, timezone: timezone.value }))
-    }
-    await Promise.all(promises)
+    await updateSettings({ ...form })
     toast.success(t('bots.settings.saveSuccess'))
   } catch {
     return

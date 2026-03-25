@@ -9,10 +9,12 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/session"
 )
 
@@ -104,13 +106,22 @@ func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, 
 		"Return ONLY the title text, nothing else.\n\n" +
 		"User: " + userSnippet
 
-	modelCfg := models.SDKModelConfig{
-		ModelID:    model.ModelID,
-		ClientType: provider.ClientType,
-		APIKey:     provider.ApiKey,
-		BaseURL:    provider.BaseUrl,
+	authResolver := providers.NewService(nil, r.queries, "")
+	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		r.logger.Warn("title gen: failed to resolve provider credentials", slog.Any("error", err))
+		return ""
 	}
-	sdkModel := models.NewSDKChatModel(modelCfg)
+
+	modelCfg := agentpkg.ModelConfig{
+		ModelID:        model.ModelID,
+		ClientType:     provider.ClientType,
+		AuthType:       creds.AuthType,
+		APIKey:         creds.APIKey,
+		CodexAccountID: creds.CodexAccountID,
+		BaseURL:        provider.BaseUrl,
+	}
+	sdkModel := agentpkg.CreateModel(modelCfg)
 
 	genCtx, cancel := context.WithTimeout(ctx, titleGenerateTimeout)
 	defer cancel()

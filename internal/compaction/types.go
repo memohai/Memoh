@@ -1,6 +1,9 @@
 package compaction
 
-import "time"
+import (
+	"net/http"
+	"time"
+)
 
 // Log represents a compaction log entry.
 type Log struct {
@@ -24,10 +27,13 @@ type ListLogsResponse struct {
 
 // TriggerConfig holds the parameters needed to trigger a compaction.
 type TriggerConfig struct {
-	BotID      string
-	SessionID  string
-	ModelID    string
-	ClientType string
-	APIKey     string //nolint:gosec // runtime credential, not a hardcoded secret
-	BaseURL    string
+	BotID          string
+	SessionID      string
+	ModelID        string
+	ClientType     string
+	AuthType       string
+	APIKey         string //nolint:gosec // runtime credential, not a hardcoded secret
+	CodexAccountID string
+	BaseURL        string
+	HTTPClient     *http.Client
 }
