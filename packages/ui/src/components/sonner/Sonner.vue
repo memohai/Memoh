@@ -14,7 +14,7 @@ const props = defineProps<ToasterProps>()
       '--normal-bg': 'var(--card)',
       '--normal-text': 'var(--foreground)',
       '--normal-border': 'var(--border)',
-      '--border-radius': '1rem',
+      '--border-radius': 'var(--radius-lg)',
     }"
     v-bind="props"
   >

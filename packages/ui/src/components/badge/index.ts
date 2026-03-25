@@ -2,6 +2,7 @@ import type { VariantProps } from 'class-variance-authority'
 import { cva } from 'class-variance-authority'
 
 export { default as Badge } from './Badge.vue'
+export { default as BadgeCount } from './BadgeCount.vue'
 
 export const badgeVariants = cva(
   'inline-flex items-center justify-center rounded-sm border px-2.5 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none transition-all overflow-hidden',

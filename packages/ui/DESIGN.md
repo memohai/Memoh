@@ -37,7 +37,8 @@ The system employs a **bimodal elevation strategy**:
 ### Base Atoms
 
 - **Avatars**: 26px rounded full. Default fallback uses `accent`. Status badges require a 2px knockout border matching the background.
-- **Badges**: 4px radius (`rounded-sm`). Default is pure black (`bg-foreground text-background`). Secondary is `bg-accent text-foreground`. Destructive is pure red background.
+- **Badges**: 4px radius (`rounded-sm`). Default is pure black (`bg-foreground text-background`). Secondary is `bg-accent text-foreground`. Destructive is pure red background. Warning is `bg-amber-500 text-white`. Outline is `bg-background border-border text-foreground`. Supports `size="sm"` (`text-[11px] px-2`) alongside default.
+- **BadgeCount**: Circular numeric counter. `rounded-full`, `h-[18px] min-w-[18px] px-1`, `text-[11px] font-medium`. Variants: default (`bg-foreground text-background`), destructive (`bg-destructive text-destructive-foreground`), secondary (`bg-accent text-foreground`). Values above 99 display as "99+".
 - **Buttons**:
   - Primary (Default): 8px radius, **`foreground` (black) background**, white text. Flat.
   - Secondary / Outline: 8px radius, `accent` background, 1px `border`. Flat.
@@ -82,12 +83,15 @@ The system employs a **bimodal elevation strategy**:
 
 ### Complex / Domain Specific
 
+- **Sonner (Toast Notifications)**: Uses `bg-background` with `border border-border` and `shadow-md`. Border radius is `var(--radius-lg)` (10px). Title: `text-sm font-medium text-foreground`. Description: `text-xs text-muted-foreground`. Status icons are `size-4`. Action buttons use `bg-foreground text-background rounded-sm text-xs font-medium`. Supports 6 states: default (with action button), loading (spinner), success, info, warning, error.
+- **Table**: Wrapped in a container with `border border-border rounded-sm` (6px). Header row height 41px with `py-[10px]`, data rows 38px with `py-[8.5px]`. Footer uses `bg-muted/50`. Empty state centers an icon + `text-muted-foreground` message in `h-[204px]`. Caption is centered `text-sm text-muted-foreground`.
+- **TagsInput**: Flat design. `rounded-lg` (no shadow). Focus state uses `ring-ring/20 ring-2` (not `ring-[3px]`).
 - **Chat Input (Main Area)**:
   - Flat container (`shadow-none`), `border-border`, 10px radius.
   - Divided horizontally by top/bottom 1px borders (`border-t`, `border-b`).
   - Send button uniquely retains `bg-primary` for high conversion focus.
   - Model selector (Badge style) floats inside the top border area, using `bg-accent` or `bg-background` depending on state.
-- **OTP Input**: Flat group. Outer container holds the `border` and `rounded-lg`. Inner cells separated by `border-r`. Focus state is a dark ring, not primary purple.
+- **OTP Input (PinInput)**: Flat group built on reka-ui `PinInput`. Each cell is `size-9 bg-background text-sm shadow-none`. The first cell gets `border border-border rounded-l-lg`, middle cells use `border-y border-r border-border` (no left border to avoid doubling), and the last cell adds `rounded-r-lg`. Focus state applies `border-2 border-ring` (dark ring, not primary purple). Supports an optional `PinInputSeparator` between groups.
 
 ## AI Image Generation & Component Reuse Rules
 
