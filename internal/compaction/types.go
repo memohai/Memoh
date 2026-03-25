@@ -27,11 +27,13 @@ type ListLogsResponse struct {
 
 // TriggerConfig holds the parameters needed to trigger a compaction.
 type TriggerConfig struct {
-	BotID      string
-	SessionID  string
-	ModelID    string
-	ClientType string
-	APIKey     string //nolint:gosec // runtime credential, not a hardcoded secret
-	BaseURL    string
-	HTTPClient *http.Client
+	BotID          string
+	SessionID      string
+	ModelID        string
+	ClientType     string
+	AuthType       string
+	APIKey         string //nolint:gosec // runtime credential, not a hardcoded secret
+	CodexAccountID string
+	BaseURL        string
+	HTTPClient     *http.Client
 }

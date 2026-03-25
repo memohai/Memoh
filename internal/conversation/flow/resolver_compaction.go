@@ -49,14 +49,16 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		return
 	}
 	authResolver := providers.NewService(nil, r.queries, "")
-	apiKey := provider.ApiKey
-	if providers.SupportsOpenAICodexOAuth(provider) {
-		apiKey = ""
+	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		r.logger.Warn("compaction: failed to resolve provider credentials", slog.Any("error", err))
+		return
 	}
 	cfg.ClientType = provider.ClientType
-	cfg.APIKey = apiKey
+	cfg.AuthType = creds.AuthType
+	cfg.APIKey = creds.APIKey
+	cfg.CodexAccountID = creds.CodexAccountID
 	cfg.BaseURL = provider.BaseUrl
-	cfg.HTTPClient = authResolver.AuthHTTPClient(provider, 0)
 
 	r.compactionService.TriggerCompaction(ctx, cfg)
 }

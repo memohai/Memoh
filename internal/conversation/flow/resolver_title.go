@@ -107,17 +107,19 @@ func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, 
 		"User: " + userSnippet
 
 	authResolver := providers.NewService(nil, r.queries, "")
-	apiKey := provider.ApiKey
-	if providers.SupportsOpenAICodexOAuth(provider) {
-		apiKey = ""
+	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		r.logger.Warn("title gen: failed to resolve provider credentials", slog.Any("error", err))
+		return ""
 	}
 
 	modelCfg := agentpkg.ModelConfig{
-		ModelID:    model.ModelID,
-		ClientType: provider.ClientType,
-		APIKey:     apiKey,
-		BaseURL:    provider.BaseUrl,
-		HTTPClient: authResolver.AuthHTTPClient(provider, titleGenerateTimeout),
+		ModelID:        model.ModelID,
+		ClientType:     provider.ClientType,
+		AuthType:       creds.AuthType,
+		APIKey:         creds.APIKey,
+		CodexAccountID: creds.CodexAccountID,
+		BaseURL:        provider.BaseUrl,
 	}
 	sdkModel := agentpkg.CreateModel(modelCfg)
 

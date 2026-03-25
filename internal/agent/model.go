@@ -3,6 +3,7 @@ package agent
 import (
 	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
 	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
+	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
 	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
 	openairesponses "github.com/memohai/twilight-ai/provider/openai/responses"
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -39,6 +40,19 @@ func CreateModel(cfg ModelConfig) *sdk.Model {
 		return p.ChatModel(cfg.ModelID)
 
 	case ClientTypeOpenAIResponses:
+		if cfg.AuthType == "openai-codex-oauth" {
+			opts := []openaicodex.Option{
+				openaicodex.WithAccessToken(cfg.APIKey),
+			}
+			if cfg.CodexAccountID != "" {
+				opts = append(opts, openaicodex.WithAccountID(cfg.CodexAccountID))
+			}
+			if cfg.HTTPClient != nil {
+				opts = append(opts, openaicodex.WithHTTPClient(cfg.HTTPClient))
+			}
+			p := openaicodex.New(opts...)
+			return p.ChatModel(cfg.ModelID)
+		}
 		opts := []openairesponses.Option{
 			openairesponses.WithAPIKey(cfg.APIKey),
 		}

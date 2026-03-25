@@ -71,13 +71,15 @@ func SpawnSystemPrompt(sessionType string) string {
 
 // SpawnModelCreatorFunc returns a tools.ModelCreator that delegates to agent.CreateModel.
 func SpawnModelCreatorFunc() tools.ModelCreator {
-	return func(modelID, clientType, apiKey, baseURL string, httpClient *http.Client) *sdk.Model {
+	return func(modelID, clientType, authType, apiKey, codexAccountID, baseURL string, httpClient *http.Client) *sdk.Model {
 		return CreateModel(ModelConfig{
-			ModelID:    modelID,
-			ClientType: clientType,
-			APIKey:     apiKey,
-			BaseURL:    baseURL,
-			HTTPClient: httpClient,
+			ModelID:        modelID,
+			ClientType:     clientType,
+			AuthType:       authType,
+			APIKey:         apiKey,
+			CodexAccountID: codexAccountID,
+			BaseURL:        baseURL,
+			HTTPClient:     httpClient,
 		})
 	}
 }

@@ -294,7 +294,7 @@ func (p *SpawnProvider) persistMessages(
 }
 
 // ModelCreator creates an sdk.Model from provider config. Set via SetModelCreator.
-type ModelCreator func(modelID, clientType, apiKey, baseURL string, httpClient *http.Client) *sdk.Model
+type ModelCreator func(modelID, clientType, authType, apiKey, codexAccountID, baseURL string, httpClient *http.Client) *sdk.Model
 
 // SetModelCreator injects the function used to create SDK models
 // (typically agent.CreateModel wrapped to match the signature).
@@ -326,16 +326,18 @@ func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Mo
 		return nil, "", errors.New("model creator not configured")
 	}
 	authResolver := providers.NewService(nil, p.queries, "")
-	apiKey := provider.ApiKey
-	if providers.SupportsOpenAICodexOAuth(provider) {
-		apiKey = ""
+	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return nil, "", err
 	}
 	sdkModel := p.modelCreator(
 		modelInfo.ModelID,
 		provider.ClientType,
-		apiKey,
+		creds.AuthType,
+		creds.APIKey,
+		creds.CodexAccountID,
 		provider.BaseUrl,
-		authResolver.AuthHTTPClient(provider, 0),
+		nil,
 	)
 	return sdkModel, modelInfo.ID, nil
 }

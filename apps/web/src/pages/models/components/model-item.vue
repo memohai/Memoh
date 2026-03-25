@@ -30,6 +30,14 @@
         >
           {{ $t(`models.compatibility.${cap}`, cap) }}
         </Badge>
+        <Badge
+          v-for="effort in reasoningEfforts"
+          :key="effort"
+          variant="secondary"
+          class="text-xs"
+        >
+          {{ effort }}
+        </Badge>
         <span
           v-if="model.config?.context_window"
           class="text-xs text-muted-foreground"
@@ -101,6 +109,10 @@ import { postModelsByIdTest } from '@memohai/sdk'
 import type { ModelsGetResponse, ModelsTestResponse } from '@memohai/sdk'
 import { ref, computed } from 'vue'
 
+type ModelConfigWithReasoning = {
+  reasoning_efforts?: string[]
+}
+
 const props = defineProps<{
   model: ModelsGetResponse
   deleteLoading: boolean
@@ -113,6 +125,7 @@ defineEmits<{
 
 const testLoading = ref(false)
 const testResult = ref<ModelsTestResponse | null>(null)
+const reasoningEfforts = computed(() => ((props.model.config as ModelConfigWithReasoning | undefined)?.reasoning_efforts ?? []))
 
 const statusDotClass = computed(() => {
   switch (testResult.value?.status) {

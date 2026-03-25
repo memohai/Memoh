@@ -257,14 +257,35 @@
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="low">
+                <SelectItem
+                  v-if="availableReasoningEfforts.includes('none')"
+                  value="none"
+                >
+                  {{ $t('bots.settings.reasoningEffortNone') }}
+                </SelectItem>
+                <SelectItem
+                  v-if="availableReasoningEfforts.includes('low')"
+                  value="low"
+                >
                   {{ $t('bots.settings.reasoningEffortLow') }}
                 </SelectItem>
-                <SelectItem value="medium">
+                <SelectItem
+                  v-if="availableReasoningEfforts.includes('medium')"
+                  value="medium"
+                >
                   {{ $t('bots.settings.reasoningEffortMedium') }}
                 </SelectItem>
-                <SelectItem value="high">
+                <SelectItem
+                  v-if="availableReasoningEfforts.includes('high')"
+                  value="high"
+                >
                   {{ $t('bots.settings.reasoningEffortHigh') }}
+                </SelectItem>
+                <SelectItem
+                  v-if="availableReasoningEfforts.includes('xhigh')"
+                  value="xhigh"
+                >
+                  {{ $t('bots.settings.reasoningEffortXHigh') }}
                 </SelectItem>
               </SelectGroup>
             </SelectContent>
@@ -530,6 +551,20 @@ const chatModelSupportsReasoning = computed(() => {
   const m = models.value.find((m) => m.id === form.chat_model_id)
   return !!m?.config?.compatibilities?.includes('reasoning')
 })
+
+const availableReasoningEfforts = computed(() => {
+  if (!form.chat_model_id) return ['low', 'medium', 'high']
+  const model = models.value.find((m) => m.id === form.chat_model_id)
+  const efforts = ((model?.config as { reasoning_efforts?: string[] } | undefined)?.reasoning_efforts ?? [])
+    .filter((effort) => ['none', 'low', 'medium', 'high', 'xhigh'].includes(effort))
+  return efforts.length > 0 ? efforts : ['low', 'medium', 'high']
+})
+
+watch(availableReasoningEfforts, (efforts) => {
+  if (!efforts.includes(form.reasoning_effort)) {
+    form.reasoning_effort = efforts.includes('medium') ? 'medium' : efforts[0] ?? 'medium'
+  }
+}, { immediate: true })
 
 const { data: memoryStatusData, isLoading: isMemoryStatusLoading } = useQuery({
   key: () => ['bot-memory-status', botIdRef.value, persistedMemoryProviderID.value],

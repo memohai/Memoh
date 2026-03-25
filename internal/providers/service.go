@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/db"
@@ -248,13 +249,12 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 
 	clientType := models.ClientType(provider.ClientType)
-	httpClient := s.AuthHTTPClient(provider, probeTimeout)
-	apiKey := provider.ApiKey
-	if s.supportsOAuth(provider) {
-		apiKey = ""
+	creds, err := s.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return TestResponse{}, err
 	}
 
-	sdkProvider := models.NewSDKProvider(baseURL, apiKey, clientType, probeTimeout, httpClient)
+	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, creds.AuthType, clientType, probeTimeout, nil)
 
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
@@ -278,6 +278,29 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
+	if s.supportsOAuth(provider) {
+		catalog := openaicodex.Catalog()
+		remoteModels := make([]RemoteModel, 0, len(catalog))
+		for _, model := range catalog {
+			compatibilities := make([]string, 0, 2)
+			if model.SupportsToolCall {
+				compatibilities = append(compatibilities, models.CompatToolCall)
+			}
+			if model.SupportsReasoning {
+				compatibilities = append(compatibilities, models.CompatReasoning)
+			}
+			remoteModels = append(remoteModels, RemoteModel{
+				ID:               model.ID,
+				Name:             model.DisplayName,
+				Object:           "model",
+				OwnedBy:          "openai-codex",
+				Type:             "chat",
+				Compatibilities:  compatibilities,
+				ReasoningEfforts: append([]string(nil), model.ReasoningEfforts...),
+			})
+		}
+		return remoteModels, nil
+	}
 
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 	modelsURL := fmt.Sprintf("%s/models", baseURL)
@@ -294,7 +317,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", provider.ApiKey))
 	}
 
-	resp, err := s.AuthHTTPClient(provider, probeTimeout).Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}

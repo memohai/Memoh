@@ -75,10 +75,14 @@ type OAuthStatus struct {
 
 // RemoteModel represents a model returned by the provider's /v1/models endpoint.
 type RemoteModel struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	OwnedBy string `json:"owned_by"`
+	ID               string   `json:"id"`
+	Object           string   `json:"object"`
+	Created          int64    `json:"created"`
+	OwnedBy          string   `json:"owned_by"`
+	Name             string   `json:"name,omitempty"`
+	Type             string   `json:"type,omitempty"`
+	Compatibilities  []string `json:"compatibilities,omitempty"`
+	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 }
 
 // FetchModelsResponse represents the response from the provider's /v1/models endpoint.

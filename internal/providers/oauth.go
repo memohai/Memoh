@@ -59,12 +59,6 @@ type openAIOAuthConfig struct {
 	IDTokenAddOrganizations bool
 }
 
-type providerOAuthTransport struct {
-	base       http.RoundTripper
-	service    *Service
-	providerID string
-}
-
 func (s *Service) providerAuthType(provider sqlc.LlmProvider) string {
 	return authTypeFromMetadata(providerMetadata(provider.Metadata))
 }
@@ -178,38 +172,6 @@ func (s *Service) supportsOAuth(provider sqlc.LlmProvider) bool {
 		return false
 	}
 	return s.validateAuthType(provider.BaseUrl, provider.ClientType, AuthTypeOpenAICodexOAuth) == nil
-}
-
-func SupportsOpenAICodexOAuth(provider sqlc.LlmProvider) bool {
-	svc := &Service{}
-	return svc.supportsOAuth(provider)
-}
-
-func (s *Service) AuthHTTPClient(provider sqlc.LlmProvider, timeout time.Duration) *http.Client {
-	if timeout <= 0 {
-		timeout = providerOAuthHTTPTimeout
-	}
-	client := &http.Client{Timeout: timeout}
-	if !s.supportsOAuth(provider) {
-		return client
-	}
-	client.Transport = &providerOAuthTransport{
-		base:       http.DefaultTransport,
-		service:    s,
-		providerID: provider.ID.String(),
-	}
-	return client
-}
-
-func (t *providerOAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	token, err := t.service.GetValidAccessToken(req.Context(), t.providerID)
-	if err != nil {
-		return nil, err
-	}
-	cloned := req.Clone(req.Context())
-	cloned.Header = cloned.Header.Clone()
-	cloned.Header.Set("Authorization", "Bearer "+token)
-	return t.base.RoundTrip(cloned)
 }
 
 func (s *Service) StartOAuthAuthorization(ctx context.Context, providerID string) (string, error) {

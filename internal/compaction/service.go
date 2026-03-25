@@ -104,11 +104,13 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 	userPrompt := buildUserPrompt(priorSummaries, entries)
 
 	model := agent.CreateModel(agent.ModelConfig{
-		ClientType: cfg.ClientType,
-		BaseURL:    cfg.BaseURL,
-		APIKey:     cfg.APIKey,
-		ModelID:    cfg.ModelID,
-		HTTPClient: cfg.HTTPClient,
+		ClientType:     cfg.ClientType,
+		AuthType:       cfg.AuthType,
+		BaseURL:        cfg.BaseURL,
+		APIKey:         cfg.APIKey,
+		CodexAccountID: cfg.CodexAccountID,
+		ModelID:        cfg.ModelID,
+		HTTPClient:     cfg.HTTPClient,
 	})
 
 	result, err := sdk.GenerateTextResult(ctx,

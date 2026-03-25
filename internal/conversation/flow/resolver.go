@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -280,17 +281,18 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 
 	authResolver := providers.NewService(nil, r.queries, "")
-	apiKey := provider.ApiKey
-	if providers.SupportsOpenAICodexOAuth(provider) {
-		apiKey = ""
+	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return resolvedContext{}, fmt.Errorf("resolve provider credentials: %w", err)
 	}
 
 	modelCfg := agentpkg.ModelConfig{
 		ModelID:         chatModel.ModelID,
 		ClientType:      clientType,
-		APIKey:          apiKey,
+		AuthType:        creds.AuthType,
+		APIKey:          creds.APIKey,
+		CodexAccountID:  creds.CodexAccountID,
 		BaseURL:         provider.BaseUrl,
-		HTTPClient:      authResolver.AuthHTTPClient(provider, 0),
 		ReasoningConfig: reasoningConfig,
 	}
 
