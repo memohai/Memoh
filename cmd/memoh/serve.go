@@ -860,16 +860,12 @@ func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenSto
 }
 
 func provideProvidersService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) *providers.Service {
-	addr := strings.TrimSpace(cfg.Server.Addr)
-	if addr == "" {
-		addr = ":8080"
-	}
-	host := addr
-	if strings.HasPrefix(host, ":") {
-		host = "localhost" + host
-	}
-	callbackURL := "http://" + host + "/providers/oauth/callback"
-	return providers.NewService(log, queries, callbackURL)
+	_ = cfg
+	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL())
+}
+
+func defaultProviderOAuthCallbackURL() string {
+	return "http://localhost:1455/auth/callback"
 }
 
 func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, cfg config.Config) *handlers.EmailOAuthHandler {

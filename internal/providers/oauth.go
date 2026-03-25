@@ -25,7 +25,7 @@ const (
 	defaultOpenAICodexClientID    = "app_EMoamEEZ73f0CkXaXp7hrann"
 	defaultOpenAIAuthorizeURL     = "https://auth.openai.com/oauth/authorize"
 	defaultOpenAITokenURL         = "https://auth.openai.com/oauth/token"
-	defaultOpenAIOAuthAudience    = "https://api.openai.com/v1/"
+	defaultOpenAICallbackURL      = "http://localhost:1455/auth/callback"
 	defaultOpenAIOAuthScopes      = "openid profile email offline_access"
 	oauthExpirySkew               = 30 * time.Second
 	providerOAuthHTTPTimeout      = 15 * time.Second
@@ -33,6 +33,7 @@ const (
 	metadataOAuthClientIDKey      = "oauth_client_id"
 	metadataOAuthAuthorizeURLKey  = "oauth_authorize_url"
 	metadataOAuthTokenURLKey      = "oauth_token_url"
+	metadataOAuthRedirectURIKey   = "oauth_redirect_uri"
 	metadataOAuthScopesKey        = "oauth_scopes"
 	metadataOAuthAudienceKey      = "oauth_audience"
 	metadataOAuthUseIDOrgsFlagKey = "oauth_id_token_add_organizations"
@@ -53,8 +54,8 @@ type openAIOAuthConfig struct {
 	ClientID                string
 	AuthorizeURL            string
 	TokenURL                string
+	RedirectURI             string
 	Scopes                  string
-	Audience                string
 	IDTokenAddOrganizations bool
 }
 
@@ -147,8 +148,8 @@ func (s *Service) oauthConfig(metadata map[string]any) openAIOAuthConfig {
 		ClientID:                defaultOpenAICodexClientID,
 		AuthorizeURL:            defaultOpenAIAuthorizeURL,
 		TokenURL:                defaultOpenAITokenURL,
+		RedirectURI:             firstNonEmpty(s.callbackURL, defaultOpenAICallbackURL),
 		Scopes:                  defaultOpenAIOAuthScopes,
-		Audience:                defaultOpenAIOAuthAudience,
 		IDTokenAddOrganizations: true,
 	}
 	if v, _ := metadata[metadataOAuthClientIDKey].(string); strings.TrimSpace(v) != "" {
@@ -160,11 +161,11 @@ func (s *Service) oauthConfig(metadata map[string]any) openAIOAuthConfig {
 	if v, _ := metadata[metadataOAuthTokenURLKey].(string); strings.TrimSpace(v) != "" {
 		cfg.TokenURL = strings.TrimSpace(v)
 	}
+	if v, _ := metadata[metadataOAuthRedirectURIKey].(string); strings.TrimSpace(v) != "" {
+		cfg.RedirectURI = strings.TrimSpace(v)
+	}
 	if v, _ := metadata[metadataOAuthScopesKey].(string); strings.TrimSpace(v) != "" {
 		cfg.Scopes = strings.TrimSpace(v)
-	}
-	if v, _ := metadata[metadataOAuthAudienceKey].(string); strings.TrimSpace(v) != "" {
-		cfg.Audience = strings.TrimSpace(v)
 	}
 	if v, ok := metadata[metadataOAuthUseIDOrgsFlagKey].(bool); ok {
 		cfg.IDTokenAddOrganizations = v
@@ -240,18 +241,16 @@ func (s *Service) StartOAuthAuthorization(ctx context.Context, providerID string
 	params := url.Values{
 		"response_type":         {"code"},
 		"client_id":             {cfg.ClientID},
-		"redirect_uri":          {s.callbackURL},
+		"redirect_uri":          {cfg.RedirectURI},
 		"scope":                 {cfg.Scopes},
 		"code_challenge":        {computeCodeChallenge(codeVerifier)},
 		"code_challenge_method": {"S256"},
 		"state":                 {state},
 	}
-	if cfg.Audience != "" {
-		params.Set("audience", cfg.Audience)
-	}
 	if cfg.IDTokenAddOrganizations {
 		params.Set("id_token_add_organizations", "true")
 	}
+	params.Set("codex_cli_simplified_flow", "true")
 
 	return cfg.AuthorizeURL + "?" + params.Encode(), nil
 }
@@ -306,7 +305,7 @@ func (s *Service) GetOAuthStatus(ctx context.Context, providerID string) (*OAuth
 	status := &OAuthStatus{
 		AuthType:    authType,
 		Configured:  s.supportsOAuth(provider),
-		CallbackURL: s.callbackURL,
+		CallbackURL: s.oauthConfig(providerMetadata(provider.Metadata)).RedirectURI,
 	}
 	if !status.Configured {
 		return status, nil
@@ -472,7 +471,7 @@ func (s *Service) exchangeCode(ctx context.Context, cfg openAIOAuthConfig, code,
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"client_id":     {cfg.ClientID},
-		"redirect_uri":  {s.callbackURL},
+		"redirect_uri":  {cfg.RedirectURI},
 		"code_verifier": {codeVerifier},
 	}
 	return s.postTokenRequest(ctx, cfg.TokenURL, values)

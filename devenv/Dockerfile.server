@@ -59,6 +59,6 @@ RUN chmod +x /entrypoint.sh
 
 VOLUME ["/var/lib/containerd", "/opt/memoh/data"]
 
-EXPOSE 8080
+EXPOSE 8080 1455
 
 ENTRYPOINT ["/entrypoint.sh"]

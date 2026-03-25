@@ -93,5 +93,8 @@ func shouldSkipJWT(path string) bool {
 	if strings.HasPrefix(path, "/providers/oauth/callback") {
 		return true
 	}
+	if strings.HasPrefix(path, "/auth/callback") {
+		return true
+	}
 	return false
 }

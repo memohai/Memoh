@@ -22,6 +22,7 @@ func (h *ProviderOAuthHandler) Register(e *echo.Echo) {
 	e.GET("/providers/:id/oauth/authorize", h.Authorize)
 	e.GET("/providers/:id/oauth/status", h.Status)
 	e.DELETE("/providers/:id/oauth/token", h.Revoke)
+	e.GET("/auth/callback", h.Callback)
 	e.GET("/providers/oauth/callback", h.Callback)
 }
 
