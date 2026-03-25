@@ -1,6 +1,14 @@
 <template>
   <div class="flex h-full">
-    <MasterDetailSidebarLayout>
+    <!-- <Teleport to=".main-left-section">
+      <SidebarProvider>
+        <SidebarContent>
+          <BotSidebar />
+        </SidebarContent>
+      </SidebarProvider>
+    </Teleport>
+   -->
+    <!-- <MasterDetailSidebarLayout>
       <template #sidebar-header>
         <div class="flex items-center gap-2">
           <FontAwesomeIcon
@@ -12,27 +20,7 @@
           </span>
         </div>
       </template>
-      <template #sidebar-content>
-        <div class="px-1.5 pb-2">
-          <div class="flex items-center gap-1.5 h-[30px] rounded-lg border border-border bg-card px-2.5">
-            <FontAwesomeIcon
-              :icon="['fas', 'magnifying-glass']"
-              class="size-[11px] text-muted-foreground shrink-0"
-            />
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="$t('chat.searchPlaceholder')"
-              class="flex-1 min-w-0 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
-            >
-          </div>
-        </div>
-
-        <div class="px-3.5 pt-2 pb-1">
-          <p class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            {{ $t('sidebar.bots') }}
-          </p>
-        </div>
+<template #sidebar-content>
         <BotSidebar />
 
         <template v-if="currentBotId">
@@ -44,43 +32,39 @@
           <SessionSidebar />
         </template>
       </template>
-      <template #sidebar-footer>
-        <div class="px-4 pb-3 pt-1">
-          <button
-            class="flex items-center gap-[7px] w-full h-[34px] rounded-lg bg-foreground text-background px-3.5 text-xs font-medium hover:bg-foreground/90 transition-colors"
-            @click="chatStore.createNewSession()"
-          >
-            <FontAwesomeIcon
-              :icon="['fas', 'plus']"
-              class="size-3"
-            />
-            <span>{{ $t('chat.newSession') }}</span>
-          </button>
-        </div>
-      </template>
-      <template #detail>
+<template #detail>
         <ChatArea />
       </template>
-    </MasterDetailSidebarLayout>
+</MasterDetailSidebarLayout> -->
+    <ChatHeader />
+    <BotSidebar />
+    <SessionSidebar />
+    <ChatArea />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import {  watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
-import BotSidebar from './components/bot-sidebar.vue'
-import SessionSidebar from './components/session-sidebar.vue'
+// import BotSidebar from './components/bot-sidebar.vue'
+// import SessionSidebar from './components/session-sidebar.vue'
 import ChatArea from './components/chat-area.vue'
-import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
+import { defineAsyncComponent } from 'vue'
+
+const BotSidebar = defineAsyncComponent(async () => import('./components/bot-sidebar.vue'))
+
+const SessionSidebar = defineAsyncComponent(() => import('./components/session_sidebar.vue'))
+
+const ChatHeader = defineAsyncComponent(() => import('./components/chat-header.vue'))
 
 const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
 const { currentBotId, sessionId } = storeToRefs(chatStore)
 
-const searchQuery = ref('')
+// const searchQuery = ref('')
 
 const urlSessionId = ((route.params.sessionId as string) ?? '').trim()
 if (urlSessionId) {
