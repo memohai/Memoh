@@ -210,6 +210,7 @@
   "provider": {
     "add": "Add Provider",
     "addBtn": "Add",
+    "authType": "Authentication",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter API key",
     "url": "Base URL",
@@ -228,7 +229,33 @@
     "icon": "Icon",
     "iconPlaceholder": "Icon URL or identifier (optional)",
     "enable": "Enable",
-    "enableHint": "Only models from enabled providers appear in the available model list"
+    "enableHint": "Only models from enabled providers appear in the available model list",
+    "authTypes": {
+      "apiKey": "API Key",
+      "apiKeyHint": "Use a static API key configured on the provider",
+      "openaiCodex": "OpenAI Codex OAuth",
+      "openaiCodexHint": "Use ChatGPT OAuth for OpenAI Codex-compatible access"
+    },
+    "oauth": {
+      "title": "OpenAI OAuth",
+      "description": "Authorize this provider with your ChatGPT account for Codex-compatible OpenAI access.",
+      "createHint": "Save the provider first, then authorize it from the provider details panel.",
+      "authorize": "Authorize",
+      "authorizeFailed": "Failed to start authorization",
+      "authorizeSuccess": "Authorization successful",
+      "revoke": "Revoke",
+      "revokeFailed": "Failed to revoke authorization",
+      "revokeSuccess": "Authorization revoked",
+      "callback": "Callback URL",
+      "statusFailed": "Failed to load OAuth status",
+      "status": {
+        "checking": "Checking authorization status...",
+        "authorized": "Authorized",
+        "expired": "Authorization expired. Re-authorize to continue.",
+        "missing": "Not authorized yet.",
+        "notConfigured": "This provider is not configured for OAuth."
+      }
+    }
   },
   "searchProvider": {
     "title": "Search Providers",

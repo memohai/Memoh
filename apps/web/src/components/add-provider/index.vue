@@ -47,6 +47,25 @@
             </FormItem>
           </FormField>
           <FormField
+            v-slot="{ value, handleChange }"
+            name="auth_type"
+          >
+            <FormItem>
+              <Label class="mb-2">
+                {{ $t('provider.authType') }}
+              </Label>
+              <FormControl>
+                <SearchableSelectPopover
+                  :model-value="value"
+                  :options="authTypeOptions"
+                  :placeholder="$t('provider.authType')"
+                  @update:model-value="handleChange"
+                />
+              </FormControl>
+            </FormItem>
+          </FormField>
+          <FormField
+            v-if="form.values.auth_type !== 'openai-codex-oauth'"
             v-slot="{ componentField }"
             name="api_key"
           >
@@ -68,6 +87,12 @@
               </FormControl>
             </FormItem>
           </FormField>
+          <div
+            v-else
+            class="rounded-lg border p-3 text-sm text-muted-foreground"
+          >
+            {{ $t('provider.oauth.createHint') }}
+          </div>
           <FormField
             v-slot="{ componentField }"
             name="base_url"
@@ -161,7 +186,7 @@ import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
 import { toast } from 'vue-sonner'
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 
 const open = defineModel<boolean>('open')
 const { t } = useI18n()
@@ -175,6 +200,21 @@ const clientTypeOptions = computed(() =>
     keywords: [ct.label, ct.hint, CLIENT_TYPE_META[ct.value]?.value ?? ct.value],
   })),
 )
+
+const authTypeOptions = computed(() => [
+  {
+    value: 'api_key',
+    label: t('provider.authTypes.apiKey'),
+    description: t('provider.authTypes.apiKeyHint'),
+    keywords: ['api key', 'token'],
+  },
+  {
+    value: 'openai-codex-oauth',
+    label: t('provider.authTypes.openaiCodex'),
+    description: t('provider.authTypes.openaiCodexHint'),
+    keywords: ['openai', 'codex', 'oauth'],
+  },
+])
 
 const queryCache = useQueryCache()
 const { mutateAsync: createProviderMutation, isLoading } = useMutation({
@@ -208,19 +248,37 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
 })
 
 const providerSchema = toTypedSchema(z.object({
-  api_key: z.string().min(1),
+  api_key: z.string().optional(),
   base_url: z.string().min(1),
   name: z.string().min(1),
   client_type: z.string().min(1),
+  auth_type: z.string().min(1),
   auto_import: z.boolean().optional(),
+}).superRefine((value, ctx) => {
+  if (value.auth_type !== 'openai-codex-oauth' && !value.api_key?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['api_key'],
+      message: 'API key is required',
+    })
+  }
 }))
 
 const form = useForm({
   validationSchema: providerSchema,
   initialValues: {
     auto_import: false,
+    auth_type: 'api_key',
     client_type: 'openai-completions',
   },
+})
+
+watch(() => form.values.auth_type, (authType) => {
+  if (authType !== 'openai-codex-oauth') return
+  form.setFieldValue('client_type', 'openai-responses')
+  if (!form.values.base_url) {
+    form.setFieldValue('base_url', 'https://api.openai.com/v1')
+  }
 })
 
 const createProvider = form.handleSubmit(async (value) => {
