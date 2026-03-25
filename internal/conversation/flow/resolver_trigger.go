@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -100,10 +101,18 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 
 	var checklist string
 	if r.agent != nil {
-		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), botID)
+		nowFn := time.Now
+		if cfg.Identity.TimezoneLocation != nil {
+			nowFn = func() time.Time { return time.Now().In(cfg.Identity.TimezoneLocation) }
+		}
+		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), botID, nowFn)
 		checklist = fs.ReadTextSafe(ctx, "/data/HEARTBEAT.md")
 	}
-	heartbeatPrompt := agentpkg.GenerateHeartbeatPrompt(payload.Interval, checklist, payload.LastHeartbeatAt)
+	now := time.Now().UTC()
+	if cfg.Identity.TimezoneLocation != nil {
+		now = now.In(cfg.Identity.TimezoneLocation)
+	}
+	heartbeatPrompt := agentpkg.GenerateHeartbeatPrompt(payload.Interval, checklist, now, payload.LastHeartbeatAt)
 	cfg.Messages = append(cfg.Messages, sdk.UserMessage(heartbeatPrompt))
 	cfg = r.prepareRunConfig(ctx, cfg)
 

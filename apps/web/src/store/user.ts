@@ -9,6 +9,7 @@ export interface UserInfo {
   role: string;
   displayName: string;
   avatarUrl: string;
+  timezone: string;
 }
 
 export const useUserStore = defineStore(
@@ -20,6 +21,7 @@ export const useUserStore = defineStore(
       role: '',
       displayName: '',
       avatarUrl: '',
+      timezone: 'UTC',
     })
 
     const localToken = useLocalStorage('token', '')
@@ -43,7 +45,7 @@ export const useUserStore = defineStore(
     const exitLogin = () => {
       localToken.value = ''
       for (const key of Object.keys(userInfo) as (keyof UserInfo)[]) {
-        userInfo[key as keyof UserInfo] = ''
+        userInfo[key as keyof UserInfo] = key === 'timezone' ? 'UTC' : ''
       }
     }
     const router = useRouter()

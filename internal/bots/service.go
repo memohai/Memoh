@@ -15,6 +15,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
 // Service provides bot CRUD and membership management.
@@ -108,6 +109,10 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if req.IsActive != nil {
 		isActive = *req.IsActive
 	}
+	timezoneValue, err := normalizeOptionalTimezone(req.Timezone)
+	if err != nil {
+		return Bot{}, err
+	}
 	metadata := req.Metadata
 	if metadata == nil {
 		metadata = map[string]any{}
@@ -120,6 +125,7 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 		OwnerUserID: ownerUUID,
 		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
 		AvatarUrl:   pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
+		Timezone:    timezoneValue,
 		IsActive:    isActive,
 		Metadata:    payload,
 		Status:      BotStatusCreating,
@@ -222,6 +228,13 @@ func (s *Service) Update(ctx context.Context, botID string, req UpdateBotRequest
 	if req.IsActive != nil {
 		isActive = *req.IsActive
 	}
+	timezoneValue := existing.Timezone
+	if req.Timezone != nil {
+		timezoneValue, err = normalizeOptionalTimezone(req.Timezone)
+		if err != nil {
+			return Bot{}, err
+		}
+	}
 	if req.Metadata != nil {
 		metadata = req.Metadata
 	}
@@ -236,6 +249,7 @@ func (s *Service) Update(ctx context.Context, botID string, req UpdateBotRequest
 		ID:          botUUID,
 		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
 		AvatarUrl:   pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
+		Timezone:    timezoneValue,
 		IsActive:    isActive,
 		Metadata:    payload,
 	})
@@ -421,15 +435,15 @@ func asSQLCBot(v any) sqlc.Bot {
 	case sqlc.Bot:
 		return r
 	case sqlc.CreateBotRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.GetBotByIDRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, CompactionEnabled: r.CompactionEnabled, CompactionThreshold: r.CompactionThreshold, CompactionModelID: r.CompactionModelID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.ListBotsByOwnerRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.UpdateBotProfileRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.UpdateBotOwnerRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, MaxContextLoadTime: r.MaxContextLoadTime, MaxContextTokens: r.MaxContextTokens, Language: r.Language, ReasoningEnabled: r.ReasoningEnabled, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	default:
 		return sqlc.Bot{}
 	}
@@ -443,6 +457,10 @@ func toBot(row sqlc.Bot) (Bot, error) {
 	avatarURL := ""
 	if row.AvatarUrl.Valid {
 		avatarURL = row.AvatarUrl.String
+	}
+	timezoneName := ""
+	if row.Timezone.Valid {
+		timezoneName = row.Timezone.String
 	}
 	metadata, err := decodeMetadata(row.Metadata)
 	if err != nil {
@@ -461,6 +479,7 @@ func toBot(row sqlc.Bot) (Bot, error) {
 		OwnerUserID:     row.OwnerUserID.String(),
 		DisplayName:     displayName,
 		AvatarURL:       avatarURL,
+		Timezone:        timezoneName,
 		IsActive:        row.IsActive,
 		Status:          strings.TrimSpace(row.Status),
 		CheckState:      BotCheckStateUnknown,
@@ -483,6 +502,21 @@ func decodeMetadata(payload []byte) (map[string]any, error) {
 		data = map[string]any{}
 	}
 	return data, nil
+}
+
+func normalizeOptionalTimezone(raw *string) (pgtype.Text, error) {
+	if raw == nil {
+		return pgtype.Text{}, nil
+	}
+	normalized := strings.TrimSpace(*raw)
+	if normalized == "" {
+		return pgtype.Text{}, nil
+	}
+	loc, _, err := tzutil.Resolve(normalized)
+	if err != nil {
+		return pgtype.Text{}, fmt.Errorf("invalid timezone: %w", err)
+	}
+	return pgtype.Text{String: loc.String(), Valid: true}, nil
 }
 
 func (s *Service) attachCheckSummary(ctx context.Context, bot *Bot, row sqlc.Bot) error {

@@ -10,6 +10,7 @@ type Account struct {
 	Role        string    `json:"role"`
 	DisplayName string    `json:"display_name"`
 	AvatarURL   string    `json:"avatar_url,omitempty"`
+	Timezone    string    `json:"timezone,omitempty"`
 	IsActive    bool      `json:"is_active"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -39,6 +40,7 @@ type UpdateAccountRequest struct {
 type UpdateProfileRequest struct {
 	DisplayName *string `json:"display_name,omitempty"`
 	AvatarURL   *string `json:"avatar_url,omitempty"`
+	Timezone    *string `json:"timezone,omitempty"`
 }
 
 // UpdatePasswordRequest is the input for password change.

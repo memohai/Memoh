@@ -14,6 +14,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
 // Service provides account (credential) management for users.
@@ -307,10 +308,22 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdatePr
 	if req.AvatarURL != nil {
 		avatarURL = strings.TrimSpace(*req.AvatarURL)
 	}
+	tzName := strings.TrimSpace(existing.Timezone)
+	if req.Timezone != nil {
+		resolved, _, err := tzutil.Resolve(*req.Timezone)
+		if err != nil {
+			return Account{}, err
+		}
+		tzName = resolved.String()
+	}
+	if tzName == "" {
+		tzName = "UTC"
+	}
 	row, err := s.queries.UpdateAccountProfile(ctx, sqlc.UpdateAccountProfileParams{
 		ID:          pgID,
 		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
 		AvatarUrl:   pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
+		Timezone:    tzName,
 		IsActive:    existing.IsActive,
 	})
 	if err != nil {
@@ -420,6 +433,7 @@ func toAccount(row sqlc.User) Account {
 	if row.AvatarUrl.Valid {
 		avatarURL = row.AvatarUrl.String
 	}
+	timezone := strings.TrimSpace(row.Timezone)
 	createdAt := time.Time{}
 	if row.CreatedAt.Valid {
 		createdAt = row.CreatedAt.Time
@@ -439,6 +453,7 @@ func toAccount(row sqlc.User) Account {
 		Role:        row.Role,
 		DisplayName: displayName,
 		AvatarURL:   avatarURL,
+		Timezone:    timezone,
 		IsActive:    row.IsActive,
 		CreatedAt:   createdAt,
 		UpdatedAt:   updatedAt,

@@ -155,11 +155,28 @@
           <FormItem>
             <Label>{{ $t('browserContext.timezoneId') }}</Label>
             <FormControl>
-              <Input
-                type="text"
-                :placeholder="$t('browserContext.timezonePlaceholder')"
-                v-bind="componentField"
-              />
+              <Select
+                :model-value="componentField.modelValue || emptyTimezoneValue"
+                @update:model-value="(value) => componentField['onUpdate:modelValue'](value === emptyTimezoneValue ? '' : value)"
+              >
+                <SelectTrigger class="w-full">
+                  <SelectValue :placeholder="$t('browserContext.timezonePlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem :value="emptyTimezoneValue">
+                      {{ $t('common.optional') }}
+                    </SelectItem>
+                    <SelectItem
+                      v-for="timezoneOption in timezones"
+                      :key="timezoneOption"
+                      :value="timezoneOption"
+                    >
+                      {{ timezoneOption }}
+                    </SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </FormControl>
           </FormItem>
         </FormField>
@@ -232,6 +249,12 @@ import {
   Label,
   Separator,
   Button,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Switch,
 } from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -247,6 +270,7 @@ import { toast } from 'vue-sonner'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { emptyTimezoneValue, timezones } from '@/utils/timezones'
 
 const { t } = useI18n()
 const { run } = useDialogMutation()

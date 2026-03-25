@@ -15,6 +15,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/accounts"
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
@@ -63,12 +64,14 @@ type Resolver struct {
 	conversationSvc   ConversationSettingsReader
 	messageService    messagepkg.Service
 	settingsService   *settings.Service
+	accountService    *accounts.Service
 	sessionService    SessionService
 	compactionService *compaction.Service
 	eventPublisher    messageevent.Publisher
 	skillLoader       SkillLoader
 	assetLoader       gatewayAssetLoader
 	timeout           time.Duration
+	clockLocation     *time.Location
 	logger            *slog.Logger
 }
 
@@ -80,11 +83,16 @@ func NewResolver(
 	conversationSvc ConversationSettingsReader,
 	messageService messagepkg.Service,
 	settingsService *settings.Service,
+	accountService *accounts.Service,
 	a *agentpkg.Agent,
+	clockLocation *time.Location,
 	timeout time.Duration,
 ) *Resolver {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
+	}
+	if clockLocation == nil {
+		clockLocation = time.UTC
 	}
 	return &Resolver{
 		agent:           a,
@@ -93,7 +101,9 @@ func NewResolver(
 		conversationSvc: conversationSvc,
 		messageService:  messageService,
 		settingsService: settingsService,
+		accountService:  accountService,
 		timeout:         timeout,
+		clockLocation:   clockLocation,
 		logger:          log.With(slog.String("service", "conversation_resolver")),
 	}
 }
@@ -149,6 +159,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		return resolvedContext{}, err
 	}
 	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, req.BotID)
+	userTimezoneName, userClockLocation := r.resolveUserTimezone(ctx, req.UserID)
 
 	var chatSettings conversation.Settings
 	if r.conversationSvc != nil {
@@ -249,6 +260,8 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		strings.TrimSpace(req.ConversationType),
 		strings.TrimSpace(req.ConversationName),
 		extractAttachmentPaths(mergedAttachments),
+		time.Now().In(userClockLocation),
+		userTimezoneName,
 		req.Query,
 	)
 	inlineImages := extractNativeImageParts(mergedAttachments)
@@ -298,6 +311,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 			CurrentPlatform:   req.CurrentChannel,
 			ReplyTarget:       strings.TrimSpace(req.ReplyTarget),
+			ConversationType:  strings.TrimSpace(req.ConversationType),
+			Timezone:          userTimezoneName,
+			TimezoneLocation:  userClockLocation,
 			SessionToken:      req.ChatToken,
 		},
 		Skills:        agentSkills,
@@ -347,14 +363,24 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 	supportsImageInput := cfg.SupportsImageInput
 	var files []agentpkg.SystemFile
 	if r.agent != nil {
-		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), cfg.Identity.BotID)
+		nowFn := time.Now
+		if cfg.Identity.TimezoneLocation != nil {
+			nowFn = func() time.Time { return time.Now().In(cfg.Identity.TimezoneLocation) }
+		}
+		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), cfg.Identity.BotID, nowFn)
 		files = fs.LoadSystemFiles(ctx)
 	}
 
+	now := time.Now().UTC()
+	if cfg.Identity.TimezoneLocation != nil {
+		now = now.In(cfg.Identity.TimezoneLocation)
+	}
 	cfg.System = agentpkg.GenerateSystemPrompt(agentpkg.SystemPromptParams{
 		SessionType:        cfg.SessionType,
 		Skills:             cfg.Skills,
 		Files:              files,
+		Now:                now,
+		Timezone:           cfg.Identity.Timezone,
 		SupportsImageInput: supportsImageInput,
 	})
 

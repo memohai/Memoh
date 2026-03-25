@@ -29,6 +29,7 @@ const (
 	DefaultQdrantCollection = "memory"
 	DefaultRuntimeDir       = "/opt/memoh/runtime"
 	DefaultBaseImage        = "debian:bookworm-slim"
+	DefaultTimezone         = "UTC"
 )
 
 type Config struct {
@@ -36,6 +37,7 @@ type Config struct {
 	Server         ServerConfig         `toml:"server"`
 	Admin          AdminConfig          `toml:"admin"`
 	Auth           AuthConfig           `toml:"auth"`
+	Timezone       string               `toml:"timezone"`
 	Containerd     ContainerdConfig     `toml:"containerd"`
 	Workspace      WorkspaceConfig      `toml:"workspace"`
 	Postgres       PostgresConfig       `toml:"postgres"`
@@ -188,6 +190,7 @@ func Load(path string) (Config, error) {
 		Auth: AuthConfig{
 			JWTExpiresIn: DefaultJWTExpiresIn,
 		},
+		Timezone: DefaultTimezone,
 		Containerd: ContainerdConfig{
 			SocketPath: DefaultSocketPath,
 			Namespace:  DefaultNamespace,

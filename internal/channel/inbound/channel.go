@@ -782,6 +782,8 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		strings.TrimSpace(msg.Conversation.Type),
 		strings.TrimSpace(msg.Conversation.Name),
 		attachmentPaths,
+		time.Now().UTC(),
+		"",
 		trimmedText,
 	)
 
