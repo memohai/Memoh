@@ -97,7 +97,9 @@
     </div>
     <Separator />
     <div class="flex-1 relative">
-      <MasterDetailSidebarLayout class="[&_td:last-child]:w-45">
+      <MasterDetailSidebarLayout
+        class="[&_td:last-child]:w-45 [&_.sidebar-container]:h-[calc(100vh-98px---spacing(12))]!"
+      >
         <template #sidebar-content>
           <SidebarMenu
             v-for="tab in tabList"
@@ -127,9 +129,7 @@
         <template #sidebar-footer />
 
         <template #detail>
-          <ScrollArea         
-            class="max-h-full h-full"
-          >
+          <ScrollArea class="max-h-full h-full">
             <section class="p-4">
               <KeepAlive>
                 <component

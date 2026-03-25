@@ -52,6 +52,7 @@
     "retryHint": "Please check and try again"
   },
   "sidebar": {
+    "session": "Session",
     "chat": "Chat",
     "bots": "Bots",
     "models": "Models",
