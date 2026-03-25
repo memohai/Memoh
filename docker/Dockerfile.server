@@ -117,7 +117,7 @@ RUN mkdir -p /opt/memoh/data /run/containerd /var/lib/containerd
 
 VOLUME ["/var/lib/containerd", "/opt/memoh/data"]
 
-EXPOSE 8080
+EXPOSE 8080 1455
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health \

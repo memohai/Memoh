@@ -47,6 +47,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
     ports:
       - "8080:8080"
+      - "1455:8080"
     depends_on:
       migrate:
         condition: service_completed_successfully
