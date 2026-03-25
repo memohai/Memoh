@@ -105,6 +105,8 @@ export const useChatStore = defineStore('chat', () => {
   const sessionId = useLocalStorage<string | null>('chat-session-id', null)
   const bots = ref<Bot[]>([])
 
+
+ 
   let abortFn: (() => void) | null = null
   let messageEventsSince = ''
   let pendingAssistantStream: PendingAssistantStream | null = null

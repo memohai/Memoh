@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex flex-col h-full min-w-0">
+  <div class="flex-1 flex flex-col h-full">
     <!-- No bot selected -->
     <div
       v-if="!currentBotId"
@@ -17,7 +17,7 @@
 
     <template v-else>
       <!-- Session header -->
-      <div class="border-b px-4 py-2 flex items-center justify-between min-h-12">
+      <!-- <div class="border-b px-4 py-2 flex items-center justify-between min-h-12">
         <div class="flex items-center gap-2 min-w-0">
           <h2 class="text-sm font-medium truncate">
             {{ activeSession?.title || $t('chat.untitledSession') }}
@@ -37,7 +37,7 @@
             />
           </Button>
         </div>
-      </div>
+      </div> -->
 
       <!-- Messages -->
       <section class="flex-1 relative w-full">
@@ -46,7 +46,7 @@
             ref="scrollContainer"
             class="h-full"
           >
-            <div class="max-w-3xl mx-auto px-4 py-6 space-y-6">
+            <div class=" mx-auto px-4 py-6 space-y-6">
               <!-- Load older indicator -->
               <div
                 v-if="loadingOlder"
@@ -89,8 +89,8 @@
       />
 
       <!-- Input -->
-      <div class="border-t p-4">
-        <div class="max-w-3xl mx-auto">
+      <div class="p-4">
+        <div class=" mx-auto">
           <!-- Pending attachment previews -->
           <div
             v-if="pendingFiles.length"
@@ -121,19 +121,20 @@
           </div>
 
           <section>
-            <InputGroup>
+            <InputGroup class="bg-transparent overflow-hidden">
               <InputGroupTextarea
                 v-model="inputText"
-                class=" max-h-15 resize-none break-all!"
+                class="min-h-20 max-h-20 resize-none break-all!"                
                 :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
                 :disabled="!currentBotId || activeChatReadOnly"
                 style="scrollbar-width: none;"
                 @keydown.enter.exact="handleKeydown"
                 @paste="handlePaste"
               />
+              <Separator />
               <InputGroupAddon
                 align="block-end"
-                class="justify-end"
+                class="bg-[#FAFAFA] dark:bg-background items-center py-2"
               >
                 <Button
                   v-if="!streaming"
@@ -168,12 +169,14 @@
                   size="sm"
                   :disabled="(!inputText.trim() && !pendingFiles.length) || !currentBotId || activeChatReadOnly"
                   aria-label="Send message"
+                  class="ml-auto bg-[#8B56E3]"
                   @click="handleSend"
                 >
                   <FontAwesomeIcon
                     :icon="['fas', 'paper-plane']"
-                    class="size-3.5"
+                    class="size-2"
                   />
+                  {{ $t('chat.send') }}
                 </Button>
                 <Button
                   v-else
@@ -222,7 +225,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, provide, useTemplateRef, watchEffect} from 'vue'
-import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@memohai/ui'
+import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,Separator } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import MessageItem from './message-item.vue'
@@ -270,7 +273,6 @@ const {
   messages,
   streaming,
   currentBotId,
-  activeSession,
   activeChatReadOnly,
   loadingOlder,
   loadingChats,
