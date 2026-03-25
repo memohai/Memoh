@@ -20,22 +20,41 @@ import (
 
 // Service handles provider operations.
 type Service struct {
-	queries *sqlc.Queries
-	logger  *slog.Logger
+	queries     *sqlc.Queries
+	logger      *slog.Logger
+	httpClient  *http.Client
+	callbackURL string
 }
 
 // NewService creates a new provider service.
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries *sqlc.Queries, callbackURL string) *Service {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &Service{
-		queries: queries,
-		logger:  log.With(slog.String("service", "providers")),
+		queries:     queries,
+		logger:      log.With(slog.String("service", "providers")),
+		httpClient:  &http.Client{Timeout: providerOAuthHTTPTimeout},
+		callbackURL: callbackURL,
 	}
 }
 
 // Create creates a new LLM provider.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
+	authType := req.AuthType
+	if authType == "" {
+		authType = authTypeFromMetadata(req.Metadata)
+	}
+	if authType == "" {
+		authType = AuthTypeAPIKey
+	}
+	if err := s.validateAuthType(req.BaseURL, req.ClientType, authType); err != nil {
+		return GetResponse{}, err
+	}
+
+	metadata := s.normalizeProviderMetadata(req.Metadata, authType)
 	// Marshal metadata
-	metadataJSON, err := json.Marshal(req.Metadata)
+	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
 	}
@@ -136,6 +155,19 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		clientType = *req.ClientType
 	}
 
+	authType := s.providerAuthType(existing)
+	if req.AuthType != nil {
+		authType = *req.AuthType
+	} else if req.Metadata != nil {
+		authType = authTypeFromMetadata(req.Metadata)
+	}
+	if authType == "" {
+		authType = AuthTypeAPIKey
+	}
+	if err := s.validateAuthType(baseURL, clientType, authType); err != nil {
+		return GetResponse{}, err
+	}
+
 	icon := existing.Icon
 	if req.Icon != nil {
 		icon = pgtype.Text{String: *req.Icon, Valid: *req.Icon != ""}
@@ -147,13 +179,16 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	}
 
 	metadata := existing.Metadata
+	metadataMap := providerMetadata(existing.Metadata)
 	if req.Metadata != nil {
-		metadataJSON, err := json.Marshal(req.Metadata)
-		if err != nil {
-			return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
-		}
-		metadata = metadataJSON
+		metadataMap = cloneMetadata(req.Metadata)
 	}
+	metadataMap = s.normalizeProviderMetadata(metadataMap, authType)
+	metadataJSON, err := json.Marshal(metadataMap)
+	if err != nil {
+		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
+	}
+	metadata = metadataJSON
 
 	// Update provider
 	updated, err := s.queries.UpdateLlmProvider(ctx, sqlc.UpdateLlmProviderParams{
@@ -213,8 +248,13 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 
 	clientType := models.ClientType(provider.ClientType)
+	httpClient := s.AuthHTTPClient(provider, probeTimeout)
+	apiKey := provider.ApiKey
+	if s.supportsOAuth(provider) {
+		apiKey = ""
+	}
 
-	sdkProvider := models.NewSDKProvider(baseURL, provider.ApiKey, clientType, probeTimeout)
+	sdkProvider := models.NewSDKProvider(baseURL, apiKey, clientType, probeTimeout, httpClient)
 
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
@@ -250,11 +290,11 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	if provider.ApiKey != "" {
+	if provider.ApiKey != "" && !s.supportsOAuth(provider) {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", provider.ApiKey))
 	}
 
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
+	resp, err := s.AuthHTTPClient(provider, probeTimeout).Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
@@ -298,6 +338,7 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 		BaseURL:    provider.BaseUrl,
 		APIKey:     maskedAPIKey,
 		ClientType: provider.ClientType,
+		AuthType:   s.providerAuthType(provider),
 		Icon:       icon,
 		Enable:     provider.Enable,
 		Metadata:   metadata,

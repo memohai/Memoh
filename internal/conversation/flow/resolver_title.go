@@ -14,6 +14,7 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/session"
 )
 
@@ -105,11 +106,18 @@ func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, 
 		"Return ONLY the title text, nothing else.\n\n" +
 		"User: " + userSnippet
 
+	authResolver := providers.NewService(nil, r.queries, "")
+	apiKey := provider.ApiKey
+	if providers.SupportsOpenAICodexOAuth(provider) {
+		apiKey = ""
+	}
+
 	modelCfg := agentpkg.ModelConfig{
 		ModelID:    model.ModelID,
 		ClientType: provider.ClientType,
-		APIKey:     provider.ApiKey,
+		APIKey:     apiKey,
 		BaseURL:    provider.BaseUrl,
+		HTTPClient: authResolver.AuthHTTPClient(provider, titleGenerateTimeout),
 	}
 	sdkModel := agentpkg.CreateModel(modelCfg)
 

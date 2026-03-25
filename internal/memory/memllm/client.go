@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ type Config struct {
 	BaseURL    string
 	APIKey     string `json:"-"`
 	ClientType string
+	HTTPClient *http.Client `json:"-"`
 	Timeout    time.Duration
 }
 
@@ -47,6 +49,7 @@ func (c *Client) model() *sdk.Model {
 		ClientType: c.cfg.ClientType,
 		APIKey:     c.cfg.APIKey,
 		BaseURL:    c.cfg.BaseURL,
+		HTTPClient: c.cfg.HTTPClient,
 	})
 }
 

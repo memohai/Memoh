@@ -43,10 +43,10 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	// Embedding models don't have a chat Provider in the SDK — probe
 	// the /embeddings endpoint directly.
 	if model.Type == string(ModelTypeEmbedding) {
-		return s.testEmbeddingModel(ctx, baseURL, apiKey, model.ModelID)
+		return s.testEmbeddingModel(ctx, baseURL, apiKey, model.ModelID, nil)
 	}
 
-	sdkProvider := NewSDKProvider(baseURL, apiKey, clientType, probeTimeout)
+	sdkProvider := NewSDKProvider(baseURL, apiKey, clientType, probeTimeout, nil)
 
 	start := time.Now()
 
@@ -100,11 +100,11 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 // testEmbeddingModel probes an embedding model by performing a minimal
 // embedding request via the Twilight SDK, verifying that the model is
 // reachable and functional rather than merely checking HTTP connectivity.
-func (*Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID string) (TestResponse, error) {
+func (*Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID string, httpClient *http.Client) (TestResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	model := NewSDKEmbeddingModel(baseURL, apiKey, modelID, probeTimeout)
+	model := NewSDKEmbeddingModel(baseURL, apiKey, modelID, probeTimeout, httpClient)
 	client := sdk.NewClient()
 
 	start := time.Now()
@@ -130,8 +130,10 @@ func (*Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID
 
 // NewSDKProvider creates a Twilight AI SDK Provider for the given client type.
 // It is exported so that other packages (e.g. providers) can reuse it for testing.
-func NewSDKProvider(baseURL, apiKey string, clientType ClientType, timeout time.Duration) sdk.Provider {
-	httpClient := &http.Client{Timeout: timeout}
+func NewSDKProvider(baseURL, apiKey string, clientType ClientType, timeout time.Duration, httpClient *http.Client) sdk.Provider {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
+	}
 
 	switch clientType {
 	case ClientTypeOpenAIResponses:

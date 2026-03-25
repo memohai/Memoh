@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"net/http"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -98,6 +99,7 @@ type ModelConfig struct {
 	ClientType      string
 	APIKey          string //nolint:gosec // carries provider credential material at runtime
 	BaseURL         string
+	HTTPClient      *http.Client
 	ReasoningConfig *ReasoningConfig
 }
 

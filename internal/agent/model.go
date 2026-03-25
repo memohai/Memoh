@@ -29,6 +29,9 @@ func CreateModel(cfg ModelConfig) *sdk.Model {
 		opts := []openaicompletions.Option{
 			openaicompletions.WithAPIKey(cfg.APIKey),
 		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, openaicompletions.WithHTTPClient(cfg.HTTPClient))
+		}
 		if cfg.BaseURL != "" {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
 		}
@@ -39,6 +42,9 @@ func CreateModel(cfg ModelConfig) *sdk.Model {
 		opts := []openairesponses.Option{
 			openairesponses.WithAPIKey(cfg.APIKey),
 		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, openairesponses.WithHTTPClient(cfg.HTTPClient))
+		}
 		if cfg.BaseURL != "" {
 			opts = append(opts, openairesponses.WithBaseURL(cfg.BaseURL))
 		}
@@ -48,6 +54,9 @@ func CreateModel(cfg ModelConfig) *sdk.Model {
 	case ClientTypeAnthropicMessages:
 		opts := []anthropicmessages.Option{
 			anthropicmessages.WithAPIKey(cfg.APIKey),
+		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, anthropicmessages.WithHTTPClient(cfg.HTTPClient))
 		}
 		if cfg.BaseURL != "" {
 			opts = append(opts, anthropicmessages.WithBaseURL(cfg.BaseURL))
@@ -66,6 +75,9 @@ func CreateModel(cfg ModelConfig) *sdk.Model {
 		opts := []googlegenerative.Option{
 			googlegenerative.WithAPIKey(cfg.APIKey),
 		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, googlegenerative.WithHTTPClient(cfg.HTTPClient))
+		}
 		if cfg.BaseURL != "" {
 			opts = append(opts, googlegenerative.WithBaseURL(cfg.BaseURL))
 		}
@@ -76,6 +88,9 @@ func CreateModel(cfg ModelConfig) *sdk.Model {
 		// OpenAI-compatible fallback
 		opts := []openaicompletions.Option{
 			openaicompletions.WithAPIKey(cfg.APIKey),
+		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, openaicompletions.WithHTTPClient(cfg.HTTPClient))
 		}
 		if cfg.BaseURL != "" {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))

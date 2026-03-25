@@ -108,6 +108,7 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		BaseURL:    cfg.BaseURL,
 		APIKey:     cfg.APIKey,
 		ModelID:    cfg.ModelID,
+		HTTPClient: cfg.HTTPClient,
 	})
 
 	result, err := sdk.GenerateTextResult(ctx,

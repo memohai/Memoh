@@ -7,6 +7,7 @@ import (
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/providers"
 )
 
 func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {
@@ -47,9 +48,15 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		r.logger.Warn("compaction: failed to fetch provider", slog.Any("error", err))
 		return
 	}
+	authResolver := providers.NewService(nil, r.queries, "")
+	apiKey := provider.ApiKey
+	if providers.SupportsOpenAICodexOAuth(provider) {
+		apiKey = ""
+	}
 	cfg.ClientType = provider.ClientType
-	cfg.APIKey = provider.ApiKey
+	cfg.APIKey = apiKey
 	cfg.BaseURL = provider.BaseUrl
+	cfg.HTTPClient = authResolver.AuthHTTPClient(provider, 0)
 
 	r.compactionService.TriggerCompaction(ctx, cfg)
 }

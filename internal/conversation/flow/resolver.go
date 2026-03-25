@@ -23,6 +23,7 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -265,11 +266,18 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
+	authResolver := providers.NewService(nil, r.queries, "")
+	apiKey := provider.ApiKey
+	if providers.SupportsOpenAICodexOAuth(provider) {
+		apiKey = ""
+	}
+
 	modelCfg := agentpkg.ModelConfig{
 		ModelID:         chatModel.ModelID,
 		ClientType:      clientType,
-		APIKey:          provider.ApiKey,
+		APIKey:          apiKey,
 		BaseURL:         provider.BaseUrl,
+		HTTPClient:      authResolver.AuthHTTPClient(provider, 0),
 		ReasoningConfig: reasoningConfig,
 	}
 

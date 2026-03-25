@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/providers"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -292,7 +294,7 @@ func (p *SpawnProvider) persistMessages(
 }
 
 // ModelCreator creates an sdk.Model from provider config. Set via SetModelCreator.
-type ModelCreator func(modelID, clientType, apiKey, baseURL string) *sdk.Model
+type ModelCreator func(modelID, clientType, apiKey, baseURL string, httpClient *http.Client) *sdk.Model
 
 // SetModelCreator injects the function used to create SDK models
 // (typically agent.CreateModel wrapped to match the signature).
@@ -323,7 +325,18 @@ func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Mo
 	if p.modelCreator == nil {
 		return nil, "", errors.New("model creator not configured")
 	}
-	sdkModel := p.modelCreator(modelInfo.ModelID, provider.ClientType, provider.ApiKey, provider.BaseUrl)
+	authResolver := providers.NewService(nil, p.queries, "")
+	apiKey := provider.ApiKey
+	if providers.SupportsOpenAICodexOAuth(provider) {
+		apiKey = ""
+	}
+	sdkModel := p.modelCreator(
+		modelInfo.ModelID,
+		provider.ClientType,
+		apiKey,
+		provider.BaseUrl,
+		authResolver.AuthHTTPClient(provider, 0),
+	)
 	return sdkModel, modelInfo.ID, nil
 }
 

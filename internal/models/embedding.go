@@ -14,11 +14,13 @@ import (
 // expose the same wire format), so we route everything through the OpenAI
 // embedding provider. If a future provider requires a different wire protocol,
 // add a branch here.
-func NewSDKEmbeddingModel(baseURL, apiKey, modelID string, timeout time.Duration) *sdk.EmbeddingModel {
+func NewSDKEmbeddingModel(baseURL, apiKey, modelID string, timeout time.Duration, httpClient *http.Client) *sdk.EmbeddingModel {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	httpClient := &http.Client{Timeout: timeout}
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
+	}
 
 	opts := []openaiembedding.Option{
 		openaiembedding.WithAPIKey(apiKey),
