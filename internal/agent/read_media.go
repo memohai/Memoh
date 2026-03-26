@@ -7,6 +7,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/models"
 )
 
 func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *readMediaDecorationState) {
@@ -14,7 +15,7 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 		return tools, nil
 	}
 
-	clientType := resolveClientType(model)
+	clientType := models.ResolveClientType(model)
 	state := &readMediaDecorationState{
 		pendingImages: make(map[string]sdk.ImagePart),
 	}
@@ -164,7 +165,7 @@ func buildReadMediaImagePart(clientType, imageBase64, mediaType string) sdk.Imag
 	}
 
 	image := imageBase64
-	if clientType != ClientTypeAnthropicMessages {
+	if clientType != string(models.ClientTypeAnthropicMessages) {
 		image = fmt.Sprintf("data:%s;base64,%s", mediaType, imageBase64)
 	}
 	return sdk.ImagePart{

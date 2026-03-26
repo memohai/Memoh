@@ -11,6 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	"github.com/memohai/memoh/internal/models"
 )
 
 const (
@@ -42,7 +43,7 @@ func New(cfg Config) *Client {
 }
 
 func (c *Client) model() *sdk.Model {
-	return agent.CreateModel(agent.ModelConfig{
+	return models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:    c.cfg.ModelID,
 		ClientType: c.cfg.ClientType,
 		APIKey:     c.cfg.APIKey,

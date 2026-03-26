@@ -6,6 +6,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/models"
 )
 
 // SpawnAdapter wraps *Agent to satisfy tools.SpawnAgent without creating
@@ -68,10 +69,10 @@ func SpawnSystemPrompt(sessionType string) string {
 	})
 }
 
-// SpawnModelCreatorFunc returns a tools.ModelCreator that delegates to agent.CreateModel.
+// SpawnModelCreatorFunc returns a tools.ModelCreator that delegates to models.NewSDKChatModel.
 func SpawnModelCreatorFunc() tools.ModelCreator {
 	return func(modelID, clientType, apiKey, baseURL string) *sdk.Model {
-		return CreateModel(ModelConfig{
+		return models.NewSDKChatModel(models.SDKModelConfig{
 			ModelID:    modelID,
 			ClientType: clientType,
 			APIKey:     apiKey,

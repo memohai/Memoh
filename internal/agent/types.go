@@ -95,21 +95,6 @@ type SystemFile struct {
 	Content  string
 }
 
-// ModelConfig holds provider and model information resolved from DB.
-type ModelConfig struct {
-	ModelID         string
-	ClientType      string
-	APIKey          string //nolint:gosec // carries provider credential material at runtime
-	BaseURL         string
-	ReasoningConfig *ReasoningConfig
-}
-
-// ReasoningConfig controls extended thinking/reasoning behavior.
-type ReasoningConfig struct {
-	Enabled bool
-	Effort  string
-}
-
 func mustMarshal(v any) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {

@@ -43,7 +43,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	// Embedding models don't have a chat Provider in the SDK — probe
 	// the /embeddings endpoint directly.
 	if model.Type == string(ModelTypeEmbedding) {
-		return s.testEmbeddingModel(ctx, baseURL, apiKey, model.ModelID)
+		return s.testEmbeddingModel(ctx, string(clientType), baseURL, apiKey, model.ModelID)
 	}
 
 	sdkProvider := NewSDKProvider(baseURL, apiKey, clientType, probeTimeout)
@@ -100,11 +100,11 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 // testEmbeddingModel probes an embedding model by performing a minimal
 // embedding request via the Twilight SDK, verifying that the model is
 // reachable and functional rather than merely checking HTTP connectivity.
-func (*Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID string) (TestResponse, error) {
+func (*Service) testEmbeddingModel(ctx context.Context, clientType, baseURL, apiKey, modelID string) (TestResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	model := NewSDKEmbeddingModel(baseURL, apiKey, modelID, probeTimeout)
+	model := NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID, probeTimeout)
 	client := sdk.NewClient()
 
 	start := time.Now()

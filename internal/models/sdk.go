@@ -1,6 +1,8 @@
-package agent
+package models
 
 import (
+	"strings"
+
 	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
 	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
 	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
@@ -8,23 +10,30 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
-// ClientType constants matching the database model configuration.
-const (
-	ClientTypeOpenAICompletions  = "openai-completions"
-	ClientTypeOpenAIResponses    = "openai-responses"
-	ClientTypeAnthropicMessages  = "anthropic-messages"
-	ClientTypeGoogleGenerativeAI = "google-generative-ai"
-)
+// SDKModelConfig holds provider and model information resolved from DB,
+// used to construct a Twilight AI SDK Model instance.
+type SDKModelConfig struct {
+	ModelID         string
+	ClientType      string
+	APIKey          string //nolint:gosec // carries provider credential material at runtime
+	BaseURL         string
+	ReasoningConfig *ReasoningConfig
+}
 
-// Reasoning budget maps per client type.
+// ReasoningConfig controls extended thinking/reasoning behavior.
+type ReasoningConfig struct {
+	Enabled bool
+	Effort  string
+}
+
 var (
 	anthropicBudget = map[string]int{"low": 5000, "medium": 16000, "high": 50000}
 	googleBudget    = map[string]int{"low": 5000, "medium": 16000, "high": 50000}
 )
 
-// CreateModel builds a Twilight AI SDK Model from the resolved model config.
-func CreateModel(cfg ModelConfig) *sdk.Model {
-	switch cfg.ClientType {
+// NewSDKChatModel builds a Twilight AI SDK Model from the resolved model config.
+func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
+	switch ClientType(cfg.ClientType) {
 	case ClientTypeOpenAICompletions:
 		opts := []openaicompletions.Option{
 			openaicompletions.WithAPIKey(cfg.APIKey),
@@ -53,7 +62,7 @@ func CreateModel(cfg ModelConfig) *sdk.Model {
 			opts = append(opts, anthropicmessages.WithBaseURL(cfg.BaseURL))
 		}
 		if cfg.ReasoningConfig != nil && cfg.ReasoningConfig.Enabled {
-			budget := ReasoningBudgetTokens(ClientTypeAnthropicMessages, cfg.ReasoningConfig.Effort)
+			budget := ReasoningBudgetTokens(cfg.ClientType, cfg.ReasoningConfig.Effort)
 			opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
 				Type:         "enabled",
 				BudgetTokens: budget,
@@ -73,7 +82,6 @@ func CreateModel(cfg ModelConfig) *sdk.Model {
 		return p.ChatModel(cfg.ModelID)
 
 	default:
-		// OpenAI-compatible fallback
 		opts := []openaicompletions.Option{
 			openaicompletions.WithAPIKey(cfg.APIKey),
 		}
@@ -86,7 +94,7 @@ func CreateModel(cfg ModelConfig) *sdk.Model {
 }
 
 // BuildReasoningOptions returns SDK generation options for reasoning/thinking.
-func BuildReasoningOptions(cfg ModelConfig) []sdk.GenerateOption {
+func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 	if cfg.ReasoningConfig == nil || !cfg.ReasoningConfig.Enabled {
 		return nil
 	}
@@ -95,9 +103,8 @@ func BuildReasoningOptions(cfg ModelConfig) []sdk.GenerateOption {
 		effort = "medium"
 	}
 
-	switch cfg.ClientType {
+	switch ClientType(cfg.ClientType) {
 	case ClientTypeAnthropicMessages:
-		// Anthropic uses thinking budget — no SDK option, handled by provider
 		return nil
 	case ClientTypeOpenAIResponses, ClientTypeOpenAICompletions:
 		return []sdk.GenerateOption{sdk.WithReasoningEffort(effort)}
@@ -113,7 +120,7 @@ func ReasoningBudgetTokens(clientType, effort string) int {
 	if effort == "" {
 		effort = "medium"
 	}
-	switch clientType {
+	switch ClientType(clientType) {
 	case ClientTypeAnthropicMessages:
 		if b, ok := anthropicBudget[effort]; ok {
 			return b
@@ -126,5 +133,23 @@ func ReasoningBudgetTokens(clientType, effort string) int {
 		return googleBudget["medium"]
 	default:
 		return 0
+	}
+}
+
+// ResolveClientType infers the client type string from an SDK Model's provider name.
+func ResolveClientType(model *sdk.Model) string {
+	if model == nil || model.Provider == nil {
+		return string(ClientTypeOpenAICompletions)
+	}
+	name := model.Provider.Name()
+	switch {
+	case strings.Contains(name, "anthropic"):
+		return string(ClientTypeAnthropicMessages)
+	case strings.Contains(name, "google"):
+		return string(ClientTypeGoogleGenerativeAI)
+	case strings.Contains(name, "responses"):
+		return string(ClientTypeOpenAIResponses)
+	default:
+		return string(ClientTypeOpenAICompletions)
 	}
 }

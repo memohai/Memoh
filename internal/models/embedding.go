@@ -4,30 +4,42 @@ import (
 	"net/http"
 	"time"
 
+	googleembedding "github.com/memohai/twilight-ai/provider/google/embedding"
 	openaiembedding "github.com/memohai/twilight-ai/provider/openai/embedding"
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 // NewSDKEmbeddingModel creates a Twilight AI SDK EmbeddingModel for the given
-// provider configuration. Currently all embedding providers use the
-// OpenAI-compatible /embeddings endpoint (including Google-hosted models that
-// expose the same wire format), so we route everything through the OpenAI
-// embedding provider. If a future provider requires a different wire protocol,
-// add a branch here.
-func NewSDKEmbeddingModel(baseURL, apiKey, modelID string, timeout time.Duration) *sdk.EmbeddingModel {
+// provider configuration. It dispatches to the native Google embedding provider
+// when clientType is "google-generative-ai", and falls back to the
+// OpenAI-compatible /embeddings endpoint for all other provider types.
+func NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID string, timeout time.Duration) *sdk.EmbeddingModel {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
 	httpClient := &http.Client{Timeout: timeout}
 
-	opts := []openaiembedding.Option{
-		openaiembedding.WithAPIKey(apiKey),
-		openaiembedding.WithHTTPClient(httpClient),
-	}
-	if baseURL != "" {
-		opts = append(opts, openaiembedding.WithBaseURL(baseURL))
-	}
+	switch ClientType(clientType) {
+	case ClientTypeGoogleGenerativeAI:
+		opts := []googleembedding.Option{
+			googleembedding.WithAPIKey(apiKey),
+			googleembedding.WithHTTPClient(httpClient),
+		}
+		if baseURL != "" {
+			opts = append(opts, googleembedding.WithBaseURL(baseURL))
+		}
+		p := googleembedding.New(opts...)
+		return p.EmbeddingModel(modelID)
 
-	p := openaiembedding.New(opts...)
-	return p.EmbeddingModel(modelID)
+	default:
+		opts := []openaiembedding.Option{
+			openaiembedding.WithAPIKey(apiKey),
+			openaiembedding.WithHTTPClient(httpClient),
+		}
+		if baseURL != "" {
+			opts = append(opts, openaiembedding.WithBaseURL(baseURL))
+		}
+		p := openaiembedding.New(opts...)
+		return p.EmbeddingModel(modelID)
+	}
 }

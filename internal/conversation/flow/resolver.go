@@ -270,15 +270,15 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		reasoningEffort = botSettings.ReasoningEffort
 	}
 
-	var reasoningConfig *agentpkg.ReasoningConfig
+	var reasoningConfig *models.ReasoningConfig
 	if reasoningEffort != "" {
-		reasoningConfig = &agentpkg.ReasoningConfig{
+		reasoningConfig = &models.ReasoningConfig{
 			Enabled: true,
 			Effort:  reasoningEffort,
 		}
 	}
 
-	modelCfg := agentpkg.ModelConfig{
+	modelCfg := models.SDKModelConfig{
 		ModelID:         chatModel.ModelID,
 		ClientType:      clientType,
 		APIKey:          provider.ApiKey,
@@ -286,7 +286,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		ReasoningConfig: reasoningConfig,
 	}
 
-	sdkModel := agentpkg.CreateModel(modelCfg)
+	sdkModel := models.NewSDKChatModel(modelCfg)
 	sdkMessages := modelMessagesToSDKMessages(nonNilModelMessages(messages))
 
 	runCfg := agentpkg.RunConfig{

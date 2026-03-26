@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/models"
 )
 
 // Service manages context compaction for bot conversations.
@@ -103,7 +103,7 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 
 	userPrompt := buildUserPrompt(priorSummaries, entries)
 
-	model := agent.CreateModel(agent.ModelConfig{
+	model := models.NewSDKChatModel(models.SDKModelConfig{
 		ClientType: cfg.ClientType,
 		BaseURL:    cfg.BaseURL,
 		APIKey:     cfg.APIKey,

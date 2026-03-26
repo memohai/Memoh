@@ -11,6 +11,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -371,31 +372,14 @@ func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep 
 	if prepareStep != nil {
 		opts = append(opts, sdk.WithPrepareStep(prepareStep))
 	}
-	opts = append(opts, BuildReasoningOptions(ModelConfig{
-		ClientType: resolveClientType(cfg.Model),
-		ReasoningConfig: &ReasoningConfig{
+	opts = append(opts, models.BuildReasoningOptions(models.SDKModelConfig{
+		ClientType: models.ResolveClientType(cfg.Model),
+		ReasoningConfig: &models.ReasoningConfig{
 			Enabled: cfg.ReasoningEffort != "",
 			Effort:  cfg.ReasoningEffort,
 		},
 	})...)
 	return opts
-}
-
-func resolveClientType(model *sdk.Model) string {
-	if model == nil || model.Provider == nil {
-		return ClientTypeOpenAICompletions
-	}
-	name := model.Provider.Name()
-	switch {
-	case strings.Contains(name, "anthropic"):
-		return ClientTypeAnthropicMessages
-	case strings.Contains(name, "google"):
-		return ClientTypeGoogleGenerativeAI
-	case strings.Contains(name, "responses"):
-		return ClientTypeOpenAIResponses
-	default:
-		return ClientTypeOpenAICompletions
-	}
 }
 
 // assembleTools collects tools from all registered ToolProviders.

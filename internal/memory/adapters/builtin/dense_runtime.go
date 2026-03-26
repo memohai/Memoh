@@ -35,6 +35,7 @@ type denseRuntime struct {
 
 type denseModelSpec struct {
 	modelID    string
+	clientType string
 	baseURL    string
 	apiKey     string
 	dimensions int
@@ -74,7 +75,7 @@ func newDenseRuntime(providerConfig map[string]any, queries *dbsqlc.Queries, cfg
 		return nil, fmt.Errorf("dense runtime: %w", err)
 	}
 
-	embedModel := models.NewSDKEmbeddingModel(spec.baseURL, spec.apiKey, spec.modelID, denseEmbedTimeout)
+	embedModel := models.NewSDKEmbeddingModel(spec.clientType, spec.baseURL, spec.apiKey, spec.modelID, denseEmbedTimeout)
 
 	return &denseRuntime{
 		qdrant:     qClient,
@@ -565,6 +566,7 @@ func resolveDenseEmbeddingModel(ctx context.Context, queries *dbsqlc.Queries, mo
 	}
 	return denseModelSpec{
 		modelID:    strings.TrimSpace(row.ModelID),
+		clientType: strings.TrimSpace(provider.ClientType),
 		baseURL:    strings.TrimSpace(provider.BaseUrl),
 		apiKey:     strings.TrimSpace(provider.ApiKey),
 		dimensions: *cfg.Dimensions,
