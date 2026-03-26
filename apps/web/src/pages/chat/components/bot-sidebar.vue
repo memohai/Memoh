@@ -14,11 +14,13 @@
               class="h-12 flex flex-rows justify-center"            
             >
               <section class="flex items-center gap-2">
-                <FontAwesomeIcon
-                  :icon="['fas', 'bars']"                
+                <img
+                  src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHZpZXdCb3g9IjAgMCAxOCAxOCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEuNSA5QzEuNSA2LjE4NzcgMS41IDQuNzgxNTUgMi4yMTYxOSAzLjc5NTgxQzIuNDQ3NDggMy40Nzc0NSAyLjcyNzQ1IDMuMTk3NDggMy4wNDU4MSAyLjk2NjE5QzQuMDMxNTUgMi4yNSA1LjQzNzcgMi4yNSA4LjI1IDIuMjVIOS43NUMxMi41NjIzIDIuMjUgMTMuOTY4NCAyLjI1IDE0Ljk1NDIgMi45NjYxOUMxNS4yNzI2IDMuMTk3NDggMTUuNTUyNSAzLjQ3NzQ1IDE1Ljc4MzggMy43OTU4MUMxNi41IDQuNzgxNTUgMTYuNSA2LjE4NzcgMTYuNSA5QzE2LjUgMTEuODEyMyAxNi41IDEzLjIxODQgMTUuNzgzOCAxNC4yMDQyQzE1LjU1MjUgMTQuNTIyNSAxNS4yNzI2IDE0LjgwMjUgMTQuOTU0MiAxNS4wMzM4QzEzLjk2ODQgMTUuNzUgMTIuNTYyMyAxNS43NSA5Ljc1IDE1Ljc1SDguMjVDNS40Mzc3IDE1Ljc1IDQuMDMxNTUgMTUuNzUgMy4wNDU4MSAxNS4wMzM4QzIuNzI3NDUgMTQuODAyNSAyLjQ0NzQ4IDE0LjUyMjUgMi4yMTYxOSAxNC4yMDQyQzEuNSAxMy4yMTg0IDEuNSAxMS44MTIzIDEuNSA5WiIgc3Ryb2tlPSIjMEEwQTBBIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8cGF0aCBkPSJNNy4xMjUgMi42MjVMNy4xMjUgMTUuMzc1IiBzdHJva2U9IiMwQTBBMEEiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CjxwYXRoIGQ9Ik0zLjc1IDUuMjVDMy43NSA1LjI1IDQuNDM1NjYgNS4yNSA0Ljg3NSA1LjI1IiBzdHJva2U9IiMwQTBBMEEiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPHBhdGggZD0iTTMuNzUgOC4yNUg0Ljg3NSIgc3Ryb2tlPSIjMEEwQTBBIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CjxwYXRoIGQ9Ik0xMi43NSA3LjVMMTEuODMwMSA4LjI5Mjg5QzExLjQ0MzQgOC42MjYyMyAxMS4yNSA4Ljc5Mjg5IDExLjI1IDlDMTEuMjUgOS4yMDcxMSAxMS40NDM0IDkuMzczNzcgMTEuODMwMSA5LjcwNzExTDEyLjc1IDEwLjUiIHN0cm9rZT0iIzBBMEEwQSIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8L3N2Zz4K"
+                  alt="折叠"
                   class="group-data-[collapsible=icon]:m-auto"
-                  @click="sidebarOpen=!sidebarOpen"
-                />
+                  @click="sidebarOpen = !sidebarOpen"
+                >
+
                 <h3 class="font-semibold text-sm group-data-[collapsible=icon]:hidden">
                   {{ $t('sidebar.session') }}
                 </h3>
