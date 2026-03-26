@@ -22,7 +22,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     :class="
       cn(
         'peer size-4 shrink-0 rounded border border-border bg-background transition-all outline-none',
-        'data-[state=checked]:bg-foreground data-[state=checked]:text-background data-[state=checked]:border-foreground',
+        'data-[state=checked]:bg-background data-[state=checked]:text-text-foreground data-[state=checked]:border-border',
         'focus-visible:ring-2 focus-visible:ring-ring/20',
         'disabled:cursor-not-allowed disabled:opacity-50',
         props.class

@@ -6,7 +6,7 @@ export { default as ButtonGroupSeparator } from './ButtonGroupSeparator.vue'
 export { default as ButtonGroupText } from './ButtonGroupText.vue'
 
 export const buttonGroupVariants = cva(
-  'flex w-fit items-stretch [&>*]:focus-visible:z-10 [&>*]:focus-visible:relative [&>[data-slot=select-trigger]:not([class*=\'w-\'])]:w-fit [&>input]:flex-1 has-[select[aria-hidden=true]:last-child]:[&>[data-slot=select-trigger]:last-of-type]:rounded-r-md has-[>[data-slot=button-group]]:gap-2',
+  'bg-inherit border border-border shadow-sm rounded-lg [&>*:not(:last-child)]:border-r [&>*:not(:last-child)]:border-border flex w-fit items-stretch [&>*]:focus-visible:z-10 [&>*]:focus-visible:relative [&>[data-slot=select-trigger]:not([class*=\'w-\'])]:w-fit [&>input]:flex-1 has-[select[aria-hidden=true]:last-child]:[&>[data-slot=select-trigger]:last-of-type]:rounded-r-md has-[>[data-slot=button-group]]:gap-2',
   {
     variants: {
       orientation: {
@@ -15,6 +15,11 @@ export const buttonGroupVariants = cva(
         vertical:
           'flex-col [&>*:not(:first-child)]:rounded-t-none [&>*:not(:first-child)]:border-t-0 [&>*:not(:last-child)]:rounded-b-none',
       },
+      size: {
+        sm: 'h-8',
+        default: 'h-9',
+        lg:'h-10'
+      }
     },
     defaultVariants: {
       orientation: 'horizontal',

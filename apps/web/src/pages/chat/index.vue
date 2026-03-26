@@ -31,11 +31,13 @@
           </div>
           <SessionSidebar />
         </template>
-      </template>
+</template>
 <template #detail>
         <ChatArea />
       </template>
 </MasterDetailSidebarLayout> -->
+   
+
     <ChatHeader />
     <BotSidebar />
     <SessionSidebar />
@@ -44,7 +46,7 @@
 </template>
 
 <script setup lang="ts">
-import {  watch } from 'vue'
+import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
