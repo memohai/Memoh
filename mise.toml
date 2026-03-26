@@ -1,8 +1,9 @@
-experimental_monorepo_root = true
+[monorepo]
+config_roots = ["."]
 
 [tools]
 # Go version from go.mod
-go = "1.25.6"
+go = "1.25.7"
 # Node.js for frontend packages
 node = "25"
 # Bun for browser gateway
@@ -36,7 +37,7 @@ run = "go mod download"
 [tasks.swagger-generate]
 description = "Generate Swagger documentation"
 depends = [
-  "//:go-install",
+  "go-install",
 ]
 run = "cd internal/handlers && go generate"
 
@@ -44,8 +45,8 @@ run = "cd internal/handlers && go generate"
 description = "Generate SDK code"
 run = "pnpm run generate-sdk"
 depends = [
-  "//:pnpm-install",
-  "//:swagger-generate"
+  "pnpm-install",
+  "swagger-generate"
 ]
 
 [tasks.sqlc-generate]
@@ -100,16 +101,16 @@ run = "pnpm release"
 [tasks.build-embedded-assets]
 description = "Build and stage embedded web assets"
 run = "scripts/release.sh --prepare-assets"
-depends = ["//:pnpm-install"]
+depends = ["pnpm-install"]
 
 [tasks.build-unified]
 description = "Build unified memoh binary"
-depends = ["//:build-embedded-assets"]
+depends = ["build-embedded-assets"]
 run = "go build -o bin/memoh ./cmd/memoh"
 
 [tasks.release-binaries]
 description = "Build release archive for one target (requires TARGET_OS TARGET_ARCH)"
-depends = ["//:pnpm-install"]
+depends = ["pnpm-install"]
 run = "scripts/release.sh"
 
 [tasks.install-socktainer]
@@ -123,15 +124,15 @@ run = "cd docker/toolkit && ./install.sh"
 [tasks.lint]
 description = "Run all linters"
 depends = [
-  "//:lint:go",
-  "//:lint:es",
+  "lint:go",
+  "lint:es",
 ]
 
 [tasks."lint:fix"]
 description = "Run all linters with auto-fix"
 depends = [
-  "//:lint:go:fix",
-  "//:lint:es:fix",
+  "lint:go:fix",
+  "lint:es:fix",
 ]
 
 [tasks."lint:go"]
@@ -153,10 +154,10 @@ run = "pnpm lint:fix"
 [tasks.setup]
 description = "Setup development environment"
 depends = [
-  "//:install-workspace-toolkit",
-  "//:sqlc-generate",
-  "//:pnpm-install",
-  "//:go-install",
+  "install-workspace-toolkit",
+  "sqlc-generate",
+  "pnpm-install",
+  "go-install",
 ]
 run = """
 #!/bin/bash

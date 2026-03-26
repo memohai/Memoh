@@ -5,4 +5,4 @@ dir = "{{cwd}}"
 alias = "dev"
 description = "Start server"
 run = "go run cmd/agent/main.go"
-depends = ["//:go-install"]
+depends = ["go-install"]
