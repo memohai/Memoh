@@ -185,6 +185,19 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	root.POST("/mcp-stdio", h.CreateMCPStdio)
 	root.POST("/mcp-stdio/:connection_id", h.HandleMCPStdio)
 	root.POST("/tools", h.HandleMCPTools)
+
+	// Skills V2 routes
+	skillsV2 := e.Group("/api/v1/bots/:bot_id/skills/v2")
+	skillsV2.GET("", h.ListSkillsV2)
+	skillsV2.GET("/:skill_name", h.GetSkillV2)
+	skillsV2.PUT("/:skill_name", h.UpdateSkillV2)
+	skillsV2.PATCH("/:skill_name/state", h.UpdateSkillStateV2)
+	skillsV2.DELETE("/:skill_name", h.DeleteSkillV2)
+	skillsV2.POST("/validate", h.ValidateSkillV2)
+	skillsV2.POST("/install", h.InstallSkillV2)
+	skillsV2.POST("/install/template", h.InstallSkillFromTemplateV2)
+	skillsV2.POST("/install/market", h.InstallSkillFromMarketV2)
+	skillsV2.GET("/:skill_name/export", h.ExportSkillV2)
 }
 
 // CreateContainer godoc

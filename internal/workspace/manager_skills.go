@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/internal/agent/tools"
-	bridgepb "github.com/memohai/memoh/internal/workspace/bridge/pb"
+	bridgepb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
 const (

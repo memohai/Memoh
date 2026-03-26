@@ -42,6 +42,15 @@ func main() {
 		},
 	})
 
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "skill",
+		Short: "Manage bot skills",
+		Long:  `Install, list, and manage skills for a bot.`,
+		RunE: func(_ *cobra.Command, args []string) error {
+			return runSkillCmd(args)
+		},
+	})
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

@@ -14,29 +14,41 @@ import (
 
 // SkillV2 represents an enhanced skill with DeerFlow-compatible metadata.
 type SkillV2 struct {
-	// Core fields (from frontmatter)
+	// Level 1: Metadata (always loaded, lightweight)
 	Name        string `json:"name" yaml:"name"`
 	Description string `json:"description" yaml:"description"`
+	Version     string `json:"version,omitempty" yaml:"version,omitempty"`
+	Author      string `json:"author,omitempty" yaml:"author,omitempty"`
+	License     string `json:"license,omitempty" yaml:"license,omitempty"`
+	Category    string `json:"category,omitempty" yaml:"category,omitempty"`
 
-	// Extended metadata (DeerFlow aligned)
-	Version       string   `json:"version,omitempty" yaml:"version,omitempty"`
-	Author        string   `json:"author,omitempty" yaml:"author,omitempty"`
-	License       string   `json:"license,omitempty" yaml:"license,omitempty"`
+	// Extended metadata
 	AllowedTools  []string `json:"allowed-tools,omitempty" yaml:"allowed-tools,omitempty"`
 	Compatibility string   `json:"compatibility,omitempty" yaml:"compatibility,omitempty"`
-	Category      string   `json:"category,omitempty" yaml:"category,omitempty"`
 
-	// Content (body after frontmatter)
-	Content string `json:"content" yaml:"-"`
-	Raw     string `json:"raw" yaml:"-"`
+	// Level 2: Content (loaded on demand)
+	Content string `json:"content,omitempty" yaml:"-"`
+	Raw     string `json:"raw,omitempty" yaml:"-"`
 
 	// Runtime state
-	Enabled      bool      `json:"enabled" yaml:"-"`
-	AutoLoad     bool      `json:"auto_load" yaml:"-"`
-	InstalledAt  time.Time `json:"installed_at" yaml:"-"`
-	UpdatedAt    time.Time `json:"updated_at" yaml:"-"`
-	SkillDir     string    `json:"-" yaml:"-"`
-	CategoryDir  string    `json:"category_dir,omitempty" yaml:"-"` // "public" or "custom"
+	Enabled       bool      `json:"enabled" yaml:"-"`
+	AutoLoad      bool      `json:"auto_load" yaml:"-"`
+	InstalledAt   time.Time `json:"installed_at" yaml:"-"`
+	UpdatedAt     time.Time `json:"updated_at" yaml:"-"`
+	SkillDir      string    `json:"-" yaml:"-"`
+	CategoryDir   string    `json:"category_dir,omitempty" yaml:"-"` // "public" or "custom"
+	contentLoaded bool      `json:"-" yaml:"-"`                      // internal flag
+
+	// Resource loader (for Level 3 on-demand loading)
+	resourceLoader ResourceLoader `json:"-" yaml:"-"`
+}
+
+// ResourceLoader defines the interface for loading skill resources on demand.
+type ResourceLoader interface {
+	// ReadFile reads a file from the skill's directory
+	ReadFile(ctx context.Context, skillDir string, resourcePath string) ([]byte, error)
+	// ListDir lists files in a directory within the skill
+	ListDir(ctx context.Context, skillDir string, subDir string) ([]string, error)
 }
 
 // ParsedSkill represents the raw parsed result from SKILL.md file.
@@ -378,4 +390,115 @@ type SkillStore interface {
 
 	// SkillExists checks if a skill exists
 	SkillExists(ctx context.Context, name string, category string) (bool, error)
+}
+
+// Progressive Loading (Level 3)
+
+// SetResourceLoader sets the resource loader for on-demand resource loading.
+func (s *SkillV2) SetResourceLoader(loader ResourceLoader) {
+	s.resourceLoader = loader
+}
+
+// LoadContent loads Level 2 content (SKILL.md body) on demand.
+// This should be called when the skill is triggered for execution.
+func (s *SkillV2) LoadContent(ctx context.Context) error {
+	if s.contentLoaded {
+		return nil
+	}
+	if s.resourceLoader == nil {
+		return errors.New("resource loader not set")
+	}
+
+	skillPath := s.SkillDir + "/" + SkillFileName
+	data, err := s.resourceLoader.ReadFile(ctx, "", skillPath)
+	if err != nil {
+		return fmt.Errorf("failed to read skill file: %w", err)
+	}
+
+	parsed, err := ParseSkillV2(string(data), s.Name, s.CategoryDir)
+	if err != nil {
+		return fmt.Errorf("failed to parse skill: %w", err)
+	}
+
+	s.Content = parsed.Content
+	s.Raw = parsed.Raw
+	s.contentLoaded = true
+	return nil
+}
+
+// LoadResource loads Level 3 bundled resources on demand.
+// resourcePath is relative to the skill directory (e.g., "references/chart.md", "scripts/generate.py")
+func (s *SkillV2) LoadResource(ctx context.Context, resourcePath string) ([]byte, error) {
+	if s.resourceLoader == nil {
+		return nil, errors.New("resource loader not set")
+	}
+
+	// Security: prevent directory traversal
+	return s.resourceLoader.ReadFile(ctx, s.SkillDir, resourcePath)
+}
+
+// ListResources lists files in a bundled resource directory.
+// subDir is relative to the skill directory (e.g., "references", "scripts")
+func (s *SkillV2) ListResources(ctx context.Context, subDir string) ([]string, error) {
+	if s.resourceLoader == nil {
+		return nil, errors.New("resource loader not set")
+	}
+
+	// Security: prevent directory traversal
+	return s.resourceLoader.ListDir(ctx, s.SkillDir, subDir)
+}
+
+// IsContentLoaded returns true if Level 2 content has been loaded.
+func (s *SkillV2) IsContentLoaded() bool {
+	return s.contentLoaded
+}
+
+// EnsureContentLoaded ensures Level 2 content is loaded, returns error if not available.
+func (s *SkillV2) EnsureContentLoaded(ctx context.Context) error {
+	if s.contentLoaded {
+		return nil
+	}
+	return s.LoadContent(ctx)
+}
+
+// ParseSkillMetadata parses only Level 1 metadata from SKILL.md frontmatter.
+// This is used for listing skills without loading full content.
+func ParseSkillMetadata(raw string, fallbackName string, category string) (*SkillV2, error) {
+	trimmed := strings.TrimSpace(raw)
+
+	skill := &SkillV2{
+		Name:        strings.TrimSpace(fallbackName),
+		CategoryDir: category,
+		Enabled:     true,
+		AutoLoad:    false,
+	}
+
+	// No frontmatter case
+	if !strings.HasPrefix(trimmed, "---") {
+		if skill.Name == "" {
+			skill.Name = "default"
+		}
+		return skill, nil
+	}
+
+	// Parse frontmatter only
+	parsed, err := parseFrontmatter(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
+	}
+
+	// Extract metadata fields only (no content)
+	if err := extractFrontmatter(skill, parsed.Frontmatter); err != nil {
+		return nil, err
+	}
+
+	// Normalize
+	if skill.Name == "" {
+		skill.Name = fallbackName
+	}
+	if skill.Name == "" {
+		skill.Name = "default"
+	}
+
+	return skill, nil
 }

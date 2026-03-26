@@ -290,6 +290,15 @@ func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
 
 	containerID := m.resolveContainerID(ctx, botID)
 	m.upsertContainerRecord(ctx, botID, containerID, "running", image)
+
+	// Initialize built-in skills for the bot
+	if err := m.InitBuiltinSkills(ctx, botID); err != nil {
+		m.logger.Error("setup bot container: init builtin skills failed",
+			slog.String("bot_id", botID),
+			slog.Any("error", err))
+		// Non-fatal: container is usable even without skills
+	}
+
 	return nil
 }
 

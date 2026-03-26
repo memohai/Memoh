@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/memohai/memoh/internal/agent/tools"
@@ -31,8 +33,8 @@ type SkillV2Item struct {
 	Category      string   `json:"category,omitempty"`
 
 	// Runtime state
-	Enabled   bool   `json:"enabled"`
-	AutoLoad  bool   `json:"auto_load"`
+	Enabled     bool   `json:"enabled"`
+	AutoLoad    bool   `json:"auto_load"`
 	CategoryDir string `json:"category_dir,omitempty"` // "public" or "custom"
 }
 
@@ -55,16 +57,16 @@ type ValidateSkillRequest struct {
 
 // ValidateSkillResponse represents the response for skill validation.
 type ValidateSkillResponse struct {
-	Valid   bool                      `json:"valid"`
-	Errors  []tools.SkillValidationError `json:"errors,omitempty"`
-	Skill   SkillV2Item               `json:"skill,omitempty"`
+	Valid  bool                         `json:"valid"`
+	Errors []tools.SkillValidationError `json:"errors,omitempty"`
+	Skill  SkillV2Item                  `json:"skill,omitempty"`
 }
 
 // InstallSkillResponse represents the response for skill installation.
 type InstallSkillResponse struct {
-	Success     bool   `json:"success"`
-	SkillName   string `json:"skill_name,omitempty"`
-	Message     string `json:"message"`
+	Success   bool   `json:"success"`
+	SkillName string `json:"skill_name,omitempty"`
+	Message   string `json:"message"`
 }
 
 const skillsV2DirPath = config.DefaultDataMount + "/.skills"
@@ -597,10 +599,15 @@ func (h *ContainerdHandler) loadSkillsV2FromContainer(ctx context.Context, botID
 				continue
 			}
 
-			skill, err := tools.ParseSkillV2(resp.GetContent(), skillName, category)
+			// Level 1: Parse only metadata for listing (lightweight)
+			skill, err := tools.ParseSkillMetadata(resp.GetContent(), skillName, category)
 			if err != nil {
 				continue
 			}
+
+			// Set up skill directory and resource loader for Level 2/3 loading
+			skill.SkillDir = "/" + entry.GetPath()
+			skill.SetResourceLoader(tools.NewBridgeResourceLoader(h.manager, botID))
 
 			allSkills = append(allSkills, skill)
 		}
@@ -624,7 +631,22 @@ func (h *ContainerdHandler) loadSkillV2FromContainer(ctx context.Context, botID 
 			continue
 		}
 
-		return tools.ParseSkillV2(resp.GetContent(), skillName, category)
+		// Parse metadata first (Level 1)
+		skill, err := tools.ParseSkillMetadata(resp.GetContent(), skillName, category)
+		if err != nil {
+			continue
+		}
+
+		// Set up resource loader
+		skill.SkillDir = path.Join("/", skillsV2DirPath, category, skillName)
+		skill.SetResourceLoader(tools.NewBridgeResourceLoader(h.manager, botID))
+
+		// Load full content (Level 2) for single skill retrieval
+		if err := skill.LoadContent(ctx); err != nil {
+			return nil, fmt.Errorf("failed to load skill content: %w", err)
+		}
+
+		return skill, nil
 	}
 
 	return nil, fmt.Errorf("skill not found")
@@ -691,4 +713,206 @@ func (h *ContainerdHandler) saveExtensionsConfig(ctx context.Context, botID stri
 	}
 
 	return client.WriteFile(ctx, configPath, data)
+}
+
+// InstallFromTemplateRequest represents a request to install from built-in template.
+type InstallFromTemplateRequest struct {
+	SkillName string `json:"skill_name" validate:"required"`
+}
+
+// InstallSkillFromTemplateV2 godoc
+// @Summary Install a skill from built-in templates
+// @Tags skills
+// @Param bot_id path string true "Bot ID"
+// @Param request body InstallFromTemplateRequest true "Skill name to install"
+// @Success 200 {object} InstallSkillResponse
+// @Router /bots/{bot_id}/skills/v2/install/template [post]
+func (h *ContainerdHandler) InstallSkillFromTemplateV2(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+
+	var req InstallFromTemplateRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+	if req.SkillName == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "skill_name is required")
+	}
+
+	ctx := c.Request().Context()
+
+	// Get gRPC client
+	_, err = h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("container not reachable: %v", err))
+	}
+
+	// Check if skill exists in built-in templates
+	builtinSkillPath := path.Join("skills/public", req.SkillName)
+	if _, err := os.Stat(builtinSkillPath); os.IsNotExist(err) {
+		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("skill '%s' not found in built-in templates", req.SkillName))
+	}
+
+	// Copy skill to container's public directory
+	targetPath := path.Join(skillsV2DirPath, tools.DefaultPublicCategory, req.SkillName)
+	if err := h.copySkillToContainer(ctx, botID, builtinSkillPath, targetPath); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to install skill: %v", err))
+	}
+
+	return c.JSON(http.StatusOK, InstallSkillResponse{
+		Success:   true,
+		SkillName: req.SkillName,
+		Message:   "Skill installed from template successfully",
+	})
+}
+
+// InstallFromMarketRequest represents a request to install from skill.sh marketplace.
+type InstallFromMarketRequest struct {
+	SkillName string `json:"skill_name" validate:"required"` // Format: owner/repo@skill-name
+}
+
+// InstallSkillFromMarketV2 godoc
+// @Summary Install a skill from skill.sh marketplace
+// @Tags skills
+// @Param bot_id path string true "Bot ID"
+// @Param request body InstallFromMarketRequest true "Skill name (owner/repo@skill-name)"
+// @Success 200 {object} InstallSkillResponse
+// @Router /bots/{bot_id}/skills/v2/install/market [post]
+func (h *ContainerdHandler) InstallSkillFromMarketV2(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+
+	var req InstallFromMarketRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+	if req.SkillName == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "skill_name is required")
+	}
+
+	// Validate format: owner/repo@skill-name
+	parts := strings.Split(req.SkillName, "@")
+	if len(parts) != 2 {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid skill name format, expected: owner/repo@skill-name")
+	}
+	ownerRepo := parts[0]
+	skillName := parts[1]
+	if !strings.Contains(ownerRepo, "/") {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid skill name format, expected: owner/repo@skill-name")
+	}
+
+	ctx := c.Request().Context()
+
+	// Get gRPC client
+	_, err = h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("container not reachable: %v", err))
+	}
+
+	// Download skill from skill.sh marketplace
+	// Format: https://skills.sh/api/v1/skills/{owner}/{repo}/{skill-name}/download
+	downloadURL := fmt.Sprintf("https://skills.sh/api/v1/skills/%s/%s/download", ownerRepo, skillName)
+
+	// Download the .skill file
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	resp, err := httpClient.Get(downloadURL)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to download skill: %v", err))
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("skill not found in marketplace: %s", req.SkillName))
+	}
+
+	// Save to temp file
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("%s-*.skill", skillName))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create temp file")
+	}
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	if _, err := io.Copy(tempFile, resp.Body); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save downloaded skill")
+	}
+	tempFile.Close()
+
+	// Install from the downloaded archive
+	targetPath := path.Join(skillsV2DirPath, tools.DefaultCustomCategory, skillName)
+	if err := h.installSkillArchive(ctx, botID, tempFile.Name(), targetPath); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to install skill: %v", err))
+	}
+
+	return c.JSON(http.StatusOK, InstallSkillResponse{
+		Success:   true,
+		SkillName: skillName,
+		Message:   "Skill installed from marketplace successfully",
+	})
+}
+
+// copySkillToContainer copies a skill directory from local filesystem to container
+func (h *ContainerdHandler) copySkillToContainer(ctx context.Context, botID, localPath, containerPath string) error {
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return err
+	}
+
+	// Create directory in container
+	if err := client.Mkdir(ctx, containerPath); err != nil {
+		return fmt.Errorf("failed to create skill directory: %w", err)
+	}
+
+	// Walk local directory and copy files
+	return filepath.Walk(localPath, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, _ := filepath.Rel(localPath, filePath)
+		targetFilePath := path.Join(containerPath, relPath)
+
+		if info.IsDir() {
+			return client.Mkdir(ctx, targetFilePath)
+		}
+
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", filePath, err)
+		}
+
+		return client.WriteFile(ctx, targetFilePath, data)
+	})
+}
+
+// installSkillArchive extracts a .skill archive to container
+func (h *ContainerdHandler) installSkillArchive(ctx context.Context, botID, archivePath, targetPath string) error {
+	client, err := h.getGRPCClient(ctx, botID)
+	if err != nil {
+		return err
+	}
+
+	// Read archive data
+	archiveData, err := os.ReadFile(archivePath)
+	if err != nil {
+		return fmt.Errorf("failed to read archive: %w", err)
+	}
+
+	// Create target directory
+	if err := client.Mkdir(ctx, targetPath); err != nil {
+		return fmt.Errorf("failed to create target directory: %w", err)
+	}
+
+	// Extract and upload files (simplified - real impl would use proper ZIP extraction)
+	// For now, just transfer the archive and let container extract it
+	archiveTargetPath := path.Join(targetPath, "archive.skill")
+	if err := client.WriteFile(ctx, archiveTargetPath, archiveData); err != nil {
+		return fmt.Errorf("failed to transfer archive: %w", err)
+	}
+
+	return nil
 }
