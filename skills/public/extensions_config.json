@@ -1,0 +1,158 @@
+{
+  "version": "1.0.0",
+  "skills": {
+    "bootstrap": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "deep-research": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "chart-visualization": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "ppt-generation": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "image-generation": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "video-generation": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "podcast-generation": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "frontend-design": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "skill-creator": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "data-analysis": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "github-deep-research": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "consulting-analysis": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "claude-to-deerflow": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "find-skills": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "surprise-me": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "vercel-deploy-claimable": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    },
+    "web-design-guidelines": {
+      "enabled": true,
+      "auto_load": true,
+      "category": "public",
+      "installed_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "source": "builtin",
+      "version": "1.0.0"
+    }
+  }
+}
