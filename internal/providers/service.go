@@ -179,7 +179,6 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		enable = *req.Enable
 	}
 
-	metadata := existing.Metadata
 	metadataMap := providerMetadata(existing.Metadata)
 	if req.Metadata != nil {
 		metadataMap = cloneMetadata(req.Metadata)
@@ -189,8 +188,6 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
 	}
-	metadata = metadataJSON
-
 	// Update provider
 	updated, err := s.queries.UpdateLlmProvider(ctx, sqlc.UpdateLlmProviderParams{
 		ID:         providerID,
@@ -200,7 +197,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		ClientType: clientType,
 		Icon:       icon,
 		Enable:     enable,
-		Metadata:   metadata,
+		Metadata:   metadataJSON,
 	})
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("update provider: %w", err)

@@ -160,7 +160,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		return resolvedContext{}, err
 	}
 	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, req.BotID)
-	userTimezoneName, userClockLocation := r.resolveUserTimezone(ctx, req.UserID)
+	userTimezoneName, userClockLocation := r.resolveTimezone(ctx, req.BotID, req.UserID)
 
 	var chatSettings conversation.Settings
 	if r.conversationSvc != nil {
@@ -272,9 +272,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		reasoningEffort = botSettings.ReasoningEffort
 	}
 
-	var reasoningConfig *agentpkg.ReasoningConfig
+	var reasoningConfig *models.ReasoningConfig
 	if reasoningEffort != "" {
-		reasoningConfig = &agentpkg.ReasoningConfig{
+		reasoningConfig = &models.ReasoningConfig{
 			Enabled: true,
 			Effort:  reasoningEffort,
 		}
@@ -286,7 +286,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		return resolvedContext{}, fmt.Errorf("resolve provider credentials: %w", err)
 	}
 
-	modelCfg := agentpkg.ModelConfig{
+	modelCfg := models.SDKModelConfig{
 		ModelID:         chatModel.ModelID,
 		ClientType:      clientType,
 		AuthType:        creds.AuthType,
@@ -296,7 +296,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		ReasoningConfig: reasoningConfig,
 	}
 
-	sdkModel := agentpkg.CreateModel(modelCfg)
+	sdkModel := models.NewSDKChatModel(modelCfg)
 	sdkMessages := modelMessagesToSDKMessages(nonNilModelMessages(messages))
 
 	runCfg := agentpkg.RunConfig{

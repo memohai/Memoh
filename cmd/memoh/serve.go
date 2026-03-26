@@ -867,6 +867,7 @@ func provideProvidersService(log *slog.Logger, queries *dbsqlc.Queries, cfg conf
 func defaultProviderOAuthCallbackURL() string {
 	return "http://localhost:1455/auth/callback"
 }
+
 func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, cfg config.Config) *handlers.EmailOAuthHandler {
 	addr := strings.TrimSpace(cfg.Server.Addr)
 	if addr == "" {

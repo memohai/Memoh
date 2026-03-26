@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -14,7 +15,7 @@ const openAIAuthClaimPath = "https://api.openai.com/auth"
 
 type ModelCredentials struct {
 	AuthType       string
-	APIKey         string
+	APIKey         string //nolint:gosec // runtime credential material used to construct SDK providers
 	CodexAccountID string
 }
 
@@ -50,7 +51,7 @@ func (s *Service) ResolveModelCredentials(ctx context.Context, provider sqlc.Llm
 func codexAccountIDFromToken(token string) (string, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", fmt.Errorf("invalid oauth access token")
+		return "", errors.New("invalid oauth access token")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {

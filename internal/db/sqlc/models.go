@@ -292,6 +292,20 @@ type LlmProvider struct {
 	ClientType string             `json:"client_type"`
 }
 
+type LlmProviderOauthToken struct {
+	ID               pgtype.UUID        `json:"id"`
+	LlmProviderID    pgtype.UUID        `json:"llm_provider_id"`
+	AccessToken      string             `json:"access_token"`
+	RefreshToken     string             `json:"refresh_token"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	Scope            string             `json:"scope"`
+	TokenType        string             `json:"token_type"`
+	State            string             `json:"state"`
+	PkceCodeVerifier string             `json:"pkce_code_verifier"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type McpConnection struct {
 	ID            pgtype.UUID        `json:"id"`
 	BotID         pgtype.UUID        `json:"bot_id"`

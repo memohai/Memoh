@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,7 +25,7 @@ import (
 const (
 	defaultOpenAICodexClientID    = "app_EMoamEEZ73f0CkXaXp7hrann"
 	defaultOpenAIAuthorizeURL     = "https://auth.openai.com/oauth/authorize"
-	defaultOpenAITokenURL         = "https://auth.openai.com/oauth/token"
+	defaultOpenAITokenURL         = "https://auth.openai.com/oauth/token" //nolint:gosec // OAuth endpoint URL, not a credential
 	defaultOpenAICallbackURL      = "http://localhost:1455/auth/callback"
 	defaultOpenAIOAuthScopes      = "openid profile email offline_access"
 	oauthExpirySkew               = 30 * time.Second
@@ -32,7 +33,7 @@ const (
 	metadataAuthTypeKey           = "auth_type"
 	metadataOAuthClientIDKey      = "oauth_client_id"
 	metadataOAuthAuthorizeURLKey  = "oauth_authorize_url"
-	metadataOAuthTokenURLKey      = "oauth_token_url"
+	metadataOAuthTokenURLKey      = "oauth_token_url" //nolint:gosec // metadata key name, not a credential
 	metadataOAuthRedirectURIKey   = "oauth_redirect_uri"
 	metadataOAuthScopesKey        = "oauth_scopes"
 	metadataOAuthAudienceKey      = "oauth_audience"
@@ -59,11 +60,11 @@ type openAIOAuthConfig struct {
 	IDTokenAddOrganizations bool
 }
 
-func (s *Service) providerAuthType(provider sqlc.LlmProvider) string {
+func (*Service) providerAuthType(provider sqlc.LlmProvider) string {
 	return authTypeFromMetadata(providerMetadata(provider.Metadata))
 }
 
-func (s *Service) normalizeProviderMetadata(input map[string]any, authType string) map[string]any {
+func (*Service) normalizeProviderMetadata(input map[string]any, authType string) map[string]any {
 	out := cloneMetadata(input)
 	if authType == "" {
 		authType = authTypeFromMetadata(out)
@@ -116,7 +117,7 @@ func cloneMetadata(in map[string]any) map[string]any {
 	return out
 }
 
-func (s *Service) validateAuthType(baseURL, clientType, authType string) error {
+func (*Service) validateAuthType(baseURL, clientType, authType string) error {
 	switch authType {
 	case "", AuthTypeAPIKey:
 		return nil
@@ -419,8 +420,8 @@ func toProviderOAuthToken(row sqlc.LlmProviderOauthToken) *providerOAuthToken {
 }
 
 type openAITokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	AccessToken  string `json:"access_token"`  //nolint:gosec // OAuth response payload carries runtime access token
+	RefreshToken string `json:"refresh_token"` //nolint:gosec // OAuth response payload carries runtime refresh token
 	TokenType    string `json:"token_type"`
 	Scope        string `json:"scope"`
 	ExpiresIn    int64  `json:"expires_in"`
@@ -449,6 +450,9 @@ func (s *Service) refreshAccessToken(ctx context.Context, cfg openAIOAuthConfig,
 }
 
 func (s *Service) postTokenRequest(ctx context.Context, tokenURL string, body url.Values) (*openAITokenResponse, error) {
+	if err := validateOAuthTokenURL(tokenURL); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(body.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("create oauth request: %w", err)
@@ -456,6 +460,7 @@ func (s *Service) postTokenRequest(ctx context.Context, tokenURL string, body ur
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
+	//nolint:gosec // tokenURL is restricted to the fixed OpenAI OAuth host by validateOAuthTokenURL above
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("execute oauth request: %w", err)
@@ -480,12 +485,26 @@ func (s *Service) postTokenRequest(ctx context.Context, tokenURL string, body ur
 	return &tokenResp, nil
 }
 
+func validateOAuthTokenURL(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("invalid oauth token url: %w", err)
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		return errors.New("oauth token url must use https")
+	}
+	if !strings.EqualFold(parsed.Hostname(), "auth.openai.com") {
+		return errors.New("oauth token url host must be auth.openai.com")
+	}
+	return nil
+}
+
 func generateState() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%x", b), nil
+	return hex.EncodeToString(b), nil
 }
 
 func generateCodeVerifier() (string, error) {

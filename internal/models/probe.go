@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -21,7 +22,6 @@ import (
 )
 
 const probeTimeout = 15 * time.Second
-const authTypeOpenAICodexOAuth = "openai-codex-oauth"
 
 // Test probes a model's provider endpoint using the Twilight AI SDK
 // to verify connectivity, authentication, and model availability.
@@ -112,7 +112,7 @@ func (*Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	model := NewSDKEmbeddingModel(baseURL, apiKey, modelID, probeTimeout, httpClient)
+	model := NewSDKEmbeddingModel(string(ClientTypeOpenAICompletions), baseURL, apiKey, modelID, probeTimeout, httpClient)
 	client := sdk.NewClient()
 
 	start := time.Now()
@@ -198,7 +198,7 @@ func NewSDKProvider(baseURL, apiKey, codexAccountID, authType string, clientType
 
 type modelCredentials struct {
 	AuthType       string
-	APIKey         string
+	APIKey         string //nolint:gosec // runtime credential material used to construct SDK providers
 	CodexAccountID string
 }
 
@@ -214,7 +214,7 @@ func (s *Service) resolveModelCredentials(ctx context.Context, provider sqlc.Llm
 	}
 	accessToken := strings.TrimSpace(tokenRow.AccessToken)
 	if accessToken == "" {
-		return modelCredentials{}, fmt.Errorf("oauth token is missing access token")
+		return modelCredentials{}, errors.New("oauth token is missing access token")
 	}
 	accountID, err := codexAccountIDFromToken(accessToken)
 	if err != nil {
@@ -242,7 +242,7 @@ func authTypeFromProviderMetadata(raw []byte) string {
 func codexAccountIDFromToken(token string) (string, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", fmt.Errorf("invalid oauth access token")
+		return "", errors.New("invalid oauth access token")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
@@ -258,7 +258,7 @@ func codexAccountIDFromToken(token string) (string, error) {
 	}
 	accountID := strings.TrimSpace(claims.OpenAIAuth.ChatGPTAccountID)
 	if accountID == "" {
-		return "", fmt.Errorf("oauth access token missing chatgpt_account_id")
+		return "", errors.New("oauth access token missing chatgpt_account_id")
 	}
 	return accountID, nil
 }

@@ -9,7 +9,6 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	messageevent "github.com/memohai/memoh/internal/message/event"
@@ -113,7 +112,7 @@ func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, 
 		return ""
 	}
 
-	modelCfg := agentpkg.ModelConfig{
+	modelCfg := models.SDKModelConfig{
 		ModelID:        model.ModelID,
 		ClientType:     provider.ClientType,
 		AuthType:       creds.AuthType,
@@ -121,7 +120,7 @@ func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, 
 		CodexAccountID: creds.CodexAccountID,
 		BaseURL:        provider.BaseUrl,
 	}
-	sdkModel := agentpkg.CreateModel(modelCfg)
+	sdkModel := models.NewSDKChatModel(modelCfg)
 
 	genCtx, cancel := context.WithTimeout(ctx, titleGenerateTimeout)
 	defer cancel()

@@ -13,11 +13,13 @@ import (
 // provider configuration. It dispatches to the native Google embedding provider
 // when clientType is "google-generative-ai", and falls back to the
 // OpenAI-compatible /embeddings endpoint for all other provider types.
-func NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID string, timeout time.Duration) *sdk.EmbeddingModel {
+func NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID string, timeout time.Duration, httpClient *http.Client) *sdk.EmbeddingModel {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	httpClient := &http.Client{Timeout: timeout}
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
+	}
 
 	switch ClientType(clientType) {
 	case ClientTypeGoogleGenerativeAI:
@@ -30,7 +32,6 @@ func NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID string, timeout t
 		}
 		p := googleembedding.New(opts...)
 		return p.EmbeddingModel(modelID)
-
 	default:
 		opts := []openaiembedding.Option{
 			openaiembedding.WithAPIKey(apiKey),
