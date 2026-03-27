@@ -44,29 +44,8 @@
         </FormField>
       </section>
 
-      <section class="space-y-2">
-        <h4 class="scroll-m-20 font-semibold tracking-tight">
-          {{ $t('provider.authType') }}
-        </h4>
-        <FormField
-          v-slot="{ value, handleChange }"
-          name="auth_type"
-        >
-          <FormItem>
-            <FormControl>
-              <SearchableSelectPopover
-                :model-value="value"
-                :options="authTypeOptions"
-                :placeholder="$t('provider.authType')"
-                @update:model-value="handleChange"
-              />
-            </FormControl>
-          </FormItem>
-        </FormField>
-      </section>
-
       <section
-        v-if="form.values.auth_type !== 'openai-codex-oauth'"
+        v-if="form.values.client_type !== 'openai-codex'"
         class="space-y-2"
       >
         <h4 class="scroll-m-20 font-semibold tracking-tight">
@@ -132,7 +111,7 @@
       </section>
 
       <section
-        v-if="form.values.auth_type === 'openai-codex-oauth'"
+        v-if="form.values.client_type === 'openai-codex'"
         class="rounded-lg border p-4 space-y-3 text-sm"
       >
         <div class="space-y-1">
@@ -295,12 +274,9 @@ import { toast } from 'vue-sonner'
 
 const { t } = useI18n()
 
-type ProviderWithAuth = Partial<ProvidersGetResponse> & {
-  auth_type?: string
-}
+type ProviderWithAuth = Partial<ProvidersGetResponse>
 
 type ProviderOAuthStatus = {
-  auth_type: string
   configured: boolean
   has_token: boolean
   expired: boolean
@@ -362,33 +338,17 @@ const clientTypeOptions = computed(() =>
   })),
 )
 
-const authTypeOptions = computed(() => [
-  {
-    value: 'api_key',
-    label: t('provider.authTypes.apiKey'),
-    description: t('provider.authTypes.apiKeyHint'),
-    keywords: ['api key', 'token'],
-  },
-  {
-    value: 'openai-codex-oauth',
-    label: t('provider.authTypes.openaiCodex'),
-    description: t('provider.authTypes.openaiCodexHint'),
-    keywords: ['openai', 'codex', 'oauth'],
-  },
-])
-
 const providerSchema = toTypedSchema(z.object({
   enable: z.boolean(),
   name: z.string().min(1),
   base_url: z.string().min(1),
   api_key: z.string().optional(),
   client_type: z.string().min(1),
-  auth_type: z.string().min(1),
   metadata: z.object({
     additionalProp1: z.object({}),
   }),
 }).superRefine((value, ctx) => {
-  if (value.auth_type !== 'openai-codex-oauth' && !value.api_key?.trim() && !providerWithAuth.value?.api_key) {
+  if (value.client_type !== 'openai-codex' && !value.api_key?.trim() && !providerWithAuth.value?.api_key) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['api_key'],
@@ -409,24 +369,22 @@ watch(() => props.provider, (newVal) => {
       base_url: newVal.base_url,
       api_key: '',
       client_type: newVal.client_type || 'openai-completions',
-      auth_type: newVal.auth_type || 'api_key',
     })
   }
 }, { immediate: true })
 
-watch(() => form.values.auth_type, (authType) => {
-  if (authType !== 'openai-codex-oauth') {
+watch(() => form.values.client_type, (clientType) => {
+  if (clientType !== 'openai-codex') {
     oauthStatus.value = null
     return
   }
-  form.setFieldValue('client_type', 'openai-responses')
   if (!form.values.base_url) {
-    form.setFieldValue('base_url', 'https://api.openai.com/v1')
+    form.setFieldValue('base_url', 'https://chatgpt.com/backend-api')
   }
 })
 
-watch(() => [props.provider?.id, form.values.auth_type] as const, async ([id, authType]) => {
-  if (!id || authType !== 'openai-codex-oauth') {
+watch(() => [props.provider?.id, form.values.client_type] as const, async ([id, clientType]) => {
+  if (!id || clientType !== 'openai-codex') {
     oauthStatus.value = null
     return
   }
@@ -440,14 +398,12 @@ const hasChanges = computed(() => {
     name: form.values.name,
     base_url: form.values.base_url,
     client_type: form.values.client_type,
-    auth_type: form.values.auth_type,
     metadata: form.values.metadata,
   }) !== JSON.stringify({
     enable: raw?.enable ?? true,
     name: raw?.name,
     base_url: raw?.base_url,
     client_type: raw?.client_type || 'openai-completions',
-    auth_type: raw?.auth_type || 'api_key',
     metadata: { additionalProp1: {} },
   })
 
@@ -461,7 +417,6 @@ const editProvider = form.handleSubmit(async (value) => {
     name: value.name,
     base_url: value.base_url,
     client_type: value.client_type,
-    auth_type: value.auth_type,
     metadata: value.metadata,
   }
   if (value.api_key && value.api_key.trim() !== '') {
@@ -474,9 +429,7 @@ const oauthExpired = computed(() => Boolean(oauthStatus.value?.has_token && oaut
 const canAuthorizeOAuth = computed(() =>
   Boolean(
     props.provider?.id
-    && form.values.auth_type === 'openai-codex-oauth'
-    && form.values.client_type === 'openai-responses'
-    && form.values.base_url.includes('api.openai.com'),
+    && form.values.client_type === 'openai-codex',
   ) && !oauthStatusLoading.value,
 )
 

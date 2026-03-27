@@ -55,7 +55,6 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		return
 	}
 	cfg.ClientType = provider.ClientType
-	cfg.AuthType = creds.AuthType
 	cfg.APIKey = creds.APIKey
 	cfg.CodexAccountID = creds.CodexAccountID
 	cfg.BaseURL = provider.BaseUrl

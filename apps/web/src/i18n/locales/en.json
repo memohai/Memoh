@@ -210,7 +210,6 @@
   "provider": {
     "add": "Add Provider",
     "addBtn": "Add",
-    "authType": "Authentication",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter API key",
     "url": "Base URL",
@@ -230,12 +229,6 @@
     "iconPlaceholder": "Icon URL or identifier (optional)",
     "enable": "Enable",
     "enableHint": "Only models from enabled providers appear in the available model list",
-    "authTypes": {
-      "apiKey": "API Key",
-      "apiKeyHint": "Use a static API key configured on the provider",
-      "openaiCodex": "OpenAI Codex OAuth",
-      "openaiCodexHint": "Use ChatGPT OAuth for OpenAI Codex-compatible access"
-    },
     "oauth": {
       "title": "OpenAI OAuth",
       "description": "Authorize this provider with your ChatGPT account for Codex-compatible OpenAI access.",

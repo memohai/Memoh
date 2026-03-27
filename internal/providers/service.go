@@ -42,20 +42,7 @@ func NewService(log *slog.Logger, queries *sqlc.Queries, callbackURL string) *Se
 
 // Create creates a new LLM provider.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
-	authType := req.AuthType
-	if authType == "" {
-		authType = authTypeFromMetadata(req.Metadata)
-	}
-	if authType == "" {
-		authType = AuthTypeAPIKey
-	}
-	if err := s.validateAuthType(req.BaseURL, req.ClientType, authType); err != nil {
-		return GetResponse{}, err
-	}
-
-	metadata := s.normalizeProviderMetadata(req.Metadata, authType)
-	// Marshal metadata
-	metadataJSON, err := json.Marshal(metadata)
+	metadataJSON, err := json.Marshal(req.Metadata)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
 	}
@@ -132,13 +119,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		return GetResponse{}, err
 	}
 
-	// Get existing provider
 	existing, err := s.queries.GetLlmProviderByID(ctx, providerID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get provider: %w", err)
 	}
 
-	// Apply updates
 	name := existing.Name
 	if req.Name != nil {
 		name = *req.Name
@@ -156,19 +141,6 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		clientType = *req.ClientType
 	}
 
-	authType := s.providerAuthType(existing)
-	if req.AuthType != nil {
-		authType = *req.AuthType
-	} else if req.Metadata != nil {
-		authType = authTypeFromMetadata(req.Metadata)
-	}
-	if authType == "" {
-		authType = AuthTypeAPIKey
-	}
-	if err := s.validateAuthType(baseURL, clientType, authType); err != nil {
-		return GetResponse{}, err
-	}
-
 	icon := existing.Icon
 	if req.Icon != nil {
 		icon = pgtype.Text{String: *req.Icon, Valid: *req.Icon != ""}
@@ -181,14 +153,13 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 
 	metadataMap := providerMetadata(existing.Metadata)
 	if req.Metadata != nil {
-		metadataMap = cloneMetadata(req.Metadata)
+		metadataMap = req.Metadata
 	}
-	metadataMap = s.normalizeProviderMetadata(metadataMap, authType)
 	metadataJSON, err := json.Marshal(metadataMap)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
 	}
-	// Update provider
+
 	updated, err := s.queries.UpdateLlmProvider(ctx, sqlc.UpdateLlmProviderParams{
 		ID:         providerID,
 		Name:       name,
@@ -251,7 +222,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		return TestResponse{}, err
 	}
 
-	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, creds.AuthType, clientType, probeTimeout, nil)
+	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
@@ -275,7 +246,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
-	if s.supportsOAuth(provider) {
+	if supportsOAuth(provider) {
 		catalog := openaicodex.Catalog()
 		remoteModels := make([]RemoteModel, 0, len(catalog))
 		for _, model := range catalog {
@@ -310,7 +281,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	if provider.ApiKey != "" && !s.supportsOAuth(provider) {
+	if provider.ApiKey != "" && !supportsOAuth(provider) {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", provider.ApiKey))
 	}
 
@@ -344,7 +315,6 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 		}
 	}
 
-	// Mask API key (show only first 8 characters)
 	maskedAPIKey := maskAPIKey(provider.ApiKey)
 
 	var icon string
@@ -358,7 +328,6 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 		BaseURL:    provider.BaseUrl,
 		APIKey:     maskedAPIKey,
 		ClientType: provider.ClientType,
-		AuthType:   s.providerAuthType(provider),
 		Icon:       icon,
 		Enable:     provider.Enable,
 		Metadata:   metadata,
@@ -379,7 +348,6 @@ func maskAPIKey(apiKey string) string {
 }
 
 // resolveUpdatedAPIKey keeps the original key when the request value matches the masked version.
-// This prevents masked placeholder values from overwriting the real stored credential.
 func resolveUpdatedAPIKey(existing string, updated *string) string {
 	if updated == nil {
 		return existing

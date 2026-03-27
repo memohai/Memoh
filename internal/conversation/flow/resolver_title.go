@@ -115,7 +115,6 @@ func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, 
 	modelCfg := models.SDKModelConfig{
 		ModelID:        model.ModelID,
 		ClientType:     provider.ClientType,
-		AuthType:       creds.AuthType,
 		APIKey:         creds.APIKey,
 		CodexAccountID: creds.CodexAccountID,
 		BaseURL:        provider.BaseUrl,

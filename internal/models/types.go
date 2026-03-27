@@ -20,6 +20,7 @@ const (
 	ClientTypeOpenAICompletions  ClientType = "openai-completions"
 	ClientTypeAnthropicMessages  ClientType = "anthropic-messages"
 	ClientTypeGoogleGenerativeAI ClientType = "google-generative-ai"
+	ClientTypeOpenAICodex        ClientType = "openai-codex"
 )
 
 const (

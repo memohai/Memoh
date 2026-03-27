@@ -9,27 +9,24 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/models"
 )
 
 const openAIAuthClaimPath = "https://api.openai.com/auth"
 
 type ModelCredentials struct {
-	AuthType       string
 	APIKey         string //nolint:gosec // runtime credential material used to construct SDK providers
 	CodexAccountID string
 }
 
 func SupportsOpenAICodexOAuth(provider sqlc.LlmProvider) bool {
-	svc := &Service{}
-	return svc.supportsOAuth(provider)
+	return supportsOAuth(provider)
 }
 
 func (s *Service) ResolveModelCredentials(ctx context.Context, provider sqlc.LlmProvider) (ModelCredentials, error) {
-	authType := s.providerAuthType(provider)
-	if !SupportsOpenAICodexOAuth(provider) {
+	if models.ClientType(provider.ClientType) != models.ClientTypeOpenAICodex {
 		return ModelCredentials{
-			AuthType: authType,
-			APIKey:   provider.ApiKey,
+			APIKey: provider.ApiKey,
 		}, nil
 	}
 
@@ -42,7 +39,6 @@ func (s *Service) ResolveModelCredentials(ctx context.Context, provider sqlc.Llm
 		return ModelCredentials{}, err
 	}
 	return ModelCredentials{
-		AuthType:       authType,
 		APIKey:         token,
 		CodexAccountID: accountID,
 	}, nil

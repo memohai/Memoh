@@ -15,6 +15,11 @@ export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
     label: 'OpenAI Completions',
     hint: 'Chat Completions API (widely compatible)',
   },
+  'openai-codex': {
+    value: 'openai-codex',
+    label: 'OpenAI Codex',
+    hint: 'Codex API (OAuth, coding-optimized)',
+  },
   'anthropic-messages': {
     value: 'anthropic-messages',
     label: 'Anthropic Messages',

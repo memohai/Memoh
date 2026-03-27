@@ -47,25 +47,7 @@
             </FormItem>
           </FormField>
           <FormField
-            v-slot="{ value, handleChange }"
-            name="auth_type"
-          >
-            <FormItem>
-              <Label class="mb-2">
-                {{ $t('provider.authType') }}
-              </Label>
-              <FormControl>
-                <SearchableSelectPopover
-                  :model-value="value"
-                  :options="authTypeOptions"
-                  :placeholder="$t('provider.authType')"
-                  @update:model-value="handleChange"
-                />
-              </FormControl>
-            </FormItem>
-          </FormField>
-          <FormField
-            v-if="form.values.auth_type !== 'openai-codex-oauth'"
+            v-if="form.values.client_type !== 'openai-codex'"
             v-slot="{ componentField }"
             name="api_key"
           >
@@ -201,21 +183,6 @@ const clientTypeOptions = computed(() =>
   })),
 )
 
-const authTypeOptions = computed(() => [
-  {
-    value: 'api_key',
-    label: t('provider.authTypes.apiKey'),
-    description: t('provider.authTypes.apiKeyHint'),
-    keywords: ['api key', 'token'],
-  },
-  {
-    value: 'openai-codex-oauth',
-    label: t('provider.authTypes.openaiCodex'),
-    description: t('provider.authTypes.openaiCodexHint'),
-    keywords: ['openai', 'codex', 'oauth'],
-  },
-])
-
 const queryCache = useQueryCache()
 const { mutateAsync: createProviderMutation, isLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
@@ -252,10 +219,9 @@ const providerSchema = toTypedSchema(z.object({
   base_url: z.string().min(1),
   name: z.string().min(1),
   client_type: z.string().min(1),
-  auth_type: z.string().min(1),
   auto_import: z.boolean().optional(),
 }).superRefine((value, ctx) => {
-  if (value.auth_type !== 'openai-codex-oauth' && !value.api_key?.trim()) {
+  if (value.client_type !== 'openai-codex' && !value.api_key?.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['api_key'],
@@ -268,16 +234,14 @@ const form = useForm({
   validationSchema: providerSchema,
   initialValues: {
     auto_import: false,
-    auth_type: 'api_key',
     client_type: 'openai-completions',
   },
 })
 
-watch(() => form.values.auth_type, (authType) => {
-  if (authType !== 'openai-codex-oauth') return
-  form.setFieldValue('client_type', 'openai-responses')
+watch(() => form.values.client_type, (clientType) => {
+  if (clientType !== 'openai-codex') return
   if (!form.values.base_url) {
-    form.setFieldValue('base_url', 'https://api.openai.com/v1')
+    form.setFieldValue('base_url', 'https://chatgpt.com/backend-api')
   }
 })
 
@@ -286,7 +250,7 @@ const createProvider = form.handleSubmit(async (value) => {
     () => createProviderMutation(value),
     {
       fallbackMessage: t('common.saveFailed'),
-      onSuccess: () => {      
+      onSuccess: () => {
         open.value = false
         form.resetForm()
       },

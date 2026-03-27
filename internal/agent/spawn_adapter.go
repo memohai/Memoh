@@ -73,11 +73,10 @@ func SpawnSystemPrompt(sessionType string) string {
 // SpawnModelCreatorFunc returns a tools.ModelCreator backed by the shared SDK model factory.
 // This keeps subagent model creation aligned with the shared SDK model factory.
 func SpawnModelCreatorFunc() tools.ModelCreator {
-	return func(modelID, clientType, authType, apiKey, codexAccountID, baseURL string, httpClient *http.Client) *sdk.Model {
+	return func(modelID, clientType, apiKey, codexAccountID, baseURL string, httpClient *http.Client) *sdk.Model {
 		return models.NewSDKChatModel(models.SDKModelConfig{
 			ModelID:        modelID,
 			ClientType:     clientType,
-			AuthType:       authType,
 			APIKey:         apiKey,
 			CodexAccountID: codexAccountID,
 			BaseURL:        baseURL,

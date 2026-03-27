@@ -48,13 +48,11 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		return TestResponse{}, err
 	}
 
-	// Embedding models don't have a chat Provider in the SDK — probe
-	// the /embeddings endpoint directly.
 	if model.Type == string(ModelTypeEmbedding) {
 		return s.testEmbeddingModel(ctx, baseURL, creds.APIKey, model.ModelID, nil)
 	}
 
-	sdkProvider := NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, creds.AuthType, clientType, probeTimeout, nil)
+	sdkProvider := NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
 	start := time.Now()
 
@@ -138,23 +136,13 @@ func (*Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID
 
 // NewSDKProvider creates a Twilight AI SDK Provider for the given client type.
 // It is exported so that other packages (e.g. providers) can reuse it for testing.
-func NewSDKProvider(baseURL, apiKey, codexAccountID, authType string, clientType ClientType, timeout time.Duration, httpClient *http.Client) sdk.Provider {
+func NewSDKProvider(baseURL, apiKey, codexAccountID string, clientType ClientType, timeout time.Duration, httpClient *http.Client) sdk.Provider {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: timeout}
 	}
 
 	switch clientType {
 	case ClientTypeOpenAIResponses:
-		if authType == authTypeOpenAICodexOAuth {
-			opts := []openaicodex.Option{
-				openaicodex.WithAccessToken(apiKey),
-				openaicodex.WithHTTPClient(httpClient),
-			}
-			if codexAccountID != "" {
-				opts = append(opts, openaicodex.WithAccountID(codexAccountID))
-			}
-			return openaicodex.New(opts...)
-		}
 		opts := []openairesponses.Option{
 			openairesponses.WithAPIKey(apiKey),
 			openairesponses.WithHTTPClient(httpClient),
@@ -163,6 +151,16 @@ func NewSDKProvider(baseURL, apiKey, codexAccountID, authType string, clientType
 			opts = append(opts, openairesponses.WithBaseURL(baseURL))
 		}
 		return openairesponses.New(opts...)
+
+	case ClientTypeOpenAICodex:
+		opts := []openaicodex.Option{
+			openaicodex.WithAccessToken(apiKey),
+			openaicodex.WithHTTPClient(httpClient),
+		}
+		if codexAccountID != "" {
+			opts = append(opts, openaicodex.WithAccountID(codexAccountID))
+		}
+		return openaicodex.New(opts...)
 
 	case ClientTypeAnthropicMessages:
 		opts := []anthropicmessages.Option{
@@ -197,15 +195,13 @@ func NewSDKProvider(baseURL, apiKey, codexAccountID, authType string, clientType
 }
 
 type modelCredentials struct {
-	AuthType       string
 	APIKey         string //nolint:gosec // runtime credential material used to construct SDK providers
 	CodexAccountID string
 }
 
 func (s *Service) resolveModelCredentials(ctx context.Context, provider sqlc.LlmProvider) (modelCredentials, error) {
-	authType := authTypeFromProviderMetadata(provider.Metadata)
-	if authType != authTypeOpenAICodexOAuth {
-		return modelCredentials{AuthType: authType, APIKey: provider.ApiKey}, nil
+	if ClientType(provider.ClientType) != ClientTypeOpenAICodex {
+		return modelCredentials{APIKey: provider.ApiKey}, nil
 	}
 
 	tokenRow, err := s.queries.GetLlmProviderOAuthTokenByProvider(ctx, provider.ID)
@@ -221,22 +217,9 @@ func (s *Service) resolveModelCredentials(ctx context.Context, provider sqlc.Llm
 		return modelCredentials{}, err
 	}
 	return modelCredentials{
-		AuthType:       authType,
 		APIKey:         accessToken,
 		CodexAccountID: accountID,
 	}, nil
-}
-
-func authTypeFromProviderMetadata(raw []byte) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var metadata map[string]any
-	if err := json.Unmarshal(raw, &metadata); err != nil {
-		return ""
-	}
-	authType, _ := metadata["auth_type"].(string)
-	return strings.TrimSpace(authType)
 }
 
 func codexAccountIDFromToken(token string) (string, error) {

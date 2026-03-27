@@ -100,7 +100,6 @@ type SystemFile struct {
 type ModelConfig struct {
 	ModelID         string
 	ClientType      string
-	AuthType        string
 	APIKey          string //nolint:gosec // carries provider credential material at runtime
 	CodexAccountID  string
 	BaseURL         string

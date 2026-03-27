@@ -289,7 +289,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	modelCfg := models.SDKModelConfig{
 		ModelID:         chatModel.ModelID,
 		ClientType:      clientType,
-		AuthType:        creds.AuthType,
 		APIKey:          creds.APIKey,
 		CodexAccountID:  creds.CodexAccountID,
 		BaseURL:         provider.BaseUrl,

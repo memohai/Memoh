@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS llm_providers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT llm_providers_name_unique UNIQUE (name),
-  CONSTRAINT llm_providers_client_type_check CHECK (client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai'))
+  CONSTRAINT llm_providers_client_type_check CHECK (client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai', 'openai-codex'))
 );
 
 CREATE TABLE IF NOT EXISTS search_providers (

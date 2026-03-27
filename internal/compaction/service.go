@@ -105,7 +105,6 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 
 	model := models.NewSDKChatModel(models.SDKModelConfig{
 		ClientType:     cfg.ClientType,
-		AuthType:       cfg.AuthType,
 		BaseURL:        cfg.BaseURL,
 		APIKey:         cfg.APIKey,
 		CodexAccountID: cfg.CodexAccountID,

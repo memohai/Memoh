@@ -31,7 +31,6 @@ type TriggerConfig struct {
 	SessionID      string
 	ModelID        string
 	ClientType     string
-	AuthType       string
 	APIKey         string //nolint:gosec // runtime credential, not a hardcoded secret
 	CodexAccountID string
 	BaseURL        string

@@ -12,14 +12,11 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
-const authTypeOpenAICodexOAuth = "openai-codex-oauth"
-
 // SDKModelConfig holds provider and model information resolved from DB,
 // used to construct a Twilight AI SDK Model instance.
 type SDKModelConfig struct {
 	ModelID         string
 	ClientType      string
-	AuthType        string
 	APIKey          string //nolint:gosec // carries provider credential material at runtime
 	CodexAccountID  string
 	BaseURL         string
@@ -55,19 +52,6 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		return p.ChatModel(cfg.ModelID)
 
 	case ClientTypeOpenAIResponses:
-		if cfg.AuthType == authTypeOpenAICodexOAuth {
-			opts := []openaicodex.Option{
-				openaicodex.WithAccessToken(cfg.APIKey),
-			}
-			if cfg.HTTPClient != nil {
-				opts = append(opts, openaicodex.WithHTTPClient(cfg.HTTPClient))
-			}
-			if cfg.CodexAccountID != "" {
-				opts = append(opts, openaicodex.WithAccountID(cfg.CodexAccountID))
-			}
-			return openaicodex.New(opts...).ChatModel(cfg.ModelID)
-		}
-
 		opts := []openairesponses.Option{
 			openairesponses.WithAPIKey(cfg.APIKey),
 		}
@@ -79,6 +63,18 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		}
 		p := openairesponses.New(opts...)
 		return p.ChatModel(cfg.ModelID)
+
+	case ClientTypeOpenAICodex:
+		opts := []openaicodex.Option{
+			openaicodex.WithAccessToken(cfg.APIKey),
+		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, openaicodex.WithHTTPClient(cfg.HTTPClient))
+		}
+		if cfg.CodexAccountID != "" {
+			opts = append(opts, openaicodex.WithAccountID(cfg.CodexAccountID))
+		}
+		return openaicodex.New(opts...).ChatModel(cfg.ModelID)
 
 	case ClientTypeAnthropicMessages:
 		opts := []anthropicmessages.Option{
@@ -141,7 +137,7 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 	switch ClientType(cfg.ClientType) {
 	case ClientTypeAnthropicMessages:
 		return nil
-	case ClientTypeOpenAIResponses, ClientTypeOpenAICompletions:
+	case ClientTypeOpenAIResponses, ClientTypeOpenAICompletions, ClientTypeOpenAICodex:
 		return []sdk.GenerateOption{sdk.WithReasoningEffort(effort)}
 	case ClientTypeGoogleGenerativeAI:
 		return nil
@@ -182,7 +178,9 @@ func ResolveClientType(model *sdk.Model) string {
 		return string(ClientTypeAnthropicMessages)
 	case strings.Contains(name, "google"):
 		return string(ClientTypeGoogleGenerativeAI)
-	case strings.Contains(name, "codex"), strings.Contains(name, "responses"):
+	case strings.Contains(name, "codex"):
+		return string(ClientTypeOpenAICodex)
+	case strings.Contains(name, "responses"):
 		return string(ClientTypeOpenAIResponses)
 	default:
 		return string(ClientTypeOpenAICompletions)

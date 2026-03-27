@@ -294,7 +294,7 @@ func (p *SpawnProvider) persistMessages(
 }
 
 // ModelCreator creates an sdk.Model from provider config. Set via SetModelCreator.
-type ModelCreator func(modelID, clientType, authType, apiKey, codexAccountID, baseURL string, httpClient *http.Client) *sdk.Model
+type ModelCreator func(modelID, clientType, apiKey, codexAccountID, baseURL string, httpClient *http.Client) *sdk.Model
 
 // SetModelCreator injects the function used to create SDK models
 // (typically agent.CreateModel wrapped to match the signature).
@@ -333,7 +333,6 @@ func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Mo
 	sdkModel := p.modelCreator(
 		modelInfo.ModelID,
 		provider.ClientType,
-		creds.AuthType,
 		creds.APIKey,
 		creds.CodexAccountID,
 		provider.BaseUrl,

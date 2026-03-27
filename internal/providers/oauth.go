@@ -20,6 +20,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/models"
 )
 
 const (
@@ -30,7 +31,6 @@ const (
 	defaultOpenAIOAuthScopes      = "openid profile email offline_access"
 	oauthExpirySkew               = 30 * time.Second
 	providerOAuthHTTPTimeout      = 15 * time.Second
-	metadataAuthTypeKey           = "auth_type"
 	metadataOAuthClientIDKey      = "oauth_client_id"
 	metadataOAuthAuthorizeURLKey  = "oauth_authorize_url"
 	metadataOAuthTokenURLKey      = "oauth_token_url" //nolint:gosec // metadata key name, not a credential
@@ -60,38 +60,6 @@ type openAIOAuthConfig struct {
 	IDTokenAddOrganizations bool
 }
 
-func (*Service) providerAuthType(provider sqlc.LlmProvider) string {
-	return authTypeFromMetadata(providerMetadata(provider.Metadata))
-}
-
-func (*Service) normalizeProviderMetadata(input map[string]any, authType string) map[string]any {
-	out := cloneMetadata(input)
-	if authType == "" {
-		authType = authTypeFromMetadata(out)
-	}
-	if authType == "" {
-		authType = AuthTypeAPIKey
-	}
-	out[metadataAuthTypeKey] = authType
-	return out
-}
-
-func authTypeFromMetadata(metadata map[string]any) string {
-	if metadata == nil {
-		return AuthTypeAPIKey
-	}
-	authType, _ := metadata[metadataAuthTypeKey].(string)
-	authType = strings.TrimSpace(authType)
-	if authType == "" {
-		return AuthTypeAPIKey
-	}
-	return authType
-}
-
-func AuthTypeFromRawMetadata(raw []byte) string {
-	return authTypeFromMetadata(providerMetadata(raw))
-}
-
 func providerMetadata(raw []byte) map[string]any {
 	if len(raw) == 0 {
 		return map[string]any{}
@@ -104,38 +72,6 @@ func providerMetadata(raw []byte) map[string]any {
 		return map[string]any{}
 	}
 	return metadata
-}
-
-func cloneMetadata(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-func (*Service) validateAuthType(baseURL, clientType, authType string) error {
-	switch authType {
-	case "", AuthTypeAPIKey:
-		return nil
-	case AuthTypeOpenAICodexOAuth:
-		if strings.TrimSpace(clientType) != "openai-responses" {
-			return errors.New("openai codex oauth requires client_type=openai-responses")
-		}
-		parsed, err := url.Parse(strings.TrimSpace(baseURL))
-		if err != nil {
-			return fmt.Errorf("invalid base_url: %w", err)
-		}
-		if !strings.EqualFold(parsed.Hostname(), "api.openai.com") {
-			return errors.New("openai codex oauth requires base_url host api.openai.com")
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported auth_type: %s", authType)
-	}
 }
 
 func (s *Service) oauthConfig(metadata map[string]any) openAIOAuthConfig {
@@ -168,11 +104,8 @@ func (s *Service) oauthConfig(metadata map[string]any) openAIOAuthConfig {
 	return cfg
 }
 
-func (s *Service) supportsOAuth(provider sqlc.LlmProvider) bool {
-	if s.providerAuthType(provider) != AuthTypeOpenAICodexOAuth {
-		return false
-	}
-	return s.validateAuthType(provider.BaseUrl, provider.ClientType, AuthTypeOpenAICodexOAuth) == nil
+func supportsOAuth(provider sqlc.LlmProvider) bool {
+	return models.ClientType(provider.ClientType) == models.ClientTypeOpenAICodex
 }
 
 func (s *Service) StartOAuthAuthorization(ctx context.Context, providerID string) (string, error) {
@@ -184,7 +117,7 @@ func (s *Service) StartOAuthAuthorization(ctx context.Context, providerID string
 	if err != nil {
 		return "", fmt.Errorf("get provider: %w", err)
 	}
-	if !s.supportsOAuth(provider) {
+	if !supportsOAuth(provider) {
 		return "", errors.New("provider does not support oauth")
 	}
 
@@ -231,7 +164,7 @@ func (s *Service) HandleOAuthCallback(ctx context.Context, state, code string) (
 	if err != nil {
 		return "", fmt.Errorf("get provider: %w", err)
 	}
-	if !s.supportsOAuth(provider) {
+	if !supportsOAuth(provider) {
 		return "", errors.New("provider does not support oauth")
 	}
 
@@ -264,10 +197,8 @@ func (s *Service) GetOAuthStatus(ctx context.Context, providerID string) (*OAuth
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
-	authType := s.providerAuthType(provider)
 	status := &OAuthStatus{
-		AuthType:    authType,
-		Configured:  s.supportsOAuth(provider),
+		Configured:  supportsOAuth(provider),
 		CallbackURL: s.oauthConfig(providerMetadata(provider.Metadata)).RedirectURI,
 	}
 	if !status.Configured {
@@ -299,7 +230,7 @@ func (s *Service) RevokeOAuthToken(ctx context.Context, providerID string) error
 	if err != nil {
 		return fmt.Errorf("get provider: %w", err)
 	}
-	if !s.supportsOAuth(provider) {
+	if !supportsOAuth(provider) {
 		return errors.New("provider does not support oauth")
 	}
 	return s.queries.DeleteLlmProviderOAuthToken(ctx, providerUUID)
