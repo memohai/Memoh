@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <h3 class="text-lg font-medium">
+        <h3 class="text-sm font-medium">
           {{ $t('bots.schedule.title') }}
         </h3>
         <Badge
@@ -33,7 +33,7 @@
     <!-- Loading -->
     <div
       v-if="isLoading && schedules.length === 0"
-      class="flex items-center justify-center py-8 text-sm text-muted-foreground"
+      class="flex items-center justify-center py-8 text-xs text-muted-foreground"
     >
       <Spinner class="mr-2" />
       {{ $t('common.loading') }}
@@ -50,7 +50,7 @@
           class="size-6 text-muted-foreground"
         />
       </div>
-      <p class="text-sm text-muted-foreground">
+      <p class="text-xs text-muted-foreground">
         {{ $t('bots.schedule.empty') }}
       </p>
     </div>
@@ -58,7 +58,7 @@
     <!-- Table -->
     <template v-else>
       <div class="rounded-md border overflow-hidden">
-        <table class="w-full text-sm">
+        <table class="w-full text-xs">
           <thead>
             <tr class="border-b bg-muted/50">
               <th class="px-4 py-2 text-left font-medium">
@@ -122,7 +122,7 @@
         v-if="totalPages > 1"
         class="flex items-center justify-between pt-4"
       >
-        <span class="text-sm text-muted-foreground">
+        <span class="text-xs text-muted-foreground">
           {{ paginationSummary }}
         </span>
         <Pagination

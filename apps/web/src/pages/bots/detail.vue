@@ -56,7 +56,7 @@
             </Button>
           </template>
           <template v-else>
-            <h2 class="truncate text-base font-medium">
+            <h2 class="truncate text-sm font-medium">
               {{ botNameDraft.trim() || bot?.display_name || botId }}
             </h2>
             <Button
@@ -77,7 +77,7 @@
             </Button>
           </template>
         </div>
-        <div class="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+        <div class="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
           <Badge
             v-if="bot"
             :variant="statusVariant"
@@ -98,7 +98,7 @@
     <Separator />
     <div class="flex-1 relative">
       <MasterDetailSidebarLayout
-        class="[&_td:last-child]:w-45 [&_.sidebar-container]:h-[calc(100vh-98px---spacing(12))]!"
+        class="[&_td:last-child]:w-45"
       >
         <template #sidebar-content>
           <SidebarMenu

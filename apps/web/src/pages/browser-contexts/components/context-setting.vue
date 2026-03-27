@@ -7,7 +7,7 @@
           class="size-5"
         />
         <div>
-          <h2 class="text-base font-semibold">
+          <h2 class="text-sm font-semibold">
             {{ curContext?.name || $t('browserContext.title') }}
           </h2>
           <p class="text-xs text-muted-foreground">
@@ -37,7 +37,7 @@
         </FormField>
 
         <Separator class="my-4" />
-        <h3 class="text-sm font-medium text-foreground">
+        <h3 class="text-xs font-medium text-foreground">
           {{ $t('browserContext.config') }}
         </h3>
 
@@ -53,7 +53,7 @@
                   v-for="c in availableCores"
                   :key="c"
                   type="button"
-                  class="flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm transition-colors"
+                  class="flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs transition-colors"
                   :class="value === c
                     ? 'border-primary bg-primary/10 text-primary font-medium'
                     : 'border-border bg-card text-muted-foreground hover:bg-accent'"

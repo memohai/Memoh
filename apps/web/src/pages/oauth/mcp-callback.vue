@@ -15,7 +15,7 @@
         :icon="['fas', 'circle-xmark']"
         class="size-8 text-destructive"
       />
-      <p class="text-sm text-muted-foreground">
+      <p class="text-xs text-muted-foreground">
         {{ message }}
       </p>
     </div>

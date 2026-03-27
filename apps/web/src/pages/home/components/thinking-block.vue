@@ -1,6 +1,6 @@
 <template>
   <Collapsible v-model:open="isOpen">
-    <CollapsibleTrigger class="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
+    <CollapsibleTrigger class="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
       <FontAwesomeIcon
         :icon="['fas', 'chevron-right']"
         class="size-3 transition-transform"
@@ -20,7 +20,7 @@
       </span>
     </CollapsibleTrigger>
     <CollapsibleContent>
-      <div class="mt-2 ml-5 pl-3 border-l-2 border-muted text-sm text-muted-foreground">
+      <div class="mt-2 ml-5 pl-3 border-l-2 border-muted text-xs text-muted-foreground">
         <div
           class="whitespace-pre-wrap leading-relaxed"
           v-text="block.content"

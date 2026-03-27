@@ -20,7 +20,7 @@
                   @click="sidebarOpen = !sidebarOpen"
                 >
 
-                <h3 class="font-medium text-sm group-data-[collapsible=icon]:hidden">
+                <h3 class="font-medium text-xs group-data-[collapsible=icon]:hidden">
                   {{ $t('sidebar.session') }}
                 </h3>
               </section>
@@ -30,7 +30,7 @@
               class="not-group-data-[collapsible=icon]:hidden flex justify-center"
               style="writing-mode:sideways-rl"
             >
-              <span class="flex-none w-[1em] mr-2.5 mt-4 text-muted-foreground text-sm">
+              <span class="flex-none w-[1em] mr-2.5 mt-4 text-muted-foreground text-xs">
                 {{ $t('sidebar.session') }}
               </span>
             </section>

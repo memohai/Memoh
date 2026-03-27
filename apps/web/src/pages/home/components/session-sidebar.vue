@@ -5,7 +5,7 @@
         :icon="['fas', 'comment-dots']"
         class="size-6 text-foreground ml-1.5"
       />
-      <span class="text-sm font-semibold text-foreground ml-2 flex-1">
+      <span class="text-xs font-semibold text-foreground ml-2 flex-1">
         {{ t('sidebar.chat') }}
       </span>
       <DropdownMenu>

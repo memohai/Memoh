@@ -18,7 +18,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     v-slot="slotProps"
     v-bind="forwarded"
     :class="cn(
-      'flex flex-wrap gap-2 items-center rounded-lg border border-input bg-background px-2 py-1 text-sm transition-[color,box-shadow] outline-none',
+      'flex flex-wrap gap-2 items-center rounded-lg border border-input bg-background px-2 py-1 text-xs transition-[color,box-shadow] outline-none',
       'focus-within:border-ring focus-within:ring-ring/20 focus-within:ring-2',
       'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
       props.class)"

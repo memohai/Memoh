@@ -589,10 +589,10 @@ watch([activeTab, botId], ([tab]) => {
   <div class="mx-auto space-y-5">
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0 space-y-1">
-        <h3 class="text-lg font-semibold">
+        <h3 class="text-sm font-semibold">
           {{ $t('bots.container.title') }}
         </h3>
-        <p class="text-sm text-muted-foreground">
+        <p class="text-xs text-muted-foreground">
           {{ $t('bots.container.subtitle') }}
         </p>
       </div>
@@ -627,14 +627,14 @@ watch([activeTab, botId], ([tab]) => {
 
     <div
       v-if="botLifecyclePending"
-      class="rounded-md border border-yellow-300/50 bg-yellow-50/70 p-3 text-sm text-yellow-800 dark:border-yellow-800/50 dark:bg-yellow-900/10 dark:text-yellow-200"
+      class="rounded-md border border-yellow-300/50 bg-yellow-50/70 p-3 text-xs text-yellow-800 dark:border-yellow-800/50 dark:bg-yellow-900/10 dark:text-yellow-200"
     >
       {{ $t('bots.container.botNotReady') }}
     </div>
 
     <div
       v-if="containerLoading && !containerInfo && !containerMissing"
-      class="flex items-center gap-2 text-sm text-muted-foreground"
+      class="flex items-center gap-2 text-xs text-muted-foreground"
     >
       <Spinner />
       <span>{{ $t('common.loading') }}</span>
@@ -644,13 +644,13 @@ watch([activeTab, botId], ([tab]) => {
       v-else-if="containerMissing"
       class="space-y-4 rounded-md border p-4"
     >
-      <p class="text-sm text-muted-foreground">
+      <p class="text-xs text-muted-foreground">
         {{ $t('bots.container.empty') }}
       </p>
 
       <div class="rounded-md border p-4 space-y-4">
         <div class="space-y-1">
-          <p class="text-sm font-medium">
+          <p class="text-xs font-medium">
             {{ $t('bots.container.actions.create') }}
           </p>
           <p class="text-xs text-muted-foreground">
@@ -719,7 +719,7 @@ watch([activeTab, botId], ([tab]) => {
         v-if="isLegacy"
         class="flex items-center justify-between gap-3 rounded-md border border-amber-300/50 bg-amber-50/70 p-3 dark:border-amber-800/50 dark:bg-amber-900/10"
       >
-        <p class="text-sm text-amber-800 dark:text-amber-200">
+        <p class="text-xs text-amber-800 dark:text-amber-200">
           {{ $t('bots.container.legacyWarning') }}
         </p>
         <Button
@@ -749,7 +749,7 @@ watch([activeTab, botId], ([tab]) => {
       </div>
 
       <div class="rounded-md border p-4">
-        <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+        <dl class="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
           <div class="space-y-1">
             <dt class="text-muted-foreground">
               {{ $t('bots.container.fields.id') }}
@@ -815,17 +815,17 @@ watch([activeTab, botId], ([tab]) => {
 
       <div class="space-y-4 rounded-md border p-4">
         <div class="space-y-1">
-          <h4 class="text-sm font-medium">
+          <h4 class="text-xs font-medium">
             {{ $t('bots.container.dataTitle') }}
           </h4>
-          <p class="text-sm text-muted-foreground">
+          <p class="text-xs text-muted-foreground">
             {{ $t('bots.container.dataSubtitle') }}
           </p>
         </div>
 
         <div
           v-if="hasPreservedData"
-          class="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm"
+          class="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs"
         >
           {{ $t('bots.container.preservedDataAvailable') }}
         </div>
@@ -885,10 +885,10 @@ watch([activeTab, botId], ([tab]) => {
 
         <div class="space-y-3">
           <div class="space-y-1">
-            <h4 class="text-sm font-medium text-destructive">
+            <h4 class="text-xs font-medium text-destructive">
               {{ $t('bots.container.deleteTitle') }}
             </h4>
-            <p class="text-sm text-muted-foreground">
+            <p class="text-xs text-muted-foreground">
               {{ $t('bots.container.deleteSubtitle') }}
             </p>
           </div>
@@ -967,14 +967,14 @@ watch([activeTab, botId], ([tab]) => {
 
         <div
           v-if="snapshotsLoading"
-          class="flex items-center gap-2 text-sm text-muted-foreground"
+          class="flex items-center gap-2 text-xs text-muted-foreground"
         >
           <Spinner />
           <span>{{ $t('common.loading') }}</span>
         </div>
         <div
           v-else-if="sortedSnapshots.length === 0"
-          class="text-sm text-muted-foreground"
+          class="text-xs text-muted-foreground"
         >
           {{ $t('bots.container.snapshotEmpty') }}
         </div>
@@ -1059,7 +1059,7 @@ watch([activeTab, botId], ([tab]) => {
                 </ConfirmPopover>
                 <div
                   v-else
-                  class="text-sm text-muted-foreground"
+                  class="text-xs text-muted-foreground"
                 >
                   -
                 </div>
@@ -1068,7 +1068,7 @@ watch([activeTab, botId], ([tab]) => {
           </div>
 
           <div class="hidden overflow-x-auto rounded-md border md:block">
-            <table class="w-full text-sm">
+            <table class="w-full text-xs">
               <thead class="bg-muted/50 text-left">
                 <tr>
                   <th class="px-3 py-2 font-medium">

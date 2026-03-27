@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="flex items-center justify-between">
       <div>
-        <h3 class="text-lg font-medium">
+        <h3 class="text-sm font-medium">
           {{ $t('bots.skills.title') }}
         </h3>
       </div>
@@ -22,7 +22,7 @@
     <!-- Loading State -->
     <div
       v-if="isLoading"
-      class="flex items-center justify-center py-8 text-sm text-muted-foreground"
+      class="flex items-center justify-center py-8 text-xs text-muted-foreground"
     >
       <Spinner class="mr-2" />
       {{ $t('common.loading') }}
@@ -39,10 +39,10 @@
           class="size-6 text-muted-foreground"
         />
       </div>
-      <h3 class="text-lg font-medium">
+      <h3 class="text-sm font-medium">
         {{ $t('bots.skills.emptyTitle') }}
       </h3>
-      <p class="text-sm text-muted-foreground mt-1">
+      <p class="text-xs text-muted-foreground mt-1">
         {{ $t('bots.skills.emptyDescription') }}
       </p>
     </div>
@@ -60,7 +60,7 @@
         <CardHeader class="pb-3">
           <div class="flex items-start justify-between gap-2">
             <CardTitle
-              class="text-base truncate"
+              class="text-sm truncate"
               :title="skill.name"
             >
               {{ skill.name }}

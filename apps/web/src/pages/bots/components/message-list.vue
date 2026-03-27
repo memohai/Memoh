@@ -20,7 +20,7 @@
         <!-- Content -->
         <div class="min-w-0 flex-1 space-y-1.5">
           <!-- Top row -->
-          <div class="flex flex-wrap items-center gap-2 text-sm">
+          <div class="flex flex-wrap items-center gap-2 text-xs">
             <Badge
               :variant="roleBadgeVariant(msg.role)"
               class="text-xs font-medium"
@@ -47,7 +47,7 @@
 
           <!-- Message content -->
           <div
-            class="text-sm leading-relaxed"
+            class="text-xs leading-relaxed"
             :class="{ 'font-mono text-xs': msg.role === 'tool' || msg.role === 'system' }"
           >
             <div

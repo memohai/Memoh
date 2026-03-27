@@ -6,7 +6,7 @@
           :provider="curProvider?.provider || ''"
           size="lg"
         />
-        <h2 class="scroll-m-20 text-base font-semibold tracking-tight">
+        <h2 class="scroll-m-20 text-sm font-semibold tracking-tight">
           {{ curProvider?.name }}
         </h2>
       </div>
@@ -80,7 +80,7 @@
         </template>
         <div
           v-else-if="form.values.provider"
-          class="text-sm text-muted-foreground"
+          class="text-xs text-muted-foreground"
         >
           {{ $t('searchProvider.unsupportedProvider') }}
         </div>

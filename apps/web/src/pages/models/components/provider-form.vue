@@ -7,7 +7,7 @@
       >
         <FormItem class="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
           <div class="space-y-0.5">
-            <Label class="text-base">
+            <Label class="text-sm">
               {{ $t('provider.enable') }}
             </Label>
             <p class="text-[0.8rem] text-muted-foreground">
@@ -112,7 +112,7 @@
 
       <section
         v-if="form.values.client_type === 'openai-codex'"
-        class="rounded-lg border p-4 space-y-3 text-sm"
+        class="rounded-lg border p-4 space-y-3 text-xs"
       >
         <div class="space-y-1">
           <div class="font-medium">
@@ -216,7 +216,7 @@
 
     <section
       v-if="testResult"
-      class="mt-4 rounded-lg border p-4 space-y-3 text-sm"
+      class="mt-4 rounded-lg border p-4 space-y-3 text-xs"
     >
       <div class="flex items-center gap-2">
         <StatusDot :status="testResult.reachable ? 'success' : 'error'" />

@@ -1,8 +1,7 @@
 <template>
   <SidebarProvider class="min-h-[initial]! absolute inset-0 ">
     <Sidebar
-      class="relative! **:[[role=navigation]]:relative! sidebar-container"
-      style="height: calc(100vh - var(--spacing) * 12.5);"
+      class="relative! **:[[role=navigation]]:relative! sidebar-container h-full!"
     >
       <SidebarHeader v-if="slots['sidebar-header']">
         <slot name="sidebar-header" />

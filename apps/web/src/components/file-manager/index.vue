@@ -277,7 +277,7 @@ defineExpose({ navigateTo, openFileByPath })
     <!-- Toolbar -->
     <div class="flex items-center gap-2 border-b border-border px-4 py-2">
       <!-- Breadcrumb -->
-      <nav class="flex min-w-0 flex-1 items-center gap-1 text-sm">
+      <nav class="flex min-w-0 flex-1 items-center gap-1 text-xs">
         <template
           v-for="(seg, idx) in pathSegments(currentPath)"
           :key="seg.path"
@@ -454,7 +454,7 @@ defineExpose({ navigateTo, openFileByPath })
         <DialogHeader>
           <DialogTitle>{{ t('bots.files.confirmDelete') }}</DialogTitle>
         </DialogHeader>
-        <p class="text-sm text-muted-foreground">
+        <p class="text-xs text-muted-foreground">
           {{ t('bots.files.confirmDeleteMessage', { name: deleteTarget?.name ?? '' }) }}
         </p>
         <DialogFooter>

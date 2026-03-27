@@ -19,7 +19,7 @@
           v-else-if="configuredChannels.length === 0"
           class="flex flex-col items-center justify-center h-full p-4 text-center"
         >
-          <p class="text-sm text-muted-foreground">
+          <p class="text-xs text-muted-foreground">
             {{ $t('bots.channels.emptyTitle') }}
           </p>
           <p class="mt-1 text-xs text-muted-foreground">
@@ -37,7 +37,7 @@
             :key="item.meta.type"
             type="button"
             :aria-pressed="selectedType === item.meta.type"
-            class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors hover:bg-accent"
+            class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-xs transition-colors hover:bg-accent"
             :class="{ 'bg-accent': selectedType === item.meta.type }"
             @click="selectedType = item.meta.type ?? ''"
           >
@@ -92,7 +92,7 @@
           >
             <div
               v-if="unconfiguredChannels.length === 0"
-              class="px-3 py-2 text-sm text-muted-foreground text-center"
+              class="px-3 py-2 text-xs text-muted-foreground text-center"
             >
               {{ $t('bots.channels.noAvailableTypes') }}
             </div>
@@ -100,7 +100,7 @@
               v-for="item in unconfiguredChannels"
               :key="item.meta.type"
               type="button"
-              class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors"
+              class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-xs hover:bg-accent transition-colors"
               @click="addChannel(item.meta.type ?? '')"
             >
               <span class="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -119,7 +119,7 @@
     <div class="flex-1 min-w-0">
       <div
         v-if="!selectedType || !selectedItem"
-        class="flex h-full items-center justify-center text-sm text-muted-foreground"
+        class="flex h-full items-center justify-center text-xs text-muted-foreground"
       >
         {{ configuredChannels.length > 0 ? $t('bots.channels.selectType') : '' }}
       </div>

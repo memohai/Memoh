@@ -4,7 +4,7 @@
     <div class="w-64 shrink-0 flex flex-col border rounded-lg overflow-hidden max-h-full">
       <div class="p-3 border-b space-y-3 shrink-0">
         <div class="flex items-center justify-between">
-          <h4 class="text-sm font-medium">
+          <h4 class="text-xs font-medium">
             {{ $t('bots.memory.files') }}
           </h4>
           <div class="flex items-center gap-1">
@@ -117,7 +117,7 @@
                 class="size-4 text-muted-foreground shrink-0"
               />
               <div class="min-w-0">
-                <h4 class="text-sm font-medium truncate">
+                <h4 class="text-xs font-medium truncate">
                   {{ formatDate(selectedMemory.created_at) }}
                 </h4>
                 <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5">
@@ -175,7 +175,7 @@
           <div class="flex-1 relative">
             <Textarea
               v-model="editContent"
-              class="absolute inset-0 resize-none border-0 rounded-none focus-visible:ring-0 font-mono text-sm p-4 h-full"
+              class="absolute inset-0 resize-none border-0 rounded-none focus-visible:ring-0 font-mono text-xs p-4 h-full"
               placeholder="Write your memory content here (Markdown)..."
             />
           </div>
@@ -228,7 +228,7 @@
             class="size-6 opacity-20"
           />
         </div>
-        <h3 class="text-sm font-medium text-foreground">
+        <h3 class="text-xs font-medium text-foreground">
           {{ $t('bots.memory.title') }}
         </h3>
         <p class="text-xs mt-1 max-w-[240px]">
@@ -352,7 +352,7 @@
         </DialogHeader>
 
         <div class="py-4 space-y-6">
-          <p class="text-sm text-muted-foreground">
+          <p class="text-xs text-muted-foreground">
             {{ $t('bots.memory.compactConfirm') }}
           </p>
 
@@ -371,7 +371,7 @@
                   class="mt-1"
                 />
                 <div class="min-w-0">
-                  <p class="text-sm font-medium">{{ $t('bots.memory.compactRatioLight') }}</p>
+                  <p class="text-xs font-medium">{{ $t('bots.memory.compactRatioLight') }}</p>
                   <p class="text-xs text-muted-foreground">{{ $t('bots.memory.compactRatioLightDesc') }}</p>
                 </div>
               </Label>
@@ -384,7 +384,7 @@
                   class="mt-1"
                 />
                 <div class="min-w-0">
-                  <p class="text-sm font-medium">{{ $t('bots.memory.compactRatioMedium') }}</p>
+                  <p class="text-xs font-medium">{{ $t('bots.memory.compactRatioMedium') }}</p>
                   <p class="text-xs text-muted-foreground">{{ $t('bots.memory.compactRatioMediumDesc') }}</p>
                 </div>
               </Label>
@@ -397,7 +397,7 @@
                   class="mt-1"
                 />
                 <div class="min-w-0">
-                  <p class="text-sm font-medium">{{ $t('bots.memory.compactRatioAggressive') }}</p>
+                  <p class="text-xs font-medium">{{ $t('bots.memory.compactRatioAggressive') }}</p>
                   <p class="text-xs text-muted-foreground">{{ $t('bots.memory.compactRatioAggressiveDesc') }}</p>
                 </div>
               </Label>

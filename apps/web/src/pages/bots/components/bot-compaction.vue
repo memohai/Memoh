@@ -61,13 +61,13 @@
 
     <!-- Logs header -->
     <div class="flex items-center justify-between">
-      <h3 class="text-lg font-medium">
+      <h3 class="text-sm font-medium">
         {{ $t('bots.compaction.title') }}
       </h3>
       <div class="flex items-center gap-2">
         <NativeSelect
           v-model="statusFilter"
-          class="h-9 w-28 text-sm"
+          class="h-9 w-28 text-xs"
         >
           <option value="">
             {{ $t('bots.compaction.filterAll') }}
@@ -117,7 +117,7 @@
     <!-- Loading -->
     <div
       v-if="isLoading && logs.length === 0"
-      class="flex items-center justify-center py-8 text-sm text-muted-foreground"
+      class="flex items-center justify-center py-8 text-xs text-muted-foreground"
     >
       <Spinner class="mr-2" />
       {{ $t('common.loading') }}
@@ -134,7 +134,7 @@
           class="size-6 text-muted-foreground"
         />
       </div>
-      <p class="text-sm text-muted-foreground">
+      <p class="text-xs text-muted-foreground">
         {{ $t('bots.compaction.empty') }}
       </p>
     </div>
@@ -142,7 +142,7 @@
     <!-- Logs -->
     <template v-else>
       <div class="rounded-md border">
-        <table class="w-full text-sm">
+        <table class="w-full text-xs">
           <thead>
             <tr class="border-b bg-muted/50">
               <th class="px-4 py-2 text-left font-medium">
@@ -192,7 +192,7 @@
       <div
         v-for="log in filteredLogs.filter(l => l.id && expandedIds.has(l.id))"
         :key="'detail-' + log.id"
-        class="rounded-md border bg-muted/20 p-4 text-sm whitespace-pre-wrap wrap-break-word"
+        class="rounded-md border bg-muted/20 p-4 text-xs whitespace-pre-wrap wrap-break-word"
       >
         <p
           v-if="log.error_message"

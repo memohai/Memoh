@@ -9,7 +9,7 @@
         />
         <span
           v-else
-          class="text-sm font-medium text-muted-foreground"
+          class="text-xs font-medium text-muted-foreground"
         >
           {{ getInitials(curProvider?.name) }}
         </span>

@@ -24,7 +24,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     v-bind="forwardedProps"
     :class="
       cn(
-        'relative flex w-full cursor-default items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-hidden select-none transition-colors',
+        'relative flex w-full cursor-default items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-xs outline-hidden select-none transition-colors',
         'focus:bg-accent focus:text-accent-foreground',
         '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
         'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',

@@ -6,10 +6,10 @@
       class="flex-1 flex items-center justify-center"
     >
       <div class="text-center">
-        <p class="text-sm font-medium text-foreground">
+        <p class="text-xs font-medium text-foreground">
           {{ $t('chat.selectBot') }}
         </p>
-        <p class="mt-1 text-sm text-muted-foreground">
+        <p class="mt-1 text-xs text-muted-foreground">
           {{ $t('chat.selectBotHint') }}
         </p>
       </div>
@@ -19,7 +19,7 @@
       <!-- Session header -->
       <!-- <div class="border-b px-4 py-2 flex items-center justify-between min-h-12">
         <div class="flex items-center gap-2 min-w-0">
-          <h2 class="text-sm font-medium truncate">
+          <h2 class="text-xs font-medium truncate">
             {{ activeSession?.title || $t('chat.untitledSession') }}
           </h2>
         </div>
@@ -63,7 +63,7 @@
                 v-if="messages.length === 0 && !loadingChats"
                 class="flex items-center justify-center min-h-[300px]"
               >
-                <p class="text-muted-foreground text-sm">
+                <p class="text-muted-foreground text-xs">
                   {{ $t('chat.greeting') }}
                 </p>
               </div>

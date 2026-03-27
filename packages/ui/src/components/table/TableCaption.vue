@@ -10,7 +10,7 @@ const props = defineProps<{
 <template>
   <caption
     data-slot="table-caption"
-    :class="cn('text-muted-foreground py-4 text-sm', props.class)"
+    :class="cn('text-muted-foreground py-4 text-xs', props.class)"
   >
     <slot />
   </caption>

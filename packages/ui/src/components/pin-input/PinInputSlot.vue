@@ -17,7 +17,7 @@ const delegatedProps = reactiveOmit(props, 'class')
     v-bind="delegatedProps"
     data-slot="pin-input-slot"
     :class="cn(
-      'size-9 bg-background text-center text-sm text-foreground shadow-none',
+      'size-9 bg-background text-center text-xs text-foreground shadow-none',
       'border-y border-r border-border',
       'transition-all outline-none',
       'focus:relative focus:z-10 focus:border-2 focus:border-ring',

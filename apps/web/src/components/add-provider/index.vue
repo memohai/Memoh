@@ -71,7 +71,7 @@
           </FormField>
           <div
             v-else
-            class="rounded-lg border p-3 text-sm text-muted-foreground"
+            class="rounded-lg border p-3 text-xs text-muted-foreground"
           >
             {{ $t('provider.oauth.createHint') }}
           </div>
@@ -125,7 +125,7 @@
           >
             <FormItem class="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
               <div class="space-y-0.5">
-                <Label class="text-base">
+                <Label class="text-sm">
                   {{ $t('provider.autoImport') }}
                 </Label>
                 <p class="text-[0.8rem] text-muted-foreground">

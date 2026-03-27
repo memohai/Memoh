@@ -1,6 +1,6 @@
 <template>
   <section>
-    <h2 class="mb-2 flex items-center text-sm font-medium">
+    <h2 class="mb-2 flex items-center text-xs font-medium">
       <FontAwesomeIcon
         :icon="['fas', 'user']"
         class="mr-2 size-3.5"

@@ -2,7 +2,7 @@
   <div class="h-[53px] shrink-0 flex items-center px-4 border-b border-border">
     <ChatStatus />
     <div class="ml-2 flex flex-col gap-0.5">
-      <h4 class="text-sm font-medium">
+      <h4 class="text-xs font-medium">
         Memoh
         <ChatStep />
       </h4>

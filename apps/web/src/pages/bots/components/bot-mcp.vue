@@ -22,7 +22,7 @@
     <template #sidebar-content>
       <div
         v-if="loading && items.length === 0"
-        class="flex items-center gap-2 text-sm text-muted-foreground p-4"
+        class="flex items-center gap-2 text-xs text-muted-foreground p-4"
       >
         <Spinner />
         <span>{{ $t('common.loading') }}</span>
@@ -105,7 +105,7 @@
       >
         <div class="p-6 space-y-6">
           <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold">
+            <h3 class="text-sm font-semibold">
               {{ selectedItem.name }}
             </h3>
             <div class="flex items-center gap-2">
@@ -248,7 +248,7 @@
 
             <div class="flex items-center justify-between pt-2 border-t">
               <div class="flex items-center gap-2">
-                <Label class="text-sm font-normal">{{ $t('mcp.active') }}</Label>
+                <Label class="text-xs font-normal">{{ $t('mcp.active') }}</Label>
                 <Switch
                   :model-value="formData.active"
                   @update:model-value="(val) => (formData.active = !!val)"
@@ -274,7 +274,7 @@
           >
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <h4 class="text-sm font-medium">
+                <h4 class="text-xs font-medium">
                   {{ $t('mcp.tools') }}
                 </h4>
                 <Badge
@@ -320,14 +320,14 @@
 
             <div
               v-if="selectedItem.status_message && selectedItem.status === 'error'"
-              class="text-sm text-destructive bg-destructive/5 rounded-md p-3"
+              class="text-xs text-destructive bg-destructive/5 rounded-md p-3"
             >
               {{ selectedItem.status_message }}
             </div>
 
             <div
               v-if="probeAuthRequired"
-              class="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 rounded-md p-3 flex items-center gap-2"
+              class="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 rounded-md p-3 flex items-center gap-2"
             >
               <FontAwesomeIcon :icon="['fas', 'lock']" />
               {{ $t('mcp.authRequired') }}
@@ -339,7 +339,7 @@
               class="border rounded-md p-4 space-y-3"
             >
               <div class="flex items-center justify-between">
-                <h4 class="text-sm font-medium">
+                <h4 class="text-xs font-medium">
                   {{ $t('mcp.oauth.title') }}
                 </h4>
                 <Badge
@@ -464,7 +464,7 @@
               <div
                 v-for="tool in displayTools"
                 :key="tool.name"
-                class="flex items-start gap-2 py-1.5 px-2 rounded text-sm hover:bg-accent/50"
+                class="flex items-start gap-2 py-1.5 px-2 rounded text-xs hover:bg-accent/50"
               >
                 <FontAwesomeIcon
                   :icon="['fas', 'wrench']"
@@ -483,7 +483,7 @@
             </div>
             <p
               v-else-if="selectedItem.status === 'connected'"
-              class="text-sm text-muted-foreground"
+              class="text-xs text-muted-foreground"
             >
               {{ $t('mcp.toolsEmpty') }}
             </p>
@@ -579,7 +579,7 @@
       <DialogHeader>
         <DialogTitle>{{ $t('common.import') }} MCP Servers</DialogTitle>
       </DialogHeader>
-      <p class="text-sm text-muted-foreground mt-2">
+      <p class="text-xs text-muted-foreground mt-2">
         {{ $t('mcp.importHint') }}
       </p>
       <div class="h-[350px] rounded-md border overflow-hidden mt-3">

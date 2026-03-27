@@ -9,7 +9,7 @@ defineProps<{
 </script>
 
 <template>
-  <div class="flex items-center gap-2 text-sm text-muted-foreground">
+  <div class="flex items-center gap-2 text-xs text-muted-foreground">
     <Spinner class="size-3.5" />
     <span v-if="phase === 'preserving'">
       {{ $t('bots.container.preservingData') }}

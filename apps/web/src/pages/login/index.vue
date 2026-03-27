@@ -99,7 +99,7 @@
             <div class="flex">
               <a
                 href="#"
-                class="ml-auto inline-block text-sm underline mt-2"
+                class="ml-auto inline-block text-xs underline mt-2"
               >
                 {{ $t('auth.forgotPassword') }}
               </a>

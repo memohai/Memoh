@@ -116,7 +116,7 @@
               <label
                 v-for="opt in COMPATIBILITY_OPTIONS"
                 :key="opt.value"
-                class="flex items-center gap-1.5 text-sm"
+                class="flex items-center gap-1.5 text-xs"
               >
                 <Checkbox
                   :model-value="selectedCompat.includes(opt.value)"

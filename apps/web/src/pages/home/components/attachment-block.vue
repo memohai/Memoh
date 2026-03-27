@@ -47,7 +47,7 @@
       <button
         v-else-if="getContainerPath(att)"
         type="button"
-        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 hover:bg-muted/60 transition-colors text-sm cursor-pointer"
+        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 hover:bg-muted/60 transition-colors text-xs cursor-pointer"
         :title="getContainerPath(att)"
         @click="handleOpenContainerFile(att)"
       >
@@ -70,7 +70,7 @@
         :href="getUrl(att)"
         target="_blank"
         rel="noopener noreferrer"
-        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 hover:bg-muted/60 transition-colors text-sm"
+        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 hover:bg-muted/60 transition-colors text-xs"
       >
         <FontAwesomeIcon
           :icon="['fas', fileIcon(att)]"
@@ -84,7 +84,7 @@
       <!-- Non-accessible attachment -->
       <div
         v-else
-        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 text-sm text-muted-foreground"
+        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 text-xs text-muted-foreground"
       >
         <FontAwesomeIcon
           :icon="['fas', fileIcon(att)]"

@@ -11,7 +11,7 @@ export { default as InputGroupText } from './InputGroupText.vue'
 export { default as InputGroupTextarea } from './InputGroupTextarea.vue'
 
 export const inputGroupAddonVariants = cva(
-  'text-muted-foreground flex h-auto cursor-text items-center justify-center gap-2 py-1.5 text-sm font-medium select-none [&>svg:not([class*=\'size-\'])]:size-4 [&>kbd]:rounded-[calc(var(--radius)-5px)] group-data-[disabled=true]/input-group:opacity-50',
+  'text-muted-foreground flex h-auto cursor-text items-center justify-center gap-2 py-1.5 text-xs font-medium select-none [&>svg:not([class*=\'size-\'])]:size-4 [&>kbd]:rounded-[calc(var(--radius)-5px)] group-data-[disabled=true]/input-group:opacity-50',
   {
     variants: {
       align: {
@@ -34,7 +34,7 @@ export const inputGroupAddonVariants = cva(
 export type InputGroupVariants = VariantProps<typeof inputGroupAddonVariants>
 
 export const inputGroupButtonVariants = cva(
-  'text-sm shadow-none flex gap-2 items-center',
+  'text-xs shadow-none flex gap-2 items-center',
   {
     variants: {
       size: {

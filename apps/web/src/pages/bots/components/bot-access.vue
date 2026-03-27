@@ -1,10 +1,10 @@
 <template>
   <div class="max-w-3xl mx-auto space-y-6">
     <div class="space-y-1">
-      <h2 class="text-lg font-semibold text-foreground">
+      <h2 class="text-sm font-semibold text-foreground">
         {{ $t('bots.access.title') }}
       </h2>
-      <p class="text-sm text-muted-foreground">
+      <p class="text-xs text-muted-foreground">
         {{ $t('bots.access.subtitle') }}
       </p>
     </div>
@@ -12,16 +12,16 @@
     <!-- Default Effect -->
     <section class="rounded-lg border border-border bg-card p-4 space-y-3">
       <div>
-        <p class="text-sm font-medium text-foreground">
+        <p class="text-xs font-medium text-foreground">
           {{ $t('bots.access.defaultEffectTitle') }}
         </p>
-        <p class="text-sm text-muted-foreground">
+        <p class="text-xs text-muted-foreground">
           {{ $t('bots.access.defaultEffectDescription') }}
         </p>
       </div>
       <div class="flex items-center gap-3">
         <button
-          class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors"
+          class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors"
           :class="defaultEffectDraft === 'deny'
             ? 'border-destructive bg-destructive/10 text-destructive'
             : 'border-border bg-card text-muted-foreground hover:bg-accent'"
@@ -35,7 +35,7 @@
           {{ $t('bots.access.effectDeny') }}
         </button>
         <button
-          class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors"
+          class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors"
           :class="defaultEffectDraft === 'allow'
             ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
             : 'border-border bg-card text-muted-foreground hover:bg-accent'"
@@ -66,10 +66,10 @@
     <section class="rounded-lg border border-border bg-card p-4 space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h3 class="text-base font-semibold text-foreground">
+          <h3 class="text-sm font-semibold text-foreground">
             {{ $t('bots.access.rulesTitle') }}
           </h3>
-          <p class="text-sm text-muted-foreground">
+          <p class="text-xs text-muted-foreground">
             {{ $t('bots.access.rulesDescription') }}
           </p>
         </div>
@@ -136,7 +136,7 @@
 
           <!-- Subject + scope -->
           <div class="min-w-0 flex-1 space-y-0.5">
-            <p class="truncate text-sm text-foreground">
+            <p class="truncate text-xs text-foreground">
               {{ describeSubject(rule) }}
             </p>
             <p
@@ -211,7 +211,7 @@
             <Label>{{ $t('bots.access.enabled') }}</Label>
             <div class="flex items-center gap-2 h-9">
               <Switch v-model="ruleForm.enabled" />
-              <span class="text-sm text-muted-foreground">{{ ruleForm.enabled ? $t('common.yes') : $t('common.no') }}</span>
+              <span class="text-xs text-muted-foreground">{{ ruleForm.enabled ? $t('common.yes') : $t('common.no') }}</span>
             </div>
           </div>
 
@@ -221,7 +221,7 @@
             <div class="flex gap-2">
               <button
                 type="button"
-                class="flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors"
+                class="flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
                 :class="ruleForm.effect === 'deny'
                   ? 'border-destructive bg-destructive/10 text-destructive'
                   : 'border-border text-muted-foreground hover:bg-accent'"
@@ -231,7 +231,7 @@
               </button>
               <button
                 type="button"
-                class="flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors"
+                class="flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
                 :class="ruleForm.effect === 'allow'
                   ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                   : 'border-border text-muted-foreground hover:bg-accent'"
@@ -313,7 +313,7 @@
                     <AvatarFallback>{{ option.label.slice(0, 2).toUpperCase() }}</AvatarFallback>
                   </Avatar>
                   <div class="min-w-0">
-                    <div class="truncate text-sm">
+                    <div class="truncate text-xs">
                       {{ option.label }}
                     </div>
                     <div
@@ -334,7 +334,7 @@
             :open="scopeOpen"
             @toggle="scopeOpen = ($event.target as HTMLDetailsElement).open"
           >
-            <summary class="flex cursor-pointer items-center gap-1 text-sm font-medium text-foreground select-none list-none">
+            <summary class="flex cursor-pointer items-center gap-1 text-xs font-medium text-foreground select-none list-none">
               <FontAwesomeIcon
                 :icon="['fas', 'chevron-right']"
                 class="size-3 transition-transform group-open:rotate-90"
@@ -387,7 +387,7 @@
                 >
                   <template #option-label="{ option }">
                     <div class="min-w-0 flex-1 text-left">
-                      <div class="truncate text-sm">
+                      <div class="truncate text-xs">
                         {{ option.label }}
                       </div>
                       <div class="truncate text-xs text-muted-foreground">
@@ -484,7 +484,7 @@
 
           <p
             v-if="formError"
-            class="text-sm text-destructive"
+            class="text-xs text-destructive"
           >
             {{ formError }}
           </p>

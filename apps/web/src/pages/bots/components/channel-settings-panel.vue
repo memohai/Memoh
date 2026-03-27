@@ -10,10 +10,10 @@
           />
         </span>
         <div>
-          <h3 class="text-lg font-semibold">
+          <h3 class="text-sm font-semibold">
             {{ channelItem.meta.display_name }}
           </h3>
-          <p class="text-sm text-muted-foreground">
+          <p class="text-xs text-muted-foreground">
             {{ channelItem.meta.type }}
           </p>
         </div>
@@ -59,7 +59,7 @@
       v-if="showWebhookCallback"
       class="space-y-2"
     >
-      <h4 class="text-sm font-medium">
+      <h4 class="text-xs font-medium">
         {{ $t('bots.channels.webhookCallback') }}
       </h4>
       <p class="text-xs text-muted-foreground">
@@ -102,7 +102,7 @@
 
     <!-- Credentials form (dynamic from config_schema) -->
     <div class="space-y-4">
-      <h4 class="text-sm font-medium">
+      <h4 class="text-xs font-medium">
         {{ $t('bots.channels.credentials') }}
       </h4>
       <p

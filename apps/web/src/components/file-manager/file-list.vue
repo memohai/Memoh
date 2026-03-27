@@ -91,7 +91,7 @@ function handleClick(entry: HandlersFsFileInfo) {
       >
         <ContextMenuTrigger as-child>
           <div
-            class="flex items-center border-b border-border/50 cursor-pointer px-3 py-2 text-sm transition-colors hover:bg-muted/50"
+            class="flex items-center border-b border-border/50 cursor-pointer px-3 py-2 text-xs transition-colors hover:bg-muted/50"
             @click="handleClick(entry)"
           >
             <div class="flex flex-1 items-center gap-2 min-w-0">

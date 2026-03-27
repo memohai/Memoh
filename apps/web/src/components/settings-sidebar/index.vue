@@ -28,7 +28,7 @@
                   :tooltip="item.title"
                   :is-active="isItemActive(item.name)"
                   :aria-current="isItemActive(item.name) ? 'page' : undefined"
-                  class="h-9 gap-2 text-muted-foreground relative before:absolute before:w-0.5 before:top-1.5 before:bottom-1.5 before:left-0 before:rounded-full data-[active=true]:before:bg-[#8B56E3]"
+                  class="h-9 gap-2 relative before:absolute before:w-0.5 before:top-1.5 before:bottom-1.5 before:left-0 before:rounded-full data-[active=true]:before:bg-[#8B56E3]"
                   @click="router.push({ name: item.name })"
                 >
                   <FontAwesomeIcon

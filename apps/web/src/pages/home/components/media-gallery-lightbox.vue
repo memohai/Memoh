@@ -75,7 +75,7 @@
         <!-- Counter -->
         <div
           v-if="items.length > 1"
-          class="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/50 text-white/90 text-sm"
+          class="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/50 text-white/90 text-xs"
         >
           {{ (openIndex ?? 0) + 1 }} / {{ items.length }}
         </div>

@@ -29,7 +29,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     :data-variant="variant"
     v-bind="forwarded"
     :class="cn(
-      'relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none transition-colors',
+      'relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none transition-colors',
       'focus:bg-accent focus:text-accent-foreground',
       'data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-accent data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive',
       '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',

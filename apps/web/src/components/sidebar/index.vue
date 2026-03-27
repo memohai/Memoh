@@ -83,7 +83,7 @@
           <SidebarMenuItem>
             <SidebarMenuButton
               :tooltip="t('sidebar.settings')"
-              class="h-9 px-2.5 text-muted-foreground"
+              class="h-9 px-2.5"
               :is-active="isSettingsActive"
               @click="router.push('/settings')"
             >

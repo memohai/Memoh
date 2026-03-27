@@ -1,5 +1,5 @@
 <template>
-  <div class="rounded-lg border bg-muted/30 text-sm overflow-hidden">
+  <div class="rounded-lg border bg-muted/30 text-xs overflow-hidden">
     <div class="flex items-center gap-2 px-3 py-2 bg-muted/50">
       <FontAwesomeIcon
         :icon="['fas', block.done ? 'check' : 'spinner']"

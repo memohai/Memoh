@@ -16,7 +16,7 @@
       </button>
       <h3
         v-if="sidebarOpen"
-        class="font-medium text-sm ml-2"
+        class="font-medium text-xs ml-2"
       >
         Session 源数据
       </h3>
@@ -166,7 +166,7 @@
         class="flex-1 flex justify-center pt-4"
         style="writing-mode: sideways-rl"
       >
-        <span class="text-sm text-muted-foreground">
+        <span class="text-xs text-muted-foreground">
           Session 源数据
         </span>
       </div>
