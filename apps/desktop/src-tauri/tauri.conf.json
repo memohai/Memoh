@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Memoh",
-        "width": 480,
-        "height": 700
+        "width": 1280,
+        "height": 800
       }
     ],
     "security": {

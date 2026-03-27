@@ -2,7 +2,7 @@ use tauri::LogicalSize;
 
 #[tauri::command]
 fn resize_for_route(window: tauri::Window, route: String) {
-    let is_login = route == "/login" || route == "/";
+    let is_login = route == "/login";
     if is_login {
         let _ = window.set_min_size(None::<tauri::Size>);
         let _ = window.set_size(tauri::Size::Logical(LogicalSize::new(480.0, 700.0)));
