@@ -1,4 +1,5 @@
-experimental_monorepo_root = true
+[monorepo]
+config_roots = ["apps/web", "apps/desktop", "apps/browser", "packages/ui", "packages/sdk", "packages/config"]
 
 [tools]
 # Go version from go.mod
@@ -13,6 +14,8 @@ pnpm = "10"
 sqlc = "latest"
 # golangci-lint for Go linting
 "golangci-lint" = "2.10.1"
+# Rust stable toolchain (required by Tauri desktop app)
+rust = "stable"
 
 [task_config]
 dir = "{{cwd}}"
@@ -164,3 +167,14 @@ set -e
 echo '✓ Setup complete! Run: mise run dev'
 echo '  Dev web UI will be available at http://localhost:18082'
 """
+
+[tasks."desktop:dev"]
+description = "Start Tauri desktop app in dev mode (wraps @memohai/web)"
+dir = "{{config_root}}/apps/desktop"
+env = { MEMOH_WEB_PROXY_TARGET = "http://localhost:18080" }
+run = "pnpm tauri dev"
+
+[tasks."desktop:build"]
+description = "Build Tauri desktop app for release"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm tauri build"

@@ -50,6 +50,9 @@
     "vue-sonner": "^2.0.9",
     "zod": "^4.3.5"
   },
+  "optionalDependencies": {
+    "@tauri-apps/api": "^2"
+  },
   "devDependencies": {
     "@memohai/config": "workspace:*",
     "@types/node": "^24.10.1",
