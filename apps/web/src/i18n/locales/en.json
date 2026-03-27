@@ -169,7 +169,11 @@
     "noSessions": "No sessions yet",
     "sessionTypeHeartbeat": "Heartbeat",
     "sessionTypeSchedule": "Scheduled Task",
-    "sessionTypeSubagent": "Subagent"
+    "sessionTypeSubagent": "Subagent",
+    "sessionTypeChat": "Chat",
+    "sessionFilterAll": "All",
+    "sessionSourcePrefix": "From:",
+    "searchSessionPlaceholder": "Search"
   },
   "models": {
     "title": "Models",

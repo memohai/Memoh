@@ -165,7 +165,11 @@
     "noSessions": "暂无会话",
     "sessionTypeHeartbeat": "心跳",
     "sessionTypeSchedule": "定时任务",
-    "sessionTypeSubagent": "子智能体"
+    "sessionTypeSubagent": "子智能体",
+    "sessionTypeChat": "对话",
+    "sessionFilterAll": "全部",
+    "sessionSourcePrefix": "来自：",
+    "searchSessionPlaceholder": "搜索"
   },
   "models": {
     "title": "模型",

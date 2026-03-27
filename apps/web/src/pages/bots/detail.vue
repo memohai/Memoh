@@ -56,7 +56,7 @@
             </Button>
           </template>
           <template v-else>
-            <h2 class="truncate text-2xl font-semibold tracking-tight">
+            <h2 class="truncate text-base font-medium">
               {{ botNameDraft.trim() || bot?.display_name || botId }}
             </h2>
             <Button

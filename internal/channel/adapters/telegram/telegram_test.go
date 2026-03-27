@@ -172,6 +172,7 @@ func TestBuildTelegramReplyRef(t *testing.T) {
 	ref := buildTelegramReplyRef(msg, "  -100  ")
 	if ref == nil {
 		t.Fatal("expected non-nil ref")
+		return
 	}
 	if ref.MessageID != "42" || ref.Target != "-100" {
 		t.Fatalf("unexpected ref: %+v", ref)

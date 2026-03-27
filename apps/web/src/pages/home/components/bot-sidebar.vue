@@ -20,7 +20,7 @@
                   @click="sidebarOpen = !sidebarOpen"
                 >
 
-                <h3 class="font-semibold text-sm group-data-[collapsible=icon]:hidden">
+                <h3 class="font-medium text-sm group-data-[collapsible=icon]:hidden">
                   {{ $t('sidebar.session') }}
                 </h3>
               </section>
@@ -82,7 +82,7 @@
                     </div>
                     <div
                       v-if="!isLoading && bots.length === 0"
-                      class="px-3 py-6 text-center text-sm text-muted-foreground"
+                      class="px-3 py-6 text-center text-xs text-muted-foreground"
                     >
                       {{ $t('bots.emptyTitle') }}
                     </div>

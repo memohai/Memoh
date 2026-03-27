@@ -76,6 +76,7 @@ func TestBuiltinProviderContextPackingProducesMemoryContextTags(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
+		return
 	}
 	if !strings.Contains(result.ContextText, "<memory-context>") {
 		t.Fatalf("expected memory-context tags, got: %s", result.ContextText)

@@ -73,7 +73,7 @@
         >
           <div
             v-if="block.type === 'text' && cleanUserText(block.content)"
-            class="rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap break-all"
+            class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
             :class="isSelf
               ? 'rounded-tr-sm bg-primary text-primary-foreground'
               : 'rounded-tl-sm bg-accent/60 text-foreground'"
@@ -146,7 +146,7 @@
         <!-- Streaming indicator -->
         <div
           v-if="message.streaming && message.blocks.length === 0"
-          class="flex items-center gap-2 text-sm text-muted-foreground h-8"
+          class="flex items-center gap-2 text-xs text-muted-foreground h-6"
         >
           <FontAwesomeIcon
             :icon="['fas', 'spinner']"

@@ -14,7 +14,7 @@
           </AvatarFallback>
         </Avatar>
         <div class="min-w-0">
-          <p class="font-semibold truncate">
+          <p class="text-sm font-medium truncate">
             {{ displayTitle }}
           </p>
           <p class="text-sm text-muted-foreground truncate">
@@ -25,10 +25,10 @@
 
       <!-- Display Settings -->
       <section>
-        <h2 class="mb-2 flex items-center text-base font-semibold">
+        <h2 class="mb-2 flex items-center text-sm font-medium">
           <FontAwesomeIcon
             :icon="['fas', 'gear']"
-            class="mr-2"
+            class="mr-2 size-3.5"
           />
           {{ $t('settings.display') }}
         </h2>
@@ -129,10 +129,10 @@
 
       <!-- Linked Channels -->
       <section>
-        <h2 class="mb-2 flex items-center text-base font-semibold">
+        <h2 class="mb-2 flex items-center text-sm font-medium">
           <FontAwesomeIcon
             :icon="['fas', 'network-wired']"
-            class="mr-2"
+            class="mr-2 size-3.5"
           />
           {{ $t('settings.linkedChannels') }}
         </h2>
@@ -157,7 +157,7 @@
               class="border rounded-md p-3 space-y-1"
             >
               <div class="flex items-center justify-between gap-3">
-                <p class="font-medium truncate">
+                <p class="text-sm font-medium truncate">
                   {{ identity.display_name || identity.channel_subject_id }}
                 </p>
                 <Badge variant="secondary">

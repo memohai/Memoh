@@ -192,7 +192,7 @@ const login = form.handleSubmit(async (values) => {
     } else {
       throw new Error(t('auth.loginFailed'))
     }
-    router.replace({ path: '/chat' })
+    router.replace({ path: '/' })
   } catch {
     toast.error(t('auth.invalidCredentials'), {
       description: t('auth.retryHint'),

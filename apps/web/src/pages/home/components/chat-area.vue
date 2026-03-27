@@ -6,7 +6,7 @@
       class="flex-1 flex items-center justify-center"
     >
       <div class="text-center">
-        <p class="text-xl font-semibold tracking-tight text-foreground">
+        <p class="text-sm font-medium text-foreground">
           {{ $t('chat.selectBot') }}
         </p>
         <p class="mt-1 text-sm text-muted-foreground">
@@ -63,7 +63,7 @@
                 v-if="messages.length === 0 && !loadingChats"
                 class="flex items-center justify-center min-h-[300px]"
               >
-                <p class="text-muted-foreground text-lg">
+                <p class="text-muted-foreground text-sm">
                   {{ $t('chat.greeting') }}
                 </p>
               </div>
@@ -89,7 +89,7 @@
       />
 
       <!-- Input -->
-      <div class="p-4">
+      <div class="px-4 py-2.5">
         <div class=" mx-auto">
           <!-- Pending attachment previews -->
           <div
@@ -124,7 +124,7 @@
             <InputGroup class="bg-transparent overflow-hidden">
               <InputGroupTextarea
                 v-model="inputText"
-                class="min-h-20 max-h-20 resize-none break-all!"                
+                class="min-h-14 max-h-14 text-xs resize-none break-all!"                
                 :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
                 :disabled="!currentBotId || activeChatReadOnly"
                 style="scrollbar-width: none;"
@@ -134,7 +134,7 @@
               <Separator />
               <InputGroupAddon
                 align="block-end"
-                class="bg-[#FAFAFA] dark:bg-background items-center py-2"
+                class="bg-[#FAFAFA] dark:bg-background items-center py-1.5"
               >
                 <Button
                   v-if="!streaming"
@@ -354,7 +354,7 @@ function handleKeydown(e: KeyboardEvent) {
 function handlePaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items
   if (!items) return
-  for (const item of items) {
+  for (const item of Array.from(items)) {
     if (item.kind === 'file') {
       const file = item.getAsFile()
       if (file) pendingFiles.value.push(file)

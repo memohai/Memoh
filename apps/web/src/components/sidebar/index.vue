@@ -1,70 +1,97 @@
 <template>
   <aside>
     <Sidebar collapsible="icon">
-      <SidebarHeader class=" h-12">
-        <section class="my-auto px-2 flex gap-2 font-extrabold group-data-[collapsible=icon]:px-1">
-          <img
-            src="/logo.png"
-            class="w-6! object-fit "
-            alt="Memoh logo"
+      <SidebarHeader class="p-0 border-0">
+        <div class="h-1.5 group-data-[collapsible=icon]:hidden" />
+        <div class="h-[38px] flex items-center group-data-[collapsible=icon]:justify-center">
+          <div class="flex items-center gap-1 ml-3 group-data-[collapsible=icon]:hidden">
+            <span class="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.7px]">
+              {{ t('sidebar.bots') }}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            class="ml-auto mr-1.5 size-6 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:mr-0"
+            :aria-label="t('bots.createBot')"
+            @click="router.push({ name: 'bots' })"
           >
-          <h1 class="font-semibold group-data-[collapsible=icon]:hidden">
-            Memoh
-          </h1>
-        </section>
-        <!-- <div class="flex items-center gap-2  group-data-[collapsible=icon]:justify-center">
-        
-          <span class="text-lg font-bold text-muted-foreground truncate group-data-[collapsible=icon]:hidden">
-            Memoh
-          </span>
-        </div> -->
+            <FontAwesomeIcon
+              :icon="['fas', 'plus']"
+              class="size-3.5"
+            />
+          </Button>
+        </div>
       </SidebarHeader>
-      <Separator />
+
       <SidebarContent>
-        <SidebarGroup>
+        <SidebarGroup class="px-2 py-0">
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu class="gap-1">
               <SidebarMenuItem
-                v-for="sidebarItem in sidebarInfo"
-                :key="sidebarItem.title"
+                v-for="bot in bots"
+                :key="bot.id"
               >
-                <SidebarMenuButton
-                  :tooltip="sidebarItem.title"
-                  :is-active="isItemActive(sidebarItem.name)"
-                  :aria-current="isItemActive(sidebarItem.name) ? 'page' : undefined"
-                  class="py-5 text-muted-foreground relative before:absolute before:w-0.5! before:top-2 before:bottom-2 data-[active=true]:before:bg-[#8B56E3] hover:before:bg-[#8B56E3] before:left-0.5!"
-                  @click="router.push({ name: sidebarItem.name })"
-                >
-                  <FontAwesomeIcon
-                    class="ml-1"
-                    :icon="sidebarItem.icon"
-                  />
-                  <span>{{ sidebarItem.title }}</span>
-                </SidebarMenuButton>
+                <BotItem :bot="bot" />
               </SidebarMenuItem>
             </SidebarMenu>
+
+            <div
+              v-if="isLoading"
+              class="flex justify-center py-4"
+            >
+              <FontAwesomeIcon
+                :icon="['fas', 'spinner']"
+                class="size-4 animate-spin text-muted-foreground"
+              />
+            </div>
+            <div
+              v-if="!isLoading && bots.length === 0"
+              class="px-3 py-6 text-center text-xs text-muted-foreground"
+            >
+              {{ t('bots.emptyTitle') }}
+            </div>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter class="border-t p-2">
-        <SidebarMenu>
-          <SidebarMenuItem>
+      <SidebarFooter class="relative border-0 px-2 pb-3.5 pt-2.5">
+        <div class="pointer-events-none absolute -top-[120px] left-0 h-[153px] w-full bg-linear-to-t from-(--sidebar-background) from-18% to-transparent z-10 group-data-[collapsible=icon]:hidden" />
+        <SidebarMenu class="gap-2.5">
+          <!-- <SidebarMenuItem>
             <SidebarMenuButton
               :tooltip="displayTitle"
+              class="h-10 px-2.5"
               @click="router.push({ name: 'settings' })"
             >
-              <Avatar class="size-4 shrink-0">
-                <AvatarImage
+              <div class="size-9 shrink-0 rounded-full border border-border bg-accent overflow-hidden p-[1.385px]">
+                <img
                   v-if="userInfo.avatarUrl"
                   :src="userInfo.avatarUrl"
                   :alt="displayTitle"
-                />
-                <AvatarFallback class="text-[7px] text-muted-foreground">
+                  class="size-full rounded-full object-cover"
+                >
+                <span
+                  v-else
+                  class="size-full flex items-center justify-center text-[10px] font-medium text-muted-foreground"
+                >
                   {{ avatarFallback }}
-                </AvatarFallback>
-              </Avatar>
-              <span class="truncate text-sm">{{ displayNameLabel }}</span>
+                </span>
+              </div>
+            </SidebarMenuButton>
+          </SidebarMenuItem> -->
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              :tooltip="t('sidebar.settings')"
+              class="h-9 px-2.5 text-muted-foreground"
+              :is-active="isSettingsActive"
+              @click="router.push('/settings')"
+            >
+              <FontAwesomeIcon
+                :icon="['fas', 'gear']"
+                class="size-3.5"
+              />
+              <span class="text-xs font-medium">{{ t('sidebar.settings') }}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -74,10 +101,16 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { useQuery } from '@pinia/colada'
+import { getBotsQuery } from '@memohai/sdk/colada'
+import type { BotsBot } from '@memohai/sdk'
+// import { useUserStore } from '@/store/user'
+// import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
+  Button,
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -87,81 +120,21 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  Separator
 } from '@memohai/ui'
-import { computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import { useI18n } from 'vue-i18n'
-import { useUserStore } from '@/store/user'
-import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import BotItem from './bot-item.vue'
 
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
-const { userInfo } = useUserStore()
+// const { userInfo } = useUserStore()
 
-const displayNameLabel = computed(() =>
-  userInfo.displayName || userInfo.username || userInfo.id || '-',
-)
-const displayTitle = computed(() =>
-  userInfo.displayName || userInfo.username || userInfo.id || t('settings.user'),
-)
-const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
+const { data: botData, isLoading } = useQuery(getBotsQuery())
+const bots = computed<BotsBot[]>(() => botData.value?.items ?? [])
 
-function isItemActive(name: string): boolean {
-  return new RegExp(`^/${name}(\\b|/)`).test(route.path)
-}
+const isSettingsActive = computed(() => route.path.startsWith('/settings'))
 
-const sidebarInfo = computed(() => [
-  {
-    title: t('sidebar.chat'),
-    name: 'chat',
-    icon: ['fas', 'comment-dots'],
-  },
-  {
-    title: t('sidebar.bots'),
-    name: 'bots',
-    icon: ['fas', 'robot'],
-  },
-  {
-    title: t('sidebar.models'),
-    name: 'models',
-    icon: ['fas', 'cubes'],
-  },
-  {
-    title: t('sidebar.searchProvider'),
-    name: 'search-providers',
-    icon: ['fas', 'globe'],
-  },
-  {
-    title: t('sidebar.memoryProvider'),
-    name: 'memory-providers',
-    icon: ['fas', 'brain'],
-  },
-  {
-    title: t('sidebar.ttsProvider'),
-    name: 'tts-providers',
-    icon: ['fas', 'volume-high'],
-  },
-  {
-    title: t('sidebar.emailProvider'),
-    name: 'email-providers',
-    icon: ['fas', 'envelope'],
-  },
-  {
-    title: t('sidebar.browserContexts'),
-    name: 'browser-contexts',
-    icon: ['fas', 'window-maximize'],
-  },
-  {
-    title: t('sidebar.usage'),
-    name: 'usage',
-    icon: ['fas', 'chart-line'],
-  },
-  {
-    title: t('sidebar.settings'),
-    name: 'settings',
-    icon: ['fas', 'gear'],
-  },
-])
+// const displayTitle = computed(() =>
+//   userInfo.displayName || userInfo.username || userInfo.id || t('settings.user'),
+// )
+// const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
 </script>

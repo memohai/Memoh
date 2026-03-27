@@ -3,3 +3,10 @@
 @import "@memohai/ui/style.css";
 
 @source "../../../packages/ui/src";
+
+@layer components {
+  [data-chat-content] .prose {
+    font-size: 0.875rem;
+    line-height: 1.625;
+  }
+}

@@ -455,6 +455,7 @@ func TestPushFinalWithChunking_ActionsOnAttachmentMsg(t *testing.T) {
 	}
 	if attachmentMsg == nil {
 		t.Fatal("expected attachment message in overflow")
+		return
 	}
 	if len(attachmentMsg.Message.Actions) != 1 || attachmentMsg.Message.Actions[0].Label != "OK" {
 		t.Fatal("actions should be on the attachment (last) message")

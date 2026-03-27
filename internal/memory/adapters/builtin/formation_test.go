@@ -426,6 +426,7 @@ func TestOnBeforeChatRecallsFactMemory(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected non-nil context result")
+		return
 	}
 	lower := strings.ToLower(result.ContextText)
 	if !strings.Contains(lower, "oolong tea") {
