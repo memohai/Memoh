@@ -3,7 +3,7 @@
     <sidebar-provider
       :default-open="sidebarDefaultOpen"
     >
-      <section class="relative z-100">
+      <section class="relative">
         <slot name="sidebar" />
       </section>
     

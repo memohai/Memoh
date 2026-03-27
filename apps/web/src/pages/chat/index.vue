@@ -31,11 +31,13 @@
           </div>
           <SessionSidebar />
         </template>
-      </template>
+</template>
 <template #detail>
         <ChatArea />
       </template>
 </MasterDetailSidebarLayout> -->
+  
+
     <ChatHeader />
     <BotSidebar />
     <SessionSidebar />
@@ -44,7 +46,7 @@
 </template>
 
 <script setup lang="ts">
-import {  watch } from 'vue'
+import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
@@ -52,6 +54,7 @@ import { useChatStore } from '@/store/chat-list'
 // import SessionSidebar from './components/session-sidebar.vue'
 import ChatArea from './components/chat-area.vue'
 import { defineAsyncComponent } from 'vue'
+
 
 const BotSidebar = defineAsyncComponent(async () => import('./components/bot-sidebar.vue'))
 
