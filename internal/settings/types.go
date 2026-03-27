@@ -16,7 +16,7 @@ type Settings struct {
 	MaxContextLoadTime  int    `json:"max_context_load_time"`
 	MaxContextTokens    int    `json:"max_context_tokens"`
 	Language            string `json:"language"`
-	AllowGuest          bool   `json:"allow_guest"`
+	AclDefaultEffect    string `json:"acl_default_effect"`
 	ReasoningEnabled    bool   `json:"reasoning_enabled"`
 	ReasoningEffort     string `json:"reasoning_effort"`
 	HeartbeatEnabled    bool   `json:"heartbeat_enabled"`
@@ -37,7 +37,7 @@ type UpsertRequest struct {
 	MaxContextLoadTime  *int    `json:"max_context_load_time,omitempty"`
 	MaxContextTokens    *int    `json:"max_context_tokens,omitempty"`
 	Language            string  `json:"language,omitempty"`
-	AllowGuest          *bool   `json:"allow_guest,omitempty"`
+	AclDefaultEffect    string  `json:"acl_default_effect,omitempty"`
 	ReasoningEnabled    *bool   `json:"reasoning_enabled,omitempty"`
 	ReasoningEffort     *string `json:"reasoning_effort,omitempty"`
 	HeartbeatEnabled    *bool   `json:"heartbeat_enabled,omitempty"`

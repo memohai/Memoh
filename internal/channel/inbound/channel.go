@@ -48,7 +48,7 @@ type channelReactor interface {
 }
 
 type chatACL interface {
-	CanPerformChatTrigger(ctx context.Context, req acl.ChatTriggerRequest) (bool, error)
+	Evaluate(ctx context.Context, req acl.EvaluateRequest) (bool, error)
 }
 
 type mediaIngestor interface {
@@ -328,12 +328,11 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply
 	if shouldTrigger && p.acl != nil {
-		allowed, err := p.acl.CanPerformChatTrigger(ctx, acl.ChatTriggerRequest{
+		allowed, err := p.acl.Evaluate(ctx, acl.EvaluateRequest{
 			BotID:             identity.BotID,
-			UserID:            identity.UserID,
 			ChannelIdentityID: identity.ChannelIdentityID,
+			ChannelType:       msg.Channel.String(),
 			SourceScope: acl.SourceScope{
-				Channel:          msg.Channel.String(),
 				ConversationType: channel.NormalizeConversationType(msg.Conversation.Type),
 				ConversationID:   strings.TrimSpace(msg.Conversation.ID),
 				ThreadID:         threadID,
@@ -2238,6 +2237,9 @@ func (p *ChannelInboundProcessor) enrichConversationAvatar(ctx context.Context, 
 			)
 		}
 		return
+	}
+	if v := strings.TrimSpace(entry.Name); v != "" {
+		meta["conversation_name"] = v
 	}
 	if v := strings.TrimSpace(entry.AvatarURL); v != "" {
 		meta["conversation_avatar_url"] = v

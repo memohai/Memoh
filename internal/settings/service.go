@@ -46,11 +46,11 @@ func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
 		return Settings{}, err
 	}
 	settings := normalizeBotSettingsReadRow(row)
-	allowGuest, err := s.allowGuestEnabled(ctx, botID)
+	aclDefaultEffect, err := s.getDefaultEffect(ctx, botID)
 	if err != nil {
 		return Settings{}, err
 	}
-	settings.AllowGuest = allowGuest
+	settings.AclDefaultEffect = aclDefaultEffect
 	return settings, nil
 }
 
@@ -66,11 +66,11 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	allowGuest, err := s.allowGuestEnabled(ctx, botID)
+	aclDefaultEffect, err := s.getDefaultEffect(ctx, botID)
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting(botRow.MaxContextLoadTime, botRow.MaxContextTokens, botRow.Language, allowGuest, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold)
+	current := normalizeBotSetting(botRow.MaxContextLoadTime, botRow.MaxContextTokens, botRow.Language, aclDefaultEffect, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold)
 	if req.MaxContextLoadTime != nil && *req.MaxContextLoadTime > 0 {
 		current.MaxContextLoadTime = *req.MaxContextLoadTime
 	}
@@ -80,8 +80,8 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if strings.TrimSpace(req.Language) != "" {
 		current.Language = strings.TrimSpace(req.Language)
 	}
-	if req.AllowGuest != nil {
-		current.AllowGuest = *req.AllowGuest
+	if effect := strings.TrimSpace(req.AclDefaultEffect); effect != "" {
+		current.AclDefaultEffect = effect
 	}
 	if req.ReasoningEnabled != nil {
 		current.ReasoningEnabled = *req.ReasoningEnabled
@@ -202,11 +202,12 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if botRow.OwnerUserID.Valid {
 		createdByUserID = uuid.UUID(botRow.OwnerUserID.Bytes).String()
 	}
-	if err := s.setAllowGuest(ctx, botID, createdByUserID, current.AllowGuest); err != nil {
+	_ = createdByUserID
+	if err := s.setDefaultEffect(ctx, botID, current.AclDefaultEffect); err != nil {
 		return Settings{}, err
 	}
 	settings := normalizeBotSettingsWriteRow(updated)
-	settings.AllowGuest = current.AllowGuest
+	settings.AclDefaultEffect = current.AclDefaultEffect
 	return settings, nil
 }
 
@@ -221,15 +222,15 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	if err := s.queries.DeleteSettingsByBotID(ctx, pgID); err != nil {
 		return err
 	}
-	return s.setAllowGuest(ctx, botID, "", false)
+	return nil
 }
 
-func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, language string, allowGuest bool, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32) Settings {
+func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, language string, aclDefaultEffect string, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32) Settings {
 	settings := Settings{
 		MaxContextLoadTime:  int(maxContextLoadTime),
 		MaxContextTokens:    int(maxContextTokens),
 		Language:            strings.TrimSpace(language),
-		AllowGuest:          allowGuest,
+		AclDefaultEffect:    strings.TrimSpace(aclDefaultEffect),
 		ReasoningEnabled:    reasoningEnabled,
 		ReasoningEffort:     strings.TrimSpace(reasoningEffort),
 		HeartbeatEnabled:    heartbeatEnabled,
@@ -245,6 +246,9 @@ func normalizeBotSetting(maxContextLoadTime int32, maxContextTokens int32, langu
 	}
 	if settings.Language == "" {
 		settings.Language = DefaultLanguage
+	}
+	if settings.AclDefaultEffect == "" {
+		settings.AclDefaultEffect = "deny"
 	}
 	if !isValidReasoningEffort(settings.ReasoningEffort) {
 		settings.ReasoningEffort = DefaultReasoningEffort
@@ -330,7 +334,7 @@ func normalizeBotSettingsFields(
 	ttsModelID pgtype.UUID,
 	browserContextID pgtype.UUID,
 ) Settings {
-	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, language, false, reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold)
+	settings := normalizeBotSetting(maxContextLoadTime, maxContextTokens, language, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold)
 	if chatModelID.Valid {
 		settings.ChatModelID = uuid.UUID(chatModelID.Bytes).String()
 	}
@@ -358,18 +362,21 @@ func normalizeBotSettingsFields(
 	return settings
 }
 
-func (s *Service) allowGuestEnabled(ctx context.Context, botID string) (bool, error) {
+func (s *Service) getDefaultEffect(ctx context.Context, botID string) (string, error) {
 	if s.acl == nil {
-		return false, nil
+		return "deny", nil
 	}
-	return s.acl.AllowGuestEnabled(ctx, botID)
+	return s.acl.GetDefaultEffect(ctx, botID)
 }
 
-func (s *Service) setAllowGuest(ctx context.Context, botID, createdByUserID string, enabled bool) error {
+func (s *Service) setDefaultEffect(ctx context.Context, botID, effect string) error {
 	if s.acl == nil {
 		return nil
 	}
-	return s.acl.SetAllowGuest(ctx, botID, createdByUserID, enabled)
+	if effect == "" {
+		return nil
+	}
+	return s.acl.SetDefaultEffect(ctx, botID, effect)
 }
 
 func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.UUID, error) {

@@ -182,13 +182,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/access/channel_identities": {
+        "/bots/{bot_id}/acl/channel-identities": {
             "get": {
-                "description": "Search locally observed channel identity candidates for bot access control",
+                "description": "Search locally observed channel identities for building ACL rules",
                 "tags": [
                     "bots"
                 ],
-                "summary": "Search access channel identities",
+                "summary": "Search ACL channel identity candidates",
                 "parameters": [
                     {
                         "type": "string",
@@ -238,9 +238,9 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/access/channel_identities/{channel_identity_id}/conversations": {
+        "/bots/{bot_id}/acl/channel-identities/{channel_identity_id}/conversations": {
             "get": {
-                "description": "List previously observed conversation candidates for a channel identity under a bot",
+                "description": "List previously observed conversation candidates for a channel identity, for scoped rule building",
                 "tags": [
                     "bots"
                 ],
@@ -289,13 +289,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/access/users": {
+        "/bots/{bot_id}/acl/channel-types/{channel_type}/conversations": {
             "get": {
-                "description": "Search user candidates for bot access control",
+                "description": "List previously observed group/thread conversation candidates for a channel type under this bot",
                 "tags": [
                     "bots"
                 ],
-                "summary": "Search access users",
+                "summary": "List observed conversations for a platform type",
                 "parameters": [
                     {
                         "type": "string",
@@ -306,22 +306,17 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Search query",
-                        "name": "q",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Max results",
-                        "name": "limit",
-                        "in": "query"
+                        "description": "Channel type (e.g. telegram, discord)",
+                        "name": "channel_type",
+                        "in": "path",
+                        "required": true
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/acl.UserCandidateListResponse"
+                            "$ref": "#/definitions/acl.ObservedConversationCandidateListResponse"
                         }
                     },
                     "400": {
@@ -345,13 +340,105 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/blacklist": {
+        "/bots/{bot_id}/acl/default-effect": {
             "get": {
-                "description": "List guest deny rules for chat trigger",
+                "description": "Get the fallback effect when no rule matches",
                 "tags": [
                     "bots"
                 ],
-                "summary": "List bot blacklist",
+                "summary": "Get bot ACL default effect",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/acl.DefaultEffectResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Set the fallback effect when no rule matches (allow or deny)",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Set bot ACL default effect",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Default effect payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/acl.DefaultEffectResponse"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/acl/rules": {
+            "get": {
+                "description": "List all ACL rules for a bot ordered by priority",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "List bot ACL rules",
                 "parameters": [
                     {
                         "type": "string",
@@ -388,12 +475,12 @@ const docTemplate = `{
                     }
                 }
             },
-            "put": {
-                "description": "Add a guest deny rule for chat trigger",
+            "post": {
+                "description": "Create a new priority-ordered ACL rule for chat.trigger",
                 "tags": [
                     "bots"
                 ],
-                "summary": "Upsert bot blacklist entry",
+                "summary": "Create ACL rule",
                 "parameters": [
                     {
                         "type": "string",
@@ -403,12 +490,122 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Blacklist payload",
+                        "description": "Rule payload",
                         "name": "payload",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/acl.UpsertRuleRequest"
+                            "$ref": "#/definitions/acl.CreateRuleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/acl.Rule"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/acl/rules/reorder": {
+            "put": {
+                "description": "Batch-update priorities for multiple ACL rules",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Reorder ACL rules",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Reorder payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/acl.ReorderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/acl/rules/{rule_id}": {
+            "put": {
+                "description": "Update an existing ACL rule",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Update ACL rule",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Rule ID",
+                        "name": "rule_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Rule payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/acl.UpdateRuleRequest"
                         }
                     }
                 ],
@@ -438,15 +635,13 @@ const docTemplate = `{
                         }
                     }
                 }
-            }
-        },
-        "/bots/{bot_id}/blacklist/{rule_id}": {
+            },
             "delete": {
-                "description": "Delete a guest deny rule by rule ID",
+                "description": "Delete an ACL rule by ID",
                 "tags": [
                     "bots"
                 ],
-                "summary": "Delete bot blacklist entry",
+                "summary": "Delete ACL rule",
                 "parameters": [
                     {
                         "type": "string",
@@ -4648,149 +4843,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/whitelist": {
-            "get": {
-                "description": "List guest allow rules for chat trigger",
-                "tags": [
-                    "bots"
-                ],
-                "summary": "List bot whitelist",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/acl.ListRulesResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "description": "Add a guest allow rule for chat trigger",
-                "tags": [
-                    "bots"
-                ],
-                "summary": "Upsert bot whitelist entry",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Whitelist payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/acl.UpsertRuleRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/acl.Rule"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/whitelist/{rule_id}": {
-            "delete": {
-                "description": "Delete a guest allow rule by rule ID",
-                "tags": [
-                    "bots"
-                ],
-                "summary": "Delete bot whitelist entry",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Rule ID",
-                        "name": "rule_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{id}": {
             "get": {
                 "description": "Get a bot by ID (owner/admin only)",
@@ -4944,111 +4996,6 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{id}/channel/weixin/qr/poll": {
-            "post": {
-                "description": "Long-poll the QR code scan status. On confirmed, auto-saves credentials.",
-                "tags": [
-                    "bots"
-                ],
-                "summary": "Poll WeChat QR login status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "QR code to poll",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/weixin.QRPollRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/weixin.QRPollResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{id}/channel/weixin/qr/start": {
-            "post": {
-                "description": "Fetch a QR code from WeChat for scanning",
-                "tags": [
-                    "bots"
-                ],
-                "summary": "Start WeChat QR login",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Optional base URL override",
-                        "name": "payload",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/weixin.QRStartRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/weixin.QRStartResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
                         }
                     }
                 }
@@ -7113,6 +7060,44 @@ const docTemplate = `{
                 }
             }
         },
+        "/providers/oauth/callback": {
+            "get": {
+                "tags": [
+                    "providers-oauth"
+                ],
+                "summary": "OAuth2 callback for LLM providers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Authorization code",
+                        "name": "code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "State parameter",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "HTML success page",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/providers/{id}": {
             "get": {
                 "description": "Get a provider configuration by its ID",
@@ -7361,6 +7346,117 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/providers/{id}/oauth/authorize": {
+            "get": {
+                "tags": [
+                    "providers-oauth"
+                ],
+                "summary": "Start OAuth2 authorization for an LLM provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/providers/{id}/oauth/status": {
+            "get": {
+                "tags": [
+                    "providers-oauth"
+                ],
+                "summary": "Get OAuth2 status for an LLM provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/providers.OAuthStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/providers/{id}/oauth/token": {
+            "delete": {
+                "tags": [
+                    "providers-oauth"
+                ],
+                "summary": "Revoke stored OAuth2 tokens for an LLM provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -8709,6 +8805,9 @@ const docTemplate = `{
                 "role": {
                     "type": "string"
                 },
+                "timezone": {
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
                 },
@@ -8798,6 +8897,9 @@ const docTemplate = `{
                 },
                 "display_name": {
                     "type": "string"
+                },
+                "timezone": {
+                    "type": "string"
                 }
             }
         },
@@ -8825,10 +8927,10 @@ const docTemplate = `{
                 "linked_display_name": {
                     "type": "string"
                 },
-                "linked_username": {
+                "linked_user_id": {
                     "type": "string"
                 },
-                "user_id": {
+                "linked_username": {
                     "type": "string"
                 }
             }
@@ -8841,6 +8943,43 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/acl.ChannelIdentityCandidate"
                     }
+                }
+            }
+        },
+        "acl.CreateRuleRequest": {
+            "type": "object",
+            "properties": {
+                "channel_identity_id": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "effect": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "source_scope": {
+                    "$ref": "#/definitions/acl.SourceScope"
+                },
+                "subject_channel_type": {
+                    "type": "string"
+                },
+                "subject_kind": {
+                    "type": "string"
+                }
+            }
+        },
+        "acl.DefaultEffectResponse": {
+            "type": "object",
+            "properties": {
+                "default_effect": {
+                    "type": "string"
                 }
             }
         },
@@ -8892,6 +9031,28 @@ const docTemplate = `{
                 }
             }
         },
+        "acl.ReorderItem": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "priority": {
+                    "type": "integer"
+                }
+            }
+        },
+        "acl.ReorderRequest": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/acl.ReorderItem"
+                    }
+                }
+            }
+        },
         "acl.Rule": {
             "type": "object",
             "properties": {
@@ -8919,8 +9080,14 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "description": {
+                    "type": "string"
+                },
                 "effect": {
                     "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
                 },
                 "id": {
                     "type": "string"
@@ -8937,25 +9104,19 @@ const docTemplate = `{
                 "linked_user_username": {
                     "type": "string"
                 },
+                "priority": {
+                    "type": "integer"
+                },
                 "source_scope": {
                     "$ref": "#/definitions/acl.SourceScope"
+                },
+                "subject_channel_type": {
+                    "type": "string"
                 },
                 "subject_kind": {
                     "type": "string"
                 },
                 "updated_at": {
-                    "type": "string"
-                },
-                "user_avatar_url": {
-                    "type": "string"
-                },
-                "user_display_name": {
-                    "type": "string"
-                },
-                "user_id": {
-                    "type": "string"
-                },
-                "user_username": {
                     "type": "string"
                 }
             }
@@ -8963,9 +9124,6 @@ const docTemplate = `{
         "acl.SourceScope": {
             "type": "object",
             "properties": {
-                "channel": {
-                    "type": "string"
-                },
                 "conversation_id": {
                     "type": "string"
                 },
@@ -8977,48 +9135,32 @@ const docTemplate = `{
                 }
             }
         },
-        "acl.UpsertRuleRequest": {
+        "acl.UpdateRuleRequest": {
             "type": "object",
             "properties": {
                 "channel_identity_id": {
                     "type": "string"
                 },
+                "description": {
+                    "type": "string"
+                },
+                "effect": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "priority": {
+                    "type": "integer"
+                },
                 "source_scope": {
                     "$ref": "#/definitions/acl.SourceScope"
                 },
-                "user_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "acl.UserCandidate": {
-            "type": "object",
-            "properties": {
-                "avatar_url": {
+                "subject_channel_type": {
                     "type": "string"
                 },
-                "display_name": {
+                "subject_kind": {
                     "type": "string"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "acl.UserCandidateListResponse": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/acl.UserCandidate"
-                    }
                 }
             }
         },
@@ -9417,6 +9559,9 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
+                "timezone": {
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
                 }
@@ -9467,6 +9612,9 @@ const docTemplate = `{
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "timezone": {
+                    "type": "string"
                 }
             }
         },
@@ -9515,6 +9663,9 @@ const docTemplate = `{
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "timezone": {
+                    "type": "string"
                 }
             }
         },
@@ -10726,6 +10877,9 @@ const docTemplate = `{
                 "role": {
                     "type": "string"
                 },
+                "timezone": {
+                    "type": "string"
+                },
                 "token_type": {
                     "type": "string"
                 },
@@ -11654,6 +11808,12 @@ const docTemplate = `{
                 },
                 "dimensions": {
                     "type": "integer"
+                },
+                "reasoning_efforts": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -11807,6 +11967,26 @@ const docTemplate = `{
                 },
                 "skipped": {
                     "type": "integer"
+                }
+            }
+        },
+        "providers.OAuthStatus": {
+            "type": "object",
+            "properties": {
+                "callback_url": {
+                    "type": "string"
+                },
+                "configured": {
+                    "type": "boolean"
+                },
+                "expired": {
+                    "type": "boolean"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "has_token": {
+                    "type": "boolean"
                 }
             }
         },
@@ -12181,8 +12361,8 @@ const docTemplate = `{
         "settings.Settings": {
             "type": "object",
             "properties": {
-                "allow_guest": {
-                    "type": "boolean"
+                "acl_default_effect": {
+                    "type": "string"
                 },
                 "browser_context_id": {
                     "type": "string"
@@ -12240,8 +12420,8 @@ const docTemplate = `{
         "settings.UpsertRequest": {
             "type": "object",
             "properties": {
-                "allow_guest": {
-                    "type": "boolean"
+                "acl_default_effect": {
+                    "type": "string"
                 },
                 "browser_context_id": {
                     "type": "string"
@@ -12500,57 +12680,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "weixin.QRPollRequest": {
-            "type": "object",
-            "properties": {
-                "baseUrl": {
-                    "type": "string"
-                },
-                "qr_code": {
-                    "type": "string"
-                },
-                "routeTag": {
-                    "type": "string"
-                }
-            }
-        },
-        "weixin.QRPollResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string"
-                },
-                "status": {
-                    "description": "wait, scaned, confirmed, expired",
-                    "type": "string"
-                }
-            }
-        },
-        "weixin.QRStartRequest": {
-            "type": "object",
-            "properties": {
-                "baseUrl": {
-                    "type": "string"
-                },
-                "routeTag": {
-                    "type": "string"
-                }
-            }
-        },
-        "weixin.QRStartResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string"
-                },
-                "qr_code": {
-                    "type": "string"
-                },
-                "qr_code_url": {
                     "type": "string"
                 }
             }

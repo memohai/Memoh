@@ -17,6 +17,8 @@ definitions:
         type: string
       role:
         type: string
+      timezone:
+        type: string
       updated_at:
         type: string
       username:
@@ -75,6 +77,8 @@ definitions:
         type: string
       display_name:
         type: string
+      timezone:
+        type: string
     type: object
   acl.ChannelIdentityCandidate:
     properties:
@@ -92,9 +96,9 @@ definitions:
         type: string
       linked_display_name:
         type: string
-      linked_username:
+      linked_user_id:
         type: string
-      user_id:
+      linked_username:
         type: string
     type: object
   acl.ChannelIdentityCandidateListResponse:
@@ -103,6 +107,30 @@ definitions:
         items:
           $ref: '#/definitions/acl.ChannelIdentityCandidate'
         type: array
+    type: object
+  acl.CreateRuleRequest:
+    properties:
+      channel_identity_id:
+        type: string
+      description:
+        type: string
+      effect:
+        type: string
+      enabled:
+        type: boolean
+      priority:
+        type: integer
+      source_scope:
+        $ref: '#/definitions/acl.SourceScope'
+      subject_channel_type:
+        type: string
+      subject_kind:
+        type: string
+    type: object
+  acl.DefaultEffectResponse:
+    properties:
+      default_effect:
+        type: string
     type: object
   acl.ListRulesResponse:
     properties:
@@ -135,6 +163,20 @@ definitions:
           $ref: '#/definitions/acl.ObservedConversationCandidate'
         type: array
     type: object
+  acl.ReorderItem:
+    properties:
+      id:
+        type: string
+      priority:
+        type: integer
+    type: object
+  acl.ReorderRequest:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/acl.ReorderItem'
+        type: array
+    type: object
   acl.Rule:
     properties:
       action:
@@ -153,8 +195,12 @@ definitions:
         type: string
       created_at:
         type: string
+      description:
+        type: string
       effect:
         type: string
+      enabled:
+        type: boolean
       id:
         type: string
       linked_user_avatar_url:
@@ -165,25 +211,19 @@ definitions:
         type: string
       linked_user_username:
         type: string
+      priority:
+        type: integer
       source_scope:
         $ref: '#/definitions/acl.SourceScope'
+      subject_channel_type:
+        type: string
       subject_kind:
         type: string
       updated_at:
         type: string
-      user_avatar_url:
-        type: string
-      user_display_name:
-        type: string
-      user_id:
-        type: string
-      user_username:
-        type: string
     type: object
   acl.SourceScope:
     properties:
-      channel:
-        type: string
       conversation_id:
         type: string
       conversation_type:
@@ -191,34 +231,24 @@ definitions:
       thread_id:
         type: string
     type: object
-  acl.UpsertRuleRequest:
+  acl.UpdateRuleRequest:
     properties:
       channel_identity_id:
         type: string
+      description:
+        type: string
+      effect:
+        type: string
+      enabled:
+        type: boolean
+      priority:
+        type: integer
       source_scope:
         $ref: '#/definitions/acl.SourceScope'
-      user_id:
+      subject_channel_type:
         type: string
-    type: object
-  acl.UserCandidate:
-    properties:
-      avatar_url:
+      subject_kind:
         type: string
-      display_name:
-        type: string
-      email:
-        type: string
-      id:
-        type: string
-      username:
-        type: string
-    type: object
-  acl.UserCandidateListResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/acl.UserCandidate'
-        type: array
     type: object
   adapters.CDFPoint:
     properties:
@@ -482,6 +512,8 @@ definitions:
         type: string
       status:
         type: string
+      timezone:
+        type: string
       updated_at:
         type: string
     type: object
@@ -516,6 +548,8 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      timezone:
+        type: string
     type: object
   bots.ListBotsResponse:
     properties:
@@ -547,6 +581,8 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      timezone:
+        type: string
     type: object
   browsercontexts.BrowserContext:
     properties:
@@ -1355,6 +1391,8 @@ definitions:
         type: string
       role:
         type: string
+      timezone:
+        type: string
       token_type:
         type: string
       user_id:
@@ -1962,6 +2000,10 @@ definitions:
         type: integer
       dimensions:
         type: integer
+      reasoning_efforts:
+        items:
+          type: string
+        type: array
     type: object
   models.ModelType:
     enum:
@@ -2066,6 +2108,19 @@ definitions:
         type: array
       skipped:
         type: integer
+    type: object
+  providers.OAuthStatus:
+    properties:
+      callback_url:
+        type: string
+      configured:
+        type: boolean
+      expired:
+        type: boolean
+      expires_at:
+        type: string
+      has_token:
+        type: boolean
     type: object
   providers.TestResponse:
     properties:
@@ -2319,8 +2374,8 @@ definitions:
     type: object
   settings.Settings:
     properties:
-      allow_guest:
-        type: boolean
+      acl_default_effect:
+        type: string
       browser_context_id:
         type: string
       chat_model_id:
@@ -2358,8 +2413,8 @@ definitions:
     type: object
   settings.UpsertRequest:
     properties:
-      allow_guest:
-        type: boolean
+      acl_default_effect:
+        type: string
       browser_context_id:
         type: string
       chat_model_id:
@@ -2531,39 +2586,6 @@ definitions:
       name:
         type: string
     type: object
-  weixin.QRPollRequest:
-    properties:
-      baseUrl:
-        type: string
-      qr_code:
-        type: string
-      routeTag:
-        type: string
-    type: object
-  weixin.QRPollResponse:
-    properties:
-      message:
-        type: string
-      status:
-        description: wait, scaned, confirmed, expired
-        type: string
-    type: object
-  weixin.QRStartRequest:
-    properties:
-      baseUrl:
-        type: string
-      routeTag:
-        type: string
-    type: object
-  weixin.QRStartResponse:
-    properties:
-      message:
-        type: string
-      qr_code:
-        type: string
-      qr_code_url:
-        type: string
-    type: object
 info:
   contact: {}
   title: Memoh API
@@ -2677,10 +2699,9 @@ paths:
       summary: Create bot user
       tags:
       - bots
-  /bots/{bot_id}/access/channel_identities:
+  /bots/{bot_id}/acl/channel-identities:
     get:
-      description: Search locally observed channel identity candidates for bot access
-        control
+      description: Search locally observed channel identities for building ACL rules
       parameters:
       - description: Bot ID
         in: path
@@ -2712,13 +2733,13 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Search access channel identities
+      summary: Search ACL channel identity candidates
       tags:
       - bots
-  /bots/{bot_id}/access/channel_identities/{channel_identity_id}/conversations:
+  /bots/{bot_id}/acl/channel-identities/{channel_identity_id}/conversations:
     get:
       description: List previously observed conversation candidates for a channel
-        identity under a bot
+        identity, for scoped rule building
       parameters:
       - description: Bot ID
         in: path
@@ -2750,28 +2771,26 @@ paths:
       summary: List observed conversations for a channel identity
       tags:
       - bots
-  /bots/{bot_id}/access/users:
+  /bots/{bot_id}/acl/channel-types/{channel_type}/conversations:
     get:
-      description: Search user candidates for bot access control
+      description: List previously observed group/thread conversation candidates for
+        a channel type under this bot
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Search query
-        in: query
-        name: q
+      - description: Channel type (e.g. telegram, discord)
+        in: path
+        name: channel_type
+        required: true
         type: string
-      - description: Max results
-        in: query
-        name: limit
-        type: integer
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/acl.UserCandidateListResponse'
+            $ref: '#/definitions/acl.ObservedConversationCandidateListResponse'
         "400":
           description: Bad Request
           schema:
@@ -2784,12 +2803,73 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Search access users
+      summary: List observed conversations for a platform type
       tags:
       - bots
-  /bots/{bot_id}/blacklist:
+  /bots/{bot_id}/acl/default-effect:
     get:
-      description: List guest deny rules for chat trigger
+      description: Get the fallback effect when no rule matches
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.DefaultEffectResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get bot ACL default effect
+      tags:
+      - bots
+    put:
+      description: Set the fallback effect when no rule matches (allow or deny)
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Default effect payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/acl.DefaultEffectResponse'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Set bot ACL default effect
+      tags:
+      - bots
+  /bots/{bot_id}/acl/rules:
+    get:
+      description: List all ACL rules for a bot ordered by priority
       parameters:
       - description: Bot ID
         in: path
@@ -2813,26 +2893,26 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List bot blacklist
+      summary: List bot ACL rules
       tags:
       - bots
-    put:
-      description: Add a guest deny rule for chat trigger
+    post:
+      description: Create a new priority-ordered ACL rule for chat.trigger
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Blacklist payload
+      - description: Rule payload
         in: body
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/acl.UpsertRuleRequest'
+          $ref: '#/definitions/acl.CreateRuleRequest'
       responses:
-        "200":
-          description: OK
+        "201":
+          description: Created
           schema:
             $ref: '#/definitions/acl.Rule'
         "400":
@@ -2847,12 +2927,12 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Upsert bot blacklist entry
+      summary: Create ACL rule
       tags:
       - bots
-  /bots/{bot_id}/blacklist/{rule_id}:
+  /bots/{bot_id}/acl/rules/{rule_id}:
     delete:
-      description: Delete a guest deny rule by rule ID
+      description: Delete an ACL rule by ID
       parameters:
       - description: Bot ID
         in: path
@@ -2879,7 +2959,79 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete bot blacklist entry
+      summary: Delete ACL rule
+      tags:
+      - bots
+    put:
+      description: Update an existing ACL rule
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Rule ID
+        in: path
+        name: rule_id
+        required: true
+        type: string
+      - description: Rule payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/acl.UpdateRuleRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acl.Rule'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update ACL rule
+      tags:
+      - bots
+  /bots/{bot_id}/acl/rules/reorder:
+    put:
+      description: Batch-update priorities for multiple ACL rules
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Reorder payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/acl.ReorderRequest'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Reorder ACL rules
       tags:
       - bots
   /bots/{bot_id}/cli/messages:
@@ -5657,101 +5809,6 @@ paths:
       summary: WebSocket chat endpoint
       tags:
       - local-channel
-  /bots/{bot_id}/whitelist:
-    get:
-      description: List guest allow rules for chat trigger
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acl.ListRulesResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List bot whitelist
-      tags:
-      - bots
-    put:
-      description: Add a guest allow rule for chat trigger
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Whitelist payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/acl.UpsertRuleRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acl.Rule'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Upsert bot whitelist entry
-      tags:
-      - bots
-  /bots/{bot_id}/whitelist/{rule_id}:
-    delete:
-      description: Delete a guest allow rule by rule ID
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Rule ID
-        in: path
-        name: rule_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete bot whitelist entry
-      tags:
-      - bots
   /bots/{id}:
     delete:
       description: Delete a bot user (owner/admin only)
@@ -6103,75 +6160,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update bot channel status
-      tags:
-      - bots
-  /bots/{id}/channel/weixin/qr/poll:
-    post:
-      description: Long-poll the QR code scan status. On confirmed, auto-saves credentials.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: QR code to poll
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/weixin.QRPollRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/weixin.QRPollResponse'
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Poll WeChat QR login status
-      tags:
-      - bots
-  /bots/{id}/channel/weixin/qr/start:
-    post:
-      description: Fetch a QR code from WeChat for scanning
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Optional base URL override
-        in: body
-        name: payload
-        schema:
-          $ref: '#/definitions/weixin.QRStartRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/weixin.QRStartResponse'
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Start WeChat QR login
       tags:
       - bots
   /bots/{id}/checks:
@@ -7406,6 +7394,78 @@ paths:
       summary: List provider models
       tags:
       - providers
+  /providers/{id}/oauth/authorize:
+    get:
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start OAuth2 authorization for an LLM provider
+      tags:
+      - providers-oauth
+  /providers/{id}/oauth/status:
+    get:
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/providers.OAuthStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get OAuth2 status for an LLM provider
+      tags:
+      - providers-oauth
+  /providers/{id}/oauth/token:
+    delete:
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Revoke stored OAuth2 tokens for an LLM provider
+      tags:
+      - providers-oauth
   /providers/{id}/test:
     post:
       consumes:
@@ -7492,6 +7552,31 @@ paths:
       summary: Get provider by name
       tags:
       - providers
+  /providers/oauth/callback:
+    get:
+      parameters:
+      - description: Authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: State parameter
+        in: query
+        name: state
+        required: true
+        type: string
+      responses:
+        "200":
+          description: HTML success page
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: OAuth2 callback for LLM providers
+      tags:
+      - providers-oauth
   /search-providers:
     get:
       consumes:

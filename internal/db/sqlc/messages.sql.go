@@ -993,15 +993,19 @@ SELECT
   r.channel_type AS channel,
   CASE
     WHEN LOWER(COALESCE(r.conversation_type, '')) IN ('thread', 'topic') THEN 'thread'
+    WHEN LOWER(COALESCE(r.conversation_type, '')) IN ('p2p', 'private', 'direct', 'dm') THEN 'private'
     ELSE 'group'
   END AS conversation_type,
   r.external_conversation_id AS conversation_id,
   COALESCE(r.external_thread_id, '') AS thread_id,
-  COALESCE(r.metadata->>'conversation_name', '')::text AS conversation_name,
+  COALESCE(
+    NULLIF(TRIM(COALESCE(r.metadata->>'conversation_name', '')), ''),
+    NULLIF(TRIM(COALESCE(r.metadata->>'conversation_handle', '')), ''),
+    ''
+  )::text AS conversation_name,
   rr.last_observed_at
 FROM observed_routes rr
 JOIN bot_channel_routes r ON r.id = rr.route_id
-WHERE LOWER(COALESCE(r.conversation_type, '')) NOT IN ('', 'p2p', 'private', 'direct', 'dm')
 GROUP BY
   r.id,
   r.channel_type,
@@ -1037,6 +1041,92 @@ func (q *Queries) ListObservedConversationsByChannelIdentity(ctx context.Context
 	var items []ListObservedConversationsByChannelIdentityRow
 	for rows.Next() {
 		var i ListObservedConversationsByChannelIdentityRow
+		if err := rows.Scan(
+			&i.RouteID,
+			&i.Channel,
+			&i.ConversationType,
+			&i.ConversationID,
+			&i.ThreadID,
+			&i.ConversationName,
+			&i.LastObservedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listObservedConversationsByChannelType = `-- name: ListObservedConversationsByChannelType :many
+WITH observed_routes AS (
+  SELECT
+    s.route_id,
+    MAX(m.created_at)::timestamptz AS last_observed_at
+  FROM bot_history_messages m
+  JOIN bot_sessions s ON s.id = m.session_id
+  JOIN bot_channel_routes r ON r.id = s.route_id
+  WHERE m.bot_id = $1
+    AND LOWER(TRIM(r.channel_type)) = LOWER(TRIM($2))
+    AND s.route_id IS NOT NULL
+  GROUP BY s.route_id
+)
+SELECT
+  r.id AS route_id,
+  r.channel_type AS channel,
+  CASE
+    WHEN LOWER(COALESCE(r.conversation_type, '')) IN ('thread', 'topic') THEN 'thread'
+    WHEN LOWER(COALESCE(r.conversation_type, '')) IN ('p2p', 'private', 'direct', 'dm') THEN 'private'
+    ELSE 'group'
+  END AS conversation_type,
+  r.external_conversation_id AS conversation_id,
+  COALESCE(r.external_thread_id, '') AS thread_id,
+  COALESCE(
+    NULLIF(TRIM(COALESCE(r.metadata->>'conversation_name', '')), ''),
+    NULLIF(TRIM(COALESCE(r.metadata->>'conversation_handle', '')), ''),
+    ''
+  )::text AS conversation_name,
+  rr.last_observed_at
+FROM observed_routes rr
+JOIN bot_channel_routes r ON r.id = rr.route_id
+GROUP BY
+  r.id,
+  r.channel_type,
+  r.conversation_type,
+  r.external_conversation_id,
+  r.external_thread_id,
+  r.metadata,
+  rr.last_observed_at
+ORDER BY rr.last_observed_at DESC
+`
+
+type ListObservedConversationsByChannelTypeParams struct {
+	BotID       pgtype.UUID `json:"bot_id"`
+	ChannelType string      `json:"channel_type"`
+}
+
+type ListObservedConversationsByChannelTypeRow struct {
+	RouteID          pgtype.UUID        `json:"route_id"`
+	Channel          string             `json:"channel"`
+	ConversationType string             `json:"conversation_type"`
+	ConversationID   string             `json:"conversation_id"`
+	ThreadID         string             `json:"thread_id"`
+	ConversationName string             `json:"conversation_name"`
+	LastObservedAt   pgtype.Timestamptz `json:"last_observed_at"`
+}
+
+// Routes on this platform type where the bot has seen at least one message (any sender).
+func (q *Queries) ListObservedConversationsByChannelType(ctx context.Context, arg ListObservedConversationsByChannelTypeParams) ([]ListObservedConversationsByChannelTypeRow, error) {
+	rows, err := q.db.Query(ctx, listObservedConversationsByChannelType, arg.BotID, arg.ChannelType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListObservedConversationsByChannelTypeRow
+	for rows.Next() {
+		var i ListObservedConversationsByChannelTypeRow
 		if err := rows.Scan(
 			&i.RouteID,
 			&i.Channel,

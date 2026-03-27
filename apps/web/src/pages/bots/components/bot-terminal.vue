@@ -388,13 +388,17 @@ onBeforeUnmount(() => {
             }"
           />
           <span>{{ tab.label }}</span>
-          <button
-            class="ml-1 size-4 inline-flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive"
+          <span
+            class="ml-1 size-4 inline-flex cursor-pointer items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive"
+            role="button"
+            tabindex="0"
             :title="t('bots.terminal.closeTab')"
             @click.stop="handleCloseTab(tab.id)"
+            @keydown.enter.prevent.stop="handleCloseTab(tab.id)"
+            @keydown.space.prevent.stop="handleCloseTab(tab.id)"
           >
             &times;
-          </button>
+          </span>
         </button>
         <button
           class="inline-flex items-center justify-center size-7 rounded-md border border-dashed border-border text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground transition-colors shrink-0"

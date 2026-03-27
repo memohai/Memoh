@@ -182,10 +182,10 @@ type fakeChatACL struct {
 	allowed bool
 	err     error
 	calls   int
-	lastReq acl.ChatTriggerRequest
+	lastReq acl.EvaluateRequest
 }
 
-func (f *fakeChatACL) CanPerformChatTrigger(_ context.Context, req acl.ChatTriggerRequest) (bool, error) {
+func (f *fakeChatACL) Evaluate(_ context.Context, req acl.EvaluateRequest) (bool, error) {
 	f.calls++
 	f.lastReq = req
 	if f.err != nil {
@@ -443,10 +443,10 @@ func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
 	if aclSvc.calls != 1 {
 		t.Fatalf("expected acl to be checked once, got %d", aclSvc.calls)
 	}
-	if aclSvc.lastReq.SourceScope.Channel != "feishu" ||
+	if aclSvc.lastReq.ChannelType != "feishu" ||
 		aclSvc.lastReq.SourceScope.ConversationType != channel.ConversationTypePrivate ||
 		aclSvc.lastReq.SourceScope.ConversationID != "chat-1" {
-		t.Fatalf("unexpected acl source scope: %+v", aclSvc.lastReq.SourceScope)
+		t.Fatalf("unexpected acl evaluate request: %+v", aclSvc.lastReq)
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatal("ACL denied guest should not trigger chat call")
@@ -493,11 +493,11 @@ func TestChannelInboundProcessorACLReceivesThreadScope(t *testing.T) {
 	if aclSvc.calls != 1 {
 		t.Fatalf("expected acl to be checked once, got %d", aclSvc.calls)
 	}
-	if aclSvc.lastReq.SourceScope.Channel != "discord" ||
+	if aclSvc.lastReq.ChannelType != "discord" ||
 		aclSvc.lastReq.SourceScope.ConversationType != channel.ConversationTypeThread ||
 		aclSvc.lastReq.SourceScope.ConversationID != "guild-chat-1" ||
 		aclSvc.lastReq.SourceScope.ThreadID != "thread-1" {
-		t.Fatalf("unexpected thread acl source scope: %+v", aclSvc.lastReq.SourceScope)
+		t.Fatalf("unexpected thread acl evaluate request: %+v", aclSvc.lastReq)
 	}
 }
 

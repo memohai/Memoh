@@ -37,6 +37,7 @@ type Bot struct {
 	Metadata            []byte             `json:"metadata"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	AclDefaultEffect    string             `json:"acl_default_effect"`
 }
 
 type BotAclRule struct {
@@ -45,7 +46,6 @@ type BotAclRule struct {
 	Action                 string             `json:"action"`
 	Effect                 string             `json:"effect"`
 	SubjectKind            string             `json:"subject_kind"`
-	UserID                 pgtype.UUID        `json:"user_id"`
 	ChannelIdentityID      pgtype.UUID        `json:"channel_identity_id"`
 	SourceChannel          pgtype.Text        `json:"source_channel"`
 	SourceConversationType pgtype.Text        `json:"source_conversation_type"`
@@ -54,6 +54,10 @@ type BotAclRule struct {
 	CreatedByUserID        pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Priority               int32              `json:"priority"`
+	Enabled                bool               `json:"enabled"`
+	Description            pgtype.Text        `json:"description"`
+	SubjectChannelType     pgtype.Text        `json:"subject_channel_type"`
 }
 
 type BotChannelConfig struct {

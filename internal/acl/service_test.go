@@ -16,6 +16,8 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
+// ---- fake DB infrastructure ----
+
 type fakeDBTX struct {
 	queryRowFunc func(ctx context.Context, sql string, args ...any) pgx.Row
 	queryFunc    func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
@@ -54,6 +56,40 @@ func (r *fakeRow) Scan(dest ...any) error {
 	return r.scanFunc(dest...)
 }
 
+type fakeRows struct {
+	rows    []func(dest ...any) error
+	idx     int
+	lastErr error
+}
+
+func (*fakeRows) Close()                                       {}
+func (r *fakeRows) Err() error                                 { return r.lastErr }
+func (*fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (*fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (r *fakeRows) Next() bool {
+	if r.idx >= len(r.rows) {
+		return false
+	}
+	r.idx++
+	return true
+}
+
+func (r *fakeRows) Scan(dest ...any) error {
+	if r.idx == 0 || r.idx > len(r.rows) {
+		return errors.New("scan called without next")
+	}
+	scan := r.rows[r.idx-1]
+	if scan == nil {
+		return nil
+	}
+	return scan(dest...)
+}
+func (*fakeRows) Values() ([]any, error) { return nil, nil }
+func (*fakeRows) RawValues() [][]byte    { return nil }
+func (*fakeRows) Conn() *pgx.Conn        { return nil }
+
+// ---- helpers ----
+
 func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
@@ -89,46 +125,14 @@ func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 	}
 }
 
-func makeBoolRow(value bool) *fakeRow {
+func makeStringRow(value string) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			*dest[0].(*bool) = value
+			*dest[0].(*string) = value
 			return nil
 		},
 	}
 }
-
-type fakeRows struct {
-	rows    []func(dest ...any) error
-	idx     int
-	lastErr error
-}
-
-func (*fakeRows) Close()                                       {}
-func (r *fakeRows) Err() error                                 { return r.lastErr }
-func (*fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
-func (*fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
-func (r *fakeRows) Next() bool {
-	if r.idx >= len(r.rows) {
-		return false
-	}
-	r.idx++
-	return true
-}
-
-func (r *fakeRows) Scan(dest ...any) error {
-	if r.idx == 0 || r.idx > len(r.rows) {
-		return errors.New("scan called without next")
-	}
-	scan := r.rows[r.idx-1]
-	if scan == nil {
-		return nil
-	}
-	return scan(dest...)
-}
-func (*fakeRows) Values() ([]any, error) { return nil, nil }
-func (*fakeRows) RawValues() [][]byte    { return nil }
-func (*fakeRows) Conn() *pgx.Conn        { return nil }
 
 func textFromArg(value any) string {
 	switch v := value.(type) {
@@ -146,109 +150,86 @@ func textFromArg(value any) string {
 	}
 }
 
-func scopeMatches(rule *SourceScope, args ...any) bool {
-	if rule == nil {
-		return false
-	}
-	scope := rule.Normalize()
-	return (scope.Channel == "" || scope.Channel == textFromArg(args[3])) &&
-		(scope.ConversationType == "" || scope.ConversationType == textFromArg(args[4])) &&
-		(scope.ConversationID == "" || scope.ConversationID == textFromArg(args[5])) &&
-		(scope.ThreadID == "" || scope.ThreadID == textFromArg(args[6]))
+// matchedRule returns a fakeRow that scans the given effect string.
+func matchedRule(effect string) *fakeRow {
+	return makeStringRow(effect)
 }
 
-func TestCanPerformChatTrigger(t *testing.T) {
+// noRule returns a fakeRow that returns pgx.ErrNoRows (no matching rule).
+func noRule() *fakeRow {
+	return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+}
+
+// ---- Evaluate tests ----
+
+func TestEvaluate(t *testing.T) {
 	botUUID := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
 	ownerUUID := pgtype.UUID{Bytes: uuid.MustParse("22222222-2222-2222-2222-222222222222"), Valid: true}
-	userUUID := pgtype.UUID{Bytes: uuid.MustParse("44444444-4444-4444-4444-444444444444"), Valid: true}
-	channelIdentityUUID := pgtype.UUID{Bytes: uuid.MustParse("55555555-5555-5555-5555-555555555555"), Valid: true}
 
 	tests := []struct {
-		name              string
-		userID            string
-		channelIdentityID string
-		sourceScope       SourceScope
-		denyUserScope     *SourceScope
-		allowUserScope    *SourceScope
-		denyChannelScope  *SourceScope
-		allowChannelScope *SourceScope
-		allowGuestAll     bool
-		wantAllowed       bool
+		name          string
+		matchedEffect string // "" means no matching rule
+		defaultEffect string
+		wantAllowed   bool
 	}{
-		{name: "owner bypass", userID: ownerUUID.String(), wantAllowed: true},
-		{name: "deny user wins", userID: userUUID.String(), denyUserScope: &SourceScope{}, allowGuestAll: true, wantAllowed: false},
-		{name: "allow user", userID: userUUID.String(), allowUserScope: &SourceScope{}, wantAllowed: true},
-		{name: "deny channel wins", channelIdentityID: channelIdentityUUID.String(), denyChannelScope: &SourceScope{}, allowGuestAll: true, wantAllowed: false},
-		{name: "allow channel identity", channelIdentityID: channelIdentityUUID.String(), allowChannelScope: &SourceScope{}, wantAllowed: true},
 		{
-			name:           "scoped allow user private",
-			userID:         userUUID.String(),
-			sourceScope:    SourceScope{Channel: "feishu", ConversationType: "private", ConversationID: "chat-1"},
-			allowUserScope: &SourceScope{Channel: "feishu", ConversationType: "private", ConversationID: "chat-1"},
-			wantAllowed:    true,
+			name:          "first rule allow",
+			matchedEffect: EffectAllow,
+			defaultEffect: EffectDeny,
+			wantAllowed:   true,
 		},
 		{
-			name:           "scoped allow user does not match other conversation",
-			userID:         userUUID.String(),
-			sourceScope:    SourceScope{Channel: "feishu", ConversationType: "private", ConversationID: "chat-2"},
-			allowUserScope: &SourceScope{Channel: "feishu", ConversationType: "private", ConversationID: "chat-1"},
-			wantAllowed:    false,
+			name:          "first rule deny",
+			matchedEffect: EffectDeny,
+			defaultEffect: EffectAllow,
+			wantAllowed:   false,
 		},
 		{
-			name:              "scoped deny overrides guest fallback",
-			channelIdentityID: channelIdentityUUID.String(),
-			sourceScope:       SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-1"},
-			denyChannelScope:  &SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-1"},
-			allowGuestAll:     true,
-			wantAllowed:       false,
+			name:          "no matching rule - default allow",
+			matchedEffect: "",
+			defaultEffect: EffectAllow,
+			wantAllowed:   true,
 		},
 		{
-			name:              "scoped deny does not block different source",
-			channelIdentityID: channelIdentityUUID.String(),
-			sourceScope:       SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-2"},
-			denyChannelScope:  &SourceScope{Channel: "telegram", ConversationType: "group", ConversationID: "group-1"},
-			allowGuestAll:     true,
-			wantAllowed:       true,
+			name:          "no matching rule - default deny",
+			matchedEffect: "",
+			defaultEffect: EffectDeny,
+			wantAllowed:   false,
 		},
-		{name: "guest_all fallback", allowGuestAll: true, wantAllowed: true},
-		{name: "default deny", wantAllowed: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db := &fakeDBTX{
-				queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+				queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
 					switch {
-					case strings.Contains(sql, "FROM bots"):
+					case strings.Contains(sql, "FROM bots") && strings.Contains(sql, "owner_user_id"):
 						return makeBotRow(botUUID, ownerUUID)
-					case strings.Contains(sql, "subject_kind = 'user'"):
-						effect := args[1].(string)
-						if effect == EffectDeny {
-							return makeBoolRow(scopeMatches(tt.denyUserScope, args...))
+					case strings.Contains(sql, "FROM bot_acl_rules") && strings.Contains(sql, "LIMIT 1"):
+						// Evaluate query
+						if tt.matchedEffect == "" {
+							return noRule()
 						}
-						return makeBoolRow(scopeMatches(tt.allowUserScope, args...))
-					case strings.Contains(sql, "subject_kind = 'channel_identity'"):
-						effect := args[1].(string)
-						if effect == EffectDeny {
-							return makeBoolRow(scopeMatches(tt.denyChannelScope, args...))
-						}
-						return makeBoolRow(scopeMatches(tt.allowChannelScope, args...))
-					case strings.Contains(sql, "subject_kind = 'guest_all'"):
-						return makeBoolRow(tt.allowGuestAll)
+						return matchedRule(tt.matchedEffect)
+					case strings.Contains(sql, "acl_default_effect"):
+						return makeStringRow(tt.defaultEffect)
 					default:
-						return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+						return noRule()
 					}
 				},
 			}
-
 			queries := sqlc.New(db)
 			botService := bots.NewService(nil, queries)
 			service := NewService(nil, queries, botService)
-			allowed, err := service.CanPerformChatTrigger(context.Background(), ChatTriggerRequest{
+
+			allowed, err := service.Evaluate(context.Background(), EvaluateRequest{
 				BotID:             botUUID.String(),
-				UserID:            tt.userID,
-				ChannelIdentityID: tt.channelIdentityID,
-				SourceScope:       tt.sourceScope,
+				ChannelIdentityID: "55555555-5555-5555-5555-555555555555",
+				ChannelType:       "telegram",
+				SourceScope: SourceScope{
+					ConversationType: "group",
+					ConversationID:   "group-1",
+				},
 			})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -260,17 +241,81 @@ func TestCanPerformChatTrigger(t *testing.T) {
 	}
 }
 
-func TestCanPerformChatTriggerRejectsInvalidScope(t *testing.T) {
+func TestEvaluateRejectsInvalidScope(t *testing.T) {
 	service := NewService(nil, nil, nil)
-	_, err := service.CanPerformChatTrigger(context.Background(), ChatTriggerRequest{
-		BotID: "bot-1",
+	_, err := service.Evaluate(context.Background(), EvaluateRequest{
+		BotID: "11111111-1111-1111-1111-111111111111",
 		SourceScope: SourceScope{
-			Channel:  "feishu",
 			ThreadID: "thread-1",
+			// missing ConversationID - invalid
 		},
 	})
 	if !errors.Is(err, ErrInvalidSourceScope) {
-		t.Fatalf("expected invalid source scope error, got %v", err)
+		t.Fatalf("expected ErrInvalidSourceScope, got %v", err)
+	}
+}
+
+func TestValidateSubject(t *testing.T) {
+	tests := []struct {
+		name               string
+		kind               string
+		channelIdentityID  string
+		subjectChannelType string
+		wantErr            bool
+	}{
+		{"all - no fields", SubjectKindAll, "", "", false},
+		{"all - with identity", SubjectKindAll, "some-id", "", true},
+		{"all - with channel type", SubjectKindAll, "", "telegram", true},
+		{"channel_identity - valid", SubjectKindChannelIdentity, "some-id", "", false},
+		{"channel_identity - missing id", SubjectKindChannelIdentity, "", "", true},
+		{"channel_identity - extra channel type", SubjectKindChannelIdentity, "some-id", "telegram", true},
+		{"channel_type - valid", SubjectKindChannelType, "", "telegram", false},
+		{"channel_type - missing channel type", SubjectKindChannelType, "", "", true},
+		{"channel_type - extra identity", SubjectKindChannelType, "some-id", "telegram", true},
+		{"unknown kind", "unknown", "", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSubject(tt.kind, tt.channelIdentityID, tt.subjectChannelType)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateSubject() error = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateEffect(t *testing.T) {
+	if err := validateEffect(EffectAllow); err != nil {
+		t.Fatalf("allow should be valid: %v", err)
+	}
+	if err := validateEffect(EffectDeny); err != nil {
+		t.Fatalf("deny should be valid: %v", err)
+	}
+	if err := validateEffect("unknown"); err == nil {
+		t.Fatal("expected error for unknown effect")
+	}
+}
+
+func TestSetDefaultEffect(t *testing.T) {
+	botUUID := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
+	var capturedEffect string
+	db := &fakeDBTX{
+		execFunc: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			if strings.Contains(sql, "acl_default_effect") {
+				capturedEffect = args[1].(string)
+			}
+			return pgconn.CommandTag{}, nil
+		},
+	}
+	service := NewService(nil, sqlc.New(db), nil)
+	if err := service.SetDefaultEffect(context.Background(), botUUID.String(), EffectAllow); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedEffect != EffectAllow {
+		t.Fatalf("expected effect %q, got %q", EffectAllow, capturedEffect)
+	}
+	if err := service.SetDefaultEffect(context.Background(), botUUID.String(), "invalid"); !errors.Is(err, ErrInvalidEffect) {
+		t.Fatalf("expected ErrInvalidEffect, got %v", err)
 	}
 }
 
@@ -282,8 +327,7 @@ func TestListObservedConversationsByChannelIdentity(t *testing.T) {
 
 	db := &fakeDBTX{
 		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			if !strings.Contains(sql, "ListObservedConversationsByChannelIdentity") &&
-				!strings.Contains(sql, "FROM bot_history_messages m") {
+			if !strings.Contains(sql, "observed_routes") && !strings.Contains(sql, "bot_sessions") {
 				return &fakeRows{}, nil
 			}
 			return &fakeRows{
@@ -309,7 +353,7 @@ func TestListObservedConversationsByChannelIdentity(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(items) != 1 {
-		t.Fatalf("expected one observed conversation, got %d", len(items))
+		t.Fatalf("expected 1 item, got %d", len(items))
 	}
 	if items[0].RouteID != routeUUID.String() {
 		t.Fatalf("unexpected route id: %s", items[0].RouteID)
@@ -317,78 +361,36 @@ func TestListObservedConversationsByChannelIdentity(t *testing.T) {
 	if items[0].ConversationID != "chat-1" || items[0].ThreadID != "thread-1" {
 		t.Fatalf("unexpected conversation scope: %+v", items[0])
 	}
-	if items[0].ConversationName != "Team Chat" {
-		t.Fatalf("unexpected conversation name: %q", items[0].ConversationName)
-	}
 }
 
-func TestAddWhitelistEntryChannelIdentityForcesIdentityChannel(t *testing.T) {
-	botUUID := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
+func TestReorderRules(t *testing.T) {
 	ruleUUID := pgtype.UUID{Bytes: uuid.MustParse("77777777-7777-7777-7777-777777777777"), Valid: true}
-	channelIdentityUUID := pgtype.UUID{Bytes: uuid.MustParse("55555555-5555-5555-5555-555555555555"), Valid: true}
-	createdByUUID := pgtype.UUID{Bytes: uuid.MustParse("88888888-8888-8888-8888-888888888888"), Valid: true}
-	now := time.Now().UTC()
-
+	var capturedPriority int32
 	db := &fakeDBTX{
-		queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
-			switch {
-			case strings.Contains(sql, "FROM channel_identities"):
-				return &fakeRow{
-					scanFunc: func(dest ...any) error {
-						*dest[0].(*pgtype.UUID) = channelIdentityUUID
-						*dest[1].(*pgtype.UUID) = pgtype.UUID{}
-						*dest[2].(*string) = "feishu"
-						*dest[3].(*string) = "ou_123"
-						*dest[4].(*pgtype.Text) = pgtype.Text{String: "Tester", Valid: true}
-						*dest[5].(*pgtype.Text) = pgtype.Text{}
-						*dest[6].(*[]byte) = []byte(`{}`)
-						*dest[7].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: now, Valid: true}
-						*dest[8].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: now, Valid: true}
-						return nil
-					},
-				}
-			case strings.Contains(sql, "INSERT INTO bot_acl_rules"):
-				if got := textFromArg(args[4]); got != "feishu" {
-					t.Fatalf("expected source_channel to be normalized to feishu, got %q", got)
-				}
-				return &fakeRow{
-					scanFunc: func(dest ...any) error {
-						*dest[0].(*pgtype.UUID) = ruleUUID
-						*dest[1].(*pgtype.UUID) = botUUID
-						*dest[2].(*string) = ActionChatTrigger
-						*dest[3].(*string) = EffectAllow
-						*dest[4].(*string) = SubjectKindChannelIdentity
-						*dest[5].(*pgtype.UUID) = pgtype.UUID{}
-						*dest[6].(*pgtype.UUID) = channelIdentityUUID
-						*dest[7].(*pgtype.Text) = pgtype.Text{String: "feishu", Valid: true}
-						*dest[8].(*pgtype.Text) = pgtype.Text{String: "group", Valid: true}
-						*dest[9].(*pgtype.Text) = pgtype.Text{String: "chat-1", Valid: true}
-						*dest[10].(*pgtype.Text) = pgtype.Text{}
-						*dest[11].(*pgtype.UUID) = createdByUUID
-						*dest[12].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: now, Valid: true}
-						*dest[13].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: now, Valid: true}
-						return nil
-					},
-				}
-			default:
-				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+		execFunc: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			if strings.Contains(sql, "priority") {
+				capturedPriority = args[1].(int32)
 			}
+			return pgconn.CommandTag{}, nil
 		},
 	}
-
 	service := NewService(nil, sqlc.New(db), nil)
-	rule, err := service.AddWhitelistEntry(context.Background(), botUUID.String(), createdByUUID.String(), UpsertRuleRequest{
-		ChannelIdentityID: channelIdentityUUID.String(),
-		SourceScope: &SourceScope{
-			Channel:          "telegram",
-			ConversationType: "group",
-			ConversationID:   "chat-1",
-		},
+	err := service.ReorderRules(context.Background(), []ReorderItem{
+		{ID: ruleUUID.String(), Priority: 42},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if rule.SourceScope == nil || rule.SourceScope.Channel != "feishu" {
-		t.Fatalf("expected normalized source scope channel feishu, got %+v", rule.SourceScope)
+	if capturedPriority != 42 {
+		t.Fatalf("expected priority 42, got %d", capturedPriority)
+	}
+}
+
+func TestTextFromArg(t *testing.T) {
+	if got := textFromArg(pgtype.Text{String: "  hello  ", Valid: true}); got != "hello" {
+		t.Fatalf("unexpected: %q", got)
+	}
+	if got := textFromArg("world"); got != "world" {
+		t.Fatalf("unexpected: %q", got)
 	}
 }

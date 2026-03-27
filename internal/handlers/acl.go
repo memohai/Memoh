@@ -32,73 +32,102 @@ func NewACLHandler(service *acl.Service, botService *bots.Service, accountServic
 }
 
 func (h *ACLHandler) Register(e *echo.Echo) {
-	group := e.Group("/bots/:bot_id")
-	group.GET("/whitelist", h.ListWhitelist)
-	group.PUT("/whitelist", h.UpsertWhitelist)
-	group.DELETE("/whitelist/:rule_id", h.DeleteWhitelist)
-	group.GET("/blacklist", h.ListBlacklist)
-	group.PUT("/blacklist", h.UpsertBlacklist)
-	group.DELETE("/blacklist/:rule_id", h.DeleteBlacklist)
-	group.GET("/access/users", h.SearchUsers)
-	group.GET("/access/channel_identities", h.SearchChannelIdentities)
-	group.GET("/access/channel_identities/:channel_identity_id/conversations", h.ListObservedConversationsByChannelIdentity)
+	group := e.Group("/bots/:bot_id/acl")
+	group.GET("/rules", h.ListRules)
+	group.POST("/rules", h.CreateRule)
+	group.PUT("/rules/reorder", h.ReorderRules)
+	group.PUT("/rules/:rule_id", h.UpdateRule)
+	group.DELETE("/rules/:rule_id", h.DeleteRule)
+	group.GET("/default-effect", h.GetDefaultEffect)
+	group.PUT("/default-effect", h.SetDefaultEffect)
+	group.GET("/channel-identities", h.SearchChannelIdentities)
+	group.GET("/channel-identities/:channel_identity_id/conversations", h.ListObservedConversations)
+	group.GET("/channel-types/:channel_type/conversations", h.ListObservedConversationsByChannelType)
 }
 
-// ListWhitelist godoc
-// @Summary List bot whitelist
-// @Description List guest allow rules for chat trigger
+// ListRules godoc
+// @Summary List bot ACL rules
+// @Description List all ACL rules for a bot ordered by priority
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} acl.ListRulesResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/whitelist [get].
-func (h *ACLHandler) ListWhitelist(c echo.Context) error {
+// @Router /bots/{bot_id}/acl/rules [get].
+func (h *ACLHandler) ListRules(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
 	if err != nil {
 		return err
 	}
-	items, err := h.service.ListWhitelist(c.Request().Context(), botID)
+	items, err := h.service.ListRules(c.Request().Context(), botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, acl.ListRulesResponse{Items: items})
 }
 
-// UpsertWhitelist godoc
-// @Summary Upsert bot whitelist entry
-// @Description Add a guest allow rule for chat trigger
+// CreateRule godoc
+// @Summary Create ACL rule
+// @Description Create a new priority-ordered ACL rule for chat.trigger
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
-// @Param payload body acl.UpsertRuleRequest true "Whitelist payload"
-// @Success 200 {object} acl.Rule
+// @Param payload body acl.CreateRuleRequest true "Rule payload"
+// @Success 201 {object} acl.Rule
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/whitelist [put].
-func (h *ACLHandler) UpsertWhitelist(c echo.Context) error {
+// @Router /bots/{bot_id}/acl/rules [post].
+func (h *ACLHandler) CreateRule(c echo.Context) error {
 	botID, actorID, err := h.requireManageAccess(c)
 	if err != nil {
 		return err
 	}
-	var req acl.UpsertRuleRequest
+	var req acl.CreateRuleRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	item, err := h.service.AddWhitelistEntry(c.Request().Context(), botID, actorID, req)
+	item, err := h.service.CreateRule(c.Request().Context(), botID, actorID, req)
 	if err != nil {
-		if errors.Is(err, acl.ErrInvalidRuleSubject) || errors.Is(err, acl.ErrInvalidSourceScope) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return h.mapRuleError(err)
+	}
+	return c.JSON(http.StatusCreated, item)
+}
+
+// UpdateRule godoc
+// @Summary Update ACL rule
+// @Description Update an existing ACL rule
+// @Tags bots
+// @Param bot_id path string true "Bot ID"
+// @Param rule_id path string true "Rule ID"
+// @Param payload body acl.UpdateRuleRequest true "Rule payload"
+// @Success 200 {object} acl.Rule
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/acl/rules/{rule_id} [put].
+func (h *ACLHandler) UpdateRule(c echo.Context) error {
+	if _, _, err := h.requireManageAccess(c); err != nil {
+		return err
+	}
+	ruleID := strings.TrimSpace(c.Param("rule_id"))
+	if ruleID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "rule_id is required")
+	}
+	var req acl.UpdateRuleRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	item, err := h.service.UpdateRule(c.Request().Context(), ruleID, req)
+	if err != nil {
+		return h.mapRuleError(err)
 	}
 	return c.JSON(http.StatusOK, item)
 }
 
-// DeleteWhitelist godoc
-// @Summary Delete bot whitelist entry
-// @Description Delete a guest allow rule by rule ID
+// DeleteRule godoc
+// @Summary Delete ACL rule
+// @Description Delete an ACL rule by ID
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Param rule_id path string true "Rule ID"
@@ -106,14 +135,14 @@ func (h *ACLHandler) UpsertWhitelist(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/whitelist/{rule_id} [delete].
-func (h *ACLHandler) DeleteWhitelist(c echo.Context) error {
+// @Router /bots/{bot_id}/acl/rules/{rule_id} [delete].
+func (h *ACLHandler) DeleteRule(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
 		return err
 	}
 	ruleID := strings.TrimSpace(c.Param("rule_id"))
 	if ruleID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "rule id is required")
+		return echo.NewHTTPError(http.StatusBadRequest, "rule_id is required")
 	}
 	if err := h.service.DeleteRule(c.Request().Context(), ruleID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -121,119 +150,85 @@ func (h *ACLHandler) DeleteWhitelist(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// ListBlacklist godoc
-// @Summary List bot blacklist
-// @Description List guest deny rules for chat trigger
+// ReorderRules godoc
+// @Summary Reorder ACL rules
+// @Description Batch-update priorities for multiple ACL rules
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} acl.ListRulesResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/blacklist [get].
-func (h *ACLHandler) ListBlacklist(c echo.Context) error {
-	botID, _, err := h.requireManageAccess(c)
-	if err != nil {
-		return err
-	}
-	items, err := h.service.ListBlacklist(c.Request().Context(), botID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, acl.ListRulesResponse{Items: items})
-}
-
-// UpsertBlacklist godoc
-// @Summary Upsert bot blacklist entry
-// @Description Add a guest deny rule for chat trigger
-// @Tags bots
-// @Param bot_id path string true "Bot ID"
-// @Param payload body acl.UpsertRuleRequest true "Blacklist payload"
-// @Success 200 {object} acl.Rule
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/blacklist [put].
-func (h *ACLHandler) UpsertBlacklist(c echo.Context) error {
-	botID, actorID, err := h.requireManageAccess(c)
-	if err != nil {
-		return err
-	}
-	var req acl.UpsertRuleRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	item, err := h.service.AddBlacklistEntry(c.Request().Context(), botID, actorID, req)
-	if err != nil {
-		if errors.Is(err, acl.ErrInvalidRuleSubject) || errors.Is(err, acl.ErrInvalidSourceScope) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, item)
-}
-
-// DeleteBlacklist godoc
-// @Summary Delete bot blacklist entry
-// @Description Delete a guest deny rule by rule ID
-// @Tags bots
-// @Param bot_id path string true "Bot ID"
-// @Param rule_id path string true "Rule ID"
+// @Param payload body acl.ReorderRequest true "Reorder payload"
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/blacklist/{rule_id} [delete].
-func (h *ACLHandler) DeleteBlacklist(c echo.Context) error {
+// @Router /bots/{bot_id}/acl/rules/reorder [put].
+func (h *ACLHandler) ReorderRules(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
 		return err
 	}
-	ruleID := strings.TrimSpace(c.Param("rule_id"))
-	if ruleID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "rule id is required")
+	var req acl.ReorderRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if err := h.service.DeleteRule(c.Request().Context(), ruleID); err != nil {
+	if err := h.service.ReorderRules(c.Request().Context(), req.Items); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
-// SearchUsers godoc
-// @Summary Search access users
-// @Description Search user candidates for bot access control
+// GetDefaultEffect godoc
+// @Summary Get bot ACL default effect
+// @Description Get the fallback effect when no rule matches
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
-// @Param q query string false "Search query"
-// @Param limit query int false "Max results"
-// @Success 200 {object} acl.UserCandidateListResponse
+// @Success 200 {object} acl.DefaultEffectResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/access/users [get].
-func (h *ACLHandler) SearchUsers(c echo.Context) error {
-	if _, _, err := h.requireManageAccess(c); err != nil {
+// @Router /bots/{bot_id}/acl/default-effect [get].
+func (h *ACLHandler) GetDefaultEffect(c echo.Context) error {
+	botID, _, err := h.requireManageAccess(c)
+	if err != nil {
 		return err
 	}
-	items, err := h.accountService.SearchAccounts(c.Request().Context(), strings.TrimSpace(c.QueryParam("q")), parseLimit(c.QueryParam("limit")))
+	effect, err := h.service.GetDefaultEffect(c.Request().Context(), botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	result := make([]acl.UserCandidate, 0, len(items))
-	for _, item := range items {
-		result = append(result, acl.UserCandidate{
-			ID:          item.ID,
-			Username:    item.Username,
-			DisplayName: item.DisplayName,
-			AvatarURL:   item.AvatarURL,
-			Email:       item.Email,
-		})
+	return c.JSON(http.StatusOK, acl.DefaultEffectResponse{DefaultEffect: effect})
+}
+
+// SetDefaultEffect godoc
+// @Summary Set bot ACL default effect
+// @Description Set the fallback effect when no rule matches (allow or deny)
+// @Tags bots
+// @Param bot_id path string true "Bot ID"
+// @Param payload body acl.DefaultEffectResponse true "Default effect payload"
+// @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/acl/default-effect [put].
+func (h *ACLHandler) SetDefaultEffect(c echo.Context) error {
+	botID, _, err := h.requireManageAccess(c)
+	if err != nil {
+		return err
 	}
-	return c.JSON(http.StatusOK, acl.UserCandidateListResponse{Items: result})
+	var req acl.DefaultEffectResponse
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if err := h.service.SetDefaultEffect(c.Request().Context(), botID, req.DefaultEffect); err != nil {
+		if errors.Is(err, acl.ErrInvalidEffect) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // SearchChannelIdentities godoc
-// @Summary Search access channel identities
-// @Description Search locally observed channel identity candidates for bot access control
+// @Summary Search ACL channel identity candidates
+// @Description Search locally observed channel identities for building ACL rules
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Param q query string false "Search query"
@@ -242,7 +237,7 @@ func (h *ACLHandler) SearchUsers(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/access/channel_identities [get].
+// @Router /bots/{bot_id}/acl/channel-identities [get].
 func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
 		return err
@@ -255,11 +250,11 @@ func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 	for _, item := range items {
 		result = append(result, acl.ChannelIdentityCandidate{
 			ID:                item.ID,
-			UserID:            item.UserID,
 			Channel:           item.Channel,
 			ChannelSubjectID:  item.ChannelSubjectID,
 			DisplayName:       item.DisplayName,
 			AvatarURL:         item.AvatarURL,
+			LinkedUserID:      item.UserID,
 			LinkedUsername:    item.LinkedUsername,
 			LinkedDisplayName: item.LinkedDisplayName,
 			LinkedAvatarURL:   item.LinkedAvatarURL,
@@ -268,9 +263,9 @@ func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 	return c.JSON(http.StatusOK, acl.ChannelIdentityCandidateListResponse{Items: result})
 }
 
-// ListObservedConversationsByChannelIdentity godoc
+// ListObservedConversations godoc
 // @Summary List observed conversations for a channel identity
-// @Description List previously observed conversation candidates for a channel identity under a bot
+// @Description List previously observed conversation candidates for a channel identity, for scoped rule building
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Param channel_identity_id path string true "Channel Identity ID"
@@ -278,8 +273,8 @@ func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/access/channel_identities/{channel_identity_id}/conversations [get].
-func (h *ACLHandler) ListObservedConversationsByChannelIdentity(c echo.Context) error {
+// @Router /bots/{bot_id}/acl/channel-identities/{channel_identity_id}/conversations [get].
+func (h *ACLHandler) ListObservedConversations(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
 	if err != nil {
 		return err
@@ -295,6 +290,33 @@ func (h *ACLHandler) ListObservedConversationsByChannelIdentity(c echo.Context) 
 	return c.JSON(http.StatusOK, acl.ObservedConversationCandidateListResponse{Items: items})
 }
 
+// ListObservedConversationsByChannelType godoc
+// @Summary List observed conversations for a platform type
+// @Description List previously observed group/thread conversation candidates for a channel type under this bot
+// @Tags bots
+// @Param bot_id path string true "Bot ID"
+// @Param channel_type path string true "Channel type (e.g. telegram, discord)"
+// @Success 200 {object} acl.ObservedConversationCandidateListResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/acl/channel-types/{channel_type}/conversations [get].
+func (h *ACLHandler) ListObservedConversationsByChannelType(c echo.Context) error {
+	botID, _, err := h.requireManageAccess(c)
+	if err != nil {
+		return err
+	}
+	channelType := strings.TrimSpace(c.Param("channel_type"))
+	if channelType == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "channel_type is required")
+	}
+	items, err := h.service.ListObservedConversationsByChannelType(c.Request().Context(), botID, channelType)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, acl.ObservedConversationCandidateListResponse{Items: items})
+}
+
 func (h *ACLHandler) requireManageAccess(c echo.Context) (string, string, error) {
 	actorID, err := RequireChannelIdentityID(c)
 	if err != nil {
@@ -302,12 +324,21 @@ func (h *ACLHandler) requireManageAccess(c echo.Context) (string, string, error)
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
 		return "", "", err
 	}
 	return botID, actorID, nil
+}
+
+func (*ACLHandler) mapRuleError(err error) error {
+	if errors.Is(err, acl.ErrInvalidRuleSubject) ||
+		errors.Is(err, acl.ErrInvalidSourceScope) ||
+		errors.Is(err, acl.ErrInvalidEffect) {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 }
 
 func parseLimit(raw string) int {

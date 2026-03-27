@@ -21,7 +21,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 			}
 			return formatKV([]kv{
 				{"Language", s.Language},
-				{"Allow Guest", boolStr(s.AllowGuest)},
+				{"ACL Default Effect", s.AclDefaultEffect},
 				{"Max Context Load Time", fmt.Sprintf("%d min", s.MaxContextLoadTime)},
 				{"Max Context Tokens", strconv.Itoa(s.MaxContextTokens)},
 				{"Reasoning Enabled", boolStr(s.ReasoningEnabled)},
@@ -38,7 +38,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 	})
 	g.Register(SubCommand{
 		Name:    "update",
-		Usage:   "update [--language L] [--allow_guest true|false] ... - Update settings",
+		Usage:   "update [--language L] [--acl_default_effect allow|deny] ... - Update settings",
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if len(cc.Args) == 0 {
@@ -54,10 +54,9 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 				case "--language":
 					i++
 					req.Language = args[i]
-				case "--allow_guest":
+				case "--acl_default_effect":
 					i++
-					v := strings.ToLower(args[i]) == "true"
-					req.AllowGuest = &v
+					req.AclDefaultEffect = args[i]
 				case "--reasoning_enabled":
 					i++
 					v := strings.ToLower(args[i]) == "true"
@@ -114,7 +113,7 @@ func settingsUpdateUsage() string {
 	return "Usage: /settings update [options]\n\n" +
 		"Options:\n" +
 		"- --language <value>\n" +
-		"- --allow_guest <true|false>\n" +
+		"- --acl_default_effect <allow|deny>\n" +
 		"- --reasoning_enabled <true|false>\n" +
 		"- --reasoning_effort <low|medium|high>\n" +
 		"- --heartbeat_enabled <true|false>\n" +

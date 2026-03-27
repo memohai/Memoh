@@ -62,12 +62,27 @@ export type AclChannelIdentityCandidate = {
     id?: string;
     linked_avatar_url?: string;
     linked_display_name?: string;
+    linked_user_id?: string;
     linked_username?: string;
-    user_id?: string;
 };
 
 export type AclChannelIdentityCandidateListResponse = {
     items?: Array<AclChannelIdentityCandidate>;
+};
+
+export type AclCreateRuleRequest = {
+    channel_identity_id?: string;
+    description?: string;
+    effect?: string;
+    enabled?: boolean;
+    priority?: number;
+    source_scope?: AclSourceScope;
+    subject_channel_type?: string;
+    subject_kind?: string;
+};
+
+export type AclDefaultEffectResponse = {
+    default_effect?: string;
 };
 
 export type AclListRulesResponse = {
@@ -88,6 +103,15 @@ export type AclObservedConversationCandidateListResponse = {
     items?: Array<AclObservedConversationCandidate>;
 };
 
+export type AclReorderItem = {
+    id?: string;
+    priority?: number;
+};
+
+export type AclReorderRequest = {
+    items?: Array<AclReorderItem>;
+};
+
 export type AclRule = {
     action?: string;
     bot_id?: string;
@@ -97,44 +121,36 @@ export type AclRule = {
     channel_subject_id?: string;
     channel_type?: string;
     created_at?: string;
+    description?: string;
     effect?: string;
+    enabled?: boolean;
     id?: string;
     linked_user_avatar_url?: string;
     linked_user_display_name?: string;
     linked_user_id?: string;
     linked_user_username?: string;
+    priority?: number;
     source_scope?: AclSourceScope;
+    subject_channel_type?: string;
     subject_kind?: string;
     updated_at?: string;
-    user_avatar_url?: string;
-    user_display_name?: string;
-    user_id?: string;
-    user_username?: string;
 };
 
 export type AclSourceScope = {
-    channel?: string;
     conversation_id?: string;
     conversation_type?: string;
     thread_id?: string;
 };
 
-export type AclUpsertRuleRequest = {
+export type AclUpdateRuleRequest = {
     channel_identity_id?: string;
+    description?: string;
+    effect?: string;
+    enabled?: boolean;
+    priority?: number;
     source_scope?: AclSourceScope;
-    user_id?: string;
-};
-
-export type AclUserCandidate = {
-    avatar_url?: string;
-    display_name?: string;
-    email?: string;
-    id?: string;
-    username?: string;
-};
-
-export type AclUserCandidateListResponse = {
-    items?: Array<AclUserCandidate>;
+    subject_channel_type?: string;
+    subject_kind?: string;
 };
 
 export type AdaptersCdfPoint = {
@@ -1207,6 +1223,7 @@ export type ModelsModelConfig = {
     compatibilities?: Array<string>;
     context_window?: number;
     dimensions?: number;
+    reasoning_efforts?: Array<string>;
 };
 
 export type ModelsModelType = 'chat' | 'embedding';
@@ -1262,6 +1279,14 @@ export type ProvidersImportModelsResponse = {
     created?: number;
     models?: Array<string>;
     skipped?: number;
+};
+
+export type ProvidersOAuthStatus = {
+    callback_url?: string;
+    configured?: boolean;
+    expired?: boolean;
+    expires_at?: string;
+    has_token?: boolean;
 };
 
 export type ProvidersTestResponse = {
@@ -1410,7 +1435,7 @@ export type SessionSession = {
 };
 
 export type SettingsSettings = {
-    allow_guest?: boolean;
+    acl_default_effect?: string;
     browser_context_id?: string;
     chat_model_id?: string;
     compaction_enabled?: boolean;
@@ -1431,7 +1456,7 @@ export type SettingsSettings = {
 };
 
 export type SettingsUpsertRequest = {
-    allow_guest?: boolean;
+    acl_default_effect?: string;
     browser_context_id?: string;
     chat_model_id?: string;
     compaction_enabled?: boolean;
@@ -1678,7 +1703,7 @@ export type PostBotsResponses = {
 
 export type PostBotsResponse = PostBotsResponses[keyof PostBotsResponses];
 
-export type GetBotsByBotIdAccessChannelIdentitiesData = {
+export type GetBotsByBotIdAclChannelIdentitiesData = {
     body?: never;
     path: {
         /**
@@ -1696,10 +1721,10 @@ export type GetBotsByBotIdAccessChannelIdentitiesData = {
          */
         limit?: number;
     };
-    url: '/bots/{bot_id}/access/channel_identities';
+    url: '/bots/{bot_id}/acl/channel-identities';
 };
 
-export type GetBotsByBotIdAccessChannelIdentitiesErrors = {
+export type GetBotsByBotIdAclChannelIdentitiesErrors = {
     /**
      * Bad Request
      */
@@ -1714,18 +1739,18 @@ export type GetBotsByBotIdAccessChannelIdentitiesErrors = {
     500: HandlersErrorResponse;
 };
 
-export type GetBotsByBotIdAccessChannelIdentitiesError = GetBotsByBotIdAccessChannelIdentitiesErrors[keyof GetBotsByBotIdAccessChannelIdentitiesErrors];
+export type GetBotsByBotIdAclChannelIdentitiesError = GetBotsByBotIdAclChannelIdentitiesErrors[keyof GetBotsByBotIdAclChannelIdentitiesErrors];
 
-export type GetBotsByBotIdAccessChannelIdentitiesResponses = {
+export type GetBotsByBotIdAclChannelIdentitiesResponses = {
     /**
      * OK
      */
     200: AclChannelIdentityCandidateListResponse;
 };
 
-export type GetBotsByBotIdAccessChannelIdentitiesResponse = GetBotsByBotIdAccessChannelIdentitiesResponses[keyof GetBotsByBotIdAccessChannelIdentitiesResponses];
+export type GetBotsByBotIdAclChannelIdentitiesResponse = GetBotsByBotIdAclChannelIdentitiesResponses[keyof GetBotsByBotIdAclChannelIdentitiesResponses];
 
-export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsData = {
+export type GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsData = {
     body?: never;
     path: {
         /**
@@ -1738,10 +1763,10 @@ export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversation
         channel_identity_id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/access/channel_identities/{channel_identity_id}/conversations';
+    url: '/bots/{bot_id}/acl/channel-identities/{channel_identity_id}/conversations';
 };
 
-export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsErrors = {
+export type GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsErrors = {
     /**
      * Bad Request
      */
@@ -1756,39 +1781,34 @@ export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversation
     500: HandlersErrorResponse;
 };
 
-export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsError = GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsErrors[keyof GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsErrors];
+export type GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsError = GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsErrors[keyof GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsErrors];
 
-export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponses = {
+export type GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsResponses = {
     /**
      * OK
      */
     200: AclObservedConversationCandidateListResponse;
 };
 
-export type GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponse = GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponses[keyof GetBotsByBotIdAccessChannelIdentitiesByChannelIdentityIdConversationsResponses];
+export type GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsResponse = GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsResponses[keyof GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsResponses];
 
-export type GetBotsByBotIdAccessUsersData = {
+export type GetBotsByBotIdAclChannelTypesByChannelTypeConversationsData = {
     body?: never;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
-    };
-    query?: {
         /**
-         * Search query
+         * Channel type (e.g. telegram, discord)
          */
-        q?: string;
-        /**
-         * Max results
-         */
-        limit?: number;
+        channel_type: string;
     };
-    url: '/bots/{bot_id}/access/users';
+    query?: never;
+    url: '/bots/{bot_id}/acl/channel-types/{channel_type}/conversations';
 };
 
-export type GetBotsByBotIdAccessUsersErrors = {
+export type GetBotsByBotIdAclChannelTypesByChannelTypeConversationsErrors = {
     /**
      * Bad Request
      */
@@ -1803,18 +1823,18 @@ export type GetBotsByBotIdAccessUsersErrors = {
     500: HandlersErrorResponse;
 };
 
-export type GetBotsByBotIdAccessUsersError = GetBotsByBotIdAccessUsersErrors[keyof GetBotsByBotIdAccessUsersErrors];
+export type GetBotsByBotIdAclChannelTypesByChannelTypeConversationsError = GetBotsByBotIdAclChannelTypesByChannelTypeConversationsErrors[keyof GetBotsByBotIdAclChannelTypesByChannelTypeConversationsErrors];
 
-export type GetBotsByBotIdAccessUsersResponses = {
+export type GetBotsByBotIdAclChannelTypesByChannelTypeConversationsResponses = {
     /**
      * OK
      */
-    200: AclUserCandidateListResponse;
+    200: AclObservedConversationCandidateListResponse;
 };
 
-export type GetBotsByBotIdAccessUsersResponse = GetBotsByBotIdAccessUsersResponses[keyof GetBotsByBotIdAccessUsersResponses];
+export type GetBotsByBotIdAclChannelTypesByChannelTypeConversationsResponse = GetBotsByBotIdAclChannelTypesByChannelTypeConversationsResponses[keyof GetBotsByBotIdAclChannelTypesByChannelTypeConversationsResponses];
 
-export type GetBotsByBotIdBlacklistData = {
+export type GetBotsByBotIdAclDefaultEffectData = {
     body?: never;
     path: {
         /**
@@ -1823,10 +1843,10 @@ export type GetBotsByBotIdBlacklistData = {
         bot_id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/blacklist';
+    url: '/bots/{bot_id}/acl/default-effect';
 };
 
-export type GetBotsByBotIdBlacklistErrors = {
+export type GetBotsByBotIdAclDefaultEffectErrors = {
     /**
      * Bad Request
      */
@@ -1841,22 +1861,99 @@ export type GetBotsByBotIdBlacklistErrors = {
     500: HandlersErrorResponse;
 };
 
-export type GetBotsByBotIdBlacklistError = GetBotsByBotIdBlacklistErrors[keyof GetBotsByBotIdBlacklistErrors];
+export type GetBotsByBotIdAclDefaultEffectError = GetBotsByBotIdAclDefaultEffectErrors[keyof GetBotsByBotIdAclDefaultEffectErrors];
 
-export type GetBotsByBotIdBlacklistResponses = {
+export type GetBotsByBotIdAclDefaultEffectResponses = {
+    /**
+     * OK
+     */
+    200: AclDefaultEffectResponse;
+};
+
+export type GetBotsByBotIdAclDefaultEffectResponse = GetBotsByBotIdAclDefaultEffectResponses[keyof GetBotsByBotIdAclDefaultEffectResponses];
+
+export type PutBotsByBotIdAclDefaultEffectData = {
+    /**
+     * Default effect payload
+     */
+    body: AclDefaultEffectResponse;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acl/default-effect';
+};
+
+export type PutBotsByBotIdAclDefaultEffectErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdAclDefaultEffectError = PutBotsByBotIdAclDefaultEffectErrors[keyof PutBotsByBotIdAclDefaultEffectErrors];
+
+export type PutBotsByBotIdAclDefaultEffectResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdAclRulesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acl/rules';
+};
+
+export type GetBotsByBotIdAclRulesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAclRulesError = GetBotsByBotIdAclRulesErrors[keyof GetBotsByBotIdAclRulesErrors];
+
+export type GetBotsByBotIdAclRulesResponses = {
     /**
      * OK
      */
     200: AclListRulesResponse;
 };
 
-export type GetBotsByBotIdBlacklistResponse = GetBotsByBotIdBlacklistResponses[keyof GetBotsByBotIdBlacklistResponses];
+export type GetBotsByBotIdAclRulesResponse = GetBotsByBotIdAclRulesResponses[keyof GetBotsByBotIdAclRulesResponses];
 
-export type PutBotsByBotIdBlacklistData = {
+export type PostBotsByBotIdAclRulesData = {
     /**
-     * Blacklist payload
+     * Rule payload
      */
-    body: AclUpsertRuleRequest;
+    body: AclCreateRuleRequest;
     path: {
         /**
          * Bot ID
@@ -1864,10 +1961,10 @@ export type PutBotsByBotIdBlacklistData = {
         bot_id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/blacklist';
+    url: '/bots/{bot_id}/acl/rules';
 };
 
-export type PutBotsByBotIdBlacklistErrors = {
+export type PostBotsByBotIdAclRulesErrors = {
     /**
      * Bad Request
      */
@@ -1882,18 +1979,57 @@ export type PutBotsByBotIdBlacklistErrors = {
     500: HandlersErrorResponse;
 };
 
-export type PutBotsByBotIdBlacklistError = PutBotsByBotIdBlacklistErrors[keyof PutBotsByBotIdBlacklistErrors];
+export type PostBotsByBotIdAclRulesError = PostBotsByBotIdAclRulesErrors[keyof PostBotsByBotIdAclRulesErrors];
 
-export type PutBotsByBotIdBlacklistResponses = {
+export type PostBotsByBotIdAclRulesResponses = {
     /**
-     * OK
+     * Created
      */
-    200: AclRule;
+    201: AclRule;
 };
 
-export type PutBotsByBotIdBlacklistResponse = PutBotsByBotIdBlacklistResponses[keyof PutBotsByBotIdBlacklistResponses];
+export type PostBotsByBotIdAclRulesResponse = PostBotsByBotIdAclRulesResponses[keyof PostBotsByBotIdAclRulesResponses];
 
-export type DeleteBotsByBotIdBlacklistByRuleIdData = {
+export type PutBotsByBotIdAclRulesReorderData = {
+    /**
+     * Reorder payload
+     */
+    body: AclReorderRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acl/rules/reorder';
+};
+
+export type PutBotsByBotIdAclRulesReorderErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdAclRulesReorderError = PutBotsByBotIdAclRulesReorderErrors[keyof PutBotsByBotIdAclRulesReorderErrors];
+
+export type PutBotsByBotIdAclRulesReorderResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type DeleteBotsByBotIdAclRulesByRuleIdData = {
     body?: never;
     path: {
         /**
@@ -1906,10 +2042,10 @@ export type DeleteBotsByBotIdBlacklistByRuleIdData = {
         rule_id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/blacklist/{rule_id}';
+    url: '/bots/{bot_id}/acl/rules/{rule_id}';
 };
 
-export type DeleteBotsByBotIdBlacklistByRuleIdErrors = {
+export type DeleteBotsByBotIdAclRulesByRuleIdErrors = {
     /**
      * Bad Request
      */
@@ -1924,14 +2060,59 @@ export type DeleteBotsByBotIdBlacklistByRuleIdErrors = {
     500: HandlersErrorResponse;
 };
 
-export type DeleteBotsByBotIdBlacklistByRuleIdError = DeleteBotsByBotIdBlacklistByRuleIdErrors[keyof DeleteBotsByBotIdBlacklistByRuleIdErrors];
+export type DeleteBotsByBotIdAclRulesByRuleIdError = DeleteBotsByBotIdAclRulesByRuleIdErrors[keyof DeleteBotsByBotIdAclRulesByRuleIdErrors];
 
-export type DeleteBotsByBotIdBlacklistByRuleIdResponses = {
+export type DeleteBotsByBotIdAclRulesByRuleIdResponses = {
     /**
      * No Content
      */
     204: unknown;
 };
+
+export type PutBotsByBotIdAclRulesByRuleIdData = {
+    /**
+     * Rule payload
+     */
+    body: AclUpdateRuleRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Rule ID
+         */
+        rule_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acl/rules/{rule_id}';
+};
+
+export type PutBotsByBotIdAclRulesByRuleIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdAclRulesByRuleIdError = PutBotsByBotIdAclRulesByRuleIdErrors[keyof PutBotsByBotIdAclRulesByRuleIdErrors];
+
+export type PutBotsByBotIdAclRulesByRuleIdResponses = {
+    /**
+     * OK
+     */
+    200: AclRule;
+};
+
+export type PutBotsByBotIdAclRulesByRuleIdResponse = PutBotsByBotIdAclRulesByRuleIdResponses[keyof PutBotsByBotIdAclRulesByRuleIdResponses];
 
 export type PostBotsByBotIdCliMessagesData = {
     /**
@@ -5339,125 +5520,6 @@ export type GetBotsByBotIdWebWsErrors = {
 
 export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
 
-export type GetBotsByBotIdWhitelistData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/whitelist';
-};
-
-export type GetBotsByBotIdWhitelistErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdWhitelistError = GetBotsByBotIdWhitelistErrors[keyof GetBotsByBotIdWhitelistErrors];
-
-export type GetBotsByBotIdWhitelistResponses = {
-    /**
-     * OK
-     */
-    200: AclListRulesResponse;
-};
-
-export type GetBotsByBotIdWhitelistResponse = GetBotsByBotIdWhitelistResponses[keyof GetBotsByBotIdWhitelistResponses];
-
-export type PutBotsByBotIdWhitelistData = {
-    /**
-     * Whitelist payload
-     */
-    body: AclUpsertRuleRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/whitelist';
-};
-
-export type PutBotsByBotIdWhitelistErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutBotsByBotIdWhitelistError = PutBotsByBotIdWhitelistErrors[keyof PutBotsByBotIdWhitelistErrors];
-
-export type PutBotsByBotIdWhitelistResponses = {
-    /**
-     * OK
-     */
-    200: AclRule;
-};
-
-export type PutBotsByBotIdWhitelistResponse = PutBotsByBotIdWhitelistResponses[keyof PutBotsByBotIdWhitelistResponses];
-
-export type DeleteBotsByBotIdWhitelistByRuleIdData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Rule ID
-         */
-        rule_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/whitelist/{rule_id}';
-};
-
-export type DeleteBotsByBotIdWhitelistByRuleIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteBotsByBotIdWhitelistByRuleIdError = DeleteBotsByBotIdWhitelistByRuleIdErrors[keyof DeleteBotsByBotIdWhitelistByRuleIdErrors];
-
-export type DeleteBotsByBotIdWhitelistByRuleIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
 export type DeleteBotsByIdData = {
     body?: never;
     path: {
@@ -7283,6 +7345,40 @@ export type GetProvidersNameByNameResponses = {
 
 export type GetProvidersNameByNameResponse = GetProvidersNameByNameResponses[keyof GetProvidersNameByNameResponses];
 
+export type GetProvidersOauthCallbackData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Authorization code
+         */
+        code: string;
+        /**
+         * State parameter
+         */
+        state: string;
+    };
+    url: '/providers/oauth/callback';
+};
+
+export type GetProvidersOauthCallbackErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+};
+
+export type GetProvidersOauthCallbackError = GetProvidersOauthCallbackErrors[keyof GetProvidersOauthCallbackErrors];
+
+export type GetProvidersOauthCallbackResponses = {
+    /**
+     * HTML success page
+     */
+    200: string;
+};
+
+export type GetProvidersOauthCallbackResponse = GetProvidersOauthCallbackResponses[keyof GetProvidersOauthCallbackResponses];
+
 export type DeleteProvidersByIdData = {
     body?: never;
     path: {
@@ -7478,6 +7574,108 @@ export type GetProvidersByIdModelsResponses = {
 };
 
 export type GetProvidersByIdModelsResponse = GetProvidersByIdModelsResponses[keyof GetProvidersByIdModelsResponses];
+
+export type GetProvidersByIdOauthAuthorizeData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/oauth/authorize';
+};
+
+export type GetProvidersByIdOauthAuthorizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProvidersByIdOauthAuthorizeError = GetProvidersByIdOauthAuthorizeErrors[keyof GetProvidersByIdOauthAuthorizeErrors];
+
+export type GetProvidersByIdOauthAuthorizeResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type GetProvidersByIdOauthAuthorizeResponse = GetProvidersByIdOauthAuthorizeResponses[keyof GetProvidersByIdOauthAuthorizeResponses];
+
+export type GetProvidersByIdOauthStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/oauth/status';
+};
+
+export type GetProvidersByIdOauthStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProvidersByIdOauthStatusError = GetProvidersByIdOauthStatusErrors[keyof GetProvidersByIdOauthStatusErrors];
+
+export type GetProvidersByIdOauthStatusResponses = {
+    /**
+     * OK
+     */
+    200: ProvidersOAuthStatus;
+};
+
+export type GetProvidersByIdOauthStatusResponse = GetProvidersByIdOauthStatusResponses[keyof GetProvidersByIdOauthStatusResponses];
+
+export type DeleteProvidersByIdOauthTokenData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/oauth/token';
+};
+
+export type DeleteProvidersByIdOauthTokenErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteProvidersByIdOauthTokenError = DeleteProvidersByIdOauthTokenErrors[keyof DeleteProvidersByIdOauthTokenErrors];
+
+export type DeleteProvidersByIdOauthTokenResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type PostProvidersByIdTestData = {
     body?: never;
