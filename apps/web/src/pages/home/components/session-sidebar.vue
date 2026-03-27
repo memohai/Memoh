@@ -49,6 +49,21 @@
       </InputGroup>
     </div>
 
+    <div class="px-1.5 shrink-0">
+      <Button
+        variant="ghost"
+        class="w-full h-12 justify-start gap-4.5 text-xs font-medium"
+        :disabled="!currentBotId"
+        @click="handleNewSession"
+      >
+        <FontAwesomeIcon
+          :icon="['fas', 'plus']"
+          class="size-3"
+        />
+        {{ t('chat.newSession') }}
+      </Button>
+    </div>
+
     <div class="px-3.5 h-[38px] flex items-center shrink-0">
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
@@ -113,20 +128,6 @@
         />
       </div>
     </ScrollArea>
-
-    <div class="p-4 shrink-0">
-      <Button
-        class="w-full h-[34px] justify-start gap-1.5 text-xs font-medium"
-        :disabled="!currentBotId"
-        @click="handleNewSession"
-      >
-        <FontAwesomeIcon
-          :icon="['fas', 'plus']"
-          class="size-3"
-        />
-        {{ t('chat.newSession') }}
-      </Button>
-    </div>
   </div>
 </template>
 

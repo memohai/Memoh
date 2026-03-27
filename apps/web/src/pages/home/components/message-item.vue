@@ -3,7 +3,7 @@
     class="flex gap-3 items-start"
     :class="message.role === 'user' && isSelf ? 'justify-end' : ''"
   >
-    <!-- Assistant avatar -->
+    <!-- Assistant avatar
     <div
       v-if="message.role === 'assistant'"
       class="relative shrink-0"
@@ -25,7 +25,7 @@
         v-if="message.platform"
         :platform="message.platform"
       />
-    </div>
+    </div> -->
 
     <!-- User avatar (other sender, left-aligned) -->
     <div
@@ -54,13 +54,13 @@
       :class="contentClass"
       data-chat-content
     >
-      <!-- Sender name for non-self user messages -->
+      <!-- Sender name for non-self user messages
       <p
         v-if="message.role === 'user' && !isSelf"
         class="text-xs text-muted-foreground mb-1"
       >
         {{ message.senderDisplayName || senderFallbackName }}
-      </p>
+      </p> -->
 
       <!-- User message -->
       <div
@@ -100,12 +100,12 @@
         class="space-y-3"
       >
         <!-- Bot name label -->
-        <p
+        <!-- <p
           v-if="botName"
           class="text-xs text-muted-foreground"
         >
           {{ botName }}
-        </p>
+        </p> -->
 
         <template
           v-for="(block, i) in message.blocks"
@@ -196,9 +196,9 @@ import ToolCallBlock from './tool-call-block.vue'
 import AttachmentBlock from './attachment-block.vue'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 import { useUserStore } from '@/store/user'
-import { useChatStore } from '@/store/chat-list'
-import { storeToRefs } from 'pinia'
-import { useI18n } from 'vue-i18n'
+// import { useChatStore } from '@/store/chat-list'
+// import { storeToRefs } from 'pinia'
+// import { useI18n } from 'vue-i18n'
 import type {
   ChatMessage,
   ThinkingBlock as ThinkingBlockType,
@@ -215,17 +215,17 @@ const props = defineProps<{
 }>()
 
 const userStore = useUserStore()
-const chatStore = useChatStore()
-const { currentBotId, bots } = storeToRefs(chatStore)
+// const chatStore = useChatStore()
+// const { currentBotId, bots } = storeToRefs(chatStore)
 
 const isSelf = computed(() => props.message.isSelf !== false)
 
-const currentBot = computed(() =>
-  bots.value.find((b) => b.id === currentBotId.value) ?? null,
-)
+// const currentBot = computed(() =>
+//   bots.value.find((b) => b.id === currentBotId.value) ?? null,
+// )
 
-const botAvatarUrl = computed(() => currentBot.value?.avatar_url ?? '')
-const botName = computed(() => currentBot.value?.display_name ?? '')
+// const botAvatarUrl = computed(() => currentBot.value?.avatar_url ?? '')
+// const botName = computed(() => currentBot.value?.display_name ?? '')
 
 const selfAvatarUrl = computed(() =>
   props.message.senderAvatarUrl || userStore.userInfo.avatarUrl || '',
@@ -238,15 +238,15 @@ const selfFallback = computed(() => {
   return name.slice(0, 2).toUpperCase() || 'U'
 })
 
-const { t } = useI18n()
+// const { t } = useI18n()
 
-const senderFallbackName = computed(() => {
-  const p = (props.message.platform ?? '').trim()
-  const platformLabel = p
-    ? t(`bots.channels.types.${p}`, p.charAt(0).toUpperCase() + p.slice(1))
-    : ''
-  return t('chat.unknownUser', { platform: platformLabel })
-})
+// const senderFallbackName = computed(() => {
+//   const p = (props.message.platform ?? '').trim()
+//   const platformLabel = p
+//     ? t(`bots.channels.types.${p}`, p.charAt(0).toUpperCase() + p.slice(1))
+//     : ''
+//   return t('chat.unknownUser', { platform: platformLabel })
+// })
 
 const senderFallback = computed(() => {
   const name = props.message.senderDisplayName ?? ''

@@ -1,10 +1,12 @@
 <template>
   <div class="flex h-full">
-    <SessionSidebar />
-    <div class="flex-1 flex flex-col min-w-0">
-      <ChatArea />
-    </div>
-    <SessionMetadata />
+    <template v-if="currentBotId">
+      <SessionSidebar />
+      <div class="flex-1 flex flex-col min-w-0">
+        <ChatArea />
+      </div>
+      <SessionMetadata />
+    </template>
   </div>
 </template>
 
