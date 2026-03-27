@@ -129,16 +129,16 @@
         <template #sidebar-footer />
 
         <template #detail>
-          <ScrollArea class="max-h-full h-full">
-            <section class="p-4">
+          <div class="absolute inset-0 overflow-y-auto">
+            <div class="p-4">
               <KeepAlive>
                 <component
                   :is="activeComponent?.component"
                   v-bind="activeComponent?.params"
                 />
               </KeepAlive>
-            </section>
-          </ScrollArea>
+            </div>
+          </div>
         </template>
       </MasterDetailSidebarLayout>
     </div>
@@ -213,7 +213,6 @@ import {
   Input,
   Separator,
   Spinner,
-  ScrollArea,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
