@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: memoh
       POSTGRES_PASSWORD: memoh123
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - /etc/localtime:/etc/localtime:ro
     ports:
       - "${MEMOH_DEV_POSTGRES_PORT:-15432}:5432"
