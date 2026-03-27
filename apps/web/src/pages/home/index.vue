@@ -5,7 +5,7 @@
       <div class="flex-1 flex flex-col min-w-0">
         <ChatArea />
       </div>
-      <SessionMetadata />
+      <!-- <SessionMetadata /> -->
     </template>
   </div>
 </template>
@@ -16,7 +16,7 @@ import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
 import SessionSidebar from './components/session-sidebar.vue'
-import SessionMetadata from './components/session-metadata.vue'
+// import SessionMetadata from './components/session-metadata.vue'
 import ChatArea from './components/chat-area.vue'
 
 const route = useRoute()
