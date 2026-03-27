@@ -82,10 +82,8 @@ func newestContainerID(containers []ctr.ContainerInfo) (string, bool) {
 // ---------------------------------------------------------------------------
 
 func (m *Manager) isTaskRunning(ctx context.Context, containerID string) bool {
-	tasks, err := m.service.ListTasks(ctx, &ctr.ListTasksOptions{
-		Filter: "container.id==" + containerID,
-	})
-	return err == nil && len(tasks) > 0 && tasks[0].Status == ctr.TaskStatusRunning
+	task, err := m.service.GetTaskInfo(ctx, containerID)
+	return err == nil && task.Status == ctr.TaskStatusRunning
 }
 
 func (m *Manager) setupNetworkAndGetIP(ctx context.Context, containerID string) (string, error) {
@@ -152,14 +150,9 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 		return m.SetupBotContainer(ctx, botID)
 	}
 
-	tasks, err := m.service.ListTasks(ctx, &ctr.ListTasksOptions{
-		Filter: "container.id==" + containerID,
-	})
-	if err != nil {
-		return err
-	}
-	if len(tasks) > 0 {
-		if tasks[0].Status == ctr.TaskStatusRunning {
+	taskInfo, err := m.service.GetTaskInfo(ctx, containerID)
+	if err == nil {
+		if taskInfo.Status == ctr.TaskStatusRunning {
 			return m.setupNetworkOrFail(ctx, containerID, botID)
 		}
 		if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
@@ -169,6 +162,8 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 				return err
 			}
 		}
+	} else if !errdefs.IsNotFound(err) {
+		return err
 	}
 
 	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
