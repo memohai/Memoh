@@ -11,3 +11,7 @@ services:
     image: memoh.cn/memohai/web:latest
   browser:
     image: memoh.cn/memohai/browser:latest
+  browser-chromium:
+    image: memoh.cn/memohai/browser-chromium:latest
+  browser-firefox:
+    image: memoh.cn/memohai/browser-firefox:latest

@@ -104,15 +104,42 @@ services:
 
   browser:
     image: memohai/browser:latest
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.browser
-      args:
-        BROWSER_CORES: ${BROWSER_CORES:-chromium,firefox}
     container_name: memoh-browser
     profiles: [browser]
     environment:
-      - BROWSER_CORES=${BROWSER_CORES:-chromium,firefox}
+      - BROWSER_CORES=chromium,firefox
+    volumes:
+      - ${MEMOH_CONFIG:-./config.toml}:/config.toml:ro
+    ports:
+      - "8083:8083"
+    depends_on:
+      - server
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  browser-chromium:
+    image: memohai/browser-chromium:latest
+    container_name: memoh-browser
+    profiles: [browser-chromium]
+    environment:
+      - BROWSER_CORES=chromium
+    volumes:
+      - ${MEMOH_CONFIG:-./config.toml}:/config.toml:ro
+    ports:
+      - "8083:8083"
+    depends_on:
+      - server
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  browser-firefox:
+    image: memohai/browser-firefox:latest
+    container_name: memoh-browser
+    profiles: [browser-firefox]
+    environment:
+      - BROWSER_CORES=firefox
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/config.toml:ro
     ports:

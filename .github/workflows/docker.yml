@@ -36,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [server, web, browser, sparse]
+        image: [server, web, browser, browser-chromium, browser-firefox, sparse]
         platform: [linux/amd64, linux/arm64]
         include:
           - image: server
@@ -45,6 +45,10 @@ jobs:
             dockerfile: docker/Dockerfile.web
           - image: browser
             dockerfile: docker/Dockerfile.browser
+          - image: browser-chromium
+            dockerfile: docker/Dockerfile.browser-chromium
+          - image: browser-firefox
+            dockerfile: docker/Dockerfile.browser-firefox
           - image: sparse
             dockerfile: docker/Dockerfile.sparse
           - platform: linux/amd64
@@ -130,7 +134,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        image: [server, web, browser, sparse]
+        image: [server, web, browser, browser-chromium, browser-firefox, sparse]
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4

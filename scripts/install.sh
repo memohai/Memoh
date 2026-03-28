@@ -107,7 +107,7 @@ WORKSPACE="$WORKSPACE_DEFAULT"
 MEMOH_DATA_DIR="$MEMOH_DATA_DIR_DEFAULT"
 USE_CN_MIRROR="${USE_CN_MIRROR:-false}"
 USE_SPARSE="${USE_SPARSE:-false}"
-BROWSER_CORES="${BROWSER_CORES:-chromium,firefox}"
+BROWSER_PROFILE="${BROWSER_PROFILE:-browser-chromium}"
 
 if [ "$SILENT" = false ]; then
   echo "Configure Memoh (press Enter to use defaults):" > /dev/tty
@@ -159,15 +159,15 @@ if [ "$SILENT" = false ]; then
 
   echo "" > /dev/tty
   echo "  Browser core selection:" > /dev/tty
-  echo "    1) Chromium only (smaller image)" > /dev/tty
+  echo "    1) Chromium only (default, smaller image)" > /dev/tty
   echo "    2) Firefox only" > /dev/tty
-  echo "    3) Both Chromium and Firefox (default)" > /dev/tty
-  printf "  Browser core [3]: " > /dev/tty
+  echo "    3) Both Chromium and Firefox" > /dev/tty
+  printf "  Browser core [1]: " > /dev/tty
   read -r input < /dev/tty || true
   case "$input" in
-    1) BROWSER_CORES="chromium" ;;
-    2) BROWSER_CORES="firefox" ;;
-    *) BROWSER_CORES="chromium,firefox" ;;
+    2) BROWSER_PROFILE="browser-firefox" ;;
+    3) BROWSER_PROFILE="browser" ;;
+    *) BROWSER_PROFILE="browser-chromium" ;;
   esac
 
   echo "" > /dev/tty
@@ -206,6 +206,8 @@ if [ "$MEMOH_DOCKER_VERSION" != "latest" ]; then
     sed -i.bak "s|memohai/server:latest|memohai/server:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
     sed -i.bak "s|memohai/agent:latest|memohai/agent:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
     sed -i.bak "s|memohai/web:latest|memohai/web:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
+    sed -i.bak "s|memohai/browser-chromium:latest|memohai/browser-chromium:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
+    sed -i.bak "s|memohai/browser-firefox:latest|memohai/browser-firefox:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
     sed -i.bak "s|memohai/browser:latest|memohai/browser:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
     sed -i.bak "s|memohai/sparse:latest|memohai/sparse:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
     rm -f docker-compose.yml.bak
@@ -231,7 +233,7 @@ export MEMOH_DATA_DIR
 mkdir -p "$MEMOH_DATA_DIR"
 
 COMPOSE_FILES="-f docker-compose.yml"
-COMPOSE_PROFILES="--profile qdrant --profile browser"
+COMPOSE_PROFILES="--profile qdrant --profile $BROWSER_PROFILE"
 if [ "$USE_SPARSE" = true ]; then
   COMPOSE_PROFILES="$COMPOSE_PROFILES --profile sparse"
   echo "${GREEN}✓ Sparse memory service enabled${NC}"
@@ -246,17 +248,12 @@ fi
 echo POSTGRES_PASSWORD="${PG_PASS}" >> .env
 echo MEMOH_CONFIG=./config.toml >> .env
 echo MEMOH_DATA_DIR="${MEMOH_DATA_DIR}" >> .env
-echo BROWSER_CORES="${BROWSER_CORES}" >> .env
 echo USE_SPARSE="${USE_SPARSE}" >> .env
-echo "${GREEN}✓ Browser cores: ${BROWSER_CORES}${NC}"
+echo "${GREEN}✓ Browser profile: ${BROWSER_PROFILE}${NC}"
 
 echo ""
-echo "${GREEN}Pulling latest Docker images...${NC}"
-$DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES pull --ignore-buildable
-
-echo ""
-echo "${GREEN}Building browser image (cores: ${BROWSER_CORES})...${NC}"
-$DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES build browser
+echo "${GREEN}Pulling Docker images...${NC}"
+$DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES pull
 
 echo ""
 echo "${GREEN}Starting services (first startup may take a few minutes)...${NC}"
