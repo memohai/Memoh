@@ -154,7 +154,7 @@ jobs:
         if: env.PUSH == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ steps.resolve.outputs.artifact_key }}-${{ strategy.job-index }}
+          name: digests__${{ steps.resolve.outputs.artifact_key }}__${{ strategy.job-index }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -202,7 +202,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-${{ matrix.artifact_key }}-*
+          pattern: digests__${{ matrix.artifact_key }}__*
           merge-multiple: true
 
       - name: Set up Docker Buildx
