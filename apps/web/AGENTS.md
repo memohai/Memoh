@@ -2,7 +2,7 @@
 
 ## Overview
 
-`@memohai/web` is the management UI for Memoh, built with Vue 3 + Vite. It provides visual configuration for bots, models, channels, memory, and more.
+`@memohai/web` is the management UI for Memoh, built with Vue 3 + Vite. It provides a chat interface for interacting with bots, plus visual configuration for bots, models, channels, memory, and more.
 
 ## Tech Stack
 
@@ -16,7 +16,7 @@
 | Data Fetching | Pinia Colada (`@pinia/colada`) + `@memohai/sdk` |
 | Forms | vee-validate + `@vee-validate/zod` + Zod |
 | i18n | vue-i18n (en / zh) |
-| Icons | FontAwesome (primary) + lucide-vue-next (secondary) |
+| Icons | FontAwesome (primary: fas/far/fab) + lucide-vue-next (secondary) |
 | Toast | vue-sonner |
 | Tables | @tanstack/vue-table |
 | Markdown | markstream-vue + Shiki + Mermaid + KaTeX |
@@ -27,38 +27,66 @@
 
 ```
 src/
-├── App.vue                    # Root component (RouterView + Toaster)
+├── App.vue                    # Root component (RouterView + Toaster + settings init)
 ├── main.ts                    # App entry (plugins, global components, API client setup)
-├── router.ts                  # Route definitions and auth guard
+├── router.ts                  # Route definitions, auth guard, chunk error recovery
 ├── style.css                  # Tailwind imports (delegates to @memohai/ui/style.css)
 ├── i18n.ts                    # vue-i18n configuration
-├── assets/                    # Static assets
+├── assets/                    # Static assets (logo.png, vue.svg)
 ├── components/                # Shared components
-│   ├── sidebar/               #   App sidebar navigation
-│   ├── main-container/        #   Main content area (header + breadcrumb + content)
+│   ├── sidebar/               #   Bot list sidebar (collapsible, bot items, settings link)
+│   │   ├── index.vue          #     Sidebar with bot list + settings gear footer
+│   │   └── bot-item.vue       #     Individual bot entry in sidebar
+│   ├── settings-sidebar/      #   Settings section sidebar (back-to-chat + nav items)
+│   ├── main-container/        #   Main content area (KeepAlive RouterView)
 │   ├── master-detail-sidebar-layout/  # Master-detail layout pattern
+│   ├── chat-list/             #   Chat list helpers
+│   │   └── channel-badge/     #     Channel badge component
+│   ├── chat/                  #   Chat UI sub-components
+│   │   ├── chat-status/       #     Chat connection status indicator
+│   │   └── chat-step/         #     Chat processing step indicator
 │   ├── data-table/            #   TanStack table wrapper
+│   ├── file-manager/          #   File browser (list + viewer)
+│   ├── monaco-editor/         #   Monaco code editor wrapper
 │   ├── form-dialog-shell/     #   Dialog wrapper for forms
 │   ├── confirm-popover/       #   Confirmation popover
 │   ├── loading-button/        #   Button with loading state
 │   ├── status-dot/            #   Status indicator dot
 │   ├── warning-banner/        #   Warning banner
-│   ├── search-provider-logo/  #   Search provider icons
+│   ├── channel-icon/          #   Channel platform icon
+│   ├── provider-icon/         #   LLM provider icon (icons.ts + index.vue)
+│   ├── search-provider-logo/  #   Search provider icons (custom-icons.ts + index.vue)
 │   ├── searchable-select-popover/  # Searchable dropdown
+│   ├── timezone-select/       #   Timezone selector
+│   ├── key-value-editor/      #   Key-value pair editor
+│   ├── import-models-dialog/  #   Bulk model import dialog
 │   ├── add-platform/          #   Add platform dialog
 │   ├── add-provider/          #   Add LLM provider dialog
-│   ├── create-model/          #   Create model dialog
-│   └── chat-list/             #   Chat list helpers
+│   └── create-model/          #   Create model dialog
 ├── composables/               # Reusable composition functions
-│   ├── api/                   #   API-related composables (chat, SSE, platform)
+│   ├── api/                   #   API-related composables
+│   │   ├── useChat.ts         #     Aggregated re-export of chat composables
+│   │   ├── useChat.types.ts   #     Bot, Session, Message, StreamEvent types
+│   │   ├── useChat.chat-api.ts  #   Bot/session CRUD (fetchBots, fetchSessions, etc.)
+│   │   ├── useChat.message-api.ts  # Message fetch, SSE streaming, local channel
+│   │   ├── useChat.sse.ts     #     SSE stream reader and parser
+│   │   ├── useChat.ws.ts      #     WebSocket connection (send, abort, reconnect)
+│   │   ├── useChat.content.ts #     Message content parsing (tool calls, text, reasoning)
+│   │   ├── useChat.sse.test.ts  #   SSE parser tests
+│   │   ├── useContainerStream.ts  # Container creation SSE stream
+│   │   └── usePlatform.ts     #     Platform list query + create mutation
 │   ├── useDialogMutation.ts   #   Mutation wrapper with toast error handling
 │   ├── useRetryingStream.ts   #   SSE retry with exponential backoff
 │   ├── useSyncedQueryParam.ts #   URL query param sync
 │   ├── useBotStatusMeta.ts    #   Bot status metadata
 │   ├── useAvatarInitials.ts   #   Avatar initial generation
 │   ├── useClipboard.ts        #   Clipboard utilities
-│   └── useKeyValueTags.ts     #   Tag management
-├── constants/                 # Constants (client types, etc.)
+│   ├── useKeyValueTags.ts     #   Tag management
+│   ├── useShikiHighlighter.ts #   Shiki syntax highlighter singleton
+│   └── useTerminalCache.ts    #   Terminal output cache
+├── constants/                 # Constants
+│   ├── client-types.ts        #   LLM client type definitions
+│   └── compatibilities.ts     #   Feature compatibility flags
 ├── i18n/locales/              # Translation files (en.json, zh.json)
 ├── layout/
 │   └── main-layout/           # Top-level layout (SidebarProvider)
@@ -66,53 +94,140 @@ src/
 │   └── api-client.ts          # SDK client setup (base URL, auth interceptor)
 ├── pages/                     # Route page components
 │   ├── login/                 #   Login page
-│   ├── main-section/          #   Authenticated layout wrapper
-│   ├── home/                  #   Home page
-│   ├── chat/                  #   Chat interface (SSE streaming)
+│   ├── main-section/          #   Chat section layout (bot sidebar + main container)
+│   ├── settings-section/      #   Settings section layout (settings sidebar + KeepAlive)
+│   ├── home/                  #   Chat interface (used by both `/` and `/chat/:botId?/:sessionId?`)
+│   │   ├── index.vue          #     Route ↔ store sync, session sidebar + chat area
+│   │   ├── composables/       #     Page-specific composables
+│   │   │   ├── useFileManagerProvider.ts  # File manager context
+│   │   │   └── useMediaGallery.ts         # Media gallery state
+│   │   └── components/        #     Chat UI components (26 files)
+│   │       ├── chat-area.vue          # Main chat area (messages, input, attachments)
+│   │       ├── session-sidebar.vue    # Session list sidebar (search, filter, CRUD)
+│   │       ├── bot-sidebar.vue        # Alternative bot sidebar layout
+│   │       ├── chat-header.vue        # Chat top bar (status, step indicator)
+│   │       ├── message-item.vue       # Single message (user/assistant, markdown, blocks)
+│   │       ├── session-item.vue       # Session list row (avatar, title, timestamp)
+│   │       ├── session-metadata.vue   # Collapsible session metadata panel
+│   │       ├── bot-item.vue           # Bot item in sidebar
+│   │       ├── thinking-block.vue     # Collapsible thinking/reasoning block
+│   │       ├── attachment-block.vue   # Attachment grid (images, audio, files)
+│   │       ├── media-gallery-lightbox.vue  # Fullscreen media lightbox
+│   │       ├── tool-call-generic.vue  # Generic tool call (name, status, JSON I/O)
+│   │       ├── tool-call-list.vue     # File listing tool display
+│   │       ├── tool-call-read.vue     # File read tool display
+│   │       ├── tool-call-write.vue    # File write tool display
+│   │       ├── tool-call-edit.vue     # File edit tool display
+│   │       ├── tool-call-exec.vue     # Command execution tool display
+│   │       ├── tool-call-web-search.vue    # Web search tool display
+│   │       ├── tool-call-web-fetch.vue     # Web fetch tool display
+│   │       ├── tool-call-browser.vue       # Browser action tool display
+│   │       ├── tool-call-memory.vue        # Memory read/write tool display
+│   │       ├── tool-call-message.vue       # Send message tool display
+│   │       ├── tool-call-email.vue         # Email tool display
+│   │       ├── tool-call-schedule.vue      # Schedule tool display
+│   │       ├── tool-call-contacts.vue      # Contacts tool display
+│   │       ├── tool-call-subagent.vue      # Sub-agent tool display
+│   │       └── tool-call-skill.vue         # Skill activation tool display
 │   ├── bots/                  #   Bot list + detail (tabs: overview, memory, channels, etc.)
+│   │   ├── index.vue          #     Bot grid with create dialog
+│   │   ├── detail.vue         #     Bot detail with tabbed interface
+│   │   └── components/        #     Bot sub-components (25+ files)
 │   ├── models/                #   LLM provider & model management
-│   ├── search-providers/      #   Search provider management
+│   ├── search-providers/      #   Search provider management (12+ engine configs)
+│   ├── memory-providers/      #   Memory provider management
+│   ├── tts-providers/         #   TTS provider & model management
 │   ├── email-providers/       #   Email provider management
-│   ├── settings/              #   User settings (profile, password, theme, channels)
-│   └── platform/              #   Platform management
+│   ├── browser-contexts/      #   Browser context management
+│   ├── usage/                 #   Token usage statistics
+│   ├── settings/              #   User settings (profile, password, bind codes)
+│   ├── platform/              #   Platform management
+│   └── oauth/                 #   OAuth callback pages
+│       └── mcp-callback.vue   #     MCP OAuth callback handler
 ├── store/                     # Pinia stores
 │   ├── user.ts                #   User state, JWT token, login/logout
 │   ├── settings.ts            #   UI settings (theme, language)
 │   ├── capabilities.ts        #   Server capabilities (container backend)
-│   └── chat-list.ts           #   Chat state, messages, SSE streaming
+│   ├── chat-selection.ts      #   Current bot/session selection (localStorage persisted)
+│   └── chat-list.ts           #   Chat messages, streaming state, SSE/WS event processing
 └── utils/                     # Utility functions
     ├── api-error.ts           #   API error message extraction
     ├── date-time.ts           #   Date/time formatting
+    ├── date-time.test.ts      #   Date/time tests
     ├── channel-icons.ts       #   Channel platform icons
-    └── key-value-tags.ts      #   Tag ↔ Record conversion
+    ├── key-value-tags.ts      #   Tag ↔ Record conversion
+    ├── key-value-tags.test.ts #   Tag conversion tests
+    ├── image-ref.ts           #   Image reference URL resolution
+    ├── image-ref.test.ts      #   Image ref tests
+    ├── timezones.ts           #   Timezone list and utilities
+    └── useControlVisibleStatus.ts  # Visibility control utility
 ```
 
 ## Routes
 
+The app uses a two-section layout architecture:
+
+### Chat Section (`/`)
+
+| Path | Name | Component | Description |
+|------|------|-----------|-------------|
+| `/` | home | `home/index.vue` | Home — empty state when no bot selected |
+| `/chat/:botId?/:sessionId?` | chat | `home/index.vue` | Chat interface with bot + session params |
+
+Both routes render the same `home/index.vue` component. The `home` route shows an empty state; the `chat` route auto-selects a bot and optionally a session based on URL params. URL and store state are bidirectionally synced.
+
+### Settings Section (`/settings`)
+
+| Path | Name | Component | Description |
+|------|------|-----------|-------------|
+| `/settings/bots` | bots | `bots/index.vue` | Bot list grid |
+| `/settings/bots/:botId` | bot-detail | `bots/detail.vue` | Bot detail with tabs |
+| `/settings/models` | models | `models/index.vue` | LLM provider & model management |
+| `/settings/search-providers` | search-providers | `search-providers/index.vue` | Search provider management |
+| `/settings/memory-providers` | memory-providers | `memory-providers/index.vue` | Memory provider management |
+| `/settings/tts-providers` | tts-providers | `tts-providers/index.vue` | TTS provider & model management |
+| `/settings/email-providers` | email-providers | `email-providers/index.vue` | Email provider management |
+| `/settings/browser-contexts` | browser-contexts | `browser-contexts/index.vue` | Browser context management |
+| `/settings/usage` | usage | `usage/index.vue` | Token usage statistics |
+| `/settings/profile` | settings | `settings/index.vue` | User profile settings |
+| `/settings/platform` | platform | `platform/index.vue` | Platform management |
+
+`/settings` redirects to `/settings/bots` by default.
+
+### Standalone Routes
+
 | Path | Name | Component | Description |
 |------|------|-----------|-------------|
 | `/login` | Login | `login/index.vue` | Login form (no auth required) |
-| `/chat` | chat | `chat/index.vue` | Chat interface with bot sidebar |
-| `/home` | home | `home/index.vue` | Home dashboard |
-| `/bots` | bots | `bots/index.vue` | Bot list grid |
-| `/bots/:botId` | bot-detail | `bots/detail.vue` | Bot detail with tabs |
-| `/models` | models | `models/index.vue` | LLM provider & model management |
-| `/search-providers` | search-providers | `search-providers/index.vue` | Search provider management |
-| `/email-providers` | email-providers | `email-providers/index.vue` | Email provider management |
-| `/settings` | settings | `settings/index.vue` | User settings |
-| `/platform` | platform | `platform/index.vue` | Platform management |
+| `/oauth/mcp/callback` | oauth-mcp-callback | `oauth/mcp-callback.vue` | MCP OAuth callback (no auth required) |
 
-Auth guard: all routes except `/login` require `localStorage.getItem('token')`. Logged-in users accessing `/login` are redirected to `/chat`.
+### Auth Guard
+
+- All routes except `/login` and `/oauth/*` require `localStorage.getItem('token')`.
+- Logged-in users accessing `/login` are redirected to `/`.
+- Chunk load errors (dynamic import failures) trigger an automatic page reload.
+- Tauri integration: `afterEach` hook calls `resize_for_route` when running inside Tauri.
 
 ## Layout System
 
-Three-tier layout architecture:
+Two-section layout architecture, both sharing the same `MainLayout` wrapper:
 
 1. **MainLayout** (`layout/main-layout/`) — Top-level wrapper using `SidebarProvider` from `@memohai/ui`. Provides `#sidebar` and `#main` slots.
-2. **Sidebar** (`components/sidebar/`) — Collapsible navigation with logo, menu items, and user avatar footer. Active route highlighting.
-3. **MainContainer** (`components/main-container/`) — Header (sidebar trigger + breadcrumb) + scrollable content area with `<KeepAlive>` wrapped `<RouterView>`.
 
-Several pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (chat, models, search providers, email providers).
+2. **Chat Section** (`pages/main-section/`) — Uses `MainLayout` with:
+   - **Sidebar** (`components/sidebar/`) — Bot list sidebar (collapsible). Header shows "Bots" label + create button. Body lists all bots as `BotItem` entries. Footer has a settings gear link to `/settings`.
+   - **MainContainer** (`components/main-container/`) — `<KeepAlive>` wrapped `<RouterView>` for chat pages.
+
+3. **Settings Section** (`pages/settings-section/`) — Uses `MainLayout` with:
+   - **SettingsSidebar** (`components/settings-sidebar/`) — Collapsible settings navigation. Top has a "back to chat" button that restores the last selected bot/session. Menu items: Bots, Models, Search Providers, Memory Providers, TTS Providers, Email Providers, Browser Contexts, Usage, Settings, Platform.
+   - **SidebarInset** — `<KeepAlive>` wrapped `<RouterView>` for settings pages.
+
+4. **Home/Chat Page** (`pages/home/`) — Internal layout:
+   - **SessionSidebar** — Left panel: session search, source filter, new session button, session list.
+   - **ChatArea** — Center panel: message list with scroll, input area with attachments.
+   - **SessionMetadata** — Right panel (currently disabled): collapsible session metadata.
+
+Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (models, search providers, email providers, memory providers, tts providers, browser contexts).
 
 ## CSS & Theming
 
@@ -141,7 +256,7 @@ CSS-based configuration (no `tailwind.config.*` file). All design tokens (CSS va
 
 ## UI Components (@memohai/ui)
 
-All UI primitives are provided by `@memohai/ui` (40+ components built on Reka UI). Do not import Reka UI directly. For the component design specification (variants, colors, elevation, spacing), see `packages/ui/DESIGN.md`.
+All UI primitives are provided by `@memohai/ui` (43 component groups built on Reka UI). Do not import Reka UI directly. For the component design specification (variants, colors, elevation, spacing), see `packages/ui/DESIGN.md`.
 
 - **Exception**: Physical UI knobs (Switch thumb, Slider thumb) may keep `bg-white` as they need to contrast against colored tracks regardless of theme.
 - **No scoped CSS modules**: Styling is done inline via utility classes.
@@ -155,16 +270,17 @@ katex/dist/katex.min.css     — Math rendering
 vue-sonner/style.css         — Toast notifications (in App.vue)
 ```
 
-`@memohai/ui` provides 40+ components built on Reka UI primitives + Tailwind + class-variance-authority:
+`@memohai/ui` provides 43 component groups built on Reka UI primitives + Tailwind + class-variance-authority:
 
-- **Form**: `Form`, `FormField`, `FormItem`, `FormControl`, `FormLabel`, `FormMessage`
-- **Input**: `Input`, `Textarea`, `InputGroup`, `NativeSelect`, `Combobox`, `TagsInput`
-- **Selection**: `Select`, `RadioGroup`, `Checkbox`, `Switch`
-- **Layout**: `Card`, `Separator`, `Sheet`, `Sidebar`, `ScrollArea`, `Collapsible`
-- **Overlays**: `Dialog`, `Popover`, `Tooltip`, `DropdownMenu`, `ContextMenu`
-- **Data**: `Table`, `Badge`, `Avatar`, `Skeleton`, `Empty`
-- **Navigation**: `Breadcrumb`, `Tabs`, `Pagination`
-- **Feedback**: `Button`, `ButtonGroup`, `Spinner`, `Alert`
+- **Form**: `Form`, `FormField`, `FormFieldArray`, `FormItem`, `FormControl`, `FormLabel`, `FormMessage`, `FormDescription`
+- **Input**: `Input`, `Textarea`, `InputGroup` (Addon, Button, Input, Text, Textarea), `NativeSelect`, `Combobox`, `TagsInput`, `InputOTP` (Group, Slot, Separator)
+- **Selection**: `Select`, `RadioGroup`, `Checkbox`, `Switch`, `Toggle`, `Slider`
+- **Layout**: `Card`, `Separator`, `Sheet`, `Sidebar` (24 sub-components), `ScrollArea`, `Collapsible`, `Item` (10 sub-components)
+- **Overlays**: `Dialog` (incl. `DialogScrollContent`), `Popover`, `Tooltip`, `DropdownMenu`, `ContextMenu`, `Command` (Dialog, Group, Input, Item, List)
+- **Data**: `Table` (9 sub-components), `Badge`, `BadgeCount`, `Avatar`, `Skeleton`, `Empty` (5 sub-components)
+- **Navigation**: `Breadcrumb`, `Tabs`, `Pagination`, `PinInput` (Group, Slot, Separator)
+- **Feedback**: `Button`, `ButtonGroup` (Separator, Text), `Spinner`, `Alert`, `Toaster` (Sonner), `Kbd`
+- **Effects**: `TextGenerateEffect`
 
 ### Form Pattern (vee-validate + Zod)
 
@@ -192,7 +308,7 @@ const form = useForm({
 
 ### Icon Usage
 
-- **FontAwesome** (primary): Global `<FontAwesomeIcon :icon="['fas', 'robot']" />`, icons registered in `main.ts`
+- **FontAwesome** (primary): Global `<FontAwesomeIcon :icon="['fas', 'robot']" />`, full `fas`/`far`/`fab` sets + custom search icons registered in `main.ts`
 - **Lucide** (secondary): Direct imports `<Sun />`, `<Moon />`, used for theme toggle
 
 ### Notification Pattern
@@ -254,25 +370,31 @@ SDK also generates colada helpers: `getBotsQuery()`, `postBotsMutation()`, query
 
 ### Pinia Stores (Client State)
 
-| Store | Purpose |
-|-------|---------|
-| `user` | JWT token (`useLocalStorage`), user info, login/logout |
-| `settings` | Theme (dark/light), language (en/zh), persisted |
-| `capabilities` | Server feature flags (container backend, snapshot support) |
-| `chat-list` | Chat messages, streaming state, SSE event processing |
+| Store | ID | Purpose |
+|-------|----|---------|
+| `user` | `user` | JWT token (`useLocalStorage`), user info (id, username, role, displayName, avatarUrl, timezone), login/logout |
+| `settings` | `settings` | Theme (dark/light), language (en/zh), synced with `useColorMode` and vue-i18n locale |
+| `capabilities` | `capabilities` | Server feature flags (container backend, snapshot support), loaded once from `getPing()` |
+| `chat-selection` | `chat-selection` | Current bot ID and session ID, persisted via `useStorage` to localStorage |
+| `chat-list` | `chat` | Chat messages, sessions, bots, streaming state, SSE/WS event processing. Depends on `chat-selection` store for current bot/session |
 
-Stores use Composition API style (`defineStore(() => { ... })`), with persistence via `pinia-plugin-persistedstate`.
+Stores use Composition API style (`defineStore(() => { ... })`), with persistence via `pinia-plugin-persistedstate` or `useStorage`.
 
-### SSE Streaming (Chat)
+### Streaming (Chat)
 
-Chat responses are streamed via Server-Sent Events:
+Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket**.
 
-- **Endpoints**: `/bots/{bot_id}/web/stream` (chat), `/bots/{bot_id}/messages/events` (real-time updates)
+#### SSE Streaming
+- **Endpoints**: `/bots/{bot_id}/web/stream` (send + stream), `/messages/events` (real-time message updates)
 - **Parsing**: `composables/api/useChat.sse.ts` reads `ReadableStream<Uint8Array>` and parses SSE `data:` lines
 - **Events**: `text_delta`, `reasoning_delta`, `tool_call_start/end`, `attachment_delta`, `processing_completed/failed`
 - **Retry**: `useRetryingStream` composable provides exponential backoff for reconnection
-- **State**: `store/chat-list.ts` processes streaming events into reactive message blocks in real-time
-- **Abort**: Stream cancellation via `AbortSignal`
+
+#### WebSocket
+- **Endpoint**: `/bots/{bot_id}/web/ws` (with token query param)
+- **Implementation**: `composables/api/useChat.ws.ts` wraps native `WebSocket` with send, abort, close, and auto-reconnect
+- **State**: `store/chat-list.ts` processes streaming events from either transport into reactive message blocks in real-time
+- **Abort**: Stream cancellation via `AbortSignal` (SSE) or close message (WS)
 
 ### Error Handling
 
@@ -308,5 +430,6 @@ Chat responses are streamed via Server-Sent Events:
 - Forms must use vee-validate + Zod schemas via `toTypedSchema()`.
 - Error messages via `resolveApiErrorMessage()` + `toast.error()`.
 - Page components go in `pages/{feature}/`; page-specific sub-components go in `pages/{feature}/components/`.
+- Page-specific composables go in `pages/{feature}/composables/`.
 - Shared components go in `components/`.
 - Composables go in `composables/`; API-specific composables in `composables/api/`.
