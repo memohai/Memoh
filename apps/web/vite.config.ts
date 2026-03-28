@@ -41,7 +41,10 @@ export default defineConfig(({ command }) => {
   }
 
   return {
-    plugins: [vue(), tailwindcss()],
+    plugins: [
+      vue(),
+      tailwindcss(),
+    ],
     optimizeDeps: {
       // Pre-bundle deps for route pages to avoid slow first load / navigation
       entries: ['src/main.ts', 'src/pages/**/*.vue'],

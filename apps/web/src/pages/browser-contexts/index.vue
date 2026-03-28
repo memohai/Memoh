@@ -6,7 +6,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput,
   Toggle,
   Empty,
   EmptyContent,
@@ -39,16 +38,9 @@ const selectContext = (id: string) => computed(() => {
   return curContext.value?.id === id
 })
 
-const searchText = ref('')
-const searchInput = ref('')
-
 const filteredContexts = computed(() => {
   if (!Array.isArray(contextData.value)) return []
-  if (!searchText.value) return contextData.value
-  const keyword = searchText.value.toLowerCase()
-  return contextData.value.filter((c: BrowsercontextsBrowserContext) => {
-    return (c.name ?? '').toLowerCase().includes(keyword)
-  })
+  return contextData.value
 })
 
 watch(filteredContexts, () => {
@@ -66,26 +58,6 @@ const openStatus = reactive({
 
 <template>
   <MasterDetailSidebarLayout>
-    <template #sidebar-header>
-      <InputGroup class="shadow-none">
-        <InputGroupInput
-          v-model="searchInput"
-          :placeholder="$t('browserContext.searchPlaceholder')"
-          aria-label="Search browser contexts"
-        />
-        <InputGroupAddon align="inline-end">
-          <InputGroupButton
-            type="button"
-            size="icon-xs"
-            aria-label="Search browser contexts"
-            @click="searchText = searchInput"
-          >
-            <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
-    </template>
-
     <template #sidebar-content>
       <SidebarMenu
         v-for="item in filteredContexts"

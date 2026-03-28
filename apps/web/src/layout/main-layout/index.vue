@@ -2,10 +2,14 @@
   <section class="flex">
     <sidebar-provider
       :default-open="sidebarDefaultOpen"
-      class="**:data-[sidebar=sidebar]:bg-transparent"
     >
-      <slot name="sidebar" />
-      <slot name="main" />
+      <section class="relative">
+        <slot name="sidebar" />
+      </section>
+    
+      <section class="main-left-section" />
+      <slot name="main" />  
+      <section class="main-right-section" />
     </sidebar-provider>
   </section>
 </template>

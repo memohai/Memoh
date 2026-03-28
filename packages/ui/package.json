@@ -30,6 +30,7 @@
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.2.2",
     "vee-validate": "^4.15.1",
+    "vue-input-otp": "^0.3.2",
     "vue-sonner": "^2.0.9",
     "zod": "3.25.76"
   },

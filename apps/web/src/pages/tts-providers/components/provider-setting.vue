@@ -7,7 +7,7 @@
           class="size-5"
         />
         <div>
-          <h2 class="text-base font-semibold">
+          <h2 class="text-sm font-semibold">
             {{ curProvider?.name }}
           </h2>
           <p class="text-xs text-muted-foreground">
@@ -46,7 +46,7 @@
         <!-- Models -->
         <section>
           <div class="flex justify-between items-center mb-4">
-            <h3 class="text-sm font-medium">
+            <h3 class="text-xs font-medium">
               {{ $t('ttsProvider.models') }}
             </h3>
             <div
@@ -72,7 +72,7 @@
 
           <div
             v-if="providerModels.length === 0"
-            class="text-sm text-muted-foreground py-4 text-center"
+            class="text-xs text-muted-foreground py-4 text-center"
           >
             {{ $t('ttsProvider.noModels') }}
           </div>
@@ -88,7 +88,7 @@
               @click="toggleModel(model.id)"
             >
               <div>
-                <span class="text-sm font-medium">{{ model.name || model.model_id }}</span>
+                <span class="text-xs font-medium">{{ model.name || model.model_id }}</span>
                 <span
                   v-if="model.name"
                   class="text-xs text-muted-foreground ml-2"

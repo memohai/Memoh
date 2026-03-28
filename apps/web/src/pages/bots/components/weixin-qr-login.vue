@@ -2,7 +2,7 @@
   <div class="space-y-4">
     <div class="flex items-center justify-between">
       <div>
-        <h4 class="text-sm font-medium">
+        <h4 class="text-xs font-medium">
           {{ $t('bots.channels.weixinQr.title') }}
         </h4>
         <p class="text-xs text-muted-foreground mt-1">
@@ -61,7 +61,7 @@
               :icon="['fas', 'mobile-screen']"
               class="size-8 text-primary mb-2"
             />
-            <p class="text-sm font-medium text-foreground">
+            <p class="text-xs font-medium text-foreground">
               {{ $t('bots.channels.weixinQr.scanned') }}
             </p>
           </div>
@@ -72,7 +72,7 @@
           v-if="pollStatus === 'expired'"
           class="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-background/80 gap-2"
         >
-          <p class="text-sm text-muted-foreground">
+          <p class="text-xs text-muted-foreground">
             {{ $t('bots.channels.weixinQr.expired') }}
           </p>
           <Button
@@ -85,7 +85,7 @@
         </div>
       </div>
 
-      <p class="text-sm text-muted-foreground text-center max-w-xs">
+      <p class="text-xs text-muted-foreground text-center max-w-xs">
         {{ statusText }}
       </p>
 
@@ -108,7 +108,7 @@
           class="size-5 text-green-600 dark:text-green-400"
         />
       </div>
-      <p class="text-sm font-medium">
+      <p class="text-xs font-medium">
         {{ $t('bots.channels.weixinQr.success') }}
       </p>
     </div>
@@ -117,7 +117,7 @@
       v-else-if="qrState === 'error'"
       class="flex flex-col items-center gap-3 py-4"
     >
-      <p class="text-sm text-destructive">
+      <p class="text-xs text-destructive">
         {{ errorMessage }}
       </p>
       <Button

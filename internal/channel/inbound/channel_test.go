@@ -1517,6 +1517,7 @@ func TestMapStreamChunkToChannelEvents_ToolCallFields(t *testing.T) {
 	tc := events[0].ToolCall
 	if tc == nil {
 		t.Fatal("expected non-nil ToolCall")
+		return
 	}
 	if tc.Name != "calc" || tc.CallID != "c1" {
 		t.Fatalf("unexpected name/callID: %q / %q", tc.Name, tc.CallID)

@@ -125,10 +125,10 @@ function checkStatusVariant(status: BotCheck['status']): 'default' | 'secondary'
     <div class="rounded-md border p-4">
       <div class="flex items-center justify-between gap-2">
         <div>
-          <p class="text-sm font-medium">
+          <p class="text-xs font-medium">
             {{ $t('bots.checks.title') }}
           </p>
-          <p class="text-sm text-muted-foreground">
+          <p class="text-xs text-muted-foreground">
             {{ $t('bots.checks.subtitle') }}
           </p>
         </div>
@@ -145,7 +145,7 @@ function checkStatusVariant(status: BotCheck['status']): 'default' | 'secondary'
           {{ $t('common.refresh') }}
         </Button>
       </div>
-      <div class="mt-3 flex items-center gap-2 text-sm">
+      <div class="mt-3 flex items-center gap-2 text-xs">
         <Badge
           :variant="hasIssue ? 'destructive' : 'default'"
           class="text-xs"
@@ -156,7 +156,7 @@ function checkStatusVariant(status: BotCheck['status']): 'default' | 'secondary'
 
       <div
         v-if="checksLoading && checks.length === 0"
-        class="mt-4 flex items-center gap-2 text-sm text-muted-foreground"
+        class="mt-4 flex items-center gap-2 text-xs text-muted-foreground"
       >
         <Spinner />
         <span>{{ $t('common.loading') }}</span>
@@ -164,7 +164,7 @@ function checkStatusVariant(status: BotCheck['status']): 'default' | 'secondary'
 
       <p
         v-else-if="checks.length === 0"
-        class="mt-4 text-sm text-muted-foreground"
+        class="mt-4 text-xs text-muted-foreground"
       >
         {{ $t('bots.checks.empty') }}
       </p>
@@ -197,7 +197,7 @@ function checkStatusVariant(status: BotCheck['status']): 'default' | 'secondary'
               {{ checkStatusLabel(item.status) }}
             </Badge>
           </div>
-          <p class="mt-2 text-sm">
+          <p class="mt-2 text-xs">
             {{ item.summary }}
           </p>
           <p

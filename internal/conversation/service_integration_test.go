@@ -182,6 +182,7 @@ func TestObservedChatVisibleAfterBindWithoutBackfill(t *testing.T) {
 	}
 	if target == nil {
 		t.Fatalf("expected chat %s in visible list after bind", chatID)
+		return
 	}
 	if target.AccessMode != conversation.AccessModeChannelIdentityObserved {
 		t.Fatalf("expected access_mode=%s, got %s", conversation.AccessModeChannelIdentityObserved, target.AccessMode)

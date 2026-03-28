@@ -5,10 +5,10 @@
   >
     <div class="flex items-center justify-between">
       <div>
-        <h3 class="text-lg font-semibold">
+        <h3 class="text-sm font-semibold">
           {{ curProvider.name }}
         </h3>
-        <p class="text-sm text-muted-foreground mt-0.5">
+        <p class="text-xs text-muted-foreground mt-0.5">
           {{ $t(`memoryProvider.providerNames.${curProvider.provider}`, curProvider.provider) }}
         </p>
       </div>
@@ -58,7 +58,7 @@
             />
             <button
               type="button"
-              class="relative z-10 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200"
+              class="relative z-10 rounded-lg px-4 py-2 text-xs font-medium transition-colors duration-200"
               :class="builtinModeButtonClass('off')"
               @click="handleBuiltinModeChange('off')"
             >
@@ -66,7 +66,7 @@
             </button>
             <button
               type="button"
-              class="relative z-10 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200"
+              class="relative z-10 rounded-lg px-4 py-2 text-xs font-medium transition-colors duration-200"
               :class="builtinModeButtonClass('sparse')"
               @click="handleBuiltinModeChange('sparse')"
             >
@@ -74,7 +74,7 @@
             </button>
             <button
               type="button"
-              class="relative z-10 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200"
+              class="relative z-10 rounded-lg px-4 py-2 text-xs font-medium transition-colors duration-200"
               :class="builtinModeButtonClass('dense')"
               @click="handleBuiltinModeChange('dense')"
             >
@@ -88,10 +88,10 @@
         v-if="builtinMode === 'off'"
         class="rounded-lg border border-border bg-card p-4 space-y-2"
       >
-        <h4 class="text-sm font-medium">
+        <h4 class="text-xs font-medium">
           {{ $t('memoryProvider.modeNames.off') }}
         </h4>
-        <p class="text-sm text-muted-foreground">
+        <p class="text-xs text-muted-foreground">
           {{ $t('memoryProvider.modeDescriptions.off') }}
         </p>
       </div>
@@ -101,15 +101,15 @@
         class="rounded-lg border border-border bg-card p-4 space-y-4"
       >
         <div class="space-y-1">
-          <h4 class="text-sm font-medium">
+          <h4 class="text-xs font-medium">
             {{ $t('memoryProvider.sparseSectionTitle') }}
           </h4>
-          <p class="text-sm text-muted-foreground">
+          <p class="text-xs text-muted-foreground">
             {{ $t('memoryProvider.modeDescriptions.sparse') }}
           </p>
         </div>
 
-        <div class="rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
+        <div class="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
           {{ $t('memoryProvider.sparseInstallHint') }}
         </div>
       </div>
@@ -119,10 +119,10 @@
         class="rounded-lg border border-border bg-card p-4 space-y-4"
       >
         <div class="space-y-1">
-          <h4 class="text-sm font-medium">
+          <h4 class="text-xs font-medium">
             {{ $t('memoryProvider.denseSectionTitle') }}
           </h4>
-          <p class="text-sm text-muted-foreground">
+          <p class="text-xs text-muted-foreground">
             {{ $t('memoryProvider.modeDescriptions.dense') }}
           </p>
         </div>
@@ -141,7 +141,7 @@
           />
         </div>
 
-        <div class="rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
+        <div class="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
           {{ $t('memoryProvider.denseQdrantHint') }}
         </div>
       </div>
@@ -156,7 +156,7 @@
           class="rounded-lg border border-border bg-background/70 p-4 space-y-2"
         >
           <div class="flex items-center justify-between gap-3">
-            <p class="text-sm font-medium text-foreground break-all">
+            <p class="text-xs font-medium text-foreground break-all">
               {{ collection.name }}
             </p>
             <span

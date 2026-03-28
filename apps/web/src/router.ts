@@ -10,27 +10,33 @@ import { i18nRef } from './i18n'
 const routes = [
   {
     path: '/',
-    redirect: '/login',
     component: () => import('@/pages/main-section/index.vue'),
     children: [
       {
-        name: 'chat',
-        path: '/chat/:sessionId?',
-        component: () => import('@/pages/chat/index.vue'),
+        name: 'home',
+        path: '',
+        component: () => import('@/pages/home/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.chat'),
         },
       },
       {
-        name: 'home',
-        path: '/home',
+        name: 'chat',
+        path: '/chat/:botId?/:sessionId?',
         component: () => import('@/pages/home/index.vue'),
         meta: {
-          breadcrumb: i18nRef('home.title'),
+          breadcrumb: i18nRef('sidebar.chat'),
         },
       },
+    ],
+  },
+  {
+    path: '/settings',
+    component: () => import('@/pages/settings-section/index.vue'),
+    redirect: '/settings/bots',
+    children: [
       {
-        path: '/bots',
+        path: 'bots',
         component: { render: () => h(RouterView) },
         meta: {
           breadcrumb: i18nRef('sidebar.bots'),
@@ -53,7 +59,7 @@ const routes = [
       },
       {
         name: 'models',
-        path: '/models',
+        path: 'models',
         component: () => import('@/pages/models/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.models'),
@@ -61,7 +67,7 @@ const routes = [
       },
       {
         name: 'search-providers',
-        path: '/search-providers',
+        path: 'search-providers',
         component: () => import('@/pages/search-providers/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.searchProvider'),
@@ -69,7 +75,7 @@ const routes = [
       },
       {
         name: 'memory-providers',
-        path: '/memory-providers',
+        path: 'memory-providers',
         component: () => import('@/pages/memory-providers/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.memoryProvider'),
@@ -77,7 +83,7 @@ const routes = [
       },
       {
         name: 'tts-providers',
-        path: '/tts-providers',
+        path: 'tts-providers',
         component: () => import('@/pages/tts-providers/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.ttsProvider'),
@@ -85,7 +91,7 @@ const routes = [
       },
       {
         name: 'email-providers',
-        path: '/email-providers',
+        path: 'email-providers',
         component: () => import('@/pages/email-providers/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.emailProvider'),
@@ -93,7 +99,7 @@ const routes = [
       },
       {
         name: 'browser-contexts',
-        path: '/browser-contexts',
+        path: 'browser-contexts',
         component: () => import('@/pages/browser-contexts/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.browserContexts'),
@@ -101,7 +107,7 @@ const routes = [
       },
       {
         name: 'usage',
-        path: '/usage',
+        path: 'usage',
         component: () => import('@/pages/usage/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.usage'),
@@ -109,7 +115,7 @@ const routes = [
       },
       {
         name: 'settings',
-        path: '/settings',
+        path: 'profile',
         component: () => import('@/pages/settings/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.settings'),
@@ -117,7 +123,7 @@ const routes = [
       },
       {
         name: 'platform',
-        path: '/platform',
+        path: 'platform',
         component: () => import('@/pages/platform/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.platform'),
@@ -160,7 +166,7 @@ router.beforeEach((to) => {
   const token = localStorage.getItem('token')
 
   if (to.fullPath === '/login') {
-    return token ? { path: '/chat' } : true
+    return token ? { path: '/' } : true
   }
   if (to.path.startsWith('/oauth/')) {
     return true

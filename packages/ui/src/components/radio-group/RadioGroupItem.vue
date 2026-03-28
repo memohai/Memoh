@@ -23,8 +23,8 @@ const forwardedProps = useForwardProps(delegatedProps)
     v-bind="forwardedProps"
     :class="
       cn(
-        'aspect-square size-4 shrink-0 rounded-full border border-border shadow-sm transition-all outline-none text-primary',
-        'focus-visible:ring-2 focus-visible:ring-primary/20',
+        'aspect-square size-4 shrink-0 rounded-full border border-border bg-background transition-all outline-none text-foreground',
+        'focus-visible:ring-2 focus-visible:ring-ring/20',
         'disabled:cursor-not-allowed disabled:opacity-50',
         props.class,
       )
@@ -35,7 +35,7 @@ const forwardedProps = useForwardProps(delegatedProps)
       class="relative flex items-center justify-center"
     >
       <slot>
-        <CircleIcon class="fill-primary absolute top-1/2 left-1/2 size-2 -translate-x-1/2 -translate-y-1/2" />
+        <CircleIcon class="fill-foreground absolute top-1/2 left-1/2 size-2 -translate-x-1/2 -translate-y-1/2" />
       </slot>
     </RadioGroupIndicator>
   </RadioGroupItem>

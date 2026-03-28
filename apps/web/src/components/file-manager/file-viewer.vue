@@ -132,7 +132,7 @@ onBeforeUnmount(() => {
           :icon="['fas', 'file']"
           class="size-3.5 shrink-0 text-muted-foreground"
         />
-        <span class="truncate text-sm font-medium">{{ filename }}</span>
+        <span class="truncate text-xs font-medium">{{ filename }}</span>
         <span class="shrink-0 text-xs text-muted-foreground">{{ formatFileSize(file.size) }}</span>
         <span
           v-if="isDirty"
@@ -213,7 +213,7 @@ onBeforeUnmount(() => {
           :icon="['fas', 'file']"
           class="size-12 opacity-30"
         />
-        <p class="text-sm">
+        <p class="text-xs">
           {{ t('bots.files.previewNotAvailable') }}
         </p>
         <Button

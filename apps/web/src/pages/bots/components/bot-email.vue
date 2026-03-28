@@ -3,10 +3,10 @@
     <!-- Header -->
     <div class="flex items-start justify-between gap-3">
       <div class="space-y-1 min-w-0">
-        <h3 class="text-lg font-semibold">
+        <h3 class="text-sm font-semibold">
           {{ $t('bots.email.title') }}
         </h3>
-        <p class="text-sm text-muted-foreground">
+        <p class="text-xs text-muted-foreground">
           {{ $t('bots.email.subtitle') }}
         </p>
       </div>
@@ -15,7 +15,7 @@
     <!-- Bindings section -->
     <div class="space-y-3">
       <div class="flex items-center justify-between">
-        <h4 class="text-sm font-medium">
+        <h4 class="text-xs font-medium">
           {{ $t('bots.email.bindings') }}
         </h4>
         <Popover>
@@ -39,7 +39,7 @@
               v-for="p in unboundProviders"
               :key="p.id"
               type="button"
-              class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent"
+              class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs transition-colors hover:bg-accent"
               :disabled="addingBinding"
               @click="handleAddBinding(p)"
             >
@@ -56,7 +56,7 @@
 
       <div
         v-if="bindingsLoading"
-        class="flex items-center gap-2 text-sm text-muted-foreground p-4"
+        class="flex items-center gap-2 text-xs text-muted-foreground p-4"
       >
         <Spinner />
         <span>{{ $t('common.loading') }}</span>
@@ -66,7 +66,7 @@
         v-else-if="!bindings?.length"
         class="rounded-md border p-4"
       >
-        <p class="text-sm text-muted-foreground">
+        <p class="text-xs text-muted-foreground">
           {{ $t('bots.email.noBindings') }}
         </p>
       </div>
@@ -82,7 +82,7 @@
         >
           <div class="flex items-center justify-between">
             <div class="min-w-0">
-              <p class="font-medium text-sm">
+              <p class="font-medium text-xs">
                 {{ providerNameMap[binding.email_provider_id!] || binding.email_provider_id }}
               </p>
               <p
@@ -108,7 +108,7 @@
             </ConfirmPopover>
           </div>
           <Separator class="my-3" />
-          <div class="flex gap-6 text-sm">
+          <div class="flex gap-6 text-xs">
             <label class="flex items-center gap-2 cursor-pointer">
               <Switch
                 :model-value="binding.can_read"
@@ -132,12 +132,12 @@
 
     <!-- Outbox (audit) -->
     <div class="space-y-3">
-      <h4 class="text-sm font-medium">
+      <h4 class="text-xs font-medium">
         {{ $t('bots.email.outbox') }}
       </h4>
       <div
         v-if="outboxLoading"
-        class="flex items-center gap-2 text-sm text-muted-foreground p-4"
+        class="flex items-center gap-2 text-xs text-muted-foreground p-4"
       >
         <Spinner />
         <span>{{ $t('common.loading') }}</span>
@@ -146,7 +146,7 @@
         v-else-if="!outboxItems?.length"
         class="rounded-md border p-4"
       >
-        <p class="text-sm text-muted-foreground">
+        <p class="text-xs text-muted-foreground">
           {{ $t('bots.email.noEmails') }}
         </p>
       </div>
@@ -154,7 +154,7 @@
         v-else
         class="overflow-x-auto rounded-md border"
       >
-        <table class="w-full text-sm">
+        <table class="w-full text-xs">
           <thead class="bg-muted/50 text-left">
             <tr>
               <th class="px-3 py-2 font-medium">

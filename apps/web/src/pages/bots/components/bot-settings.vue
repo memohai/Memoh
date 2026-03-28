@@ -37,7 +37,7 @@
       />
       <div
         v-if="selectedBuiltinMemoryProvider"
-        class="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground"
+        class="rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
       >
         {{ $t('bots.settings.memoryModePreview', {
           mode: $t(`memoryProvider.modeNames.${selectedBuiltinMemoryMode}`),
@@ -49,7 +49,7 @@
       >
         <div class="flex items-start justify-between gap-3">
           <div class="space-y-1">
-            <p class="text-sm font-medium text-foreground">
+            <p class="text-xs font-medium text-foreground">
               {{ indexedMemoryStatusTitle }}
             </p>
             <p class="text-xs text-muted-foreground">
@@ -74,7 +74,7 @@
 
         <div
           v-if="isMemoryStatusLoading"
-          class="text-sm text-muted-foreground"
+          class="text-xs text-muted-foreground"
         >
           {{ $t('common.loading') }}
         </div>
@@ -87,7 +87,7 @@
             <p class="text-xs text-muted-foreground">
               {{ $t('bots.settings.memorySourceDir') }}
             </p>
-            <p class="mt-1 text-sm font-medium text-foreground break-all">
+            <p class="mt-1 text-xs font-medium text-foreground break-all">
               {{ statusCardData.source_dir || '-' }}
             </p>
           </div>
@@ -95,7 +95,7 @@
             <p class="text-xs text-muted-foreground">
               {{ $t('bots.settings.memoryOverviewPath') }}
             </p>
-            <p class="mt-1 text-sm font-medium text-foreground break-all">
+            <p class="mt-1 text-xs font-medium text-foreground break-all">
               {{ statusCardData.overview_path || '-' }}
             </p>
           </div>
@@ -103,7 +103,7 @@
             <p class="text-xs text-muted-foreground">
               {{ $t('bots.settings.memoryMarkdownFiles') }}
             </p>
-            <p class="mt-1 text-sm font-medium text-foreground">
+            <p class="mt-1 text-xs font-medium text-foreground">
               {{ statusCardData.markdown_file_count ?? 0 }}
             </p>
           </div>
@@ -111,7 +111,7 @@
             <p class="text-xs text-muted-foreground">
               {{ $t('bots.settings.memorySourceEntries') }}
             </p>
-            <p class="mt-1 text-sm font-medium text-foreground">
+            <p class="mt-1 text-xs font-medium text-foreground">
               {{ statusCardData.source_count ?? 0 }}
             </p>
           </div>
@@ -119,7 +119,7 @@
             <p class="text-xs text-muted-foreground">
               {{ $t('bots.settings.memoryIndexedEntries') }}
             </p>
-            <p class="mt-1 text-sm font-medium text-foreground">
+            <p class="mt-1 text-xs font-medium text-foreground">
               {{ statusCardData.indexed_count ?? 0 }}
             </p>
           </div>
@@ -130,7 +130,7 @@
             <p class="text-xs text-muted-foreground">
               {{ $t('bots.settings.memoryQdrantCollection') }}
             </p>
-            <p class="mt-1 text-sm font-medium text-foreground break-all">
+            <p class="mt-1 text-xs font-medium text-foreground break-all">
               {{ statusCardData.qdrant_collection || '-' }}
             </p>
           </div>
@@ -142,7 +142,7 @@
               {{ encoderHealthLabel }}
             </p>
             <p
-              class="mt-1 text-sm font-medium"
+              class="mt-1 text-xs font-medium"
               :class="healthTextClass(statusCardData.encoder?.ok)"
             >
               {{ healthLabel(statusCardData.encoder?.ok, statusCardData.encoder?.error) }}
@@ -156,7 +156,7 @@
               {{ $t('bots.settings.memoryQdrantHealth') }}
             </p>
             <p
-              class="mt-1 text-sm font-medium"
+              class="mt-1 text-xs font-medium"
               :class="healthTextClass(statusCardData.qdrant?.ok)"
             >
               {{ healthLabel(statusCardData.qdrant?.ok, statusCardData.qdrant?.error) }}
@@ -309,10 +309,10 @@
 
     <!-- Danger Zone -->
     <div class="rounded-lg border border-destructive/50 bg-destructive/5 p-4 space-y-3">
-      <h3 class="text-sm font-semibold text-destructive">
+      <h3 class="text-xs font-semibold text-destructive">
         {{ $t('bots.settings.dangerZone') }}
       </h3>
-      <p class="text-sm text-muted-foreground">
+      <p class="text-xs text-muted-foreground">
         {{ $t('bots.settings.deleteBotDescription') }}
       </p>
       <div class="flex items-center justify-end">

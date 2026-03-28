@@ -7,7 +7,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput,
   Toggle,
   Empty,
   EmptyContent,
@@ -36,16 +35,9 @@ const selectProvider = (name: string) => computed(() => {
   return curProvider.value?.name === name
 })
 
-const searchText = ref('')
-const searchInput = ref('')
-
 const filteredProviders = computed(() => {
   if (!Array.isArray(providerData.value)) return []
-  if (!searchText.value) return providerData.value
-  const keyword = searchText.value.toLowerCase()
-  return providerData.value.filter((p: EmailProviderResponse) =>
-    (p.name ?? '').toLowerCase().includes(keyword),
-  )
+  return providerData.value
 })
 
 watch(filteredProviders, (list) => {
@@ -69,26 +61,6 @@ const openStatus = reactive({ addOpen: false })
 
 <template>
   <MasterDetailSidebarLayout>
-    <template #sidebar-header>
-      <InputGroup class="shadow-none">
-        <InputGroupInput
-          v-model="searchInput"
-          :placeholder="$t('emailProvider.searchPlaceholder')"
-          aria-label="Search email providers"
-        />
-        <InputGroupAddon align="inline-end">
-          <InputGroupButton
-            type="button"
-            size="icon-xs"
-            aria-label="Search"
-            @click="searchText = searchInput"
-          >
-            <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
-    </template>
-
     <template #sidebar-content>
       <SidebarMenu
         v-for="item in filteredProviders"

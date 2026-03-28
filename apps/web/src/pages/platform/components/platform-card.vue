@@ -11,7 +11,7 @@
         </Badge>
       </CardTitle>
       <CardContent class="px-0 pb-0">
-        <ol class="space-y-2 text-sm">
+        <ol class="space-y-2 text-xs">
           <li
             v-for="(value, key) in platform.config"
             :key="key"

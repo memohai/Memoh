@@ -119,7 +119,7 @@
             class="flex-1"
             @update:model-value="(val) => configData.speed = val[0]"
           />
-          <span class="text-sm text-muted-foreground w-12 text-right">
+          <span class="text-xs text-muted-foreground w-12 text-right">
             {{ Number(configData.speed ?? caps.speed.default ?? 1).toFixed(1) }}x
           </span>
         </div>
@@ -167,7 +167,7 @@
             class="flex-1"
             @update:model-value="(val) => configData.pitch = val[0]"
           />
-          <span class="text-sm text-muted-foreground w-16 text-right">
+          <span class="text-xs text-muted-foreground w-16 text-right">
             {{ Number(configData.pitch ?? caps.pitch.default ?? 0).toFixed(0) }} Hz
           </span>
         </div>
@@ -176,7 +176,7 @@
 
     <div
       v-else
-      class="text-sm text-muted-foreground"
+      class="text-xs text-muted-foreground"
     >
       {{ $t('ttsProvider.noCapabilities') }}
     </div>
@@ -185,7 +185,7 @@
 
     <!-- Test Synthesis -->
     <div class="space-y-3">
-      <h4 class="text-sm font-medium">
+      <h4 class="text-xs font-medium">
         {{ $t('ttsProvider.test.title') }}
       </h4>
       <div class="relative">

@@ -4,7 +4,6 @@ import modelSetting from './model-setting.vue'
 import { useQuery } from '@pinia/colada'
 import {
   ScrollArea,
-  InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -42,21 +41,14 @@ const curProvider = ref<ProvidersGetResponse>()
 provide('curProvider', curProvider)
 
 const selectProvider = (value: string) => computed(() => {
-  return curProvider.value?.name === value
+  return curProvider.value?.id === value
 })
-
-const searchText = ref('')
-const searchInput = ref('')
 
 const curFilterProvider = computed(() => {
   if (!Array.isArray(providerData.value)) {
     return []
   }
   let list = providerData.value as ProvidersGetResponse[]
-  if (searchText.value) {
-    const keyword = searchText.value.toLowerCase()
-    list = list.filter((p) => (p.name ?? '').toLowerCase().includes(keyword))
-  }
   return [...list].sort((a, b) => {
     const ae = a.enable !== false ? 1 : 0
     const be = b.enable !== false ? 1 : 0
@@ -64,12 +56,20 @@ const curFilterProvider = computed(() => {
   })
 })
 
-watch(curFilterProvider, () => {
-  if (curFilterProvider.value.length > 0) {
-    curProvider.value = curFilterProvider.value[0]
-  } else {
+watch(curFilterProvider, (providers) => {
+  if (providers.length === 0) {
     curProvider.value = { id: '' }
+    return
   }
+  const currentId = curProvider.value?.id
+  if (currentId) {
+    const stillExists = providers.find((p) => p.id === currentId)
+    if (stillExists) {
+      curProvider.value = stillExists
+      return
+    }
+  }
+  curProvider.value = providers[0]
 }, {
   immediate: true
 })
@@ -82,28 +82,6 @@ const openStatus = reactive({
 
 <template>
   <MasterDetailSidebarLayout class="[&_td:last-child]:w-45">
-    <template #sidebar-header>
-      <InputGroup class="shadow-none">
-        <InputGroupInput
-          v-model="searchInput"
-          :placeholder="$t('models.searchPlaceholder')"
-          aria-label="Search models"
-        />
-        <InputGroupAddon
-          align="inline-end"
-        >
-          <InputGroupButton
-            type="button"
-            size="icon-xs"
-            aria-label="Search models"
-            @click="searchText = searchInput"
-          >
-            <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
-    </template>
-
     <template
       #sidebar-content
     >
@@ -119,9 +97,9 @@ const openStatus = reactive({
             <Toggle
               :class="[
                 'py-4 border',
-                curProvider?.name === providerItem.name ? 'border-border' : 'border-transparent',
+                curProvider?.id === providerItem.id ? 'border-border' : 'border-transparent',
               ]"
-              :model-value="selectProvider(providerItem.name ?? '').value"
+              :model-value="selectProvider(providerItem.id ?? '').value"
               @update:model-value="(isSelect) => {
                 if (isSelect) {
                   curProvider = providerItem

@@ -187,7 +187,7 @@
         <!-- Chart: Model distribution -->
         <Card v-if="byModelData.length > 0">
           <CardHeader class="pb-2 flex flex-row items-center justify-between">
-            <CardTitle class="text-base">
+            <CardTitle class="text-sm">
               {{ $t('usage.modelDistribution') }}
             </CardTitle>
             <Select
@@ -220,7 +220,7 @@
         <!-- Chart: Daily token usage -->
         <Card>
           <CardHeader class="pb-2">
-            <CardTitle class="text-base">
+            <CardTitle class="text-sm">
               {{ $t('usage.dailyTokens') }}
             </CardTitle>
           </CardHeader>
@@ -236,7 +236,7 @@
         <!-- Chart: Cache breakdown -->
         <Card>
           <CardHeader class="pb-2">
-            <CardTitle class="text-base">
+            <CardTitle class="text-sm">
               {{ $t('usage.cacheBreakdown') }}
             </CardTitle>
           </CardHeader>
@@ -252,7 +252,7 @@
         <!-- Chart: Cache hit rate -->
         <Card>
           <CardHeader class="pb-2">
-            <CardTitle class="text-base">
+            <CardTitle class="text-sm">
               {{ $t('usage.cacheHitRate') }}
             </CardTitle>
           </CardHeader>

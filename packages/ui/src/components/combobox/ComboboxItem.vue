@@ -18,7 +18,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     data-slot="combobox-item"
     v-bind="forwarded"
     :class="cn(
-      'relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none transition-colors',
+      'relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none transition-colors',
       'data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground',
       '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
       'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',

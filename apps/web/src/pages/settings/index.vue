@@ -14,10 +14,10 @@
           </AvatarFallback>
         </Avatar>
         <div class="min-w-0">
-          <p class="font-semibold truncate">
+          <p class="text-xs font-medium truncate">
             {{ displayTitle }}
           </p>
-          <p class="text-sm text-muted-foreground truncate">
+          <p class="text-xs text-muted-foreground truncate">
             {{ displayUserID }}
           </p>
         </div>
@@ -25,10 +25,10 @@
 
       <!-- Display Settings -->
       <section>
-        <h2 class="mb-2 flex items-center text-base font-semibold">
+        <h2 class="mb-2 flex items-center text-xs font-medium">
           <FontAwesomeIcon
             :icon="['fas', 'gear']"
-            class="mr-2"
+            class="mr-2 size-3.5"
           />
           {{ $t('settings.display') }}
         </h2>
@@ -129,10 +129,10 @@
 
       <!-- Linked Channels -->
       <section>
-        <h2 class="mb-2 flex items-center text-base font-semibold">
+        <h2 class="mb-2 flex items-center text-xs font-medium">
           <FontAwesomeIcon
             :icon="['fas', 'network-wired']"
-            class="mr-2"
+            class="mr-2 size-3.5"
           />
           {{ $t('settings.linkedChannels') }}
         </h2>
@@ -140,13 +140,13 @@
         <div class="mt-4 space-y-3">
           <p
             v-if="loadingIdentities"
-            class="text-sm text-muted-foreground"
+            class="text-xs text-muted-foreground"
           >
             {{ $t('common.loading') }}
           </p>
           <p
             v-else-if="identities.length === 0"
-            class="text-sm text-muted-foreground"
+            class="text-xs text-muted-foreground"
           >
             {{ $t('settings.noLinkedChannels') }}
           </p>
@@ -157,7 +157,7 @@
               class="border rounded-md p-3 space-y-1"
             >
               <div class="flex items-center justify-between gap-3">
-                <p class="font-medium truncate">
+                <p class="text-xs font-medium truncate">
                   {{ identity.display_name || identity.channel_subject_id }}
                 </p>
                 <Badge variant="secondary">

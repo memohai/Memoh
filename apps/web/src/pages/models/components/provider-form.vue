@@ -1,37 +1,13 @@
 <template>
   <form @submit="editProvider">
     <div class="space-y-4">
-      <FormField
-        v-slot="{ value, handleChange }"
-        name="enable"
-      >
-        <FormItem class="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
-          <div class="space-y-0.5">
-            <Label class="text-base">
-              {{ $t('provider.enable') }}
-            </Label>
-            <p class="text-[0.8rem] text-muted-foreground">
-              {{ $t('provider.enableHint') }}
-            </p>
-          </div>
-          <FormControl>
-            <Switch
-              :model-value="value"
-              @update:model-value="handleChange"
-            />
-          </FormControl>
-        </FormItem>
-      </FormField>
-
       <section class="space-y-2">
-        <h4 class="scroll-m-20 font-semibold tracking-tight">
-          {{ $t('common.name') }}
-        </h4>
         <FormField
           v-slot="{ componentField }"
           name="name"
         >
           <FormItem>
+            <FormLabel>{{ $t('common.name') }}</FormLabel>
             <FormControl>
               <Input
                 type="text"
@@ -48,14 +24,12 @@
         v-if="form.values.client_type !== 'openai-codex'"
         class="space-y-2"
       >
-        <h4 class="scroll-m-20 font-semibold tracking-tight">
-          {{ $t('provider.apiKey') }}
-        </h4>
         <FormField
           v-slot="{ componentField }"
           name="api_key"
         >
           <FormItem>
+            <FormLabel>{{ $t('provider.apiKey') }}</FormLabel>
             <FormControl>
               <Input
                 type="password"
@@ -69,14 +43,12 @@
       </section>
 
       <section class="space-y-2">
-        <h4 class="scroll-m-20 font-semibold tracking-tight">
-          {{ $t('provider.url') }}
-        </h4>
         <FormField
           v-slot="{ componentField }"
           name="base_url"
         >
           <FormItem>
+            <FormLabel>{{ $t('provider.url') }}</FormLabel>
             <FormControl>
               <Input
                 type="text"
@@ -90,14 +62,12 @@
       </section>
 
       <section class="space-y-2">
-        <h4 class="scroll-m-20 font-semibold tracking-tight">
-          {{ $t('provider.clientType') }}
-        </h4>
         <FormField
           v-slot="{ value, handleChange }"
           name="client_type"
         >
           <FormItem>
+            <FormLabel>{{ $t('provider.clientType') }}</FormLabel>
             <FormControl>
               <SearchableSelectPopover
                 :model-value="value"
@@ -112,7 +82,7 @@
 
       <section
         v-if="form.values.client_type === 'openai-codex'"
-        class="rounded-lg border p-4 space-y-3 text-sm"
+        class="rounded-lg border p-4 space-y-3 text-xs"
       >
         <div class="space-y-1">
           <div class="font-medium">
@@ -216,7 +186,7 @@
 
     <section
       v-if="testResult"
-      class="mt-4 rounded-lg border p-4 space-y-3 text-sm"
+      class="mt-4 rounded-lg border p-4 space-y-3 text-xs"
     >
       <div class="flex items-center gap-2">
         <StatusDot :status="testResult.reachable ? 'success' : 'error'" />
@@ -254,9 +224,8 @@ import {
   Button,
   FormControl,
   FormField,
+  FormLabel,
   FormItem,
-  Label,
-  Switch,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import StatusDot from '@/components/status-dot/index.vue'

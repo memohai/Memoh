@@ -93,7 +93,7 @@
               </FormControl>
             </FormItem>
           </FormField>
-          <div class="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          <div class="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             {{ $t('bots.createBotWaitHint') }}
           </div>
         </div>

@@ -99,7 +99,7 @@
             <div class="flex">
               <a
                 href="#"
-                class="ml-auto inline-block text-sm underline mt-2"
+                class="ml-auto inline-block text-xs underline mt-2"
               >
                 {{ $t('auth.forgotPassword') }}
               </a>
@@ -192,7 +192,7 @@ const login = form.handleSubmit(async (values) => {
     } else {
       throw new Error(t('auth.loginFailed'))
     }
-    router.replace({ path: '/chat' })
+    router.replace({ path: '/' })
   } catch {
     toast.error(t('auth.invalidCredentials'), {
       description: t('auth.retryHint'),

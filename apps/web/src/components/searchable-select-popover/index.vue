@@ -38,7 +38,7 @@
           v-model="searchTerm"
           :placeholder="searchPlaceholder"
           :aria-label="searchAriaLabel"
-          class="flex h-10 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+          class="flex h-10 w-full bg-transparent py-3 text-xs outline-none placeholder:text-muted-foreground"
         >
       </div>
 
@@ -48,7 +48,7 @@
       >
         <div
           v-if="filteredGroups.length === 0"
-          class="py-6 text-center text-sm text-muted-foreground"
+          class="py-6 text-center text-xs text-muted-foreground"
         >
           {{ emptyText }}
         </div>
@@ -76,7 +76,7 @@
             type="button"
             role="option"
             :aria-selected="selected === option.value"
-            class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+            class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
             :class="{ 'bg-accent': selected === option.value }"
             @click="selectOption(option.value)"
           >

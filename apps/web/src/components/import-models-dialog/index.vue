@@ -19,7 +19,7 @@
     </template>
     <template #body>
       <div class="flex flex-col gap-3 mt-4">
-        <p class="text-sm text-muted-foreground">
+        <p class="text-xs text-muted-foreground">
           {{ $t('models.importConfirmHint') }}
         </p>
       </div>

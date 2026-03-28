@@ -1,9 +1,9 @@
 <template>
   <section>
-    <h2 class="mb-2 flex items-center text-base font-semibold">
+    <h2 class="mb-2 flex items-center text-xs font-medium">
       <FontAwesomeIcon
         :icon="['fas', 'plug']"
-        class="mr-2"
+        class="mr-2 size-3.5"
       />
       {{ $t('settings.bindCode') }}
     </h2>

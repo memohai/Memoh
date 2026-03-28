@@ -7,7 +7,7 @@
           class="size-5"
         />
         <div>
-          <h2 class="text-base font-semibold">
+          <h2 class="text-sm font-semibold">
             {{ curProvider?.name }}
           </h2>
           <p class="text-xs text-muted-foreground">
@@ -135,7 +135,7 @@
       >
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="flex-1 min-w-[220px]">
-            <p class="text-sm font-medium">
+            <p class="text-xs font-medium">
               {{ $t('emailProvider.oauth.title') }}
             </p>
             <p class="text-xs text-muted-foreground mt-0.5">

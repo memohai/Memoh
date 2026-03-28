@@ -17,13 +17,13 @@
           :src="bot.avatar_url"
           :alt="bot.display_name"
         />
-        <AvatarFallback class="text-base">
+        <AvatarFallback class="text-sm">
           {{ avatarFallback }}
         </AvatarFallback>
       </Avatar>
       <div class="flex-1 min-w-0 flex flex-col gap-1.5">
         <div class="flex items-center justify-between gap-2">
-          <CardTitle class="text-base truncate">
+          <CardTitle class="text-sm truncate">
             {{ bot.display_name || bot.id }}
           </CardTitle>
           <Badge
