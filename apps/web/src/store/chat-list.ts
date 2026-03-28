@@ -97,7 +97,8 @@ export const useChatStore = defineStore('chat', () => {
   const { currentBotId, sessionId } = storeToRefs(selectionStore)
 
   const messages = reactive<ChatMessage[]>([])
-  const streaming = ref(false)
+  const streamingSessionId = ref<string | null>(null)
+  const streaming = computed(() => streamingSessionId.value !== null && streamingSessionId.value === sessionId.value)
   const sessions = ref<SessionSummary[]>([])
   const loading = ref(false)
   const loadingChats = ref(false)
@@ -334,7 +335,7 @@ export const useChatStore = defineStore('chat', () => {
     for (const msg of messages) {
       if (msg.streaming) msg.streaming = false
     }
-    streaming.value = false
+    streamingSessionId.value = null
   }
 
   // ---- Message list management ----
@@ -775,7 +776,6 @@ export const useChatStore = defineStore('chat', () => {
   async function createNewSession() {
     const bid = await ensureBot()
     if (!bid) return
-    // Enter draft state first. Session will be created lazily on first send.
     sessionId.value = null
     replaceMessages([])
   }
@@ -810,15 +810,14 @@ export const useChatStore = defineStore('chat', () => {
     if ((!trimmed && !attachments?.length) || streaming.value || !currentBotId.value) return
 
     loading.value = true
-    streaming.value = true
 
     try {
       await ensureActiveSession()
 
       const bid = currentBotId.value!
       const sid = sessionId.value!
+      streamingSessionId.value = sid
 
-      // Add user message
       const userBlocks: ContentBlock[] = []
       if (trimmed) userBlocks.push({ type: 'text', content: trimmed })
       if (attachments?.length) {
@@ -840,7 +839,6 @@ export const useChatStore = defineStore('chat', () => {
         streaming: false,
       })
 
-      // Add assistant placeholder
       messages.push({
         id: nextId(),
         role: 'assistant',
@@ -877,7 +875,7 @@ export const useChatStore = defineStore('chat', () => {
       await completion
 
       assistantMsg.streaming = false
-      streaming.value = false
+      streamingSessionId.value = null
       loading.value = false
       abortFn = null
       touchSession(sid)
@@ -898,7 +896,7 @@ export const useChatStore = defineStore('chat', () => {
         })
       }
       pendingAssistantStream = null
-      streaming.value = false
+      streamingSessionId.value = null
       loading.value = false
       abortFn = null
     }
