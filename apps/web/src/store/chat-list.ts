@@ -1,8 +1,8 @@
-import { defineStore } from 'pinia'
+import { defineStore, storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
-import { useLocalStorage } from '@vueuse/core'
 import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
+import { useChatSelectionStore } from '@/store/chat-selection'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -93,6 +93,9 @@ interface PendingAssistantStream {
 // ---- Store ----
 
 export const useChatStore = defineStore('chat', () => {
+  const selectionStore = useChatSelectionStore()
+  const { currentBotId, sessionId } = storeToRefs(selectionStore)
+
   const messages = reactive<ChatMessage[]>([])
   const streaming = ref(false)
   const sessions = ref<SessionSummary[]>([])
@@ -101,8 +104,6 @@ export const useChatStore = defineStore('chat', () => {
   const loadingOlder = ref(false)
   const hasMoreOlder = ref(true)
   const initializing = ref(false)
-  const currentBotId = useLocalStorage<string | null>('chat-bot-id', null)
-  const sessionId = useLocalStorage<string | null>('chat-session-id', null)
   const bots = ref<Bot[]>([])
 
 
@@ -772,17 +773,11 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function createNewSession() {
-    loadingChats.value = true
-    try {
-      const bid = await ensureBot()
-      if (!bid) return
-      const created = await createSession(bid)
-      sessions.value = [created, ...sessions.value.filter((s) => s.id !== created.id)]
-      sessionId.value = created.id
-      replaceMessages([])
-    } finally {
-      loadingChats.value = false
-    }
+    const bid = await ensureBot()
+    if (!bid) return
+    // Enter draft state first. Session will be created lazily on first send.
+    sessionId.value = null
+    replaceMessages([])
   }
 
   async function removeSession(targetSessionId: string) {

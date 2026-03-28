@@ -14,9 +14,19 @@
           {{ getInitials(curProvider?.name) }}
         </span>
       </span>
-      <h4 class="scroll-m-20 tracking-tight">
+      <h4 class="scroll-m-20 tracking-tight min-w-0 truncate">
         {{ curProvider?.name }}
       </h4>
+      <div class="ml-auto flex items-center gap-2">
+        <span class="text-xs text-muted-foreground">
+          {{ $t('provider.enable') }}
+        </span>
+        <Switch
+          :model-value="curProvider?.enable ?? true"
+          :disabled="!curProvider?.id || enableLoading"
+          @update:model-value="handleToggleEnable"
+        />
+      </div>
     </section>
     <Separator class="mt-4 mb-6" />
 
@@ -41,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { Separator } from '@memohai/ui'
+import { Separator, Switch } from '@memohai/ui'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 
 function getInitials(name: string | undefined) {
@@ -54,6 +64,8 @@ import { computed, inject, provide, reactive, ref, toRef, watch } from 'vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { putProvidersById, deleteProvidersById, getProvidersByIdModels, deleteModelsById } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } from '@memohai/sdk'
+import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{
@@ -79,6 +91,8 @@ function handleEditModel(model: ModelsGetResponse) {
 // ---- 当前 Provider ----
 const curProvider = inject('curProvider', ref<ProvidersGetResponse>())
 const curProviderId = computed(() => curProvider.value?.id)
+const enableLoading = ref(false)
+const { t } = useI18n()
 
 // ---- API Hooks ----
 const queryCache = useQueryCache()
@@ -103,6 +117,34 @@ const { mutate: changeProvider, isLoading: editLoading } = useMutation({
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['providers'] }),
 })
+
+async function handleToggleEnable(value: boolean) {
+  if (!curProviderId.value || !curProvider.value) return
+
+  const prev = curProvider.value.enable ?? true
+  curProvider.value = {
+    ...curProvider.value,
+    enable: value,
+  }
+
+  enableLoading.value = true
+  try {
+    await putProvidersById({
+      path: { id: curProviderId.value },
+      body: { enable: value },
+      throwOnError: true,
+    })
+    queryCache.invalidateQueries({ key: ['providers'] })
+  } catch {
+    curProvider.value = {
+      ...curProvider.value,
+      enable: prev,
+    }
+    toast.error(t('common.saveFailed'))
+  } finally {
+    enableLoading.value = false
+  }
+}
 
 const { mutate: deleteModel, isLoading: deleteModelLoading } = useMutation({
   mutation: async (modelID: string) => {

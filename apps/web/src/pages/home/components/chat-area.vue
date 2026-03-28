@@ -40,13 +40,13 @@
       </div> -->
 
       <!-- Messages -->
-      <section class="flex-1 relative w-full">
+      <section class="flex-1 relative w-full px-3 sm:px-5 lg:px-8">
         <section class="absolute inset-0">
           <ScrollArea
             ref="scrollContainer"
             class="h-full"
           >
-            <div class=" mx-auto px-4 py-6 space-y-6">
+            <div class="w-full max-w-4xl mx-auto px-1 sm:px-2 py-6 space-y-6">
               <!-- Load older indicator -->
               <div
                 v-if="loadingOlder"
@@ -89,8 +89,8 @@
       />
 
       <!-- Input -->
-      <div class="px-4 py-2.5">
-        <div class=" mx-auto">
+      <div class="px-3 sm:px-5 lg:px-8 py-2.5">
+        <div class="w-full max-w-4xl mx-auto">
           <!-- Pending attachment previews -->
           <div
             v-if="pendingFiles.length"
@@ -137,11 +137,10 @@
                 class="bg-[#FAFAFA] dark:bg-background items-center py-1.5"
               >
                 <Button
-                  v-if="!streaming"
                   type="button"
                   size="sm"
                   variant="ghost"
-                  :disabled="!currentBotId || activeChatReadOnly"
+                  :disabled="!currentBotId || activeChatReadOnly || streaming"
                   aria-label="Attach files"
                   @click="fileInput?.click()"
                 >
@@ -183,6 +182,7 @@
                   type="button"
                   size="sm"
                   variant="destructive"
+                  class="ml-auto"
                   aria-label="Stop generating response"
                   @click="chatStore.abort()"
                 >

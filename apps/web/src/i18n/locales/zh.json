@@ -595,6 +595,7 @@
     },
     "tabs": {
       "overview": "概览",
+      "general": "General",
       "memory": "记忆",
       "channels": "平台",
       "container": "容器",

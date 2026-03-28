@@ -6,7 +6,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput,
   Toggle,
   Empty,
   EmptyContent,
@@ -37,14 +36,9 @@ const selectProvider = (value: string) => computed(() => {
   return curProvider.value?.name === value
 })
 
-const searchText = ref('')
-const searchInput = ref('')
-
 const curFilterProvider = computed(() => {
   if (!Array.isArray(providerData.value)) return []
-  if (!searchText.value) return providerData.value
-  const keyword = searchText.value.toLowerCase()
-  return providerData.value.filter((p) => p.name.toLowerCase().includes(keyword))
+  return providerData.value
 })
 
 watch(curFilterProvider, () => {
@@ -60,26 +54,6 @@ const openStatus = reactive({ addOpen: false })
 
 <template>
   <MasterDetailSidebarLayout>
-    <template #sidebar-header>
-      <InputGroup class="shadow-none">
-        <InputGroupInput
-          v-model="searchInput"
-          :placeholder="$t('memoryProvider.searchPlaceholder')"
-          aria-label="Search memory providers"
-        />
-        <InputGroupAddon align="inline-end">
-          <InputGroupButton
-            type="button"
-            size="icon-xs"
-            aria-label="Search memory providers"
-            @click="searchText = searchInput"
-          >
-            <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
-    </template>
-
     <template #sidebar-content>
       <SidebarMenu
         v-for="item in curFilterProvider"

@@ -4,7 +4,7 @@
       <SidebarHeader class="p-0 border-0">
         <button
           class="h-[53px] flex items-center gap-2.5 px-3.5 w-full border-b border-border text-foreground hover:bg-accent/50 transition-colors group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
-          @click="router.push({ name: 'home' })"
+          @click="router.push(backToChatRoute)"
         >
           <FontAwesomeIcon
             :icon="['fas', 'chevron-left']"
@@ -48,8 +48,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useChatSelectionStore } from '@/store/chat-selection'
 import {
   Sidebar,
   SidebarContent,
@@ -64,6 +66,21 @@ import {
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
+const selectionStore = useChatSelectionStore()
+const { currentBotId, sessionId } = storeToRefs(selectionStore)
+
+const backToChatRoute = computed(() => {
+  const botId = (currentBotId.value ?? '').trim()
+  const targetSessionId = (sessionId.value ?? '').trim()
+  if (!botId) return { name: 'home' as const }
+  return {
+    name: 'chat' as const,
+    params: {
+      botId,
+      sessionId: targetSessionId || undefined,
+    },
+  }
+})
 
 function isItemActive(name: string): boolean {
   if (name === 'bots') {

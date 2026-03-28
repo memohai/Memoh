@@ -157,10 +157,9 @@ const chatStore = useChatStore()
 const { sessions, sessionId, currentBotId, loadingChats } = storeToRefs(chatStore)
 
 const searchQuery = ref('')
-const filterType = ref<string | null>(null)
+const filterType = ref<string>('chat')
 
 const filterOptions = computed(() => [
-  { value: null, label: t('chat.sessionFilterAll') },
   { value: 'chat', label: t('chat.sessionTypeChat') },
   { value: 'heartbeat', label: t('chat.sessionTypeHeartbeat') },
   { value: 'schedule', label: t('chat.sessionTypeSchedule') },
@@ -168,16 +167,13 @@ const filterOptions = computed(() => [
 ])
 
 const filterLabel = computed(() => {
-  if (!filterType.value) return t('chat.sessionFilterAll')
   const opt = filterOptions.value.find(o => o.value === filterType.value)
-  return opt?.label ?? filterType.value
+  return opt?.label ?? t('chat.sessionTypeChat')
 })
 
 const filteredSessions = computed(() => {
   let list = sessions.value
-  if (filterType.value) {
-    list = list.filter(s => s.type === filterType.value)
-  }
+  list = list.filter(s => s.type === filterType.value)
   const q = searchQuery.value.trim().toLowerCase()
   if (q) {
     list = list.filter(s =>

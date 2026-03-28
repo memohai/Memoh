@@ -75,8 +75,8 @@
             v-if="block.type === 'text' && cleanUserText(block.content)"
             class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
             :class="isSelf
-              ? 'rounded-tr-sm bg-primary text-primary-foreground'
-              : 'rounded-tl-sm bg-accent/60 text-foreground'"
+              ? 'rounded-tr-sm bg-foreground text-background'
+              : 'rounded-tl-sm bg-accent text-foreground'"
           >
             {{ cleanUserText(block.content) }}
           </div>
@@ -162,27 +162,6 @@
         </p>
       </div>
     </div>
-
-    <!-- Self user avatar (right side) -->
-    <div
-      v-if="message.role === 'user' && isSelf"
-      class="relative shrink-0"
-    >
-      <Avatar class="size-8">
-        <AvatarImage
-          v-if="selfAvatarUrl"
-          :src="selfAvatarUrl"
-          alt=""
-        />
-        <AvatarFallback class="text-xs">
-          {{ selfFallback }}
-        </AvatarFallback>
-      </Avatar>
-      <ChannelBadge
-        v-if="message.platform"
-        :platform="message.platform"
-      />
-    </div>
   </div>
 </template>
 
@@ -195,7 +174,7 @@ import ThinkingBlock from './thinking-block.vue'
 import ToolCallBlock from './tool-call-block.vue'
 import AttachmentBlock from './attachment-block.vue'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
-import { useUserStore } from '@/store/user'
+// import { useUserStore } from '@/store/user'
 // import { useChatStore } from '@/store/chat-list'
 // import { storeToRefs } from 'pinia'
 // import { useI18n } from 'vue-i18n'
@@ -214,7 +193,6 @@ const props = defineProps<{
   onOpenMedia?: (src: string) => void
 }>()
 
-const userStore = useUserStore()
 // const chatStore = useChatStore()
 // const { currentBotId, bots } = storeToRefs(chatStore)
 
@@ -226,17 +204,6 @@ const isSelf = computed(() => props.message.isSelf !== false)
 
 // const botAvatarUrl = computed(() => currentBot.value?.avatar_url ?? '')
 // const botName = computed(() => currentBot.value?.display_name ?? '')
-
-const selfAvatarUrl = computed(() =>
-  props.message.senderAvatarUrl || userStore.userInfo.avatarUrl || '',
-)
-const selfFallback = computed(() => {
-  const name = props.message.senderDisplayName
-    || userStore.userInfo.displayName
-    || userStore.userInfo.username
-    || ''
-  return name.slice(0, 2).toUpperCase() || 'U'
-})
 
 // const { t } = useI18n()
 

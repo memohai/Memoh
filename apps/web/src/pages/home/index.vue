@@ -32,9 +32,6 @@ if (urlBotId) {
   if (urlSessionId) {
     sessionId.value = urlSessionId
   }
-} else if (!urlBotId && !urlSessionId) {
-  currentBotId.value = null
-  sessionId.value = null
 }
 
 let suppressUrlSync = false
@@ -74,10 +71,6 @@ watch(
       }
       if (urlSession && urlSession !== storeSession) {
         await chatStore.selectSession(urlSession)
-      }
-      if (!urlBot && storeBot) {
-        currentBotId.value = null
-        sessionId.value = null
       }
     } finally {
       suppressUrlSync = false
