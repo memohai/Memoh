@@ -6,7 +6,7 @@
 <div align="center">
   <img src="./assets/logo.png" alt="Memoh" width="100" height="100">
   <h1>Memoh</h1>
-  <p>Multi-Member, Structured Long-Memory, Containerized AI Agent System.</p>
+  <p>Self hosted, always-on AI agent platform run in containers.</p>
   <p>📌 <a href="https://docs.memoh.ai/blogs/2026-02-16.html">Introduction to Memoh - The Case for an Always-On, Containerized Home Agent</a></p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
@@ -28,7 +28,7 @@
   <hr>
 </div>
 
-Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), Email, or the built-in Web UI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
+Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), QQ, Matrix, WeCom, WeChat, Email, or the built-in Web UI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
 
 ## Quick Start
 
@@ -52,7 +52,7 @@ sudo docker compose up -d
 
 > **Install a specific version:**
 > ```bash
-> curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v1.0.0 sh
+> curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v0.6.0 sh
 > ```
 >
 > **Use CN mirror for slow image pulls:**
@@ -68,32 +68,36 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup
 
 ## Why Memoh?
 
-OpenClaw is impressive, but it has notable drawbacks: stability issues, security concerns, cumbersome configuration, and high token costs. If you're looking for a stable, secure solution, consider Memoh.
+Memoh is built for **always-on continuity** — an AI that stays online, and a memory that stays yours.
 
-Memoh is a multi-bot agent service built with Golang. It offers full graphical configuration for bots, Channels, MCP, and Skills. We use Containerd to provide container-level isolation for each bot and draw heavily from OpenClaw's Agent design.
-
-Memoh Bot can distinguish and remember requests from multiple humans and bots, working seamlessly in any group chat. You can use Memoh to build bot teams, or set up accounts for family members to manage daily household tasks with bots.
+- **Lightweight & Fast**: Built with Go as home/studio infrastructure, runs efficiently on edge devices.
+- **Containerized by default**: Each bot gets an isolated container with its own filesystem, network, and tools.
+- **Hybrid split**: Cloud inference for frontier model capability, local-first memory and indexing for privacy.
+- **Multi-user first**: Explicit sharing and privacy boundaries across users and bots.
+- **Full graphical configuration**: Configure bots, channels, MCP, skills, and all settings through a modern web UI — no coding required.
 
 ## Features
 
-- 🤖 **Multi-Bot Management**: Create multiple bots; humans and bots, or bots with each other, can chat privately, in groups, or collaborate. Supports role-based access control (owner / admin / member) with ownership transfer.
-- 👥 **Multi-User & Identity Recognition**: Bots can distinguish individual users in group chats, remember each person's context separately, and send direct messages to specific users. Cross-platform identity binding unifies the same person across Telegram, Discord, Lark, and Web.
-- 📦 **Containerized**: Each bot runs in its own isolated containerd container. Bots can freely execute commands, edit files, and access the network within their containers — like having their own computer. Supports container snapshots for save/restore.
-- 🧠 **Memory Engineering**: Multi-provider memory architecture — Built-in (off / sparse / dense modes), [Mem0](https://mem0.ai), and OpenViking. LLM-driven fact extraction, hybrid retrieval (dense semantic search + BM25 keyword + neural sparse vectors), 24-hour context loading, memory compaction & rebuild, and multi-language auto-detection.
-- 💬 **Multi-Platform**: Supports Telegram, Discord, Lark (Feishu), Email, and the built-in Web UI. Unified message format with rich text, media attachments, reactions, and streaming across all platforms. Cross-platform identity binding.
-- 📧 **Email**: Multi-adapter email service (Mailgun, generic SMTP) with per-bot binding and outbound audit log. Bots can send and receive emails as a channel.
-- 🔧 **MCP (Model Context Protocol)**: Full MCP support (HTTP / SSE / Stdio). Built-in tools for container operations, memory search, web search, scheduling, messaging, and more. Connect external MCP servers for extensibility.
-- 🧩 **Subagents**: Create specialized sub-agents per bot with independent context and skills, enabling multi-agent collaboration.
-- 🎭 **Skills & Identity**: Define bot personality via IDENTITY.md, SOUL.md, and modular skill files that bots can enable/disable at runtime.
-- 🌐 **Browser**: Each bot can have its own headless Chromium browser (via Playwright). Navigate pages, click elements, fill forms, take screenshots (with annotated element labels), read accessibility trees, manage tabs, and more — enabling real web automation and AI-driven browsing.
-- 🔍 **Web Search**: 12 built-in search providers — Brave, Bing, Google, Tavily, DuckDuckGo, SearXNG, Serper, Sogou, Jina, Exa, Bocha, and Yandex — for web search and URL content fetching.
-- ⏰ **Scheduled Tasks**: Cron-based scheduling with max-call limits. Bots can autonomously run commands or tools at specified intervals.
-- 💓 **Heartbeat**: Periodic autonomous tasks — bots can perform routine operations (e.g., check-ins, summaries, monitoring) at configurable intervals with execution logging.
-- 📥 **Inbox**: Cross-channel inbox — messages from other channels are queued and surfaced in the system prompt so the bot never misses context.
-- 📊 **Token Usage Tracking**: Monitor token consumption per bot with usage statistics and visualization.
-- 🧪 **Multi-Model**: Works with any OpenAI-compatible, Anthropic, or Google Generative AI provider. Per-bot model assignment for chat, memory, and embedding.
-- 🖥️ **Web UI**: Modern dashboard (Vue 3 + Tailwind CSS) with real-time streaming chat, tool call visualization, in-chat file manager, container filesystem browser, and visual configuration for all settings. Dark/light theme, i18n.
-- 🚀 **One-Click Deploy**: Docker Compose with automatic migration, containerd setup, and CNI networking. Interactive install script included.
+### Core
+
+- 🤖 **Multi-Bot & Multi-User**: Create multiple bots that chat privately, in groups, or with each other. Bots distinguish individual users in group chats, remember each person's context, and support cross-platform identity binding.
+- 📦 **Containerized**: Each bot runs in its own isolated containerd container with a dedicated filesystem and network — like having its own computer. Supports snapshots, data export/import, and versioning.
+- 🧠 **Memory Engineering**: LLM-driven fact extraction, hybrid retrieval (dense + sparse + BM25), 24-hour context loading, memory compaction & rebuild. Pluggable backends: Built-in (off / sparse / dense), [Mem0](https://mem0.ai), OpenViking.
+- 💬 **9 Channels**: Telegram, Discord, Lark (Feishu), QQ, Matrix, WeCom, WeChat, Email (Mailgun / SMTP / Gmail OAuth), and built-in Web UI — with unified streaming, rich text, and attachments.
+
+### Agent Capabilities
+
+- 🔧 **MCP (Model Context Protocol)**: Full MCP support (HTTP / SSE / Stdio / OAuth). Connect external tool servers for extensibility; each bot manages its own independent MCP connections.
+- 🌐 **Browser Automation**: Headless Chromium/Firefox via Playwright — navigate, click, fill forms, screenshot, read accessibility trees, manage tabs.
+- 🎭 **Skills & Subagents**: Define bot personality via modular skill files; delegate complex tasks to sub-agents with independent context.
+- ⏰ **Automation**: Cron-based scheduled tasks and periodic heartbeat for autonomous bot activity.
+
+### Management
+
+- 🖥️ **Web UI**: Modern dashboard (Vue 3 + Tailwind CSS) — streaming chat, tool call visualization, file manager, visual configuration for all settings. Dark/light theme, i18n.
+- 🔐 **Access Control**: Priority-based ACL rules with allow/deny effects, scoped by channel identity, channel type, or conversation.
+- 🧪 **Multi-Model**: Any OpenAI-compatible, Anthropic, or Google provider. Per-bot model assignment, provider OAuth, and automatic model import.
+- 🚀 **One-Click Deploy**: Docker Compose with automatic migration, containerd setup, and CNI networking.
 
 ## Memory System
 
@@ -140,7 +144,7 @@ Additional capabilities include memory compaction (merge redundant entries), reb
 flowchart TB
     subgraph Clients [" Clients "]
         direction LR
-        CH["Channels<br/>Telegram · Discord · Feishu · QQ · Email"]
+        CH["Channels<br/>Telegram · Discord · Feishu · QQ<br/>Matrix · WeCom · WeChat · Email"]
         WEB["Web UI (Vue 3 :8082)"]
     end
 
