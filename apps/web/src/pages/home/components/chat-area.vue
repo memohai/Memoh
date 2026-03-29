@@ -118,6 +118,13 @@
             </div>
           </div>
 
+          <input
+            ref="fileInput"
+            type="file"
+            multiple
+            class="hidden"
+            @change="handleFileInputChange"
+          >
           <section>
             <InputGroup class="bg-transparent overflow-hidden">
               <InputGroupTextarea
@@ -129,7 +136,6 @@
                 @keydown.enter.exact="handleKeydown"
                 @paste="handlePaste"
               />
-              <Separator />
               <InputGroupAddon
                 align="block-end"
                 class="bg-[#FAFAFA] dark:bg-background items-center py-1.5"
@@ -161,23 +167,22 @@
                 <Button
                   v-if="!streaming"
                   type="button"
-                  size="sm"
+                  size="icon"
                   :disabled="(!inputText.trim() && !pendingFiles.length) || !currentBotId || activeChatReadOnly"
                   aria-label="Send message"
-                  class="ml-auto bg-[#8B56E3]"
+                  class="ml-auto size-7 rounded-full bg-[#8B56E3] text-white"
                   @click="handleSend"
                 >
                   <Send
-                    class="size-2"
+                    class="size-3"
                   />
-                  {{ $t('chat.send') }}
                 </Button>
                 <Button
                   v-else
                   type="button"
-                  size="sm"
+                  size="icon"
                   variant="destructive"
-                  class="ml-auto"
+                  class="ml-auto size-7 rounded-full"
                   aria-label="Stop generating response"
                   @click="chatStore.abort()"
                 >
@@ -220,7 +225,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, provide, useTemplateRef, watchEffect} from 'vue'
 import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, FolderOpen, Send } from 'lucide-vue-next'
-import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,Separator } from '@memohai/ui'
+import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import MessageItem from './message-item.vue'
@@ -340,11 +345,21 @@ watchEffect(() => {
 })
 
 function handleKeydown(e: KeyboardEvent) {
-  if (e.isComposing) return
+  if (e.isComposing || e.keyCode === 229) return
   e.preventDefault()
   handleSend()
 }
 
+
+function handleFileInputChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (input.files) {
+    for (const file of Array.from(input.files)) {
+      pendingFiles.value.push(file)
+    }
+  }
+  input.value = ''
+}
 
 function handlePaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items
