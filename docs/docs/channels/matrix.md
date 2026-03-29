@@ -25,6 +25,8 @@ curl -X POST "https://<homeserver>/_matrix/client/v3/login" \
 
 - Option B: Extract from a client
 
+> **Important**: Keep the access token secret. Anyone with this token can act as your bot account.
+
 ## Step 2: Configure Memoh
 
 1. Go to your Bot's **Platforms** tab in the Memoh Web UI.
