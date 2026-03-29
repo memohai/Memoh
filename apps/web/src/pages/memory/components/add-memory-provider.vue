@@ -5,8 +5,7 @@
         variant="outline"
         class="w-full mb-4 text-muted-foreground"
       >
-        <FontAwesomeIcon
-          :icon="['fas', 'plus']"
+        <Plus
           class="mr-2"
         />
         {{ $t('memory.add') }}
@@ -69,6 +68,7 @@
 </template>
 
 <script setup lang="ts">
+import { Plus } from 'lucide-vue-next'
 import { reactive, ref } from 'vue'
 import {
   Button,

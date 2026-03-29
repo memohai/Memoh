@@ -1,5 +1,5 @@
 <template>
-  <section class="h-full max-w-7xl mx-auto p-4">
+  <section class="max-w-7xl mx-auto p-4 pb-12">
     <div class="max-w-3xl mx-auto space-y-8">
       <!-- Avatar & name -->
       <div class="flex items-center gap-4">
@@ -26,8 +26,7 @@
       <!-- Display Settings -->
       <section>
         <h2 class="mb-2 flex items-center text-xs font-medium">
-          <FontAwesomeIcon
-            :icon="['fas', 'gear']"
+          <Settings
             class="mr-2 size-3.5"
           />
           {{ $t('settings.display') }}
@@ -130,8 +129,7 @@
       <!-- Linked Channels -->
       <section>
         <h2 class="mb-2 flex items-center text-xs font-medium">
-          <FontAwesomeIcon
-            :icon="['fas', 'network-wired']"
+          <Network
             class="mr-2 size-3.5"
           />
           {{ $t('settings.linkedChannels') }}
@@ -190,6 +188,26 @@
         @generate="onGenerateBindCode"
         @copy="copyBindCode"
       />
+
+      <!-- Version -->
+      <section>
+        <Separator class="mb-4" />
+        <div class="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{{ $t('settings.version') }}</span>
+          <Badge
+            v-if="serverVersion"
+            variant="secondary"
+          >
+            {{ $t('settings.versionTag', { version: serverVersion }) }}
+          </Badge>
+          <Badge
+            v-if="commitHash"
+            variant="outline"
+          >
+            {{ commitHash }}
+          </Badge>
+        </div>
+      </section>
     </div>
   </section>
 </template>
@@ -215,6 +233,7 @@ import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
+import { Settings, Network } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ProfileSection from './components/profile-section.vue'
 import PasswordSection from './components/password-section.vue'
@@ -224,6 +243,7 @@ import { client } from '@memohai/sdk/client'
 import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest, IdentitiesChannelIdentity } from '@memohai/sdk'
 import { useUserStore } from '@/store/user'
 import { useSettingsStore } from '@/store/settings'
+import { useCapabilitiesStore } from '@/store/capabilities'
 import type { Locale } from '@/i18n'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
@@ -250,6 +270,10 @@ const { userInfo, exitLogin, patchUserInfo } = userStore
 const settingsStore = useSettingsStore()
 const { language, theme } = storeToRefs(settingsStore)
 const { setLanguage, setTheme } = settingsStore
+
+// ---- Server version ----
+const capabilitiesStore = useCapabilitiesStore()
+const { serverVersion, commitHash } = storeToRefs(capabilitiesStore)
 
 // ---- User data ----
 const account = ref<UserAccount | null>(null)

@@ -15,7 +15,7 @@
         variant="ghost"
         size="icon"
       >
-        <FontAwesomeIcon :icon="['fas', 'arrow-rotate-right']" />
+        <RefreshCw />
       </Button>
     </div>
   </div>
@@ -25,4 +25,5 @@
 import ChatStatus from '@/components/chat/chat-status/index.vue'
 import ChatStep from '@/components/chat/chat-step/index.vue'
 import { Button } from '@memohai/ui'
+import { RefreshCw } from 'lucide-vue-next'
 </script>

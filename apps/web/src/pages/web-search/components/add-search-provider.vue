@@ -14,8 +14,7 @@
           class="w-full shadow-none! text-muted-foreground mb-4"
           variant="outline"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'plus']"
+          <Plus
             class="mr-1"
           /> {{ $t('webSearch.add') }}
         </Button>
@@ -107,6 +106,7 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { postSearchProviders } from '@memohai/sdk'
 import type { SearchprovidersCreateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
+import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 

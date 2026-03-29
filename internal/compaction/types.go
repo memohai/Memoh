@@ -22,17 +22,20 @@ type Log struct {
 
 // ListLogsResponse is the API response for listing compaction logs.
 type ListLogsResponse struct {
-	Items []Log `json:"items"`
+	Items      []Log `json:"items"`
+	TotalCount int64 `json:"total_count"`
 }
 
 // TriggerConfig holds the parameters needed to trigger a compaction.
 type TriggerConfig struct {
-	BotID          string
-	SessionID      string
-	ModelID        string
-	ClientType     string
-	APIKey         string //nolint:gosec // runtime credential, not a hardcoded secret
-	CodexAccountID string
-	BaseURL        string
-	HTTPClient     *http.Client
+	BotID            string
+	SessionID        string
+	ModelID          string
+	ClientType       string
+	APIKey           string //nolint:gosec // runtime credential, not a hardcoded secret
+	CodexAccountID   string
+	BaseURL          string
+	HTTPClient       *http.Client
+	Ratio            int
+	TotalInputTokens int
 }

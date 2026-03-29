@@ -114,10 +114,11 @@ func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 			*dest[15].(*string) = ""                 // HeartbeatPrompt
 			*dest[16].(*bool) = false                // CompactionEnabled
 			*dest[17].(*int32) = 100000              // CompactionThreshold
-			*dest[18].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
-			*dest[19].(*[]byte) = []byte(`{}`)
-			*dest[20].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[18].(*int32) = 80                  // CompactionRatio
+			*dest[19].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
+			*dest[20].(*[]byte) = []byte(`{}`)
 			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

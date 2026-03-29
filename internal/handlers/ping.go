@@ -7,12 +7,15 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/boot"
+	"github.com/memohai/memoh/internal/version"
 )
 
 type PingResponse struct {
 	Status            string `json:"status"`
 	ContainerBackend  string `json:"container_backend"`
 	SnapshotSupported bool   `json:"snapshot_supported"`
+	Version           string `json:"version"`
+	CommitHash        string `json:"commit_hash"`
 }
 
 type PingHandler struct {
@@ -42,6 +45,8 @@ func (h *PingHandler) Ping(c echo.Context) error {
 		Status:            "ok",
 		ContainerBackend:  h.runtime.ContainerBackend,
 		SnapshotSupported: h.runtime.ContainerBackend != "apple",
+		Version:           version.Version,
+		CommitHash:        version.ShortCommitHash(),
 	})
 }
 

@@ -19,6 +19,7 @@ import { getMemoryProviders } from '@memohai/sdk'
 import type { MemoryprovidersGetResponse } from '@memohai/sdk'
 import AddMemoryProvider from './components/add-memory-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
+import { Brain, Plus } from 'lucide-vue-next'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 const { data: providerData } = useQuery({
@@ -69,8 +70,7 @@ const openStatus = reactive({ addOpen: false })
               :model-value="selectProvider(item.name).value"
               @update:model-value="(isSelect) => { if (isSelect) curProvider = item }"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'brain']"
+              <Brain
                 class="mr-2 size-4 text-primary"
               />
               {{ item.name }}
@@ -97,7 +97,7 @@ const openStatus = reactive({ addOpen: false })
       >
         <EmptyHeader>
           <EmptyMedia variant="icon">
-            <FontAwesomeIcon :icon="['fas', 'brain']" />
+            <Brain />
           </EmptyMedia>
         </EmptyHeader>
         <EmptyTitle>{{ $t('memory.emptyTitle') }}</EmptyTitle>
@@ -108,8 +108,7 @@ const openStatus = reactive({ addOpen: false })
             class="w-full"
             @click="openStatus.addOpen=true"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'plus']"
+            <Plus
               class="mr-2"
             />
             {{ $t('memory.add') }}

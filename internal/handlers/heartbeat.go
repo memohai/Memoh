@@ -4,9 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -42,8 +40,8 @@ func (h *HeartbeatHandler) Register(e *echo.Echo) {
 // @Description List heartbeat execution logs for a bot
 // @Tags heartbeat
 // @Param bot_id path string true "Bot ID"
-// @Param before query string false "Before timestamp (RFC3339)"
 // @Param limit query int false "Limit" default(50)
+// @Param offset query int false "Offset" default(0)
 // @Success 200 {object} heartbeat.ListLogsResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -61,26 +59,12 @@ func (h *HeartbeatHandler) ListLogs(c echo.Context) error {
 		return err
 	}
 
-	var before *time.Time
-	if raw := strings.TrimSpace(c.QueryParam("before")); raw != "" {
-		t, err := time.Parse(time.RFC3339Nano, raw)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid before timestamp")
-		}
-		before = &t
-	}
-	limit := 50
-	if raw := strings.TrimSpace(c.QueryParam("limit")); raw != "" {
-		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
-			limit = v
-		}
-	}
-
-	items, err := h.service.ListLogs(c.Request().Context(), botID, before, limit)
+	limit, offset := parseOffsetLimit(c)
+	items, total, err := h.service.ListLogs(c.Request().Context(), botID, limit, offset)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, heartbeat.ListLogsResponse{Items: items})
+	return c.JSON(http.StatusOK, heartbeat.ListLogsResponse{Items: items, TotalCount: total})
 }
 
 // DeleteLogs godoc

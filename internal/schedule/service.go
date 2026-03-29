@@ -325,58 +325,68 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, re
 	}
 }
 
-func (s *Service) ListLogs(ctx context.Context, botID string, before *time.Time, limit int) ([]Log, error) {
+func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int) ([]Log, int64, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	beforeTS := pgtype.Timestamptz{}
-	if before != nil {
-		beforeTS = pgtype.Timestamptz{Time: *before, Valid: true}
+	if offset < 0 {
+		offset = 0
 	}
+
+	total, err := s.queries.CountScheduleLogsByBot(ctx, pgBotID)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	rows, err := s.queries.ListScheduleLogsByBot(ctx, sqlc.ListScheduleLogsByBotParams{
-		BotID:   pgBotID,
-		Column2: beforeTS,
-		Limit:   int32(limit), //nolint:gosec // capped to 100 above
+		BotID:  pgBotID,
+		Limit:  int32(limit),  //nolint:gosec // capped to 100 above
+		Offset: int32(offset), //nolint:gosec // validated above
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	items := make([]Log, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toScheduleLog(row))
 	}
-	return items, nil
+	return items, total, nil
 }
 
-func (s *Service) ListLogsBySchedule(ctx context.Context, scheduleID string, before *time.Time, limit int) ([]Log, error) {
+func (s *Service) ListLogsBySchedule(ctx context.Context, scheduleID string, limit, offset int) ([]Log, int64, error) {
 	pgID, err := db.ParseUUID(scheduleID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	beforeTS := pgtype.Timestamptz{}
-	if before != nil {
-		beforeTS = pgtype.Timestamptz{Time: *before, Valid: true}
+	if offset < 0 {
+		offset = 0
 	}
+
+	total, err := s.queries.CountScheduleLogsBySchedule(ctx, pgID)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	rows, err := s.queries.ListScheduleLogsBySchedule(ctx, sqlc.ListScheduleLogsByScheduleParams{
 		ScheduleID: pgID,
-		Column2:    beforeTS,
-		Limit:      int32(limit), //nolint:gosec // capped to 100 above
+		Limit:      int32(limit),  //nolint:gosec // capped to 100 above
+		Offset:     int32(offset), //nolint:gosec // validated above
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	items := make([]Log, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toScheduleLogFromSchedule(row))
 	}
-	return items, nil
+	return items, total, nil
 }
 
 func (s *Service) DeleteLogs(ctx context.Context, botID string) error {

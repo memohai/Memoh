@@ -1,15 +1,15 @@
 <template>
   <div class="rounded-lg border bg-muted/30 text-xs overflow-hidden">
     <div class="flex items-center gap-2 px-3 py-2 bg-muted/50">
-      <FontAwesomeIcon
-        :icon="['fas', block.done ? 'check' : 'spinner']"
-        class="size-3"
-        :class="block.done ? 'text-green-600 dark:text-green-400' : 'animate-spin text-muted-foreground'"
+      <Check
+        v-if="block.done"
+        class="size-3 text-green-600 dark:text-green-400"
       />
-      <FontAwesomeIcon
-        :icon="['fas', 'code-branch']"
-        class="size-3 text-violet-400"
+      <LoaderCircle
+        v-else
+        class="size-3 animate-spin text-muted-foreground"
       />
+      <GitBranch class="size-3 text-violet-400" />
       <span class="font-mono font-medium text-xs text-foreground">
         spawn
       </span>
@@ -58,8 +58,7 @@
       v-model:open="resultOpen"
     >
       <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full">
-        <FontAwesomeIcon
-          :icon="['fas', 'chevron-right']"
+        <ChevronRight
           class="size-2.5 transition-transform"
           :class="{ 'rotate-90': resultOpen }"
         />
@@ -73,10 +72,13 @@
             class="text-xs"
           >
             <div class="flex items-center gap-1.5 mb-0.5">
-              <FontAwesomeIcon
-                :icon="['fas', result.success ? 'circle-check' : 'circle-xmark']"
-                class="size-2.5"
-                :class="result.success ? 'text-green-500' : 'text-red-500'"
+              <CircleCheck
+                v-if="result.success"
+                class="size-2.5 text-green-500"
+              />
+              <CircleX
+                v-else
+                class="size-2.5 text-red-500"
               />
               <span class="font-mono text-foreground">#{{ idx + 1 }}</span>
               <span
@@ -106,6 +108,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { Check, LoaderCircle, GitBranch, ChevronRight, CircleCheck, CircleX } from 'lucide-vue-next'
 import { Badge, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 

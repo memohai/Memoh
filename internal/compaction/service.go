@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -80,6 +79,12 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		return nil
 	}
 
+	toCompact := splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
+	if len(toCompact) == 0 {
+		s.completeLog(ctx, logID, "ok", "", "", nil, pgtype.UUID{})
+		return nil
+	}
+
 	priorLogs, err := s.queries.ListCompactionLogsBySession(ctx, sessionUUID)
 	if err != nil {
 		return err
@@ -91,9 +96,9 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		}
 	}
 
-	entries := make([]messageEntry, 0, len(messages))
-	messageIDs := make([]pgtype.UUID, 0, len(messages))
-	for _, m := range messages {
+	entries := make([]messageEntry, 0, len(toCompact))
+	messageIDs := make([]pgtype.UUID, 0, len(toCompact))
+	for _, m := range toCompact {
 		entries = append(entries, messageEntry{
 			Role:    m.Role,
 			Content: extractTextContent(m.Content),
@@ -151,35 +156,38 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 }
 
 // ListLogs returns paginated compaction logs for a bot.
-func (s *Service) ListLogs(ctx context.Context, botID string, before *time.Time, limit int) ([]Log, error) {
+func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int) ([]Log, int64, error) {
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	var beforeTS pgtype.Timestamptz
-	if before != nil {
-		beforeTS = pgtype.Timestamptz{Time: *before, Valid: true}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
-	clampedLimit := limit
-	if clampedLimit > 1000 {
-		clampedLimit = 1000
+	total, err := s.queries.CountCompactionLogsByBot(ctx, botUUID)
+	if err != nil {
+		return nil, 0, err
 	}
+
 	rows, err := s.queries.ListCompactionLogsByBot(ctx, sqlc.ListCompactionLogsByBotParams{
-		BotID:   botUUID,
-		Column2: beforeTS,
-		Limit:   int32(clampedLimit), //nolint:gosec // clamped above
+		BotID:  botUUID,
+		Limit:  int32(limit),  //nolint:gosec // clamped above
+		Offset: int32(offset), //nolint:gosec // validated above
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	logs := make([]Log, len(rows))
 	for i, r := range rows {
 		logs[i] = toLog(r)
 	}
-	return logs, nil
+	return logs, total, nil
 }
 
 // DeleteLogs deletes all compaction logs for a bot.
@@ -255,4 +263,50 @@ func extractTextContent(content []byte) string {
 
 func joinTexts(parts []string) string {
 	return strings.Join(parts, " ")
+}
+
+// splitByRatio splits messages so that roughly the first ratio% (by token weight)
+// are returned for compaction, and the rest are kept as-is.
+// When ratio >= 100 or totalInputTokens <= 0, all messages are returned.
+func splitByRatio(messages []sqlc.ListUncompactedMessagesBySessionRow, totalInputTokens, ratio int) []sqlc.ListUncompactedMessagesBySessionRow {
+	if ratio >= 100 || ratio <= 0 || totalInputTokens <= 0 || len(messages) == 0 {
+		return messages
+	}
+
+	keepTokens := totalInputTokens * (100 - ratio) / 100
+	if keepTokens <= 0 {
+		return messages
+	}
+
+	accumulated := 0
+	cutoff := len(messages)
+	for i := len(messages) - 1; i >= 0; i-- {
+		accumulated += estimateRowTokens(messages[i])
+		if accumulated >= keepTokens {
+			cutoff = i + 1
+			break
+		}
+	}
+
+	if cutoff <= 0 {
+		return nil
+	}
+	if cutoff >= len(messages) {
+		return messages
+	}
+	return messages[:cutoff]
+}
+
+type usagePayload struct {
+	OutputTokens *int `json:"output_tokens"`
+}
+
+func estimateRowTokens(m sqlc.ListUncompactedMessagesBySessionRow) int {
+	if len(m.Usage) > 0 {
+		var u usagePayload
+		if json.Unmarshal(m.Usage, &u) == nil && u.OutputTokens != nil && *u.OutputTokens > 0 {
+			return *u.OutputTokens
+		}
+	}
+	return len(m.Content) / 4
 }

@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,6 +18,8 @@ import (
 	"github.com/memohai/memoh/internal/email"
 	emailgmail "github.com/memohai/memoh/internal/email/adapters/gmail"
 )
+
+const emailOAuthCallbackPath = "/api/email/oauth/callback"
 
 // EmailOAuthHandler handles the OAuth2 authorization flow for Gmail providers.
 type EmailOAuthHandler struct {
@@ -47,6 +52,7 @@ func (h *EmailOAuthHandler) Register(e *echo.Echo) {
 	e.GET("/email-providers/:id/oauth/status", h.Status)
 	e.DELETE("/email-providers/:id/oauth/token", h.Revoke)
 	e.GET("/email/oauth/callback", h.Callback)
+	e.GET(emailOAuthCallbackPath, h.Callback)
 }
 
 // Authorize godoc
@@ -69,7 +75,8 @@ func (h *EmailOAuthHandler) Authorize(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "provider not found")
 	}
 
-	state, err := generateState()
+	callbackURL := h.effectiveCallbackURL(c)
+	state, err := generateState(callbackURL)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate state")
 	}
@@ -85,7 +92,7 @@ func (h *EmailOAuthHandler) Authorize(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "client_id is not configured for this provider")
 		}
 		adapter := emailgmail.New(h.logger, h.tokenStore)
-		authURL = adapter.AuthorizeURL(clientID, h.callbackURL, state)
+		authURL = adapter.AuthorizeURL(clientID, callbackURL, state)
 	}
 	if authURL == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "provider does not support OAuth2")
@@ -109,10 +116,10 @@ func (h *EmailOAuthHandler) Callback(c echo.Context) error {
 	state := strings.TrimSpace(c.QueryParam("state"))
 
 	if code == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "code is required")
+		return renderEmailOAuthCallbackResult(c, http.StatusBadRequest, "", "error", "code is required")
 	}
 	if state == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "state is required")
+		return renderEmailOAuthCallbackResult(c, http.StatusBadRequest, "", "error", "state is required")
 	}
 
 	ctx := c.Request().Context()
@@ -120,25 +127,29 @@ func (h *EmailOAuthHandler) Callback(c echo.Context) error {
 	stored, err := h.tokenStore.GetByState(ctx, state)
 	if err != nil {
 		h.logger.Error("oauth callback: state not found", slog.String("state", state), slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid or expired state")
+		return renderEmailOAuthCallbackResult(c, http.StatusBadRequest, "", "error", "invalid or expired state")
 	}
 
 	provider, err := h.service.GetProvider(ctx, stored.ProviderID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "provider not found")
+		return renderEmailOAuthCallbackResult(c, http.StatusInternalServerError, stored.ProviderID, "error", "provider not found")
 	}
 
 	if email.ProviderName(provider.Provider) != emailgmail.ProviderName {
-		return echo.NewHTTPError(http.StatusBadRequest, "provider does not support OAuth2")
+		return renderEmailOAuthCallbackResult(c, http.StatusBadRequest, stored.ProviderID, "error", "provider does not support OAuth2")
 	}
 	adapter := emailgmail.New(h.logger, h.tokenStore)
-	if err := adapter.ExchangeCode(ctx, provider.Config, stored.ProviderID, code, h.callbackURL); err != nil {
+	redirectURI := callbackURLFromState(state)
+	if redirectURI == "" {
+		redirectURI = h.effectiveCallbackURL(c)
+	}
+	if err := adapter.ExchangeCode(ctx, provider.Config, stored.ProviderID, code, redirectURI); err != nil {
 		h.logger.Error("gmail code exchange failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "token exchange failed")
+		return renderEmailOAuthCallbackResult(c, http.StatusInternalServerError, stored.ProviderID, "error", "token exchange failed")
 	}
 
 	h.logger.Info("email oauth authorized", slog.String("provider_id", stored.ProviderID), slog.String("provider", provider.Provider))
-	return c.JSON(http.StatusOK, map[string]string{"status": "authorized"})
+	return renderEmailOAuthCallbackResult(c, http.StatusOK, stored.ProviderID, "success", "")
 }
 
 // Status godoc
@@ -236,10 +247,119 @@ func isProviderConfigured(provider email.ProviderResponse) bool {
 	return strings.TrimSpace(clientID) != ""
 }
 
-func generateState() (string, error) {
+func generateState(callbackURL string) (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(b), nil
+	state := hex.EncodeToString(b)
+	if callbackURL == "" {
+		return state, nil
+	}
+	return state + "." + base64.RawURLEncoding.EncodeToString([]byte(callbackURL)), nil
+}
+
+func (h *EmailOAuthHandler) effectiveCallbackURL(c echo.Context) string {
+	if baseURL := requestBaseURL(c.Request()); baseURL != "" {
+		return strings.TrimRight(baseURL, "/") + emailOAuthCallbackPath
+	}
+	return h.callbackURL
+}
+
+func requestBaseURL(req *http.Request) string {
+	if origin := normalizeOrigin(req.Header.Get(echo.HeaderOrigin)); origin != "" {
+		return origin
+	}
+	if referer := normalizeOrigin(req.Referer()); referer != "" {
+		return referer
+	}
+
+	host := firstHeaderValue(req.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(req.Host)
+	}
+	if host == "" {
+		return ""
+	}
+	proto := firstHeaderValue(req.Header.Get(echo.HeaderXForwardedProto))
+	if proto == "" {
+		if req.TLS != nil {
+			proto = "https"
+		} else {
+			proto = "http"
+		}
+	}
+	if port := firstHeaderValue(req.Header.Get("X-Forwarded-Port")); port != "" &&
+		!strings.Contains(host, ":") &&
+		(proto != "https" || port != "443") &&
+		(proto != "http" || port != "80") {
+		host += ":" + port
+	}
+	return proto + "://" + host
+}
+
+func normalizeOrigin(raw string) string {
+	origin := firstHeaderValue(raw)
+	if origin == "" {
+		return ""
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+func firstHeaderValue(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Split(raw, ",")
+	return strings.TrimSpace(parts[0])
+}
+
+func callbackURLFromState(state string) string {
+	_, encoded, ok := strings.Cut(state, ".")
+	if !ok || encoded == "" {
+		return ""
+	}
+	callbackURL, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(callbackURL))
+}
+
+func renderEmailOAuthCallbackResult(c echo.Context, statusCode int, providerID, status, errorMessage string) error {
+	page := template.Must(template.New("email-oauth-result").Parse(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>{{if eq .Status "success"}}Gmail OAuth Connected{{else}}Gmail OAuth Failed{{end}}</title>
+  </head>
+  <body style="font-family: sans-serif; padding: 24px;">
+    {{if eq .Status "success"}}
+      <h2>Gmail OAuth connected</h2>
+      <p>You can close this window and return to Memoh.</p>
+    {{else}}
+      <h2>Gmail OAuth failed</h2>
+      <p>{{.Error}}</p>
+    {{end}}
+    <script>
+      window.opener?.postMessage({
+        type: "memoh-email-oauth-callback",
+        status: "{{.Status}}",
+        providerId: "{{.ProviderID}}",
+        error: "{{.Error}}"
+      }, "*");
+      setTimeout(() => window.close(), 300);
+    </script>
+  </body>
+</html>`))
+
+	return c.HTML(statusCode, executeHTMLTemplate(page, map[string]string{
+		"ProviderID": providerID,
+		"Status":     status,
+		"Error":      errorMessage,
+	}))
 }

@@ -17,8 +17,9 @@ var (
 	BuildTime = ""
 )
 
-// GetInfo returns a formatted version string including the version and commit hash.
-func GetInfo() string {
+// EnsureBuildInfo populates CommitHash and BuildTime from Go build info
+// when they were not set via ldflags.
+func EnsureBuildInfo() {
 	if CommitHash == "" {
 		if info, ok := debug.ReadBuildInfo(); ok {
 			for _, setting := range info.Settings {
@@ -31,15 +32,23 @@ func GetInfo() string {
 			}
 		}
 	}
+}
 
+// ShortCommitHash returns the first 7 characters of the commit hash.
+func ShortCommitHash() string {
+	EnsureBuildInfo()
+	if len(CommitHash) > 7 {
+		return CommitHash[:7]
+	}
+	return CommitHash
+}
+
+// GetInfo returns a formatted version string including the version and commit hash.
+func GetInfo() string {
+	EnsureBuildInfo()
 	res := Version
-	if CommitHash != "" {
-		// Only use the first 7 characters of the commit hash if it's long
-		shortHash := CommitHash
-		if len(shortHash) > 7 {
-			shortHash = shortHash[:7]
-		}
-		res += fmt.Sprintf(" (%s)", shortHash)
+	if h := ShortCommitHash(); h != "" {
+		res += fmt.Sprintf(" (%s)", h)
 	}
 	return res
 }

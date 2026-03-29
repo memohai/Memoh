@@ -13,7 +13,7 @@
             size="icon-xs"
             aria-label="Search"
           >
-            <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
+            <Search />
           </InputGroupButton>
         </InputGroupAddon>
       </InputGroup>
@@ -82,8 +82,7 @@
           size="sm"
           @click="openCreateDialog"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'plus']"
+          <Plus
             class="mr-1.5"
           />
           {{ $t('common.add') }}
@@ -309,9 +308,8 @@
                   v-if="probing"
                   class="mr-1.5"
                 />
-                <FontAwesomeIcon
+                <RefreshCw
                   v-else
-                  :icon="['fas', 'rotate']"
                   class="mr-1.5"
                 />
                 {{ probing ? $t('mcp.probing') : $t('mcp.probe') }}
@@ -329,7 +327,7 @@
               v-if="probeAuthRequired"
               class="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 rounded-md p-3 flex items-center gap-2"
             >
-              <FontAwesomeIcon :icon="['fas', 'lock']" />
+              <Lock />
               {{ $t('mcp.authRequired') }}
             </div>
 
@@ -415,7 +413,7 @@
                       size="icon-xs"
                       @click="copyText(oauthCallbackUrl); toast.success($t('common.copied'))"
                     >
-                      <FontAwesomeIcon :icon="['far', 'copy']" />
+                      <Copy />
                     </Button>
                   </div>
                   <p class="text-xs text-muted-foreground">
@@ -436,9 +434,8 @@
                     v-if="oauthDiscovering || oauthAuthorizing"
                     class="mr-1.5"
                   />
-                  <FontAwesomeIcon
+                  <KeyRound
                     v-else
-                    :icon="['fas', 'key']"
                     class="mr-1.5"
                   />
                   {{ oauthDiscovering ? $t('mcp.oauth.discovering') : oauthAuthorizing ? $t('mcp.oauth.authorizing') : $t('mcp.oauth.authorize') }}
@@ -466,8 +463,7 @@
                 :key="tool.name"
                 class="flex items-start gap-2 py-1.5 px-2 rounded text-xs hover:bg-accent/50"
               >
-                <FontAwesomeIcon
-                  :icon="['fas', 'wrench']"
+                <Wrench
                   class="mt-1 text-muted-foreground shrink-0 text-xs"
                 />
                 <div class="min-w-0">
@@ -504,7 +500,7 @@
       >
         <EmptyHeader>
           <EmptyMedia variant="icon">
-            <FontAwesomeIcon :icon="['fas', 'plug']" />
+            <Plug />
           </EmptyMedia>
         </EmptyHeader>
         <EmptyTitle>{{ $t('mcp.emptyTitle') }}</EmptyTitle>
@@ -639,6 +635,7 @@
 </template>
 
 <script setup lang="ts">
+import { Search, Plus, RefreshCw, Lock, Copy, KeyRound, Wrench, Plug } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'

@@ -18,17 +18,21 @@ RETURNING id, schedule_id, bot_id, session_id, status, result_text, error_messag
 SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs
 WHERE bot_id = $1
-  AND ($2::timestamptz IS NULL OR started_at < $2::timestamptz)
 ORDER BY started_at DESC
-LIMIT $3;
+LIMIT $2 OFFSET $3;
+
+-- name: CountScheduleLogsByBot :one
+SELECT count(*) FROM schedule_logs WHERE bot_id = $1;
 
 -- name: ListScheduleLogsBySchedule :many
 SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs
 WHERE schedule_id = $1
-  AND ($2::timestamptz IS NULL OR started_at < $2::timestamptz)
 ORDER BY started_at DESC
-LIMIT $3;
+LIMIT $2 OFFSET $3;
+
+-- name: CountScheduleLogsBySchedule :one
+SELECT count(*) FROM schedule_logs WHERE schedule_id = $1;
 
 -- name: DeleteScheduleLogsByBot :exec
 DELETE FROM schedule_logs WHERE bot_id = $1;

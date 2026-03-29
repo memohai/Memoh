@@ -13,7 +13,7 @@
         variant="outline"
         class="flex items-center gap-2"
       >
-        <FontAwesomeIcon :icon="['fas', 'file-import']" />
+        <FileInput />
         {{ $t('models.importModels') }}
       </Button>
     </template>
@@ -33,6 +33,7 @@ import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postProvidersByIdImportModels } from '@memohai/sdk'
 import { toast } from 'vue-sonner'
+import { FileInput } from 'lucide-vue-next'
 import { Button } from '@memohai/ui'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'

@@ -8,8 +8,7 @@
           v-if="isLoading && configuredChannels.length === 0"
           class="flex items-center justify-center h-full p-4"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'spinner']"
+          <LoaderCircle
             class="size-4 animate-spin text-muted-foreground"
           />
         </div>
@@ -79,8 +78,7 @@
               size="sm"
               :disabled="unconfiguredChannels.length === 0 && !isLoading"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'plus']"
+              <Plus
                 class="mr-2 size-3"
               />
               {{ $t('bots.channels.addChannel') }}
@@ -136,6 +134,7 @@
 </template>
 
 <script setup lang="ts">
+import { LoaderCircle, Plus } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import {
   Button,

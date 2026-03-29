@@ -1,20 +1,42 @@
 <template>
-  <SearchableSelectPopover
-    v-model="selected"
-    :options="options"
-    :placeholder="placeholder || ''"
-    :aria-label="placeholder || 'Select model'"
-    :search-placeholder="$t('bots.settings.searchModel')"
-    search-aria-label="Search models"
-    :empty-text="$t('bots.settings.noModel')"
-  />
+  <Popover v-model:open="open">
+    <PopoverTrigger as-child>
+      <Button
+        variant="outline"
+        role="combobox"
+        :aria-expanded="open"
+        :aria-label="placeholder || 'Select model'"
+        class="w-full justify-between font-normal"
+      >
+        <span class="truncate">
+          {{ displayLabel || placeholder }}
+        </span>
+        <Search
+          class="ml-2 size-3.5 shrink-0 text-muted-foreground"
+        />
+      </Button>
+    </PopoverTrigger>
+    <PopoverContent
+      class="w-[--reka-popover-trigger-width] p-0"
+      align="start"
+    >
+      <ModelOptions
+        v-model="selected"
+        :models="models"
+        :providers="providers"
+        :model-type="modelType"
+        :open="open"
+      />
+    </PopoverContent>
+  </Popover>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { Search } from 'lucide-vue-next'
+import { Popover, PopoverTrigger, PopoverContent, Button } from '@memohai/ui'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
-import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
-import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
+import ModelOptions from './model-options.vue'
 
 const props = defineProps<{
   models: ModelsGetResponse[]
@@ -24,30 +46,14 @@ const props = defineProps<{
 }>()
 
 const selected = defineModel<string>({ default: '' })
+const open = ref(false)
 
-const typeFilteredModels = computed(() =>
-  props.models.filter((m) => m.type === props.modelType),
-)
-
-const providerMap = computed(() => {
-  const map = new Map<string, string>()
-  for (const p of props.providers) {
-    map.set(p.id, p.name ?? p.id)
-  }
-  return map
+watch(selected, () => {
+  open.value = false
 })
 
-const options = computed<SearchableSelectOption[]>(() =>
-  typeFilteredModels.value.map((model) => {
-    const providerId = model.llm_provider_id
-    return {
-      value: model.id || model.model_id,
-      label: model.name || model.model_id,
-      description: model.name ? model.model_id : undefined,
-      group: providerId,
-      groupLabel: providerMap.value.get(providerId) ?? providerId,
-      keywords: [model.model_id, model.name ?? ''],
-    }
-  }),
-)
+const displayLabel = computed(() => {
+  const model = props.models.find((m) => (m.id || m.model_id) === selected.value)
+  return model?.name || model?.model_id || selected.value
+})
 </script>

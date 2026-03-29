@@ -16,8 +16,7 @@
             :aria-label="t('bots.createBot')"
             @click="router.push({ name: 'bots' })"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'plus']"
+            <Plus
               class="size-3.5"
             />
           </Button>
@@ -40,8 +39,7 @@
               v-if="isLoading"
               class="flex justify-center py-4"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'spinner']"
+              <LoaderCircle
                 class="size-4 animate-spin text-muted-foreground"
               />
             </div>
@@ -87,8 +85,7 @@
               :is-active="isSettingsActive"
               @click="router.push('/settings')"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'gear']"
+              <Settings
                 class="size-3.5"
               />
               <span class="text-xs font-medium">{{ t('sidebar.settings') }}</span>
@@ -121,6 +118,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@memohai/ui'
+import { Plus, LoaderCircle, Settings } from 'lucide-vue-next'
 import BotItem from './bot-item.vue'
 import { usePinnedBots } from '@/composables/usePinnedBots'
 

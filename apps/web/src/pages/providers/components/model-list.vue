@@ -19,9 +19,8 @@
         class="shadow-none mb-4"
       >
         <InputGroupAddon align="inline-start">
-          <FontAwesomeIcon
-            :icon="['fas', 'magnifying-glass']"
-            class="text-muted-foreground"
+          <Search
+            class="size-3.5 text-muted-foreground"
           />
         </InputGroupAddon>
         <InputGroupInput
@@ -42,20 +41,40 @@
       </section>
 
       <div
-        v-if="hasMore"
-        class="flex flex-col items-center gap-2 pt-4"
+        v-if="totalPages > 1"
+        class="flex items-center justify-between pt-4"
       >
         <span class="text-xs text-muted-foreground">
-          {{ $t('models.showingCount', { count: displayLimit, total: filteredModels.length }) }}
+          {{ $t('models.showingCount', { count: `${pageStart}-${pageEnd}`, total: filteredModels.length }) }}
         </span>
-        <Button
-          variant="outline"
-          size="sm"
-          class="cursor-pointer"
-          @click="showMore"
+        <Pagination
+          :total="filteredModels.length"
+          :items-per-page="PAGE_SIZE"
+          :sibling-count="1"
+          :page="currentPage"
+          show-edges
+          @update:page="currentPage = $event"
         >
-          {{ $t('models.showMore') }}
-        </Button>
+          <PaginationContent v-slot="{ items }">
+            <PaginationFirst />
+            <PaginationPrevious />
+            <template
+              v-for="(item, index) in items"
+              :key="index"
+            >
+              <PaginationEllipsis
+                v-if="item.type === 'ellipsis'"
+                :index="index"
+              />
+              <PaginationItem
+                v-else
+                :value="item.value"
+              />
+            </template>
+            <PaginationNext />
+            <PaginationLast />
+          </PaginationContent>
+        </Pagination>
       </div>
 
       <Empty
@@ -64,7 +83,7 @@
       >
         <EmptyHeader>
           <EmptyMedia variant="icon">
-            <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
+            <Search />
           </EmptyMedia>
         </EmptyHeader>
         <EmptyTitle>{{ $t('models.searchNoResults') }}</EmptyTitle>
@@ -77,7 +96,7 @@
     >
       <EmptyHeader>
         <EmptyMedia variant="icon">
-          <FontAwesomeIcon :icon="['far', 'rectangle-list']" />
+          <List />
         </EmptyMedia>
       </EmptyHeader>
       <EmptyTitle>{{ $t('models.emptyTitle') }}</EmptyTitle>
@@ -90,7 +109,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import {
-  Button,
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -100,7 +118,16 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationFirst,
+  PaginationItem,
+  PaginationLast,
+  PaginationNext,
+  PaginationPrevious,
 } from '@memohai/ui'
+import { Search, List } from 'lucide-vue-next'
 import CreateModel from '@/components/create-model/index.vue'
 import ImportModelsDialog from '@/components/import-models-dialog/index.vue'
 import ModelItem from './model-item.vue'
@@ -120,7 +147,7 @@ defineEmits<{
 }>()
 
 const searchQuery = ref('')
-const displayLimit = ref(PAGE_SIZE)
+const currentPage = ref(1)
 
 const filteredModels = computed(() => {
   if (!props.models) return []
@@ -133,14 +160,15 @@ const filteredModels = computed(() => {
   })
 })
 
-const displayedModels = computed(() => filteredModels.value.slice(0, displayLimit.value))
-const hasMore = computed(() => displayLimit.value < filteredModels.value.length)
-
-function showMore() {
-  displayLimit.value += PAGE_SIZE
-}
+const totalPages = computed(() => Math.ceil(filteredModels.value.length / PAGE_SIZE))
+const pageStart = computed(() => (currentPage.value - 1) * PAGE_SIZE + 1)
+const pageEnd = computed(() => Math.min(currentPage.value * PAGE_SIZE, filteredModels.value.length))
+const displayedModels = computed(() => {
+  const start = (currentPage.value - 1) * PAGE_SIZE
+  return filteredModels.value.slice(start, start + PAGE_SIZE)
+})
 
 watch(searchQuery, () => {
-  displayLimit.value = PAGE_SIZE
+  currentPage.value = 1
 })
 </script>

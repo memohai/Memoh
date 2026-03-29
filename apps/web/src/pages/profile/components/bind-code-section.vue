@@ -1,8 +1,7 @@
 <template>
   <section>
     <h2 class="mb-2 flex items-center text-xs font-medium">
-      <FontAwesomeIcon
-        :icon="['fas', 'plug']"
+      <Plug
         class="mr-2 size-3.5"
       />
       {{ $t('settings.bindCode') }}
@@ -99,6 +98,7 @@ import {
   Separator,
   Spinner,
 } from '@memohai/ui'
+import { Plug } from 'lucide-vue-next'
 
 interface BindCodeValue {
   token: string

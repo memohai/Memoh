@@ -46,7 +46,7 @@ export function extractAllToolResults(
       const part = p as Record<string, unknown>
       return {
         toolCallId: String(part.toolCallId ?? ''),
-        output: part.output ?? null,
+        output: part.output ?? part.result ?? null,
       }
     })
 }

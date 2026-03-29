@@ -3,8 +3,7 @@
     <DialogTrigger as-child>
       <slot name="trigger">
         <Button variant="default">
-          <FontAwesomeIcon
-            :icon="['fas', 'plus']"
+          <Plus
             class="mr-1.5"
           />
           {{ $t('bots.createBot') }}
@@ -142,6 +141,7 @@ import {
   SelectValue,
   Spinner,
 } from '@memohai/ui'
+import { Plus } from 'lucide-vue-next'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'

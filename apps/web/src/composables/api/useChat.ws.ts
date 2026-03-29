@@ -6,6 +6,8 @@ export interface WSClientMessage {
   text?: string
   session_id?: string
   attachments?: ChatAttachment[]
+  model_id?: string
+  reasoning_effort?: string
 }
 
 export interface ChatWebSocket {

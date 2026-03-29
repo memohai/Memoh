@@ -516,7 +516,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return result
 	}
 
-	chunkCh, streamErrCh := p.runner.StreamChat(ctx, conversation.ChatRequest{
+	chatReq := conversation.ChatRequest{
 		BotID:                   identity.BotID,
 		ChatID:                  activeChatID,
 		SessionID:               sessionID,
@@ -536,7 +536,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		UserMessagePersisted:    false,
 		Attachments:             attachments,
 		OutboundAssetCollector:  assetCollector,
-	})
+	}
+	if mid, _ := msg.Metadata["model_id"].(string); strings.TrimSpace(mid) != "" {
+		chatReq.Model = strings.TrimSpace(mid)
+	}
+	if re, _ := msg.Metadata["reasoning_effort"].(string); strings.TrimSpace(re) != "" {
+		chatReq.ReasoningEffort = strings.TrimSpace(re)
+	}
+	chunkCh, streamErrCh := p.runner.StreamChat(ctx, chatReq)
 
 	var (
 		finalMessages []conversation.ModelMessage

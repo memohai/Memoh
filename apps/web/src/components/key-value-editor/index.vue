@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X, Plus } from 'lucide-vue-next'
 import { Button, Input } from '@memohai/ui'
 
 export interface KeyValuePair {
@@ -67,7 +68,7 @@ function removeRow(index: number) {
         class="shrink-0 size-8 text-muted-foreground hover:text-destructive"
         @click="removeRow(index)"
       >
-        <FontAwesomeIcon :icon="['fas', 'xmark']" />
+        <X />
       </Button>
     </div>
     <Button
@@ -78,8 +79,7 @@ function removeRow(index: number) {
       class="w-fit"
       @click="addRow"
     >
-      <FontAwesomeIcon
-        :icon="['fas', 'plus']"
+      <Plus
         class="mr-1.5"
       />
       {{ $t('common.add') }}

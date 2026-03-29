@@ -20,6 +20,7 @@ import { getProviders } from '@memohai/sdk'
 import type { ProvidersGetResponse } from '@memohai/sdk'
 import AddProvider from '@/components/add-provider/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
+import { List } from 'lucide-vue-next'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 function getInitials(name: string | undefined) {
@@ -151,7 +152,7 @@ const openStatus = reactive({
       >
         <EmptyHeader>
           <EmptyMedia variant="icon">
-            <FontAwesomeIcon :icon="['far', 'rectangle-list']" />
+            <List />
           </EmptyMedia>
         </EmptyHeader>
         <EmptyTitle>{{ $t('provider.emptyTitle') }}</EmptyTitle>

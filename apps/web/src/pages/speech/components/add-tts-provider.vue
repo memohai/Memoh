@@ -14,8 +14,7 @@
           class="w-full shadow-none! text-muted-foreground mb-4"
           variant="outline"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'plus']"
+          <Plus
             class="mr-1"
           /> {{ $t('speech.add') }}
         </Button>
@@ -99,6 +98,7 @@ import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { postTtsProviders, getTtsProvidersMeta } from '@memohai/sdk'
 import type { TtsCreateProviderRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
+import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 

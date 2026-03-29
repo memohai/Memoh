@@ -470,11 +470,6 @@ const summary = computed(() => {
   }
 })
 
-const sessionTypeInputLabel = (type: SessionType) =>
-  t(`usage.${type}Input`)
-const sessionTypeOutputLabel = (type: SessionType) =>
-  t(`usage.${type}Output`)
-
 function modelLabel(m: HandlersModelTokenUsage) {
   return `${m.model_name || m.model_slug} (${m.provider_name})`
 }
@@ -555,71 +550,42 @@ const dailyTokensOption = computed(() => {
   const types = activeTypes.value
   const maps = dayMaps.value
 
-  const legendItems: string[] = []
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const series: any[] = []
-
-  for (const type of types) {
-    const inputName = sessionTypeInputLabel(type)
-    const outputName = sessionTypeOutputLabel(type)
-    legendItems.push(inputName, outputName)
-    const map = maps[type]
-
-    series.push({
-      name: inputName,
-      type: 'bar' as const,
-      stack: type,
-      data: days.map(d => map.get(d)?.input_tokens ?? 0),
-    })
-    series.push({
-      name: outputName,
-      type: 'bar' as const,
-      stack: type,
-      data: days.map(d => map.get(d)?.output_tokens ?? 0),
-    })
-  }
-
   const totalInputLabel = t('usage.totalInput')
   const totalOutputLabel = t('usage.totalOutput')
-  legendItems.push(totalInputLabel, totalOutputLabel)
-
-  series.push({
-    name: totalInputLabel,
-    type: 'line' as const,
-    smooth: true,
-    symbol: 'circle',
-    symbolSize: 4,
-    data: days.map(d => {
-      let sum = 0
-      for (const tp of types) sum += maps[tp].get(d)?.input_tokens ?? 0
-      return sum
-    }),
-  })
-  series.push({
-    name: totalOutputLabel,
-    type: 'line' as const,
-    smooth: true,
-    symbol: 'circle',
-    symbolSize: 4,
-    data: days.map(d => {
-      let sum = 0
-      for (const tp of types) sum += maps[tp].get(d)?.output_tokens ?? 0
-      return sum
-    }),
-  })
 
   return {
     tooltip: { trigger: 'axis' as const },
     legend: {
-      data: legendItems,
+      data: [totalInputLabel, totalOutputLabel],
       bottom: 0,
       left: 'center',
       itemGap: 12,
     },
-    grid: { left: 60, right: 20, bottom: 55, top: 20 },
+    grid: { left: 60, right: 20, bottom: 40, top: 20 },
     xAxis: { type: 'category' as const, data: days },
     yAxis: { type: 'value' as const },
-    series,
+    series: [
+      {
+        name: totalInputLabel,
+        type: 'bar' as const,
+        stack: 'tokens',
+        data: days.map(d => {
+          let sum = 0
+          for (const tp of types) sum += maps[tp].get(d)?.input_tokens ?? 0
+          return sum
+        }),
+      },
+      {
+        name: totalOutputLabel,
+        type: 'bar' as const,
+        stack: 'tokens',
+        data: days.map(d => {
+          let sum = 0
+          for (const tp of types) sum += maps[tp].get(d)?.output_tokens ?? 0
+          return sum
+        }),
+      },
+    ],
   }
 })
 

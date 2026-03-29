@@ -18,24 +18,21 @@
         class="w-full justify-between font-normal"
       >
         <span class="flex items-center gap-2 truncate">
-          <FontAwesomeIcon
+          <AppWindow
             v-if="selected"
-            :icon="['fas', 'window-maximize']"
             class="size-3.5 text-muted-foreground"
           />
           <span class="truncate">{{ displayLabel || placeholder }}</span>
         </span>
-        <FontAwesomeIcon
-          :icon="['fas', 'magnifying-glass']"
+        <Search
           class="ml-2 size-3.5 shrink-0 text-muted-foreground"
         />
       </Button>
     </template>
 
     <template #option-icon="{ option }">
-      <FontAwesomeIcon
+      <AppWindow
         v-if="option.value"
-        :icon="['fas', 'window-maximize']"
         class="size-3.5 text-muted-foreground"
       />
     </template>
@@ -52,6 +49,7 @@
 </template>
 
 <script setup lang="ts">
+import { AppWindow, Search } from 'lucide-vue-next'
 import { Button } from '@memohai/ui'
 import { computed } from 'vue'
 import type { BrowsercontextsBrowserContext } from '@memohai/sdk'

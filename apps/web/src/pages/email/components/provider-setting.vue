@@ -2,8 +2,7 @@
   <div class="p-4">
     <section class="flex justify-between items-center">
       <div class="flex items-center gap-2">
-        <FontAwesomeIcon
-          :icon="['fas', 'envelope']"
+        <Mail
           class="size-5"
         />
         <div>
@@ -78,8 +77,8 @@
               class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
             >
-              <FontAwesomeIcon
-                :icon="['fas', visibleSecrets[field.key] ? 'eye-slash' : 'eye']"
+              <component
+                :is="visibleSecrets[field.key] ? EyeOff : Eye"
                 class="size-3.5"
               />
             </button>
@@ -170,8 +169,7 @@
               :loading="authorizeLoading"
               @click="handleAuthorize"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'key']"
+              <KeyRound
                 class="mr-1.5"
               />
               {{ $t('email.oauth.authorize') }}
@@ -200,7 +198,7 @@
               type="button"
               variant="outline"
             >
-              <FontAwesomeIcon :icon="['far', 'trash-can']" />
+              <Trash2 />
             </Button>
           </template>
         </ConfirmPopover>
@@ -231,6 +229,7 @@ import {
   Switch,
   Label,
 } from '@memohai/ui'
+import { Mail, Eye, EyeOff, KeyRound, Trash2 } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import { computed, inject, reactive, ref, watch } from 'vue'
@@ -380,8 +379,35 @@ async function handleAuthorize() {
     if (error || !data?.auth_url) {
       throw new Error(t('email.oauth.authorizeFailed'))
     }
-    window.open(data.auth_url, '_blank', 'noopener,noreferrer')
-    toast.success(t('email.oauth.authorizeOpened'))
+
+    const popup = window.open(data.auth_url, 'email-oauth', 'width=600,height=720')
+    if (!popup) {
+      throw new Error(t('email.oauth.authorizeFailed'))
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        window.removeEventListener('message', onMessage)
+      }
+
+      const onMessage = async (event: MessageEvent) => {
+        if (event.data?.type !== 'memoh-email-oauth-callback') return
+        if (event.data?.providerId && event.data.providerId !== curProviderId.value) return
+
+        cleanup()
+
+        if (event.data?.status === 'success') {
+          await fetchOAuthStatus()
+          toast.success(t('email.oauth.authorizeOpened'))
+          resolve()
+          return
+        }
+
+        reject(new Error(typeof event.data?.error === 'string' && event.data.error ? event.data.error : t('email.oauth.authorizeFailed')))
+      }
+
+      window.addEventListener('message', onMessage)
+    })
   } catch (e: unknown) {
     toast.error(e instanceof Error ? e.message : t('email.oauth.authorizeFailed'))
   } finally {

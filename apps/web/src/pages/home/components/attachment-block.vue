@@ -51,17 +51,14 @@
         :title="getContainerPath(att)"
         @click="handleOpenContainerFile(att)"
       >
-        <FontAwesomeIcon
-          :icon="['fas', fileIcon(att)]"
+        <component
+          :is="fileIconComponent(att)"
           class="size-4 text-muted-foreground"
         />
         <span class="truncate max-w-[200px] font-mono text-xs">
           {{ getDisplayName(att) }}
         </span>
-        <FontAwesomeIcon
-          :icon="['fas', 'arrow-up-right-from-square']"
-          class="size-3 text-muted-foreground/60 shrink-0"
-        />
+        <ExternalLink class="size-3 text-muted-foreground/60 shrink-0" />
       </button>
 
       <!-- Downloadable file -->
@@ -72,8 +69,8 @@
         rel="noopener noreferrer"
         class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 hover:bg-muted/60 transition-colors text-xs"
       >
-        <FontAwesomeIcon
-          :icon="['fas', fileIcon(att)]"
+        <component
+          :is="fileIconComponent(att)"
           class="size-4 text-muted-foreground"
         />
         <span class="truncate max-w-[200px]">
@@ -86,8 +83,8 @@
         v-else
         class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 text-xs text-muted-foreground"
       >
-        <FontAwesomeIcon
-          :icon="['fas', fileIcon(att)]"
+        <component
+          :is="fileIconComponent(att)"
           class="size-4"
         />
         <span class="truncate max-w-[200px]">
@@ -100,6 +97,8 @@
 
 <script setup lang="ts">
 import { inject } from 'vue'
+import { Music, Video, File as FileIcon, ExternalLink } from 'lucide-vue-next'
+import type { Component } from 'vue'
 import type { AttachmentBlock, AttachmentItem } from '@/store/chat-list'
 import { resolveUrl } from '../composables/useMediaGallery'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
@@ -164,10 +163,10 @@ function handleOpenContainerFile(att: AttachmentItem) {
   }
 }
 
-function fileIcon(att: AttachmentItem): string {
+function fileIconComponent(att: AttachmentItem): Component {
   const type = String(att.type ?? '').toLowerCase()
-  if (type === 'audio' || type === 'voice') return 'music'
-  if (type === 'video') return 'video'
-  return 'file'
+  if (type === 'audio' || type === 'voice') return Music
+  if (type === 'video') return Video
+  return FileIcon
 }
 </script>

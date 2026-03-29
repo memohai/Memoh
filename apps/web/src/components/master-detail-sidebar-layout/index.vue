@@ -24,8 +24,7 @@
       </section>
 
       <div class="fixed right-4 top-0 h-12 z-1000 md:hidden flex items-center">
-        <FontAwesomeIcon
-          :icon="['fas', 'bars']"
+        <Menu
           class="cursor-pointer p-2"
           @click="mobileOpen = !mobileOpen"
         />
@@ -62,6 +61,7 @@
 </template>
 
 <script setup lang="ts">
+import { Menu } from 'lucide-vue-next'
 import {  ref } from 'vue'
 import {
   Sheet,

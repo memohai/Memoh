@@ -87,7 +87,7 @@ func shouldSkipJWT(path string) bool {
 	if strings.HasPrefix(path, "/email/mailgun/webhook/") {
 		return true
 	}
-	if strings.HasPrefix(path, "/email/oauth/callback") {
+	if strings.HasPrefix(path, "/email/oauth/callback") || strings.HasPrefix(path, "/api/email/oauth/callback") {
 		return true
 	}
 	if strings.HasPrefix(path, "/providers/oauth/callback") {

@@ -17,24 +17,21 @@
         class="w-full justify-between font-normal"
       >
         <span class="flex items-center gap-2 truncate">
-          <FontAwesomeIcon
+          <Volume2
             v-if="selected"
-            :icon="['fas', 'volume-high']"
             class="size-3.5 text-muted-foreground"
           />
           <span class="truncate">{{ displayLabel || placeholder }}</span>
         </span>
-        <FontAwesomeIcon
-          :icon="['fas', 'magnifying-glass']"
+        <Search
           class="ml-2 size-3.5 shrink-0 text-muted-foreground"
         />
       </Button>
     </template>
 
     <template #option-icon="{ option }">
-      <FontAwesomeIcon
+      <Volume2
         v-if="option.value"
-        :icon="['fas', 'volume-high']"
         class="size-3.5 text-muted-foreground"
       />
     </template>
@@ -51,6 +48,7 @@
 </template>
 
 <script setup lang="ts">
+import { Volume2, Search } from 'lucide-vue-next'
 import { Button } from '@memohai/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'

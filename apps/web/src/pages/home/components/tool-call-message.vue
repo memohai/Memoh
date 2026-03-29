@@ -1,18 +1,18 @@
 <template>
   <div class="rounded-lg border bg-muted/30 text-xs overflow-hidden">
     <div class="flex items-center gap-2 px-3 py-2 bg-muted/50">
-      <FontAwesomeIcon
-        :icon="['fas', block.done ? 'check' : 'spinner']"
-        class="size-3"
-        :class="block.done ? 'text-green-600 dark:text-green-400' : 'animate-spin text-muted-foreground'"
+      <Check
+        v-if="block.done"
+        class="size-3 text-green-600 dark:text-green-400"
+      />
+      <LoaderCircle
+        v-else
+        class="size-3 animate-spin text-muted-foreground"
       />
 
       <!-- send -->
       <template v-if="block.toolName === 'send'">
-        <FontAwesomeIcon
-          :icon="['fas', 'paper-plane']"
-          class="size-3 text-muted-foreground"
-        />
+        <Send class="size-3 text-muted-foreground" />
         <span
           v-if="platform || target"
           class="text-xs truncate text-foreground"
@@ -36,10 +36,7 @@
 
       <!-- react -->
       <template v-else>
-        <FontAwesomeIcon
-          :icon="['fas', 'face-smile']"
-          class="size-3 text-muted-foreground"
-        />
+        <Smile class="size-3 text-muted-foreground" />
         <span
           v-if="emoji"
           class="text-xs"
@@ -74,6 +71,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { Check, LoaderCircle, Send, Smile } from 'lucide-vue-next'
 import { Badge } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 

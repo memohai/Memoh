@@ -957,6 +957,8 @@ definitions:
         items:
           $ref: '#/definitions/compaction.Log'
         type: array
+      total_count:
+        type: integer
     type: object
   compaction.Log:
     properties:
@@ -1373,6 +1375,10 @@ definitions:
     properties:
       message:
         $ref: '#/definitions/channel.Message'
+      model_id:
+        type: string
+      reasoning_effort:
+        type: string
     type: object
   handlers.LoginRequest:
     properties:
@@ -1445,11 +1451,15 @@ definitions:
     type: object
   handlers.PingResponse:
     properties:
+      commit_hash:
+        type: string
       container_backend:
         type: string
       snapshot_supported:
         type: boolean
       status:
+        type: string
+      version:
         type: string
     type: object
   handlers.ProbeResponse:
@@ -1719,6 +1729,8 @@ definitions:
         items:
           $ref: '#/definitions/heartbeat.Log'
         type: array
+      total_count:
+        type: integer
     type: object
   heartbeat.Log:
     properties:
@@ -2170,6 +2182,8 @@ definitions:
         items:
           $ref: '#/definitions/schedule.Log'
         type: array
+      total_count:
+        type: integer
     type: object
   schedule.ListResponse:
     properties:
@@ -2388,6 +2402,8 @@ definitions:
         type: boolean
       compaction_model_id:
         type: string
+      compaction_ratio:
+        type: integer
       compaction_threshold:
         type: integer
       heartbeat_enabled:
@@ -2423,6 +2439,8 @@ definitions:
         type: boolean
       compaction_model_id:
         type: string
+      compaction_ratio:
+        type: integer
       compaction_threshold:
         type: integer
       heartbeat_enabled:
@@ -3169,14 +3187,15 @@ paths:
         name: bot_id
         required: true
         type: string
-      - description: Before timestamp (RFC3339)
-        in: query
-        name: before
-        type: string
       - default: 50
         description: Limit
         in: query
         name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
         type: integer
       responses:
         "200":
@@ -4175,14 +4194,15 @@ paths:
         name: bot_id
         required: true
         type: string
-      - description: Before timestamp (RFC3339)
-        in: query
-        name: before
-        type: string
       - default: 50
         description: Limit
         in: query
         name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
         type: integer
       responses:
         "200":
@@ -5270,14 +5290,15 @@ paths:
         name: id
         required: true
         type: string
-      - description: Before timestamp (RFC3339)
-        in: query
-        name: before
-        type: string
       - default: 50
         description: Limit
         in: query
         name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
         type: integer
       responses:
         "200":
@@ -5326,14 +5347,15 @@ paths:
         name: bot_id
         required: true
         type: string
-      - description: Before timestamp (RFC3339)
-        in: query
-        name: before
-        type: string
       - default: 50
         description: Limit
         in: query
         name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
         type: integer
       responses:
         "200":

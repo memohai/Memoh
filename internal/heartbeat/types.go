@@ -21,5 +21,6 @@ type Log struct {
 }
 
 type ListLogsResponse struct {
-	Items []Log `json:"items"`
+	Items      []Log `json:"items"`
+	TotalCount int64 `json:"total_count"`
 }

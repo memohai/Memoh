@@ -77,8 +77,7 @@
           size="sm"
           @click="openAddDialog"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'plus']"
+          <Plus
             class="mr-1.5 size-3.5"
           />
           {{ $t('bots.access.addRule') }}
@@ -113,8 +112,7 @@
             :aria-label="$t('bots.access.dragToReorder')"
             :disabled="isReordering"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'grip-vertical']"
+            <GripVertical
               class="size-3.5"
             />
           </button>
@@ -167,8 +165,7 @@
               size="icon-sm"
               @click="openEditDialog(rule)"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'pen']"
+              <SquarePen
                 class="size-3.5"
               />
             </Button>
@@ -183,8 +180,7 @@
                 size="icon-sm"
                 class="text-destructive hover:text-destructive"
               >
-                <FontAwesomeIcon
-                  :icon="['fas', 'trash']"
+                <Trash2
                   class="size-3.5"
                 />
               </Button>
@@ -335,8 +331,7 @@
             @toggle="scopeOpen = ($event.target as HTMLDetailsElement).open"
           >
             <summary class="flex cursor-pointer items-center gap-1 text-xs font-medium text-foreground select-none list-none">
-              <FontAwesomeIcon
-                :icon="['fas', 'chevron-right']"
+              <ChevronRight
                 class="size-3 transition-transform group-open:rotate-90"
               />
               {{ $t('bots.access.sourceScopeTitle') }}
@@ -401,8 +396,7 @@
                   <summary
                     class="cursor-pointer list-none text-xs font-medium text-muted-foreground hover:text-foreground select-none"
                   >
-                    <FontAwesomeIcon
-                      :icon="['fas', 'chevron-right']"
+                    <ChevronRight
                       class="mr-0.5 inline size-3 transition-transform group-open/conversation-manual:rotate-90"
                     />
                     {{ $t('bots.access.manualConversationIds') }}
@@ -520,7 +514,7 @@ import { useSortable } from '@vueuse/integrations/useSortable'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
+import { Plus, GripVertical, SquarePen, Trash2, ChevronRight } from 'lucide-vue-next'
 import {
   Button,
   Input,

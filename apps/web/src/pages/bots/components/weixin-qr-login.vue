@@ -24,9 +24,8 @@
           v-if="isStarting"
           class="mr-1.5"
         />
-        <FontAwesomeIcon
+        <QrCode
           v-else
-          :icon="['fas', 'qrcode']"
           class="mr-1.5 size-3.5"
         />
         {{ $t('bots.channels.weixinQr.startScan') }}
@@ -57,8 +56,7 @@
           class="absolute inset-0 flex items-center justify-center rounded-lg bg-background/80"
         >
           <div class="text-center">
-            <FontAwesomeIcon
-              :icon="['fas', 'mobile-screen']"
+            <Smartphone
               class="size-8 text-primary mb-2"
             />
             <p class="text-xs font-medium text-foreground">
@@ -103,8 +101,7 @@
       class="flex flex-col items-center gap-3 py-4"
     >
       <div class="flex size-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900">
-        <FontAwesomeIcon
-          :icon="['fas', 'check']"
+        <Check
           class="size-5 text-green-600 dark:text-green-400"
         />
       </div>
@@ -132,6 +129,7 @@
 </template>
 
 <script setup lang="ts">
+import { QrCode, Smartphone, Check } from 'lucide-vue-next'
 import { ref, computed, onUnmounted } from 'vue'
 import { Button, Spinner } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'

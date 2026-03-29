@@ -22,8 +22,8 @@
         v-else
         class="flex items-center justify-center size-[26px] rounded-full bg-accent border border-border"
       >
-        <FontAwesomeIcon
-          :icon="iconDef"
+        <component
+          :is="iconComponent"
           class="size-2.5"
           :class="iconClass"
         />
@@ -62,7 +62,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, type Component } from 'vue'
+import { HeartPulse, Clock, GitBranch, MessageSquare } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
@@ -86,12 +87,12 @@ const isIMSession = computed(() => {
   return ct !== '' && !WEB_CHANNELS.has(ct)
 })
 
-const iconDef = computed<string[]>(() => {
+const iconComponent = computed<Component>(() => {
   switch (props.session.type) {
-    case 'heartbeat': return ['fas', 'heart-pulse']
-    case 'schedule': return ['fas', 'clock']
-    case 'subagent': return ['fas', 'code-branch']
-    default: return ['fas', 'message']
+    case 'heartbeat': return HeartPulse
+    case 'schedule': return Clock
+    case 'subagent': return GitBranch
+    default: return MessageSquare
   }
 })
 

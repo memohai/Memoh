@@ -194,7 +194,12 @@ func execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) erro
 		workDir = defaultWorkDir
 	}
 
-	cmd := exec.CommandContext(stream.Context(), "/bin/sh", "-c", command) //nolint:gosec // G204: intentional
+	var cmd *exec.Cmd
+	if isBarePath(command) {
+		cmd = exec.CommandContext(stream.Context(), command) //nolint:gosec // G204: intentional
+	} else {
+		cmd = exec.CommandContext(stream.Context(), "/bin/sh", "-c", command) //nolint:gosec // G204: intentional
+	}
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
@@ -472,6 +477,22 @@ func (*containerServer) Rename(_ context.Context, req *pb.RenameRequest) (*pb.Re
 		return nil, status.Errorf(codes.Internal, "rename: %v", err)
 	}
 	return &pb.RenameResponse{}, nil
+}
+
+// isBarePath returns true when the command string is a plain executable path
+// (no spaces, shell operators, or arguments) so it can be exec'd directly
+// without wrapping in "/bin/sh -c". This matters for interactive PTY shells
+// where /bin/sh -c wrapping would strip readline support.
+func isBarePath(cmd string) bool {
+	if cmd == "" {
+		return false
+	}
+	for _, c := range cmd {
+		if c == ' ' || c == '\t' || c == '|' || c == '&' || c == ';' || c == '>' || c == '<' || c == '$' || c == '(' || c == ')' || c == '`' {
+			return false
+		}
+	}
+	return strings.HasPrefix(cmd, "/") || !strings.Contains(cmd, "/")
 }
 
 func streamPipe(stream pb.ContainerService_ExecServer, r io.Reader, st pb.ExecOutput_Stream) {

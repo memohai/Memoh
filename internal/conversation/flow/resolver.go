@@ -234,8 +234,12 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	inlineImages := extractNativeImageParts(mergedAttachments)
 
 	reasoningEffort := ""
-	if chatModel.HasCompatibility(models.CompatReasoning) && botSettings.ReasoningEnabled {
-		reasoningEffort = botSettings.ReasoningEffort
+	if chatModel.HasCompatibility(models.CompatReasoning) {
+		if re := strings.TrimSpace(req.ReasoningEffort); re != "" {
+			reasoningEffort = re
+		} else if botSettings.ReasoningEnabled {
+			reasoningEffort = botSettings.ReasoningEffort
+		}
 	}
 
 	var reasoningConfig *models.ReasoningConfig

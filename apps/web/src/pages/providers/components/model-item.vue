@@ -3,6 +3,18 @@
     <ItemContent>
       <ItemTitle class="flex items-center gap-2">
         {{ model.name || model.model_id }}
+        <Badge
+          v-if="model.type"
+          variant="outline"
+          size="sm"
+          class="inline-flex items-center gap-1"
+        >
+          <component
+            :is="typeIcon"
+            class="size-3"
+          />
+          {{ model.type }}
+        </Badge>
         <span
           v-if="testResult"
           class="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
@@ -19,17 +31,7 @@
         />
       </ItemTitle>
       <ItemDescription class="gap-2 flex flex-wrap items-center mt-3">
-        <Badge variant="outline">
-          {{ model.type }}
-        </Badge>
-        <Badge
-          v-for="cap in (model.config?.compatibilities || [])"
-          :key="cap"
-          variant="secondary"
-          class="text-xs"
-        >
-          {{ $t(`models.compatibility.${cap}`, cap) }}
-        </Badge>
+        <ModelCapabilities :compatibilities="model.config?.compatibilities || []" />
         <Badge
           v-for="effort in reasoningEfforts"
           :key="effort"
@@ -38,12 +40,7 @@
         >
           {{ effort }}
         </Badge>
-        <span
-          v-if="model.config?.context_window"
-          class="text-xs text-muted-foreground"
-        >
-          ctx: {{ model.config.context_window.toLocaleString() }}
-        </span>
+        <ContextWindowBadge :context-window="model.config?.context_window" />
         <span
           v-if="testResult && testResult.status !== 'ok' && testResult.message"
           class="text-destructive text-xs"
@@ -61,7 +58,7 @@
         :aria-label="$t('models.testModel')"
         @click="runTest"
       >
-        <FontAwesomeIcon :icon="['fas', 'rotate']" />
+        <RefreshCw />
       </Button>
 
       <Button
@@ -71,7 +68,7 @@
         :aria-label="$t('common.edit')"
         @click="$emit('edit', model)"
       >
-        <FontAwesomeIcon :icon="['fas', 'gear']" />
+        <Settings />
       </Button>
 
       <ConfirmPopover
@@ -85,7 +82,7 @@
             variant="outline"
             :aria-label="$t('common.delete')"
           >
-            <FontAwesomeIcon :icon="['far', 'trash-can']" />
+            <Trash2 />
           </Button>
         </template>
       </ConfirmPopover>
@@ -104,7 +101,10 @@ import {
   Button,
   Spinner,
 } from '@memohai/ui'
+import { RefreshCw, Settings, Trash2, MessageSquare, Binary } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import ModelCapabilities from '@/components/model-capabilities/index.vue'
+import ContextWindowBadge from '@/components/context-window-badge/index.vue'
 import { postModelsByIdTest } from '@memohai/sdk'
 import type { ModelsGetResponse, ModelsTestResponse } from '@memohai/sdk'
 import { ref, computed } from 'vue'
@@ -126,6 +126,10 @@ defineEmits<{
 const testLoading = ref(false)
 const testResult = ref<ModelsTestResponse | null>(null)
 const reasoningEfforts = computed(() => ((props.model.config as ModelConfigWithReasoning | undefined)?.reasoning_efforts ?? []))
+
+const typeIcon = computed(() => {
+  return props.model.type === 'embedding' ? Binary : MessageSquare
+})
 
 const statusDotClass = computed(() => {
   switch (testResult.value?.status) {
@@ -152,5 +156,4 @@ async function runTest() {
     testLoading.value = false
   }
 }
-
 </script>

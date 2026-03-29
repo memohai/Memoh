@@ -1,15 +1,15 @@
 <template>
   <div class="rounded-lg border bg-muted/30 text-xs overflow-hidden">
     <div class="flex items-center gap-2 px-3 py-2 bg-muted/50">
-      <FontAwesomeIcon
-        :icon="['fas', block.done ? 'check' : 'spinner']"
-        class="size-3"
-        :class="block.done ? 'text-green-600 dark:text-green-400' : 'animate-spin text-muted-foreground'"
+      <Check
+        v-if="block.done"
+        class="size-3 text-green-600 dark:text-green-400"
       />
-      <FontAwesomeIcon
-        :icon="['fas', 'clock']"
-        class="size-3 text-muted-foreground"
+      <LoaderCircle
+        v-else
+        class="size-3 animate-spin text-muted-foreground"
       />
+      <Clock class="size-3 text-muted-foreground" />
       <span class="font-mono font-medium text-xs text-muted-foreground">
         {{ block.toolName }}
       </span>
@@ -47,6 +47,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { Check, LoaderCircle, Clock } from 'lucide-vue-next'
 import { Badge } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 

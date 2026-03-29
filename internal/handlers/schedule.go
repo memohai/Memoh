@@ -4,9 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -225,8 +223,8 @@ func (h *ScheduleHandler) Delete(c echo.Context) error {
 // @Description List schedule execution logs for a bot
 // @Tags schedule
 // @Param bot_id path string true "Bot ID"
-// @Param before query string false "Before timestamp (RFC3339)"
 // @Param limit query int false "Limit" default(50)
+// @Param offset query int false "Offset" default(0)
 // @Success 200 {object} schedule.ListLogsResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -244,12 +242,12 @@ func (h *ScheduleHandler) ListLogs(c echo.Context) error {
 		return err
 	}
 
-	before, limit := parseBeforeLimit(c)
-	items, err := h.service.ListLogs(c.Request().Context(), botID, before, limit)
+	limit, offset := parseOffsetLimit(c)
+	items, total, err := h.service.ListLogs(c.Request().Context(), botID, limit, offset)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, schedule.ListLogsResponse{Items: items})
+	return c.JSON(http.StatusOK, schedule.ListLogsResponse{Items: items, TotalCount: total})
 }
 
 // ListLogsBySchedule godoc
@@ -258,8 +256,8 @@ func (h *ScheduleHandler) ListLogs(c echo.Context) error {
 // @Tags schedule
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Schedule ID"
-// @Param before query string false "Before timestamp (RFC3339)"
 // @Param limit query int false "Limit" default(50)
+// @Param offset query int false "Offset" default(0)
 // @Success 200 {object} schedule.ListLogsResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -281,12 +279,12 @@ func (h *ScheduleHandler) ListLogsBySchedule(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "schedule id is required")
 	}
 
-	before, limit := parseBeforeLimit(c)
-	items, err := h.service.ListLogsBySchedule(c.Request().Context(), scheduleID, before, limit)
+	limit, offset := parseOffsetLimit(c)
+	items, total, err := h.service.ListLogsBySchedule(c.Request().Context(), scheduleID, limit, offset)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, schedule.ListLogsResponse{Items: items})
+	return c.JSON(http.StatusOK, schedule.ListLogsResponse{Items: items, TotalCount: total})
 }
 
 // DeleteLogs godoc
@@ -314,22 +312,6 @@ func (h *ScheduleHandler) DeleteLogs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
-}
-
-func parseBeforeLimit(c echo.Context) (*time.Time, int) {
-	var before *time.Time
-	if raw := strings.TrimSpace(c.QueryParam("before")); raw != "" {
-		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			before = &t
-		}
-	}
-	limit := 50
-	if raw := strings.TrimSpace(c.QueryParam("limit")); raw != "" {
-		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
-			limit = v
-		}
-	}
-	return before, limit
 }
 
 func (*ScheduleHandler) requireUserID(c echo.Context) (string, error) {

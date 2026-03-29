@@ -25,8 +25,7 @@
           />
           <span class="truncate">{{ displayLabel || placeholder }}</span>
         </span>
-        <FontAwesomeIcon
-          :icon="['fas', 'magnifying-glass']"
+        <Search
           class="ml-2 size-3.5 shrink-0 text-muted-foreground"
         />
       </Button>
@@ -52,6 +51,7 @@
 </template>
 
 <script setup lang="ts">
+import { Search } from 'lucide-vue-next'
 import { Button } from '@memohai/ui'
 import { computed } from 'vue'
 import type { SearchprovidersGetResponse } from '@memohai/sdk'

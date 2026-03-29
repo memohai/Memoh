@@ -575,6 +575,7 @@ export type ChannelUpsertConfigRequest = {
 
 export type CompactionListLogsResponse = {
     items?: Array<CompactionLog>;
+    total_count?: number;
 };
 
 export type CompactionLog = {
@@ -834,6 +835,8 @@ export type HandlersListSnapshotsResponse = {
 
 export type HandlersLocalChannelMessageRequest = {
     message?: ChannelMessage;
+    model_id?: string;
+    reasoning_effort?: string;
 };
 
 export type HandlersLoginRequest = {
@@ -878,9 +881,11 @@ export type HandlersModelTokenUsage = {
 };
 
 export type HandlersPingResponse = {
+    commit_hash?: string;
     container_backend?: string;
     snapshot_supported?: boolean;
     status?: string;
+    version?: string;
 };
 
 export type HandlersProbeResponse = {
@@ -1051,6 +1056,7 @@ export type HandlersUpdateSessionRequest = {
 
 export type HeartbeatListLogsResponse = {
     items?: Array<HeartbeatLog>;
+    total_count?: number;
 };
 
 export type HeartbeatLog = {
@@ -1318,6 +1324,7 @@ export type ScheduleCreateRequest = {
 
 export type ScheduleListLogsResponse = {
     items?: Array<ScheduleLog>;
+    total_count?: number;
 };
 
 export type ScheduleListResponse = {
@@ -1442,6 +1449,7 @@ export type SettingsSettings = {
     chat_model_id?: string;
     compaction_enabled?: boolean;
     compaction_model_id?: string;
+    compaction_ratio?: number;
     compaction_threshold?: number;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
@@ -1461,6 +1469,7 @@ export type SettingsUpsertRequest = {
     chat_model_id?: string;
     compaction_enabled?: boolean;
     compaction_model_id?: string;
+    compaction_ratio?: number;
     compaction_threshold?: number;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
@@ -2266,13 +2275,13 @@ export type GetBotsByBotIdCompactionLogsData = {
     };
     query?: {
         /**
-         * Before timestamp (RFC3339)
-         */
-        before?: string;
-        /**
          * Limit
          */
         limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
     };
     url: '/bots/{bot_id}/compaction/logs';
 };
@@ -3537,13 +3546,13 @@ export type GetBotsByBotIdHeartbeatLogsData = {
     };
     query?: {
         /**
-         * Before timestamp (RFC3339)
-         */
-        before?: string;
-        /**
          * Limit
          */
         limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
     };
     url: '/bots/{bot_id}/heartbeat/logs';
 };
@@ -4774,13 +4783,13 @@ export type GetBotsByBotIdScheduleLogsData = {
     };
     query?: {
         /**
-         * Before timestamp (RFC3339)
-         */
-        before?: string;
-        /**
          * Limit
          */
         limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
     };
     url: '/bots/{bot_id}/schedule/logs';
 };
@@ -4928,13 +4937,13 @@ export type GetBotsByBotIdScheduleByIdLogsData = {
     };
     query?: {
         /**
-         * Before timestamp (RFC3339)
-         */
-        before?: string;
-        /**
          * Limit
          */
         limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
     };
     url: '/bots/{bot_id}/schedule/{id}/logs';
 };

@@ -148,8 +148,7 @@
           v-if="message.streaming && message.blocks.length === 0"
           class="flex items-center gap-2 text-xs text-muted-foreground h-6"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'spinner']"
+          <LoaderCircle
             class="size-3.5 animate-spin"
           />
           {{ $t('chat.thinking') }}
@@ -167,6 +166,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'

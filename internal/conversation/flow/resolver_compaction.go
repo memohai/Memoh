@@ -31,9 +31,16 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		modelID = rc.model.ID
 	}
 
+	ratio := settings.CompactionRatio
+	if ratio <= 0 || ratio > 100 {
+		ratio = 80
+	}
+
 	cfg := compaction.TriggerConfig{
-		BotID:     req.BotID,
-		SessionID: req.SessionID,
+		BotID:            req.BotID,
+		SessionID:        req.SessionID,
+		Ratio:            ratio,
+		TotalInputTokens: inputTokens,
 	}
 
 	model, err := r.modelsService.GetByID(ctx, modelID)

@@ -22,6 +22,7 @@ type Settings struct {
 	TitleModelID        string `json:"title_model_id"`
 	CompactionEnabled   bool   `json:"compaction_enabled"`
 	CompactionThreshold int    `json:"compaction_threshold"`
+	CompactionRatio     int    `json:"compaction_ratio"`
 	CompactionModelID   string `json:"compaction_model_id,omitempty"`
 }
 
@@ -41,5 +42,6 @@ type UpsertRequest struct {
 	TitleModelID        string  `json:"title_model_id,omitempty"`
 	CompactionEnabled   *bool   `json:"compaction_enabled,omitempty"`
 	CompactionThreshold *int    `json:"compaction_threshold,omitempty"`
+	CompactionRatio     *int    `json:"compaction_ratio,omitempty"`
 	CompactionModelID   *string `json:"compaction_model_id,omitempty"`
 }

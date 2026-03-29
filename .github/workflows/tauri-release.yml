@@ -35,6 +35,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Sync version to tauri.conf.json and Cargo.toml
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAURI_CONF="apps/desktop/src-tauri/tauri.conf.json"
+          CARGO_TOML="apps/desktop/src-tauri/Cargo.toml"
+
+          node -e "
+            const fs = require('fs');
+            const conf = JSON.parse(fs.readFileSync('$TAURI_CONF', 'utf8'));
+            conf.version = '$VERSION';
+            fs.writeFileSync('$TAURI_CONF', JSON.stringify(conf, null, 2) + '\n');
+          "
+
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" "$CARGO_TOML"
+          rm -f "$CARGO_TOML.bak"
+
+          echo "Updated $TAURI_CONF version to $VERSION"
+          echo "Updated $CARGO_TOML version to $VERSION"
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10

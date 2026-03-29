@@ -106,9 +106,9 @@ export const useChatStore = defineStore('chat', () => {
   const hasMoreOlder = ref(true)
   const initializing = ref(false)
   const bots = ref<Bot[]>([])
+  const overrideModelId = ref<string>('')
+  const overrideReasoningEffort = ref<string>('')
 
-
- 
   let abortFn: (() => void) | null = null
   let messageEventsSince = ''
   let pendingAssistantStream: PendingAssistantStream | null = null
@@ -867,10 +867,13 @@ export const useChatStore = defineStore('chat', () => {
         rejectPendingAssistantStream(abortError)
       }
 
+      const modelId = overrideModelId.value || undefined
+      const re = overrideReasoningEffort.value
+      const reasoningEffort = (re && re !== 'off') ? re : undefined
       if (activeWs?.connected) {
-        activeWs.send({ type: 'message', text: trimmed, session_id: sid, attachments })
+        activeWs.send({ type: 'message', text: trimmed, session_id: sid, attachments, model_id: modelId, reasoning_effort: reasoningEffort })
       } else {
-        await sendLocalChannelMessage(bid, trimmed, attachments)
+        await sendLocalChannelMessage(bid, trimmed, attachments, { modelId, reasoningEffort })
       }
       await completion
 
@@ -927,6 +930,8 @@ export const useChatStore = defineStore('chat', () => {
     loadingOlder,
     hasMoreOlder,
     initializing,
+    overrideModelId,
+    overrideReasoningEffort,
     initialize,
     selectBot,
     selectSession,

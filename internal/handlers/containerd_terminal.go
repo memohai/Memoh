@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
@@ -50,9 +52,10 @@ func (h *ContainerdHandler) GetTerminalInfo(c echo.Context) error {
 		return c.JSON(http.StatusOK, terminalInfoResponse{Available: false})
 	}
 
+	shell := detectShell(ctx, client)
 	return c.JSON(http.StatusOK, terminalInfoResponse{
 		Available: true,
-		Shell:     "/bin/sh",
+		Shell:     shell,
 	})
 }
 
@@ -92,7 +95,8 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	}
 	defer func() { _ = conn.Close() }()
 
-	execStream, err := client.ExecStreamPTY(ctx, "/bin/sh", "/data", cols, rows)
+	shell := detectShell(ctx, client)
+	execStream, err := client.ExecStreamPTY(ctx, shell, "/data", cols, rows)
 	if err != nil {
 		_ = conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "exec failed"))
@@ -152,6 +156,18 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 
 	<-done
 	return nil
+}
+
+// detectShell probes the container for an interactive shell with readline support.
+// Prefers bash > zsh > /bin/sh.
+func detectShell(ctx context.Context, client *bridge.Client) string {
+	for _, sh := range []string{"/bin/bash", "/usr/bin/bash", "/bin/zsh", "/usr/bin/zsh"} {
+		result, err := client.Exec(ctx, "test -x "+sh, "/", 5)
+		if err == nil && result.ExitCode == 0 {
+			return sh
+		}
+	}
+	return "/bin/sh"
 }
 
 func parseUint32Query(c echo.Context, name string, fallback uint32) uint32 {

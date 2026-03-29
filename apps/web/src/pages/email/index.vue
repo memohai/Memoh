@@ -19,6 +19,7 @@ import { getEmailProviders } from '@memohai/sdk'
 import type { EmailProviderResponse } from '@memohai/sdk'
 import AddEmailProvider from './components/add-email-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
+import { Mail, Plus } from 'lucide-vue-next'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 const { data: providerData } = useQuery({
@@ -100,7 +101,7 @@ const openStatus = reactive({ addOpen: false })
       >
         <EmptyHeader>
           <EmptyMedia variant="icon">
-            <FontAwesomeIcon :icon="['fas', 'envelope']" />
+            <Mail />
           </EmptyMedia>
         </EmptyHeader>
         <EmptyTitle>{{ $t('email.emptyTitle') }}</EmptyTitle>
@@ -110,8 +111,7 @@ const openStatus = reactive({ addOpen: false })
             variant="outline"
             @click="openStatus.addOpen = true"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'plus']"
+            <Plus
               class="mr-1"
             /> {{ $t('email.add') }}
           </Button>

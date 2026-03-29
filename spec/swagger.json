@@ -843,16 +843,17 @@
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Before timestamp (RFC3339)",
-                        "name": "before",
-                        "in": "query"
-                    },
-                    {
                         "type": "integer",
                         "default": 50,
                         "description": "Limit",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
                         "in": "query"
                     }
                 ],
@@ -2366,16 +2367,17 @@
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Before timestamp (RFC3339)",
-                        "name": "before",
-                        "in": "query"
-                    },
-                    {
                         "type": "integer",
                         "default": 50,
                         "description": "Limit",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
                         "in": "query"
                     }
                 ],
@@ -3901,16 +3903,17 @@
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Before timestamp (RFC3339)",
-                        "name": "before",
-                        "in": "query"
-                    },
-                    {
                         "type": "integer",
                         "default": 50,
                         "description": "Limit",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
                         "in": "query"
                     }
                 ],
@@ -4114,16 +4117,17 @@
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Before timestamp (RFC3339)",
-                        "name": "before",
-                        "in": "query"
-                    },
-                    {
                         "type": "integer",
                         "default": 50,
                         "description": "Limit",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
                         "in": "query"
                     }
                 ],
@@ -10204,6 +10208,9 @@
                     "items": {
                         "$ref": "#/definitions/compaction.Log"
                     }
+                },
+                "total_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -10839,6 +10846,12 @@
             "properties": {
                 "message": {
                     "$ref": "#/definitions/channel.Message"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "type": "string"
                 }
             }
         },
@@ -10951,6 +10964,9 @@
         "handlers.PingResponse": {
             "type": "object",
             "properties": {
+                "commit_hash": {
+                    "type": "string"
+                },
                 "container_backend": {
                     "type": "string"
                 },
@@ -10958,6 +10974,9 @@
                     "type": "boolean"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "version": {
                     "type": "string"
                 }
             }
@@ -11371,6 +11390,9 @@
                     "items": {
                         "$ref": "#/definitions/heartbeat.Log"
                     }
+                },
+                "total_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -12053,6 +12075,9 @@
                     "items": {
                         "$ref": "#/definitions/schedule.Log"
                     }
+                },
+                "total_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -12373,6 +12398,9 @@
                 "compaction_model_id": {
                     "type": "string"
                 },
+                "compaction_ratio": {
+                    "type": "integer"
+                },
                 "compaction_threshold": {
                     "type": "integer"
                 },
@@ -12425,6 +12453,9 @@
                 },
                 "compaction_model_id": {
                     "type": "string"
+                },
+                "compaction_ratio": {
+                    "type": "integer"
                 },
                 "compaction_threshold": {
                     "type": "integer"

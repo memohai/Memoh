@@ -1,15 +1,15 @@
 <template>
   <div class="rounded-lg border bg-muted/30 text-xs overflow-hidden">
     <div class="flex items-center gap-2 px-3 py-2 bg-muted/50">
-      <FontAwesomeIcon
-        :icon="['fas', block.done ? 'check' : 'spinner']"
-        class="size-3"
-        :class="block.done ? 'text-green-600 dark:text-green-400' : 'animate-spin text-muted-foreground'"
+      <Check
+        v-if="block.done"
+        class="size-3 text-green-600 dark:text-green-400"
       />
-      <FontAwesomeIcon
-        :icon="['fas', 'brain']"
-        class="size-3 text-muted-foreground"
+      <LoaderCircle
+        v-else
+        class="size-3 animate-spin text-muted-foreground"
       />
+      <Brain class="size-3 text-muted-foreground" />
       <span class="text-xs truncate text-foreground">
         {{ query }}
       </span>
@@ -41,8 +41,7 @@
       v-model:open="resultsOpen"
     >
       <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full">
-        <FontAwesomeIcon
-          :icon="['fas', 'chevron-right']"
+        <ChevronRight
           class="size-2.5 transition-transform"
           :class="{ 'rotate-90': resultsOpen }"
         />
@@ -71,6 +70,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { Check, LoaderCircle, Brain, ChevronRight } from 'lucide-vue-next'
 import { Badge, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 

@@ -19,8 +19,7 @@
           aria-label="Close"
           @click="close"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'xmark']"
+          <X
             class="size-6"
           />
         </button>
@@ -33,8 +32,7 @@
           aria-label="Previous"
           @click.stop="prev"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'chevron-left']"
+          <ChevronLeft
             class="size-6"
           />
         </button>
@@ -47,8 +45,7 @@
           aria-label="Next"
           @click.stop="next"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'chevron-right']"
+          <ChevronRight
             class="size-6"
           />
         </button>
@@ -86,6 +83,7 @@
 
 <script setup lang="ts">
 import { computed, watchEffect, onUnmounted, nextTick, ref } from 'vue'
+import { X, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 
 export interface MediaGalleryItem {
   src: string

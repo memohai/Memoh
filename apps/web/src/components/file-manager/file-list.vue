@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
+import { LoaderCircle, FolderOpen, Folder, File, Download, SquarePen, Trash2 } from 'lucide-vue-next'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -52,8 +52,7 @@ function handleClick(entry: HandlersFsFileInfo) {
       v-if="loading"
       class="flex items-center justify-center py-16 text-muted-foreground"
     >
-      <FontAwesomeIcon
-        :icon="['fas', 'spinner']"
+      <LoaderCircle
         class="mr-2 size-4 animate-spin"
       />
       {{ t('common.loading') }}
@@ -63,8 +62,7 @@ function handleClick(entry: HandlersFsFileInfo) {
       v-else-if="sortedEntries.length === 0"
       class="flex flex-col items-center justify-center py-16 text-muted-foreground"
     >
-      <FontAwesomeIcon
-        :icon="['fas', 'folder-open']"
+      <FolderOpen
         class="mb-2 size-8 opacity-40"
       />
       <span>{{ t('bots.files.empty') }}</span>
@@ -95,8 +93,8 @@ function handleClick(entry: HandlersFsFileInfo) {
             @click="handleClick(entry)"
           >
             <div class="flex flex-1 items-center gap-2 min-w-0">
-              <FontAwesomeIcon
-                :icon="entry.isDir ? ['fas', 'folder'] : ['fas', 'file']"
+              <component
+                :is="entry.isDir ? Folder : File"
                 :class="entry.isDir ? 'text-blue-500' : 'text-muted-foreground'"
                 class="size-4 shrink-0"
               />
@@ -115,15 +113,13 @@ function handleClick(entry: HandlersFsFileInfo) {
             v-if="!entry.isDir"
             @select="emit('download', entry)"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'download']"
+            <Download
               class="mr-2 size-3.5"
             />
             {{ t('bots.files.download') }}
           </ContextMenuItem>
           <ContextMenuItem @select="emit('rename', entry)">
-            <FontAwesomeIcon
-              :icon="['fas', 'pen']"
+            <SquarePen
               class="mr-2 size-3.5"
             />
             {{ t('bots.files.rename') }}
@@ -133,8 +129,7 @@ function handleClick(entry: HandlersFsFileInfo) {
             class="text-destructive focus:text-destructive"
             @select="emit('delete', entry)"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'trash']"
+            <Trash2
               class="mr-2 size-3.5"
             />
             {{ t('bots.files.delete') }}

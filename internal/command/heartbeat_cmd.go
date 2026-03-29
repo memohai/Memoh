@@ -11,7 +11,7 @@ func (h *Handler) buildHeartbeatGroup() *CommandGroup {
 		Name:  "logs",
 		Usage: "logs - List recent heartbeat logs",
 		Handler: func(cc CommandContext) (string, error) {
-			items, err := h.heartbeatService.ListLogs(cc.Ctx, cc.BotID, nil, 10)
+			items, _, err := h.heartbeatService.ListLogs(cc.Ctx, cc.BotID, 10, 0)
 			if err != nil {
 				return "", err
 			}

@@ -41,8 +41,7 @@
           <span
             class="shrink-0 size-6 flex items-center justify-center rounded text-muted-foreground opacity-0 group-hover/bot:opacity-100 hover:text-foreground hover:bg-accent transition-opacity"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'ellipsis']"
+            <Ellipsis
               class="size-3"
             />
           </span>
@@ -53,15 +52,13 @@
           @click.stop
         >
           <DropdownMenuItem @click.stop="handleTogglePin">
-            <FontAwesomeIcon
-              :icon="['fas', 'thumbtack']"
+            <Pin
               class="size-3 mr-2"
             />
             {{ pinned ? $t('common.unpin') : $t('common.pin') }}
           </DropdownMenuItem>
           <DropdownMenuItem @click.stop="handleDetails">
-            <FontAwesomeIcon
-              :icon="['fas', 'gear']"
+            <Settings
               class="size-3 mr-2"
             />
             {{ $t('common.details') }}
@@ -80,6 +77,7 @@ import type { BotsBot } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { usePinnedBots } from '@/composables/usePinnedBots'
+import { Ellipsis, Pin, Settings } from 'lucide-vue-next'
 import {
   SidebarMenuButton,
   DropdownMenu,

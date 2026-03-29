@@ -18,9 +18,11 @@ RETURNING id, bot_id, session_id, status, result_text, error_message, usage, mod
 SELECT id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM bot_heartbeat_logs
 WHERE bot_id = $1
-  AND ($2::timestamptz IS NULL OR started_at < $2::timestamptz)
 ORDER BY started_at DESC
-LIMIT $3;
+LIMIT $2 OFFSET $3;
+
+-- name: CountHeartbeatLogsByBot :one
+SELECT count(*) FROM bot_heartbeat_logs WHERE bot_id = $1;
 
 -- name: DeleteHeartbeatLogsByBot :exec
 DELETE FROM bot_heartbeat_logs WHERE bot_id = $1;

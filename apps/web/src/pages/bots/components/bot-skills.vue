@@ -11,8 +11,7 @@
         size="sm"
         @click="handleCreate"
       >
-        <FontAwesomeIcon
-          :icon="['fas', 'plus']"
+        <Plus
           class="mr-2"
         />
         {{ $t('bots.skills.addSkill') }}
@@ -34,8 +33,7 @@
       class="flex flex-col items-center justify-center py-12 text-center"
     >
       <div class="rounded-full bg-muted p-3 mb-4">
-        <FontAwesomeIcon
-          :icon="['fas', 'bolt']"
+        <Zap
           class="size-6 text-muted-foreground"
         />
       </div>
@@ -73,8 +71,7 @@
                 :title="$t('common.edit')"
                 @click="handleEdit(skill)"
               >
-                <FontAwesomeIcon
-                  :icon="['fas', 'pen-to-square']"
+                <SquarePen
                   class="size-3.5"
                 />
               </Button>
@@ -91,8 +88,7 @@
                     :disabled="isDeleting"
                     :title="$t('common.delete')"
                   >
-                    <FontAwesomeIcon
-                      :icon="['far', 'trash-can']"
+                    <Trash2
                       class="size-3.5"
                     />
                   </Button>
@@ -149,6 +145,7 @@
 </template>
 
 <script setup lang="ts">
+import { Plus, Zap, SquarePen, Trash2 } from 'lucide-vue-next'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'

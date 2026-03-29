@@ -8,15 +8,15 @@
       v-if="iconComponent"
       :size="iconSize"
     />
-    <FontAwesomeIcon
+    <Globe
       v-else
-      :icon="['fas', 'globe']"
       :class="iconSizeClass"
     />
   </span>
 </template>
 
 <script setup lang="ts">
+import { Globe } from 'lucide-vue-next'
 import { computed, type Component } from 'vue'
 import {
   Brave,

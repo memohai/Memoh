@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -45,4 +47,20 @@ func AuthorizeBotAccess(ctx context.Context, botService *bots.Service, accountSe
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return bot, nil
+}
+
+// parseOffsetLimit extracts limit and offset query parameters with defaults.
+func parseOffsetLimit(c echo.Context) (limit, offset int) {
+	limit = 50
+	if raw := strings.TrimSpace(c.QueryParam("limit")); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if raw := strings.TrimSpace(c.QueryParam("offset")); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v >= 0 {
+			offset = v
+		}
+	}
+	return limit, offset
 }

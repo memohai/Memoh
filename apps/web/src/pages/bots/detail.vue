@@ -21,8 +21,7 @@
           :disabled="!bot || botLifecyclePending"
           @click="handleEditAvatar"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'pen-to-square']"
+          <SquarePen
             class="size-6 text-white"
           />
         </button>
@@ -70,8 +69,7 @@
               :aria-label="$t('common.edit')"
               @click="handleStartEditBotName"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'pen-to-square']"
+              <SquarePen
                 class="size-3.5"
               />
             </Button>
@@ -84,9 +82,8 @@
             class="text-xs"
             :title="hasIssue ? issueTitle : undefined"
           >
-            <FontAwesomeIcon
+            <LoaderCircle
               v-if="bot.status === 'creating' || bot.status === 'deleting'"
-              :icon="['fas', 'spinner']"
               class="mr-1 size-3 animate-spin"
             />
             {{ statusLabel }}
@@ -218,6 +215,7 @@ import {
   SidebarMenuItem,
   Toggle
 } from '@memohai/ui'
+import { SquarePen, LoaderCircle } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'

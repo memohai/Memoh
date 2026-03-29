@@ -1,8 +1,7 @@
 <template>
   <div class="p-4">
     <section class="flex items-center gap-3">
-      <FontAwesomeIcon
-        :icon="['fas', 'volume-high']"
+      <Volume2
         class="size-5"
       />
       <div class="min-w-0">
@@ -68,7 +67,7 @@
                 :loading="importLoading"
                 @click="handleImportModels"
               >
-                <FontAwesomeIcon :icon="['fas', 'file-import']" />
+                <FileInput />
                 {{ $t('speech.importModels') }}
               </LoadingButton>
               <AddTtsModel
@@ -102,8 +101,8 @@
                   class="text-xs text-muted-foreground ml-2"
                 >{{ model.model_id }}</span>
               </div>
-              <FontAwesomeIcon
-                :icon="['fas', expandedModelId === model.id ? 'chevron-up' : 'chevron-down']"
+              <component
+                :is="expandedModelId === model.id ? ChevronUp : ChevronDown"
                 class="size-3 text-muted-foreground"
               />
             </button>
@@ -136,7 +135,7 @@
               type="button"
               variant="outline"
             >
-              <FontAwesomeIcon :icon="['far', 'trash-can']" />
+              <Trash2 />
             </Button>
           </template>
         </ConfirmPopover>
@@ -165,6 +164,7 @@ import {
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ModelConfigEditor from './model-config-editor.vue'
+import { Volume2, FileInput, ChevronUp, ChevronDown, Trash2 } from 'lucide-vue-next'
 import AddTtsModel from './add-tts-model.vue'
 import { computed, inject, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'

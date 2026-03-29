@@ -150,8 +150,8 @@
             :aria-pressed="!!visibleSecrets[key]"
             @click="visibleSecrets[key] = !visibleSecrets[key]"
           >
-            <FontAwesomeIcon
-              :icon="['fas', visibleSecrets[key] ? 'eye-slash' : 'eye']"
+            <component
+              :is="visibleSecrets[key] ? EyeOff : Eye"
               class="size-3.5"
             />
           </button>
@@ -262,6 +262,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@memohai/ui'
+import { Eye, EyeOff } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'

@@ -57,6 +57,17 @@ func (q *Queries) CompleteHeartbeatLog(ctx context.Context, arg CompleteHeartbea
 	return i, err
 }
 
+const countHeartbeatLogsByBot = `-- name: CountHeartbeatLogsByBot :one
+SELECT count(*) FROM bot_heartbeat_logs WHERE bot_id = $1
+`
+
+func (q *Queries) CountHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countHeartbeatLogsByBot, botID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createHeartbeatLog = `-- name: CreateHeartbeatLog :one
 INSERT INTO bot_heartbeat_logs (bot_id, session_id, started_at)
 VALUES ($1, $2::uuid, now())
@@ -110,15 +121,14 @@ const listHeartbeatLogsByBot = `-- name: ListHeartbeatLogsByBot :many
 SELECT id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM bot_heartbeat_logs
 WHERE bot_id = $1
-  AND ($2::timestamptz IS NULL OR started_at < $2::timestamptz)
 ORDER BY started_at DESC
-LIMIT $3
+LIMIT $2 OFFSET $3
 `
 
 type ListHeartbeatLogsByBotParams struct {
-	BotID   pgtype.UUID        `json:"bot_id"`
-	Column2 pgtype.Timestamptz `json:"column_2"`
-	Limit   int32              `json:"limit"`
+	BotID  pgtype.UUID `json:"bot_id"`
+	Limit  int32       `json:"limit"`
+	Offset int32       `json:"offset"`
 }
 
 type ListHeartbeatLogsByBotRow struct {
@@ -134,7 +144,7 @@ type ListHeartbeatLogsByBotRow struct {
 }
 
 func (q *Queries) ListHeartbeatLogsByBot(ctx context.Context, arg ListHeartbeatLogsByBotParams) ([]ListHeartbeatLogsByBotRow, error) {
-	rows, err := q.db.Query(ctx, listHeartbeatLogsByBot, arg.BotID, arg.Column2, arg.Limit)
+	rows, err := q.db.Query(ctx, listHeartbeatLogsByBot, arg.BotID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

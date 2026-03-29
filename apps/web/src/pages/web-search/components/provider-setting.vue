@@ -106,7 +106,7 @@
               variant="outline"
               :aria-label="$t('common.delete')"
             >
-              <FontAwesomeIcon :icon="['far', 'trash-can']" />
+              <Trash2 />
             </Button>
           </template>
         </ConfirmPopover>
@@ -147,6 +147,7 @@ import ExaSettings from './exa-settings.vue'
 import BochaSettings from './bocha-settings.vue'
 import DuckduckgoSettings from './duckduckgo-settings.vue'
 import YandexSettings from './yandex-settings.vue'
+import { Trash2 } from 'lucide-vue-next'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import { computed, inject, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'

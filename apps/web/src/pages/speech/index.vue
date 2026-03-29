@@ -19,6 +19,7 @@ import { getTtsProviders } from '@memohai/sdk'
 import type { TtsProviderResponse } from '@memohai/sdk'
 import AddTtsProvider from './components/add-tts-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
+import { Volume2, Plus } from 'lucide-vue-next'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 const { data: providerData } = useQuery({
@@ -82,8 +83,7 @@ const openStatus = reactive({ addOpen: false })
             >
               <span class="relative shrink-0">
                 <span class="flex size-7 items-center justify-center rounded-full bg-muted">
-                  <FontAwesomeIcon
-                    :icon="['fas', 'volume-high']"
+                  <Volume2
                     class="size-3.5 text-muted-foreground"
                   />
                 </span>
@@ -116,7 +116,7 @@ const openStatus = reactive({ addOpen: false })
       >
         <EmptyHeader>
           <EmptyMedia variant="icon">
-            <FontAwesomeIcon :icon="['fas', 'volume-high']" />
+            <Volume2 />
           </EmptyMedia>
         </EmptyHeader>
         <EmptyTitle>{{ $t('speech.emptyTitle') }}</EmptyTitle>
@@ -126,8 +126,7 @@ const openStatus = reactive({ addOpen: false })
             variant="outline"
             @click="openStatus.addOpen = true"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'plus']"
+            <Plus
               class="mr-1"
             /> {{ $t('speech.add') }}
           </Button>

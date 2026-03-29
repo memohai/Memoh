@@ -852,16 +852,17 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Before timestamp (RFC3339)",
-                        "name": "before",
-                        "in": "query"
-                    },
-                    {
                         "type": "integer",
                         "default": 50,
                         "description": "Limit",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
                         "in": "query"
                     }
                 ],
@@ -2375,16 +2376,17 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Before timestamp (RFC3339)",
-                        "name": "before",
-                        "in": "query"
-                    },
-                    {
                         "type": "integer",
                         "default": 50,
                         "description": "Limit",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
                         "in": "query"
                     }
                 ],
@@ -3910,16 +3912,17 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Before timestamp (RFC3339)",
-                        "name": "before",
-                        "in": "query"
-                    },
-                    {
                         "type": "integer",
                         "default": 50,
                         "description": "Limit",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
                         "in": "query"
                     }
                 ],
@@ -4123,16 +4126,17 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Before timestamp (RFC3339)",
-                        "name": "before",
-                        "in": "query"
-                    },
-                    {
                         "type": "integer",
                         "default": 50,
                         "description": "Limit",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
                         "in": "query"
                     }
                 ],
@@ -10213,6 +10217,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/compaction.Log"
                     }
+                },
+                "total_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -10848,6 +10855,12 @@ const docTemplate = `{
             "properties": {
                 "message": {
                     "$ref": "#/definitions/channel.Message"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "type": "string"
                 }
             }
         },
@@ -10960,6 +10973,9 @@ const docTemplate = `{
         "handlers.PingResponse": {
             "type": "object",
             "properties": {
+                "commit_hash": {
+                    "type": "string"
+                },
                 "container_backend": {
                     "type": "string"
                 },
@@ -10967,6 +10983,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "version": {
                     "type": "string"
                 }
             }
@@ -11380,6 +11399,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/heartbeat.Log"
                     }
+                },
+                "total_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -12062,6 +12084,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/schedule.Log"
                     }
+                },
+                "total_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -12382,6 +12407,9 @@ const docTemplate = `{
                 "compaction_model_id": {
                     "type": "string"
                 },
+                "compaction_ratio": {
+                    "type": "integer"
+                },
                 "compaction_threshold": {
                     "type": "integer"
                 },
@@ -12434,6 +12462,9 @@ const docTemplate = `{
                 },
                 "compaction_model_id": {
                     "type": "string"
+                },
+                "compaction_ratio": {
+                    "type": "integer"
                 },
                 "compaction_threshold": {
                     "type": "integer"

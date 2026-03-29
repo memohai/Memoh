@@ -126,7 +126,7 @@
             :loading="authorizeLoading"
             @click="handleAuthorize"
           >
-            <FontAwesomeIcon :icon="['fas', 'key']" />
+            <KeyRound />
             {{ $t('provider.oauth.authorize') }}
           </LoadingButton>
           <LoadingButton
@@ -150,9 +150,8 @@
         :disabled="!props.provider?.id"
         @click="runTest"
       >
-        <FontAwesomeIcon
+        <RefreshCw
           v-if="!testLoading"
-          :icon="['fas', 'rotate']"
         />
         {{ $t('provider.testConnection') }}
       </LoadingButton>
@@ -169,7 +168,7 @@
               variant="outline"
               :aria-label="$t('common.delete')"
             >
-              <FontAwesomeIcon :icon="['far', 'trash-can']" />
+              <Trash2 />
             </Button>
           </template>
         </ConfirmPopover>
@@ -227,6 +226,7 @@ import {
   FormLabel,
   FormItem,
 } from '@memohai/ui'
+import { KeyRound, RefreshCw, Trash2 } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import StatusDot from '@/components/status-dot/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'

@@ -24,9 +24,11 @@ WHERE id = $1;
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
 FROM bot_history_message_compacts
 WHERE bot_id = $1
-  AND ($2::timestamptz IS NULL OR started_at < $2)
 ORDER BY started_at DESC
-LIMIT $3;
+LIMIT $2 OFFSET $3;
+
+-- name: CountCompactionLogsByBot :one
+SELECT count(*) FROM bot_history_message_compacts WHERE bot_id = $1;
 
 -- name: ListCompactionLogsBySession :many
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at

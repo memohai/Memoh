@@ -19,6 +19,7 @@ import { getBrowserContexts } from '@memohai/sdk'
 import type { BrowsercontextsBrowserContext } from '@memohai/sdk'
 import AddBrowserContext from './components/add-browser-context.vue'
 import ContextSetting from './components/context-setting.vue'
+import { AppWindow, Plus } from 'lucide-vue-next'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 const { data: contextData } = useQuery({
@@ -73,12 +74,11 @@ const openStatus = reactive({
               :model-value="selectContext(item.id as string).value"
               @update:model-value="(isSelect) => {
                 if (isSelect) {
-                  curContext = item
+                  curContext.value = item
                 }
               }"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'window-maximize']"
+              <AppWindow
                 class="mr-2"
               />
               {{ item.name }}
@@ -105,7 +105,7 @@ const openStatus = reactive({
       >
         <EmptyHeader>
           <EmptyMedia variant="icon">
-            <FontAwesomeIcon :icon="['fas', 'window-maximize']" />
+            <AppWindow />
           </EmptyMedia>
         </EmptyHeader>
         <EmptyTitle>{{ $t('browser.emptyTitle') }}</EmptyTitle>
@@ -115,8 +115,7 @@ const openStatus = reactive({
             variant="outline"
             @click="openStatus.addOpen = true"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'plus']"
+            <Plus
               class="mr-1"
             /> {{ $t('browser.add') }}
           </Button>

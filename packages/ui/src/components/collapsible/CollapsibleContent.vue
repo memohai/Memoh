@@ -9,7 +9,7 @@ const props = defineProps<CollapsibleContentProps>()
   <CollapsibleContent
     data-slot="collapsible-content"
     v-bind="props"
-    class="*:border-b *:border-x *:first-of-type:border-t *:first-of-type:rounded-t-md *:last-of-type:rounded-b-md"
+    class=""
   >
     <slot />
   </CollapsibleContent>

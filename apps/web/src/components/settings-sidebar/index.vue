@@ -6,8 +6,7 @@
           class="h-[53px] flex items-center gap-2.5 px-3.5 w-full border-b border-border text-foreground hover:bg-accent/50 transition-colors group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
           @click="router.push(backToChatRoute)"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'chevron-left']"
+          <ChevronLeft
             class="size-3 shrink-0"
           />
           <span class="text-xs font-semibold group-data-[collapsible=icon]:hidden">
@@ -31,8 +30,8 @@
                   class="h-9 gap-2 relative before:absolute before:w-0.5 before:top-1.5 before:bottom-1.5 before:left-0 before:rounded-full data-[active=true]:before:bg-[#8B56E3]"
                   @click="router.push({ name: item.name })"
                 >
-                  <FontAwesomeIcon
-                    :icon="item.icon"
+                  <component
+                    :is="item.icon"
                     class="size-3.5 ml-1.5"
                   />
                   <span class="text-xs font-medium">{{ item.title }}</span>
@@ -47,10 +46,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, Mail, AppWindow, ChartLine, Settings } from 'lucide-vue-next'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import {
   Sidebar,
@@ -89,51 +89,51 @@ function isItemActive(name: string): boolean {
   return route.name === name
 }
 
-const navItems = computed(() => [
+const navItems = computed<{ title: string; name: string; icon: Component }[]>(() => [
   {
     title: t('sidebar.bots'),
     name: 'bots',
-    icon: ['fas', 'robot'],
+    icon: Bot,
   },
   {
     title: t('sidebar.providers'),
     name: 'providers',
-    icon: ['fas', 'cubes'],
+    icon: Boxes,
   },
   {
     title: t('sidebar.webSearch'),
     name: 'web-search',
-    icon: ['fas', 'globe'],
+    icon: Globe,
   },
   {
     title: t('sidebar.memory'),
     name: 'memory',
-    icon: ['fas', 'brain'],
+    icon: Brain,
   },
   {
     title: t('sidebar.speech'),
     name: 'speech',
-    icon: ['fas', 'volume-high'],
+    icon: Volume2,
   },
   {
     title: t('sidebar.email'),
     name: 'email',
-    icon: ['fas', 'envelope'],
+    icon: Mail,
   },
   {
     title: t('sidebar.browser'),
     name: 'browser',
-    icon: ['fas', 'window-maximize'],
+    icon: AppWindow,
   },
   {
     title: t('sidebar.usage'),
     name: 'usage',
-    icon: ['fas', 'chart-line'],
+    icon: ChartLine,
   },
   {
     title: t('sidebar.profile'),
     name: 'profile',
-    icon: ['fas', 'gear'],
+    icon: Settings,
   },
 ])
 </script>

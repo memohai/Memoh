@@ -5,14 +5,12 @@
         v-if="loading"
         class="mx-auto size-8"
       />
-      <FontAwesomeIcon
+      <CircleCheck
         v-else-if="success"
-        :icon="['fas', 'circle-check']"
         class="size-8 text-green-500"
       />
-      <FontAwesomeIcon
+      <CircleX
         v-else
-        :icon="['fas', 'circle-xmark']"
         class="size-8 text-destructive"
       />
       <p class="text-xs text-muted-foreground">
@@ -27,6 +25,7 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Spinner } from '@memohai/ui'
+import { CircleCheck, CircleX } from 'lucide-vue-next'
 import { postBotsByBotIdMcpByIdOauthExchange } from '@memohai/sdk'
 
 const route = useRoute()

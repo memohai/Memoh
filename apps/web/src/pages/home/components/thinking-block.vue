@@ -1,17 +1,13 @@
 <template>
   <Collapsible v-model:open="isOpen">
     <CollapsibleTrigger class="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
-      <FontAwesomeIcon
-        :icon="['fas', 'chevron-right']"
+      <ChevronRight
         class="size-3 transition-transform"
         :class="{ 'rotate-90': isOpen }"
       />
       <span class="flex items-center gap-1.5">
         <template v-if="streaming">
-          <FontAwesomeIcon
-            :icon="['fas', 'spinner']"
-            class="size-3 animate-spin"
-          />
+          <LoaderCircle class="size-3 animate-spin" />
           {{ $t('chat.thinkingInProgress') }}
         </template>
         <template v-else>
@@ -32,6 +28,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { ChevronRight, LoaderCircle } from 'lucide-vue-next'
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memohai/ui'
 import type { ThinkingBlock } from '@/store/chat-list'
 

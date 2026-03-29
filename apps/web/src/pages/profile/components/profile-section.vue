@@ -1,8 +1,7 @@
 <template>
   <section>
     <h2 class="mb-2 flex items-center text-xs font-medium">
-      <FontAwesomeIcon
-        :icon="['fas', 'user']"
+      <User
         class="mr-2 size-3.5"
       />
       {{ $t('settings.userProfile') }}
@@ -75,6 +74,7 @@ import {
   Separator,
   Spinner,
 } from '@memohai/ui'
+import { User } from 'lucide-vue-next'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 
 defineProps<{

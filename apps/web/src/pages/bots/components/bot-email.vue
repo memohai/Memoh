@@ -24,8 +24,7 @@
               size="sm"
               :disabled="!unboundProviders.length"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'plus']"
+              <Plus
                 class="mr-1.5"
               />
               {{ $t('bots.email.addBinding') }}
@@ -211,6 +210,7 @@ import {
   Switch,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import { Plus } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'

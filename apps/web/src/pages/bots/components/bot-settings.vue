@@ -209,67 +209,40 @@
       />
     </div>
 
-    <!-- Reasoning (only if chat model supports it) -->
-    <template v-if="chatModelSupportsReasoning">
-      <Separator />
-      <div class="space-y-4">
-        <div class="flex items-center justify-between">
-          <Label>{{ $t('bots.settings.reasoningEnabled') }}</Label>
-          <Switch
-            :model-value="form.reasoning_enabled"
-            @update:model-value="(val) => form.reasoning_enabled = !!val"
-          />
-        </div>
-        <div
-          v-if="form.reasoning_enabled"
-          class="space-y-2"
-        >
-          <Label>{{ $t('bots.settings.reasoningEffort') }}</Label>
-          <Select
-            :model-value="form.reasoning_effort"
-            @update:model-value="(val) => form.reasoning_effort = val ?? 'medium'"
+    <!-- Reasoning -->
+    <Separator />
+    <div class="space-y-2">
+      <Label>{{ $t('bots.settings.reasoningEffort') }}</Label>
+      <Popover v-model:open="reasoningPopoverOpen">
+        <PopoverTrigger as-child>
+          <Button
+            variant="outline"
+            role="combobox"
+            :disabled="!chatModelSupportsReasoning"
+            class="w-full justify-between font-normal"
           >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem
-                  v-if="availableReasoningEfforts.includes('none')"
-                  value="none"
-                >
-                  {{ $t('bots.settings.reasoningEffortNone') }}
-                </SelectItem>
-                <SelectItem
-                  v-if="availableReasoningEfforts.includes('low')"
-                  value="low"
-                >
-                  {{ $t('bots.settings.reasoningEffortLow') }}
-                </SelectItem>
-                <SelectItem
-                  v-if="availableReasoningEfforts.includes('medium')"
-                  value="medium"
-                >
-                  {{ $t('bots.settings.reasoningEffortMedium') }}
-                </SelectItem>
-                <SelectItem
-                  v-if="availableReasoningEfforts.includes('high')"
-                  value="high"
-                >
-                  {{ $t('bots.settings.reasoningEffortHigh') }}
-                </SelectItem>
-                <SelectItem
-                  v-if="availableReasoningEfforts.includes('xhigh')"
-                  value="xhigh"
-                >
-                  {{ $t('bots.settings.reasoningEffortXHigh') }}
-                </SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-    </template>
+            <span class="flex items-center gap-2">
+              <Lightbulb
+                class="size-3.5"
+                :style="{ opacity: EFFORT_OPACITY[reasoningFormValue] ?? 0.5 }"
+              />
+              {{ reasoningFormValue === 'off' ? $t('chat.reasoningOff') : $t(EFFORT_LABELS[reasoningFormValue] ?? reasoningFormValue) }}
+            </span>
+            <ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          class="w-[--reka-popover-trigger-width] p-0"
+          align="start"
+        >
+          <ReasoningEffortSelect
+            v-model="reasoningFormValue"
+            :efforts="availableReasoningEfforts"
+            @update:model-value="reasoningPopoverOpen = false"
+          />
+        </PopoverContent>
+      </Popover>
+    </div>
 
     <!-- Save -->
     <div class="flex justify-end">
@@ -321,23 +294,22 @@
 import {
   Label,
   Input,
-  Switch,
   Button,
   Separator,
   Spinner,
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
 } from '@memohai/ui'
-import { reactive, computed, watch } from 'vue'
+import { Lightbulb, ChevronDown } from 'lucide-vue-next'
+import { reactive, computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ModelSelect from './model-select.vue'
+import ReasoningEffortSelect from './reasoning-effort-select.vue'
+import { EFFORT_LABELS, EFFORT_OPACITY } from './reasoning-effort'
 import SearchProviderSelect from './search-provider-select.vue'
 import MemoryProviderSelect from './memory-provider-select.vue'
 import TtsModelSelect from './tts-model-select.vue'
@@ -541,6 +513,20 @@ watch(availableReasoningEfforts, (efforts) => {
     form.reasoning_effort = efforts.includes('medium') ? 'medium' : efforts[0] ?? 'medium'
   }
 }, { immediate: true })
+
+const reasoningPopoverOpen = ref(false)
+
+const reasoningFormValue = computed({
+  get: () => form.reasoning_enabled ? form.reasoning_effort : 'off',
+  set: (v: string) => {
+    if (v === 'off') {
+      form.reasoning_enabled = false
+    } else {
+      form.reasoning_enabled = true
+      form.reasoning_effort = v
+    }
+  },
+})
 
 const { data: memoryStatusData, isLoading: isMemoryStatusLoading } = useQuery({
   key: () => ['bot-memory-status', botIdRef.value, persistedMemoryProviderID.value],

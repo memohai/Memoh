@@ -18,8 +18,7 @@
           <span class="truncate">
             {{ displayLabel || placeholder }}
           </span>
-          <FontAwesomeIcon
-            :icon="['fas', 'magnifying-glass']"
+          <Search
             class="ml-2 size-3.5 shrink-0 text-muted-foreground"
           />
         </Button>
@@ -30,8 +29,7 @@
       align="start"
     >
       <div class="flex items-center border-b px-3">
-        <FontAwesomeIcon
-          :icon="['fas', 'magnifying-glass']"
+        <Search
           class="mr-2 size-3.5 shrink-0 text-muted-foreground"
         />
         <input
@@ -80,9 +78,8 @@
             :class="{ 'bg-accent': selected === option.value }"
             @click="selectOption(option.value)"
           >
-            <FontAwesomeIcon
+            <Check
               v-if="selected === option.value"
-              :icon="['fas', 'check']"
               class="size-3.5"
             />
             <span
@@ -118,6 +115,7 @@
 </template>
 
 <script setup lang="ts">
+import { Search, Check } from 'lucide-vue-next'
 import {
   Popover,
   PopoverTrigger,

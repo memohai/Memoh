@@ -209,8 +209,7 @@
           :disabled="!testText.trim() || testText.length > maxTestTextLen"
           @click="handleTest"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'play']"
+          <Play
             class="mr-1.5"
           />
           {{ $t('speech.test.generate') }}
@@ -262,6 +261,7 @@ import {
   Textarea,
   Separator,
 } from '@memohai/ui'
+import { Play } from 'lucide-vue-next'
 import LoadingButton from '@/components/loading-button/index.vue'
 import type { TtsModelCapabilities, TtsVoiceInfo } from '@memohai/sdk'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'

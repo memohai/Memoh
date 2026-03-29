@@ -168,7 +168,9 @@ func formatLocalStreamEvent(event channel.StreamEvent) ([]byte, error) {
 
 // LocalChannelMessageRequest is the request body for posting a local channel message.
 type LocalChannelMessageRequest struct {
-	Message channel.Message `json:"message"`
+	Message         channel.Message `json:"message"`
+	ModelID         string          `json:"model_id,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
 }
 
 // PostMessage godoc
@@ -234,6 +236,18 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 		ReceivedAt: time.Now().UTC(),
 		Source:     "local",
 	}
+	if mid := strings.TrimSpace(req.ModelID); mid != "" {
+		if msg.Metadata == nil {
+			msg.Metadata = make(map[string]any)
+		}
+		msg.Metadata["model_id"] = mid
+	}
+	if re := strings.TrimSpace(req.ReasoningEffort); re != "" {
+		if msg.Metadata == nil {
+			msg.Metadata = make(map[string]any)
+		}
+		msg.Metadata["reasoning_effort"] = re
+	}
 	if err := h.channelManager.HandleInbound(c.Request().Context(), cfg, msg); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -245,10 +259,12 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 type wsClientMessage struct {
-	Type        string            `json:"type"`
-	Text        string            `json:"text,omitempty"`
-	SessionID   string            `json:"session_id,omitempty"`
-	Attachments []json.RawMessage `json:"attachments,omitempty"`
+	Type            string            `json:"type"`
+	Text            string            `json:"text,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
+	Attachments     []json.RawMessage `json:"attachments,omitempty"`
+	ModelID         string            `json:"model_id,omitempty"`
+	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 }
 
 // wsWriter serialises all WebSocket writes through a single goroutine to
@@ -419,6 +435,8 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					CurrentChannel:          h.channelType.String(),
 					Channels:                []string{h.channelType.String()},
 					Attachments:             chatAttachments,
+					Model:                   strings.TrimSpace(msg.ModelID),
+					ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
 				}
 				if streamErr := h.resolver.StreamChatWS(streamCtx, req, eventCh, abortCh); streamErr != nil {
 					if ctx.Err() == nil {

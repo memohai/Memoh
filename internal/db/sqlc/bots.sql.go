@@ -94,7 +94,7 @@ func (q *Queries) DeleteBotByID(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getBotByID = `-- name: GetBotByID :one
-SELECT id, owner_user_id, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_model_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id, metadata, created_at, updated_at
 FROM bots
 WHERE id = $1
 `
@@ -118,6 +118,7 @@ type GetBotByIDRow struct {
 	HeartbeatPrompt     string             `json:"heartbeat_prompt"`
 	CompactionEnabled   bool               `json:"compaction_enabled"`
 	CompactionThreshold int32              `json:"compaction_threshold"`
+	CompactionRatio     int32              `json:"compaction_ratio"`
 	CompactionModelID   pgtype.UUID        `json:"compaction_model_id"`
 	Metadata            []byte             `json:"metadata"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
@@ -146,6 +147,7 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (GetBotByIDRow
 		&i.HeartbeatPrompt,
 		&i.CompactionEnabled,
 		&i.CompactionThreshold,
+		&i.CompactionRatio,
 		&i.CompactionModelID,
 		&i.Metadata,
 		&i.CreatedAt,

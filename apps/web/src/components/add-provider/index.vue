@@ -14,8 +14,7 @@
           class="w-full shadow-none! text-muted-foreground mb-4"
           variant="outline"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'plus']"
+          <Plus
             class="mr-1"
           /> {{ $t('provider.addBtn') }}
         </Button>
@@ -163,6 +162,7 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { postProviders, postProvidersByIdImportModels } from '@memohai/sdk'
 import type { ProvidersCreateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
+import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'

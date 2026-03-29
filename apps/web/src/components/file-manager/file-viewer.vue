@@ -2,7 +2,7 @@
 import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
+import { File, Download, X } from 'lucide-vue-next'
 import { Button, Spinner } from '@memohai/ui'
 import {
   getBotsByBotIdContainerFsRead,
@@ -93,7 +93,8 @@ async function handleSave() {
 }
 
 function handleDownload() {
-  const url = `/api/bots/${props.botId}/container/fs/download?path=${encodeURIComponent(filePath.value)}`
+  const token = localStorage.getItem('token') ?? ''
+  const url = `/api/bots/${props.botId}/container/fs/download?path=${encodeURIComponent(filePath.value)}&token=${encodeURIComponent(token)}`
   const a = document.createElement('a')
   a.href = url
   a.download = filename.value
@@ -128,8 +129,7 @@ onBeforeUnmount(() => {
     <!-- Header -->
     <div class="flex items-center justify-between border-b border-border px-4 py-2">
       <div class="flex items-center gap-2 min-w-0">
-        <FontAwesomeIcon
-          :icon="['fas', 'file']"
+        <File
           class="size-3.5 shrink-0 text-muted-foreground"
         />
         <span class="truncate text-xs font-medium">{{ filename }}</span>
@@ -157,8 +157,7 @@ onBeforeUnmount(() => {
           size="sm"
           @click="handleDownload"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'download']"
+          <Download
             class="mr-1 size-3"
           />
           {{ t('bots.files.download') }}
@@ -169,8 +168,7 @@ onBeforeUnmount(() => {
           class="size-7 p-0"
           @click="emit('close')"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'xmark']"
+          <X
             class="size-4"
           />
         </Button>
@@ -209,8 +207,7 @@ onBeforeUnmount(() => {
         v-else
         class="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground"
       >
-        <FontAwesomeIcon
-          :icon="['fas', 'file']"
+        <File
           class="size-12 opacity-30"
         />
         <p class="text-xs">
@@ -221,8 +218,7 @@ onBeforeUnmount(() => {
           size="sm"
           @click="handleDownload"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'download']"
+          <Download
             class="mr-1.5 size-3"
           />
           {{ t('bots.files.download') }}

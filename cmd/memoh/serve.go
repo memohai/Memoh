@@ -901,7 +901,7 @@ func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, token
 	if strings.HasPrefix(host, ":") {
 		host = "localhost" + host
 	}
-	callbackURL := "http://" + host + "/email/oauth/callback"
+	callbackURL := "http://" + host + "/api/email/oauth/callback"
 	return handlers.NewEmailOAuthHandler(log, service, tokenStore, callbackURL)
 }
 

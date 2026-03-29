@@ -31,9 +31,8 @@
             class="shrink-0 text-xs"
             :title="hasIssue ? issueTitle : undefined"
           >
-            <FontAwesomeIcon
+            <LoaderCircle
               v-if="isPending"
-              :icon="['fas', 'spinner']"
               class="mr-1 size-3 animate-spin"
             />
             {{ statusLabel }}
@@ -59,6 +58,7 @@ import {
   AvatarFallback,
   Badge,
 } from '@memohai/ui'
+import { LoaderCircle } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'

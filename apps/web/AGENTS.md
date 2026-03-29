@@ -16,7 +16,7 @@
 | Data Fetching | Pinia Colada (`@pinia/colada`) + `@memohai/sdk` |
 | Forms | vee-validate + `@vee-validate/zod` + Zod |
 | i18n | vue-i18n (en / zh) |
-| Icons | FontAwesome (primary: fas/far/fab) + lucide-vue-next (secondary) |
+| Icons | lucide-vue-next (primary) + `@memohai/icon` (brand/provider icons) |
 | Toast | vue-sonner |
 | Tables | @tanstack/vue-table |
 | Markdown | markstream-vue + Shiki + Mermaid + KaTeX |
@@ -308,8 +308,9 @@ const form = useForm({
 
 ### Icon Usage
 
-- **FontAwesome** (primary): Global `<FontAwesomeIcon :icon="['fas', 'robot']" />`, full `fas`/`far`/`fab` sets + custom search icons registered in `main.ts`
-- **Lucide** (secondary): Direct imports `<Sun />`, `<Moon />`, used for theme toggle
+- **Lucide** (primary): Direct component imports from `lucide-vue-next`. Example: `import { Plus, Search, Bot } from 'lucide-vue-next'` → `<Plus class="size-4" />`. Used for all UI icons (actions, navigation, status indicators, etc.).
+- **`@memohai/icon`** (brand icons): Workspace package (`packages/icons/`) providing AI provider, search engine, and channel platform SVG icons as Vue components. Example: `import { Openai, Claude } from '@memohai/icon'`.
+- **Do NOT use FontAwesome** for new code. Legacy FontAwesome usage remains only in commented-out code blocks. Always use Lucide for UI icons and `@memohai/icon` for brand logos.
 
 ### Notification Pattern
 
@@ -424,6 +425,7 @@ Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket*
 - Style with Tailwind utility classes; avoid `<style>` blocks. Follow the design system in `packages/ui/DESIGN.md`.
 - **Always use semantic color tokens** (`text-foreground`, `bg-card`, `border-border`, `text-muted-foreground`, `bg-accent`, etc.) instead of raw colors (`gray-*`, `bg-white`, `text-black`). Never introduce hardcoded Tailwind color classes for themed elements — this breaks dark mode consistency.
 - Use `@memohai/ui` components for all UI primitives; do not import Reka UI directly.
+- Use `lucide-vue-next` for all UI icons. Use `@memohai/icon` for brand/provider logos. **Never use FontAwesome** — do not add `<FontAwesomeIcon>`, do not import from `@fortawesome/*`, do not use inline SVG or base64-encoded SVG in templates.
 - Use Pinia Colada (`useQuery`/`useMutation`) for server state; use Pinia stores for client state only.
 - API calls must go through `@memohai/sdk`; never call `fetch()` directly.
 - All user-facing strings must use i18n keys (`t('key')`) — never hardcode text.

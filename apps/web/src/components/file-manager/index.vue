@@ -3,7 +3,7 @@ import { ref, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
+import { ChevronRight, Folder, Upload, FolderPlus, RefreshCw } from 'lucide-vue-next'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import {
   Button,
@@ -238,7 +238,8 @@ async function handleDelete() {
 
 // Download
 function handleDownload(entry: HandlersFsFileInfo) {
-  const url = `/api/bots/${props.botId}/container/fs/download?path=${encodeURIComponent(entry.path ?? '')}`
+  const token = localStorage.getItem('token') ?? ''
+  const url = `/api/bots/${props.botId}/container/fs/download?path=${encodeURIComponent(entry.path ?? '')}&token=${encodeURIComponent(token)}`
   const a = document.createElement('a')
   a.href = url
   a.download = entry.name ?? 'file'
@@ -282,20 +283,18 @@ defineExpose({ navigateTo, openFileByPath })
           v-for="(seg, idx) in pathSegments(currentPath)"
           :key="seg.path"
         >
-          <FontAwesomeIcon
+          <ChevronRight
             v-if="idx > 0"
-            :icon="['fas', 'chevron-right']"
             class="size-2.5 shrink-0 text-muted-foreground"
           />
           <button
-            class="truncate rounded px-1.5 py-0.5 hover:bg-muted transition-colors"
+            class="inline-flex items-center truncate rounded px-1.5 py-0.5 hover:bg-muted transition-colors"
             :class="idx === pathSegments(currentPath).length - 1 ? 'font-medium text-foreground' : 'text-muted-foreground'"
             @click="handleNavigate(seg.path)"
           >
-            <FontAwesomeIcon
+            <Folder
               v-if="idx === 0"
-              :icon="['fas', 'folder']"
-              class="mr-1 size-3"
+              class="mr-1 size-3 shrink-0"
             />
             {{ seg.name }}
           </button>
@@ -315,8 +314,7 @@ defineExpose({ navigateTo, openFileByPath })
           size="sm"
           @click="triggerUpload"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'upload']"
+          <Upload
             class="mr-1.5 size-3"
           />
           {{ t('bots.files.upload') }}
@@ -326,8 +324,7 @@ defineExpose({ navigateTo, openFileByPath })
           size="sm"
           @click="openMkdirDialog"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'folder-plus']"
+          <FolderPlus
             class="mr-1.5 size-3"
           />
           {{ t('bots.files.newFolder') }}
@@ -339,8 +336,7 @@ defineExpose({ navigateTo, openFileByPath })
           :disabled="listLoading"
           @click="() => loadDirectory(currentPath)"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'rotate']"
+          <RefreshCw
             class="size-3.5"
             :class="{ 'animate-spin': listLoading }"
           />

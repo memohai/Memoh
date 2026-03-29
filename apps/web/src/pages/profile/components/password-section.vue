@@ -1,8 +1,7 @@
 <template>
   <section>
     <h2 class="mb-2 flex items-center text-xs font-medium">
-      <FontAwesomeIcon
-        :icon="['fas', 'gear']"
+      <Settings
         class="mr-2 size-3.5"
       />
       {{ $t('settings.changePassword') }}
@@ -54,6 +53,7 @@
 
 <script setup lang="ts">
 import { Button, Input, Label, Separator, Spinner } from '@memohai/ui'
+import { Settings } from 'lucide-vue-next'
 
 defineProps<{
   currentPassword: string

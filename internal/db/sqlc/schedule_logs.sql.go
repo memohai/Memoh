@@ -58,6 +58,28 @@ func (q *Queries) CompleteScheduleLog(ctx context.Context, arg CompleteScheduleL
 	return i, err
 }
 
+const countScheduleLogsByBot = `-- name: CountScheduleLogsByBot :one
+SELECT count(*) FROM schedule_logs WHERE bot_id = $1
+`
+
+func (q *Queries) CountScheduleLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countScheduleLogsByBot, botID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countScheduleLogsBySchedule = `-- name: CountScheduleLogsBySchedule :one
+SELECT count(*) FROM schedule_logs WHERE schedule_id = $1
+`
+
+func (q *Queries) CountScheduleLogsBySchedule(ctx context.Context, scheduleID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countScheduleLogsBySchedule, scheduleID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createScheduleLog = `-- name: CreateScheduleLog :one
 INSERT INTO schedule_logs (schedule_id, bot_id, session_id, started_at)
 VALUES ($1, $2, $3::uuid, now())
@@ -123,15 +145,14 @@ const listScheduleLogsByBot = `-- name: ListScheduleLogsByBot :many
 SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs
 WHERE bot_id = $1
-  AND ($2::timestamptz IS NULL OR started_at < $2::timestamptz)
 ORDER BY started_at DESC
-LIMIT $3
+LIMIT $2 OFFSET $3
 `
 
 type ListScheduleLogsByBotParams struct {
-	BotID   pgtype.UUID        `json:"bot_id"`
-	Column2 pgtype.Timestamptz `json:"column_2"`
-	Limit   int32              `json:"limit"`
+	BotID  pgtype.UUID `json:"bot_id"`
+	Limit  int32       `json:"limit"`
+	Offset int32       `json:"offset"`
 }
 
 type ListScheduleLogsByBotRow struct {
@@ -148,7 +169,7 @@ type ListScheduleLogsByBotRow struct {
 }
 
 func (q *Queries) ListScheduleLogsByBot(ctx context.Context, arg ListScheduleLogsByBotParams) ([]ListScheduleLogsByBotRow, error) {
-	rows, err := q.db.Query(ctx, listScheduleLogsByBot, arg.BotID, arg.Column2, arg.Limit)
+	rows, err := q.db.Query(ctx, listScheduleLogsByBot, arg.BotID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -182,15 +203,14 @@ const listScheduleLogsBySchedule = `-- name: ListScheduleLogsBySchedule :many
 SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs
 WHERE schedule_id = $1
-  AND ($2::timestamptz IS NULL OR started_at < $2::timestamptz)
 ORDER BY started_at DESC
-LIMIT $3
+LIMIT $2 OFFSET $3
 `
 
 type ListScheduleLogsByScheduleParams struct {
-	ScheduleID pgtype.UUID        `json:"schedule_id"`
-	Column2    pgtype.Timestamptz `json:"column_2"`
-	Limit      int32              `json:"limit"`
+	ScheduleID pgtype.UUID `json:"schedule_id"`
+	Limit      int32       `json:"limit"`
+	Offset     int32       `json:"offset"`
 }
 
 type ListScheduleLogsByScheduleRow struct {
@@ -207,7 +227,7 @@ type ListScheduleLogsByScheduleRow struct {
 }
 
 func (q *Queries) ListScheduleLogsBySchedule(ctx context.Context, arg ListScheduleLogsByScheduleParams) ([]ListScheduleLogsByScheduleRow, error) {
-	rows, err := q.db.Query(ctx, listScheduleLogsBySchedule, arg.ScheduleID, arg.Column2, arg.Limit)
+	rows, err := q.db.Query(ctx, listScheduleLogsBySchedule, arg.ScheduleID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

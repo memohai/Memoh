@@ -18,24 +18,21 @@
         class="w-full justify-between font-normal"
       >
         <span class="flex items-center gap-2 truncate">
-          <FontAwesomeIcon
+          <Brain
             v-if="selected"
-            :icon="['fas', 'brain']"
             class="size-3.5 text-primary"
           />
           <span class="truncate">{{ displayLabel || placeholder }}</span>
         </span>
-        <FontAwesomeIcon
-          :icon="['fas', 'magnifying-glass']"
+        <Search
           class="ml-2 size-3.5 shrink-0 text-muted-foreground"
         />
       </Button>
     </template>
 
     <template #option-icon="{ option }">
-      <FontAwesomeIcon
+      <Brain
         v-if="option.value"
-        :icon="['fas', 'brain']"
         class="size-3.5 text-primary"
       />
     </template>
@@ -52,6 +49,7 @@
 </template>
 
 <script setup lang="ts">
+import { Brain, Search } from 'lucide-vue-next'
 import { Button } from '@memohai/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'

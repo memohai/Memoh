@@ -18,8 +18,7 @@
               :aria-label="$t('bots.memory.compact')"
               @click="openCompactDialog"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'brain']"
+              <Brain
                 class="size-3.5 text-primary"
               />
             </Button>
@@ -32,8 +31,7 @@
               :aria-label="$t('common.refresh')"
               @click="loadMemories"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'rotate']"
+              <RefreshCw
                 :class="{ 'animate-spin': loading }"
                 class="size-3.5"
               />
@@ -41,8 +39,7 @@
           </div>
         </div>
         <div class="relative">
-          <FontAwesomeIcon
-            :icon="['fas', 'magnifying-glass']"
+          <Search
             class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground"
           />
           <Input
@@ -77,8 +74,7 @@
             @click="selectMemory(item)"
           >
             <div class="flex items-center gap-2">
-              <FontAwesomeIcon
-                :icon="['fas', 'file-lines']"
+              <FileText
                 class="size-3 shrink-0 opacity-70"
               />
               <span class="truncate pr-4">{{ formatDate(item.created_at) }}</span>
@@ -97,8 +93,7 @@
           class="w-full h-8 text-xs"
           @click="openNewMemoryDialog"
         >
-          <FontAwesomeIcon
-            :icon="['fas', 'plus']"
+          <Plus
             class="mr-2 size-3"
           />
           {{ $t('bots.memory.newMemory') }}
@@ -112,8 +107,7 @@
         <div class="flex-1 flex flex-col min-h-0">
           <div class="p-3 border-b flex items-center justify-between bg-muted/30 shrink-0">
             <div class="flex items-center gap-3 min-w-0">
-              <FontAwesomeIcon
-                :icon="['fas', 'file-lines']"
+              <FileText
                 class="size-4 text-muted-foreground shrink-0"
               />
               <div class="min-w-0">
@@ -129,8 +123,7 @@
                     :aria-label="$t('common.copy')"
                     @click="copyToClipboard(selectedMemory.id)"
                   >
-                    <FontAwesomeIcon
-                      :icon="['fas', 'copy']"
+                    <Copy
                       class="size-2.5"
                     />
                   </button>
@@ -151,8 +144,7 @@
                     :disabled="actionLoading"
                     :aria-label="$t('common.delete')"
                   >
-                    <FontAwesomeIcon
-                      :icon="['far', 'trash-can']"
+                    <Trash2
                       class="size-3.5"
                     />
                   </Button>
@@ -223,8 +215,7 @@
         class="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center"
       >
         <div class="size-12 rounded-full bg-muted flex items-center justify-center mb-4">
-          <FontAwesomeIcon
-            :icon="['fas', 'brain']"
+          <Brain
             class="size-6 opacity-20"
           />
         </div>
@@ -260,8 +251,7 @@
               class="text-xs h-8"
               @click="loadHistory"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'rotate']"
+              <RefreshCw
                 :class="{ 'animate-spin': historyLoading }"
                 class="mr-1.5 size-3"
               />
@@ -292,9 +282,8 @@
                   class="mt-1 size-4 shrink-0 rounded border border-primary flex items-center justify-center transition-colors"
                   :class="selectedHistoryMessages.includes(msg) ? 'bg-primary text-primary-foreground' : 'bg-background'"
                 >
-                  <FontAwesomeIcon
+                  <Check
                     v-if="selectedHistoryMessages.includes(msg)"
-                    :icon="['fas', 'check']"
                     class="size-2.5"
                   />
                 </div>
@@ -444,6 +433,7 @@
 </template>
 
 <script setup lang="ts">
+import { Brain, RefreshCw, Search, FileText, Plus, Copy, Trash2, Check } from 'lucide-vue-next'
 import { computed, ref, onMounted, watch } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'

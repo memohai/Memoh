@@ -7,8 +7,7 @@
       </h2>
       <div class="flex items-center gap-3 ">
         <div class="relative">
-          <FontAwesomeIcon
-            :icon="['fas', 'magnifying-glass']"
+          <Search
             class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground size-3.5"
           />
           <Input
@@ -41,7 +40,7 @@
     >
       <EmptyHeader>
         <EmptyMedia variant="icon">
-          <FontAwesomeIcon :icon="['fas', 'robot']" />
+          <Bot />
         </EmptyMedia>
       </EmptyHeader>
       <EmptyTitle>{{ $t('bots.emptyTitle') }}</EmptyTitle>
@@ -61,6 +60,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@memohai/ui'
+import { Search, Bot } from 'lucide-vue-next'
 import { ref, computed, watch, onUnmounted } from 'vue'
 import BotCard from './components/bot-card.vue'
 import CreateBot from './components/create-bot.vue'

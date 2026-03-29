@@ -5,7 +5,7 @@ import { Sheet, SheetContent } from '#/components/sheet'
 import SheetDescription from '#/components/sheet/SheetDescription.vue'
 import SheetHeader from '#/components/sheet/SheetHeader.vue'
 import SheetTitle from '#/components/sheet/SheetTitle.vue'
-import { SIDEBAR_WIDTH_MOBILE, useSidebar } from './utils'
+import { SIDEBAR_WIDTH, SIDEBAR_WIDTH_MOBILE, useSidebar } from './utils'
 
 defineOptions({
   inheritAttrs: false,
@@ -64,6 +64,7 @@ const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
     :data-collapsible="state === 'collapsed' ? collapsible : ''"
     :data-variant="variant"
     :data-side="side"
+    :style="{ '--sidebar-width': SIDEBAR_WIDTH }"
   >
     <!-- This is what handles the sidebar gap on desktop  -->
     <div

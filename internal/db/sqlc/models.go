@@ -28,6 +28,7 @@ type Bot struct {
 	HeartbeatModelID    pgtype.UUID        `json:"heartbeat_model_id"`
 	CompactionEnabled   bool               `json:"compaction_enabled"`
 	CompactionThreshold int32              `json:"compaction_threshold"`
+	CompactionRatio     int32              `json:"compaction_ratio"`
 	CompactionModelID   pgtype.UUID        `json:"compaction_model_id"`
 	TitleModelID        pgtype.UUID        `json:"title_model_id"`
 	TtsModelID          pgtype.UUID        `json:"tts_model_id"`

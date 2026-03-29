@@ -9,6 +9,7 @@ SELECT
   bots.heartbeat_prompt,
   bots.compaction_enabled,
   bots.compaction_threshold,
+  bots.compaction_ratio,
   chat_models.id AS chat_model_id,
   heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
@@ -39,6 +40,7 @@ WITH updated AS (
       heartbeat_prompt = sqlc.arg(heartbeat_prompt),
       compaction_enabled = sqlc.arg(compaction_enabled),
       compaction_threshold = sqlc.arg(compaction_threshold),
+      compaction_ratio = sqlc.arg(compaction_ratio),
       chat_model_id = COALESCE(sqlc.narg(chat_model_id)::uuid, bots.chat_model_id),
       heartbeat_model_id = COALESCE(sqlc.narg(heartbeat_model_id)::uuid, bots.heartbeat_model_id),
       compaction_model_id = COALESCE(sqlc.narg(compaction_model_id)::uuid, bots.compaction_model_id),
@@ -49,7 +51,7 @@ WITH updated AS (
       browser_context_id = COALESCE(sqlc.narg(browser_context_id)::uuid, bots.browser_context_id),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
 )
 SELECT
   updated.id AS bot_id,
@@ -61,6 +63,7 @@ SELECT
   updated.heartbeat_prompt,
   updated.compaction_enabled,
   updated.compaction_threshold,
+  updated.compaction_ratio,
   chat_models.id AS chat_model_id,
   heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
@@ -89,6 +92,7 @@ SET language = 'auto',
     heartbeat_prompt = '',
     compaction_enabled = false,
     compaction_threshold = 100000,
+    compaction_ratio = 80,
     chat_model_id = NULL,
     heartbeat_model_id = NULL,
     compaction_model_id = NULL,

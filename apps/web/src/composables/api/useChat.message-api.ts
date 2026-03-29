@@ -28,10 +28,16 @@ export async function fetchMessages(
   return (data as unknown as { items?: Message[] })?.items ?? []
 }
 
+export interface SendMessageOverrides {
+  modelId?: string
+  reasoningEffort?: string
+}
+
 export async function sendLocalChannelMessage(
   botId: string,
   text: string,
   attachments?: ChatAttachment[],
+  overrides?: SendMessageOverrides,
 ): Promise<void> {
   const msg: ChannelMessage = {}
   const trimmedText = text.trim()
@@ -46,9 +52,12 @@ export async function sendLocalChannelMessage(
       name: item.name ?? '',
     }))
   }
+  const body: Record<string, unknown> = { message: msg }
+  if (overrides?.modelId) body.model_id = overrides.modelId
+  if (overrides?.reasoningEffort) body.reasoning_effort = overrides.reasoningEffort
   await postBotsByBotIdWebMessages({
     path: { bot_id: botId },
-    body: { message: msg },
+    body: body as { message: ChannelMessage; model_id?: string; reasoning_effort?: string },
     throwOnError: true,
   })
 }

@@ -20,6 +20,7 @@ import type { SearchprovidersGetResponse } from '@memohai/sdk'
 import AddSearchProvider from './components/add-search-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
+import { Globe, Plus } from 'lucide-vue-next'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 const { data: providerData } = useQuery({
@@ -131,7 +132,7 @@ const openStatus = reactive({
       >
         <EmptyHeader>
           <EmptyMedia variant="icon">
-            <FontAwesomeIcon :icon="['fas', 'globe']" />
+            <Globe />
           </EmptyMedia>
         </EmptyHeader>
         <EmptyTitle>{{ $t('webSearch.emptyTitle') }}</EmptyTitle>
@@ -141,8 +142,7 @@ const openStatus = reactive({
             variant="outline"
             @click="openStatus.addOpen=true"
           >
-            <FontAwesomeIcon
-              :icon="['fas', 'plus']"
+            <Plus
               class="mr-1"
             /> {{ $t('webSearch.add') }}
           </Button>
