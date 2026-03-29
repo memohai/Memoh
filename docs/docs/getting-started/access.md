@@ -1,17 +1,17 @@
 # Bot Access Control
 
-Memoh uses an ACL (Access Control List) system to control who can interact with your bot. You can configure guest access, whitelist specific users or channel identities, and blacklist others — all from the bot's **Access** tab.
+Memoh uses an ACL (Access Control List) system to control who can interact with your bot. You can define prioritized rules to allow or deny specific users, channel identities, or entire channel types — all from the bot's **Access** tab.
 
 ---
 
 ## Concepts
 
-### Authorization Layers
+### Default Effect
 
-Bot access is enforced at two levels:
+Each bot has a **default effect** (`allow` or `deny`) that applies when no ACL rule matches an incoming message. Configure this in the bot's **General** tab under **ACL Default Effect**.
 
-1. **Management Access**: Only the bot **owner** and system **admins** can edit bot settings, manage ACL rules, and configure the bot. This is not configurable — it is based on ownership.
-2. **Chat Trigger Access**: Controls who can send messages to the bot and trigger a response. This is what the ACL system manages.
+- **Allow**: Anyone can chat with the bot unless explicitly denied by a rule.
+- **Deny**: Only the bot owner, admins, and explicitly allowed subjects can chat.
 
 ### Subject Types
 
@@ -19,21 +19,27 @@ ACL rules can target three kinds of subjects:
 
 | Subject | Description |
 |---------|-------------|
-| **Guest (all)** | A global toggle — when enabled, anyone can chat with the bot without being explicitly listed. |
-| **User** | A specific Memoh user account. |
-| **Channel Identity** | A specific identity on an external channel (e.g. a Telegram user, a Discord member). Useful when the person doesn't have a Memoh account. |
+| **All** | Matches every incoming message regardless of sender. Use this for global allow/deny rules. |
+| **Channel Identity** | A specific identity on an external channel (e.g., a Telegram user, a Discord member). Useful for controlling access at the individual level. |
+| **Channel Type** | An entire channel platform (e.g., all Telegram users, all Discord users). Useful for platform-level access control. |
 
-### Evaluation Order
+### Rule Effects
 
-When an incoming message arrives, the bot evaluates access in this order:
+Each rule has an **effect**:
 
-1. Bot owner or system admin → **Allow**
-2. User or channel identity has a **deny** rule → **Deny**
-3. User or channel identity has an **allow** rule → **Allow**
-4. Guest access is enabled → **Allow**
-5. None of the above → **Deny**
+- **Allow** — Grants the subject permission to chat with the bot.
+- **Deny** — Blocks the subject from chatting with the bot.
 
-Blacklist (deny) rules are always checked before whitelist (allow) rules. This means a blacklisted user cannot bypass the block even if guest access is enabled.
+### Priority-Based Evaluation
+
+Rules are evaluated in **priority order** (top to bottom). The first matching rule determines the outcome:
+
+1. Bot owner or system admin → **Always allowed** (bypasses ACL).
+2. Rules are checked from highest priority (top) to lowest (bottom).
+3. The first rule whose subject matches the sender is applied.
+4. If no rule matches → the **default effect** is applied.
+
+This means rule ordering matters. A deny rule placed above an allow rule will take precedence for matching subjects.
 
 ---
 
@@ -41,69 +47,64 @@ Blacklist (deny) rules are always checked before whitelist (allow) rules. This m
 
 Open a bot's **Access** tab to configure its access control.
 
-### Guest Access
+### Adding Rules
 
-Toggle **Allow Guest Access** to let anyone chat with the bot without an explicit whitelist entry. This is useful for public-facing bots.
-
-When guest access is disabled, only the bot owner, admins, and explicitly whitelisted users/identities can trigger the bot.
-
-### Whitelist
-
-The whitelist grants specific users or channel identities permission to chat with the bot.
-
-1. Click **Add** in the Whitelist section.
+1. Click **Add Rule**.
 2. Select a subject type:
-   - **User**: Search and select a Memoh user.
-   - **Channel Identity**: Search and select a channel identity (e.g. a Telegram user the bot has seen before).
-3. Optionally set **source scope** to restrict the rule to a specific context:
-   - **Channel**: Only applies when the message comes from a specific channel (e.g. your Telegram bot channel).
+   - **All**: Applies to everyone.
+   - **Channel Identity**: Search and select a specific channel identity the bot has seen before.
+   - **Channel Type**: Select an entire channel platform.
+3. Choose the **effect**: `allow` or `deny`.
+4. Optionally set **source scope** to restrict the rule to a specific context:
+   - **Channel**: Only applies when the message comes from a specific channel config.
    - **Conversation Type**: `private`, `group`, or `thread`.
    - **Conversation ID**: A specific chat/group ID.
    - **Thread ID**: A specific thread within a conversation (requires Conversation ID).
-4. Click **Save**.
+5. Click **Save**.
 
-Without source scope, the rule applies globally — the subject can chat with the bot from any channel.
+### Reordering Rules
 
-### Blacklist
-
-The blacklist denies specific users or channel identities from chatting with the bot. The setup process is the same as the whitelist.
-
-Blacklist rules take priority over whitelist rules and guest access. Use this to block specific users while keeping the bot open to others.
+Rules can be **drag-and-dropped** to change their priority. Higher rules (closer to the top) are evaluated first. After reordering, click **Save** to persist the new order.
 
 ### Source Scope
 
 Source scope lets you create fine-grained rules. For example:
 
-- Allow a user to chat only via Telegram, but not Discord
-- Block a channel identity only in group conversations
-- Restrict access to a specific thread in a specific group
+- Allow a user to chat only via Telegram, but not Discord.
+- Block an entire channel type only in group conversations.
+- Restrict access to a specific thread in a specific group.
 
-Scope fields form a hierarchy: **Channel → Conversation Type → Conversation ID → Thread ID**. Each level is optional, but a Thread ID requires a Conversation ID, and a Conversation ID requires a Channel.
+Scope fields form a hierarchy: **Channel → Conversation Type → Conversation ID → Thread ID**. Each level is optional, but a Thread ID requires a Conversation ID.
 
 ---
 
 ## Examples
 
-### Public Bot (Anyone Can Chat)
+### Open Bot (Anyone Can Chat)
 
-1. Open the bot's **Access** tab.
-2. Enable **Allow Guest Access**.
-3. Done — anyone on any connected channel can now message the bot.
+1. Set **ACL Default Effect** to `allow` in the **General** tab.
+2. No rules needed — everyone is allowed by default.
 
 ### Private Bot with Selected Users
 
-1. Disable **Allow Guest Access**.
-2. Add each authorized user or channel identity to the **Whitelist**.
+1. Set **ACL Default Effect** to `deny`.
+2. Add **allow** rules for each authorized channel identity.
 3. Only listed subjects (plus the bot owner and admins) can trigger the bot.
 
-### Public Bot with Blocked Users
+### Open Bot with Blocked Users
 
-1. Enable **Allow Guest Access**.
-2. Add problematic users/identities to the **Blacklist**.
-3. Everyone except blacklisted subjects can chat with the bot.
+1. Set **ACL Default Effect** to `allow`.
+2. Add **deny** rules for problematic channel identities at the top of the list.
+3. Everyone except denied subjects can chat with the bot.
+
+### Platform-Specific Access
+
+1. Set **ACL Default Effect** to `deny`.
+2. Add an **allow** rule with subject type **Channel Type** set to `telegram`.
+3. Only Telegram users can chat with the bot — messages from other channels are denied.
 
 ### Channel-Scoped Access
 
-1. Add a whitelist rule for a user.
-2. Set the **Channel** source scope to your Telegram channel.
-3. The user can only chat with the bot via Telegram — messages from other channels are denied.
+1. Add an **allow** rule for a specific channel identity.
+2. Set the **Source Scope** channel to your Telegram channel config.
+3. The user can only chat with the bot via that specific Telegram channel.

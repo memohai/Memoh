@@ -4,15 +4,15 @@ Channels connect your Bot to various messaging platforms, allowing you to intera
 
 ## Concept: Unified Communication
 
-Memoh acts as a hub that bridges different messaging services. You can configure multiple channels for a single bot, enabling it to chat on Telegram, Discord, and more simultaneously.
+Memoh acts as a hub that bridges different messaging services. You can configure multiple channels for a single bot, enabling it to chat on Telegram, Discord, Matrix, and more simultaneously.
 
 ---
 
 ## Supported Channels
 
-Configure your bot's connections from the **Channels** tab in the Bot Detail page.
+Configure your bot's connections from the **Platforms** tab in the Bot Detail page.
 
-### Popular Platforms
+### Platform Guides
 
 For detailed step-by-step guides on how to create and configure bots for each platform, see:
 
@@ -20,6 +20,9 @@ For detailed step-by-step guides on how to create and configure bots for each pl
 - **[Feishu (Lark) Configuration](/channels/feishu)**
 - **[Discord Configuration](/channels/discord)**
 - **[QQ Configuration](/channels/qq)**
+- **[Matrix Configuration](/channels/matrix)**
+- **[WeCom (WeWork) Configuration](/channels/wecom)**
+- **[WeChat Configuration](/channels/weixin)**
 
 ---
 
@@ -45,6 +48,12 @@ If using **Feishu** in `webhook` inbound mode:
 1. Memoh will generate a **Webhook Callback URL**.
 2. Copy this URL and paste it into your Feishu App's event configuration.
 3. This allows Feishu to send messages directly to Memoh.
+
+### 4. Special Case: WeChat QR Code
+
+If using **WeChat**:
+1. After enabling the channel, a QR code flow is provided for connecting.
+2. Scan the QR code with WeChat to link the bot.
 
 ---
 

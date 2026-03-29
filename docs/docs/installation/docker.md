@@ -1,6 +1,6 @@
 # Docker Installation
 
-Docker is the recommended way to run Memoh. The stack includes PostgreSQL, Qdrant, the main server (with embedded Containerd), agent gateway, and web UI — all orchestrated via Docker Compose. You do not need to install containerd, nerdctl, or buildkit on your host; everything runs inside containers.
+Docker is the recommended way to run Memoh. The stack includes PostgreSQL, the main server (with embedded Containerd and in-process AI agent), and the web UI — all orchestrated via Docker Compose. You do not need to install containerd, nerdctl, or buildkit on your host; everything runs inside containers.
 
 ## Service Architecture
 
@@ -8,8 +8,7 @@ The Docker Compose stack consists of multiple services. Some are always started,
 
 | Service | Profile | Description |
 |---------|---------|-------------|
-| **server** | *(core)* | Main Memoh server with embedded Containerd |
-| **agent** | *(core)* | Agent gateway for bot execution |
+| **server** | *(core)* | Main Memoh server with embedded Containerd and in-process AI agent |
 | **web** | *(core)* | Web UI (Vue 3) |
 | **postgres** | *(core)* | PostgreSQL database |
 | **qdrant** | `qdrant` | Qdrant vector database for memory search (sparse and dense modes) |
@@ -82,13 +81,13 @@ Defaults when running silently:
 **Install a specific version:**
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh -s -- --version v0.5.0
+curl -fsSL https://memoh.sh | sudo sh -s -- --version v0.6.0
 ```
 
 Or using the environment variable:
 
 ```bash
-curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v0.5.0 sh
+curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v0.6.0 sh
 ```
 
 **Use China mainland mirror** (for slow image pulls):
@@ -97,7 +96,7 @@ curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v0.5.0 sh
 curl -fsSL https://memoh.sh | sudo USE_CN_MIRROR=true sh
 ```
 
-> Environment variables can be combined, e.g. `curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v1.0.0 USE_CN_MIRROR=true sh`
+> Environment variables can be combined, e.g. `curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v0.6.0 USE_CN_MIRROR=true sh`
 
 ## Manual Install
 
@@ -155,12 +154,31 @@ After startup:
 |-----------------|------------------------|
 | Web UI          | http://localhost:8082  |
 | API             | http://localhost:8080  |
-| Agent Gateway   | http://localhost:8081  |
 | Browser Gateway | http://localhost:8083  |
 
 Default login: `admin` / `admin123` (change this in `config.toml`).
 
 First startup may take 1–2 minutes while images are pulled and services initialize.
+
+## Configuration Reference
+
+The `config.toml` file controls all server behavior. Here is a summary of the available sections:
+
+| Section | Description |
+|---------|-------------|
+| `[log]` | Logging level and format (`info`, `debug`; `text`, `json`) |
+| `[server]` | HTTP listen address (default `:8080`) |
+| `[admin]` | Admin account credentials (username, password, email) |
+| `[auth]` | JWT secret and token expiration |
+| `timezone` | Server timezone (default `UTC`) |
+| `[containerd]` | Containerd socket path and namespace |
+| `[workspace]` | Container image, snapshotter, data paths, CNI config, optional registry mirror |
+| `[postgres]` | PostgreSQL connection (host, port, user, password, database, sslmode) |
+| `[qdrant]` | Qdrant vector database connection (base_url, api_key, timeout) |
+| `[sparse]` | Sparse encoding service URL |
+| `[registry]` | Provider definitions directory |
+| `[browser_gateway]` | Browser Gateway host, port, and server address |
+| `[web]` | Web frontend host and port |
 
 ## Common Commands
 
@@ -180,29 +198,7 @@ docker compose pull && docker compose up -d  # Update to latest images
 |--------------------|--------------------|----------------------------------------------|
 | `POSTGRES_PASSWORD`| `memoh123`         | PostgreSQL password (must match `postgres.password` in `config.toml`) |
 | `MEMOH_CONFIG`     | `./config.toml`    | Path to the configuration file               |
-| `MEMOH_VERSION`    | *(latest release)* | Git tag to install (e.g. `v1.0.0`). Also pins Docker image versions. |
-| `USE_CN_MIRROR`    | `false`            | Set to `true` to use China mainland mirror for Docker images         |
-| `BROWSER_CORES`    | `chromium,firefox`  | Browser engines to include in the browser image (`chromium`, `firefox`, or `chromium,firefox`) |
-| `USE_SPARSE`       | `false`            | Set to `true` to enable the sparse memory service (`--profile sparse`) |
-
-## Production Checklist
-
-1. **Passwords** — Change all default passwords and secrets in `config.toml`
-2. **HTTPS** — Configure SSL (e.g. via `docker-compose.override.yml` with certs or a reverse proxy)
-3. **Firewall** — Restrict access to necessary ports
-4. **Resource limits** — Set memory/CPU limits for containers
-5. **Backups** — Regular backups of Postgres and Qdrant data
-
-## Troubleshooting
-
-```bash
-docker compose logs server      # View main service logs
-docker compose config           # Validate configuration
-docker compose build --no-cache && docker compose up -d  # Full rebuild
-```
-
-## Security Warnings
-
-- The main service runs with privileged container access — only run in trusted environments
-- You must change all default passwords and secrets before production use
-- Use HTTPS in production
+| `MEMOH_VERSION`    | *(latest release)* | Git tag to install (e.g. `v0.6.0`). Also pins Docker image versions. |
+| `USE_CN_MIRROR`    | `false`            | Set to `true` to use China mainland image mirrors |
+| `BROWSER_CORES`    | `chromium,firefox`  | Browser engines to include in the browser image |
+| `BROWSER_TAG`      | `latest`           | Docker tag for the browser image |

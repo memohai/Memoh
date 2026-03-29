@@ -7,7 +7,7 @@ Memoh's structured long-term memory system allows bots to remember information a
 Before using the **Memory** tab, make sure your bot already has a **Memory Provider** configured.
 
 1. Create a provider from one of the [Memory Providers](/memory-providers/index.md) (Built-in, Mem0, or OpenViking).
-2. Open your bot's **Settings** tab.
+2. Open your bot's **General** tab.
 3. Select the provider in the **Memory Provider** field.
 4. Click **Save**.
 
@@ -45,17 +45,39 @@ Over time, memories can accumulate and become redundant. The **Compact** feature
 - **Ratio**: Set the compression ratio (for example `0.8`, `0.5`, or `0.3`) to determine how much information is retained.
 - **Decay Days**: Optionally specify a time window to compact only memories older than a certain number of days.
 
+For more details on compaction, see [Memory Compaction](/getting-started/compaction).
+
 ---
 
-## Visualization: Vector Manifold
+## Rebuild
 
-The Memory tab includes visual tools to help you understand how the memory system is performing:
+The **Rebuild** feature re-indexes all memories from scratch. This is useful when:
 
-### Top-K Bucket Chart
-Shows the distribution of relevant memories retrieved for the most recent queries.
+- You have changed the memory provider's mode (e.g., switching from `off` to `sparse`).
+- The vector index has become inconsistent.
+- You want to re-process all memories with updated settings.
 
-### CDF Curve (Cumulative Distribution Function)
-Visualizes the scoring threshold of retrieved memories, helping you fine-tune how much relevant information the bot should consider.
+Click **Rebuild** in the Memory tab to start the process. You can monitor the rebuild status in real-time.
+
+---
+
+## Status
+
+The Memory tab shows the current **status** of the memory provider for this bot:
+
+- **Connected** — The memory backend is reachable and operational.
+- **Error** — There is an issue with the memory provider configuration or connectivity.
+
+Use the status indicator to quickly verify that the memory system is working before troubleshooting other issues.
+
+---
+
+## Usage Statistics
+
+The Memory tab displays storage usage information:
+
+- **Total Memories** — The number of memory entries stored for this bot.
+- **Index Status** — Whether the vector index is up-to-date.
 
 ---
 

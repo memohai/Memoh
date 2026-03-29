@@ -18,10 +18,10 @@ Manage the lifecycle of your bot's environment from the **Container** tab in the
 
 ### Lifecycle Actions
 
-- **Create**: Initialize the container if it doesn't exist (using the configured image).
+- **Create**: Initialize the container if it doesn't exist (using the configured image). Progress is shown via real-time SSE feedback during image pull and creation.
 - **Start**: Launch the container. The bot must have a running container to perform many operations like file editing or executing tools.
 - **Stop**: Gracefully shut down the container to save resources.
-- **Delete**: Remove the container instance. This will delete the temporary state but preserve the data in persistent volumes.
+- **Delete**: Remove the container instance.
 
 ---
 
@@ -54,3 +54,36 @@ Snapshots allow you to capture the current state of the bot's container and rest
 ### Managing Snapshots
 - View a list of existing snapshots with their creation timestamps and parent relationships.
 - Use the **Delete** button next to a snapshot to remove it.
+
+---
+
+## Data Export and Import
+
+The Container tab supports exporting and importing container data for backup, migration, or sharing purposes.
+
+### Export
+
+1. Click **Export Data**.
+2. The container's filesystem data is packaged into a downloadable archive.
+3. Save the archive to your local machine.
+
+### Import
+
+1. Click **Import Data**.
+2. Select an archive file from your local machine.
+3. The archive contents are extracted into the container's filesystem.
+
+### Restore
+
+The **Restore** operation resets the container's data directory to a clean state. This is useful when the filesystem has become corrupted or you want to start fresh without recreating the container.
+
+---
+
+## Container Versioning
+
+Memoh tracks container versions to manage the lifecycle of the bot's runtime environment. Version information includes:
+
+- **Current Version**: The active container version.
+- **Version History**: A log of container version changes over time.
+
+This helps with auditing and understanding when container configurations were updated.

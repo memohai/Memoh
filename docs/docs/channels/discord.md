@@ -27,7 +27,7 @@ Connecting your Memoh Bot to Discord allows it to join servers and interact with
 
 ## Step 4: Configure Memoh
 
-1. Go to your Bot's **Channels** tab in the Memoh Web UI.
+1. Go to your Bot's **Platforms** tab in the Memoh Web UI.
 2. Click **Add Channel** and select **Discord**.
 3. Paste your **Bot Token**.
 4. Click **Save and Enable**.

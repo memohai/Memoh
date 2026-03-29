@@ -30,7 +30,7 @@ Click the `edge-read-aloud` model to configure its settings.
 
 ## Assigning to a Bot
 
-1. Open a bot's **Settings** tab.
+1. Open a bot's **General** tab.
 2. Find the **TTS Model** dropdown.
 3. Select the configured Edge TTS model.
 4. Click **Save**.

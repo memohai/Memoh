@@ -31,7 +31,7 @@ After creating a provider, select it from the list and configure its settings.
 ## Assigning a Mem0 Provider to a Bot
 
 1. Navigate to the **Bots** page and open your bot.
-2. Go to the **Settings** tab.
+2. Go to the **General** tab.
 3. Find the **Memory Provider** dropdown.
 4. Select the Mem0 provider you created.
 5. Click **Save**.

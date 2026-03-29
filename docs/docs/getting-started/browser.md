@@ -59,7 +59,7 @@ After creating a context, select it from the sidebar and update its settings.
 ## Assigning a Browser Context to a Bot
 
 1. Navigate to the **Bots** page and open your bot.
-2. Go to the **Settings** tab.
+2. Go to the **General** tab.
 3. Find the **Browser Context** dropdown.
 4. Select the context you created.
 5. Click **Save**.

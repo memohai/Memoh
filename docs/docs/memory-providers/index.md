@@ -1,6 +1,6 @@
 # Memory Providers
 
-Memoh uses a **Memory Provider** to define how a bot stores, retrieves, and manages long-term memory. A bot can bind one memory provider in its **Settings** tab, and that provider becomes the backend for memory extraction and memory search.
+Memoh uses a **Memory Provider** to define how a bot stores, retrieves, and manages long-term memory. A bot can bind one memory provider in its **General** tab, and that provider becomes the backend for memory extraction and memory search.
 
 ## Available Providers
 
@@ -17,7 +17,7 @@ Memoh supports the following memory providers:
 1. Open the **Memory Providers** page from the sidebar.
 2. Create a provider instance using one of the supported provider types.
 3. Configure the provider settings.
-4. Open a bot's **Settings** tab and assign that provider in **Memory Provider**.
+4. Open a bot's **General** tab and assign that provider in **Memory Provider**.
 5. Manage actual memories from the bot's **Memory** tab.
 
 ---

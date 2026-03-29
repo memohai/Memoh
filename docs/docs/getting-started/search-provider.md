@@ -45,7 +45,7 @@ Configure your search engines from the **Search Provider** page in the sidebar.
 ## Assigning a Search Provider to a Bot
 
 1. Navigate to the **Bots** page and select your bot.
-2. Go to the **Settings** tab.
+2. Go to the **General** tab.
 3. Find the **Search Provider** dropdown and select the provider you created.
 4. Click **Save**.
 

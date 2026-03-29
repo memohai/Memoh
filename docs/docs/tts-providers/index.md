@@ -15,7 +15,7 @@ Memoh supports **Text-to-Speech (TTS)** so bots can synthesize spoken audio from
 3. Click **Create** — the provider's default model is auto-imported.
 4. Click the model to configure voice, format, speed, and pitch.
 5. Test synthesis with the built-in test button.
-6. Open a bot's **Settings** tab and select the TTS Model.
+6. Open a bot's **General** tab and select the TTS Model.
 7. Save — the bot can now synthesize speech.
 
 ---

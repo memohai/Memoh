@@ -8,7 +8,7 @@ An LLM Provider represents a connection to an AI service (like OpenAI, Anthropic
 
 ### Creating a Provider
 
-1. Navigate to the **Models** page from the sidebar.
+1. Navigate to the **Providers** page from the sidebar.
 2. Click the **Add Provider** button at the bottom of the sidebar.
 3. Fill in the following fields:
     - **Name**: A display name for this provider (e.g., "OpenAI").
@@ -16,9 +16,30 @@ An LLM Provider represents a connection to an AI service (like OpenAI, Anthropic
     - **API Key**: Your authentication token for the service.
 4. Click **Create**.
 
+### OAuth Authentication
+
+Some providers (like OpenAI) support OAuth-based authentication. If a provider supports OAuth:
+
+1. Select the provider from the list.
+2. Click **Connect with OAuth** in the provider settings form.
+3. Follow the authorization flow in the popup window.
+4. Once authorized, the provider will use the OAuth token instead of a manual API key.
+
+### Import Models
+
+Memoh can automatically discover and import available models from a provider:
+
+1. Select a provider from the list.
+2. Click **Import Models**.
+3. Memoh will query the provider's API to fetch available models.
+4. Select which models to import and click **Import**.
+
+This saves time compared to manually adding each model one by one.
+
 ### Managing Providers
 
 - **Edit**: Select a provider from the list and use the form on the right to update its name, URL, or API key.
+- **Test**: Click **Test Connection** to verify the provider is reachable.
 - **Delete**: Use the **Delete Provider** button in the provider settings form.
 
 ---
@@ -29,7 +50,7 @@ A Model is a specific AI instance (like `gpt-4o` or `text-embedding-3-small`) th
 
 ### Adding a Model
 
-1. Select a Provider from the list on the **Models** page.
+1. Select a Provider from the list on the **Providers** page.
 2. Click **Add Model** in the model list section.
 3. Configure the following fields:
 

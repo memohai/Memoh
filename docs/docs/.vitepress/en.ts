@@ -21,48 +21,52 @@ export const en = [
     text: 'Getting Started',
     items: [
       {
-        text: 'LLM Provider and Model',
+        text: 'LLM Provider',
         link: '/getting-started/provider-and-model.md'
       },
       {
-        text: 'Bot Management',
+        text: 'Bot',
         link: '/getting-started/bot.md'
       },
       {
-        text: 'Bot Access Control',
+        text: 'Sessions',
+        link: '/getting-started/sessions.md'
+      },
+      {
+        text: 'Access Control',
         link: '/getting-started/access.md'
       },
       {
-        text: 'Container Management',
+        text: 'Container',
         link: '/getting-started/container.md'
       },
       {
-        text: 'Files Management',
+        text: 'Files',
         link: '/getting-started/files.md'
       },
       {
-        text: 'Bot Skills',
+        text: 'Skills',
         link: '/getting-started/skills.md'
       },
       {
-        text: 'MCP Connections',
+        text: 'MCP',
         link: '/getting-started/mcp.md'
       },
       {
-        text: 'Bot Channels',
+        text: 'Channels',
         link: '/getting-started/channels.md'
       },
       {
-        text: 'Browser Contexts',
+        text: 'Browser',
         link: '/getting-started/browser.md'
       },
       {
-        text: 'Memory Management',
+        text: 'Memory',
         link: '/getting-started/memory.md'
       },
       {
-        text: 'Subagents',
-        link: '/getting-started/subagents.md'
+        text: 'Context Compaction',
+        link: '/getting-started/compaction.md'
       },
       {
         text: 'Heartbeat',
@@ -73,12 +77,16 @@ export const en = [
         link: '/getting-started/schedule.md'
       },
       {
-        text: 'Search Providers',
+        text: 'Web Search',
         link: '/getting-started/search-provider.md'
       },
       {
-        text: 'Email Providers',
+        text: 'Email',
         link: '/getting-started/email.md'
+      },
+      {
+        text: 'Slash Commands',
+        link: '/getting-started/slash-commands.md'
       },
     ]
   },
@@ -138,6 +146,18 @@ export const en = [
       {
         text: 'QQ',
         link: '/channels/qq.md'
+      },
+      {
+        text: 'Matrix',
+        link: '/channels/matrix.md'
+      },
+      {
+        text: 'WeCom (WeWork)',
+        link: '/channels/wecom.md'
+      },
+      {
+        text: 'WeChat',
+        link: '/channels/weixin.md'
       },
     ]
   },

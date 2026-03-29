@@ -14,7 +14,7 @@ Configure MCP connections from the **MCP** tab in the Bot Detail page.
 
 ### 1. Stdio (Local Process)
 
-This type of connection executes a local command on the server and communicates via standard input/output.
+This type of connection executes a local command inside the bot's container and communicates via standard input/output.
 
 | Field | Description |
 |-------|-------------|
@@ -35,13 +35,43 @@ This type of connection connects to a remote MCP server over the network.
 
 ---
 
+## OAuth Authentication
+
+Some MCP servers require OAuth-based authentication. Memoh supports the full MCP OAuth flow:
+
+1. Click the **OAuth** button on a connection that requires authentication.
+2. Memoh will **discover** the server's OAuth configuration automatically.
+3. Click **Authorize** to open the provider's authorization page.
+4. After granting access, you are redirected back to Memoh.
+5. The token is **exchanged** and stored securely for the connection.
+
+You can also:
+
+- **Check status** — View the current OAuth token status.
+- **Revoke** — Remove the stored OAuth token.
+
+---
+
 ## Operations
 
 - **Add Connection**: Click **Add**, choose the type, and fill in the configuration.
 - **Import JSON**: Use the **Import** button to quickly add multiple connections from a standard `mcpServers` JSON config file.
+- **Export**: Export connection configurations to a JSON file for backup or sharing.
 - **Toggle Active**: Enable or disable specific connections without deleting them.
 - **Search**: Quickly find a connection by name or ID.
-- **Export**: Export a connection configuration to a JSON file.
+- **Batch Delete**: Select multiple connections and delete them at once.
+
+---
+
+## Tool Discovery
+
+Once an MCP connection is active, Memoh automatically discovers the tools exposed by the server. You can:
+
+1. Click on a connection to view its details.
+2. The **Tools** section lists all available tools with their names and descriptions.
+3. The bot will use these tools automatically during conversations when relevant.
+
+You can also use the **Probe** button to manually refresh the tool list from the server.
 
 ---
 

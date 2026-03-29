@@ -25,7 +25,7 @@ Memoh supports integrating with Feishu (Lark) via the Open Platform. This allows
 
 ## Step 4: Configure Events (Webhook Mode)
 
-1. In Memoh, go to your Bot's **Channels** tab and add a **Feishu** channel.
+1. In Memoh, go to your Bot's **Platforms** tab and add a **Feishu** channel.
 2. Choose **Inbound Mode**: `webhook`.
 3. Fill in your **App ID** and **App Secret**.
 4. Click **Save**. Memoh will generate a **Webhook Callback URL**.
