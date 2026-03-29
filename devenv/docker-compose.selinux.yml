@@ -14,3 +14,7 @@ services:
   web:
     security_opt:
       - label=disable
+
+  browser:
+    security_opt:
+      - label=disable

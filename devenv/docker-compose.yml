@@ -132,29 +132,29 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # browser:
-  #   build:
-  #     context: ..
-  #     dockerfile: devenv/Dockerfile.browser
-  #     args:
-  #       BROWSER_CORES: ${BROWSER_CORES:-chromium,firefox}
-  #   container_name: memoh-dev-browser
-  #   working_dir: /workspace/apps/browser
-  #   command: ["bun", "run", "--watch", "src/index.ts"]
-  #   environment:
-  #     - MEMOH_CONFIG_PATH=/workspace/devenv/app.dev.toml
-  #     - BROWSER_CORES=${BROWSER_CORES:-chromium,firefox}
-  #   volumes:
-  #     - ..:/workspace
-  #     - node_modules:/workspace/node_modules
-  #   ports:
-  #     - "${MEMOH_DEV_BROWSER_PORT:-18083}:8083"
-  #   depends_on:
-  #     deps:
-  #       condition: service_completed_successfully
-  #     server:
-  #       condition: service_healthy
-  #   restart: unless-stopped
+  browser:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.browser
+      args:
+        BROWSER_CORES: ${BROWSER_CORES:-chromium,firefox}
+    container_name: memoh-dev-browser
+    working_dir: /workspace/apps/browser
+    command: ["bun", "run", "--watch", "src/index.ts"]
+    environment:
+      - MEMOH_CONFIG_PATH=/workspace/devenv/app.dev.toml
+      - BROWSER_CORES=${BROWSER_CORES:-chromium,firefox}
+    volumes:
+      - ..:/workspace
+      - node_modules:/workspace/node_modules
+    ports:
+      - "${MEMOH_DEV_BROWSER_PORT:-18083}:8083"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+    restart: unless-stopped
 
   sparse:
     build:
