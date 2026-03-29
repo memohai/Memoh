@@ -73,7 +73,7 @@ const openStatus = reactive({
               :model-value="selectContext(item.id as string).value"
               @update:model-value="(isSelect) => {
                 if (isSelect) {
-                  curContext = item
+                  curContext.value = item
                 }
               }"
             >
