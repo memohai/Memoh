@@ -7,10 +7,23 @@ Connecting your Memoh Bot to Matrix allows it to communicate via the decentraliz
 1. Register a new account on your Matrix homeserver (e.g., via Element or any Matrix client).
 2. Note the **User ID** (e.g., `@mybot:matrix.org`).
 3. Obtain an **Access Token** for the account. You can do this by:
-   - Using the Matrix client login API: `POST /_matrix/client/r0/login`
-   - Or extracting it from your Matrix client's settings (Element: Settings > Help & About > Access Token).
 
-> **Important**: Keep the access token secret. Anyone with this token can act as your bot account.
+- Option A: Using the Matrix Client Login API
+
+```bash
+curl -X POST "https://<homeserver>/_matrix/client/v3/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "m.login.password",
+    "identifier": {
+      "type": "m.id.user",
+      "user": "<username>"
+    },
+    "password": "<password>"
+  }'
+```
+
+- Option B: Extract from a client
 
 ## Step 2: Configure Memoh
 
@@ -41,6 +54,8 @@ Connecting your Memoh Bot to Matrix allows it to communicate via the decentraliz
 - **Direct Messages**: Private conversations with individual users.
 - **Streaming**: Responses are streamed as they are generated.
 - **Markdown**: Support for formatted text.
+- **Media/Attachment**: Bots can receive and send files or photo.
+- Check [the roadmap](https://github.com/memohai/Memoh/issues/249) for more features of Matrix.
 
 ## Official Resources
 
