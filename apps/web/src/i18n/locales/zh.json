@@ -401,7 +401,7 @@
       "title": "OAuth2 授权",
       "description": "授权此提供商以您的名义发送邮件，系统将跳转到提供商登录页面。",
       "authorize": "授权",
-      "authorizeOpened": "授权页面已在新标签页打开",
+      "authorizeOpened": "授权完成",
       "authorizeFailed": "启动授权失败",
       "status": {
         "checking": "正在检查授权状态...",

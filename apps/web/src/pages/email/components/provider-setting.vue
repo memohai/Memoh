@@ -379,8 +379,35 @@ async function handleAuthorize() {
     if (error || !data?.auth_url) {
       throw new Error(t('email.oauth.authorizeFailed'))
     }
-    window.open(data.auth_url, '_blank', 'noopener,noreferrer')
-    toast.success(t('email.oauth.authorizeOpened'))
+
+    const popup = window.open(data.auth_url, 'email-oauth', 'width=600,height=720')
+    if (!popup) {
+      throw new Error(t('email.oauth.authorizeFailed'))
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        window.removeEventListener('message', onMessage)
+      }
+
+      const onMessage = async (event: MessageEvent) => {
+        if (event.data?.type !== 'memoh-email-oauth-callback') return
+        if (event.data?.providerId && event.data.providerId !== curProviderId.value) return
+
+        cleanup()
+
+        if (event.data?.status === 'success') {
+          await fetchOAuthStatus()
+          toast.success(t('email.oauth.authorizeOpened'))
+          resolve()
+          return
+        }
+
+        reject(new Error(typeof event.data?.error === 'string' && event.data.error ? event.data.error : t('email.oauth.authorizeFailed')))
+      }
+
+      window.addEventListener('message', onMessage)
+    })
   } catch (e: unknown) {
     toast.error(e instanceof Error ? e.message : t('email.oauth.authorizeFailed'))
   } finally {

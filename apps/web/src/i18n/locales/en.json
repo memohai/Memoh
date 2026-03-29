@@ -405,7 +405,7 @@
       "title": "OAuth2 Authorization",
       "description": "Authorize this provider to send emails on your behalf. You will be redirected to the provider's login page.",
       "authorize": "Authorize",
-      "authorizeOpened": "Authorization page opened in a new tab",
+      "authorizeOpened": "Authorization completed",
       "authorizeFailed": "Failed to start authorization",
       "status": {
         "checking": "Checking authorization status...",
