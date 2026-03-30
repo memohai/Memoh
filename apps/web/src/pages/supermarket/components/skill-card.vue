@@ -7,12 +7,24 @@
             <Zap class="size-4 text-muted-foreground" />
           </div>
           <div class="min-w-0">
-            <CardTitle
-              class="text-sm truncate"
-              :title="skill.name"
-            >
-              {{ skill.name }}
-            </CardTitle>
+            <div class="flex items-center gap-1.5">
+              <CardTitle
+                class="text-sm truncate"
+                :title="skill.name"
+              >
+                {{ skill.name }}
+              </CardTitle>
+              <a
+                v-if="skill.metadata?.homepage"
+                :href="skill.metadata.homepage"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                @click.stop
+              >
+                <ExternalLink class="size-3" />
+              </a>
+            </div>
             <span
               v-if="skill.metadata?.author?.name"
               class="text-[11px] text-muted-foreground"
@@ -54,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { Zap, Download } from 'lucide-vue-next'
+import { Zap, Download, ExternalLink } from 'lucide-vue-next'
 import { Card, CardHeader, CardTitle, CardContent, CardFooter, Badge, Button } from '@memohai/ui'
 import type { HandlersSupermarketSkillEntry } from '@memohai/sdk'
 

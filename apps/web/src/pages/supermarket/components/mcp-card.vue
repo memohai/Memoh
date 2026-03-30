@@ -19,12 +19,24 @@
           <Plug class="size-4 text-muted-foreground" />
         </div>
         <div class="flex-1 min-w-0">
-          <CardTitle
-            class="text-sm truncate"
-            :title="mcp.name"
-          >
-            {{ mcp.name }}
-          </CardTitle>
+          <div class="flex items-center gap-1.5">
+            <CardTitle
+              class="text-sm truncate"
+              :title="mcp.name"
+            >
+              {{ mcp.name }}
+            </CardTitle>
+            <a
+              v-if="mcp.homepage"
+              :href="mcp.homepage"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+              @click.stop
+            >
+              <ExternalLink class="size-3" />
+            </a>
+          </div>
           <div class="flex items-center gap-1.5 mt-1">
             <Badge
               variant="outline"
@@ -73,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { Plug, Download } from 'lucide-vue-next'
+import { Plug, Download, ExternalLink } from 'lucide-vue-next'
 import { Card, CardHeader, CardTitle, CardContent, CardFooter, Badge, Button } from '@memohai/ui'
 import type { HandlersSupermarketMcpEntry } from '@memohai/sdk'
 
