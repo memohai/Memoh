@@ -56,6 +56,9 @@ host = "127.0.0.1"
 port = 8083
 server_addr = ":8080"
 
+[supermarket]
+base_url = "https://supermarket.memoh.ai"
+
 [web]
 host = "127.0.0.1"
 port = 8082

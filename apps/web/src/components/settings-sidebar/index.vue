@@ -50,7 +50,7 @@ import { computed, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, Mail, AppWindow, ChartLine, User } from 'lucide-vue-next'
+import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, Mail, AppWindow, ChartLine, User, Store } from 'lucide-vue-next'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import {
   Sidebar,
@@ -94,6 +94,11 @@ const navItems = computed<{ title: string; name: string; icon: Component }[]>(()
     title: t('sidebar.bots'),
     name: 'bots',
     icon: Bot,
+  },
+  {
+    title: t('sidebar.supermarket'),
+    name: 'supermarket',
+    icon: Store,
   },
   {
     title: t('sidebar.providers'),

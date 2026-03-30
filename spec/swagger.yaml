@@ -1362,6 +1362,20 @@ definitions:
       updated_at:
         type: string
     type: object
+  handlers.InstallMcpRequest:
+    properties:
+      env:
+        additionalProperties:
+          type: string
+        type: object
+      mcp_id:
+        type: string
+    type: object
+  handlers.InstallSkillRequest:
+    properties:
+      skill_id:
+        type: string
+    type: object
   handlers.ListSnapshotsResponse:
     properties:
       snapshots:
@@ -1552,6 +1566,120 @@ definitions:
         type: string
       version:
         type: integer
+    type: object
+  handlers.SupermarketAuthor:
+    properties:
+      email:
+        type: string
+      name:
+        type: string
+    type: object
+  handlers.SupermarketConfigVar:
+    properties:
+      defaultValue:
+        type: string
+      description:
+        type: string
+      key:
+        type: string
+    type: object
+  handlers.SupermarketMcpEntry:
+    properties:
+      args:
+        items:
+          type: string
+        type: array
+      author:
+        $ref: '#/definitions/handlers.SupermarketAuthor'
+      command:
+        type: string
+      description:
+        type: string
+      env:
+        items:
+          $ref: '#/definitions/handlers.SupermarketConfigVar'
+        type: array
+      headers:
+        items:
+          $ref: '#/definitions/handlers.SupermarketConfigVar'
+        type: array
+      homepage:
+        type: string
+      icon:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      transport:
+        type: string
+      url:
+        type: string
+    type: object
+  handlers.SupermarketMcpListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketMcpEntry'
+        type: array
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+    type: object
+  handlers.SupermarketSkillEntry:
+    properties:
+      content:
+        type: string
+      description:
+        type: string
+      files:
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      metadata:
+        $ref: '#/definitions/handlers.SupermarketSkillMetadata'
+      name:
+        type: string
+    type: object
+  handlers.SupermarketSkillListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillEntry'
+        type: array
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+    type: object
+  handlers.SupermarketSkillMetadata:
+    properties:
+      author:
+        $ref: '#/definitions/handlers.SupermarketAuthor'
+      homepage:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+    type: object
+  handlers.SupermarketTagsResponse:
+    properties:
+      tags:
+        items:
+          type: string
+        type: array
     type: object
   handlers.TokenUsageResponse:
     properties:
@@ -5612,6 +5740,76 @@ paths:
       summary: Update user settings
       tags:
       - settings
+  /bots/{bot_id}/supermarket/install-mcp:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Install MCP request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.InstallMcpRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Install MCP from supermarket to bot
+      tags:
+      - supermarket
+  /bots/{bot_id}/supermarket/install-skill:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Install skill request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.InstallSkillRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Install skill from supermarket to bot container
+      tags:
+      - supermarket
   /bots/{bot_id}/token-usage:
     get:
       description: Get daily aggregated token usage for a bot, split by chat, heartbeat,
@@ -7756,6 +7954,134 @@ paths:
       summary: List search provider metadata
       tags:
       - search-providers
+  /supermarket/mcps:
+    get:
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Filter by tag
+        in: query
+        name: tag
+        type: string
+      - description: Filter by transport type
+        in: query
+        name: transport
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketMcpListResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List MCPs from supermarket
+      tags:
+      - supermarket
+  /supermarket/mcps/{id}:
+    get:
+      parameters:
+      - description: MCP ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketMcpEntry'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get MCP detail from supermarket
+      tags:
+      - supermarket
+  /supermarket/skills:
+    get:
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Filter by tag
+        in: query
+        name: tag
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillListResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List skills from supermarket
+      tags:
+      - supermarket
+  /supermarket/skills/{id}:
+    get:
+      parameters:
+      - description: Skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillEntry'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get skill detail from supermarket
+      tags:
+      - supermarket
+  /supermarket/tags:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketTagsResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List all tags from supermarket
+      tags:
+      - supermarket
   /tts-models:
     get:
       produces:

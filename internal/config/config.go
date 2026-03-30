@@ -45,6 +45,7 @@ type Config struct {
 	Sparse         SparseConfig         `toml:"sparse"`
 	BrowserGateway BrowserGatewayConfig `toml:"browser_gateway"`
 	Registry       RegistryConfig       `toml:"registry"`
+	Supermarket    SupermarketConfig    `toml:"supermarket"`
 }
 
 type LogConfig struct {
@@ -171,6 +172,19 @@ func (c BrowserGatewayConfig) BaseURL() string {
 		port = 8083
 	}
 	return "http://" + host + ":" + strconv.Itoa(port)
+}
+
+const DefaultSupermarketBaseURL = "https://supermarket.memoh.ai"
+
+type SupermarketConfig struct {
+	BaseURL string `toml:"base_url"`
+}
+
+func (c SupermarketConfig) GetBaseURL() string {
+	if c.BaseURL != "" {
+		return c.BaseURL
+	}
+	return DefaultSupermarketBaseURL
 }
 
 func Load(path string) (Config, error) {

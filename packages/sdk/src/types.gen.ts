@@ -828,6 +828,17 @@ export type HandlersGetContainerResponse = {
     updated_at?: string;
 };
 
+export type HandlersInstallMcpRequest = {
+    env?: {
+        [key: string]: string;
+    };
+    mcp_id?: string;
+};
+
+export type HandlersInstallSkillRequest = {
+    skill_id?: string;
+};
+
 export type HandlersListSnapshotsResponse = {
     snapshots?: Array<HandlersSnapshotInfo>;
     snapshotter?: string;
@@ -942,6 +953,66 @@ export type HandlersSnapshotInfo = {
     source?: string;
     updated_at?: string;
     version?: number;
+};
+
+export type HandlersSupermarketAuthor = {
+    email?: string;
+    name?: string;
+};
+
+export type HandlersSupermarketConfigVar = {
+    defaultValue?: string;
+    description?: string;
+    key?: string;
+};
+
+export type HandlersSupermarketMcpEntry = {
+    args?: Array<string>;
+    author?: HandlersSupermarketAuthor;
+    command?: string;
+    description?: string;
+    env?: Array<HandlersSupermarketConfigVar>;
+    headers?: Array<HandlersSupermarketConfigVar>;
+    homepage?: string;
+    icon?: string;
+    id?: string;
+    name?: string;
+    tags?: Array<string>;
+    transport?: string;
+    url?: string;
+};
+
+export type HandlersSupermarketMcpListResponse = {
+    data?: Array<HandlersSupermarketMcpEntry>;
+    limit?: number;
+    page?: number;
+    total?: number;
+};
+
+export type HandlersSupermarketSkillEntry = {
+    content?: string;
+    description?: string;
+    files?: Array<string>;
+    id?: string;
+    metadata?: HandlersSupermarketSkillMetadata;
+    name?: string;
+};
+
+export type HandlersSupermarketSkillListResponse = {
+    data?: Array<HandlersSupermarketSkillEntry>;
+    limit?: number;
+    page?: number;
+    total?: number;
+};
+
+export type HandlersSupermarketSkillMetadata = {
+    author?: HandlersSupermarketAuthor;
+    homepage?: string;
+    tags?: Array<string>;
+};
+
+export type HandlersSupermarketTagsResponse = {
+    tags?: Array<string>;
 };
 
 export type HandlersTokenUsageResponse = {
@@ -5286,6 +5357,90 @@ export type PutBotsByBotIdSettingsResponses = {
 
 export type PutBotsByBotIdSettingsResponse = PutBotsByBotIdSettingsResponses[keyof PutBotsByBotIdSettingsResponses];
 
+export type PostBotsByBotIdSupermarketInstallMcpData = {
+    /**
+     * Install MCP request
+     */
+    body: HandlersInstallMcpRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/supermarket/install-mcp';
+};
+
+export type PostBotsByBotIdSupermarketInstallMcpErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdSupermarketInstallMcpError = PostBotsByBotIdSupermarketInstallMcpErrors[keyof PostBotsByBotIdSupermarketInstallMcpErrors];
+
+export type PostBotsByBotIdSupermarketInstallMcpResponses = {
+    /**
+     * OK
+     */
+    200: GithubComMemohaiMemohInternalMcpConnection;
+};
+
+export type PostBotsByBotIdSupermarketInstallMcpResponse = PostBotsByBotIdSupermarketInstallMcpResponses[keyof PostBotsByBotIdSupermarketInstallMcpResponses];
+
+export type PostBotsByBotIdSupermarketInstallSkillData = {
+    /**
+     * Install skill request
+     */
+    body: HandlersInstallSkillRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/supermarket/install-skill';
+};
+
+export type PostBotsByBotIdSupermarketInstallSkillErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdSupermarketInstallSkillError = PostBotsByBotIdSupermarketInstallSkillErrors[keyof PostBotsByBotIdSupermarketInstallSkillErrors];
+
+export type PostBotsByBotIdSupermarketInstallSkillResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: boolean;
+    };
+};
+
+export type PostBotsByBotIdSupermarketInstallSkillResponse = PostBotsByBotIdSupermarketInstallSkillResponses[keyof PostBotsByBotIdSupermarketInstallSkillResponses];
+
 export type GetBotsByBotIdTokenUsageData = {
     body?: never;
     path: {
@@ -7904,6 +8059,187 @@ export type PutSearchProvidersByIdResponses = {
 };
 
 export type PutSearchProvidersByIdResponse = PutSearchProvidersByIdResponses[keyof PutSearchProvidersByIdResponses];
+
+export type GetSupermarketMcpsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Filter by tag
+         */
+        tag?: string;
+        /**
+         * Filter by transport type
+         */
+        transport?: string;
+        /**
+         * Page number
+         */
+        page?: number;
+        /**
+         * Items per page
+         */
+        limit?: number;
+    };
+    url: '/supermarket/mcps';
+};
+
+export type GetSupermarketMcpsErrors = {
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketMcpsError = GetSupermarketMcpsErrors[keyof GetSupermarketMcpsErrors];
+
+export type GetSupermarketMcpsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketMcpListResponse;
+};
+
+export type GetSupermarketMcpsResponse = GetSupermarketMcpsResponses[keyof GetSupermarketMcpsResponses];
+
+export type GetSupermarketMcpsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * MCP ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/supermarket/mcps/{id}';
+};
+
+export type GetSupermarketMcpsByIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketMcpsByIdError = GetSupermarketMcpsByIdErrors[keyof GetSupermarketMcpsByIdErrors];
+
+export type GetSupermarketMcpsByIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketMcpEntry;
+};
+
+export type GetSupermarketMcpsByIdResponse = GetSupermarketMcpsByIdResponses[keyof GetSupermarketMcpsByIdResponses];
+
+export type GetSupermarketSkillsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Filter by tag
+         */
+        tag?: string;
+        /**
+         * Page number
+         */
+        page?: number;
+        /**
+         * Items per page
+         */
+        limit?: number;
+    };
+    url: '/supermarket/skills';
+};
+
+export type GetSupermarketSkillsErrors = {
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketSkillsError = GetSupermarketSkillsErrors[keyof GetSupermarketSkillsErrors];
+
+export type GetSupermarketSkillsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillListResponse;
+};
+
+export type GetSupermarketSkillsResponse = GetSupermarketSkillsResponses[keyof GetSupermarketSkillsResponses];
+
+export type GetSupermarketSkillsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Skill ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/supermarket/skills/{id}';
+};
+
+export type GetSupermarketSkillsByIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketSkillsByIdError = GetSupermarketSkillsByIdErrors[keyof GetSupermarketSkillsByIdErrors];
+
+export type GetSupermarketSkillsByIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillEntry;
+};
+
+export type GetSupermarketSkillsByIdResponse = GetSupermarketSkillsByIdResponses[keyof GetSupermarketSkillsByIdResponses];
+
+export type GetSupermarketTagsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/supermarket/tags';
+};
+
+export type GetSupermarketTagsErrors = {
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketTagsError = GetSupermarketTagsErrors[keyof GetSupermarketTagsErrors];
+
+export type GetSupermarketTagsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketTagsResponse;
+};
+
+export type GetSupermarketTagsResponse = GetSupermarketTagsResponses[keyof GetSupermarketTagsResponses];
 
 export type GetTtsModelsData = {
     body?: never;

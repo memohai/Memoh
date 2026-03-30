@@ -69,7 +69,8 @@
     "mcp": "MCP",
     "platform": "接入平台",
     "usage": "用量统计",
-    "browser": "浏览器"
+    "browser": "浏览器",
+    "supermarket": "市场"
   },
   "breadcrumb": {
     "main": "主页"
@@ -1136,5 +1137,34 @@
     "dateTo": "结束日期",
     "chartPie": "饼图",
     "chartBar": "柱状图"
+  },
+  "supermarket": {
+    "title": "市场",
+    "searchPlaceholder": "搜索 MCP 和 Skills...",
+    "mcpSection": "MCP 服务",
+    "skillsSection": "Skills",
+    "noResults": "未找到结果",
+    "noMcpResults": "未找到 MCP 服务",
+    "noSkillResults": "未找到 Skill",
+    "install": "安装",
+    "installToBot": "安装到 Bot",
+    "selectBot": "选择 Bot",
+    "selectBotPlaceholder": "选择要安装到的 Bot...",
+    "envVariables": "环境变量",
+    "envDescription": "配置所需的环境变量",
+    "installSuccess": "安装成功",
+    "installFailed": "安装失败",
+    "installing": "安装中...",
+    "filterByTag": "按标签筛选: {tag}",
+    "clearFilter": "清除筛选",
+    "allTags": "所有标签",
+    "author": "作者",
+    "transport": "传输协议",
+    "homepage": "主页",
+    "files": "文件",
+    "viewDetails": "查看详情",
+    "mcpInstallTitle": "安装 MCP 服务",
+    "skillInstallTitle": "安装 Skill",
+    "loadError": "从市场加载失败"
   }
 }

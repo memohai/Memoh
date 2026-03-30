@@ -254,6 +254,7 @@ func runServe() {
 			provideOAuthService,
 			provideServerHandler(handlers.NewTokenUsageHandler),
 			provideServerHandler(handlers.NewBrowserContextsHandler),
+			provideServerHandler(handlers.NewSupermarketHandler),
 			provideServerHandler(provideCLIHandler),
 			provideServerHandler(provideWebHandler),
 

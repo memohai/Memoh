@@ -69,7 +69,8 @@
     "mcp": "MCP",
     "platform": "Platform",
     "usage": "Usage",
-    "browser": "Browser"
+    "browser": "Browser",
+    "supermarket": "Supermarket"
   },
   "breadcrumb": {
     "main": "Home"
@@ -1140,5 +1141,34 @@
     "dateTo": "To",
     "chartPie": "Pie",
     "chartBar": "Bar"
+  },
+  "supermarket": {
+    "title": "Supermarket",
+    "searchPlaceholder": "Search MCPs and Skills...",
+    "mcpSection": "MCP Servers",
+    "skillsSection": "Skills",
+    "noResults": "No results found",
+    "noMcpResults": "No MCP servers found",
+    "noSkillResults": "No skills found",
+    "install": "Install",
+    "installToBot": "Install to Bot",
+    "selectBot": "Select a bot",
+    "selectBotPlaceholder": "Choose a bot to install to...",
+    "envVariables": "Environment Variables",
+    "envDescription": "Configure the required environment variables",
+    "installSuccess": "Installed successfully",
+    "installFailed": "Installation failed",
+    "installing": "Installing...",
+    "filterByTag": "Filter by tag: {tag}",
+    "clearFilter": "Clear filter",
+    "allTags": "All Tags",
+    "author": "Author",
+    "transport": "Transport",
+    "homepage": "Homepage",
+    "files": "Files",
+    "viewDetails": "View details",
+    "mcpInstallTitle": "Install MCP Server",
+    "skillInstallTitle": "Install Skill",
+    "loadError": "Failed to load from Supermarket"
   }
 }

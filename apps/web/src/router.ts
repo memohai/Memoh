@@ -129,6 +129,14 @@ const routes = [
           breadcrumb: i18nRef('sidebar.platform'),
         },
       },
+      {
+        name: 'supermarket',
+        path: 'supermarket',
+        component: () => import('@/pages/supermarket/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.supermarket'),
+        },
+      },
     ],
   },
   {
