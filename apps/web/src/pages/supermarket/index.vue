@@ -17,7 +17,7 @@
         </div>
       </div>
 
-      <!-- Active tag filter -->
+      <!-- Active tag filter (e.g. from card tag click) -->
       <div
         v-if="activeTag"
         class="flex items-center gap-2"
@@ -33,23 +33,6 @@
           >
             <X class="size-3" />
           </button>
-        </Badge>
-      </div>
-
-      <!-- Tags bar -->
-      <div
-        v-if="tags.length > 0"
-        class="flex flex-wrap gap-1.5"
-      >
-        <Badge
-          v-for="tag in tags"
-          :key="tag"
-          :variant="activeTag === tag ? 'default' : 'outline'"
-          size="sm"
-          class="cursor-pointer transition-colors"
-          @click="toggleTag(tag)"
-        >
-          {{ tag }}
         </Badge>
       </div>
     </div>
@@ -145,7 +128,6 @@ import { Input, Badge, Spinner } from '@memohai/ui'
 import {
   getSupermarketMcps,
   getSupermarketSkills,
-  getSupermarketTags,
   type HandlersSupermarketMcpEntry,
   type HandlersSupermarketSkillEntry,
 } from '@memohai/sdk'
@@ -161,7 +143,6 @@ const { t } = useI18n()
 const searchInput = ref('')
 const searchQuery = ref('')
 const activeTag = ref('')
-const tags = ref<string[]>([])
 
 const mcps = ref<HandlersSupermarketMcpEntry[]>([])
 const skills = ref<HandlersSupermarketSkillEntry[]>([])
@@ -189,10 +170,6 @@ function setTag(tag: string) {
   activeTag.value = tag
 }
 
-function toggleTag(tag: string) {
-  activeTag.value = activeTag.value === tag ? '' : tag
-}
-
 function clearTag() {
   activeTag.value = ''
 }
@@ -205,15 +182,6 @@ function openMcpInstall(mcp: HandlersSupermarketMcpEntry) {
 function openSkillInstall(skill: HandlersSupermarketSkillEntry) {
   selectedSkill.value = skill
   skillDialogOpen.value = true
-}
-
-async function loadTags() {
-  try {
-    const { data } = await getSupermarketTags({ throwOnError: true })
-    tags.value = data.tags ?? []
-  } catch {
-    // non-critical
-  }
 }
 
 async function loadMcps() {
@@ -263,6 +231,4 @@ watch([searchQuery, activeTag], () => {
   loadMcps()
   loadSkills()
 }, { immediate: true })
-
-loadTags()
 </script>
