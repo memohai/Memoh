@@ -22,20 +22,11 @@
     <div class="flex flex-wrap items-end gap-4">
       <div class="space-y-1.5">
         <Label>{{ $t('usage.selectBot') }}</Label>
-        <Select v-model="selectedBotId">
-          <SelectTrigger class="w-56">
-            <SelectValue :placeholder="$t('usage.selectBotPlaceholder')" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
-              v-for="bot in botList"
-              :key="bot.id"
-              :value="bot.id!"
-            >
-              {{ bot.display_name || bot.id }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+        <BotSelect
+          v-model="selectedBotId"
+          trigger-class="w-56"
+          :placeholder="$t('usage.selectBotPlaceholder')"
+        />
       </div>
 
       <div class="space-y-1.5">
@@ -307,6 +298,7 @@ import {
 } from '@memohai/ui'
 import { getBotsQuery } from '@memohai/sdk/colada'
 import { getBotsByBotIdTokenUsage } from '@memohai/sdk'
+import BotSelect from '@/components/bot-select/index.vue'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 

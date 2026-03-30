@@ -10,74 +10,44 @@
       <div class="space-y-4 py-2">
         <div class="space-y-1.5">
           <label class="text-xs font-medium">{{ $t('supermarket.selectBot') }}</label>
-          <NativeSelect
+          <BotSelect
             v-model="selectedBotId"
-            class="w-full"
-          >
-            <option
-              value=""
-              disabled
-            >
-              {{ $t('supermarket.selectBotPlaceholder') }}
-            </option>
-            <option
-              v-for="bot in bots"
-              :key="bot.id"
-              :value="bot.id"
-            >
-              {{ bot.name }}
-            </option>
-          </NativeSelect>
+            trigger-class="w-full"
+          />
         </div>
 
         <div
-          v-if="mcp?.env?.length"
-          class="space-y-3"
+          v-if="mcp"
+          class="rounded-md border border-border p-3 space-y-1"
         >
-          <div>
-            <label class="text-xs font-medium">{{ $t('supermarket.envVariables') }}</label>
-            <p class="text-[11px] text-muted-foreground mt-0.5">
-              {{ $t('supermarket.envDescription') }}
+          <div class="flex items-center gap-2">
+            <p class="text-xs font-medium">
+              {{ mcp.name }}
             </p>
+            <Badge
+              v-if="mcp.transport"
+              variant="outline"
+              size="sm"
+            >
+              {{ mcp.transport }}
+            </Badge>
           </div>
-          <div
-            v-for="envVar in mcp.env"
-            :key="envVar.key"
-            class="space-y-1"
-          >
-            <label class="text-[11px] font-medium text-muted-foreground">
-              {{ envVar.key }}
-              <span
-                v-if="envVar.description"
-                class="font-normal"
-              > — {{ envVar.description }}</span>
-            </label>
-            <Input
-              v-model="envValues[envVar.key!]"
-              :placeholder="envVar.defaultValue || ''"
-              class="text-xs"
-            />
-          </div>
+          <p class="text-[11px] text-muted-foreground line-clamp-2">
+            {{ mcp.description }}
+          </p>
         </div>
       </div>
       <DialogFooter>
         <DialogClose as-child>
-          <Button
-            variant="outline"
-            :disabled="installing"
-          >
+          <Button variant="outline">
             {{ $t('common.cancel') }}
           </Button>
         </DialogClose>
         <Button
-          :disabled="!selectedBotId || installing"
-          @click="handleInstall"
+          :disabled="!selectedBotId"
+          @click="handleNavigate"
         >
-          <Spinner
-            v-if="installing"
-            class="mr-2 size-4"
-          />
-          {{ installing ? $t('supermarket.installing') : $t('supermarket.install') }}
+          {{ $t('supermarket.install') }}
         </Button>
       </DialogFooter>
     </DialogContent>
@@ -85,20 +55,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, reactive, computed } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { useQuery } from '@pinia/colada'
-import { toast } from 'vue-sonner'
+import { ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button, Input, NativeSelect, Spinner,
+  Button, Badge,
 } from '@memohai/ui'
-import { getBotsQuery } from '@memohai/sdk/colada'
-import {
-  postBotsByBotIdSupermarketInstallMcp,
-  type HandlersSupermarketMcpEntry,
-} from '@memohai/sdk'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import type { HandlersSupermarketMcpEntry } from '@memohai/sdk'
+import BotSelect from '@/components/bot-select/index.vue'
+import { useSupermarketMcpDraft } from '@/stores/supermarket-mcp-draft'
 
 const props = defineProps<{
   open: boolean
@@ -107,53 +72,27 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:open': [open: boolean]
-  'installed': []
 }>()
 
-const { t } = useI18n()
-
-const { data: botsData } = useQuery(getBotsQuery())
-const bots = computed(() => botsData.value?.items ?? [])
+const router = useRouter()
+const { setPendingDraft } = useSupermarketMcpDraft()
 
 const selectedBotId = ref('')
-const installing = ref(false)
-const envValues = reactive<Record<string, string>>({})
-
-watch(() => props.mcp, (mcp) => {
-  Object.keys(envValues).forEach((k) => delete envValues[k])
-  if (mcp?.env) {
-    for (const e of mcp.env) {
-      if (e.key) envValues[e.key] = e.defaultValue ?? ''
-    }
-  }
-}, { immediate: true })
 
 watch(() => props.open, (open) => {
   if (!open) {
     selectedBotId.value = ''
-    installing.value = false
   }
 })
 
-async function handleInstall() {
-  if (!selectedBotId.value || !props.mcp?.id) return
-  installing.value = true
-  try {
-    await postBotsByBotIdSupermarketInstallMcp({
-      path: { bot_id: selectedBotId.value },
-      body: {
-        mcp_id: props.mcp.id,
-        env: { ...envValues },
-      },
-      throwOnError: true,
-    })
-    toast.success(t('supermarket.installSuccess'))
-    emit('update:open', false)
-    emit('installed')
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('supermarket.installFailed')))
-  } finally {
-    installing.value = false
-  }
+function handleNavigate() {
+  if (!selectedBotId.value || !props.mcp) return
+  setPendingDraft(props.mcp)
+  emit('update:open', false)
+  router.push({
+    name: 'bot-detail',
+    params: { botId: selectedBotId.value },
+    query: { tab: 'mcp' },
+  })
 }
 </script>

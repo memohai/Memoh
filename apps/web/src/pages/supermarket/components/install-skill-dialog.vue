@@ -10,24 +10,10 @@
       <div class="space-y-4 py-2">
         <div class="space-y-1.5">
           <label class="text-xs font-medium">{{ $t('supermarket.selectBot') }}</label>
-          <NativeSelect
+          <BotSelect
             v-model="selectedBotId"
-            class="w-full"
-          >
-            <option
-              value=""
-              disabled
-            >
-              {{ $t('supermarket.selectBotPlaceholder') }}
-            </option>
-            <option
-              v-for="bot in bots"
-              :key="bot.id"
-              :value="bot.id"
-            >
-              {{ bot.name }}
-            </option>
-          </NativeSelect>
+            trigger-class="w-full"
+          />
         </div>
 
         <div
@@ -73,20 +59,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQuery } from '@pinia/colada'
 import { toast } from 'vue-sonner'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button, NativeSelect, Spinner,
+  Button, Spinner,
 } from '@memohai/ui'
-import { getBotsQuery } from '@memohai/sdk/colada'
 import {
   postBotsByBotIdSupermarketInstallSkill,
   type HandlersSupermarketSkillEntry,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import BotSelect from '@/components/bot-select/index.vue'
 
 const props = defineProps<{
   open: boolean
@@ -99,9 +84,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-
-const { data: botsData } = useQuery(getBotsQuery())
-const bots = computed(() => botsData.value?.items ?? [])
 
 const selectedBotId = ref('')
 const installing = ref(false)

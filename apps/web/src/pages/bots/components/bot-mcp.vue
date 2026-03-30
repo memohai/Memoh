@@ -705,6 +705,7 @@ import type {
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useClipboard } from '@/composables/useClipboard'
+import { useSupermarketMcpDraft } from '@/stores/supermarket-mcp-draft'
 
 interface McpItem {
   id: string
@@ -1243,10 +1244,58 @@ watch(connectionType, (mode) => {
   }
 })
 
-watch(() => props.botId, () => {
+const { consumePendingDraft } = useSupermarketMcpDraft()
+
+function applyPendingDraft() {
+  const entry = consumePendingDraft()
+  if (!entry) return
+
+  removeDraft()
+  const isStdio = entry.transport === 'stdio'
+  const cfg: Record<string, unknown> = {}
+
+  if (isStdio) {
+    if (entry.command) cfg.command = entry.command
+    if (entry.args?.length) cfg.args = entry.args
+    const envMap: Record<string, string> = {}
+    if (entry.env) {
+      for (const e of entry.env) {
+        if (e.key) envMap[e.key] = e.defaultValue ?? ''
+      }
+    }
+    if (Object.keys(envMap).length) cfg.env = envMap
+  } else {
+    if (entry.url) cfg.url = entry.url
+    const headerMap: Record<string, string> = {}
+    if (entry.headers) {
+      for (const h of entry.headers) {
+        if (h.key) headerMap[h.key] = h.defaultValue ?? ''
+      }
+    }
+    if (Object.keys(headerMap).length) cfg.headers = headerMap
+  }
+
+  const draft: McpItem = {
+    id: DRAFT_ID,
+    name: entry.name ?? '',
+    type: isStdio ? 'stdio' : (entry.transport === 'sse' ? 'sse' : 'http'),
+    config: cfg,
+    is_active: true,
+    status: 'unknown',
+    tools_cache: [],
+    last_probed_at: null,
+    status_message: '',
+    auth_type: 'none',
+  }
+  items.value = [draft, ...items.value.filter((i) => i.id !== DRAFT_ID)]
+  selectItem(draft)
+}
+
+watch(() => props.botId, async () => {
   if (props.botId) {
     selectedItem.value = null
-    loadList()
+    await loadList()
+    applyPendingDraft()
   }
 }, { immediate: true })
 </script>

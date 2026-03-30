@@ -128,7 +128,6 @@
     <InstallMcpDialog
       v-model:open="mcpDialogOpen"
       :mcp="selectedMcp"
-      @installed="refreshAll"
     />
     <InstallSkillDialog
       v-model:open="skillDialogOpen"

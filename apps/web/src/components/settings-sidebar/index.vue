@@ -96,11 +96,6 @@ const navItems = computed<{ title: string; name: string; icon: Component }[]>(()
     icon: Bot,
   },
   {
-    title: t('sidebar.supermarket'),
-    name: 'supermarket',
-    icon: Store,
-  },
-  {
     title: t('sidebar.providers'),
     name: 'providers',
     icon: Boxes,
@@ -129,6 +124,11 @@ const navItems = computed<{ title: string; name: string; icon: Component }[]>(()
     title: t('sidebar.browser'),
     name: 'browser',
     icon: AppWindow,
+  },
+  {
+    title: t('sidebar.supermarket'),
+    name: 'supermarket',
+    icon: Store,
   },
   {
     title: t('sidebar.usage'),
