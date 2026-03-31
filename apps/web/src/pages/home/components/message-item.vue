@@ -131,6 +131,7 @@
           >
             <MarkdownRender
               :content="block.content"
+              :is-dark="isDark"
               custom-id="chat-msg"
             />
           </div>
@@ -170,6 +171,7 @@ import { LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
+import { useSettingsStore } from '@/store/settings'
 import ThinkingBlock from './thinking-block.vue'
 import ToolCallBlock from './tool-call-block.vue'
 import AttachmentBlock from './attachment-block.vue'
@@ -187,6 +189,9 @@ import type {
 
 enableKatex()
 enableMermaid()
+
+const settingsStore = useSettingsStore()
+const isDark = computed(() => settingsStore.theme === 'dark')
 
 const props = defineProps<{
   message: ChatMessage

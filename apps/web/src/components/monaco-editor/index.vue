@@ -1,17 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, shallowRef } from 'vue'
-import * as monaco from 'monaco-editor'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useMonaco } from 'stream-monaco'
 import { useSettingsStore } from '@/store/settings'
 import { getLanguageByFilename } from '@/components/file-manager/utils'
-
-self.MonacoEnvironment = {
-  getWorker() {
-    return new Worker(
-      new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url),
-      { type: 'module' },
-    )
-  },
-}
 
 const props = withDefaults(defineProps<{
   modelValue: string
@@ -29,7 +20,6 @@ const emit = defineEmits<{
 }>()
 
 const containerRef = ref<HTMLDivElement>()
-const editorInstance = shallowRef<monaco.editor.IStandaloneCodeEditor>()
 const settings = useSettingsStore()
 
 function resolveLanguage(): string {
@@ -42,56 +32,62 @@ function resolveTheme(): string {
   return settings.theme === 'dark' ? 'vitesse-dark' : 'vitesse-light'
 }
 
-onMounted(() => {
+const {
+  createEditor,
+  cleanupEditor,
+  updateCode,
+  setTheme,
+  setLanguage,
+  getEditorView,
+} = useMonaco({
+  theme: resolveTheme(),
+  themes: ['vitesse-dark', 'vitesse-light'],
+  readOnly: props.readonly,
+  automaticLayout: true,
+  minimap: { enabled: false },
+  scrollBeyondLastLine: true,
+  fontSize: 13,
+  lineNumbers: 'on',
+  renderLineHighlight: 'line',
+  tabSize: 2,
+  wordWrap: 'on',
+  padding: { top: 8, bottom: 8 },
+})
+
+onMounted(async () => {
   if (!containerRef.value) return
 
-  editorInstance.value = monaco.editor.create(containerRef.value, {
-    value: props.modelValue,
-    language: resolveLanguage(),
-    theme: resolveTheme(),
-    readOnly: props.readonly,
-    automaticLayout: true,
-    minimap: { enabled: false },
-    scrollBeyondLastLine: true,
-    fontSize: 13,
-    lineNumbers: 'on',
-    renderLineHighlight: 'line',
-    tabSize: 2,
-    wordWrap: 'on',
-    padding: { top: 8, bottom: 8 },
-  })
+  await createEditor(containerRef.value, props.modelValue, resolveLanguage())
 
-  editorInstance.value.onDidChangeModelContent(() => {
-    const value = editorInstance.value?.getValue() ?? ''
+  const editor = getEditorView()
+  editor?.onDidChangeModelContent(() => {
+    const value = editor.getValue() ?? ''
     emit('update:modelValue', value)
   })
 })
 
 onBeforeUnmount(() => {
-  editorInstance.value?.dispose()
+  cleanupEditor()
 })
 
 watch(() => props.modelValue, (newVal) => {
-  const editor = editorInstance.value
+  const editor = getEditorView()
   if (!editor) return
   if (editor.getValue() !== newVal) {
-    editor.setValue(newVal)
+    updateCode(newVal, resolveLanguage())
   }
 })
 
 watch(() => props.readonly, (val) => {
-  editorInstance.value?.updateOptions({ readOnly: val })
+  getEditorView()?.updateOptions({ readOnly: val })
 })
 
 watch([() => props.language, () => props.filename], () => {
-  const model = editorInstance.value?.getModel()
-  if (model) {
-    monaco.editor.setModelLanguage(model, resolveLanguage())
-  }
+  setLanguage(resolveLanguage())
 })
 
 watch(() => settings.theme, () => {
-  monaco.editor.setTheme(resolveTheme())
+  setTheme(resolveTheme())
 })
 </script>
 
