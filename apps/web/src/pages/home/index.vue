@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full">
+  <div class="flex h-full overflow-hidden">
     <template v-if="currentBotId">
       <SessionSidebar />
       <div class="flex-1 flex flex-col min-w-0">

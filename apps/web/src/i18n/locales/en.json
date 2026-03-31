@@ -167,6 +167,7 @@
     "toolSpawnCount": "{count} tasks",
     "unknownUser": "{platform} User",
     "files": "Files",
+    "clearMessages": "Clear Messages",
     "modelOverride": "Model",
     "modelDefault": "Default",
     "reasoningEffort": "Reasoning",

@@ -32,8 +32,10 @@ import FileViewer from './file-viewer.vue'
 const props = withDefaults(defineProps<{
   botId: string
   syncUrl?: boolean
+  previewLayout?: 'side' | 'bottom'
 }>(), {
   syncUrl: true,
+  previewLayout: 'side',
 })
 
 const { t } = useI18n()
@@ -345,11 +347,16 @@ defineExpose({ navigateTo, openFileByPath })
     </div>
 
     <!-- Main content area -->
-    <div class="flex flex-1 min-h-0 overflow-hidden h-full ">
+    <div
+      class="flex flex-1 min-h-0 overflow-hidden h-full"
+      :class="previewLayout === 'bottom' ? 'flex-col' : ''"
+    >
       <!-- File list -->
       <ScrollArea
-        class=" border-border transition-colors "
-        :class="openFile ? 'w-80 shrink-0 border-r' : 'w-full'"
+        class="border-border transition-colors min-h-0"
+        :class="openFile
+          ? (previewLayout === 'bottom' ? 'h-1/2 shrink-0 border-b' : 'w-80 shrink-0 border-r')
+          : (previewLayout === 'bottom' ? 'flex-1' : 'w-full')"
       >
         <FileList
           :entries="entries"
@@ -365,7 +372,8 @@ defineExpose({ navigateTo, openFileByPath })
       <!-- File viewer -->
       <div
         v-if="openFile"
-        class="flex-1 overflow-hidden max-h-full"
+        class="flex-1 overflow-hidden min-h-0"
+        :class="previewLayout === 'bottom' ? '' : 'max-h-full'"
       >
         <FileViewer
           :bot-id="botId"

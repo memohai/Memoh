@@ -163,6 +163,7 @@
     "toolSpawnCount": "{count} 个任务",
     "unknownUser": "{platform}用户",
     "files": "文件管理",
+    "clearMessages": "清除消息",
     "modelOverride": "模型",
     "modelDefault": "默认",
     "reasoningEffort": "推理",

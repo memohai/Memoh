@@ -17,29 +17,6 @@
       </div>
 
       <template v-else>
-        <!-- Session header -->
-        <!-- <div class="border-b px-4 py-2 flex items-center justify-between min-h-12">
-        <div class="flex items-center gap-2 min-w-0">
-          <h2 class="text-xs font-medium truncate">
-            {{ activeSession?.title || $t('chat.untitledSession') }}
-          </h2>
-        </div>
-        <div class="flex items-center gap-1 shrink-0">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            :aria-label="$t('chat.newSession')"
-            @click="chatStore.createNewSession()"
-          >
-            <FontAwesomeIcon
-              :icon="['fas', 'plus']"
-              class="size-3.5"
-            />
-          </Button>
-        </div>
-      </div> -->
-
         <!-- Messages -->
         <section class="flex-1 relative w-full px-3 sm:px-5 lg:px-8">
           <section class="absolute inset-0">
@@ -79,7 +56,6 @@
             </ScrollArea>
           </section>
         </section>
-
 
         <!-- Media gallery lightbox -->
         <MediaGalleryLightbox
@@ -130,7 +106,7 @@
               <InputGroup class="bg-transparent overflow-hidden shadow-none! ring-0! border-border!">
                 <InputGroupTextarea
                   v-model="inputText"
-                  class="min-h-14 max-h-14 text-xs resize-none break-all!"                
+                  class="min-h-14 max-h-14 text-xs resize-none break-all!"
                   :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
                   :disabled="!currentBotId || activeChatReadOnly"
                   style="scrollbar-width: none;"
@@ -213,18 +189,6 @@
                     />
                   </Button>
                   <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    :disabled="!currentBotId"
-                    :aria-label="$t('chat.files')"
-                    @click="fileManagerOpen = true"
-                  >
-                    <FolderOpen
-                      class="size-3.5"
-                    />
-                  </Button>
-                  <Button
                     v-if="!streaming"
                     type="button"
                     size="icon"
@@ -258,58 +222,153 @@
       </template>
     </div>
 
-    <!-- File manager panel -->
+    <!-- Right sidebar panel -->
     <div
-      v-if="fileManagerOpen"
+      v-if="activeRightTab"
       class="flex shrink-0 h-full relative"
-      :style="{ width: `${fileManagerWidth}px` }"
+      :style="{ width: `${rightPanelWidth}px` }"
     >
+      <!-- Resize handle -->
       <div
         class="absolute top-0 left-0 w-1 h-full cursor-col-resize z-10 group"
-        @mousedown="onFmResizeStart"
+        @mousedown="onPanelResizeStart"
       >
         <div
           class="w-full h-full transition-colors group-hover:bg-primary/20"
-          :class="{ 'bg-primary/30': isFmResizing }"
+          :class="{ 'bg-primary/30': isPanelResizing }"
         />
       </div>
 
-      <div class="flex flex-col h-full flex-1 min-w-0 border-l border-border bg-sidebar">
-        <div class="flex items-center justify-between px-4 h-12 shrink-0">
-          <span class="text-sm font-medium text-foreground">{{ $t('chat.files') }}</span>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            class="size-6"
-            @click="fileManagerOpen = false"
+      <div class="flex flex-col h-full flex-1 min-w-0 overflow-hidden border-l border-border bg-sidebar">
+        <!-- Panel tab bar -->
+        <div class="flex items-center h-12 shrink-0 border-b border-border">
+          <button
+            v-for="tab in rightTabs"
+            :key="tab.id"
+            class="flex items-center gap-1.5 px-4 h-full text-xs transition-colors border-b-2"
+            :class="activeRightTab === tab.id
+              ? 'border-foreground text-foreground font-medium'
+              : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeRightTab = tab.id"
           >
-            <X class="size-3.5" />
-          </Button>
+            <component
+              :is="tab.icon"
+              class="size-4"
+            />
+            {{ tab.label }}
+          </button>
         </div>
+
+        <!-- Panel content -->
         <div class="flex-1 min-h-0 relative">
-          <FileManager
-            v-if="currentBotId"
-            ref="fileManagerRef"
-            :bot-id="currentBotId"
-            :sync-url="false"
-          />
+          <div
+            v-show="activeRightTab === 'terminal'"
+            class="absolute inset-0"
+          >
+            <TerminalComponent
+              v-if="currentBotId"
+              :bot-id="currentBotId"
+              :visible="activeRightTab === 'terminal'"
+            />
+          </div>
+          <div
+            v-show="activeRightTab === 'files'"
+            class="absolute inset-0"
+          >
+            <FileManager
+              v-if="currentBotId"
+              ref="fileManagerRef"
+              :bot-id="currentBotId"
+              :sync-url="false"
+              preview-layout="bottom"
+            />
+          </div>
+          <div
+            v-if="activeRightTab === 'info'"
+            class="absolute inset-0 flex items-center justify-center"
+          >
+            <p class="text-sm text-muted-foreground">
+              Info
+            </p>
+          </div>
         </div>
       </div>
     </div>
+
+    <!-- Activity Bar -->
+    <div class="flex flex-col items-center w-10 shrink-0 h-full border-l border-border bg-sidebar">
+      <div class="flex flex-col items-center gap-3 pt-4">
+        <button
+          v-for="tab in rightTabs"
+          :key="tab.id"
+          class="flex items-center justify-center size-7 rounded-md transition-colors"
+          :class="activeRightTab === tab.id
+            ? 'bg-accent text-accent-foreground'
+            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'"
+          :title="tab.label"
+          @click="toggleRightPanel(tab.id)"
+        >
+          <component
+            :is="tab.icon"
+            class="size-4"
+          />
+        </button>
+      </div>
+      <div class="mt-auto pb-4">
+        <button
+          class="flex items-center justify-center size-7 rounded-md text-destructive/60 hover:bg-destructive/10 hover:text-destructive transition-colors"
+          :title="$t('chat.deleteSession')"
+          :disabled="!sessionId"
+          @click="confirmDeleteSession"
+        >
+          <Trash2 class="size-4" />
+        </button>
+      </div>
+    </div>
+
+    <!-- Delete session confirmation dialog -->
+    <Dialog v-model:open="deleteSessionDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ $t('chat.deleteSession') }}</DialogTitle>
+          <DialogDescription>{{ $t('chat.deleteSessionConfirm') }}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            :disabled="deleteSessionLoading"
+            @click="deleteSessionDialogOpen = false"
+          >
+            {{ $t('common.cancel') }}
+          </Button>
+          <Button
+            variant="destructive"
+            :disabled="deleteSessionLoading"
+            @click="handleDeleteSession"
+          >
+            <LoaderCircle
+              v-if="deleteSessionLoading"
+              class="mr-1 size-3 animate-spin"
+            />
+            {{ $t('common.confirm') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onBeforeUnmount, provide, useTemplateRef, watchEffect, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, provide, useTemplateRef, watchEffect, watch, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
-import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, FolderOpen, Send, ChevronDown, Lightbulb } from 'lucide-vue-next'
-import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
+import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, FolderOpen, Send, ChevronDown, Lightbulb, TerminalSquare, BarChart3, Trash2 } from 'lucide-vue-next'
+import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import MessageItem from './message-item.vue'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import FileManager from '@/components/file-manager/index.vue'
+import TerminalComponent from '@/components/terminal/index.vue'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
 import ReasoningEffortSelect from '@/pages/bots/components/reasoning-effort-select.vue'
 import { EFFORT_LABELS, EFFORT_OPACITY } from '@/pages/bots/components/reasoning-effort'
@@ -326,31 +385,60 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
-const fileManagerOpen = ref(false)
 const fileManagerRef = ref<InstanceType<typeof FileManager> | null>(null)
 const modelPopoverOpen = ref(false)
 const reasoningPopoverOpen = ref(false)
 
-const FM_MIN_WIDTH = 320
-const FM_MAX_WIDTH = 800
-const FM_DEFAULT_WIDTH = 520
+// ---- Right sidebar panel ----
 
-const fileManagerWidth = useLocalStorage('file-manager-panel-width', FM_DEFAULT_WIDTH)
-const isFmResizing = ref(false)
+type RightTabId = 'terminal' | 'files' | 'info'
 
-function onFmResizeStart(e: MouseEvent) {
+interface RightTab {
+  id: RightTabId
+  label: string
+  icon: Component
+}
+
+const rightTabs = computed<RightTab[]>(() => [
+  { id: 'terminal', label: 'Terminal', icon: TerminalSquare },
+  { id: 'files', label: t('chat.files'), icon: FolderOpen },
+  { id: 'info', label: 'Info', icon: BarChart3 },
+])
+
+const activeRightTab = ref<RightTabId | null>(null)
+
+function toggleRightPanel(tabId: RightTabId) {
+  activeRightTab.value = activeRightTab.value === tabId ? null : tabId
+}
+
+function openRightPanel(tabId: RightTabId) {
+  activeRightTab.value = tabId
+}
+
+watch(activeRightTab, () => {
+  nextTick(() => window.dispatchEvent(new Event('resize')))
+})
+
+const PANEL_MIN_WIDTH = 320
+const PANEL_MAX_WIDTH = 800
+const PANEL_DEFAULT_WIDTH = 504
+
+const rightPanelWidth = useLocalStorage('chat-right-panel-width', PANEL_DEFAULT_WIDTH)
+const isPanelResizing = ref(false)
+
+function onPanelResizeStart(e: MouseEvent) {
   e.preventDefault()
-  isFmResizing.value = true
+  isPanelResizing.value = true
   const startX = e.clientX
-  const startWidth = fileManagerWidth.value
+  const startWidth = rightPanelWidth.value
 
   function onMouseMove(ev: MouseEvent) {
     const delta = startX - ev.clientX
-    fileManagerWidth.value = Math.min(FM_MAX_WIDTH, Math.max(FM_MIN_WIDTH, startWidth + delta))
+    rightPanelWidth.value = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, startWidth + delta))
   }
 
   function onMouseUp() {
-    isFmResizing.value = false
+    isPanelResizing.value = false
     document.removeEventListener('mousemove', onMouseMove)
     document.removeEventListener('mouseup', onMouseUp)
     document.body.style.cursor = ''
@@ -367,6 +455,30 @@ onBeforeUnmount(() => {
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
 })
+
+// ---- Delete session ----
+
+const deleteSessionDialogOpen = ref(false)
+const deleteSessionLoading = ref(false)
+
+function confirmDeleteSession() {
+  if (!sessionId.value) return
+  deleteSessionDialogOpen.value = true
+}
+
+async function handleDeleteSession() {
+  const sid = sessionId.value
+  if (!sid || deleteSessionLoading.value) return
+  deleteSessionLoading.value = true
+  try {
+    await chatStore.removeSession(sid)
+    deleteSessionDialogOpen.value = false
+  } finally {
+    deleteSessionLoading.value = false
+  }
+}
+
+// ---- File manager provider (for tool call components) ----
 
 const FILE_MANAGER_ROOT = '/data'
 
@@ -385,7 +497,7 @@ function normalizeFileManagerPath(path: string): string {
 
 provide(openInFileManagerKey, (path: string, isDir = false) => {
   const normalizedPath = normalizeFileManagerPath(path)
-  fileManagerOpen.value = true
+  openRightPanel('files')
   nextTick(() => {
     if (!fileManagerRef.value) return
     if (isDir) {
@@ -395,10 +507,14 @@ provide(openInFileManagerKey, (path: string, isDir = false) => {
     }
   })
 })
+
+// ---- Chat store refs ----
+
 const {
   messages,
   streaming,
   currentBotId,
+  sessionId,
   activeChatReadOnly,
   loadingOlder,
   loadingChats,
@@ -406,6 +522,8 @@ const {
   overrideModelId,
   overrideReasoningEffort,
 } = storeToRefs(chatStore)
+
+// ---- Model / provider queries ----
 
 const { data: modelData } = useQuery({
   key: ['all-models'],
@@ -501,6 +619,8 @@ function onReasoningSelected() {
   reasoningPopoverOpen.value = false
 }
 
+// ---- Media gallery ----
+
 const {
   items: galleryItems,
   openIndex: galleryOpenIndex,
@@ -508,8 +628,9 @@ const {
   openBySrc: galleryOpenBySrc,
 } = useMediaGallery(messages)
 
-const inputText = ref('')
+// ---- Input & scroll ----
 
+const inputText = ref('')
 
 onMounted(async () => {
   try {
@@ -529,10 +650,9 @@ const elNode = useTemplateRef('scrollContainer')
 const descEl = computed(() => elNode.value?.$el?.children[0]?.children[0])
 const scrollEl = computed(() => descEl.value?.parentNode)
 const isAutoScroll = ref(true)
-const isInstant=ref(false)
-const { y, directions, arrivedState } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value&&isInstant.value ? 'smooth' : 'instant') })
-const { height,bottom } = useElementBounding(descEl)
-
+const isInstant = ref(false)
+const { y, directions, arrivedState } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
+const { height, bottom } = useElementBounding(descEl)
 
 watchEffect(() => {
   if (directions.top) {
@@ -543,7 +663,7 @@ watchEffect(() => {
   }
 })
 
-watchEffect(() => {  
+watchEffect(() => {
   if (isAutoScroll.value) {
     y.value = height.value
   }
@@ -553,14 +673,14 @@ let Throttle = true
 
 watchEffect(() => {
   if (directions.top && arrivedState.top && Throttle && hasMoreOlder.value && !loadingOlder.value) {
-    const prev=bottom.value
-    Throttle = false    
+    const prev = bottom.value
+    Throttle = false
     chatStore.loadOlderMessages().then((count) => {
       setTimeout(() => {
-        if (count > 0) {               
-          y.value = height.value-prev
-          Throttle = true        
-        }    
+        if (count > 0) {
+          y.value = height.value - prev
+          Throttle = true
+        }
       })
     })
   }
@@ -571,7 +691,6 @@ function handleKeydown(e: KeyboardEvent) {
   e.preventDefault()
   handleSend()
 }
-
 
 function handleFileInputChange(e: Event) {
   const input = e.target as HTMLInputElement
@@ -611,7 +730,7 @@ async function fileToAttachment(file: File): Promise<ChatAttachment> {
 }
 
 async function handleSend() {
-  isAutoScroll.value=true
+  isAutoScroll.value = true
   const text = inputText.value.trim()
   const files = [...pendingFiles.value]
   if ((!text && !files.length) || streaming.value || activeChatReadOnly.value) return
