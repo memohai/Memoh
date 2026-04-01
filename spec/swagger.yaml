@@ -1190,6 +1190,17 @@ definitions:
           type: string
         type: array
     type: object
+  handlers.CacheStats:
+    properties:
+      cache_hit_rate:
+        type: number
+      cache_read_tokens:
+        type: integer
+      cache_write_tokens:
+        type: integer
+      total_input_tokens:
+        type: integer
+    type: object
   handlers.ChannelMeta:
     properties:
       capabilities:
@@ -1206,6 +1217,13 @@ definitions:
         type: string
       user_config_schema:
         $ref: '#/definitions/channel.ConfigSchema'
+    type: object
+  handlers.ContextUsage:
+    properties:
+      context_window:
+        type: integer
+      used_tokens:
+        type: integer
     type: object
   handlers.CreateContainerRequest:
     properties:
@@ -1502,6 +1520,19 @@ definitions:
     properties:
       version:
         type: integer
+    type: object
+  handlers.SessionInfoResponse:
+    properties:
+      cache_stats:
+        $ref: '#/definitions/handlers.CacheStats'
+      context_usage:
+        $ref: '#/definitions/handlers.ContextUsage'
+      message_count:
+        type: integer
+      skills:
+        items:
+          type: string
+        type: array
     type: object
   handlers.SkillItem:
     properties:
@@ -5653,6 +5684,45 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update a session
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/info:
+    get:
+      description: Get aggregated info for a chat session including message count,
+        context usage, cache stats, and used skills
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Optional model UUID override for context window
+        in: query
+        name: model_id
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SessionInfoResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get session info
       tags:
       - sessions
   /bots/{bot_id}/settings:

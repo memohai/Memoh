@@ -198,7 +198,17 @@
     "scheduleDescription": "描述",
     "schedulePattern": "Cron 表达式",
     "scheduleMaxCalls": "最大调用次数",
-    "viewSchedule": "查看定时任务"
+    "viewSchedule": "查看定时任务",
+    "infoMessages": "消息数",
+    "infoContextUsage": "上下文使用率",
+    "infoContextTokens": "{used} / {window}",
+    "infoContextTokensNoWindow": "{used} / --",
+    "infoCacheHitRate": "Cache 命中率",
+    "infoCacheRead": "Cache 读取",
+    "infoCacheWrite": "Cache 写入",
+    "infoSkills": "Skills",
+    "infoNoSkills": "此会话未使用任何 Skill",
+    "infoNoData": "暂无数据"
   },
   "models": {
     "title": "模型",

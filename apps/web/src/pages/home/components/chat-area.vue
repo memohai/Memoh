@@ -290,11 +290,12 @@
           </div>
           <div
             v-if="activeRightTab === 'info'"
-            class="absolute inset-0 flex items-center justify-center"
+            class="absolute inset-0"
           >
-            <p class="text-sm text-muted-foreground">
-              Info
-            </p>
+            <SessionInfoPanel
+              :visible="activeRightTab === 'info'"
+              :override-model-id="overrideModelId"
+            />
           </div>
         </div>
       </div>
@@ -376,6 +377,7 @@ import FileManager from '@/components/file-manager/index.vue'
 import TerminalComponent from '@/components/terminal/index.vue'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
 import ReasoningEffortSelect from '@/pages/bots/components/reasoning-effort-select.vue'
+import SessionInfoPanel from './session-info-panel.vue'
 import { EFFORT_LABELS, EFFORT_OPACITY } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'

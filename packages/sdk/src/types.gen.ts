@@ -719,6 +719,13 @@ export type HandlersBrowserCoresResponse = {
     cores?: Array<string>;
 };
 
+export type HandlersCacheStats = {
+    cache_hit_rate?: number;
+    cache_read_tokens?: number;
+    cache_write_tokens?: number;
+    total_input_tokens?: number;
+};
+
 export type HandlersChannelMeta = {
     capabilities?: ChannelChannelCapabilities;
     config_schema?: ChannelConfigSchema;
@@ -727,6 +734,11 @@ export type HandlersChannelMeta = {
     target_spec?: ChannelTargetSpec;
     type?: string;
     user_config_schema?: ChannelConfigSchema;
+};
+
+export type HandlersContextUsage = {
+    context_window?: number;
+    used_tokens?: number;
 };
 
 export type HandlersCreateContainerRequest = {
@@ -914,6 +926,13 @@ export type HandlersRefreshResponse = {
 
 export type HandlersRollbackRequest = {
     version?: number;
+};
+
+export type HandlersSessionInfoResponse = {
+    cache_stats?: HandlersCacheStats;
+    context_usage?: HandlersContextUsage;
+    message_count?: number;
+    skills?: Array<string>;
 };
 
 export type HandlersSkillItem = {
@@ -5236,6 +5255,53 @@ export type PatchBotsByBotIdSessionsBySessionIdResponses = {
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdResponse = PatchBotsByBotIdSessionsBySessionIdResponses[keyof PatchBotsByBotIdSessionsBySessionIdResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdInfoData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: {
+        /**
+         * Optional model UUID override for context window
+         */
+        model_id?: string;
+    };
+    url: '/bots/{bot_id}/sessions/{session_id}/info';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdInfoErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdInfoError = GetBotsByBotIdSessionsBySessionIdInfoErrors[keyof GetBotsByBotIdSessionsBySessionIdInfoErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdInfoResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSessionInfoResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdInfoResponse = GetBotsByBotIdSessionsBySessionIdInfoResponses[keyof GetBotsByBotIdSessionsBySessionIdInfoResponses];
 
 export type DeleteBotsByBotIdSettingsData = {
     body?: never;

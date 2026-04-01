@@ -1,0 +1,168 @@
+<template>
+  <ScrollArea class="h-full">
+    <div class="px-4 py-3">
+      <!-- No session -->
+      <div
+        v-if="!sessionId"
+        class="flex items-center justify-center h-40"
+      >
+        <p class="text-xs text-muted-foreground">
+          {{ $t('chat.infoNoData') }}
+        </p>
+      </div>
+
+      <template v-else>
+        <!-- Key-value rows -->
+        <div class="divide-y divide-border text-xs">
+          <!-- Messages -->
+          <div class="flex items-center justify-between py-2">
+            <span class="text-muted-foreground">{{ $t('chat.infoMessages') }}</span>
+            <span class="font-medium text-foreground tabular-nums">{{ info?.message_count ?? '--' }}</span>
+          </div>
+
+          <!-- Context Usage -->
+          <div class="py-2 space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-muted-foreground">{{ $t('chat.infoContextUsage') }}</span>
+              <span class="font-medium text-foreground tabular-nums">
+                <template v-if="contextWindow != null">
+                  {{ formatTokenCount(usedTokens) }} / {{ formatTokenCount(contextWindow) }}
+                  <span class="text-muted-foreground font-normal ml-1">({{ contextPercent.toFixed(1) }}%)</span>
+                </template>
+                <template v-else>
+                  {{ formatTokenCount(usedTokens) }} / --
+                </template>
+              </span>
+            </div>
+            <div
+              v-if="contextWindow != null && contextWindow > 0"
+              class="w-full h-1 rounded-full bg-accent overflow-hidden"
+            >
+              <div
+                class="h-full rounded-full transition-all"
+                :class="contextBarColor"
+                :style="{ width: `${Math.min(contextPercent, 100)}%` }"
+              />
+            </div>
+          </div>
+
+          <!-- Cache Hit Rate -->
+          <div class="flex items-center justify-between py-2">
+            <span class="text-muted-foreground">{{ $t('chat.infoCacheHitRate') }}</span>
+            <span class="font-medium text-foreground tabular-nums">{{ cacheHitRate }}%</span>
+          </div>
+
+          <!-- Cache Read -->
+          <div class="flex items-center justify-between py-2">
+            <span class="text-muted-foreground">{{ $t('chat.infoCacheRead') }}</span>
+            <span class="font-medium text-foreground tabular-nums">{{ formatTokenCount(info?.cache_stats?.cache_read_tokens ?? 0) }}</span>
+          </div>
+
+          <!-- Cache Write -->
+          <div class="flex items-center justify-between py-2">
+            <span class="text-muted-foreground">{{ $t('chat.infoCacheWrite') }}</span>
+            <span class="font-medium text-foreground tabular-nums">{{ formatTokenCount(info?.cache_stats?.cache_write_tokens ?? 0) }}</span>
+          </div>
+        </div>
+
+        <!-- Skills -->
+        <div class="mt-3">
+          <p class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+            {{ $t('chat.infoSkills') }}
+          </p>
+          <div
+            v-if="!skills.length"
+            class="text-xs text-muted-foreground"
+          >
+            {{ $t('chat.infoNoSkills') }}
+          </div>
+          <div
+            v-else
+            class="space-y-0.5"
+          >
+            <button
+              v-for="skill in skills"
+              :key="skill"
+              type="button"
+              class="flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-xs text-foreground hover:bg-accent transition-colors text-left"
+              @click="openSkillFile(skill)"
+            >
+              <Sparkles class="size-3 text-muted-foreground shrink-0" />
+              <span class="truncate">{{ skill }}</span>
+              <ExternalLink class="size-3 text-muted-foreground shrink-0 ml-auto" />
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </ScrollArea>
+</template>
+
+<script setup lang="ts">
+import { computed, inject } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useQuery } from '@pinia/colada'
+import { Sparkles, ExternalLink } from 'lucide-vue-next'
+import { ScrollArea } from '@memohai/ui'
+import { getBotsByBotIdSessionsBySessionIdInfo } from '@memohai/sdk'
+import type { HandlersSessionInfoResponse } from '@memohai/sdk'
+import { useChatStore } from '@/store/chat-list'
+import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+
+const props = defineProps<{
+  visible: boolean
+  overrideModelId?: string
+}>()
+
+const chatStore = useChatStore()
+const { currentBotId, sessionId } = storeToRefs(chatStore)
+const openInFileManager = inject(openInFileManagerKey, undefined)
+
+const { data: info } = useQuery({
+  key: () => ['session-info', currentBotId.value ?? '', sessionId.value ?? '', props.overrideModelId ?? ''],
+  query: async () => {
+    const { data } = await getBotsByBotIdSessionsBySessionIdInfo({
+      path: {
+        bot_id: currentBotId.value!,
+        session_id: sessionId.value!,
+      },
+      query: {
+        model_id: props.overrideModelId || undefined,
+      },
+      throwOnError: true,
+    })
+    return data as HandlersSessionInfoResponse
+  },
+  enabled: () => !!currentBotId.value && !!sessionId.value && props.visible,
+  refetchOnWindowFocus: false,
+})
+
+const usedTokens = computed(() => info.value?.context_usage?.used_tokens ?? 0)
+const contextWindow = computed(() => info.value?.context_usage?.context_window ?? null)
+const contextPercent = computed(() => {
+  if (contextWindow.value == null || contextWindow.value <= 0) return 0
+  return (usedTokens.value / contextWindow.value) * 100
+})
+const contextBarColor = computed(() => {
+  if (contextPercent.value >= 90) return 'bg-destructive'
+  if (contextPercent.value >= 70) return 'bg-amber-500'
+  return 'bg-foreground'
+})
+
+const cacheHitRate = computed(() => {
+  const rate = info.value?.cache_stats?.cache_hit_rate ?? 0
+  return rate.toFixed(1)
+})
+
+const skills = computed(() => info.value?.skills ?? [])
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+function openSkillFile(skillName: string) {
+  openInFileManager?.(`/data/skills/${skillName}/SKILL.md`, false)
+}
+</script>

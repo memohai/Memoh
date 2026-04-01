@@ -180,6 +180,7 @@ func runServe() {
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideOAuthService,
 			provideServerHandler(handlers.NewTokenUsageHandler),
+			provideServerHandler(handlers.NewSessionInfoHandler),
 			provideServerHandler(handlers.NewBrowserContextsHandler),
 			provideServerHandler(provideCLIHandler),
 			provideServerHandler(provideWebHandler),
