@@ -1108,7 +1108,7 @@ func (a *commandContainerFSAdapter) ListDir(ctx context.Context, botID, dirPath 
 	if err != nil {
 		return nil, err
 	}
-	entries, err := client.ListDir(ctx, dirPath, false)
+	entries, err := client.ListDirAll(ctx, dirPath, false)
 	if err != nil {
 		return nil, err
 	}

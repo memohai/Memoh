@@ -78,15 +78,38 @@ func (c *Client) WriteFile(ctx context.Context, path string, content []byte) err
 	return mapError(err)
 }
 
-func (c *Client) ListDir(ctx context.Context, path string, recursive bool) ([]*pb.FileEntry, error) {
+// ListDirResult holds the paginated result of a directory listing.
+type ListDirResult struct {
+	Entries    []*pb.FileEntry
+	TotalCount int32
+	Truncated  bool
+}
+
+func (c *Client) ListDir(ctx context.Context, path string, recursive bool, offset, limit, collapseThreshold int32) (*ListDirResult, error) {
 	resp, err := c.svc.ListDir(ctx, &pb.ListDirRequest{
-		Path:      path,
-		Recursive: recursive,
+		Path:              path,
+		Recursive:         recursive,
+		Offset:            offset,
+		Limit:             limit,
+		CollapseThreshold: collapseThreshold,
 	})
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return resp.GetEntries(), nil
+	return &ListDirResult{
+		Entries:    resp.GetEntries(),
+		TotalCount: resp.GetTotalCount(),
+		Truncated:  resp.GetTruncated(),
+	}, nil
+}
+
+// ListDirAll lists all entries without pagination (offset=0, limit=0, no collapsing).
+func (c *Client) ListDirAll(ctx context.Context, path string, recursive bool) ([]*pb.FileEntry, error) {
+	result, err := c.ListDir(ctx, path, recursive, 0, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	return result.Entries, nil
 }
 
 func (c *Client) Stat(ctx context.Context, path string) (*pb.FileEntry, error) {

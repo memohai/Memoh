@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"math"
@@ -26,6 +27,7 @@ const (
 	readMaxLines     = 200
 	readMaxBytes     = 5120
 	readMaxLineLen   = 1000
+	listMaxEntries   = 200
 	binaryProbeBytes = 8 * 1024
 	rawChunkSize     = 64 * 1024
 	defaultWorkDir   = "/data"
@@ -134,7 +136,7 @@ func (*containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.
 	}
 	dir = resolvePath(dir)
 
-	var entries []*pb.FileEntry
+	var all []*pb.FileEntry
 
 	if req.GetRecursive() {
 		err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -147,12 +149,16 @@ func (*containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.
 			}
 			entry, _ := buildFileEntry(rel, p, d)
 			if entry != nil {
-				entries = append(entries, entry)
+				all = append(all, entry)
 			}
 			return nil
 		})
 		if err != nil {
 			return nil, status.Errorf(codes.NotFound, "walk: %v", err)
+		}
+
+		if threshold := req.GetCollapseThreshold(); threshold > 0 {
+			all = collapseHeavySubdirs(all, int(threshold))
 		}
 	} else {
 		dirEntries, err := os.ReadDir(dir)
@@ -162,12 +168,100 @@ func (*containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.
 		for _, d := range dirEntries {
 			entry, _ := buildFileEntry(d.Name(), filepath.Join(dir, d.Name()), d)
 			if entry != nil {
-				entries = append(entries, entry)
+				all = append(all, entry)
 			}
 		}
 	}
 
-	return &pb.ListDirResponse{Entries: entries}, nil
+	totalCount := int32(min(len(all), math.MaxInt32)) //nolint:gosec // clamped
+	offset := req.GetOffset()
+	if offset < 0 {
+		offset = 0
+	}
+	limit := req.GetLimit()
+	if limit < 0 {
+		limit = 0
+	}
+	if limit > listMaxEntries {
+		limit = listMaxEntries
+	}
+
+	// limit=0 means no limit (return all entries from offset)
+	var entries []*pb.FileEntry
+	if int(offset) < len(all) {
+		entries = all[offset:]
+	}
+	if limit > 0 && int(limit) < len(entries) {
+		entries = entries[:limit]
+	}
+
+	truncated := int(offset)+len(entries) < int(totalCount)
+	return &pb.ListDirResponse{
+		Entries:    entries,
+		TotalCount: totalCount,
+		Truncated:  truncated,
+	}, nil
+}
+
+// collapseHeavySubdirs replaces entries under top-level subdirectories that
+// exceed the threshold with a single summary entry per heavy directory.
+// The top-level directory entry itself (e.g. ".venv") is preserved.
+func collapseHeavySubdirs(entries []*pb.FileEntry, threshold int) []*pb.FileEntry {
+	counts := make(map[string]int)
+	for _, e := range entries {
+		top := listTopDir(e.GetPath())
+		if top != "" {
+			counts[top]++
+		}
+	}
+
+	heavy := make(map[string]bool)
+	for dir, n := range counts {
+		if n > threshold {
+			heavy[dir] = true
+		}
+	}
+	if len(heavy) == 0 {
+		return entries
+	}
+
+	seen := make(map[string]bool)
+	out := make([]*pb.FileEntry, 0, len(entries))
+	for _, e := range entries {
+		path := e.GetPath()
+		top := listTopDir(path)
+
+		if !heavy[top] {
+			// Top-level files (top=="") or entries under non-heavy dirs pass through.
+			out = append(out, e)
+			continue
+		}
+
+		// Keep the top-level directory entry itself (path == top, is_dir).
+		if path == top && e.GetIsDir() {
+			out = append(out, e)
+			continue
+		}
+
+		if seen[top] {
+			continue
+		}
+		seen[top] = true
+		out = append(out, &pb.FileEntry{
+			Path:    top + "/",
+			IsDir:   true,
+			Summary: fmt.Sprintf("%d items (not expanded)", counts[top]),
+		})
+	}
+	return out
+}
+
+// listTopDir extracts the first path component from a relative path.
+func listTopDir(path string) string {
+	if i := strings.IndexByte(path, '/'); i >= 0 {
+		return path[:i]
+	}
+	return ""
 }
 
 func (*containerServer) Exec(stream pb.ContainerService_ExecServer) error {

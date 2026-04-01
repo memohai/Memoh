@@ -1181,6 +1181,7 @@
     "viewDetails": "View details",
     "mcpInstallTitle": "Install MCP Server",
     "skillInstallTitle": "Install Skill",
-    "loadError": "Failed to load from Supermarket"
+    "loadError": "Failed to load from Supermarket",
+    "submit": "Submit"
   }
 }

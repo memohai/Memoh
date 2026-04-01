@@ -112,7 +112,7 @@ func (s *Service) buildScanIndex(ctx context.Context, botID string) (map[string]
 	if err != nil {
 		return nil, err
 	}
-	entries, err := c.ListDir(ctx, memoryDirPath(), false)
+	entries, err := c.ListDirAll(ctx, memoryDirPath(), false)
 	if err != nil {
 		if isNotFound(err) {
 			return map[string]scanEntry{}, nil
@@ -287,7 +287,7 @@ func (s *Service) ReadAllMemoryFiles(ctx context.Context, botID string) ([]Memor
 	if err != nil {
 		return nil, err
 	}
-	entries, err := c.ListDir(ctx, memoryDirPath(), false)
+	entries, err := c.ListDirAll(ctx, memoryDirPath(), false)
 	if err != nil {
 		if isNotFound(err) {
 			return []MemoryItem{}, nil
@@ -341,7 +341,7 @@ func (s *Service) CountMemoryFiles(ctx context.Context, botID string) (int, erro
 	if err != nil {
 		return 0, err
 	}
-	entries, err := c.ListDir(ctx, memoryDirPath(), false)
+	entries, err := c.ListDirAll(ctx, memoryDirPath(), false)
 	if err != nil {
 		if isNotFound(err) {
 			return 0, nil

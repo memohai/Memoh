@@ -1,5 +1,7 @@
+experimental_monorepo_root = true
+
 [monorepo]
-config_roots = ["apps/web", "apps/desktop", "apps/browser", "packages/ui", "packages/sdk", "packages/config", "cmd/agent"]
+config_roots = ["apps/web", "cmd/agent"]
 
 [tools]
 # Go version from go.mod

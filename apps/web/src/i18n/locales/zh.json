@@ -1177,6 +1177,7 @@
     "viewDetails": "查看详情",
     "mcpInstallTitle": "安装 MCP 服务",
     "skillInstallTitle": "安装 Skill",
-    "loadError": "从市场加载失败"
+    "loadError": "从市场加载失败",
+    "submit": "提交"
   }
 }

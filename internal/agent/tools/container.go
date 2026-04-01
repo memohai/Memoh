@@ -70,12 +70,14 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        "list",
-			Description: "List directory entries inside the bot container.",
+			Description: fmt.Sprintf("List directory entries inside the bot container. Supports pagination. Max %d entries per call. In recursive mode, subdirectories with >%d items are collapsed to a summary.", listMaxEntries, listCollapseThreshold),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("Directory path (relative to %s or absolute inside container)", wd)},
 					"recursive": map[string]any{"type": "boolean", "description": "List recursively"},
+					"offset":    map[string]any{"type": "integer", "description": "Entry offset to start from (0-indexed). Default: 0.", "minimum": 0, "default": 0},
+					"limit":     map[string]any{"type": "integer", "description": fmt.Sprintf("Max entries to return per call. Default: %d. Max: %d.", listMaxEntries, listMaxEntries), "minimum": 1, "maximum": listMaxEntries, "default": listMaxEntries},
 				},
 				"required": []string{"path"},
 			},
@@ -217,18 +219,63 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 		dirPath = "."
 	}
 	recursive, _, _ := BoolArg(args, "recursive")
-	entries, err := client.ListDir(ctx, dirPath, recursive)
+
+	offset := int32(0)
+	if v, ok, err := IntArg(args, "offset"); err != nil {
+		return nil, fmt.Errorf("invalid offset: %w", err)
+	} else if ok {
+		if v < 0 {
+			return nil, errors.New("offset must be >= 0")
+		}
+		if v > math.MaxInt32 {
+			return nil, errors.New("offset exceeds maximum")
+		}
+		offset = int32(v) //nolint:gosec // bounded above
+	}
+
+	limit := int32(listMaxEntries)
+	if v, ok, err := IntArg(args, "limit"); err != nil {
+		return nil, fmt.Errorf("invalid limit: %w", err)
+	} else if ok {
+		if v < 1 {
+			return nil, errors.New("limit must be >= 1")
+		}
+		if v > listMaxEntries {
+			v = listMaxEntries
+		}
+		limit = int32(v) //nolint:gosec // bounded by listMaxEntries
+	}
+
+	var collapseThreshold int32
+	if recursive {
+		collapseThreshold = listCollapseThreshold
+	}
+
+	result, err := client.ListDir(ctx, dirPath, recursive, offset, limit, collapseThreshold)
 	if err != nil {
 		return nil, err
 	}
-	entriesMaps := make([]map[string]any, len(entries))
-	for i, e := range entries {
-		entriesMaps[i] = map[string]any{
+
+	entriesMaps := make([]map[string]any, 0, len(result.Entries))
+	for _, e := range result.Entries {
+		m := map[string]any{
 			"path": e.GetPath(), "is_dir": e.GetIsDir(), "size": e.GetSize(),
 			"mode": e.GetMode(), "mod_time": e.GetModTime(),
 		}
+		if s := e.GetSummary(); s != "" {
+			m["summary"] = s
+		}
+		entriesMaps = append(entriesMaps, m)
 	}
-	return map[string]any{"path": dirPath, "entries": entriesMaps}, nil
+
+	return map[string]any{
+		"path":        dirPath,
+		"entries":     entriesMaps,
+		"total_count": result.TotalCount,
+		"truncated":   result.Truncated,
+		"offset":      offset,
+		"limit":       limit,
+	}, nil
 }
 
 func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
