@@ -289,11 +289,11 @@
             />
           </div>
           <div
-            v-if="activeRightTab === 'info'"
+            v-if="activeRightTab === 'status'"
             class="absolute inset-0"
           >
             <SessionInfoPanel
-              :visible="activeRightTab === 'info'"
+              :visible="activeRightTab === 'status'"
               :override-model-id="overrideModelId"
             />
           </div>
@@ -398,7 +398,7 @@ const reasoningPopoverOpen = ref(false)
 
 // ---- Right sidebar panel ----
 
-type RightTabId = 'terminal' | 'files' | 'info'
+type RightTabId = 'terminal' | 'files' | 'status'
 
 interface RightTab {
   id: RightTabId
@@ -409,7 +409,7 @@ interface RightTab {
 const rightTabs = computed<RightTab[]>(() => [
   { id: 'terminal', label: 'Terminal', icon: TerminalSquare },
   { id: 'files', label: t('chat.files'), icon: FolderOpen },
-  { id: 'info', label: 'Info', icon: BarChart3 },
+  { id: 'status', label: 'Status', icon: BarChart3 },
 ])
 
 const activeRightTab = ref<RightTabId | null>(null)

@@ -42,6 +42,23 @@ func (q *Queries) GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.
 	return input_tokens, err
 }
 
+const getLatestSessionIDByBot = `-- name: GetLatestSessionIDByBot :one
+SELECT s.id
+FROM bot_sessions s
+WHERE s.bot_id = $1
+  AND s.type = 'chat'
+  AND s.deleted_at IS NULL
+ORDER BY s.updated_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestSessionIDByBot(ctx context.Context, botID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLatestSessionIDByBot, botID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getSessionCacheStats = `-- name: GetSessionCacheStats :one
 SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS total_input_tokens,

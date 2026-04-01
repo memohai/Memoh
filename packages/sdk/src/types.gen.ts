@@ -5256,7 +5256,7 @@ export type PatchBotsByBotIdSessionsBySessionIdResponses = {
 
 export type PatchBotsByBotIdSessionsBySessionIdResponse = PatchBotsByBotIdSessionsBySessionIdResponses[keyof PatchBotsByBotIdSessionsBySessionIdResponses];
 
-export type GetBotsByBotIdSessionsBySessionIdInfoData = {
+export type GetBotsByBotIdSessionsBySessionIdStatusData = {
     body?: never;
     path: {
         /**
@@ -5274,10 +5274,10 @@ export type GetBotsByBotIdSessionsBySessionIdInfoData = {
          */
         model_id?: string;
     };
-    url: '/bots/{bot_id}/sessions/{session_id}/info';
+    url: '/bots/{bot_id}/sessions/{session_id}/status';
 };
 
-export type GetBotsByBotIdSessionsBySessionIdInfoErrors = {
+export type GetBotsByBotIdSessionsBySessionIdStatusErrors = {
     /**
      * Bad Request
      */
@@ -5292,16 +5292,16 @@ export type GetBotsByBotIdSessionsBySessionIdInfoErrors = {
     500: HandlersErrorResponse;
 };
 
-export type GetBotsByBotIdSessionsBySessionIdInfoError = GetBotsByBotIdSessionsBySessionIdInfoErrors[keyof GetBotsByBotIdSessionsBySessionIdInfoErrors];
+export type GetBotsByBotIdSessionsBySessionIdStatusError = GetBotsByBotIdSessionsBySessionIdStatusErrors[keyof GetBotsByBotIdSessionsBySessionIdStatusErrors];
 
-export type GetBotsByBotIdSessionsBySessionIdInfoResponses = {
+export type GetBotsByBotIdSessionsBySessionIdStatusResponses = {
     /**
      * OK
      */
     200: HandlersSessionInfoResponse;
 };
 
-export type GetBotsByBotIdSessionsBySessionIdInfoResponse = GetBotsByBotIdSessionsBySessionIdInfoResponses[keyof GetBotsByBotIdSessionsBySessionIdInfoResponses];
+export type GetBotsByBotIdSessionsBySessionIdStatusResponse = GetBotsByBotIdSessionsBySessionIdStatusResponses[keyof GetBotsByBotIdSessionsBySessionIdStatusResponses];
 
 export type DeleteBotsByBotIdSettingsData = {
     body?: never;

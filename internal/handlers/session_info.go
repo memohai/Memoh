@@ -38,7 +38,7 @@ func NewSessionInfoHandler(log *slog.Logger, queries *sqlc.Queries, botService *
 }
 
 func (h *SessionInfoHandler) Register(e *echo.Echo) {
-	e.GET("/bots/:bot_id/sessions/:session_id/info", h.GetSessionInfo)
+	e.GET("/bots/:bot_id/sessions/:session_id/status", h.GetSessionInfo)
 }
 
 type SessionInfoResponse struct {
@@ -71,7 +71,7 @@ type CacheStats struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/sessions/{session_id}/info [get].
+// @Router /bots/{bot_id}/sessions/{session_id}/status [get].
 func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
 	if err != nil {

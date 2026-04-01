@@ -104,7 +104,7 @@ import { storeToRefs } from 'pinia'
 import { useQuery } from '@pinia/colada'
 import { Sparkles, ExternalLink } from 'lucide-vue-next'
 import { ScrollArea } from '@memohai/ui'
-import { getBotsByBotIdSessionsBySessionIdInfo } from '@memohai/sdk'
+import { getBotsByBotIdSessionsBySessionIdStatus } from '@memohai/sdk'
 import type { HandlersSessionInfoResponse } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
@@ -119,9 +119,9 @@ const { currentBotId, sessionId } = storeToRefs(chatStore)
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
 const { data: info } = useQuery({
-  key: () => ['session-info', currentBotId.value ?? '', sessionId.value ?? '', props.overrideModelId ?? ''],
+  key: () => ['session-status', currentBotId.value ?? '', sessionId.value ?? '', props.overrideModelId ?? ''],
   query: async () => {
-    const { data } = await getBotsByBotIdSessionsBySessionIdInfo({
+    const { data } = await getBotsByBotIdSessionsBySessionIdStatus({
       path: {
         bot_id: currentBotId.value!,
         session_id: sessionId.value!,

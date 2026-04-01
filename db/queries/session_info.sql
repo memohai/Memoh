@@ -22,6 +22,15 @@ FROM bot_history_messages m
 WHERE m.session_id = sqlc.arg(session_id)
   AND m.usage IS NOT NULL;
 
+-- name: GetLatestSessionIDByBot :one
+SELECT s.id
+FROM bot_sessions s
+WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.type = 'chat'
+  AND s.deleted_at IS NULL
+ORDER BY s.updated_at DESC
+LIMIT 1;
+
 -- name: GetSessionUsedSkills :many
 SELECT DISTINCT
   (part->'input'->>'skillName')::text AS skill_name

@@ -4395,7 +4395,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/sessions/{session_id}/info": {
+        "/bots/{bot_id}/sessions/{session_id}/status": {
             "get": {
                 "description": "Get aggregated info for a chat session including message count, context usage, cache stats, and used skills",
                 "tags": [
