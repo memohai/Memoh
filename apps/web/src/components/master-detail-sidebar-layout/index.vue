@@ -1,5 +1,8 @@
 <template>
-  <SidebarProvider class="min-h-[initial]! absolute inset-0 ">
+  <SidebarProvider
+    class="min-h-[initial]! absolute inset-0 "
+    :default-open="true"
+  >
     <Sidebar
       class="relative! **:[[role=navigation]]:relative! sidebar-container h-full!"
     >
