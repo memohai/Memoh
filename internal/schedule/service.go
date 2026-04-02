@@ -28,7 +28,7 @@ type SessionCreator interface {
 
 type Service struct {
 	queries        *sqlc.Queries
-	cron           *cron.Cron
+	crons          map[string]*cron.Cron
 	parser         cron.Parser
 	triggerer      Triggerer
 	sessionCreator SessionCreator
@@ -40,14 +40,9 @@ type Service struct {
 
 func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
 	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-	location := time.UTC
-	if runtimeConfig != nil && runtimeConfig.TimezoneLocation != nil {
-		location = runtimeConfig.TimezoneLocation
-	}
-	c := cron.New(cron.WithParser(parser), cron.WithLocation(location))
 	service := &Service{
 		queries:        queries,
-		cron:           c,
+		crons:          map[string]*cron.Cron{},
 		parser:         parser,
 		triggerer:      triggerer,
 		sessionCreator: sessionCreator,
@@ -55,7 +50,6 @@ func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, se
 		logger:         log.With(slog.String("service", "schedule")),
 		jobs:           map[string]cron.EntryID{},
 	}
-	c.Start()
 	return service
 }
 
@@ -483,12 +477,14 @@ func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error
 	if id == "" {
 		return errors.New("schedule id missing")
 	}
+	timezone := s.resolveTimezone(ctx, schedule.BotID.String())
 	job := func() {
 		if err := s.runSchedule(context.WithoutCancel(ctx), toSchedule(schedule)); err != nil {
 			s.logger.Error("scheduled job failed", slog.String("schedule_id", schedule.ID.String()), slog.Any("error", err))
 		}
 	}
-	entryID, err := s.cron.AddFunc(schedule.Pattern, job)
+	c := s.getCron(timezone)
+	entryID, err := c.AddFunc(schedule.Pattern, job)
 	if err != nil {
 		return err
 	}
@@ -515,7 +511,9 @@ func (s *Service) removeJob(id string) {
 	defer s.mu.Unlock()
 	entryID, ok := s.jobs[id]
 	if ok {
-		s.cron.Remove(entryID)
+		for _, c := range s.crons {
+			c.Remove(entryID)
+		}
 		delete(s.jobs, id)
 	}
 }
@@ -542,6 +540,42 @@ func toSchedule(row sqlc.Schedule) Schedule {
 		item.UpdatedAt = row.UpdatedAt.Time
 	}
 	return item
+}
+
+func (s *Service) getCron(timezone string) *cron.Cron {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c, ok := s.crons[timezone]; ok {
+		return c
+	}
+	opts := []cron.Option{cron.WithParser(s.parser)}
+	if tz := strings.TrimSpace(timezone); tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err != nil {
+			s.logger.Warn("invalid timezone, using server local", slog.String("timezone", tz), slog.Any("error", err))
+		} else {
+			opts = append(opts, cron.WithLocation(loc))
+		}
+	}
+	c := cron.New(opts...)
+	c.Start()
+	s.crons[timezone] = c
+	return c
+}
+
+func (s *Service) resolveTimezone(ctx context.Context, botID string) string {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return ""
+	}
+	bot, err := s.queries.GetBotByID(ctx, pgBotID)
+	if err != nil {
+		return ""
+	}
+	if bot.Timezone.Valid {
+		return bot.Timezone.String
+	}
+	return ""
 }
 
 func toUUID(id string) pgtype.UUID {

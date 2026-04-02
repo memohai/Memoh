@@ -39,6 +39,7 @@ func (h *ScheduleHandler) Register(e *echo.Echo) {
 	group.GET("/:id/logs", h.ListLogsBySchedule)
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
+	group.POST("/:id/trigger", h.Trigger)
 }
 
 // Create godoc
@@ -312,6 +313,46 @@ func (h *ScheduleHandler) DeleteLogs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// Trigger godoc
+// @Summary Trigger a schedule manually
+// @Description Manually trigger a schedule by ID
+// @Tags schedule
+// @Param id path string true "Schedule ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/schedule/{id}/trigger [post].
+func (h *ScheduleHandler) Trigger(c echo.Context) error {
+	userID, err := h.requireUserID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	id := c.Param("id")
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	}
+	item, err := h.service.Get(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+	if item.BotID != botID {
+		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+	go func() {
+		if err := h.service.Trigger(context.Background(), id); err != nil {
+			h.logger.Error("manual schedule trigger failed", slog.String("schedule_id", id), slog.Any("error", err))
+		}
+	}()
+	return c.JSON(http.StatusOK, map[string]string{"status": "triggered"})
 }
 
 func (*ScheduleHandler) requireUserID(c echo.Context) (string, error) {

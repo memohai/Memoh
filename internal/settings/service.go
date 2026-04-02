@@ -69,7 +69,11 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting(botRow.Language, aclDefaultEffect, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionRatio)
+	tz := ""
+	if botRow.Timezone.Valid {
+		tz = botRow.Timezone.String
+	}
+	current := normalizeBotSetting(botRow.Language, aclDefaultEffect, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionRatio, tz)
 	if strings.TrimSpace(req.Language) != "" {
 		current.Language = strings.TrimSpace(req.Language)
 	}
@@ -96,6 +100,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if req.CompactionRatio != nil && *req.CompactionRatio >= 1 && *req.CompactionRatio <= 100 {
 		current.CompactionRatio = *req.CompactionRatio
+	}
+	if req.Timezone != nil {
+		current.Timezone = strings.TrimSpace(*req.Timezone)
 	}
 	chatModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.ChatModelID); value != "" {
@@ -174,6 +181,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		CompactionEnabled:   current.CompactionEnabled,
 		CompactionThreshold: int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
 		CompactionRatio:     int32(current.CompactionRatio),     //nolint:gosec // bounded 1-100 above
+		Timezone:            pgtype.Text{String: current.Timezone, Valid: current.Timezone != ""},
 		ChatModelID:         chatModelUUID,
 		HeartbeatModelID:    heartbeatModelUUID,
 		CompactionModelID:   compactionModelUUID,
@@ -213,7 +221,7 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return nil
 }
 
-func normalizeBotSetting(language string, aclDefaultEffect string, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32, compactionRatio int32) Settings {
+func normalizeBotSetting(language string, aclDefaultEffect string, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32, compactionRatio int32, timezone string) Settings {
 	settings := Settings{
 		Language:            strings.TrimSpace(language),
 		AclDefaultEffect:    strings.TrimSpace(aclDefaultEffect),
@@ -224,6 +232,7 @@ func normalizeBotSetting(language string, aclDefaultEffect string, reasoningEnab
 		CompactionEnabled:   compactionEnabled,
 		CompactionThreshold: int(compactionThreshold),
 		CompactionRatio:     int(compactionRatio),
+		Timezone:            strings.TrimSpace(timezone),
 	}
 	if settings.Language == "" {
 		settings.Language = DefaultLanguage
@@ -256,6 +265,10 @@ func isValidReasoningEffort(effort string) bool {
 }
 
 func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
+	tz := ""
+	if row.Timezone.Valid {
+		tz = row.Timezone.String
+	}
 	return normalizeBotSettingsFields(
 		row.Language,
 		row.ReasoningEnabled,
@@ -265,6 +278,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.CompactionEnabled,
 		row.CompactionThreshold,
 		row.CompactionRatio,
+		tz,
 		row.ChatModelID,
 		row.HeartbeatModelID,
 		row.CompactionModelID,
@@ -277,6 +291,10 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 }
 
 func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
+	tz := ""
+	if row.Timezone.Valid {
+		tz = row.Timezone.String
+	}
 	return normalizeBotSettingsFields(
 		row.Language,
 		row.ReasoningEnabled,
@@ -286,6 +304,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.CompactionEnabled,
 		row.CompactionThreshold,
 		row.CompactionRatio,
+		tz,
 		row.ChatModelID,
 		row.HeartbeatModelID,
 		row.CompactionModelID,
@@ -306,6 +325,7 @@ func normalizeBotSettingsFields(
 	compactionEnabled bool,
 	compactionThreshold int32,
 	compactionRatio int32,
+	timezone string,
 	chatModelID pgtype.UUID,
 	heartbeatModelID pgtype.UUID,
 	compactionModelID pgtype.UUID,
@@ -315,7 +335,7 @@ func normalizeBotSettingsFields(
 	ttsModelID pgtype.UUID,
 	browserContextID pgtype.UUID,
 ) Settings {
-	settings := normalizeBotSetting(language, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionRatio)
+	settings := normalizeBotSetting(language, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionRatio, timezone)
 	if chatModelID.Valid {
 		settings.ChatModelID = uuid.UUID(chatModelID.Bytes).String()
 	}

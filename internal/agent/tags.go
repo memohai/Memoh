@@ -107,8 +107,16 @@ func SpeechResolver() TagResolver {
 	}
 }
 
+// xaiTagPattern matches xAI-specific internal tags like <xai:function_call>...</xai:function_call>
+var xaiTagPattern = regexp.MustCompile(`<xai:\w+[^>]*>[\s\S]*?<\/xai:\w+>`)
+
+// stripXAITags removes all <xai:...>...</xai:...> tag blocks from text.
+func stripXAITags(text string) string {
+	return xaiTagPattern.ReplaceAllString(text, "")
+}
+
 // StripAgentTags removes all default agent tag blocks (<attachments>, <reactions>, <speech>)
-// from text, returning only the visible content.
+// and xAI internal tags from text, returning only the visible content.
 func StripAgentTags(text string) string {
 	cleaned, _ := ExtractTagsFromText(text, DefaultTagResolvers())
 	return cleaned
@@ -131,6 +139,7 @@ func ExtractTagsFromText(text string, resolvers []TagResolver) (string, []TagEve
 			return ""
 		})
 	}
+	cleaned = stripXAITags(cleaned)
 	cleaned = regexp.MustCompile(`\n{3,}`).ReplaceAllString(cleaned, "\n\n")
 	cleaned = strings.TrimSpace(cleaned)
 	return cleaned, events
@@ -255,14 +264,14 @@ func (e *StreamTagExtractor) FlushRemainder() TagStreamResult {
 	if e.state == 0 {
 		out := e.buffer
 		e.buffer = ""
-		return TagStreamResult{VisibleText: out}
+		return TagStreamResult{VisibleText: stripXAITags(out)}
 	}
 	out := e.activeMeta.openTag + e.tagBuffer + e.buffer
 	e.state = 0
 	e.buffer = ""
 	e.tagBuffer = ""
 	e.activeMeta = nil
-	return TagStreamResult{VisibleText: out}
+	return TagStreamResult{VisibleText: stripXAITags(out)}
 }
 
 func filenameFromPath(p string) string {

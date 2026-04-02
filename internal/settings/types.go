@@ -24,6 +24,7 @@ type Settings struct {
 	CompactionThreshold int    `json:"compaction_threshold"`
 	CompactionRatio     int    `json:"compaction_ratio"`
 	CompactionModelID   string `json:"compaction_model_id,omitempty"`
+	Timezone            string `json:"timezone"`
 }
 
 type UpsertRequest struct {
@@ -44,4 +45,5 @@ type UpsertRequest struct {
 	CompactionThreshold *int    `json:"compaction_threshold,omitempty"`
 	CompactionRatio     *int    `json:"compaction_ratio,omitempty"`
 	CompactionModelID   *string `json:"compaction_model_id,omitempty"`
+	Timezone            *string `json:"timezone,omitempty"`
 }
