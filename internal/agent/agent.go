@@ -98,6 +98,47 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	if readMediaState != nil {
 		prepareStep = readMediaState.prepareStep
 	}
+
+	initialMsgCount := len(cfg.Messages)
+
+	if cfg.InjectCh != nil {
+		basePrepare := prepareStep
+		prepareStep = func(p *sdk.GenerateParams) *sdk.GenerateParams {
+			if basePrepare != nil {
+				if override := basePrepare(p); override != nil {
+					p = override
+				}
+			}
+			for {
+				select {
+				case injected, ok := <-cfg.InjectCh:
+					if !ok {
+						break
+					}
+					text := strings.TrimSpace(injected.HeaderifiedText)
+					if text == "" {
+						text = strings.TrimSpace(injected.Text)
+					}
+					if text != "" {
+						insertAfter := len(p.Messages) - initialMsgCount
+						p.Messages = append(p.Messages, sdk.UserMessage(text))
+						if cfg.InjectedRecorder != nil {
+							cfg.InjectedRecorder(text, insertAfter)
+						}
+						a.logger.Info("injected user message into agent stream",
+							slog.String("bot_id", cfg.Identity.BotID),
+							slog.Int("insert_after", insertAfter),
+						)
+					}
+					continue
+				default:
+				}
+				break
+			}
+			return p
+		}
+	}
+
 	opts := a.buildGenerateOptions(cfg, tools, prepareStep)
 
 	streamResult, err := a.client.StreamText(ctx, opts...)

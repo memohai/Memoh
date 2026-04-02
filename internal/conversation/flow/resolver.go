@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -136,10 +137,11 @@ type usageInfo struct {
 }
 
 type resolvedContext struct {
-	runConfig agentpkg.RunConfig
-	model     models.GetResponse
-	provider  sqlc.LlmProvider
-	query     string // headerified query
+	runConfig       agentpkg.RunConfig
+	model           models.GetResponse
+	provider        sqlc.LlmProvider
+	query           string // headerified query
+	injectedRecords *[]conversation.InjectedMessageRecord
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
@@ -292,7 +294,40 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		LoopDetection: agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 	}
 
-	return resolvedContext{runConfig: runCfg, model: chatModel, provider: provider, query: headerifiedQuery}, nil
+	var injectedRecords *[]conversation.InjectedMessageRecord
+	if req.InjectCh != nil {
+		agentInjectCh := make(chan agentpkg.InjectMessage, cap(req.InjectCh))
+		go func() {
+			for msg := range req.InjectCh {
+				agentInjectCh <- agentpkg.InjectMessage{
+					Text:            msg.Text,
+					HeaderifiedText: msg.HeaderifiedText,
+				}
+			}
+			close(agentInjectCh)
+		}()
+		runCfg.InjectCh = agentInjectCh
+
+		records := make([]conversation.InjectedMessageRecord, 0)
+		injectedRecords = &records
+		var recMu sync.Mutex
+		runCfg.InjectedRecorder = func(headerifiedText string, insertAfter int) {
+			recMu.Lock()
+			*injectedRecords = append(*injectedRecords, conversation.InjectedMessageRecord{
+				HeaderifiedText: headerifiedText,
+				InsertAfter:     insertAfter,
+			})
+			recMu.Unlock()
+		}
+	}
+
+	return resolvedContext{
+		runConfig:       runCfg,
+		model:           chatModel,
+		provider:        provider,
+		query:           headerifiedQuery,
+		injectedRecords: injectedRecords,
+	}, nil
 }
 
 // Chat sends a synchronous chat request and stores the result.

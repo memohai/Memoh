@@ -241,6 +241,10 @@ type ChatRequest struct {
 	// Set by the inbound channel processor; called by the resolver at persist time.
 	OutboundAssetCollector func() []OutboundAssetRef `json:"-"`
 
+	// InjectCh receives user messages to inject into the active agent stream
+	// between tool rounds via the PrepareStep hook. Nil means no injection.
+	InjectCh <-chan InjectMessage `json:"-"`
+
 	Query           string           `json:"query"`
 	Model           string           `json:"model,omitempty"`
 	Provider        string           `json:"provider,omitempty"`
@@ -249,6 +253,24 @@ type ChatRequest struct {
 	CurrentChannel  string           `json:"current_channel,omitempty"`
 	Messages        []ModelMessage   `json:"messages,omitempty"`
 	Attachments     []ChatAttachment `json:"attachments,omitempty"`
+}
+
+// InjectMessage carries a user message to be injected into a running agent
+// stream between tool rounds.
+type InjectMessage struct {
+	Text            string
+	Attachments     []ChatAttachment
+	HeaderifiedText string
+}
+
+// InjectedMessageRecord records a message that was injected via PrepareStep,
+// together with its position in the output message sequence.
+type InjectedMessageRecord struct {
+	HeaderifiedText string
+	// InsertAfter is the number of SDK output messages that existed before
+	// this injection. Used to determine the correct insertion position when
+	// interleaving injected messages into the persisted round.
+	InsertAfter int
 }
 
 // ChatResponse is the output of a non-streaming chat call.

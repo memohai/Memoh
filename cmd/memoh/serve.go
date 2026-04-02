@@ -457,6 +457,7 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
+	processor.SetDispatcher(inbound.NewRouteDispatcher(log))
 	processor.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
 	processor.SetCommandHandler(command.NewHandler(
 		log,
