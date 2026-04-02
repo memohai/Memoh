@@ -81,7 +81,8 @@ func (r *Registry) GlobalHelp() string {
 	var b strings.Builder
 	b.WriteString("Available commands:\n\n")
 	b.WriteString("/help - Show this help message\n")
-	b.WriteString("/new - Start a new conversation (resets session context)\n\n")
+	b.WriteString("/new - Start a new conversation (resets session context)\n")
+	b.WriteString("/stop - Stop the current generation\n\n")
 	for i, name := range r.order {
 		if i > 0 {
 			b.WriteByte('\n')

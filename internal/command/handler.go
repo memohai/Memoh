@@ -112,7 +112,8 @@ func NewHandler(
 // the regular resource-group dispatch (e.g. in the channel inbound
 // processor which has the required routing context).
 var topLevelCommands = map[string]string{
-	"new": "Start a new conversation (resets session context)",
+	"new":  "Start a new conversation (resets session context)",
+	"stop": "Stop the current generation",
 }
 
 // IsCommand reports whether the text contains a slash command.
