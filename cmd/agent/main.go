@@ -33,6 +33,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/feishu"
 	"github.com/memohai/memoh/internal/channel/adapters/local"
 	"github.com/memohai/memoh/internal/channel/adapters/matrix"
+	"github.com/memohai/memoh/internal/channel/adapters/misskey"
 	"github.com/memohai/memoh/internal/channel/adapters/qq"
 	"github.com/memohai/memoh/internal/channel/adapters/telegram"
 	"github.com/memohai/memoh/internal/channel/adapters/wecom"
@@ -500,6 +501,10 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	registry.MustRegister(weixinAdapter)
 	registry.MustRegister(local.NewCLIAdapter(hub))
 	registry.MustRegister(local.NewWebAdapter(hub))
+
+	// Misskey
+	registry.MustRegister(misskey.NewMisskeyAdapter(log))
+
 	return registry
 }
 

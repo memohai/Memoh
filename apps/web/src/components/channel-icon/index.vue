@@ -21,6 +21,7 @@ import {
   Feishu,
   Wechat,
   Matrix,
+  Misskey,
 } from '@memohai/icon'
 
 const channelIcons: Record<string, Component> = {
@@ -32,6 +33,7 @@ const channelIcons: Record<string, Component> = {
   wechat: Wechat,
   weixin: Wechat,
   matrix: Matrix,
+  misskey: Misskey,
 }
 
 const props = withDefaults(defineProps<{
