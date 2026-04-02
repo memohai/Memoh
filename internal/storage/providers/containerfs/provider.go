@@ -106,7 +106,7 @@ func (p *Provider) ListPrefix(ctx context.Context, prefix string) ([]string, err
 	}
 	dir := filepath.Dir(filepath.Join(containerMediaRoot, sub))
 	base := filepath.Base(sub)
-	entries, err := client.ListDir(ctx, dir, false)
+	entries, err := client.ListDirAll(ctx, dir, false)
 	if err != nil {
 		return nil, nil
 	}

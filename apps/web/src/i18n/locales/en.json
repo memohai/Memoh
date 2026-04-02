@@ -202,7 +202,17 @@
     "scheduleDescription": "Description",
     "schedulePattern": "Cron Pattern",
     "scheduleMaxCalls": "Max Calls",
-    "viewSchedule": "View Schedule"
+    "viewSchedule": "View Schedule",
+    "infoMessages": "Messages",
+    "infoContextUsage": "Context Usage",
+    "infoContextTokens": "{used} / {window}",
+    "infoContextTokensNoWindow": "{used} / --",
+    "infoCacheHitRate": "Cache Hit Rate",
+    "infoCacheRead": "Cache Read",
+    "infoCacheWrite": "Cache Write",
+    "infoSkills": "Skills",
+    "infoNoSkills": "No skills used in this session",
+    "infoNoData": "No data available"
   },
   "models": {
     "title": "Models",
@@ -1181,6 +1191,7 @@
     "viewDetails": "View details",
     "mcpInstallTitle": "Install MCP Server",
     "skillInstallTitle": "Install Skill",
-    "loadError": "Failed to load from Supermarket"
+    "loadError": "Failed to load from Supermarket",
+    "submit": "Submit"
   }
 }

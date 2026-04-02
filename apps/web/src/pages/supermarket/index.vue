@@ -1,10 +1,25 @@
 <template>
   <div class="p-6 max-w-6xl mx-auto space-y-6">
-    <!-- Header + Search -->
-    <div class="space-y-4">
+    <!-- Header: Title + Submit Button -->
+    <div class="flex items-center justify-between">
       <h1 class="text-lg font-semibold">
         {{ $t('supermarket.title') }}
       </h1>
+      <Button
+        variant="outline"
+        size="sm"
+        as="a"
+        href="https://github.com/memohai/supermarket"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <Github class="size-4" />
+        {{ $t('supermarket.submit') }}
+      </Button>
+    </div>
+
+    <!-- Search -->
+    <div class="space-y-4">
       <div class="flex items-center gap-2">
         <div class="relative flex-1">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -17,7 +32,7 @@
         </div>
       </div>
 
-      <!-- Active tag filter (e.g. from card tag click) -->
+      <!-- Active tag filter -->
       <div
         v-if="activeTag"
         class="flex items-center gap-2"
@@ -37,75 +52,82 @@
       </div>
     </div>
 
-    <!-- MCP Section -->
-    <section class="space-y-3">
-      <h2 class="text-sm font-semibold">
-        {{ $t('supermarket.mcpSection') }}
-      </h2>
+    <!-- Tabs: Skills / MCP -->
+    <Tabs
+      default-value="skills"
+      class="w-full"
+    >
+      <TabsList>
+        <TabsTrigger value="skills">
+          {{ $t('supermarket.skillsSection') }}
+        </TabsTrigger>
+        <TabsTrigger value="mcp">
+          {{ $t('supermarket.mcpSection') }}
+        </TabsTrigger>
+      </TabsList>
 
-      <div
-        v-if="mcpLoading"
-        class="flex items-center justify-center py-8 text-xs text-muted-foreground"
-      >
-        <Spinner class="mr-2" />
-        {{ $t('common.loading') }}
-      </div>
+      <!-- Skills Tab -->
+      <TabsContent value="skills">
+        <div
+          v-if="skillsLoading"
+          class="flex items-center justify-center py-8 text-xs text-muted-foreground"
+        >
+          <Spinner class="mr-2" />
+          {{ $t('common.loading') }}
+        </div>
 
-      <div
-        v-else-if="!mcps.length"
-        class="py-8 text-center text-xs text-muted-foreground"
-      >
-        {{ $t('supermarket.noMcpResults') }}
-      </div>
+        <div
+          v-else-if="!skills.length"
+          class="py-8 text-center text-xs text-muted-foreground"
+        >
+          {{ $t('supermarket.noSkillResults') }}
+        </div>
 
-      <div
-        v-else
-        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-      >
-        <McpCard
-          v-for="mcp in mcps"
-          :key="mcp.id"
-          :mcp="mcp"
-          @tag-click="setTag"
-          @install="openMcpInstall"
-        />
-      </div>
-    </section>
+        <div
+          v-else
+          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+        >
+          <SkillCard
+            v-for="skill in skills"
+            :key="skill.id"
+            :skill="skill"
+            @tag-click="setTag"
+            @install="openSkillInstall"
+          />
+        </div>
+      </TabsContent>
 
-    <!-- Skills Section -->
-    <section class="space-y-3">
-      <h2 class="text-sm font-semibold">
-        {{ $t('supermarket.skillsSection') }}
-      </h2>
+      <!-- MCP Tab -->
+      <TabsContent value="mcp">
+        <div
+          v-if="mcpLoading"
+          class="flex items-center justify-center py-8 text-xs text-muted-foreground"
+        >
+          <Spinner class="mr-2" />
+          {{ $t('common.loading') }}
+        </div>
 
-      <div
-        v-if="skillsLoading"
-        class="flex items-center justify-center py-8 text-xs text-muted-foreground"
-      >
-        <Spinner class="mr-2" />
-        {{ $t('common.loading') }}
-      </div>
+        <div
+          v-else-if="!mcps.length"
+          class="py-8 text-center text-xs text-muted-foreground"
+        >
+          {{ $t('supermarket.noMcpResults') }}
+        </div>
 
-      <div
-        v-else-if="!skills.length"
-        class="py-8 text-center text-xs text-muted-foreground"
-      >
-        {{ $t('supermarket.noSkillResults') }}
-      </div>
-
-      <div
-        v-else
-        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-      >
-        <SkillCard
-          v-for="skill in skills"
-          :key="skill.id"
-          :skill="skill"
-          @tag-click="setTag"
-          @install="openSkillInstall"
-        />
-      </div>
-    </section>
+        <div
+          v-else
+          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+        >
+          <McpCard
+            v-for="mcp in mcps"
+            :key="mcp.id"
+            :mcp="mcp"
+            @tag-click="setTag"
+            @install="openMcpInstall"
+          />
+        </div>
+      </TabsContent>
+    </Tabs>
 
     <!-- Install Dialogs -->
     <InstallMcpDialog
@@ -123,8 +145,8 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Search, X } from 'lucide-vue-next'
-import { Input, Badge, Spinner } from '@memohai/ui'
+import { Search, X, Github } from 'lucide-vue-next'
+import { Input, Badge, Spinner, Button, Tabs, TabsList, TabsTrigger, TabsContent } from '@memohai/ui'
 import {
   getSupermarketMcps,
   getSupermarketSkills,

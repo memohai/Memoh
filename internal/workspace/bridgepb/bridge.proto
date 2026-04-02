@@ -39,6 +39,9 @@ message WriteFileResponse {}
 message ListDirRequest {
   string path = 1;
   bool recursive = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+  int32 collapse_threshold = 5;
 }
 
 message FileEntry {
@@ -47,10 +50,13 @@ message FileEntry {
   int64 size = 3;
   string mode = 4;
   string mod_time = 5;
+  string summary = 6;
 }
 
 message ListDirResponse {
   repeated FileEntry entries = 1;
+  int32 total_count = 2;
+  bool truncated = 3;
 }
 
 message ExecInput {

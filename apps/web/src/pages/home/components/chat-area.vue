@@ -289,12 +289,13 @@
             />
           </div>
           <div
-            v-if="activeRightTab === 'info'"
-            class="absolute inset-0 flex items-center justify-center"
+            v-if="activeRightTab === 'status'"
+            class="absolute inset-0"
           >
-            <p class="text-sm text-muted-foreground">
-              Info
-            </p>
+            <SessionInfoPanel
+              :visible="activeRightTab === 'status'"
+              :override-model-id="overrideModelId"
+            />
           </div>
         </div>
       </div>
@@ -376,6 +377,7 @@ import FileManager from '@/components/file-manager/index.vue'
 import TerminalComponent from '@/components/terminal/index.vue'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
 import ReasoningEffortSelect from '@/pages/bots/components/reasoning-effort-select.vue'
+import SessionInfoPanel from './session-info-panel.vue'
 import { EFFORT_LABELS, EFFORT_OPACITY } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
@@ -396,7 +398,7 @@ const reasoningPopoverOpen = ref(false)
 
 // ---- Right sidebar panel ----
 
-type RightTabId = 'terminal' | 'files' | 'info'
+type RightTabId = 'terminal' | 'files' | 'status'
 
 interface RightTab {
   id: RightTabId
@@ -407,7 +409,7 @@ interface RightTab {
 const rightTabs = computed<RightTab[]>(() => [
   { id: 'terminal', label: 'Terminal', icon: TerminalSquare },
   { id: 'files', label: t('chat.files'), icon: FolderOpen },
-  { id: 'info', label: 'Info', icon: BarChart3 },
+  { id: 'status', label: 'Status', icon: BarChart3 },
 ])
 
 const activeRightTab = ref<RightTabId | null>(null)

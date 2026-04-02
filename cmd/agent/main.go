@@ -253,6 +253,7 @@ func runServe() {
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideOAuthService,
 			provideServerHandler(handlers.NewTokenUsageHandler),
+			provideServerHandler(handlers.NewSessionInfoHandler),
 			provideServerHandler(handlers.NewBrowserContextsHandler),
 			provideServerHandler(handlers.NewSupermarketHandler),
 			provideServerHandler(provideCLIHandler),
@@ -1205,7 +1206,7 @@ func (a *commandContainerFSAdapter) ListDir(ctx context.Context, botID, dirPath 
 	if err != nil {
 		return nil, err
 	}
-	entries, err := client.ListDir(ctx, dirPath, false)
+	entries, err := client.ListDirAll(ctx, dirPath, false)
 	if err != nil {
 		return nil, err
 	}

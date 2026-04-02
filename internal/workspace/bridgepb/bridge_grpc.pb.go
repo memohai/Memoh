@@ -8,7 +8,6 @@ package bridgepb
 
 import (
 	context "context"
-
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -20,16 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ContainerService_ReadFile_FullMethodName   = "/mcpcontainer.ContainerService/ReadFile"
-	ContainerService_WriteFile_FullMethodName  = "/mcpcontainer.ContainerService/WriteFile"
-	ContainerService_ListDir_FullMethodName    = "/mcpcontainer.ContainerService/ListDir"
-	ContainerService_Stat_FullMethodName       = "/mcpcontainer.ContainerService/Stat"
-	ContainerService_Mkdir_FullMethodName      = "/mcpcontainer.ContainerService/Mkdir"
-	ContainerService_Rename_FullMethodName     = "/mcpcontainer.ContainerService/Rename"
-	ContainerService_Exec_FullMethodName       = "/mcpcontainer.ContainerService/Exec"
-	ContainerService_ReadRaw_FullMethodName    = "/mcpcontainer.ContainerService/ReadRaw"
-	ContainerService_WriteRaw_FullMethodName   = "/mcpcontainer.ContainerService/WriteRaw"
-	ContainerService_DeleteFile_FullMethodName = "/mcpcontainer.ContainerService/DeleteFile"
+	ContainerService_ReadFile_FullMethodName   = "/bridgepb.ContainerService/ReadFile"
+	ContainerService_WriteFile_FullMethodName  = "/bridgepb.ContainerService/WriteFile"
+	ContainerService_ListDir_FullMethodName    = "/bridgepb.ContainerService/ListDir"
+	ContainerService_Stat_FullMethodName       = "/bridgepb.ContainerService/Stat"
+	ContainerService_Mkdir_FullMethodName      = "/bridgepb.ContainerService/Mkdir"
+	ContainerService_Rename_FullMethodName     = "/bridgepb.ContainerService/Rename"
+	ContainerService_Exec_FullMethodName       = "/bridgepb.ContainerService/Exec"
+	ContainerService_ReadRaw_FullMethodName    = "/bridgepb.ContainerService/ReadRaw"
+	ContainerService_WriteRaw_FullMethodName   = "/bridgepb.ContainerService/WriteRaw"
+	ContainerService_DeleteFile_FullMethodName = "/bridgepb.ContainerService/DeleteFile"
 )
 
 // ContainerServiceClient is the client API for ContainerService service.
@@ -401,7 +400,7 @@ func _ContainerService_DeleteFile_Handler(srv interface{}, ctx context.Context, 
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var ContainerService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "mcpcontainer.ContainerService",
+	ServiceName: "bridgepb.ContainerService",
 	HandlerType: (*ContainerServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

@@ -162,7 +162,7 @@ func (h *ContainerdHandler) loadSkillsFromContainer(ctx context.Context, botID s
 		return nil, err
 	}
 
-	entries, err := client.ListDir(ctx, skillsDirPath, false)
+	entries, err := client.ListDirAll(ctx, skillsDirPath, false)
 	if err != nil {
 		return []SkillItem{}, nil
 	}

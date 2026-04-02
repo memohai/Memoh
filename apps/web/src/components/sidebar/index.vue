@@ -9,17 +9,17 @@
               {{ t('sidebar.bots') }}
             </span>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="ml-auto mr-1.5 size-6 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:mr-0"
-            :aria-label="t('bots.createBot')"
-            @click="router.push({ name: 'bots' })"
-          >
-            <Plus
-              class="size-3.5"
-            />
-          </Button>
+          <div class="flex items-center gap-1 ml-auto mr-1.5 group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:mr-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              class="size-6 text-muted-foreground hover:text-foreground"
+              :aria-label="t('bots.createBot')"
+              @click="router.push({ name: 'bots' })"
+            >
+              <Plus class="size-3.5" />
+            </Button>
+          </div>
         </div>
       </SidebarHeader>
 
@@ -53,6 +53,8 @@
         </SidebarGroup>
       </SidebarContent>
 
+      <SidebarRail />
+
       <SidebarFooter class="relative border-0 px-2 pb-3.5 pt-2.5">
         <div class="pointer-events-none absolute -top-[120px] left-0 h-[153px] w-full bg-linear-to-t from-(--sidebar-background) from-18% to-transparent z-10 group-data-[collapsible=icon]:hidden" />
         <SidebarMenu class="gap-2.5">
@@ -81,14 +83,14 @@
           <SidebarMenuItem>
             <SidebarMenuButton
               :tooltip="t('sidebar.settings')"
-              class="h-9 px-2.5"
+              class="h-9 px-2.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
               :is-active="isSettingsActive"
               @click="router.push('/settings')"
             >
               <Settings
                 class="size-3.5"
               />
-              <span class="text-xs font-medium">{{ t('sidebar.settings') }}</span>
+              <span class="text-xs font-medium group-data-[collapsible=icon]:hidden">{{ t('sidebar.settings') }}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -117,6 +119,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
 } from '@memohai/ui'
 import { Plus, LoaderCircle, Settings } from 'lucide-vue-next'
 import BotItem from './bot-item.vue'

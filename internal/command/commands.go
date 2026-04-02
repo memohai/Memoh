@@ -15,5 +15,6 @@ func (h *Handler) buildRegistry() *Registry {
 	r.RegisterGroup(h.buildHeartbeatGroup())
 	r.RegisterGroup(h.buildSkillGroup())
 	r.RegisterGroup(h.buildFSGroup())
+	r.RegisterGroup(h.buildStatusGroup())
 	return r
 }

@@ -17,6 +17,9 @@ const (
 	readTailBytes     = 1024
 	readHeadLines     = 120
 	readTailLines     = 40
+
+	listMaxEntries        = 200
+	listCollapseThreshold = 50
 )
 
 func pruneToolOutputText(text, label string) string {

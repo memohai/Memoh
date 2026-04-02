@@ -4395,6 +4395,63 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/status": {
+            "get": {
+                "description": "Get aggregated info for a chat session including message count, context usage, cache stats, and used skills",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Get session info",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional model UUID override for context window",
+                        "name": "model_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SessionInfoResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/settings": {
             "get": {
                 "description": "Get agent settings for current user",
@@ -10875,6 +10932,23 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.CacheStats": {
+            "type": "object",
+            "properties": {
+                "cache_hit_rate": {
+                    "type": "number"
+                },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "total_input_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.ChannelMeta": {
             "type": "object",
             "properties": {
@@ -10898,6 +10972,17 @@ const docTemplate = `{
                 },
                 "user_config_schema": {
                     "$ref": "#/definitions/channel.ConfigSchema"
+                }
+            }
+        },
+        "handlers.ContextUsage": {
+            "type": "object",
+            "properties": {
+                "context_window": {
+                    "type": "integer"
+                },
+                "used_tokens": {
+                    "type": "integer"
                 }
             }
         },
@@ -11356,6 +11441,26 @@ const docTemplate = `{
             "properties": {
                 "version": {
                     "type": "integer"
+                }
+            }
+        },
+        "handlers.SessionInfoResponse": {
+            "type": "object",
+            "properties": {
+                "cache_stats": {
+                    "$ref": "#/definitions/handlers.CacheStats"
+                },
+                "context_usage": {
+                    "$ref": "#/definitions/handlers.ContextUsage"
+                },
+                "message_count": {
+                    "type": "integer"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

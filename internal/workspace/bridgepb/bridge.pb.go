@@ -7,12 +7,11 @@
 package bridgepb
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -55,11 +54,11 @@ func (x ExecOutput_Stream) String() string {
 }
 
 func (ExecOutput_Stream) Descriptor() protoreflect.EnumDescriptor {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_enumTypes[0].Descriptor()
+	return file_internal_workspace_bridgepb_bridge_proto_enumTypes[0].Descriptor()
 }
 
 func (ExecOutput_Stream) Type() protoreflect.EnumType {
-	return &file_internal_mcp_mcpcontainer_mcpcontainer_proto_enumTypes[0]
+	return &file_internal_workspace_bridgepb_bridge_proto_enumTypes[0]
 }
 
 func (x ExecOutput_Stream) Number() protoreflect.EnumNumber {
@@ -68,7 +67,7 @@ func (x ExecOutput_Stream) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ExecOutput_Stream.Descriptor instead.
 func (ExecOutput_Stream) EnumDescriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{9, 0}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{9, 0}
 }
 
 type ReadFileRequest struct {
@@ -82,7 +81,7 @@ type ReadFileRequest struct {
 
 func (x *ReadFileRequest) Reset() {
 	*x = ReadFileRequest{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[0]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -94,7 +93,7 @@ func (x *ReadFileRequest) String() string {
 func (*ReadFileRequest) ProtoMessage() {}
 
 func (x *ReadFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[0]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -107,7 +106,7 @@ func (x *ReadFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadFileRequest.ProtoReflect.Descriptor instead.
 func (*ReadFileRequest) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{0}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ReadFileRequest) GetPath() string {
@@ -142,7 +141,7 @@ type ReadFileResponse struct {
 
 func (x *ReadFileResponse) Reset() {
 	*x = ReadFileResponse{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[1]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -154,7 +153,7 @@ func (x *ReadFileResponse) String() string {
 func (*ReadFileResponse) ProtoMessage() {}
 
 func (x *ReadFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[1]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -167,7 +166,7 @@ func (x *ReadFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadFileResponse.ProtoReflect.Descriptor instead.
 func (*ReadFileResponse) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{1}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ReadFileResponse) GetContent() string {
@@ -201,7 +200,7 @@ type WriteFileRequest struct {
 
 func (x *WriteFileRequest) Reset() {
 	*x = WriteFileRequest{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[2]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -213,7 +212,7 @@ func (x *WriteFileRequest) String() string {
 func (*WriteFileRequest) ProtoMessage() {}
 
 func (x *WriteFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[2]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -226,7 +225,7 @@ func (x *WriteFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileRequest.ProtoReflect.Descriptor instead.
 func (*WriteFileRequest) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{2}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *WriteFileRequest) GetPath() string {
@@ -251,7 +250,7 @@ type WriteFileResponse struct {
 
 func (x *WriteFileResponse) Reset() {
 	*x = WriteFileResponse{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[3]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -263,7 +262,7 @@ func (x *WriteFileResponse) String() string {
 func (*WriteFileResponse) ProtoMessage() {}
 
 func (x *WriteFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[3]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -276,20 +275,23 @@ func (x *WriteFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileResponse.ProtoReflect.Descriptor instead.
 func (*WriteFileResponse) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{3}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{3}
 }
 
 type ListDirRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Recursive     bool                   `protobuf:"varint,2,opt,name=recursive,proto3" json:"recursive,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Path              string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Recursive         bool                   `protobuf:"varint,2,opt,name=recursive,proto3" json:"recursive,omitempty"`
+	Offset            int32                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
+	Limit             int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	CollapseThreshold int32                  `protobuf:"varint,5,opt,name=collapse_threshold,json=collapseThreshold,proto3" json:"collapse_threshold,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ListDirRequest) Reset() {
 	*x = ListDirRequest{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[4]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -301,7 +303,7 @@ func (x *ListDirRequest) String() string {
 func (*ListDirRequest) ProtoMessage() {}
 
 func (x *ListDirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[4]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -314,7 +316,7 @@ func (x *ListDirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDirRequest.ProtoReflect.Descriptor instead.
 func (*ListDirRequest) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{4}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListDirRequest) GetPath() string {
@@ -331,6 +333,27 @@ func (x *ListDirRequest) GetRecursive() bool {
 	return false
 }
 
+func (x *ListDirRequest) GetOffset() int32 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *ListDirRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListDirRequest) GetCollapseThreshold() int32 {
+	if x != nil {
+		return x.CollapseThreshold
+	}
+	return 0
+}
+
 type FileEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
@@ -338,13 +361,14 @@ type FileEntry struct {
 	Size          int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
 	Mode          string                 `protobuf:"bytes,4,opt,name=mode,proto3" json:"mode,omitempty"`
 	ModTime       string                 `protobuf:"bytes,5,opt,name=mod_time,json=modTime,proto3" json:"mod_time,omitempty"`
+	Summary       string                 `protobuf:"bytes,6,opt,name=summary,proto3" json:"summary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileEntry) Reset() {
 	*x = FileEntry{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[5]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -356,7 +380,7 @@ func (x *FileEntry) String() string {
 func (*FileEntry) ProtoMessage() {}
 
 func (x *FileEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[5]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -369,7 +393,7 @@ func (x *FileEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileEntry.ProtoReflect.Descriptor instead.
 func (*FileEntry) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{5}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *FileEntry) GetPath() string {
@@ -407,16 +431,25 @@ func (x *FileEntry) GetModTime() string {
 	return ""
 }
 
+func (x *FileEntry) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
 type ListDirResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Entries       []*FileEntry           `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	TotalCount    int32                  `protobuf:"varint,2,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"`
+	Truncated     bool                   `protobuf:"varint,3,opt,name=truncated,proto3" json:"truncated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListDirResponse) Reset() {
 	*x = ListDirResponse{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[6]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -428,7 +461,7 @@ func (x *ListDirResponse) String() string {
 func (*ListDirResponse) ProtoMessage() {}
 
 func (x *ListDirResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[6]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -441,7 +474,7 @@ func (x *ListDirResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDirResponse.ProtoReflect.Descriptor instead.
 func (*ListDirResponse) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{6}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListDirResponse) GetEntries() []*FileEntry {
@@ -449,6 +482,20 @@ func (x *ListDirResponse) GetEntries() []*FileEntry {
 		return x.Entries
 	}
 	return nil
+}
+
+func (x *ListDirResponse) GetTotalCount() int32 {
+	if x != nil {
+		return x.TotalCount
+	}
+	return 0
+}
+
+func (x *ListDirResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
 }
 
 type ExecInput struct {
@@ -466,7 +513,7 @@ type ExecInput struct {
 
 func (x *ExecInput) Reset() {
 	*x = ExecInput{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[7]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -478,7 +525,7 @@ func (x *ExecInput) String() string {
 func (*ExecInput) ProtoMessage() {}
 
 func (x *ExecInput) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[7]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -491,7 +538,7 @@ func (x *ExecInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecInput.ProtoReflect.Descriptor instead.
 func (*ExecInput) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{7}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ExecInput) GetCommand() string {
@@ -553,7 +600,7 @@ type TerminalResize struct {
 
 func (x *TerminalResize) Reset() {
 	*x = TerminalResize{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[8]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -565,7 +612,7 @@ func (x *TerminalResize) String() string {
 func (*TerminalResize) ProtoMessage() {}
 
 func (x *TerminalResize) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[8]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -578,7 +625,7 @@ func (x *TerminalResize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalResize.ProtoReflect.Descriptor instead.
 func (*TerminalResize) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{8}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TerminalResize) GetCols() uint32 {
@@ -597,7 +644,7 @@ func (x *TerminalResize) GetRows() uint32 {
 
 type ExecOutput struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Stream        ExecOutput_Stream      `protobuf:"varint,1,opt,name=stream,proto3,enum=mcpcontainer.ExecOutput_Stream" json:"stream,omitempty"`
+	Stream        ExecOutput_Stream      `protobuf:"varint,1,opt,name=stream,proto3,enum=bridgepb.ExecOutput_Stream" json:"stream,omitempty"`
 	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
 	ExitCode      int32                  `protobuf:"varint,3,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -606,7 +653,7 @@ type ExecOutput struct {
 
 func (x *ExecOutput) Reset() {
 	*x = ExecOutput{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[9]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -618,7 +665,7 @@ func (x *ExecOutput) String() string {
 func (*ExecOutput) ProtoMessage() {}
 
 func (x *ExecOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[9]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -631,7 +678,7 @@ func (x *ExecOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecOutput.ProtoReflect.Descriptor instead.
 func (*ExecOutput) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{9}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ExecOutput) GetStream() ExecOutput_Stream {
@@ -664,7 +711,7 @@ type ReadRawRequest struct {
 
 func (x *ReadRawRequest) Reset() {
 	*x = ReadRawRequest{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[10]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -676,7 +723,7 @@ func (x *ReadRawRequest) String() string {
 func (*ReadRawRequest) ProtoMessage() {}
 
 func (x *ReadRawRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[10]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -689,7 +736,7 @@ func (x *ReadRawRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadRawRequest.ProtoReflect.Descriptor instead.
 func (*ReadRawRequest) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{10}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ReadRawRequest) GetPath() string {
@@ -708,7 +755,7 @@ type DataChunk struct {
 
 func (x *DataChunk) Reset() {
 	*x = DataChunk{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[11]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -720,7 +767,7 @@ func (x *DataChunk) String() string {
 func (*DataChunk) ProtoMessage() {}
 
 func (x *DataChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[11]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -733,7 +780,7 @@ func (x *DataChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DataChunk.ProtoReflect.Descriptor instead.
 func (*DataChunk) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{11}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DataChunk) GetData() []byte {
@@ -753,7 +800,7 @@ type WriteRawChunk struct {
 
 func (x *WriteRawChunk) Reset() {
 	*x = WriteRawChunk{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[12]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -765,7 +812,7 @@ func (x *WriteRawChunk) String() string {
 func (*WriteRawChunk) ProtoMessage() {}
 
 func (x *WriteRawChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[12]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -778,7 +825,7 @@ func (x *WriteRawChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteRawChunk.ProtoReflect.Descriptor instead.
 func (*WriteRawChunk) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{12}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *WriteRawChunk) GetPath() string {
@@ -804,7 +851,7 @@ type WriteRawResponse struct {
 
 func (x *WriteRawResponse) Reset() {
 	*x = WriteRawResponse{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[13]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -816,7 +863,7 @@ func (x *WriteRawResponse) String() string {
 func (*WriteRawResponse) ProtoMessage() {}
 
 func (x *WriteRawResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[13]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -829,7 +876,7 @@ func (x *WriteRawResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteRawResponse.ProtoReflect.Descriptor instead.
 func (*WriteRawResponse) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{13}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *WriteRawResponse) GetBytesWritten() int64 {
@@ -849,7 +896,7 @@ type DeleteFileRequest struct {
 
 func (x *DeleteFileRequest) Reset() {
 	*x = DeleteFileRequest{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[14]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -861,7 +908,7 @@ func (x *DeleteFileRequest) String() string {
 func (*DeleteFileRequest) ProtoMessage() {}
 
 func (x *DeleteFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[14]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -874,7 +921,7 @@ func (x *DeleteFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteFileRequest.ProtoReflect.Descriptor instead.
 func (*DeleteFileRequest) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{14}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeleteFileRequest) GetPath() string {
@@ -899,7 +946,7 @@ type DeleteFileResponse struct {
 
 func (x *DeleteFileResponse) Reset() {
 	*x = DeleteFileResponse{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[15]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -911,7 +958,7 @@ func (x *DeleteFileResponse) String() string {
 func (*DeleteFileResponse) ProtoMessage() {}
 
 func (x *DeleteFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[15]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -924,7 +971,7 @@ func (x *DeleteFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteFileResponse.ProtoReflect.Descriptor instead.
 func (*DeleteFileResponse) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{15}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{15}
 }
 
 type StatRequest struct {
@@ -936,7 +983,7 @@ type StatRequest struct {
 
 func (x *StatRequest) Reset() {
 	*x = StatRequest{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[16]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -948,7 +995,7 @@ func (x *StatRequest) String() string {
 func (*StatRequest) ProtoMessage() {}
 
 func (x *StatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[16]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -961,7 +1008,7 @@ func (x *StatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatRequest.ProtoReflect.Descriptor instead.
 func (*StatRequest) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{16}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *StatRequest) GetPath() string {
@@ -980,7 +1027,7 @@ type StatResponse struct {
 
 func (x *StatResponse) Reset() {
 	*x = StatResponse{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[17]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -992,7 +1039,7 @@ func (x *StatResponse) String() string {
 func (*StatResponse) ProtoMessage() {}
 
 func (x *StatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[17]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1005,7 +1052,7 @@ func (x *StatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatResponse.ProtoReflect.Descriptor instead.
 func (*StatResponse) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{17}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *StatResponse) GetEntry() *FileEntry {
@@ -1024,7 +1071,7 @@ type MkdirRequest struct {
 
 func (x *MkdirRequest) Reset() {
 	*x = MkdirRequest{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[18]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1036,7 +1083,7 @@ func (x *MkdirRequest) String() string {
 func (*MkdirRequest) ProtoMessage() {}
 
 func (x *MkdirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[18]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1049,7 +1096,7 @@ func (x *MkdirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MkdirRequest.ProtoReflect.Descriptor instead.
 func (*MkdirRequest) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{18}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *MkdirRequest) GetPath() string {
@@ -1067,7 +1114,7 @@ type MkdirResponse struct {
 
 func (x *MkdirResponse) Reset() {
 	*x = MkdirResponse{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[19]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1079,7 +1126,7 @@ func (x *MkdirResponse) String() string {
 func (*MkdirResponse) ProtoMessage() {}
 
 func (x *MkdirResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[19]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1092,7 +1139,7 @@ func (x *MkdirResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MkdirResponse.ProtoReflect.Descriptor instead.
 func (*MkdirResponse) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{19}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{19}
 }
 
 type RenameRequest struct {
@@ -1105,7 +1152,7 @@ type RenameRequest struct {
 
 func (x *RenameRequest) Reset() {
 	*x = RenameRequest{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[20]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1117,7 +1164,7 @@ func (x *RenameRequest) String() string {
 func (*RenameRequest) ProtoMessage() {}
 
 func (x *RenameRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[20]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1130,7 +1177,7 @@ func (x *RenameRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenameRequest.ProtoReflect.Descriptor instead.
 func (*RenameRequest) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{20}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RenameRequest) GetOldPath() string {
@@ -1155,7 +1202,7 @@ type RenameResponse struct {
 
 func (x *RenameResponse) Reset() {
 	*x = RenameResponse{}
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[21]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1167,7 +1214,7 @@ func (x *RenameResponse) String() string {
 func (*RenameResponse) ProtoMessage() {}
 
 func (x *RenameResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes[21]
+	mi := &file_internal_workspace_bridgepb_bridge_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1180,14 +1227,14 @@ func (x *RenameResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenameResponse.ProtoReflect.Descriptor instead.
 func (*RenameResponse) Descriptor() ([]byte, []int) {
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP(), []int{21}
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP(), []int{21}
 }
 
-var File_internal_mcp_mcpcontainer_mcpcontainer_proto protoreflect.FileDescriptor
+var File_internal_workspace_bridgepb_bridge_proto protoreflect.FileDescriptor
 
-const file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDesc = "" +
+const file_internal_workspace_bridgepb_bridge_proto_rawDesc = "" +
 	"\n" +
-	",internal/mcp/mcpcontainer/mcpcontainer.proto\x12\fmcpcontainer\"_\n" +
+	"(internal/workspace/bridgepb/bridge.proto\x12\bbridgepb\"_\n" +
 	"\x0fReadFileRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1f\n" +
 	"\vline_offset\x18\x02 \x01(\x05R\n" +
@@ -1201,18 +1248,25 @@ const file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDesc = "" +
 	"\x10WriteFileRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\fR\acontent\"\x13\n" +
-	"\x11WriteFileResponse\"B\n" +
+	"\x11WriteFileResponse\"\x9f\x01\n" +
 	"\x0eListDirRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1c\n" +
-	"\trecursive\x18\x02 \x01(\bR\trecursive\"y\n" +
+	"\trecursive\x18\x02 \x01(\bR\trecursive\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\x05R\x06offset\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12-\n" +
+	"\x12collapse_threshold\x18\x05 \x01(\x05R\x11collapseThreshold\"\x93\x01\n" +
 	"\tFileEntry\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x15\n" +
 	"\x06is_dir\x18\x02 \x01(\bR\x05isDir\x12\x12\n" +
 	"\x04size\x18\x03 \x01(\x03R\x04size\x12\x12\n" +
 	"\x04mode\x18\x04 \x01(\tR\x04mode\x12\x19\n" +
-	"\bmod_time\x18\x05 \x01(\tR\amodTime\"D\n" +
-	"\x0fListDirResponse\x121\n" +
-	"\aentries\x18\x01 \x03(\v2\x17.mcpcontainer.FileEntryR\aentries\"\xe2\x01\n" +
+	"\bmod_time\x18\x05 \x01(\tR\amodTime\x12\x18\n" +
+	"\asummary\x18\x06 \x01(\tR\asummary\"\x7f\n" +
+	"\x0fListDirResponse\x12-\n" +
+	"\aentries\x18\x01 \x03(\v2\x13.bridgepb.FileEntryR\aentries\x12\x1f\n" +
+	"\vtotal_count\x18\x02 \x01(\x05R\n" +
+	"totalCount\x12\x1c\n" +
+	"\ttruncated\x18\x03 \x01(\bR\ttruncated\"\xde\x01\n" +
 	"\tExecInput\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\bwork_dir\x18\x02 \x01(\tR\aworkDir\x12\x10\n" +
@@ -1220,14 +1274,14 @@ const file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDesc = "" +
 	"\x0ftimeout_seconds\x18\x04 \x01(\x05R\x0etimeoutSeconds\x12\x1d\n" +
 	"\n" +
 	"stdin_data\x18\x05 \x01(\fR\tstdinData\x12\x10\n" +
-	"\x03pty\x18\x06 \x01(\bR\x03pty\x124\n" +
-	"\x06resize\x18\a \x01(\v2\x1c.mcpcontainer.TerminalResizeR\x06resize\"8\n" +
+	"\x03pty\x18\x06 \x01(\bR\x03pty\x120\n" +
+	"\x06resize\x18\a \x01(\v2\x18.bridgepb.TerminalResizeR\x06resize\"8\n" +
 	"\x0eTerminalResize\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\x02 \x01(\rR\x04rows\"\xa2\x01\n" +
+	"\x04rows\x18\x02 \x01(\rR\x04rows\"\x9e\x01\n" +
 	"\n" +
-	"ExecOutput\x127\n" +
-	"\x06stream\x18\x01 \x01(\x0e2\x1f.mcpcontainer.ExecOutput.StreamR\x06stream\x12\x12\n" +
+	"ExecOutput\x123\n" +
+	"\x06stream\x18\x01 \x01(\x0e2\x1b.bridgepb.ExecOutput.StreamR\x06stream\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1b\n" +
 	"\texit_code\x18\x03 \x01(\x05R\bexitCode\"*\n" +
 	"\x06Stream\x12\n" +
@@ -1250,93 +1304,93 @@ const file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDesc = "" +
 	"\trecursive\x18\x02 \x01(\bR\trecursive\"\x14\n" +
 	"\x12DeleteFileResponse\"!\n" +
 	"\vStatRequest\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"=\n" +
-	"\fStatResponse\x12-\n" +
-	"\x05entry\x18\x01 \x01(\v2\x17.mcpcontainer.FileEntryR\x05entry\"\"\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"9\n" +
+	"\fStatResponse\x12)\n" +
+	"\x05entry\x18\x01 \x01(\v2\x13.bridgepb.FileEntryR\x05entry\"\"\n" +
 	"\fMkdirRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"\x0f\n" +
 	"\rMkdirResponse\"E\n" +
 	"\rRenameRequest\x12\x19\n" +
 	"\bold_path\x18\x01 \x01(\tR\aoldPath\x12\x19\n" +
 	"\bnew_path\x18\x02 \x01(\tR\anewPath\"\x10\n" +
-	"\x0eRenameResponse2\xd8\x05\n" +
-	"\x10ContainerService\x12I\n" +
-	"\bReadFile\x12\x1d.mcpcontainer.ReadFileRequest\x1a\x1e.mcpcontainer.ReadFileResponse\x12L\n" +
-	"\tWriteFile\x12\x1e.mcpcontainer.WriteFileRequest\x1a\x1f.mcpcontainer.WriteFileResponse\x12F\n" +
-	"\aListDir\x12\x1c.mcpcontainer.ListDirRequest\x1a\x1d.mcpcontainer.ListDirResponse\x12=\n" +
-	"\x04Stat\x12\x19.mcpcontainer.StatRequest\x1a\x1a.mcpcontainer.StatResponse\x12@\n" +
-	"\x05Mkdir\x12\x1a.mcpcontainer.MkdirRequest\x1a\x1b.mcpcontainer.MkdirResponse\x12C\n" +
-	"\x06Rename\x12\x1b.mcpcontainer.RenameRequest\x1a\x1c.mcpcontainer.RenameResponse\x12=\n" +
-	"\x04Exec\x12\x17.mcpcontainer.ExecInput\x1a\x18.mcpcontainer.ExecOutput(\x010\x01\x12B\n" +
-	"\aReadRaw\x12\x1c.mcpcontainer.ReadRawRequest\x1a\x17.mcpcontainer.DataChunk0\x01\x12I\n" +
-	"\bWriteRaw\x12\x1b.mcpcontainer.WriteRawChunk\x1a\x1e.mcpcontainer.WriteRawResponse(\x01\x12O\n" +
+	"\x0eRenameResponse2\x88\x05\n" +
+	"\x10ContainerService\x12A\n" +
+	"\bReadFile\x12\x19.bridgepb.ReadFileRequest\x1a\x1a.bridgepb.ReadFileResponse\x12D\n" +
+	"\tWriteFile\x12\x1a.bridgepb.WriteFileRequest\x1a\x1b.bridgepb.WriteFileResponse\x12>\n" +
+	"\aListDir\x12\x18.bridgepb.ListDirRequest\x1a\x19.bridgepb.ListDirResponse\x125\n" +
+	"\x04Stat\x12\x15.bridgepb.StatRequest\x1a\x16.bridgepb.StatResponse\x128\n" +
+	"\x05Mkdir\x12\x16.bridgepb.MkdirRequest\x1a\x17.bridgepb.MkdirResponse\x12;\n" +
+	"\x06Rename\x12\x17.bridgepb.RenameRequest\x1a\x18.bridgepb.RenameResponse\x125\n" +
+	"\x04Exec\x12\x13.bridgepb.ExecInput\x1a\x14.bridgepb.ExecOutput(\x010\x01\x12:\n" +
+	"\aReadRaw\x12\x18.bridgepb.ReadRawRequest\x1a\x13.bridgepb.DataChunk0\x01\x12A\n" +
+	"\bWriteRaw\x12\x17.bridgepb.WriteRawChunk\x1a\x1a.bridgepb.WriteRawResponse(\x01\x12G\n" +
 	"\n" +
-	"DeleteFile\x12\x1f.mcpcontainer.DeleteFileRequest\x1a .mcpcontainer.DeleteFileResponseB4Z2github.com/memohai/memoh/internal/mcp/mcpcontainerb\x06proto3"
+	"DeleteFile\x12\x1b.bridgepb.DeleteFileRequest\x1a\x1c.bridgepb.DeleteFileResponseB6Z4github.com/memohai/memoh/internal/workspace/bridgepbb\x06proto3"
 
 var (
-	file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescOnce sync.Once
-	file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescData []byte
+	file_internal_workspace_bridgepb_bridge_proto_rawDescOnce sync.Once
+	file_internal_workspace_bridgepb_bridge_proto_rawDescData []byte
 )
 
-func file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescGZIP() []byte {
-	file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescOnce.Do(func() {
-		file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDesc), len(file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDesc)))
+func file_internal_workspace_bridgepb_bridge_proto_rawDescGZIP() []byte {
+	file_internal_workspace_bridgepb_bridge_proto_rawDescOnce.Do(func() {
+		file_internal_workspace_bridgepb_bridge_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_workspace_bridgepb_bridge_proto_rawDesc), len(file_internal_workspace_bridgepb_bridge_proto_rawDesc)))
 	})
-	return file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDescData
+	return file_internal_workspace_bridgepb_bridge_proto_rawDescData
 }
 
-var file_internal_mcp_mcpcontainer_mcpcontainer_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
-var file_internal_mcp_mcpcontainer_mcpcontainer_proto_goTypes = []any{
-	(ExecOutput_Stream)(0),     // 0: mcpcontainer.ExecOutput.Stream
-	(*ReadFileRequest)(nil),    // 1: mcpcontainer.ReadFileRequest
-	(*ReadFileResponse)(nil),   // 2: mcpcontainer.ReadFileResponse
-	(*WriteFileRequest)(nil),   // 3: mcpcontainer.WriteFileRequest
-	(*WriteFileResponse)(nil),  // 4: mcpcontainer.WriteFileResponse
-	(*ListDirRequest)(nil),     // 5: mcpcontainer.ListDirRequest
-	(*FileEntry)(nil),          // 6: mcpcontainer.FileEntry
-	(*ListDirResponse)(nil),    // 7: mcpcontainer.ListDirResponse
-	(*ExecInput)(nil),          // 8: mcpcontainer.ExecInput
-	(*TerminalResize)(nil),     // 9: mcpcontainer.TerminalResize
-	(*ExecOutput)(nil),         // 10: mcpcontainer.ExecOutput
-	(*ReadRawRequest)(nil),     // 11: mcpcontainer.ReadRawRequest
-	(*DataChunk)(nil),          // 12: mcpcontainer.DataChunk
-	(*WriteRawChunk)(nil),      // 13: mcpcontainer.WriteRawChunk
-	(*WriteRawResponse)(nil),   // 14: mcpcontainer.WriteRawResponse
-	(*DeleteFileRequest)(nil),  // 15: mcpcontainer.DeleteFileRequest
-	(*DeleteFileResponse)(nil), // 16: mcpcontainer.DeleteFileResponse
-	(*StatRequest)(nil),        // 17: mcpcontainer.StatRequest
-	(*StatResponse)(nil),       // 18: mcpcontainer.StatResponse
-	(*MkdirRequest)(nil),       // 19: mcpcontainer.MkdirRequest
-	(*MkdirResponse)(nil),      // 20: mcpcontainer.MkdirResponse
-	(*RenameRequest)(nil),      // 21: mcpcontainer.RenameRequest
-	(*RenameResponse)(nil),     // 22: mcpcontainer.RenameResponse
+var file_internal_workspace_bridgepb_bridge_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_internal_workspace_bridgepb_bridge_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_internal_workspace_bridgepb_bridge_proto_goTypes = []any{
+	(ExecOutput_Stream)(0),     // 0: bridgepb.ExecOutput.Stream
+	(*ReadFileRequest)(nil),    // 1: bridgepb.ReadFileRequest
+	(*ReadFileResponse)(nil),   // 2: bridgepb.ReadFileResponse
+	(*WriteFileRequest)(nil),   // 3: bridgepb.WriteFileRequest
+	(*WriteFileResponse)(nil),  // 4: bridgepb.WriteFileResponse
+	(*ListDirRequest)(nil),     // 5: bridgepb.ListDirRequest
+	(*FileEntry)(nil),          // 6: bridgepb.FileEntry
+	(*ListDirResponse)(nil),    // 7: bridgepb.ListDirResponse
+	(*ExecInput)(nil),          // 8: bridgepb.ExecInput
+	(*TerminalResize)(nil),     // 9: bridgepb.TerminalResize
+	(*ExecOutput)(nil),         // 10: bridgepb.ExecOutput
+	(*ReadRawRequest)(nil),     // 11: bridgepb.ReadRawRequest
+	(*DataChunk)(nil),          // 12: bridgepb.DataChunk
+	(*WriteRawChunk)(nil),      // 13: bridgepb.WriteRawChunk
+	(*WriteRawResponse)(nil),   // 14: bridgepb.WriteRawResponse
+	(*DeleteFileRequest)(nil),  // 15: bridgepb.DeleteFileRequest
+	(*DeleteFileResponse)(nil), // 16: bridgepb.DeleteFileResponse
+	(*StatRequest)(nil),        // 17: bridgepb.StatRequest
+	(*StatResponse)(nil),       // 18: bridgepb.StatResponse
+	(*MkdirRequest)(nil),       // 19: bridgepb.MkdirRequest
+	(*MkdirResponse)(nil),      // 20: bridgepb.MkdirResponse
+	(*RenameRequest)(nil),      // 21: bridgepb.RenameRequest
+	(*RenameResponse)(nil),     // 22: bridgepb.RenameResponse
 }
-var file_internal_mcp_mcpcontainer_mcpcontainer_proto_depIdxs = []int32{
-	6,  // 0: mcpcontainer.ListDirResponse.entries:type_name -> mcpcontainer.FileEntry
-	9,  // 1: mcpcontainer.ExecInput.resize:type_name -> mcpcontainer.TerminalResize
-	0,  // 2: mcpcontainer.ExecOutput.stream:type_name -> mcpcontainer.ExecOutput.Stream
-	6,  // 3: mcpcontainer.StatResponse.entry:type_name -> mcpcontainer.FileEntry
-	1,  // 4: mcpcontainer.ContainerService.ReadFile:input_type -> mcpcontainer.ReadFileRequest
-	3,  // 5: mcpcontainer.ContainerService.WriteFile:input_type -> mcpcontainer.WriteFileRequest
-	5,  // 6: mcpcontainer.ContainerService.ListDir:input_type -> mcpcontainer.ListDirRequest
-	17, // 7: mcpcontainer.ContainerService.Stat:input_type -> mcpcontainer.StatRequest
-	19, // 8: mcpcontainer.ContainerService.Mkdir:input_type -> mcpcontainer.MkdirRequest
-	21, // 9: mcpcontainer.ContainerService.Rename:input_type -> mcpcontainer.RenameRequest
-	8,  // 10: mcpcontainer.ContainerService.Exec:input_type -> mcpcontainer.ExecInput
-	11, // 11: mcpcontainer.ContainerService.ReadRaw:input_type -> mcpcontainer.ReadRawRequest
-	13, // 12: mcpcontainer.ContainerService.WriteRaw:input_type -> mcpcontainer.WriteRawChunk
-	15, // 13: mcpcontainer.ContainerService.DeleteFile:input_type -> mcpcontainer.DeleteFileRequest
-	2,  // 14: mcpcontainer.ContainerService.ReadFile:output_type -> mcpcontainer.ReadFileResponse
-	4,  // 15: mcpcontainer.ContainerService.WriteFile:output_type -> mcpcontainer.WriteFileResponse
-	7,  // 16: mcpcontainer.ContainerService.ListDir:output_type -> mcpcontainer.ListDirResponse
-	18, // 17: mcpcontainer.ContainerService.Stat:output_type -> mcpcontainer.StatResponse
-	20, // 18: mcpcontainer.ContainerService.Mkdir:output_type -> mcpcontainer.MkdirResponse
-	22, // 19: mcpcontainer.ContainerService.Rename:output_type -> mcpcontainer.RenameResponse
-	10, // 20: mcpcontainer.ContainerService.Exec:output_type -> mcpcontainer.ExecOutput
-	12, // 21: mcpcontainer.ContainerService.ReadRaw:output_type -> mcpcontainer.DataChunk
-	14, // 22: mcpcontainer.ContainerService.WriteRaw:output_type -> mcpcontainer.WriteRawResponse
-	16, // 23: mcpcontainer.ContainerService.DeleteFile:output_type -> mcpcontainer.DeleteFileResponse
+var file_internal_workspace_bridgepb_bridge_proto_depIdxs = []int32{
+	6,  // 0: bridgepb.ListDirResponse.entries:type_name -> bridgepb.FileEntry
+	9,  // 1: bridgepb.ExecInput.resize:type_name -> bridgepb.TerminalResize
+	0,  // 2: bridgepb.ExecOutput.stream:type_name -> bridgepb.ExecOutput.Stream
+	6,  // 3: bridgepb.StatResponse.entry:type_name -> bridgepb.FileEntry
+	1,  // 4: bridgepb.ContainerService.ReadFile:input_type -> bridgepb.ReadFileRequest
+	3,  // 5: bridgepb.ContainerService.WriteFile:input_type -> bridgepb.WriteFileRequest
+	5,  // 6: bridgepb.ContainerService.ListDir:input_type -> bridgepb.ListDirRequest
+	17, // 7: bridgepb.ContainerService.Stat:input_type -> bridgepb.StatRequest
+	19, // 8: bridgepb.ContainerService.Mkdir:input_type -> bridgepb.MkdirRequest
+	21, // 9: bridgepb.ContainerService.Rename:input_type -> bridgepb.RenameRequest
+	8,  // 10: bridgepb.ContainerService.Exec:input_type -> bridgepb.ExecInput
+	11, // 11: bridgepb.ContainerService.ReadRaw:input_type -> bridgepb.ReadRawRequest
+	13, // 12: bridgepb.ContainerService.WriteRaw:input_type -> bridgepb.WriteRawChunk
+	15, // 13: bridgepb.ContainerService.DeleteFile:input_type -> bridgepb.DeleteFileRequest
+	2,  // 14: bridgepb.ContainerService.ReadFile:output_type -> bridgepb.ReadFileResponse
+	4,  // 15: bridgepb.ContainerService.WriteFile:output_type -> bridgepb.WriteFileResponse
+	7,  // 16: bridgepb.ContainerService.ListDir:output_type -> bridgepb.ListDirResponse
+	18, // 17: bridgepb.ContainerService.Stat:output_type -> bridgepb.StatResponse
+	20, // 18: bridgepb.ContainerService.Mkdir:output_type -> bridgepb.MkdirResponse
+	22, // 19: bridgepb.ContainerService.Rename:output_type -> bridgepb.RenameResponse
+	10, // 20: bridgepb.ContainerService.Exec:output_type -> bridgepb.ExecOutput
+	12, // 21: bridgepb.ContainerService.ReadRaw:output_type -> bridgepb.DataChunk
+	14, // 22: bridgepb.ContainerService.WriteRaw:output_type -> bridgepb.WriteRawResponse
+	16, // 23: bridgepb.ContainerService.DeleteFile:output_type -> bridgepb.DeleteFileResponse
 	14, // [14:24] is the sub-list for method output_type
 	4,  // [4:14] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
@@ -1344,27 +1398,27 @@ var file_internal_mcp_mcpcontainer_mcpcontainer_proto_depIdxs = []int32{
 	0,  // [0:4] is the sub-list for field type_name
 }
 
-func init() { file_internal_mcp_mcpcontainer_mcpcontainer_proto_init() }
-func file_internal_mcp_mcpcontainer_mcpcontainer_proto_init() {
-	if File_internal_mcp_mcpcontainer_mcpcontainer_proto != nil {
+func init() { file_internal_workspace_bridgepb_bridge_proto_init() }
+func file_internal_workspace_bridgepb_bridge_proto_init() {
+	if File_internal_workspace_bridgepb_bridge_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDesc), len(file_internal_mcp_mcpcontainer_mcpcontainer_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_workspace_bridgepb_bridge_proto_rawDesc), len(file_internal_workspace_bridgepb_bridge_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_internal_mcp_mcpcontainer_mcpcontainer_proto_goTypes,
-		DependencyIndexes: file_internal_mcp_mcpcontainer_mcpcontainer_proto_depIdxs,
-		EnumInfos:         file_internal_mcp_mcpcontainer_mcpcontainer_proto_enumTypes,
-		MessageInfos:      file_internal_mcp_mcpcontainer_mcpcontainer_proto_msgTypes,
+		GoTypes:           file_internal_workspace_bridgepb_bridge_proto_goTypes,
+		DependencyIndexes: file_internal_workspace_bridgepb_bridge_proto_depIdxs,
+		EnumInfos:         file_internal_workspace_bridgepb_bridge_proto_enumTypes,
+		MessageInfos:      file_internal_workspace_bridgepb_bridge_proto_msgTypes,
 	}.Build()
-	File_internal_mcp_mcpcontainer_mcpcontainer_proto = out.File
-	file_internal_mcp_mcpcontainer_mcpcontainer_proto_goTypes = nil
-	file_internal_mcp_mcpcontainer_mcpcontainer_proto_depIdxs = nil
+	File_internal_workspace_bridgepb_bridge_proto = out.File
+	file_internal_workspace_bridgepb_bridge_proto_goTypes = nil
+	file_internal_workspace_bridgepb_bridge_proto_depIdxs = nil
 }

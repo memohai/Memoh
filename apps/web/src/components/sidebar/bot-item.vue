@@ -6,6 +6,7 @@
     <button
       :class="[
         'group/bot flex items-center gap-2.5 w-full h-[38px] px-2.5 rounded-lg transition-colors',
+        'group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0',
         isActive
           ? 'bg-background'
           : bot.status === 'error'
@@ -15,7 +16,7 @@
       :disabled="bot.status === 'error'"
       @click="handleSelect"
     >
-      <div class="size-[26px] shrink-0 rounded-full border border-border bg-accent overflow-hidden p-px">
+      <div class="size-[26px] shrink-0 rounded-full border border-border bg-accent overflow-hidden p-px group-data-[collapsible=icon]:mx-auto">
         <img
           v-if="bot.avatar_url"
           :src="bot.avatar_url"
@@ -29,42 +30,44 @@
           {{ avatarFallback }}
         </span>
       </div>
-      <span class="truncate text-xs font-medium text-foreground leading-[18px] flex-1 text-left">
+      <span class="truncate text-xs font-medium text-foreground leading-[18px] flex-1 text-left group-data-[collapsible=icon]:hidden">
         {{ bot.display_name || bot.id }}
       </span>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          as-child
-          @click.stop
-        >
-          <span
-            class="shrink-0 size-6 flex items-center justify-center rounded text-muted-foreground opacity-0 group-hover/bot:opacity-100 hover:text-foreground hover:bg-accent transition-opacity"
+      <div class="group-data-[collapsible=icon]:hidden">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            as-child
+            @click.stop
           >
-            <Ellipsis
-              class="size-3"
-            />
-          </span>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="start"
-          side="bottom"
-          @click.stop
-        >
-          <DropdownMenuItem @click.stop="handleTogglePin">
-            <Pin
-              class="size-3 mr-2"
-            />
-            {{ pinned ? $t('common.unpin') : $t('common.pin') }}
-          </DropdownMenuItem>
-          <DropdownMenuItem @click.stop="handleDetails">
-            <Settings
-              class="size-3 mr-2"
-            />
-            {{ $t('common.details') }}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <span
+              class="shrink-0 size-6 flex items-center justify-center rounded text-muted-foreground opacity-0 group-hover/bot:opacity-100 hover:text-foreground hover:bg-accent transition-opacity"
+            >
+              <Ellipsis
+                class="size-3"
+              />
+            </span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            side="bottom"
+            @click.stop
+          >
+            <DropdownMenuItem @click.stop="handleTogglePin">
+              <Pin
+                class="size-3 mr-2"
+              />
+              {{ pinned ? $t('common.unpin') : $t('common.pin') }}
+            </DropdownMenuItem>
+            <DropdownMenuItem @click.stop="handleDetails">
+              <Settings
+                class="size-3 mr-2"
+              />
+              {{ $t('common.details') }}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </button>
   </SidebarMenuButton>
 </template>

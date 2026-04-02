@@ -205,7 +205,7 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
 	}
 
-	entries, err := client.ListDir(ctx, containerPath, false)
+	entries, err := client.ListDirAll(ctx, containerPath, false)
 	if err != nil {
 		return fsHTTPError(err)
 	}
