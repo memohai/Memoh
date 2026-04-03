@@ -1,0 +1,186 @@
+<template>
+  <section class="max-w-7xl mx-auto p-4 pb-12">
+    <div class="max-w-3xl mx-auto space-y-6">
+      <!-- Header: Logo + Version + Check Button -->
+      <div class="flex items-center gap-3">
+        <img
+          src="/logo.png"
+          alt="Memoh"
+          class="size-10 shrink-0 rounded-lg"
+        >
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-semibold">
+            Memoh
+          </p>
+          <div class="flex items-center gap-2 mt-0.5">
+            <Badge
+              v-if="serverVersion"
+              variant="secondary"
+            >
+              {{ $t('settings.versionTag', { version: serverVersion }) }}
+            </Badge>
+            <Badge
+              v-if="commitHash"
+              variant="outline"
+            >
+              {{ commitHash }}
+            </Badge>
+          </div>
+        </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          :disabled="checking"
+          @click="checkForUpdates"
+        >
+          <Spinner
+            v-if="checking"
+            class="size-3"
+          />
+          <RefreshCw
+            v-else
+            class="size-3"
+          />
+          {{ checking ? $t('about.checking') : $t('about.checkForUpdates') }}
+        </Button>
+      </div>
+
+      <!-- Update Result -->
+      <template v-if="checkResult">
+        <div
+          v-if="checkResult.isUpToDate"
+          class="flex items-center gap-2 text-xs text-muted-foreground"
+        >
+          <CircleCheck class="size-3.5 text-green-500" />
+          {{ $t('about.upToDate') }}
+        </div>
+
+        <template v-else>
+          <Separator />
+
+          <div class="flex items-center gap-2">
+            <Badge class="bg-[#8B56E3] text-white hover:bg-[#8B56E3]/90">
+              {{ $t('about.newVersionAvailable', { version: checkResult.latestVersion }) }}
+            </Badge>
+          </div>
+
+          <div
+            v-if="checkResult.body"
+            class="space-y-2"
+          >
+            <h4 class="text-xs font-medium text-muted-foreground">
+              {{ $t('about.releaseNotes') }}
+            </h4>
+            <div class="prose prose-xs dark:prose-invert max-w-none *:first:mt-0 text-[0.8rem] leading-relaxed">
+              <MarkdownRender
+                :content="checkResult.body"
+                :is-dark="isDark"
+                :typewriter="false"
+                custom-id="release-notes"
+              />
+            </div>
+          </div>
+        </template>
+      </template>
+
+      <!-- External Links -->
+      <section>
+        <Separator class="mb-4" />
+        <div class="space-y-1">
+          <a
+            href="https://github.com/memohai/memoh"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-foreground hover:bg-accent transition-colors"
+          >
+            <Github class="size-4 text-muted-foreground" />
+            {{ $t('about.github') }}
+            <ExternalLink class="size-3 ml-auto text-muted-foreground" />
+          </a>
+          <a
+            href="https://docs.memoh.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-foreground hover:bg-accent transition-colors"
+          >
+            <BookOpen class="size-4 text-muted-foreground" />
+            {{ $t('about.docs') }}
+            <ExternalLink class="size-3 ml-auto text-muted-foreground" />
+          </a>
+          <a
+            href="https://github.com/memohai/memoh/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-foreground hover:bg-accent transition-colors"
+          >
+            <MessageSquare class="size-4 text-muted-foreground" />
+            {{ $t('about.feedback') }}
+            <ExternalLink class="size-3 ml-auto text-muted-foreground" />
+          </a>
+        </div>
+      </section>
+    </div>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
+import { RefreshCw, ExternalLink, Github, BookOpen, MessageSquare, CircleCheck } from 'lucide-vue-next'
+import { Badge, Button, Separator, Spinner } from '@memohai/ui'
+import MarkdownRender from 'markstream-vue'
+import { useCapabilitiesStore } from '@/store/capabilities'
+import { useSettingsStore } from '@/store/settings'
+
+const GITHUB_REPO = 'memohai/memoh'
+
+interface CheckResult {
+  isUpToDate: boolean
+  latestVersion: string
+  body: string
+  htmlUrl: string
+}
+
+const { t } = useI18n()
+
+const capabilitiesStore = useCapabilitiesStore()
+const { serverVersion, commitHash } = storeToRefs(capabilitiesStore)
+
+const settingsStore = useSettingsStore()
+const isDark = computed(() => settingsStore.theme === 'dark')
+
+const checking = ref(false)
+const checkResult = ref<CheckResult | null>(null)
+
+onMounted(async () => {
+  await capabilitiesStore.load()
+  await checkForUpdates()
+})
+
+async function checkForUpdates() {
+  checking.value = true
+  checkResult.value = null
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+
+    const tagName: string = data.tag_name ?? ''
+    const latestVersion = tagName.replace(/^v/, '')
+    const currentVersion = (serverVersion.value ?? '').replace(/^v/, '')
+
+    checkResult.value = {
+      isUpToDate: latestVersion === currentVersion,
+      latestVersion,
+      body: data.body ?? '',
+      htmlUrl: data.html_url ?? `https://github.com/${GITHUB_REPO}/releases/latest`,
+    }
+  } catch {
+    toast.error(t('about.checkFailed'))
+  } finally {
+    checking.value = false
+  }
+}
+</script>

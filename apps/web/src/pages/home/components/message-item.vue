@@ -117,6 +117,7 @@
               <MarkdownRender
                 :content="block.content"
                 :is-dark="isDark"
+                :typewriter="message.streaming"
                 custom-id="chat-msg"
               />
             </div>
@@ -205,6 +206,7 @@
             <MarkdownRender
               :content="block.content"
               :is-dark="isDark"
+              :typewriter="message.streaming"
               custom-id="chat-msg"
             />
           </div>

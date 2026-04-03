@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	stdpath "path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -82,6 +83,8 @@ import (
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
+	"github.com/memohai/memoh/internal/storage/providers/fallback"
+	"github.com/memohai/memoh/internal/storage/providers/localfs"
 	ttspkg "github.com/memohai/memoh/internal/tts"
 	ttsedge "github.com/memohai/memoh/internal/tts/adapter/edge"
 	"github.com/memohai/memoh/internal/version"
@@ -454,6 +457,7 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
+	processor.SetDispatcher(inbound.NewRouteDispatcher(log))
 	processor.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
 	processor.SetCommandHandler(command.NewHandler(
 		log,
@@ -543,6 +547,7 @@ func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *c
 		agenttools.NewSkillProvider(log),
 		agenttools.NewBrowserProvider(log, settingsService, browserContextService, manager, cfg.BrowserGateway),
 		agenttools.NewTTSProvider(log, settingsService, ttsService, channelManager, registry),
+		agenttools.NewImageGenProvider(log, settingsService, modelsService, queries, manager, config.DefaultDataMount),
 		agenttools.NewFederationProvider(log, fedSource),
 		agenttools.NewHistoryProvider(log, sessionService, queries),
 	}
@@ -577,8 +582,14 @@ func (h *memohAuthHandler) Register(e *echo.Echo) {
 	e.POST("/api/auth/refresh", h.inner.Refresh)
 }
 
-func provideMediaService(log *slog.Logger, manager *workspace.Manager) *media.Service {
-	provider := containerfs.New(manager)
+func provideMediaService(log *slog.Logger, manager *workspace.Manager, cfg config.Config) *media.Service {
+	primary := containerfs.New(manager)
+	dataRoot := cfg.Workspace.DataRoot
+	if dataRoot == "" {
+		dataRoot = config.DefaultDataRoot
+	}
+	secondary := localfs.New(filepath.Join(dataRoot, "media"))
+	provider := fallback.New(primary, secondary)
 	return media.NewService(log, provider)
 }
 

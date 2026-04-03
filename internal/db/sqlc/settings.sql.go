@@ -26,6 +26,7 @@ SET language = 'auto',
     heartbeat_model_id = NULL,
     compaction_model_id = NULL,
     title_model_id = NULL,
+    image_model_id = NULL,
     search_provider_id = NULL,
     memory_provider_id = NULL,
     tts_model_id = NULL,
@@ -57,6 +58,7 @@ SELECT
   title_models.id AS title_model_id,
   search_providers.id AS search_provider_id,
   memory_providers.id AS memory_provider_id,
+  image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
   browser_contexts.id AS browser_context_id
 FROM bots
@@ -64,6 +66,7 @@ LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id
 LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id
 LEFT JOIN models AS title_models ON title_models.id = bots.title_model_id
+LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
 LEFT JOIN tts_models ON tts_models.id = bots.tts_model_id
@@ -88,6 +91,7 @@ type GetSettingsByBotIDRow struct {
 	TitleModelID        pgtype.UUID `json:"title_model_id"`
 	SearchProviderID    pgtype.UUID `json:"search_provider_id"`
 	MemoryProviderID    pgtype.UUID `json:"memory_provider_id"`
+	ImageModelID        pgtype.UUID `json:"image_model_id"`
 	TtsModelID          pgtype.UUID `json:"tts_model_id"`
 	BrowserContextID    pgtype.UUID `json:"browser_context_id"`
 }
@@ -112,6 +116,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.TitleModelID,
 		&i.SearchProviderID,
 		&i.MemoryProviderID,
+		&i.ImageModelID,
 		&i.TtsModelID,
 		&i.BrowserContextID,
 	)
@@ -136,11 +141,12 @@ WITH updated AS (
       title_model_id = COALESCE($13::uuid, bots.title_model_id),
       search_provider_id = COALESCE($14::uuid, bots.search_provider_id),
       memory_provider_id = COALESCE($15::uuid, bots.memory_provider_id),
-      tts_model_id = COALESCE($16::uuid, bots.tts_model_id),
-      browser_context_id = COALESCE($17::uuid, bots.browser_context_id),
+      image_model_id = COALESCE($16::uuid, bots.image_model_id),
+      tts_model_id = COALESCE($17::uuid, bots.tts_model_id),
+      browser_context_id = COALESCE($18::uuid, bots.browser_context_id),
       updated_at = now()
-  WHERE bots.id = $18
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
+  WHERE bots.id = $19
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
 )
 SELECT
   updated.id AS bot_id,
@@ -159,6 +165,7 @@ SELECT
   title_models.id AS title_model_id,
   search_providers.id AS search_provider_id,
   memory_providers.id AS memory_provider_id,
+  image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
   browser_contexts.id AS browser_context_id
 FROM updated
@@ -166,6 +173,7 @@ LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id
 LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id
 LEFT JOIN models AS title_models ON title_models.id = updated.title_model_id
+LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id
 LEFT JOIN tts_models ON tts_models.id = updated.tts_model_id
@@ -188,6 +196,7 @@ type UpsertBotSettingsParams struct {
 	TitleModelID        pgtype.UUID `json:"title_model_id"`
 	SearchProviderID    pgtype.UUID `json:"search_provider_id"`
 	MemoryProviderID    pgtype.UUID `json:"memory_provider_id"`
+	ImageModelID        pgtype.UUID `json:"image_model_id"`
 	TtsModelID          pgtype.UUID `json:"tts_model_id"`
 	BrowserContextID    pgtype.UUID `json:"browser_context_id"`
 	ID                  pgtype.UUID `json:"id"`
@@ -210,6 +219,7 @@ type UpsertBotSettingsRow struct {
 	TitleModelID        pgtype.UUID `json:"title_model_id"`
 	SearchProviderID    pgtype.UUID `json:"search_provider_id"`
 	MemoryProviderID    pgtype.UUID `json:"memory_provider_id"`
+	ImageModelID        pgtype.UUID `json:"image_model_id"`
 	TtsModelID          pgtype.UUID `json:"tts_model_id"`
 	BrowserContextID    pgtype.UUID `json:"browser_context_id"`
 }
@@ -231,6 +241,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.TitleModelID,
 		arg.SearchProviderID,
 		arg.MemoryProviderID,
+		arg.ImageModelID,
 		arg.TtsModelID,
 		arg.BrowserContextID,
 		arg.ID,
@@ -253,6 +264,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.TitleModelID,
 		&i.SearchProviderID,
 		&i.MemoryProviderID,
+		&i.ImageModelID,
 		&i.TtsModelID,
 		&i.BrowserContextID,
 	)

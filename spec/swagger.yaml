@@ -2571,6 +2571,8 @@ definitions:
         type: integer
       heartbeat_model_id:
         type: string
+      image_model_id:
+        type: string
       language:
         type: string
       memory_provider_id:
@@ -2607,6 +2609,8 @@ definitions:
       heartbeat_interval:
         type: integer
       heartbeat_model_id:
+        type: string
+      image_model_id:
         type: string
       language:
         type: string

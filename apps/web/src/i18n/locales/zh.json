@@ -70,7 +70,8 @@
     "platform": "接入平台",
     "usage": "用量统计",
     "browser": "浏览器",
-    "supermarket": "市场"
+    "supermarket": "市场",
+    "about": "关于"
   },
   "breadcrumb": {
     "main": "主页"
@@ -123,6 +124,18 @@
     "version": "版本",
     "versionTag": "v{version}",
     "commitHash": "提交"
+  },
+  "about": {
+    "checkForUpdates": "检查更新",
+    "checking": "检查中...",
+    "upToDate": "已是最新版本",
+    "newVersionAvailable": "发现新版本: v{version}",
+    "releaseNotes": "更新日志",
+    "viewOnGitHub": "在 GitHub 上查看",
+    "checkFailed": "检查更新失败",
+    "github": "GitHub",
+    "docs": "文档",
+    "feedback": "反馈"
   },
   "chat": {
     "greeting": "你好！有什么我可以帮你的吗？",
@@ -839,6 +852,9 @@
       "memoryHealthUnavailable": "暂不可用",
       "ttsModel": "语音合成模型",
       "ttsModelPlaceholder": "选择语音合成模型",
+      "imageModel": "图片生成模型",
+      "imageModelDescription": "用于 generate_image 工具的模型，必须支持 image-output 兼容性。",
+      "imageModelPlaceholder": "选择图片模型（可选）",
       "language": "语言",
       "reasoningEnabled": "启用推理",
       "reasoningEffort": "推理等级",

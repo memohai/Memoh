@@ -46,6 +46,13 @@ type LoopDetectionConfig struct {
 	Enabled bool
 }
 
+// InjectMessage carries a user message to be injected into a running agent
+// stream between tool rounds via the PrepareStep hook.
+type InjectMessage struct {
+	Text            string
+	HeaderifiedText string
+}
+
 // RunConfig holds everything needed for a single agent invocation.
 type RunConfig struct {
 	Model              *sdk.Model
@@ -55,10 +62,22 @@ type RunConfig struct {
 	System             string
 	SessionType        string
 	SupportsImageInput bool
+	SupportsToolCall   bool
 	InlineImages       []sdk.ImagePart
 	Identity           SessionContext
 	Skills             []SkillEntry
 	LoopDetection      LoopDetectionConfig
+
+	// InjectCh receives user messages to inject between tool rounds.
+	// When non-nil, a PrepareStep hook drains this channel and appends
+	// user messages to the conversation before the next LLM call.
+	InjectCh <-chan InjectMessage
+
+	// InjectedRecorder is called each time a message is injected via
+	// PrepareStep, recording the headerified text and the number of SDK
+	// output messages that preceded the injection. Used by the resolver
+	// to interleave injected messages at the correct position in storeRound.
+	InjectedRecorder func(headerifiedText string, insertAfter int)
 }
 
 // GenerateResult holds the result of a non-streaming agent invocation.

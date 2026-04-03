@@ -63,10 +63,14 @@ func (a *Agent) Generate(ctx context.Context, cfg RunConfig) (*GenerateResult, e
 }
 
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
-	tools, err := a.assembleTools(ctx, cfg)
-	if err != nil {
-		ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("assemble tools: %v", err)}
-		return
+	var tools []sdk.Tool
+	if cfg.SupportsToolCall {
+		var err error
+		tools, err = a.assembleTools(ctx, cfg)
+		if err != nil {
+			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("assemble tools: %v", err)}
+			return
+		}
 	}
 	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
 
@@ -98,6 +102,47 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	if readMediaState != nil {
 		prepareStep = readMediaState.prepareStep
 	}
+
+	initialMsgCount := len(cfg.Messages)
+
+	if cfg.InjectCh != nil {
+		basePrepare := prepareStep
+		prepareStep = func(p *sdk.GenerateParams) *sdk.GenerateParams {
+			if basePrepare != nil {
+				if override := basePrepare(p); override != nil {
+					p = override
+				}
+			}
+			for {
+				select {
+				case injected, ok := <-cfg.InjectCh:
+					if !ok {
+						break
+					}
+					text := strings.TrimSpace(injected.HeaderifiedText)
+					if text == "" {
+						text = strings.TrimSpace(injected.Text)
+					}
+					if text != "" {
+						insertAfter := len(p.Messages) - initialMsgCount
+						p.Messages = append(p.Messages, sdk.UserMessage(text))
+						if cfg.InjectedRecorder != nil {
+							cfg.InjectedRecorder(text, insertAfter)
+						}
+						a.logger.Info("injected user message into agent stream",
+							slog.String("bot_id", cfg.Identity.BotID),
+							slog.Int("insert_after", insertAfter),
+						)
+					}
+					continue
+				default:
+				}
+				break
+			}
+			return p
+		}
+	}
+
 	opts := a.buildGenerateOptions(cfg, tools, prepareStep)
 
 	streamResult, err := a.client.StreamText(ctx, opts...)
@@ -271,9 +316,13 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult, error) {
-	tools, err := a.assembleTools(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("assemble tools: %w", err)
+	var tools []sdk.Tool
+	if cfg.SupportsToolCall {
+		var err error
+		tools, err = a.assembleTools(ctx, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("assemble tools: %w", err)
+		}
 	}
 	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
 
@@ -366,7 +415,7 @@ func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep 
 		sdk.WithSystem(cfg.System),
 		sdk.WithMaxSteps(-1),
 	}
-	if len(tools) > 0 {
+	if len(tools) > 0 && cfg.SupportsToolCall {
 		opts = append(opts, sdk.WithTools(tools))
 	}
 	if prepareStep != nil {

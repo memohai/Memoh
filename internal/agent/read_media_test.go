@@ -246,6 +246,7 @@ func TestAgentGenerateReadMediaInjectsImageIntoNextStep(t *testing.T) {
 		Model:              &sdk.Model{ID: "mock-model", Provider: modelProvider},
 		Messages:           []sdk.Message{sdk.UserMessage("look at the image")},
 		SupportsImageInput: true,
+		SupportsToolCall:   true,
 		Identity: SessionContext{
 			BotID: "bot-1",
 		},
@@ -321,6 +322,7 @@ func TestAgentGenerateReadMediaInjectsAnthropicSafeImageIntoNextStep(t *testing.
 		Model:              &sdk.Model{ID: "mock-model", Provider: modelProvider},
 		Messages:           []sdk.Message{sdk.UserMessage("look at the image")},
 		SupportsImageInput: true,
+		SupportsToolCall:   true,
 		Identity: SessionContext{
 			BotID: "bot-1",
 		},
@@ -367,6 +369,7 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 		Model:              &sdk.Model{ID: "mock-model", Provider: modelProvider},
 		Messages:           []sdk.Message{sdk.UserMessage("look at the image")},
 		SupportsImageInput: true,
+		SupportsToolCall:   true,
 		Identity: SessionContext{
 			BotID: "bot-1",
 		},

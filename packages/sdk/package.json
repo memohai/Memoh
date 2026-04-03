@@ -1,6 +1,6 @@
 {
   "name": "@memohai/sdk",
-  "version": "0.6.1",
+  "version": "0.6.3",
   "description": "",
   "exports": {
     ".": "./src/index.ts",

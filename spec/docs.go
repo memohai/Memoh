@@ -13029,6 +13029,9 @@ const docTemplate = `{
                 "heartbeat_model_id": {
                     "type": "string"
                 },
+                "image_model_id": {
+                    "type": "string"
+                },
                 "language": {
                     "type": "string"
                 },
@@ -13083,6 +13086,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "heartbeat_model_id": {
+                    "type": "string"
+                },
+                "image_model_id": {
                     "type": "string"
                 },
                 "language": {

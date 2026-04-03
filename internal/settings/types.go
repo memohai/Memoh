@@ -8,6 +8,7 @@ const (
 
 type Settings struct {
 	ChatModelID         string `json:"chat_model_id"`
+	ImageModelID        string `json:"image_model_id"`
 	SearchProviderID    string `json:"search_provider_id"`
 	MemoryProviderID    string `json:"memory_provider_id"`
 	TtsModelID          string `json:"tts_model_id"`
@@ -28,6 +29,7 @@ type Settings struct {
 
 type UpsertRequest struct {
 	ChatModelID         string  `json:"chat_model_id,omitempty"`
+	ImageModelID        string  `json:"image_model_id,omitempty"`
 	SearchProviderID    string  `json:"search_provider_id,omitempty"`
 	MemoryProviderID    string  `json:"memory_provider_id,omitempty"`
 	TtsModelID          string  `json:"tts_model_id,omitempty"`

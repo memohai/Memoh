@@ -148,7 +148,7 @@ func (s *Service) IngestContainerFile(ctx context.Context, botID, containerPath 
 	}
 	opener, ok := s.provider.(storage.ContainerFileOpener)
 	if !ok {
-		return Asset{}, errors.New("provider does not support container file reading")
+		return Asset{}, storage.ErrContainerFileNotSupported
 	}
 	f, err := opener.OpenContainerFile(ctx, botID, containerPath)
 	if err != nil {

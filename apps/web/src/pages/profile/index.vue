@@ -188,26 +188,6 @@
         @generate="onGenerateBindCode"
         @copy="copyBindCode"
       />
-
-      <!-- Version -->
-      <section>
-        <Separator class="mb-4" />
-        <div class="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{{ $t('settings.version') }}</span>
-          <Badge
-            v-if="serverVersion"
-            variant="secondary"
-          >
-            {{ $t('settings.versionTag', { version: serverVersion }) }}
-          </Badge>
-          <Badge
-            v-if="commitHash"
-            variant="outline"
-          >
-            {{ commitHash }}
-          </Badge>
-        </div>
-      </section>
     </div>
   </section>
 </template>
@@ -243,7 +223,6 @@ import { client } from '@memohai/sdk/client'
 import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest, IdentitiesChannelIdentity } from '@memohai/sdk'
 import { useUserStore } from '@/store/user'
 import { useSettingsStore } from '@/store/settings'
-import { useCapabilitiesStore } from '@/store/capabilities'
 import type { Locale } from '@/i18n'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
@@ -270,10 +249,6 @@ const { userInfo, exitLogin, patchUserInfo } = userStore
 const settingsStore = useSettingsStore()
 const { language, theme } = storeToRefs(settingsStore)
 const { setLanguage, setTheme } = settingsStore
-
-// ---- Server version ----
-const capabilitiesStore = useCapabilitiesStore()
-const { serverVersion, commitHash } = storeToRefs(capabilitiesStore)
 
 // ---- User data ----
 const account = ref<UserAccount | null>(null)

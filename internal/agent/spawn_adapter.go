@@ -31,12 +31,13 @@ func (s *SpawnAdapter) Generate(ctx context.Context, cfg tools.SpawnRunConfig) (
 	}
 
 	rc := RunConfig{
-		Model:           cfg.Model,
-		System:          cfg.System,
-		Query:           cfg.Query,
-		SessionType:     cfg.SessionType,
-		Messages:        messages,
-		ReasoningEffort: cfg.ReasoningEffort,
+		Model:            cfg.Model,
+		System:           cfg.System,
+		Query:            cfg.Query,
+		SessionType:      cfg.SessionType,
+		Messages:         messages,
+		ReasoningEffort:  cfg.ReasoningEffort,
+		SupportsToolCall: true,
 		Identity: SessionContext{
 			BotID:             cfg.Identity.BotID,
 			ChatID:            cfg.Identity.ChatID,
