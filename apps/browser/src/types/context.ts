@@ -5,6 +5,7 @@ import type { BrowserCore } from '../browser'
 export interface GatewayBrowserContext {
   id: string
   name: string
+  botId?: string
   core: BrowserCore
   context: BrowserContext
   config: BrowserContextConfig
