@@ -31,6 +31,7 @@ type Bot struct {
 	CompactionRatio     int32              `json:"compaction_ratio"`
 	CompactionModelID   pgtype.UUID        `json:"compaction_model_id"`
 	TitleModelID        pgtype.UUID        `json:"title_model_id"`
+	ImageModelID        pgtype.UUID        `json:"image_model_id"`
 	TtsModelID          pgtype.UUID        `json:"tts_model_id"`
 	BrowserContextID    pgtype.UUID        `json:"browser_context_id"`
 	Metadata            []byte             `json:"metadata"`

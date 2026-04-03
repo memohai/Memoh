@@ -187,6 +187,21 @@
       />
     </div>
 
+    <!-- Image Generation Model -->
+    <div class="space-y-2">
+      <Label>{{ $t('bots.settings.imageModel') }}</Label>
+      <p class="text-xs text-muted-foreground">
+        {{ $t('bots.settings.imageModelDescription') }}
+      </p>
+      <ModelSelect
+        v-model="form.image_model_id"
+        :models="imageCapableModels"
+        :providers="providers"
+        model-type="chat"
+        :placeholder="$t('bots.settings.imageModelPlaceholder')"
+      />
+    </div>
+
     <!-- Browser Context -->
     <div class="space-y-2">
       <Label>{{ $t('bots.settings.browserContext') }}</Label>
@@ -426,6 +441,9 @@ const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
 
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
+const imageCapableModels = computed(() =>
+  models.value.filter((m) => m.config?.compatibilities?.includes('image-output')),
+)
 const searchProviders = computed(() => (searchProviderData.value ?? []).filter((p) => p.enable !== false))
 const memoryProviders = computed(() => memoryProviderData.value ?? [])
 const ttsProviders = computed(() => (ttsProviderData.value ?? []).filter((p) => p.enable !== false))
@@ -437,6 +455,7 @@ const browserContexts = computed(() => browserContextData.value ?? [])
 const form = reactive({
   chat_model_id: '',
   title_model_id: '',
+  image_model_id: '',
   search_provider_id: '',
   memory_provider_id: '',
   tts_model_id: '',
@@ -574,6 +593,7 @@ watch(settings, (val) => {
   if (val) {
     form.chat_model_id = val.chat_model_id ?? ''
     form.title_model_id = val.title_model_id ?? ''
+    form.image_model_id = val.image_model_id ?? ''
     form.search_provider_id = val.search_provider_id ?? ''
     form.memory_provider_id = val.memory_provider_id ?? ''
     form.tts_model_id = val.tts_model_id ?? ''
@@ -590,6 +610,7 @@ const hasChanges = computed(() => {
   let changed =
     form.chat_model_id !== (s.chat_model_id ?? '')
     || form.title_model_id !== (s.title_model_id ?? '')
+    || form.image_model_id !== (s.image_model_id ?? '')
     || form.search_provider_id !== (s.search_provider_id ?? '')
     || form.memory_provider_id !== (s.memory_provider_id ?? '')
     || form.tts_model_id !== (s.tts_model_id ?? '')

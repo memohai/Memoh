@@ -131,6 +131,14 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		titleModelUUID = modelID
 	}
+	imageModelUUID := pgtype.UUID{}
+	if value := strings.TrimSpace(req.ImageModelID); value != "" {
+		modelID, err := s.resolveModelUUID(ctx, value)
+		if err != nil {
+			return Settings{}, err
+		}
+		imageModelUUID = modelID
+	}
 	searchProviderUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.SearchProviderID); value != "" {
 		providerID, err := db.ParseUUID(value)
@@ -178,6 +186,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		HeartbeatModelID:    heartbeatModelUUID,
 		CompactionModelID:   compactionModelUUID,
 		TitleModelID:        titleModelUUID,
+		ImageModelID:        imageModelUUID,
 		SearchProviderID:    searchProviderUUID,
 		MemoryProviderID:    memoryProviderUUID,
 		TtsModelID:          ttsModelUUID,
@@ -269,6 +278,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.HeartbeatModelID,
 		row.CompactionModelID,
 		row.TitleModelID,
+		row.ImageModelID,
 		row.SearchProviderID,
 		row.MemoryProviderID,
 		row.TtsModelID,
@@ -290,6 +300,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.HeartbeatModelID,
 		row.CompactionModelID,
 		row.TitleModelID,
+		row.ImageModelID,
 		row.SearchProviderID,
 		row.MemoryProviderID,
 		row.TtsModelID,
@@ -310,6 +321,7 @@ func normalizeBotSettingsFields(
 	heartbeatModelID pgtype.UUID,
 	compactionModelID pgtype.UUID,
 	titleModelID pgtype.UUID,
+	imageModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
@@ -327,6 +339,9 @@ func normalizeBotSettingsFields(
 	}
 	if titleModelID.Valid {
 		settings.TitleModelID = uuid.UUID(titleModelID.Bytes).String()
+	}
+	if imageModelID.Valid {
+		settings.ImageModelID = uuid.UUID(imageModelID.Bytes).String()
 	}
 	if searchProviderID.Valid {
 		settings.SearchProviderID = uuid.UUID(searchProviderID.Bytes).String()

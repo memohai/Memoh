@@ -162,6 +162,10 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	outputMessages := sdkMessagesToModelMessages(sdkMsgs)
 	roundMessages := prependUserMessage(req.Query, outputMessages)
 
+	if rc.injectedRecords != nil && len(*rc.injectedRecords) > 0 {
+		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
+	}
+
 	if err := r.storeRound(ctx, req, roundMessages, modelID); err != nil {
 		return false, err
 	}
@@ -171,6 +175,37 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	}
 
 	return true, nil
+}
+
+// interleaveInjectedMessages inserts injected user messages at their correct
+// positions within the round. Each record's InsertAfter value indicates how
+// many output messages preceded the injection.
+//
+// round layout: [user_A, output_0, output_1, ..., output_N]
+// InsertAfter=K → insert after round[K] (i.e. after the K-th output message).
+func interleaveInjectedMessages(round []conversation.ModelMessage, injections []conversation.InjectedMessageRecord) []conversation.ModelMessage {
+	if len(injections) == 0 {
+		return round
+	}
+	result := make([]conversation.ModelMessage, 0, len(round)+len(injections))
+	injIdx := 0
+	for i, msg := range round {
+		result = append(result, msg)
+		for injIdx < len(injections) && injections[injIdx].InsertAfter == i {
+			result = append(result, conversation.ModelMessage{
+				Role:    "user",
+				Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+			})
+			injIdx++
+		}
+	}
+	for ; injIdx < len(injections); injIdx++ {
+		result = append(result, conversation.ModelMessage{
+			Role:    "user",
+			Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+		})
+	}
+	return result
 }
 
 func extractInputTokensFromUsage(raw json.RawMessage) int {

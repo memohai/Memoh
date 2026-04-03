@@ -3,8 +3,13 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"io"
 )
+
+// ErrContainerFileNotSupported is returned when no underlying provider
+// implements ContainerFileOpener.
+var ErrContainerFileNotSupported = errors.New("provider does not support container file reading")
 
 // Provider abstracts object storage operations.
 type Provider interface {

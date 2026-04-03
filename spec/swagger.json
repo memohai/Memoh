@@ -13020,6 +13020,9 @@
                 "heartbeat_model_id": {
                     "type": "string"
                 },
+                "image_model_id": {
+                    "type": "string"
+                },
                 "language": {
                     "type": "string"
                 },
@@ -13074,6 +13077,9 @@
                     "type": "integer"
                 },
                 "heartbeat_model_id": {
+                    "type": "string"
+                },
+                "image_model_id": {
                     "type": "string"
                 },
                 "language": {

@@ -58,7 +58,7 @@ function normalizeSrc(src: string): string {
   if (!src || src.startsWith('data:')) return src
   try {
     const u = new URL(src, window.location.origin)
-    return u.pathname + u.search
+    return u.pathname
   } catch {
     return src
   }

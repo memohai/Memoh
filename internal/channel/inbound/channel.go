@@ -98,6 +98,7 @@ type ChannelInboundProcessor struct {
 	tokenTTL         time.Duration
 	identity         *IdentityResolver
 	policy           PolicyService
+	dispatcher       *RouteDispatcher
 	acl              chatACL
 	observer         channel.StreamObserver
 	ttsService       ttsSynthesizer
@@ -211,6 +212,14 @@ func (p *ChannelInboundProcessor) SetCommandHandler(handler *command.Handler) {
 	p.commandHandler = handler
 }
 
+// SetDispatcher configures the per-route message dispatcher for inject/queue/parallel modes.
+func (p *ChannelInboundProcessor) SetDispatcher(dispatcher *RouteDispatcher) {
+	if p == nil {
+		return
+	}
+	p.dispatcher = dispatcher
+}
+
 // HandleInbound processes an inbound channel message through identity resolution and chat gateway.
 func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, sender channel.StreamReplySender) error {
 	if p.runner == nil {
@@ -278,7 +287,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return p.handleStopCommand(ctx, cfg, msg, sender, identity)
 	}
 
-	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && isDirectedAtBot(msg) {
+	// Skip generic command handler for mode-prefix commands (/btw, /now, /next)
+	// so they pass through to mode detection below.
+	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && !IsModeCommand(cmdText) && isDirectedAtBot(msg) {
 		reply, err := p.commandHandler.Execute(ctx, strings.TrimSpace(identity.BotID), strings.TrimSpace(identity.ChannelIdentityID), cmdText)
 		if err != nil {
 			reply = "Error: " + err.Error()
@@ -292,6 +303,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	resolvedAttachments := p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Attachments)
 	attachments := mapChannelToChatAttachments(resolvedAttachments)
 	text = buildInboundQuery(msg.Message, attachments)
+
+	// Detect inbound mode from message prefix (/btw, /now, /next).
+	// Only applies to non-local channels; WebUI always uses the default flow.
+	// Must run after buildInboundQuery so the prefix is stripped from the final text.
+	inboundMode := ModeInject
+	if !isLocalChannelType(msg.Channel) {
+		inboundMode, text = DetectMode(text)
+	}
 	threadID := extractThreadID(msg)
 
 	// Resolve or create the route via channel_routes.
@@ -381,6 +400,66 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		return nil
 	}
+
+	routeID := strings.TrimSpace(resolved.RouteID)
+
+	// --- Dispatcher-based mode handling (inject / queue) ---
+	// For non-parallel modes, when a route already has an active agent stream,
+	// short-circuit here instead of starting a new stream.
+	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
+		if p.dispatcher.IsActive(routeID) {
+			headerifiedText := flow.FormatUserHeader(
+				strings.TrimSpace(msg.Message.ID),
+				strings.TrimSpace(identity.ChannelIdentityID),
+				strings.TrimSpace(identity.DisplayName),
+				msg.Channel.String(),
+				strings.TrimSpace(msg.Conversation.Type),
+				strings.TrimSpace(msg.Conversation.Name),
+				collectAttachmentPaths(attachments),
+				time.Now().UTC(),
+				"",
+				text,
+			)
+
+			switch inboundMode {
+			case ModeInject:
+				// Don't persist here — the injected message will be interleaved
+				// at the correct position within the round by
+				// interleaveInjectedMessages in storeRound.
+				injected := p.dispatcher.Inject(routeID, InjectMessage{
+					Text:            text,
+					Attachments:     attachments,
+					HeaderifiedText: headerifiedText,
+				})
+				if injected {
+					p.sendModeConfirmation(ctx, sender, msg, identity, "inject")
+				} else {
+					if p.logger != nil {
+						p.logger.Warn("inject failed (channel full), falling through to new stream",
+							slog.String("route_id", routeID))
+					}
+					goto startStream
+				}
+				return nil
+
+			case ModeQueue:
+				p.persistPassiveMessage(ctx, identity, msg, text, attachments, routeID, sessionID)
+				p.dispatcher.Enqueue(routeID, QueuedTask{
+					Ctx:     ctx,
+					Cfg:     cfg,
+					Msg:     msg,
+					Sender:  sender,
+					Ident:   identity,
+					Text:    text,
+					Attachs: attachments,
+				})
+				p.sendModeConfirmation(ctx, sender, msg, identity, "queue")
+				return nil
+			}
+		}
+	}
+
+startStream:
 
 	// Issue chat token for reply routing.
 	chatToken := ""
@@ -524,6 +603,33 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return result
 	}
 
+	// Mark this route as active in the dispatcher so subsequent messages
+	// can be injected or queued. Produces the inject channel for this stream.
+	// Parallel mode (/now) skips the dispatcher entirely — it must not
+	// interfere with the active flag or drain the queue of another stream.
+	var injectCh <-chan InjectMessage
+	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
+		injectCh = p.dispatcher.MarkActive(routeID)
+		defer func() {
+			p.drainQueue(context.WithoutCancel(ctx), routeID)
+		}()
+	}
+	// Convert inbound InjectMessage channel to conversation.InjectMessage channel.
+	var convInjectCh chan conversation.InjectMessage
+	if injectCh != nil {
+		convInjectCh = make(chan conversation.InjectMessage, injectChBuffer)
+		go func() {
+			for im := range injectCh {
+				convInjectCh <- conversation.InjectMessage{
+					Text:            im.Text,
+					Attachments:     im.Attachments,
+					HeaderifiedText: im.HeaderifiedText,
+				}
+			}
+			close(convInjectCh)
+		}()
+	}
+
 	chatReq := conversation.ChatRequest{
 		BotID:                   identity.BotID,
 		ChatID:                  activeChatID,
@@ -544,6 +650,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		UserMessagePersisted:    false,
 		Attachments:             attachments,
 		OutboundAssetCollector:  assetCollector,
+	}
+	if convInjectCh != nil {
+		chatReq.InjectCh = convInjectCh
 	}
 	if mid, _ := msg.Metadata["model_id"].(string); strings.TrimSpace(mid) != "" {
 		chatReq.Model = strings.TrimSpace(mid)
@@ -701,6 +810,75 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 	return nil
+}
+
+// sendModeConfirmation sends a lightweight acknowledgement to the user when
+// their message is injected or queued rather than triggering a new stream.
+func (p *ChannelInboundProcessor) sendModeConfirmation(
+	ctx context.Context,
+	_ channel.StreamReplySender,
+	msg channel.InboundMessage,
+	identity InboundIdentity,
+	mode string,
+) {
+	target := strings.TrimSpace(msg.ReplyTarget)
+	sourceMessageID := strings.TrimSpace(msg.Message.ID)
+	if target == "" || sourceMessageID == "" {
+		return
+	}
+	if p.reactor != nil {
+		emoji := "👀"
+		if mode == "queue" {
+			emoji = "📋"
+		}
+		_ = p.reactor.React(ctx, strings.TrimSpace(identity.BotID), msg.Channel, channel.ReactRequest{
+			Target:    target,
+			MessageID: sourceMessageID,
+			Emoji:     emoji,
+		})
+	}
+}
+
+// drainQueue marks the route as done and processes any queued tasks.
+func (p *ChannelInboundProcessor) drainQueue(ctx context.Context, routeID string) {
+	if p.dispatcher == nil {
+		return
+	}
+	result := p.dispatcher.MarkDone(routeID)
+
+	for _, fn := range result.PendingPersists {
+		fn(ctx)
+	}
+
+	for _, task := range result.QueuedTasks {
+		if p.logger != nil {
+			p.logger.Info("processing queued task",
+				slog.String("route_id", routeID),
+				slog.String("query", strings.TrimSpace(task.Text)),
+			)
+		}
+		if err := p.HandleInbound(ctx, task.Cfg, task.Msg, task.Sender); err != nil { //nolint:contextcheck // ctx is already WithoutCancel from the defer caller
+			if p.logger != nil {
+				p.logger.Error("queued task processing failed",
+					slog.String("route_id", routeID),
+					slog.Any("error", err),
+				)
+			}
+		}
+	}
+}
+
+func collectAttachmentPaths(attachments []conversation.ChatAttachment) []string {
+	if len(attachments) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(attachments))
+	for _, att := range attachments {
+		if p := strings.TrimSpace(att.Path); p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths
 }
 
 func shouldTriggerAssistantResponse(msg channel.InboundMessage) bool {
