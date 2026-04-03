@@ -494,7 +494,7 @@ func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error
 	// Resolve bot timezone so cron expressions are interpreted in the bot's
 	// configured timezone rather than the system default.
 	loc := s.resolveBotLocation(ctx, schedule.BotID)
-	sched, err := cron.NewParser(cron.SecondOptional|cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Descriptor).Parse(schedule.Pattern)
+	sched, err := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(schedule.Pattern)
 	if err != nil {
 		return err
 	}
