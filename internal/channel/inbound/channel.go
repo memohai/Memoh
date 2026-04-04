@@ -27,6 +27,7 @@ import (
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
 var base64Std = base64.StdEncoding
@@ -77,12 +78,14 @@ type SessionEnsurer interface {
 	EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
 	// CreateNewSession always creates a fresh session and sets it as the
 	// active session for the given route, replacing any previous one.
-	CreateNewSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
+	// sessionType defaults to "chat" if empty.
+	CreateNewSession(ctx context.Context, botID, routeID, channelType, sessionType string) (SessionResult, error)
 }
 
 // SessionResult carries the minimum fields needed from a session.
 type SessionResult struct {
-	ID string
+	ID   string
+	Type string
 }
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
@@ -107,6 +110,7 @@ type ChannelInboundProcessor struct {
 	sessionEnsurer   SessionEnsurer
 	pipeline         *pipelinepkg.Pipeline
 	eventStore       *pipelinepkg.EventStore
+	discussDriver    *pipelinepkg.DiscussDriver
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -210,13 +214,14 @@ func (p *ChannelInboundProcessor) SetCommandHandler(handler *command.Handler) {
 	p.commandHandler = handler
 }
 
-// SetPipeline configures the DCP pipeline and event store for event-driven context assembly.
-func (p *ChannelInboundProcessor) SetPipeline(pipeline *pipelinepkg.Pipeline, store *pipelinepkg.EventStore) {
+// SetPipeline configures the DCP pipeline, event store, and discuss driver.
+func (p *ChannelInboundProcessor) SetPipeline(pipeline *pipelinepkg.Pipeline, store *pipelinepkg.EventStore, driver *pipelinepkg.DiscussDriver) {
 	if p == nil {
 		return
 	}
 	p.pipeline = pipeline
 	p.eventStore = store
+	p.discussDriver = driver
 }
 
 // SetDispatcher configures the per-route message dispatcher for inject/queue/parallel modes.
@@ -340,6 +345,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	// Resolve or auto-create the active session for this route.
 	sessionID := ""
+	sessionType := ""
 	if p.sessionEnsurer != nil {
 		sess, sessErr := p.sessionEnsurer.EnsureActiveSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
 		if sessErr != nil {
@@ -348,11 +354,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 		} else {
 			sessionID = sess.ID
+			sessionType = sess.Type
 		}
 	}
 
 	// Push event into the DCP pipeline (persist + in-memory projection).
 	// On first access for a session, replay persisted events to warm the pipeline.
+	var latestRC pipelinepkg.RenderedContext
 	if p.pipeline != nil && sessionID != "" {
 		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
 			p.replayPipelineSession(ctx, sessionID)
@@ -363,7 +371,24 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				p.logger.Warn("persist pipeline event failed", slog.Any("error", err))
 			}
 		}
-		p.pipeline.PushEvent(sessionID, event)
+		latestRC = p.pipeline.PushEvent(sessionID, event)
+	}
+
+	// Discuss mode: dispatch to the discuss driver and return.
+	// The discuss driver autonomously decides whether to call the LLM.
+	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
+		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, pipelinepkg.DiscussSessionConfig{
+			BotID:             identity.BotID,
+			SessionID:         sessionID,
+			ChannelIdentityID: identity.ChannelIdentityID,
+			ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
+			CurrentPlatform:   msg.Channel.String(),
+			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
+			ConversationName:  strings.TrimSpace(msg.Conversation.Name),
+		})
+		// Still persist passive message for WebUI visibility.
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID)
+		return nil
 	}
 
 	// Bot-centric history container:
@@ -434,6 +459,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				msg.Channel.String(),
 				strings.TrimSpace(msg.Conversation.Type),
 				strings.TrimSpace(msg.Conversation.Name),
+				strings.TrimSpace(msg.ReplyTarget),
 				collectAttachmentPaths(attachments),
 				time.Now().UTC(),
 				"",
@@ -992,6 +1018,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		msg.Channel.String(),
 		strings.TrimSpace(msg.Conversation.Type),
 		strings.TrimSpace(msg.Conversation.Name),
+		strings.TrimSpace(msg.ReplyTarget),
 		attachmentPaths,
 		time.Now().UTC(),
 		"",
@@ -2504,9 +2531,41 @@ func isNewSessionCommand(cmdText string) bool {
 	return parsed.Resource == "new"
 }
 
+// resolveNewSessionType determines the session type for /new command.
+// /new chat → chat, /new discuss → discuss, /new (no arg) → default by context.
+// WebUI (local channel) always defaults to chat.
+// Groups default to discuss, DMs default to chat.
+func resolveNewSessionType(cmdText string, msg channel.InboundMessage) (string, error) {
+	extracted := command.ExtractCommandText(cmdText)
+	parsed, _ := command.Parse(extracted)
+
+	explicit := strings.ToLower(strings.TrimSpace(parsed.Action))
+	switch explicit {
+	case "chat":
+		return sessionpkg.TypeChat, nil
+	case "discuss":
+		if isLocalChannelType(msg.Channel) {
+			return "", errors.New("discuss mode is not supported via WebUI — use a channel adapter (Telegram, Discord, etc.)")
+		}
+		return sessionpkg.TypeDiscuss, nil
+	case "":
+		// Default: local → chat, group → discuss, DM → chat.
+		if isLocalChannelType(msg.Channel) {
+			return sessionpkg.TypeChat, nil
+		}
+		if channel.IsPrivateConversationType(msg.Conversation.Type) {
+			return sessionpkg.TypeChat, nil
+		}
+		return sessionpkg.TypeDiscuss, nil
+	default:
+		return "", fmt.Errorf("unknown session type %q — use /new, /new chat, or /new discuss", explicit)
+	}
+}
+
 // handleNewSessionCommand resolves the route for the current message and
 // creates a brand-new active session, effectively starting a fresh
 // conversation in the same IM thread/chat.
+// Supports: /new (default), /new chat, /new discuss.
 func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	ctx context.Context,
 	cfg channel.ChannelConfig,
@@ -2517,6 +2576,15 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
 		return errors.New("reply target missing for /new command")
+	}
+
+	cmdText := rawTextForCommand(msg, "")
+	sessType, err := resolveNewSessionType(cmdText, msg)
+	if err != nil {
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: " + err.Error()},
+		})
 	}
 
 	if p.routeResolver == nil {
@@ -2556,7 +2624,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		})
 	}
 
-	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
+	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), sessType)
 	if err != nil {
 		if p.logger != nil {
 			p.logger.Warn("create new session via /new command failed", slog.Any("error", err))
@@ -2567,16 +2635,21 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		})
 	}
 
+	modeLabel := "chat"
+	if sess.Type == sessionpkg.TypeDiscuss {
+		modeLabel = "discuss"
+	}
 	if p.logger != nil {
 		p.logger.Info("new session created via /new command",
 			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
 			slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
 			slog.String("session_id", strings.TrimSpace(sess.ID)),
+			slog.String("session_type", sess.Type),
 			slog.String("channel", msg.Channel.String()),
 		)
 	}
 	return sender.Send(ctx, channel.OutboundMessage{
 		Target:  target,
-		Message: channel.Message{Text: "New conversation started."},
+		Message: channel.Message{Text: fmt.Sprintf("New %s conversation started.", modeLabel)},
 	})
 }

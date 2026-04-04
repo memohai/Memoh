@@ -62,6 +62,7 @@ type ConversationMeta struct {
 	Channel          string `json:"channel"`
 	ConversationName string `json:"conversation_name,omitempty"`
 	ConversationType string `json:"conversation_type"`
+	Target           string `json:"target,omitempty"`
 }
 
 // --- Concrete event types ---

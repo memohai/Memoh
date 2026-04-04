@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS bots (
   compaction_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   title_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   image_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  discuss_probe_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id UUID REFERENCES tts_models(id) ON DELETE SET NULL,
   browser_context_id UUID REFERENCES browser_contexts(id) ON DELETE SET NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,

@@ -87,6 +87,22 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 	if err != nil {
 		return nil, err
 	}
+	// Discuss mode: same-conversation sends must go through the channel
+	// adapter directly — there is no active stream to emit events into.
+	if result.Local && session.SessionType == "discuss" {
+		sendResult, err := p.exec.SendDirect(ctx, toMessagingSession(session), result.Target, args)
+		if err != nil {
+			return nil, err
+		}
+		resp := map[string]any{
+			"ok": true, "bot_id": sendResult.BotID, "platform": sendResult.Platform, "target": sendResult.Target,
+			"delivered": "current_conversation",
+		}
+		if sendResult.MessageID != "" {
+			resp["message_id"] = sendResult.MessageID
+		}
+		return resp, nil
+	}
 	if result.Local && session.Emitter != nil {
 		atts := channelAttachmentsToToolAttachments(result.LocalAttachments)
 		if len(atts) > 0 {
@@ -95,15 +111,23 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 				Attachments: atts,
 			})
 		}
-		return map[string]any{
+		resp := map[string]any{
 			"ok":          true,
 			"delivered":   "current_conversation",
 			"attachments": len(atts),
-		}, nil
+		}
+		if result.MessageID != "" {
+			resp["message_id"] = result.MessageID
+		}
+		return resp, nil
 	}
-	return map[string]any{
+	resp := map[string]any{
 		"ok": true, "bot_id": result.BotID, "platform": result.Platform, "target": result.Target,
-	}, nil
+	}
+	if result.MessageID != "" {
+		resp["message_id"] = result.MessageID
+	}
+	return resp, nil
 }
 
 func channelAttachmentsToToolAttachments(atts []channel.Attachment) []Attachment {

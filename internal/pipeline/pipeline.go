@@ -10,7 +10,6 @@ type Pipeline struct {
 	renderParams RenderParams
 	sessions     map[string]IntermediateContext
 	rendered     map[string]RenderedContext
-	cursors      map[string]int64
 }
 
 // NewPipeline creates a Pipeline with the given default render params.
@@ -19,16 +18,7 @@ func NewPipeline(params RenderParams) *Pipeline {
 		renderParams: params,
 		sessions:     make(map[string]IntermediateContext),
 		rendered:     make(map[string]RenderedContext),
-		cursors:      make(map[string]int64),
 	}
-}
-
-func (p *Pipeline) effectiveParams(sessionID string) RenderParams {
-	params := p.renderParams
-	if cursor, ok := p.cursors[sessionID]; ok {
-		params.CompactCursorMs = &cursor
-	}
-	return params
 }
 
 // PushEvent processes a single canonical event through the pipeline:
@@ -45,7 +35,7 @@ func (p *Pipeline) PushEvent(sessionID string, event CanonicalEvent) RenderedCon
 	newIC := Reduce(ic, event)
 	p.sessions[sessionID] = newIC
 
-	rc := Render(newIC, p.effectiveParams(sessionID))
+	rc := Render(newIC, p.renderParams)
 	p.rendered[sessionID] = rc
 	return rc
 }
@@ -62,25 +52,7 @@ func (p *Pipeline) ReplaySession(sessionID string, events []CanonicalEvent) Rend
 	}
 	p.sessions[sessionID] = ic
 
-	rc := Render(ic, p.effectiveParams(sessionID))
-	p.rendered[sessionID] = rc
-	return rc
-}
-
-// SetCompactCursor updates the compact cursor for a session and re-renders RC.
-// Segments before the cursor are excluded from the rendered output.
-func (p *Pipeline) SetCompactCursor(sessionID string, cursorMs int64) RenderedContext {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.cursors[sessionID] = cursorMs
-
-	ic, ok := p.sessions[sessionID]
-	if !ok {
-		return nil
-	}
-
-	rc := Render(ic, p.effectiveParams(sessionID))
+	rc := Render(ic, p.renderParams)
 	p.rendered[sessionID] = rc
 	return rc
 }
@@ -100,14 +72,6 @@ func (p *Pipeline) GetIC(sessionID string) (IntermediateContext, bool) {
 	return ic, ok
 }
 
-// GetCompactCursor returns the compact cursor for a session, if set.
-func (p *Pipeline) GetCompactCursor(sessionID string) (int64, bool) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	cursor, ok := p.cursors[sessionID]
-	return cursor, ok
-}
-
 // SessionIDs returns all loaded session IDs.
 func (p *Pipeline) SessionIDs() []string {
 	p.mu.RLock()
@@ -125,7 +89,6 @@ func (p *Pipeline) DropSession(sessionID string) {
 	defer p.mu.Unlock()
 	delete(p.sessions, sessionID)
 	delete(p.rendered, sessionID)
-	delete(p.cursors, sessionID)
 }
 
 // UpdateRenderParams replaces the default render params and re-renders all
@@ -136,7 +99,7 @@ func (p *Pipeline) UpdateRenderParams(params RenderParams) {
 
 	p.renderParams = params
 	for sessionID, ic := range p.sessions {
-		rc := Render(ic, p.effectiveParams(sessionID))
+		rc := Render(ic, p.renderParams)
 		p.rendered[sessionID] = rc
 	}
 }

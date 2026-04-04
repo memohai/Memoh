@@ -14,6 +14,7 @@ type UserMessageMeta struct {
 	Channel           string   `json:"channel"`
 	ConversationType  string   `json:"conversation-type"`
 	ConversationName  string   `json:"conversation-name,omitempty"`
+	Target            string   `json:"target,omitempty"`
 	Time              string   `json:"time"`
 	Timezone          string   `json:"timezone,omitempty"`
 	AttachmentPaths   []string `json:"attachments"`
@@ -74,8 +75,9 @@ func (m UserMessageMeta) ToMap() map[string]any {
 // structured context (sender, channel, conversation, time, attachments)
 // alongside the raw message. This must be the single source of truth for
 // user-message formatting — the agent gateway must NOT add its own header.
-func FormatUserHeader(messageID, channelIdentityID, displayName, channel, conversationType, conversationName string, attachmentPaths []string, now time.Time, timezone, query string) string {
+func FormatUserHeader(messageID, channelIdentityID, displayName, channel, conversationType, conversationName, target string, attachmentPaths []string, now time.Time, timezone, query string) string {
 	meta := BuildUserMessageMetaWithTime(messageID, channelIdentityID, displayName, channel, conversationType, conversationName, attachmentPaths, now, timezone)
+	meta.Target = strings.TrimSpace(target)
 	return FormatUserHeaderFromMeta(meta, query)
 }
 
@@ -96,6 +98,9 @@ func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 	}
 	if meta.ConversationType != "" {
 		writeXMLAttr(&sb, "type", meta.ConversationType)
+	}
+	if meta.Target != "" {
+		writeXMLAttr(&sb, "target", meta.Target)
 	}
 	sb.WriteString(">\n")
 

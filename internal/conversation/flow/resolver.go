@@ -242,6 +242,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		req.CurrentChannel,
 		strings.TrimSpace(req.ConversationType),
 		strings.TrimSpace(req.ConversationName),
+		strings.TrimSpace(req.ReplyTarget),
 		extractAttachmentPaths(mergedAttachments),
 		time.Now().In(userClockLocation),
 		userTimezoneName,
@@ -377,6 +378,101 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 		Model:    rc.model.ModelID,
 		Provider: rc.provider.ClientType,
 	}, nil
+}
+
+// ResolveRunConfig builds a complete RunConfig (model, system prompt, tools,
+// identity) for a bot+session without loading messages or requiring a query.
+// The caller is responsible for filling RunConfig.Messages.
+// Used by the discuss driver to reuse the resolver's model/tools/prompt pipeline.
+func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (agentpkg.RunConfig, error) {
+	if strings.TrimSpace(botID) == "" {
+		return agentpkg.RunConfig{}, errors.New("bot id is required")
+	}
+
+	botSettings, err := r.loadBotSettings(ctx, botID)
+	if err != nil {
+		return agentpkg.RunConfig{}, err
+	}
+	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, botID)
+	userTimezoneName, userClockLocation := r.resolveTimezone(ctx, botID, "")
+
+	req := conversation.ChatRequest{
+		BotID:          botID,
+		ChatID:         botID,
+		SessionID:      sessionID,
+		CurrentChannel: currentPlatform,
+	}
+
+	chatModel, provider, err := r.selectChatModel(ctx, req, botSettings, conversation.Settings{})
+	if err != nil {
+		return agentpkg.RunConfig{}, err
+	}
+
+	reasoningEffort := ""
+	if chatModel.HasCompatibility(models.CompatReasoning) && botSettings.ReasoningEnabled {
+		reasoningEffort = botSettings.ReasoningEffort
+	}
+	var reasoningConfig *models.ReasoningConfig
+	if reasoningEffort != "" {
+		reasoningConfig = &models.ReasoningConfig{Enabled: true, Effort: reasoningEffort}
+	}
+
+	authResolver := providers.NewService(nil, r.queries, "")
+	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return agentpkg.RunConfig{}, fmt.Errorf("resolve provider credentials: %w", err)
+	}
+
+	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
+		ModelID:         chatModel.ModelID,
+		ClientType:      provider.ClientType,
+		APIKey:          creds.APIKey,
+		CodexAccountID:  creds.CodexAccountID,
+		BaseURL:         provider.BaseUrl,
+		ReasoningConfig: reasoningConfig,
+	})
+
+	var agentSkills []agentpkg.SkillEntry
+	if r.skillLoader != nil {
+		entries, skillErr := r.skillLoader.LoadSkills(ctx, botID)
+		if skillErr != nil {
+			r.logger.Warn("discuss: failed to load skills", slog.String("bot_id", botID), slog.Any("error", skillErr))
+		} else {
+			for _, e := range entries {
+				if skill, ok := normalizeGatewaySkill(e); ok {
+					agentSkills = append(agentSkills, skill)
+				}
+			}
+		}
+	}
+	if agentSkills == nil {
+		agentSkills = []agentpkg.SkillEntry{}
+	}
+
+	cfg := agentpkg.RunConfig{
+		Model:              sdkModel,
+		ReasoningEffort:    reasoningEffort,
+		SessionType:        "discuss",
+		SupportsImageInput: chatModel.HasCompatibility(models.CompatVision),
+		SupportsToolCall:   chatModel.HasCompatibility(models.CompatToolCall),
+		Identity: agentpkg.SessionContext{
+			BotID:             botID,
+			ChatID:            botID,
+			SessionID:         sessionID,
+			ChannelIdentityID: strings.TrimSpace(channelIdentityID),
+			CurrentPlatform:   currentPlatform,
+			ReplyTarget:       strings.TrimSpace(replyTarget),
+			ConversationType:  strings.TrimSpace(conversationType),
+			Timezone:          userTimezoneName,
+			TimezoneLocation:  userClockLocation,
+			SessionToken:      chatToken,
+		},
+		Skills:        agentSkills,
+		LoopDetection: agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
+	}
+
+	cfg = r.prepareRunConfig(ctx, cfg)
+	return cfg, nil
 }
 
 // prepareRunConfig generates the system prompt and appends the user message.

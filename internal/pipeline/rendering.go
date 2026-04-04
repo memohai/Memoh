@@ -29,9 +29,8 @@ type RenderedContext []RenderedSegment
 
 // RenderParams controls rendering behavior.
 type RenderParams struct {
-	CompactCursorMs *int64
-	BotUserID       string
-	ContactNames    map[string]string
+	BotUserID    string
+	ContactNames map[string]string
 }
 
 // Render converts an IntermediateContext into a RenderedContext.
@@ -39,10 +38,6 @@ func Render(ic IntermediateContext, params RenderParams) RenderedContext {
 	segments := make([]RenderedSegment, 0, len(ic.Nodes))
 
 	for _, node := range ic.Nodes {
-		if params.CompactCursorMs != nil && node.GetReceivedAtMs() < *params.CompactCursorMs {
-			continue
-		}
-
 		if node.Message != nil {
 			seg := renderMessage(node.Message, params)
 			segments = append(segments, seg)
@@ -96,6 +91,9 @@ func renderMessage(msg *ICMessage, params RenderParams) RenderedSegment {
 	}
 	if msg.Conversation.ConversationType != "" {
 		attrs = append(attrs, fmt.Sprintf("type=%q", escapeXMLAttrValue(msg.Conversation.ConversationType)))
+	}
+	if msg.Conversation.Target != "" {
+		attrs = append(attrs, fmt.Sprintf("target=%q", escapeXMLAttrValue(msg.Conversation.Target)))
 	}
 
 	if msg.ForwardInfo != nil {

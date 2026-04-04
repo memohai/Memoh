@@ -53,6 +53,7 @@ func AdaptInbound(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 			Channel:          msg.Channel.String(),
 			ConversationName: strings.TrimSpace(msg.Conversation.Name),
 			ConversationType: convType,
+			Target:           strings.TrimSpace(msg.ReplyTarget),
 		},
 	}
 }
