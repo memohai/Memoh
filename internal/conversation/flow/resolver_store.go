@@ -89,11 +89,13 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		messageSenderUserID := ""
 		externalMessageID := ""
 		sourceReplyToMessageID := ""
+		messageEventID := ""
 		assets := []messagepkg.AssetRef(nil)
 		if msg.Role == "user" {
 			messageSenderChannelIdentityID = senderChannelIdentityID
 			messageSenderUserID = senderUserID
 			externalMessageID = req.ExternalMessageID
+			messageEventID = req.EventID
 			if strings.TrimSpace(msg.TextContent()) == strings.TrimSpace(req.Query) {
 				assets = chatAttachmentsToAssetRefs(req.Attachments)
 			}
@@ -116,6 +118,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			Usage:                   msg.Usage,
 			Assets:                  assets,
 			ModelID:                 modelID,
+			EventID:                 messageEventID,
 		}); err != nil {
 			r.logger.Warn("persist message failed", slog.Any("error", err))
 		}

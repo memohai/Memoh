@@ -401,6 +401,7 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   usage JSONB,
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   compact_id UUID,
+  event_id UUID REFERENCES bot_session_events(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

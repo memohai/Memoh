@@ -37,6 +37,8 @@ type Message struct {
 	Usage                   json.RawMessage `json:"usage,omitempty"`
 	Assets                  []MessageAsset  `json:"assets,omitempty"`
 	CompactID               string          `json:"compact_id,omitempty"`
+	EventID                 string          `json:"event_id,omitempty"`
+	DisplayContent          string          `json:"display_content,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
 }
 
@@ -67,6 +69,7 @@ type PersistInput struct {
 	Usage                   json.RawMessage
 	Assets                  []AssetRef
 	ModelID                 string
+	EventID                 string
 }
 
 // Writer defines write behavior needed by the inbound router.
@@ -90,4 +93,5 @@ type Service interface {
 	DeleteByBot(ctx context.Context, botID string) error
 	DeleteBySession(ctx context.Context, sessionID string) error
 	LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error
+	FillDisplayContent(ctx context.Context, messages []Message)
 }

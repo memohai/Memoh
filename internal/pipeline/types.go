@@ -78,6 +78,8 @@ type MessageEvent struct {
 	UTCOffsetMin     int              `json:"utc_offset_min"`
 	Content          []ContentNode    `json:"content"`
 	ReplyToMessageID string           `json:"reply_to_message_id,omitempty"`
+	ReplyToSender    string           `json:"reply_to_sender,omitempty"`
+	ReplyToPreview   string           `json:"reply_to_preview,omitempty"`
 	ForwardInfo      *ForwardInfo     `json:"forward_info,omitempty"`
 	Attachments      []Attachment     `json:"attachments"`
 	IsSelfSent       bool             `json:"is_self_sent,omitempty"`

@@ -70,6 +70,10 @@ function getContentParts(message: Message): unknown[] | null {
 }
 
 export function extractMessageText(message: Message): string {
+  if (message.role === 'user' && message.display_content) {
+    return message.display_content.trim()
+  }
+
   const raw = message.content
   if (!raw) return ''
 

@@ -3,7 +3,6 @@ package feishu
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -81,40 +80,19 @@ func (a *FeishuAdapter) enrichQuotedMessage(ctx context.Context, cfg channel.Cha
 	}
 	msg.Metadata["is_reply_to_bot"] = isReplyToBot
 
-	// Extract text content from the parent message.
-	text := extractFeishuMessageText(parent)
-	if text == "" {
+	// Fill structured reply context instead of prepending [Reply to ...] text.
+	preview := extractFeishuMessageText(parent)
+	if preview == "" {
 		msgType := ptrStr(parent.MsgType)
 		if msgType != "" && msgType != larkim.MsgTypeText {
-			text = "[" + msgType + "]"
+			preview = "[" + msgType + "]"
 		}
 	}
-	if text == "" {
-		return
+	if len([]rune(preview)) > feishuQuotedTextMaxLength {
+		preview = string([]rune(preview)[:feishuQuotedTextMaxLength]) + "..."
 	}
-	if len([]rune(text)) > feishuQuotedTextMaxLength {
-		text = string([]rune(text)[:feishuQuotedTextMaxLength]) + "..."
-	}
-
-	var quotedText string
-	if senderName != "" {
-		quotedText = fmt.Sprintf("[Reply to %s: %s]", senderName, text)
-	} else {
-		quotedText = fmt.Sprintf("[Reply to: %s]", text)
-	}
-
-	current := strings.TrimSpace(msg.Message.Text)
-	if msg.Metadata == nil {
-		msg.Metadata = map[string]any{}
-	}
-	if _, exists := msg.Metadata["raw_text"]; !exists {
-		msg.Metadata["raw_text"] = current
-	}
-	if current != "" {
-		msg.Message.Text = quotedText + "\n" + current
-	} else {
-		msg.Message.Text = quotedText
-	}
+	msg.Message.Reply.Sender = senderName
+	msg.Message.Reply.Preview = preview
 }
 
 // extractFeishuMessageText extracts plain text from a Feishu message object

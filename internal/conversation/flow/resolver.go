@@ -227,30 +227,30 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	displayName := r.resolveDisplayName(ctx, req)
 	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)
 
-	// When using the pipeline, the current user message is already in the
-	// RenderedContext so we must not append it again as Query.
-	var headerifiedQuery string
-	if !usePipeline {
-		tz := runCfg.Identity.TimezoneLocation
-		if tz == nil {
-			tz = time.UTC
-		}
-		headerifiedQuery = FormatUserHeader(UserMessageHeaderInput{
-			MessageID:         strings.TrimSpace(req.ExternalMessageID),
-			ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
-			DisplayName:       displayName,
-			Channel:           req.CurrentChannel,
-			ConversationType:  strings.TrimSpace(req.ConversationType),
-			ConversationName:  strings.TrimSpace(req.ConversationName),
-			Target:            strings.TrimSpace(req.ReplyTarget),
-			AttachmentPaths:   extractAttachmentPaths(mergedAttachments),
-			Time:              time.Now().In(tz),
-			Timezone:          runCfg.Identity.Timezone,
-		}, req.Query)
+	tz := runCfg.Identity.TimezoneLocation
+	if tz == nil {
+		tz = time.UTC
 	}
+	headerifiedQuery := FormatUserHeader(UserMessageHeaderInput{
+		MessageID:         strings.TrimSpace(req.ExternalMessageID),
+		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
+		DisplayName:       displayName,
+		Channel:           req.CurrentChannel,
+		ConversationType:  strings.TrimSpace(req.ConversationType),
+		ConversationName:  strings.TrimSpace(req.ConversationName),
+		Target:            strings.TrimSpace(req.ReplyTarget),
+		AttachmentPaths:   extractAttachmentPaths(mergedAttachments),
+		Time:              time.Now().In(tz),
+		Timezone:          runCfg.Identity.Timezone,
+	}, req.Query)
 
 	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
-	runCfg.Query = headerifiedQuery
+	// When using the pipeline the user message is already in the RC;
+	// don't send it to the LLM again. headerifiedQuery is still kept
+	// for storeRound so the user message gets persisted.
+	if !usePipeline {
+		runCfg.Query = headerifiedQuery
+	}
 	runCfg.InlineImages = extractNativeImageParts(mergedAttachments)
 
 	var injectedRecords *[]conversation.InjectedMessageRecord

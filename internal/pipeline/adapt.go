@@ -7,10 +7,23 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 )
 
-// AdaptInbound converts a channel.InboundMessage into a pipeline MessageEvent.
-// This is the primary adaptation path — all channel adapters normalize to
-// InboundMessage before reaching the pipeline.
-func AdaptInbound(msg channel.InboundMessage, sessionID, channelIdentityID, displayName string) MessageEvent {
+// AdaptInbound converts a channel.InboundMessage into a pipeline CanonicalEvent.
+// The event type is determined by the "event_type" metadata key set by channel
+// adapters: "edit" → EditEvent, "service" → ServiceEvent. All other messages
+// (including the default) produce a MessageEvent.
+func AdaptInbound(msg channel.InboundMessage, sessionID, channelIdentityID, displayName string) CanonicalEvent {
+	eventType, _ := msg.Metadata["event_type"].(string)
+	switch eventType {
+	case "edit":
+		return adaptEdit(msg, sessionID, channelIdentityID, displayName)
+	case "service":
+		return adaptService(msg, sessionID)
+	default:
+		return adaptMessage(msg, sessionID, channelIdentityID, displayName)
+	}
+}
+
+func adaptMessage(msg channel.InboundMessage, sessionID, channelIdentityID, displayName string) MessageEvent {
 	now := msg.ReceivedAt
 	if now.IsZero() {
 		now = time.Now()
@@ -29,9 +42,11 @@ func AdaptInbound(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 	content := adaptContent(msg.Message.Text)
 	attachments := adaptAttachments(msg.Message.Attachments)
 
-	var replyToMessageID string
+	var replyToMessageID, replyToSender, replyToPreview string
 	if msg.Message.Reply != nil {
 		replyToMessageID = strings.TrimSpace(msg.Message.Reply.MessageID)
+		replyToSender = strings.TrimSpace(msg.Message.Reply.Sender)
+		replyToPreview = strings.TrimSpace(msg.Message.Reply.Preview)
 	}
 
 	_, offset := now.Zone()
@@ -48,6 +63,8 @@ func AdaptInbound(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 		UTCOffsetMin:     utcOffsetMin,
 		Content:          content,
 		ReplyToMessageID: replyToMessageID,
+		ReplyToSender:    replyToSender,
+		ReplyToPreview:   replyToPreview,
 		Attachments:      attachments,
 		Conversation: ConversationMeta{
 			Channel:          msg.Channel.String(),
@@ -88,6 +105,69 @@ func adaptAttachments(atts []channel.Attachment) []Attachment {
 		result = append(result, att)
 	}
 	return result
+}
+
+func adaptEdit(msg channel.InboundMessage, sessionID, channelIdentityID, displayName string) EditEvent {
+	now := msg.ReceivedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	var sender *CanonicalUser
+	if channelIdentityID != "" || displayName != "" {
+		sender = &CanonicalUser{
+			ID:          channelIdentityID,
+			DisplayName: displayName,
+			Username:    strings.TrimSpace(msg.Sender.Attribute("username")),
+			IsBot:       metadataBool(msg.Metadata, "is_bot"),
+		}
+	}
+
+	_, offset := now.Zone()
+	return EditEvent{
+		SessionID:    sessionID,
+		MessageID:    strings.TrimSpace(msg.Message.ID),
+		Sender:       sender,
+		ReceivedAtMs: now.UnixMilli(),
+		TimestampSec: now.Unix(),
+		UTCOffsetMin: offset / 60,
+		Content:      adaptContent(msg.Message.Text),
+		Attachments:  adaptAttachments(msg.Message.Attachments),
+	}
+}
+
+func adaptService(msg channel.InboundMessage, sessionID string) ServiceEvent {
+	now := msg.ReceivedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	action, _ := msg.Metadata["service_action"].(string)
+	var actor *CanonicalUser
+	if msg.Sender.SubjectID != "" || msg.Sender.DisplayName != "" {
+		actor = &CanonicalUser{
+			ID:          strings.TrimSpace(msg.Sender.SubjectID),
+			DisplayName: strings.TrimSpace(msg.Sender.DisplayName),
+			Username:    strings.TrimSpace(msg.Sender.Attribute("username")),
+		}
+	}
+
+	_, offset := now.Zone()
+	event := ServiceEvent{
+		SessionID:    sessionID,
+		Action:       ServiceAction(action),
+		Actor:        actor,
+		ReceivedAtMs: now.UnixMilli(),
+		TimestampSec: now.Unix(),
+		UTCOffsetMin: offset / 60,
+	}
+	if title, ok := msg.Metadata["new_title"].(string); ok {
+		event.NewTitle = title
+	}
+	if title, ok := msg.Metadata["old_title"].(string); ok {
+		event.OldTitle = title
+	}
+	return event
 }
 
 func metadataBool(meta map[string]any, key string) bool {

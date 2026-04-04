@@ -23,7 +23,7 @@ func (q *Queries) CountSessionEvents(ctx context.Context, sessionID pgtype.UUID)
 	return count, err
 }
 
-const createSessionEvent = `-- name: CreateSessionEvent :exec
+const createSessionEvent = `-- name: CreateSessionEvent :one
 INSERT INTO bot_session_events (
   bot_id,
   session_id,
@@ -34,6 +34,7 @@ INSERT INTO bot_session_events (
   received_at_ms
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT DO NOTHING
+RETURNING id
 `
 
 type CreateSessionEventParams struct {
@@ -46,8 +47,8 @@ type CreateSessionEventParams struct {
 	ReceivedAtMs            int64       `json:"received_at_ms"`
 }
 
-func (q *Queries) CreateSessionEvent(ctx context.Context, arg CreateSessionEventParams) error {
-	_, err := q.db.Exec(ctx, createSessionEvent,
+func (q *Queries) CreateSessionEvent(ctx context.Context, arg CreateSessionEventParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createSessionEvent,
 		arg.BotID,
 		arg.SessionID,
 		arg.EventKind,
@@ -56,7 +57,44 @@ func (q *Queries) CreateSessionEvent(ctx context.Context, arg CreateSessionEvent
 		arg.SenderChannelIdentityID,
 		arg.ReceivedAtMs,
 	)
-	return err
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const listSessionEventsByEventID = `-- name: ListSessionEventsByEventID :many
+SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at FROM bot_session_events
+WHERE id = $1
+`
+
+func (q *Queries) ListSessionEventsByEventID(ctx context.Context, id pgtype.UUID) ([]BotSessionEvent, error) {
+	rows, err := q.db.Query(ctx, listSessionEventsByEventID, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BotSessionEvent
+	for rows.Next() {
+		var i BotSessionEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.EventKind,
+			&i.EventData,
+			&i.ExternalMessageID,
+			&i.SenderChannelIdentityID,
+			&i.ReceivedAtMs,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listSessionEventsBySession = `-- name: ListSessionEventsBySession :many

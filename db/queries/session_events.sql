@@ -1,4 +1,4 @@
--- name: CreateSessionEvent :exec
+-- name: CreateSessionEvent :one
 INSERT INTO bot_session_events (
   bot_id,
   session_id,
@@ -8,7 +8,8 @@ INSERT INTO bot_session_events (
   sender_channel_identity_id,
   received_at_ms
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT DO NOTHING;
+ON CONFLICT DO NOTHING
+RETURNING id;
 
 -- name: ListSessionEventsBySession :many
 SELECT * FROM bot_session_events
@@ -23,3 +24,7 @@ ORDER BY received_at_ms ASC;
 -- name: CountSessionEvents :one
 SELECT COUNT(*) FROM bot_session_events
 WHERE session_id = $1;
+
+-- name: ListSessionEventsByEventID :many
+SELECT * FROM bot_session_events
+WHERE id = $1;
