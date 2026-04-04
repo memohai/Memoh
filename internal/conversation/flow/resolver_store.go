@@ -97,7 +97,11 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			messageSenderUserID = senderUserID
 			externalMessageID = req.ExternalMessageID
 			messageEventID = req.EventID
-			displayText = strings.TrimSpace(req.Query)
+			if req.RawQuery != "" {
+				displayText = req.RawQuery
+			} else {
+				displayText = strings.TrimSpace(req.Query)
+			}
 			if strings.TrimSpace(msg.TextContent()) == strings.TrimSpace(req.Query) {
 				assets = chatAttachmentsToAssetRefs(req.Attachments)
 			}
