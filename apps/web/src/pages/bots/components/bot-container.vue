@@ -4,6 +4,7 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useQuery } from '@pinia/colada'
+import { ChevronRight } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdContainer,
   getBotsByBotIdContainer,
@@ -25,7 +26,7 @@ import {
   type ContainerCreateLayerStatus,
   type ContainerCreateStreamEvent,
 } from '@/composables/api/useContainerStream'
-import { Button, Input, Label, Separator, Spinner, Switch, Textarea } from '@memohai/ui'
+import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, Input, Label, Separator, Spinner, Switch, Textarea } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ContainerCreateProgress from './container-create-progress.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
@@ -62,6 +63,7 @@ const createImagePrefilled = ref(false)
 const createGPUEnabled = ref(false)
 const createGPUDevices = ref('')
 const createGPUPrefilled = ref(false)
+const createAdvancedOpen = ref(false)
 const newSnapshotName = ref('')
 const importInputRef = ref<HTMLInputElement | null>(null)
 
@@ -624,6 +626,7 @@ watch(containerMissing, (missing) => {
   if (!missing) {
     createImagePrefilled.value = false
     createGPUPrefilled.value = false
+    createAdvancedOpen.value = false
   }
 })
 
@@ -751,32 +754,58 @@ watch([activeTab, botId], ([tab]) => {
           </p>
         </div>
 
-        <div class="flex items-start justify-between gap-4 rounded-md border p-3">
-          <div class="space-y-1">
-            <Label>{{ $t('bots.container.createGpuLabel') }}</Label>
-            <p class="text-xs text-muted-foreground">
-              {{ $t('bots.container.createGpuDescription') }}
-            </p>
-          </div>
-          <Switch
-            :model-value="createGPUEnabled"
-            :disabled="containerBusy || botLifecyclePending"
-            @update:model-value="(value) => createGPUEnabled = !!value"
-          />
-        </div>
+        <Collapsible v-model:open="createAdvancedOpen">
+          <div class="rounded-md border">
+            <CollapsibleTrigger class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40">
+              <div class="space-y-1">
+                <p class="text-xs font-medium">
+                  {{ $t('bots.container.createAdvancedTitle') }}
+                </p>
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('bots.container.createAdvancedDescription') }}
+                </p>
+              </div>
+              <ChevronRight
+                class="size-4 shrink-0 text-muted-foreground transition-transform"
+                :class="{ 'rotate-90': createAdvancedOpen }"
+              />
+            </CollapsibleTrigger>
 
-        <div class="space-y-2">
-          <Label>{{ $t('bots.container.createGpuDevicesLabel') }}</Label>
-          <Textarea
-            v-model="createGPUDevices"
-            :placeholder="$t('bots.container.createGpuDevicesPlaceholder')"
-            :disabled="containerBusy || botLifecyclePending || !createGPUEnabled"
-            class="min-h-24 font-mono text-xs"
-          />
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.container.createGpuDevicesDescription') }}
-          </p>
-        </div>
+            <CollapsibleContent>
+              <div class="space-y-4 border-t px-3 py-3">
+                <div class="flex items-start justify-between gap-4 rounded-md border p-3">
+                  <div class="space-y-1">
+                    <Label>{{ $t('bots.container.createGpuLabel') }}</Label>
+                    <p class="text-xs text-muted-foreground">
+                      {{ $t('bots.container.createGpuDescription') }}
+                    </p>
+                  </div>
+                  <Switch
+                    :model-value="createGPUEnabled"
+                    :disabled="containerBusy || botLifecyclePending"
+                    @update:model-value="(value) => createGPUEnabled = !!value"
+                  />
+                </div>
+
+                <div
+                  v-if="createGPUEnabled"
+                  class="space-y-2"
+                >
+                  <Label>{{ $t('bots.container.createGpuDevicesLabel') }}</Label>
+                  <Textarea
+                    v-model="createGPUDevices"
+                    :placeholder="$t('bots.container.createGpuDevicesPlaceholder')"
+                    :disabled="containerBusy || botLifecyclePending"
+                    class="min-h-24 font-mono text-xs"
+                  />
+                  <p class="text-xs text-muted-foreground">
+                    {{ $t('bots.container.createGpuDevicesDescription') }}
+                  </p>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
 
         <div class="flex justify-end">
           <Button
