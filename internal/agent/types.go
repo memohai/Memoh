@@ -92,11 +92,14 @@ type GenerateResult struct {
 
 // FileAttachment represents a file reference extracted from agent output.
 type FileAttachment struct {
-	Type string `json:"type"`
-	Path string `json:"path,omitempty"`
-	URL  string `json:"url,omitempty"`
-	Mime string `json:"mime,omitempty"`
-	Name string `json:"name,omitempty"`
+	Type        string         `json:"type"`
+	Path        string         `json:"path,omitempty"`
+	URL         string         `json:"url,omitempty"`
+	Mime        string         `json:"mime,omitempty"`
+	Name        string         `json:"name,omitempty"`
+	ContentHash string         `json:"content_hash,omitempty"`
+	Size        int64          `json:"size,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 // ReactionItem represents an emoji reaction extracted from agent output.

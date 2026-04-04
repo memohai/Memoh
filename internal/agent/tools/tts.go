@@ -67,13 +67,13 @@ func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.
 	return []sdk.Tool{
 		{
 			Name:        "speak",
-			Description: "Send a voice message to a DIFFERENT channel or person. Synthesizes text to speech and delivers as audio. Do NOT use this for the current conversation — use <speech> block instead.",
+			Description: "Send a voice message. When target is omitted, speaks in the current conversation. When target is specified, sends to that channel/person. Synthesizes text to speech and delivers as audio.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"text":     map[string]any{"type": "string", "description": "The text to convert to speech (max 500 characters)"},
 					"platform": map[string]any{"type": "string", "description": "Channel platform name. Defaults to current session platform."},
-					"target":   map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Use get_contacts to find available targets."},
+					"target":   map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to speak in the current conversation. Use get_contacts to find targets for other conversations."},
 					"reply_to": map[string]any{"type": "string", "description": "Message ID to reply to. The voice message will reference this message on the platform."},
 				},
 				"required": []string{"text"},
@@ -108,12 +108,7 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 	if target == "" {
 		return nil, errors.New("target is required")
 	}
-	if strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) &&
-		target == strings.TrimSpace(session.ReplyTarget) {
-		return nil, errors.New("you are trying to speak in the same conversation you are already in. " +
-			"Do not use the speak tool for this. Instead, use the <speech> block in your response " +
-			"(e.g. <speech>Hello world</speech>)")
-	}
+
 	botSettings, err := p.settings.GetBot(ctx, botID)
 	if err != nil {
 		return nil, errors.New("failed to load bot settings")
@@ -125,6 +120,19 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 	if synthErr != nil {
 		return nil, fmt.Errorf("speech synthesis failed: %s", synthErr.Error())
 	}
+
+	// Same-conversation: emit as a speech stream event for inline delivery.
+	if session.IsSameConversation(channelType.String(), target) && session.Emitter != nil {
+		session.Emitter(ToolStreamEvent{
+			Type:     StreamEventSpeech,
+			Speeches: []Speech{{Text: text}},
+		})
+		return map[string]any{
+			"ok":        true,
+			"delivered": "current_conversation",
+		}, nil
+	}
+
 	dataURL := fmt.Sprintf("data:%s;base64,%s", contentType, base64.StdEncoding.EncodeToString(audioData))
 	msg := channel.Message{
 		Attachments: []channel.Attachment{{Type: channel.AttachmentVoice, URL: dataURL, Mime: contentType, Size: int64(len(audioData))}},

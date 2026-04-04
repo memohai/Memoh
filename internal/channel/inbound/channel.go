@@ -1867,6 +1867,12 @@ func (p *ChannelInboundProcessor) ingestOutboundAttachments(ctx context.Context,
 		item := att
 		rawURL := strings.TrimSpace(item.URL)
 		if strings.TrimSpace(item.ContentHash) != "" {
+			if item.Metadata == nil {
+				item.Metadata = make(map[string]any)
+			}
+			if _, ok := item.Metadata["bot_id"]; !ok {
+				item.Metadata["bot_id"] = botID
+			}
 			result = append(result, item)
 			continue
 		}
@@ -2142,14 +2148,15 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 		return nil
 	}
 	var items []struct {
-		Type        string `json:"type"`
-		URL         string `json:"url"`
-		Path        string `json:"path"`
-		PlatformKey string `json:"platform_key"`
-		ContentHash string `json:"content_hash"`
-		Name        string `json:"name"`
-		Mime        string `json:"mime"`
-		Size        int64  `json:"size"`
+		Type        string         `json:"type"`
+		URL         string         `json:"url"`
+		Path        string         `json:"path"`
+		PlatformKey string         `json:"platform_key"`
+		ContentHash string         `json:"content_hash"`
+		Name        string         `json:"name"`
+		Mime        string         `json:"mime"`
+		Size        int64          `json:"size"`
+		Metadata    map[string]any `json:"metadata"`
 	}
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil
@@ -2172,6 +2179,7 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 			Name:        name,
 			Mime:        strings.TrimSpace(item.Mime),
 			Size:        item.Size,
+			Metadata:    item.Metadata,
 		})
 	}
 	return attachments
