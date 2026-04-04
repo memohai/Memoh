@@ -10,7 +10,7 @@ import (
 // Config holds the Misskey instance credentials extracted from a channel configuration.
 type Config struct {
 	InstanceURL string // Misskey instance URL (e.g. https://misskey.io)
-	AccessToken string // API access token
+	AccessToken string `json:"AccessToken"` //nolint:gosec // G117: token field, handled securely
 }
 
 // apiURL returns the base API URL with trailing slashes removed.

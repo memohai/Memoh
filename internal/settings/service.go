@@ -105,7 +105,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			return Settings{}, err
 		}
 		timezoneValue = normalized
-		current.Timezone = normalized.String
 	}
 	chatModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.ChatModelID); value != "" {
@@ -417,7 +416,7 @@ func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.
 	if len(rows) > 1 {
 		return pgtype.UUID{}, fmt.Errorf("%w: %s", ErrModelIDAmbiguous, modelID)
 	}
-return rows[0].ID, nil
+	return rows[0].ID, nil
 }
 
 func normalizeOptionalTimezone(raw string) (pgtype.Text, error) {

@@ -25,7 +25,7 @@ func apiRequest(ctx context.Context, cfg Config, endpoint string, payload any) (
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpClient.Do(req) //nolint:gosec // G704: URL is user-configured, validated at config level
 	if err != nil {
 		return nil, fmt.Errorf("misskey api do: %w", err)
 	}
