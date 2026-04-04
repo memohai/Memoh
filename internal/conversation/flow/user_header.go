@@ -6,7 +6,7 @@ import (
 )
 
 // UserMessageMeta holds the structured metadata attached to every user
-// message. It is the single source of truth for the YAML header sent to the LLM.
+// message. It is the single source of truth for the XML message tag sent to the LLM.
 type UserMessageMeta struct {
 	MessageID         string   `json:"message-id,omitempty"`
 	ChannelIdentityID string   `json:"channel-identity-id"`
@@ -47,8 +47,8 @@ func BuildUserMessageMetaWithTime(messageID, channelIdentityID, displayName, cha
 	return meta
 }
 
-// ToMap returns the metadata as a map with the same keys used in the YAML
-// header, suitable for storing as inbox content JSONB.
+// ToMap returns the metadata as a map with the same keys used in the XML
+// attributes, suitable for storing as inbox content JSONB.
 func (m UserMessageMeta) ToMap() map[string]any {
 	result := map[string]any{
 		"channel-identity-id": m.ChannelIdentityID,
@@ -70,8 +70,8 @@ func (m UserMessageMeta) ToMap() map[string]any {
 	return result
 }
 
-// FormatUserHeader wraps a user query with YAML front-matter metadata so
-// the LLM sees structured context (sender, channel, time, attachments)
+// FormatUserHeader wraps a user query in an XML <message> tag so the LLM sees
+// structured context (sender, channel, conversation, time, attachments)
 // alongside the raw message. This must be the single source of truth for
 // user-message formatting — the agent gateway must NOT add its own header.
 func FormatUserHeader(messageID, channelIdentityID, displayName, channel, conversationType, conversationName string, attachmentPaths []string, now time.Time, timezone, query string) string {
@@ -80,60 +80,53 @@ func FormatUserHeader(messageID, channelIdentityID, displayName, channel, conver
 }
 
 // FormatUserHeaderFromMeta formats a pre-built UserMessageMeta into the
-// YAML front-matter string sent to the LLM.
+// XML <message> string sent to the LLM.
 func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 	var sb strings.Builder
-	sb.WriteString("---\n")
+
+	sb.WriteString("<message")
 	if meta.MessageID != "" {
-		writeYAMLString(&sb, "message-id", meta.MessageID)
+		writeXMLAttr(&sb, "id", meta.MessageID)
 	}
-	writeYAMLString(&sb, "channel-identity-id", meta.ChannelIdentityID)
-	writeYAMLString(&sb, "display-name", meta.DisplayName)
-	writeYAMLString(&sb, "channel", meta.Channel)
-	writeYAMLString(&sb, "conversation-type", meta.ConversationType)
+	writeXMLAttr(&sb, "sender", meta.DisplayName)
+	writeXMLAttr(&sb, "t", meta.Time)
+	writeXMLAttr(&sb, "channel", meta.Channel)
 	if meta.ConversationName != "" {
-		writeYAMLString(&sb, "conversation-name", meta.ConversationName)
+		writeXMLAttr(&sb, "conversation", meta.ConversationName)
 	}
-	writeYAMLString(&sb, "time", meta.Time)
-	if strings.TrimSpace(meta.Timezone) != "" {
-		writeYAMLString(&sb, "timezone", meta.Timezone)
+	if meta.ConversationType != "" {
+		writeXMLAttr(&sb, "type", meta.ConversationType)
 	}
+	sb.WriteString(">\n")
+
 	if len(meta.AttachmentPaths) > 0 {
-		sb.WriteString("attachments:\n")
 		for _, p := range meta.AttachmentPaths {
-			sb.WriteString("  - ")
-			sb.WriteString(p)
-			sb.WriteByte('\n')
+			sb.WriteString("<attachment path=\"")
+			sb.WriteString(escapeXMLAttr(p))
+			sb.WriteString("\"/>\n")
 		}
-	} else {
-		sb.WriteString("attachments: []\n")
 	}
-	sb.WriteString("---\n")
+
 	sb.WriteString(query)
+	sb.WriteString("\n</message>")
 	return sb.String()
 }
 
-func writeYAMLString(sb *strings.Builder, key, value string) {
-	sb.WriteString(key)
-	sb.WriteString(": ")
-	if value == "" || needsYAMLQuote(value) {
-		sb.WriteByte('"')
-		sb.WriteString(strings.ReplaceAll(value, `"`, `\"`))
-		sb.WriteByte('"')
-	} else {
-		sb.WriteString(value)
-	}
-	sb.WriteByte('\n')
+// escapeXMLAttr escapes a string for use inside an XML attribute value.
+func escapeXMLAttr(s string) string {
+	r := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		"\"", "&quot;",
+	)
+	return r.Replace(s)
 }
 
-func needsYAMLQuote(s string) bool {
-	if s == "" {
-		return true
-	}
-	for _, c := range s {
-		if c == ':' || c == '#' || c == '"' || c == '\'' || c == '{' || c == '}' || c == '[' || c == ']' || c == ',' || c == '\n' {
-			return true
-		}
-	}
-	return false
+func writeXMLAttr(sb *strings.Builder, key, value string) {
+	sb.WriteByte(' ')
+	sb.WriteString(key)
+	sb.WriteString("=\"")
+	sb.WriteString(escapeXMLAttr(value))
+	sb.WriteByte('"')
 }

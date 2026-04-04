@@ -26,6 +26,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 )
 
 var base64Std = base64.StdEncoding
@@ -104,6 +105,8 @@ type ChannelInboundProcessor struct {
 	ttsService       ttsSynthesizer
 	ttsModelResolver ttsModelResolver
 	sessionEnsurer   SessionEnsurer
+	pipeline         *pipelinepkg.Pipeline
+	eventStore       *pipelinepkg.EventStore
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -205,6 +208,15 @@ func (p *ChannelInboundProcessor) SetCommandHandler(handler *command.Handler) {
 		return
 	}
 	p.commandHandler = handler
+}
+
+// SetPipeline configures the DCP pipeline and event store for event-driven context assembly.
+func (p *ChannelInboundProcessor) SetPipeline(pipeline *pipelinepkg.Pipeline, store *pipelinepkg.EventStore) {
+	if p == nil {
+		return
+	}
+	p.pipeline = pipeline
+	p.eventStore = store
 }
 
 // SetDispatcher configures the per-route message dispatcher for inject/queue/parallel modes.
@@ -337,6 +349,21 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		} else {
 			sessionID = sess.ID
 		}
+	}
+
+	// Push event into the DCP pipeline (persist + in-memory projection).
+	// On first access for a session, replay persisted events to warm the pipeline.
+	if p.pipeline != nil && sessionID != "" {
+		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
+			p.replayPipelineSession(ctx, sessionID)
+		}
+		event := pipelinepkg.AdaptInbound(msg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
+		if p.eventStore != nil {
+			if err := p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event); err != nil && p.logger != nil {
+				p.logger.Warn("persist pipeline event failed", slog.Any("error", err))
+			}
+		}
+		p.pipeline.PushEvent(sessionID, event)
 	}
 
 	// Bot-centric history container:
@@ -2044,10 +2071,31 @@ func extractStorageKey(accessPath string, _ string) string {
 }
 
 // isLocalChannelType returns true for channels that already publish to RouteHub
-// natively (e.g. web, cli). Wrapping these with a tee would cause duplicate events.
+// natively (e.g. web). Wrapping these with a tee would cause duplicate events.
 func isLocalChannelType(ct channel.ChannelType) bool {
 	s := strings.ToLower(strings.TrimSpace(string(ct)))
-	return s == "web" || s == "cli"
+	return s == "local"
+}
+
+// replayPipelineSession loads persisted events from the DB and replays them
+// into the pipeline. Called lazily on first access per session after cold start.
+func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, sessionID string) {
+	if p.eventStore == nil || p.pipeline == nil {
+		return
+	}
+	events, err := p.eventStore.LoadEvents(ctx, sessionID)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		}
+		return
+	}
+	if len(events) > 0 {
+		p.pipeline.ReplaySession(sessionID, events)
+		if p.logger != nil {
+			p.logger.Info("pipeline session replayed", slog.String("session_id", sessionID), slog.Int("events", len(events)))
+		}
+	}
 }
 
 // broadcastInboundMessage notifies the observer about the user's inbound

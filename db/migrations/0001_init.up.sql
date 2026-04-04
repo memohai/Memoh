@@ -347,7 +347,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
   channel_type TEXT,
-  type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent')),
+  type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent', 'discuss')),
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
@@ -365,6 +365,25 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_sessio
 ALTER TABLE bot_channel_routes
   ADD CONSTRAINT fk_bot_channel_routes_active_session
   FOREIGN KEY (active_session_id) REFERENCES bot_sessions(id) ON DELETE SET NULL;
+
+-- bot_session_events: DCP pipeline event store for cold-start replay.
+CREATE TABLE IF NOT EXISTS bot_session_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  event_kind TEXT NOT NULL CHECK (event_kind IN ('message', 'edit', 'delete', 'service')),
+  event_data JSONB NOT NULL,
+  external_message_id TEXT,
+  sender_channel_identity_id UUID,
+  received_at_ms BIGINT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_events_session_received
+  ON bot_session_events (session_id, received_at_ms);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_events_dedup
+  ON bot_session_events (session_id, external_message_id)
+  WHERE external_message_id IS NOT NULL AND external_message_id != '';
 
 -- bot_history_messages: unified message history under bot scope.
 CREATE TABLE IF NOT EXISTS bot_history_messages (

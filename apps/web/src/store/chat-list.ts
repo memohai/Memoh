@@ -128,7 +128,7 @@ export const useChatStore = defineStore('chat', () => {
     const type = session.type ?? 'chat'
     if (type === 'heartbeat' || type === 'schedule' || type === 'subagent') return true
     const ct = (session.channel_type ?? '').trim().toLowerCase()
-    if (ct && ct !== 'web') return true
+    if (ct && ct !== 'local') return true
     return false
   })
 
@@ -196,7 +196,7 @@ export const useChatStore = defineStore('chat', () => {
     const createdAt = raw.created_at ? new Date(raw.created_at) : new Date()
     const timestamp = Number.isNaN(createdAt.getTime()) ? new Date() : createdAt
     const platform = (raw.platform ?? '').trim().toLowerCase()
-    const channelTag = platform && platform !== 'web' ? platform : undefined
+    const channelTag = platform && platform !== 'local' ? platform : undefined
 
     if (raw.role === 'user') {
       const isSelf = resolveIsSelf(raw)
@@ -260,7 +260,7 @@ export const useChatStore = defineStore('chat', () => {
         if (toolCalls.length > 0) {
           if (!pendingAssistant) {
             const platform = (raw.platform ?? '').trim().toLowerCase()
-            const channelTag = platform && platform !== 'web' ? platform : undefined
+            const channelTag = platform && platform !== 'local' ? platform : undefined
             pendingAssistant = {
               id: raw.id || nextId(),
               role: 'assistant',
@@ -336,7 +336,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function resolveIsSelf(raw: Message): boolean {
     const platform = (raw.platform ?? '').trim().toLowerCase()
-    if (!platform || platform === 'web') return true
+    if (!platform || platform === 'local') return true
     const senderUserId = (raw.sender_user_id ?? '').trim()
     if (!senderUserId) return false
     const userStore = useUserStore()
@@ -654,7 +654,7 @@ export const useChatStore = defineStore('chat', () => {
     const msgSessionId = (raw.session_id ?? '').trim()
     if (msgSessionId && sessionId.value && msgSessionId !== sessionId.value) return
     const platform = resolveMessagePlatform(raw)
-    if (platform === 'web') return
+    if (platform === 'local') return
     const mid = String(raw.id ?? '').trim()
     if (mid && hasMessageWithId(mid)) return
     const item = messageToChat(raw)

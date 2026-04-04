@@ -7,5 +7,5 @@ const (
 	// CLIType is the registered ChannelType for the CLI adapter.
 	CLIType channel.ChannelType = "cli"
 	// WebType is the registered ChannelType for the Web adapter.
-	WebType channel.ChannelType = "web"
+	WebType channel.ChannelType = "local"
 )
