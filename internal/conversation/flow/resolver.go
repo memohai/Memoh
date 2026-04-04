@@ -26,6 +26,7 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -72,6 +73,7 @@ type Resolver struct {
 	eventPublisher    messageevent.Publisher
 	skillLoader       SkillLoader
 	assetLoader       gatewayAssetLoader
+	pipeline          *pipelinepkg.Pipeline
 	timeout           time.Duration
 	clockLocation     *time.Location
 	logger            *slog.Logger
@@ -129,6 +131,18 @@ func (r *Resolver) SetGatewayAssetLoader(loader gatewayAssetLoader) {
 // SetCompactionService configures the compaction service for context compaction.
 func (r *Resolver) SetCompactionService(s *compaction.Service) {
 	r.compactionService = s
+}
+
+// SetPipeline configures the DCP pipeline for RC-based context assembly.
+// When set, resolve() will use RC from the pipeline instead of loading
+// history from bot_history_messages for sessions that have pipeline data.
+func (r *Resolver) SetPipeline(p *pipelinepkg.Pipeline) {
+	r.pipeline = p
+}
+
+// Pipeline returns the configured pipeline, or nil.
+func (r *Resolver) Pipeline() *pipelinepkg.Pipeline {
+	return r.pipeline
 }
 
 type usageInfo struct {

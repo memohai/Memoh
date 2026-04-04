@@ -5,7 +5,23 @@
     :height="size"
     viewBox="0 0 24 24"
     v-bind="$attrs"
-  ><defs><linearGradient id="lobe-icons-baichuan-fill" x1="17.764%" x2="100%" y1="8.678%" y2="91.322%"><stop offset="0%" stop-color="#FEC13E"></stop><stop offset="100%" stop-color="#FF6933"></stop></linearGradient></defs><path d="M7.333 2h-3.2l-2 4.333V17.8L0 22h5.2l2.028-4.2L7.333 2zm7.334 0h-5.2v20h5.2V2zM16.8 7.733H22V22h-5.2V7.733zM22 2h-5.2v4.133H22V2z" fill="url(#lobe-icons-baichuan-fill)" fill-rule="nonzero"></path></svg>
+  ><defs><linearGradient
+    id="lobe-icons-baichuan-fill"
+    x1="17.764%"
+    x2="100%"
+    y1="8.678%"
+    y2="91.322%"
+  ><stop
+    offset="0%"
+    stop-color="#FEC13E"
+  /><stop
+    offset="100%"
+    stop-color="#FF6933"
+  /></linearGradient></defs><path
+    d="M7.333 2h-3.2l-2 4.333V17.8L0 22h5.2l2.028-4.2L7.333 2zm7.334 0h-5.2v20h5.2V2zM16.8 7.733H22V22h-5.2V7.733zM22 2h-5.2v4.133H22V2z"
+    fill="url(#lobe-icons-baichuan-fill)"
+    fill-rule="nonzero"
+  /></svg>
 </template>
 
 <script setup lang="ts">

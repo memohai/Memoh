@@ -172,6 +172,18 @@ type BotSession struct {
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type BotSessionEvent struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	EventKind               string             `json:"event_kind"`
+	EventData               []byte             `json:"event_data"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	ReceivedAtMs            int64              `json:"received_at_ms"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+}
+
 type BotStorageBinding struct {
 	ID                pgtype.UUID        `json:"id"`
 	BotID             pgtype.UUID        `json:"bot_id"`

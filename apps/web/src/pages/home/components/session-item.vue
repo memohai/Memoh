@@ -80,7 +80,7 @@ defineEmits<{
 
 const { t } = useI18n()
 
-const WEB_CHANNELS = new Set(['web', ''])
+const WEB_CHANNELS = new Set(['local', ''])
 
 const isIMSession = computed(() => {
   const ct = (props.session.channel_type ?? '').trim().toLowerCase()

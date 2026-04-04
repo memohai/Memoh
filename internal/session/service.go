@@ -35,6 +35,7 @@ const (
 	TypeHeartbeat = "heartbeat"
 	TypeSchedule  = "schedule"
 	TypeSubagent  = "subagent"
+	TypeDiscuss   = "discuss"
 )
 
 // CreateInput holds input for creating a new session.
