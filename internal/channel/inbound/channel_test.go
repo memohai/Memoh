@@ -915,10 +915,10 @@ func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
 	sender := &fakeReplySender{}
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("fake-image-bytes"))
-	cfg := channel.ChannelConfig{ID: "cfg-base64", BotID: "bot-1", ChannelType: channel.ChannelType("web")}
+	cfg := channel.ChannelConfig{ID: "cfg-base64", BotID: "bot-1", ChannelType: channel.ChannelType("local")}
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
-		Channel: channel.ChannelType("web"),
+		Channel: channel.ChannelType("local"),
 		Message: channel.Message{
 			ID:   "msg-base64-1",
 			Text: "attachment base64 test",

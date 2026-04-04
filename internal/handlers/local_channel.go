@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -26,7 +25,6 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/media"
-	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 // localTtsSynthesizer synthesizes text to speech audio.
@@ -39,7 +37,7 @@ type localTtsModelResolver interface {
 	ResolveTtsModelID(ctx context.Context, botID string) (string, error)
 }
 
-// LocalChannelHandler handles local channel (CLI/Web) routes backed by bot history.
+// LocalChannelHandler handles local channel routes (WebUI / API) backed by bot history.
 type LocalChannelHandler struct {
 	channelType      channel.ChannelType
 	channelManager   *channel.Manager
@@ -310,17 +308,6 @@ func (w *wsWriter) Close() {
 	<-w.done
 }
 
-// extractRawBearerToken returns the raw JWT token suitable for passing to the
-// gateway. The gateway WS handler receives the token directly (not as an HTTP
-// header), so we must strip the "Bearer " prefix if present.
-func extractRawBearerToken(c echo.Context) string {
-	auth := strings.TrimSpace(c.Request().Header.Get("Authorization"))
-	if auth != "" {
-		return strings.TrimPrefix(auth, "Bearer ")
-	}
-	return strings.TrimSpace(c.QueryParam("token"))
-}
-
 // HandleWebSocket godoc
 // @Summary WebSocket chat endpoint
 // @Description Upgrade to WebSocket for bidirectional chat streaming with abort support.
@@ -346,18 +333,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	if err := h.ensureBotParticipant(c.Request().Context(), botID, channelIdentityID); err != nil {
 		return err
 	}
-	if h.resolver == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "resolver not configured")
+	if h.channelManager == nil || h.channelStore == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "channel manager not configured")
 	}
 
-	conn, err := wsUpgrader.Upgrade(c.Response(), c.Request(), nil)
-	if err != nil {
-		return err
+	conn, wsErr := wsUpgrader.Upgrade(c.Response(), c.Request(), nil)
+	if wsErr != nil {
+		return wsErr
 	}
 	defer func() { _ = conn.Close() }()
-
-	rawToken := extractRawBearerToken(c)
-	bearerToken := "Bearer " + rawToken
 
 	writer := newWSWriter(conn)
 	defer writer.Close()
@@ -365,8 +349,33 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	abortCh := make(chan struct{}, 1)
-	var activeCancel context.CancelFunc
+	// Subscribe to RouteHub so that events produced by HandleInbound
+	// (streaming deltas, tool calls, etc.) are forwarded over the WebSocket.
+	if h.routeHub != nil {
+		_, stream, unsubscribe := h.routeHub.Subscribe(botID)
+		defer unsubscribe()
+
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case hubEvent, ok := <-stream:
+					if !ok {
+						return
+					}
+					data, marshalErr := json.Marshal(hubEvent.Event)
+					if marshalErr != nil {
+						continue
+					}
+					processed := h.processWSEvent(ctx, botID, data)
+					for _, p := range processed {
+						writer.Send(p)
+					}
+				}
+			}
+		}()
+	}
 
 	for {
 		_, raw, readErr := conn.ReadMessage()
@@ -382,94 +391,72 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 		switch msg.Type {
 		case "abort":
-			select {
-			case abortCh <- struct{}{}:
-			default:
-			}
+			// Abort is no longer wired to a direct resolver call. The
+			// HandleInbound path manages its own lifecycle.
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)
-
-			chatAttachments := make([]conversation.ChatAttachment, 0, len(msg.Attachments))
-			for _, rawAtt := range msg.Attachments {
-				var att conversation.ChatAttachment
-				if err := json.Unmarshal(rawAtt, &att); err == nil {
-					chatAttachments = append(chatAttachments, att)
-				}
-			}
-
-			if text == "" && len(chatAttachments) == 0 {
+			if text == "" && len(msg.Attachments) == 0 {
 				writer.SendJSON(map[string]string{"type": "error", "message": "message text or attachments required"})
 				continue
 			}
 
-			// Drain any previous abort signal.
-			select {
-			case <-abortCh:
-			default:
+			cfg, cfgErr := h.channelStore.ResolveEffectiveConfig(ctx, botID, h.channelType)
+			if cfgErr != nil {
+				writer.SendJSON(map[string]string{"type": "error", "message": cfgErr.Error()})
+				continue
 			}
 
-			streamCtx, streamCancel := context.WithCancel(ctx)
-			activeCancel = streamCancel
-			eventCh := make(chan flow.WSStreamEvent, 64)
+			channelMsg := channel.Message{Text: text}
+			for _, rawAtt := range msg.Attachments {
+				var att channel.Attachment
+				if json.Unmarshal(rawAtt, &att) == nil {
+					channelMsg.Attachments = append(channelMsg.Attachments, att)
+				}
+			}
 
-			sessionID := strings.TrimSpace(msg.SessionID)
-			var (
-				outboundAssetMu   sync.Mutex
-				outboundAssetRefs []messagepkg.AssetRef
-			)
+			routeKey := botID
+			inbound := channel.InboundMessage{
+				Channel:     h.channelType,
+				Message:     channelMsg,
+				BotID:       botID,
+				ReplyTarget: routeKey,
+				RouteKey:    routeKey,
+				Sender: channel.Identity{
+					SubjectID: channelIdentityID,
+					Attributes: map[string]string{
+						"user_id": channelIdentityID,
+					},
+				},
+				Conversation: channel.Conversation{
+					ID:   routeKey,
+					Type: channel.ConversationTypePrivate,
+				},
+				ReceivedAt: time.Now().UTC(),
+				Source:     "local",
+			}
+			if mid := strings.TrimSpace(msg.ModelID); mid != "" {
+				if inbound.Metadata == nil {
+					inbound.Metadata = make(map[string]any)
+				}
+				inbound.Metadata["model_id"] = mid
+			}
+			if re := strings.TrimSpace(msg.ReasoningEffort); re != "" {
+				if inbound.Metadata == nil {
+					inbound.Metadata = make(map[string]any)
+				}
+				inbound.Metadata["reasoning_effort"] = re
+			}
 
-			go func() {
-				defer streamCancel()
-				defer close(eventCh)
-				req := conversation.ChatRequest{
-					BotID:                   botID,
-					ChatID:                  botID,
-					SessionID:               sessionID,
-					Token:                   bearerToken,
-					UserID:                  channelIdentityID,
-					SourceChannelIdentityID: channelIdentityID,
-					ConversationType:        channel.ConversationTypePrivate,
-					Query:                   text,
-					CurrentChannel:          h.channelType.String(),
-					Channels:                []string{h.channelType.String()},
-					Attachments:             chatAttachments,
-					Model:                   strings.TrimSpace(msg.ModelID),
-					ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
-				}
-				if streamErr := h.resolver.StreamChatWS(streamCtx, req, eventCh, abortCh); streamErr != nil {
-					if ctx.Err() == nil {
-						h.logger.Error("ws stream error", slog.Any("error", streamErr))
-						writer.SendJSON(map[string]string{"type": "error", "message": streamErr.Error()})
-					}
-				}
-			}()
-
-			go func() {
-				for event := range eventCh {
-					processed := h.processWSEvent(streamCtx, botID, event)
-					for _, p := range processed {
-						writer.Send(p)
-						if refs := extractAssetRefsFromProcessedEvent(p); len(refs) > 0 {
-							outboundAssetMu.Lock()
-							outboundAssetRefs = append(outboundAssetRefs, refs...)
-							outboundAssetMu.Unlock()
-						}
-					}
-				}
-				outboundAssetMu.Lock()
-				refs := outboundAssetRefs
-				outboundAssetMu.Unlock()
-				if len(refs) > 0 {
-					h.resolver.LinkOutboundAssets(context.WithoutCancel(ctx), botID, sessionID, refs)
-				}
-			}()
+			if handleErr := h.channelManager.HandleInbound(ctx, cfg, inbound); handleErr != nil {
+				h.logger.Error("ws HandleInbound error", slog.Any("error", handleErr))
+				writer.SendJSON(map[string]string{"type": "error", "message": handleErr.Error()})
+			}
 
 		default:
 			writer.SendJSON(map[string]string{"type": "error", "message": "unknown message type: " + msg.Type})
 		}
 	}
-	_ = activeCancel
 	return nil
 }
 
@@ -737,49 +724,4 @@ func applyAssetToMap(m map[string]any, botID string, asset media.Asset) {
 	if size, _ := m["size"].(float64); size == 0 && asset.SizeBytes > 0 {
 		m["size"] = asset.SizeBytes
 	}
-}
-
-// extractAssetRefsFromProcessedEvent parses a processed attachment_delta
-// event to collect asset refs for post-persist linking.
-func extractAssetRefsFromProcessedEvent(event json.RawMessage) []messagepkg.AssetRef {
-	var envelope struct {
-		Type        string `json:"type"`
-		Attachments []struct {
-			ContentHash string         `json:"content_hash"`
-			Name        string         `json:"name"`
-			Mime        string         `json:"mime"`
-			Size        float64        `json:"size"`
-			Metadata    map[string]any `json:"metadata"`
-		} `json:"attachments"`
-	}
-	if err := json.Unmarshal(event, &envelope); err != nil || envelope.Type != "attachment_delta" {
-		return nil
-	}
-	var refs []messagepkg.AssetRef
-	for i, att := range envelope.Attachments {
-		ch := strings.TrimSpace(att.ContentHash)
-		if ch == "" {
-			continue
-		}
-		name := strings.TrimSpace(att.Name)
-		if name == "" && att.Metadata != nil {
-			name, _ = att.Metadata["name"].(string)
-		}
-		ref := messagepkg.AssetRef{
-			ContentHash: ch,
-			Role:        "attachment",
-			Ordinal:     i,
-			Name:        name,
-			Mime:        strings.TrimSpace(att.Mime),
-			SizeBytes:   int64(att.Size),
-			Metadata:    att.Metadata,
-		}
-		if att.Metadata != nil {
-			if sk, ok := att.Metadata["storage_key"].(string); ok {
-				ref.StorageKey = sk
-			}
-		}
-		refs = append(refs, ref)
-	}
-	return refs
 }
