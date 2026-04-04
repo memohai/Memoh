@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -38,6 +39,9 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			)
 			errCh <- err
 			return
+		}
+		if streamReq.RawQuery == "" {
+			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
 		streamReq.Query = rc.query
 
@@ -86,6 +90,9 @@ func (r *Resolver) StreamChatWS(
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
 		return fmt.Errorf("resolve: %w", err)
+	}
+	if req.RawQuery == "" {
+		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	req.Query = rc.query
 

@@ -296,6 +296,9 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
+	if req.RawQuery == "" {
+		req.RawQuery = strings.TrimSpace(req.Query)
+	}
 	req.Query = rc.query
 
 	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.Query)
