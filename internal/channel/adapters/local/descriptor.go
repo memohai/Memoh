@@ -1,11 +1,9 @@
-// Package local implements the CLI and Web channel adapters for local development.
+// Package local implements the local channel adapter for WebUI and API access.
 package local
 
 import "github.com/memohai/memoh/internal/channel"
 
 const (
-	// CLIType is the registered ChannelType for the CLI adapter.
-	CLIType channel.ChannelType = "cli"
-	// WebType is the registered ChannelType for the Web adapter.
+	// WebType is the registered ChannelType for the local adapter (WebUI / API).
 	WebType channel.ChannelType = "local"
 )

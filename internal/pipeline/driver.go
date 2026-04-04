@@ -16,10 +16,17 @@ import (
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
-// RunConfigResolver resolves a complete agent RunConfig (model, system prompt,
-// tools, identity) for a bot+session. Implemented by flow.Resolver.
+// ResolveRunConfigResult holds the output of ResolveRunConfig.
+type ResolveRunConfigResult struct {
+	RunConfig agentpkg.RunConfig
+	ModelID   string // database UUID of the selected model
+}
+
+// RunConfigResolver resolves a complete agent RunConfig and persists output
+// rounds. Implemented by flow.Resolver.
 type RunConfigResolver interface {
-	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (agentpkg.RunConfig, error)
+	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
+	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
 
 // DiscussDriverDeps holds dependencies injected into the DiscussDriver.
@@ -81,11 +88,11 @@ func (d *DiscussDriver) SetResolver(r RunConfigResolver) {
 
 // NotifyRC pushes a new RenderedContext to the discuss session.
 // If the session goroutine is not running, it starts one.
-func (d *DiscussDriver) NotifyRC(ctx context.Context, sessionID string, rc RenderedContext, config DiscussSessionConfig) {
+func (d *DiscussDriver) NotifyRC(_ context.Context, sessionID string, rc RenderedContext, config DiscussSessionConfig) {
 	d.mu.Lock()
 	sess, ok := d.sessions[sessionID]
 	if !ok {
-		sessCtx, cancel := context.WithCancel(ctx) //nolint:contextcheck // long-lived goroutine context derived from caller
+		sessCtx, cancel := context.WithCancel(context.Background())
 		sess = &discussSession{
 			config: config,
 			rcCh:   make(chan RenderedContext, 16),
@@ -93,7 +100,7 @@ func (d *DiscussDriver) NotifyRC(ctx context.Context, sessionID string, rc Rende
 			cancel: cancel,
 		}
 		d.sessions[sessionID] = sess
-		go d.runSession(sessCtx, sess)
+		go d.runSession(sessCtx, sess) //nolint:contextcheck // long-lived goroutine; must outlive the inbound HTTP request
 	}
 	d.mu.Unlock()
 
@@ -203,13 +210,14 @@ func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, r
 		log.Error("discuss driver: resolver not configured")
 		return
 	}
-	runConfig, err := d.deps.Resolver.ResolveRunConfig(ctx,
+	resolved, err := d.deps.Resolver.ResolveRunConfig(ctx,
 		cfg.BotID, cfg.SessionID, cfg.ChannelIdentityID,
 		cfg.CurrentPlatform, cfg.ReplyTarget, cfg.ConversationType, cfg.SessionToken)
 	if err != nil {
 		log.Error("discuss: resolve run config failed", slog.Any("error", err))
 		return
 	}
+	runConfig := resolved.RunConfig
 
 	// Replace messages with RC-based context.
 	runConfig.Messages = contextMessagesToSDK(composed.Messages)
@@ -228,52 +236,17 @@ func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, r
 	}
 
 	now := time.Now()
-	d.persistAssistantOutput(ctx, cfg, result, log)
+
+	if d.deps.Resolver != nil && len(result.Messages) > 0 {
+		if storeErr := d.deps.Resolver.StoreRound(ctx,
+			cfg.BotID, cfg.SessionID, cfg.ChannelIdentityID, cfg.CurrentPlatform,
+			result.Messages, resolved.ModelID,
+		); storeErr != nil {
+			log.Error("discuss: store round failed", slog.Any("error", storeErr))
+		}
+	}
+
 	sess.lastProcessedMs = now.UnixMilli()
-}
-
-func (d *DiscussDriver) persistAssistantOutput(ctx context.Context, cfg DiscussSessionConfig, result *agentpkg.GenerateResult, log *slog.Logger) {
-	if d.deps.MessageService == nil || result == nil {
-		return
-	}
-	if len(result.Messages) == 0 {
-		return
-	}
-
-	for _, msg := range result.Messages {
-		data, err := json.Marshal(msg)
-		if err != nil {
-			log.Warn("marshal sdk message failed", slog.Any("error", err))
-			continue
-		}
-		var envelope struct {
-			Content json.RawMessage `json:"content"`
-		}
-		if err := json.Unmarshal(data, &envelope); err != nil {
-			log.Warn("extract content from sdk message failed", slog.Any("error", err))
-			continue
-		}
-
-		role := string(msg.Role)
-		modelMsg := conversation.ModelMessage{
-			Role:    role,
-			Content: envelope.Content,
-		}
-		content, err := json.Marshal(modelMsg)
-		if err != nil {
-			log.Warn("marshal model message failed", slog.Any("error", err))
-			continue
-		}
-
-		if _, err := d.deps.MessageService.Persist(ctx, messagepkg.PersistInput{
-			BotID:     cfg.BotID,
-			SessionID: cfg.SessionID,
-			Role:      role,
-			Content:   content,
-		}); err != nil {
-			log.Warn("persist discuss message failed", slog.String("role", role), slog.Any("error", err))
-		}
-	}
 }
 
 func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string) []TurnResponseEntry {
@@ -297,9 +270,9 @@ func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string)
 		if err := json.Unmarshal(m.Content, &mm); err != nil {
 			continue
 		}
-		contentStr := ""
-		if mm.Content != nil {
-			contentStr = string(mm.Content)
+		contentStr := mm.TextContent()
+		if contentStr == "" {
+			continue
 		}
 		trs = append(trs, TurnResponseEntry{
 			RequestedAtMs: m.CreatedAt.UnixMilli(),

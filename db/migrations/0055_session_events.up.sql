@@ -18,5 +18,5 @@ CREATE INDEX IF NOT EXISTS idx_session_events_session_received
   ON bot_session_events (session_id, received_at_ms);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_session_events_dedup
-  ON bot_session_events (session_id, external_message_id)
+  ON bot_session_events (session_id, event_kind, external_message_id)
   WHERE external_message_id IS NOT NULL AND external_message_id != '';

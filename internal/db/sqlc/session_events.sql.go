@@ -23,7 +23,7 @@ func (q *Queries) CountSessionEvents(ctx context.Context, sessionID pgtype.UUID)
 	return count, err
 }
 
-const createSessionEvent = `-- name: CreateSessionEvent :one
+const createSessionEvent = `-- name: CreateSessionEvent :exec
 INSERT INTO bot_session_events (
   bot_id,
   session_id,
@@ -34,7 +34,6 @@ INSERT INTO bot_session_events (
   received_at_ms
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT DO NOTHING
-RETURNING id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at
 `
 
 type CreateSessionEventParams struct {
@@ -47,8 +46,8 @@ type CreateSessionEventParams struct {
 	ReceivedAtMs            int64       `json:"received_at_ms"`
 }
 
-func (q *Queries) CreateSessionEvent(ctx context.Context, arg CreateSessionEventParams) (BotSessionEvent, error) {
-	row := q.db.QueryRow(ctx, createSessionEvent,
+func (q *Queries) CreateSessionEvent(ctx context.Context, arg CreateSessionEventParams) error {
+	_, err := q.db.Exec(ctx, createSessionEvent,
 		arg.BotID,
 		arg.SessionID,
 		arg.EventKind,
@@ -57,19 +56,7 @@ func (q *Queries) CreateSessionEvent(ctx context.Context, arg CreateSessionEvent
 		arg.SenderChannelIdentityID,
 		arg.ReceivedAtMs,
 	)
-	var i BotSessionEvent
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.SessionID,
-		&i.EventKind,
-		&i.EventData,
-		&i.ExternalMessageID,
-		&i.SenderChannelIdentityID,
-		&i.ReceivedAtMs,
-		&i.CreatedAt,
-	)
-	return i, err
+	return err
 }
 
 const listSessionEventsBySession = `-- name: ListSessionEventsBySession :many

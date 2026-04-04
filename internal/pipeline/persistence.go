@@ -61,7 +61,7 @@ func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, 
 		}
 	}
 
-	_, err = s.queries.CreateSessionEvent(ctx, sqlc.CreateSessionEventParams{
+	if err = s.queries.CreateSessionEvent(ctx, sqlc.CreateSessionEventParams{
 		BotID:                   pgBotID,
 		SessionID:               pgSessionID,
 		EventKind:               string(event.Kind()),
@@ -69,8 +69,7 @@ func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, 
 		ExternalMessageID:       pgExternalMsgID,
 		SenderChannelIdentityID: pgSenderID,
 		ReceivedAtMs:            event.GetReceivedAtMs(),
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("persist session event: %w", err)
 	}
 

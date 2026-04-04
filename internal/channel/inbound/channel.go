@@ -358,6 +358,41 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
+	// ACL gate: evaluate before events enter the pipeline. If denied, the
+	// message is not persisted in the event store and not pushed into the
+	// in-memory pipeline. This applies uniformly to chat and discuss modes.
+	aclAllowed := true
+	if p.acl != nil {
+		allowed, aclErr := p.acl.Evaluate(ctx, acl.EvaluateRequest{
+			BotID:             identity.BotID,
+			ChannelIdentityID: identity.ChannelIdentityID,
+			ChannelType:       msg.Channel.String(),
+			SourceScope: acl.SourceScope{
+				ConversationType: channel.NormalizeConversationType(msg.Conversation.Type),
+				ConversationID:   strings.TrimSpace(msg.Conversation.ID),
+				ThreadID:         threadID,
+			},
+		})
+		if aclErr != nil {
+			return fmt.Errorf("evaluate acl: %w", aclErr)
+		}
+		aclAllowed = allowed
+	}
+
+	if !aclAllowed {
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID)
+		if p.logger != nil {
+			p.logger.Info(
+				"inbound denied by acl — event not ingested",
+				slog.String("channel", msg.Channel.String()),
+				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+				slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
+				slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
+			)
+		}
+		return nil
+	}
+
 	// Push event into the DCP pipeline (persist + in-memory projection).
 	// On first access for a session, replay persisted events to warm the pipeline.
 	var latestRC pipelinepkg.RenderedContext
@@ -386,7 +421,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationName:  strings.TrimSpace(msg.Conversation.Name),
 		})
-		// Still persist passive message for WebUI visibility.
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID)
 		return nil
 	}
@@ -398,34 +432,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		activeChatID = strings.TrimSpace(resolved.ChatID)
 	}
 	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply
-	if shouldTrigger && p.acl != nil {
-		allowed, err := p.acl.Evaluate(ctx, acl.EvaluateRequest{
-			BotID:             identity.BotID,
-			ChannelIdentityID: identity.ChannelIdentityID,
-			ChannelType:       msg.Channel.String(),
-			SourceScope: acl.SourceScope{
-				ConversationType: channel.NormalizeConversationType(msg.Conversation.Type),
-				ConversationID:   strings.TrimSpace(msg.Conversation.ID),
-				ThreadID:         threadID,
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("authorize chat trigger: %w", err)
-		}
-		if !allowed {
-			shouldTrigger = false
-			if p.logger != nil {
-				p.logger.Info(
-					"inbound trigger denied by acl",
-					slog.String("channel", msg.Channel.String()),
-					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
-					slog.String("user_id", strings.TrimSpace(identity.UserID)),
-					slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
-					slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
-				)
-			}
-		}
-	}
 
 	if !shouldTrigger {
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID)

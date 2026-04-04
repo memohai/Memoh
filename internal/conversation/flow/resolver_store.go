@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
@@ -32,6 +34,23 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 	go r.storeMemory(context.WithoutCancel(ctx), req, fullRound)
 
 	return nil
+}
+
+// StoreRound persists SDK messages as a complete round (assistant + tool
+// output) into bot_history_messages with full metadata, usage tracking,
+// and memory extraction. Used by the discuss driver so it shares the same
+// persistence quality as chat mode.
+func (r *Resolver) StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, sdkMessages []sdk.Message, modelID string) error {
+	modelMessages := sdkMessagesToModelMessages(sdkMessages)
+	req := conversation.ChatRequest{
+		BotID:                   botID,
+		ChatID:                  botID,
+		SessionID:               sessionID,
+		SourceChannelIdentityID: channelIdentityID,
+		CurrentChannel:          currentPlatform,
+		UserMessagePersisted:    true,
+	}
+	return r.storeRound(ctx, req, modelMessages, modelID)
 }
 
 func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string) {
