@@ -24,7 +24,8 @@ INSERT INTO bot_history_messages (
   metadata,
   usage,
   model_id,
-  event_id
+  event_id,
+  display_text
 )
 VALUES (
   $1,
@@ -38,7 +39,8 @@ VALUES (
   $9,
   $10,
   $11::uuid,
-  $12::uuid
+  $12::uuid,
+  $13::text
 )
 RETURNING
   id,
@@ -53,6 +55,7 @@ RETURNING
   metadata,
   usage,
   event_id,
+  display_text,
   created_at
 `
 
@@ -69,6 +72,7 @@ type CreateMessageParams struct {
 	Usage                   []byte      `json:"usage"`
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
+	DisplayText             pgtype.Text `json:"display_text"`
 }
 
 type CreateMessageRow struct {
@@ -84,6 +88,7 @@ type CreateMessageRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -101,6 +106,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		arg.Usage,
 		arg.ModelID,
 		arg.EventID,
+		arg.DisplayText,
 	)
 	var i CreateMessageRow
 	err := row.Scan(
@@ -116,6 +122,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		&i.Metadata,
 		&i.Usage,
 		&i.EventID,
+		&i.DisplayText,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -155,6 +162,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
@@ -187,6 +195,7 @@ type ListActiveMessagesSinceRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
@@ -216,6 +225,7 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
@@ -246,6 +256,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
@@ -278,6 +289,7 @@ type ListActiveMessagesSinceBySessionRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
@@ -307,6 +319,7 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
@@ -337,6 +350,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -362,6 +376,7 @@ type ListMessagesRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -390,6 +405,7 @@ func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]ListMe
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.DisplayText,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -419,6 +435,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -451,6 +468,7 @@ type ListMessagesBeforeRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -479,6 +497,7 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.DisplayText,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -508,6 +527,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -540,6 +560,7 @@ type ListMessagesBeforeBySessionRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -568,6 +589,7 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.DisplayText,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -597,6 +619,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -622,6 +645,7 @@ type ListMessagesBySessionRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -650,6 +674,7 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID pgtype.UU
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.DisplayText,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -679,6 +704,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -709,6 +735,7 @@ type ListMessagesLatestRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -737,6 +764,7 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.DisplayText,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -766,6 +794,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -796,6 +825,7 @@ type ListMessagesLatestBySessionRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -824,6 +854,7 @@ func (q *Queries) ListMessagesLatestBySession(ctx context.Context, arg ListMessa
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.DisplayText,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -853,6 +884,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -883,6 +915,7 @@ type ListMessagesSinceRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -911,6 +944,7 @@ func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSincePa
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.DisplayText,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -940,6 +974,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -970,6 +1005,7 @@ type ListMessagesSinceBySessionRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -998,6 +1034,7 @@ func (q *Queries) ListMessagesSinceBySession(ctx context.Context, arg ListMessag
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.DisplayText,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,

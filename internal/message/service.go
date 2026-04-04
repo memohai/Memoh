@@ -90,6 +90,7 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		Usage:                   input.Usage,
 		ModelID:                 pgModelID,
 		EventID:                 pgEventID,
+		DisplayText:             toPgText(input.DisplayText),
 	})
 	if err != nil {
 		return Message{}, err
@@ -395,6 +396,7 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -424,6 +426,7 @@ func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -445,6 +448,7 @@ func toMessageFromSessionListRow(row sqlc.ListMessagesBySessionRow) Message {
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -466,6 +470,7 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -487,6 +492,7 @@ func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Mess
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -508,6 +514,7 @@ func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 	if row.CompactID.Valid {
@@ -533,6 +540,7 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 	if row.CompactID.Valid {
@@ -558,6 +566,7 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -579,6 +588,7 @@ func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Me
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -600,6 +610,7 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -621,6 +632,7 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 		row.Metadata,
 		row.Usage,
 		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -641,6 +653,7 @@ func toMessageFields(
 	metadata []byte,
 	usage []byte,
 	eventID pgtype.UUID,
+	displayText pgtype.Text,
 	createdAt pgtype.Timestamptz,
 ) Message {
 	m := Message{
@@ -658,6 +671,7 @@ func toMessageFields(
 		Content:                 json.RawMessage(content),
 		Metadata:                parseJSONMap(metadata),
 		Usage:                   json.RawMessage(usage),
+		DisplayContent:          dbpkg.TextToString(displayText),
 		CreatedAt:               createdAt.Time,
 	}
 	if eventID.Valid {
@@ -879,45 +893,4 @@ func unmarshalMetadata(b []byte) map[string]any {
 		return nil
 	}
 	return m
-}
-
-// FillDisplayContent populates DisplayContent for user messages that have an
-// associated event_id by extracting plain text from the event's content nodes.
-func (s *DBService) FillDisplayContent(ctx context.Context, messages []Message) {
-	for i := range messages {
-		if messages[i].EventID == "" || messages[i].Role != "user" {
-			continue
-		}
-		pgEventID, err := dbpkg.ParseUUID(messages[i].EventID)
-		if err != nil {
-			continue
-		}
-		rows, err := s.queries.ListSessionEventsByEventID(ctx, pgEventID)
-		if err != nil || len(rows) == 0 {
-			continue
-		}
-		messages[i].DisplayContent = extractEventText(rows[0].EventData)
-	}
-}
-
-func extractEventText(eventData []byte) string {
-	var envelope struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(eventData, &envelope); err != nil {
-		return ""
-	}
-	var sb strings.Builder
-	for _, node := range envelope.Content {
-		if node.Type == "text" && node.Text != "" {
-			if sb.Len() > 0 {
-				sb.WriteByte('\n')
-			}
-			sb.WriteString(node.Text)
-		}
-	}
-	return sb.String()
 }
