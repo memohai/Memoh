@@ -224,8 +224,21 @@
       />
     </div>
 
-    <!-- Reasoning -->
+    <!-- Timezone -->
+    <div class="space-y-2">
+      <Label>{{ $t('bots.timezone') }}</Label>
+      <TimezoneSelect
+        :model-value="form.timezone || emptyTimezoneValue"
+        :placeholder="$t('bots.timezonePlaceholder')"
+        allow-empty
+        :empty-label="$t('bots.timezoneInherited')"
+        @update:model-value="(val: string) => form.timezone = val === emptyTimezoneValue ? '' : val"
+      />
+    </div>
+
     <Separator />
+
+    <!-- Reasoning -->
     <div class="space-y-2">
       <Label>{{ $t('bots.settings.reasoningEffort') }}</Label>
       <Popover v-model:open="reasoningPopoverOpen">
@@ -334,6 +347,8 @@ import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getMode
 import type { SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import TimezoneSelect from '@/components/timezone-select/index.vue'
+import { emptyTimezoneValue } from '@/utils/timezones'
 
 const props = defineProps<{
   botId: string
@@ -461,6 +476,7 @@ const form = reactive({
   tts_model_id: '',
   browser_context_id: '',
   language: '',
+  timezone: '',
   reasoning_enabled: false,
   reasoning_effort: 'medium',
 })
@@ -599,6 +615,7 @@ watch(settings, (val) => {
     form.tts_model_id = val.tts_model_id ?? ''
     form.browser_context_id = val.browser_context_id ?? ''
     form.language = val.language ?? ''
+    form.timezone = val.timezone ?? ''
     form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
   }
@@ -616,6 +633,7 @@ const hasChanges = computed(() => {
     || form.tts_model_id !== (s.tts_model_id ?? '')
     || form.browser_context_id !== (s.browser_context_id ?? '')
     || form.language !== (s.language ?? '')
+    || form.timezone !== (s.timezone ?? '')
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')
   return changed

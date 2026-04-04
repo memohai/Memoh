@@ -52,6 +52,7 @@ SELECT
   bots.compaction_enabled,
   bots.compaction_threshold,
   bots.compaction_ratio,
+  bots.timezone,
   chat_models.id AS chat_model_id,
   heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
@@ -85,6 +86,7 @@ type GetSettingsByBotIDRow struct {
 	CompactionEnabled   bool        `json:"compaction_enabled"`
 	CompactionThreshold int32       `json:"compaction_threshold"`
 	CompactionRatio     int32       `json:"compaction_ratio"`
+	Timezone            pgtype.Text `json:"timezone"`
 	ChatModelID         pgtype.UUID `json:"chat_model_id"`
 	HeartbeatModelID    pgtype.UUID `json:"heartbeat_model_id"`
 	CompactionModelID   pgtype.UUID `json:"compaction_model_id"`
@@ -110,6 +112,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.CompactionEnabled,
 		&i.CompactionThreshold,
 		&i.CompactionRatio,
+		&i.Timezone,
 		&i.ChatModelID,
 		&i.HeartbeatModelID,
 		&i.CompactionModelID,
@@ -135,18 +138,19 @@ WITH updated AS (
       compaction_enabled = $7,
       compaction_threshold = $8,
       compaction_ratio = $9,
-      chat_model_id = COALESCE($10::uuid, bots.chat_model_id),
-      heartbeat_model_id = COALESCE($11::uuid, bots.heartbeat_model_id),
-      compaction_model_id = COALESCE($12::uuid, bots.compaction_model_id),
-      title_model_id = COALESCE($13::uuid, bots.title_model_id),
-      search_provider_id = COALESCE($14::uuid, bots.search_provider_id),
-      memory_provider_id = COALESCE($15::uuid, bots.memory_provider_id),
-      image_model_id = COALESCE($16::uuid, bots.image_model_id),
-      tts_model_id = COALESCE($17::uuid, bots.tts_model_id),
-      browser_context_id = COALESCE($18::uuid, bots.browser_context_id),
+      timezone = COALESCE($10, bots.timezone),
+      chat_model_id = COALESCE($11::uuid, bots.chat_model_id),
+      heartbeat_model_id = COALESCE($12::uuid, bots.heartbeat_model_id),
+      compaction_model_id = COALESCE($13::uuid, bots.compaction_model_id),
+      title_model_id = COALESCE($14::uuid, bots.title_model_id),
+      search_provider_id = COALESCE($15::uuid, bots.search_provider_id),
+      memory_provider_id = COALESCE($16::uuid, bots.memory_provider_id),
+      image_model_id = COALESCE($17::uuid, bots.image_model_id),
+      tts_model_id = COALESCE($18::uuid, bots.tts_model_id),
+      browser_context_id = COALESCE($19::uuid, bots.browser_context_id),
       updated_at = now()
-  WHERE bots.id = $19
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
+  WHERE bots.id = $20
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id
 )
 SELECT
   updated.id AS bot_id,
@@ -159,6 +163,7 @@ SELECT
   updated.compaction_enabled,
   updated.compaction_threshold,
   updated.compaction_ratio,
+  updated.timezone,
   chat_models.id AS chat_model_id,
   heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
@@ -190,6 +195,7 @@ type UpsertBotSettingsParams struct {
 	CompactionEnabled   bool        `json:"compaction_enabled"`
 	CompactionThreshold int32       `json:"compaction_threshold"`
 	CompactionRatio     int32       `json:"compaction_ratio"`
+	Timezone            pgtype.Text `json:"timezone"`
 	ChatModelID         pgtype.UUID `json:"chat_model_id"`
 	HeartbeatModelID    pgtype.UUID `json:"heartbeat_model_id"`
 	CompactionModelID   pgtype.UUID `json:"compaction_model_id"`
@@ -213,6 +219,7 @@ type UpsertBotSettingsRow struct {
 	CompactionEnabled   bool        `json:"compaction_enabled"`
 	CompactionThreshold int32       `json:"compaction_threshold"`
 	CompactionRatio     int32       `json:"compaction_ratio"`
+	Timezone            pgtype.Text `json:"timezone"`
 	ChatModelID         pgtype.UUID `json:"chat_model_id"`
 	HeartbeatModelID    pgtype.UUID `json:"heartbeat_model_id"`
 	CompactionModelID   pgtype.UUID `json:"compaction_model_id"`
@@ -235,6 +242,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.CompactionEnabled,
 		arg.CompactionThreshold,
 		arg.CompactionRatio,
+		arg.Timezone,
 		arg.ChatModelID,
 		arg.HeartbeatModelID,
 		arg.CompactionModelID,
@@ -258,6 +266,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.CompactionEnabled,
 		&i.CompactionThreshold,
 		&i.CompactionRatio,
+		&i.Timezone,
 		&i.ChatModelID,
 		&i.HeartbeatModelID,
 		&i.CompactionModelID,

@@ -15,6 +15,7 @@ type Settings struct {
 	BrowserContextID    string `json:"browser_context_id"`
 	Language            string `json:"language"`
 	AclDefaultEffect    string `json:"acl_default_effect"`
+	Timezone            string `json:"timezone"`
 	ReasoningEnabled    bool   `json:"reasoning_enabled"`
 	ReasoningEffort     string `json:"reasoning_effort"`
 	HeartbeatEnabled    bool   `json:"heartbeat_enabled"`
@@ -36,6 +37,7 @@ type UpsertRequest struct {
 	BrowserContextID    string  `json:"browser_context_id,omitempty"`
 	Language            string  `json:"language,omitempty"`
 	AclDefaultEffect    string  `json:"acl_default_effect,omitempty"`
+	Timezone            *string `json:"timezone,omitempty"`
 	ReasoningEnabled    *bool   `json:"reasoning_enabled,omitempty"`
 	ReasoningEffort     *string `json:"reasoning_effort,omitempty"`
 	HeartbeatEnabled    *bool   `json:"heartbeat_enabled,omitempty"`
