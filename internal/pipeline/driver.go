@@ -149,10 +149,23 @@ func (d *DiscussDriver) HasSession(sessionID string) bool {
 	return ok
 }
 
+const discussIdleTimeout = 10 * time.Minute
+
 func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
-	log := d.logger.With(slog.String("session_id", sess.config.SessionID), slog.String("bot_id", sess.config.BotID))
+	sessionID := sess.config.SessionID
+	log := d.logger.With(slog.String("session_id", sessionID), slog.String("bot_id", sess.config.BotID))
 	log.Info("discuss session started")
-	defer log.Info("discuss session stopped")
+	defer func() {
+		log.Info("discuss session stopped")
+		d.mu.Lock()
+		if cur, ok := d.sessions[sessionID]; ok && cur == sess {
+			delete(d.sessions, sessionID)
+		}
+		d.mu.Unlock()
+	}()
+
+	idle := time.NewTimer(discussIdleTimeout)
+	defer idle.Stop()
 
 	var latestRC RenderedContext
 
@@ -160,8 +173,12 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 		select {
 		case <-sess.stopCh:
 			return
+		case <-idle.C:
+			log.Info("discuss session idle timeout, exiting")
+			return
 		case rc := <-sess.rcCh:
 			latestRC = rc
+			idle.Reset(discussIdleTimeout)
 		}
 
 	drain:
