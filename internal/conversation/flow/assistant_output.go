@@ -30,6 +30,7 @@ func ExtractAssistantOutputs(messages []conversation.ModelMessage) []conversatio
 			continue
 		}
 		content = agent.StripAgentTags(content)
+		parts = stripAgentTagsFromParts(parts)
 		outputs = append(outputs, conversation.AssistantOutput{Content: content, Parts: parts})
 	}
 	return outputs
@@ -85,6 +86,22 @@ func visibleContentText(parts []conversation.ContentPart) string {
 		texts = append(texts, text)
 	}
 	return strings.TrimSpace(strings.Join(texts, "\n"))
+}
+
+func stripAgentTagsFromParts(parts []conversation.ContentPart) []conversation.ContentPart {
+	if len(parts) == 0 {
+		return nil
+	}
+	result := make([]conversation.ContentPart, 0, len(parts))
+	for _, p := range parts {
+		if strings.TrimSpace(p.Text) != "" {
+			p.Text = agent.StripAgentTags(p.Text)
+		}
+		if p.HasValue() {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 func visibleContentPartText(part conversation.ContentPart) string {
