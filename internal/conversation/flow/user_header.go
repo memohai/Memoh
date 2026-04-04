@@ -14,6 +14,7 @@ type UserMessageMeta struct {
 	Channel           string   `json:"channel"`
 	ConversationType  string   `json:"conversation-type"`
 	ConversationName  string   `json:"conversation-name,omitempty"`
+	Target            string   `json:"target,omitempty"`
 	Time              string   `json:"time"`
 	Timezone          string   `json:"timezone,omitempty"`
 	AttachmentPaths   []string `json:"attachments"`
@@ -29,6 +30,7 @@ type UserMessageHeaderInput struct {
 	Channel           string
 	ConversationType  string
 	ConversationName  string
+	Target            string
 	AttachmentPaths   []string
 	Time              time.Time
 	Timezone          string
@@ -47,6 +49,7 @@ func BuildUserMessageMetaFromInput(input UserMessageHeaderInput) UserMessageMeta
 		Channel:           input.Channel,
 		ConversationType:  input.ConversationType,
 		ConversationName:  input.ConversationName,
+		Target:            strings.TrimSpace(input.Target),
 		Time:              time.Now().UTC().Format(time.RFC3339),
 		Timezone:          strings.TrimSpace(input.Timezone),
 		AttachmentPaths:   attachmentPaths,
@@ -95,6 +98,9 @@ func (m UserMessageMeta) ToMap() map[string]any {
 	if m.ConversationName != "" {
 		result["conversation-name"] = m.ConversationName
 	}
+	if m.Target != "" {
+		result["target"] = m.Target
+	}
 	if strings.TrimSpace(m.Timezone) != "" {
 		result["timezone"] = m.Timezone
 	}
@@ -127,6 +133,9 @@ func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 	}
 	if meta.ConversationType != "" {
 		writeXMLAttr(&sb, "type", meta.ConversationType)
+	}
+	if meta.Target != "" {
+		writeXMLAttr(&sb, "target", meta.Target)
 	}
 	sb.WriteString(">\n")
 

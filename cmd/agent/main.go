@@ -202,6 +202,7 @@ func runServe() {
 			// DCP pipeline
 			providePipeline,
 			provideEventStore,
+			provideDiscussDriver,
 
 			// channel infrastructure
 			local.NewRouteHub,
@@ -405,6 +406,16 @@ func provideEventStore(log *slog.Logger, queries *dbsqlc.Queries) *pipelinepkg.E
 	return pipelinepkg.NewEventStore(log, queries)
 }
 
+func provideDiscussDriver(log *slog.Logger, pipeline *pipelinepkg.Pipeline, eventStore *pipelinepkg.EventStore, agent *agentpkg.Agent, msgService *message.DBService) *pipelinepkg.DiscussDriver {
+	return pipelinepkg.NewDiscussDriver(pipelinepkg.DiscussDriverDeps{
+		Pipeline:       pipeline,
+		EventStore:     eventStore,
+		Agent:          agent,
+		MessageService: msgService,
+		Logger:         log,
+	})
+}
+
 func provideRouteService(log *slog.Logger, queries *dbsqlc.Queries, chatService *conversation.Service) *route.DBService {
 	return route.NewService(log, queries, chatService)
 }
@@ -549,6 +560,7 @@ func provideChannelRouter(
 	manager *workspace.Manager,
 	pipeline *pipelinepkg.Pipeline,
 	eventStore *pipelinepkg.EventStore,
+	discussDriver *pipelinepkg.DiscussDriver,
 	rc *boot.RuntimeConfig,
 ) *inbound.ChannelInboundProcessor {
 	adapter, ok := registry.Get(qq.Type)
@@ -564,7 +576,8 @@ func provideChannelRouter(
 
 	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, policyService, bindService, rc.JwtSecret, 5*time.Minute)
 	processor.SetSessionEnsurer(&sessionEnsurerAdapter{svc: sessionService})
-	processor.SetPipeline(pipeline, eventStore)
+	processor.SetPipeline(pipeline, eventStore, discussDriver)
+	discussDriver.SetResolver(resolver)
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
@@ -756,15 +769,15 @@ func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, 
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}
-	return inbound.SessionResult{ID: sess.ID}, nil
+	return inbound.SessionResult{ID: sess.ID, Type: sess.Type}, nil
 }
 
-func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, routeID, channelType string) (inbound.SessionResult, error) {
-	sess, err := a.svc.CreateNewSession(ctx, botID, routeID, channelType)
+func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, routeID, channelType, sessionType string) (inbound.SessionResult, error) {
+	sess, err := a.svc.CreateNewSession(ctx, botID, routeID, channelType, sessionType)
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}
-	return inbound.SessionResult{ID: sess.ID}, nil
+	return inbound.SessionResult{ID: sess.ID, Type: sess.Type}, nil
 }
 
 type settingsTtsModelResolver struct {

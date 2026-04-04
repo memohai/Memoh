@@ -251,11 +251,16 @@ func (s *Service) SetRouteActiveSession(ctx context.Context, routeID, sessionID 
 
 // CreateNewSession always creates a fresh session and sets it as the active
 // session for the given route, replacing any previous active session.
-func (s *Service) CreateNewSession(ctx context.Context, botID, routeID, channelType string) (Session, error) {
+// sessionType defaults to TypeChat if empty.
+func (s *Service) CreateNewSession(ctx context.Context, botID, routeID, channelType, sessionType string) (Session, error) {
+	if strings.TrimSpace(sessionType) == "" {
+		sessionType = TypeChat
+	}
 	sess, err := s.Create(ctx, CreateInput{
 		BotID:       botID,
 		RouteID:     routeID,
 		ChannelType: channelType,
+		Type:        sessionType,
 	})
 	if err != nil {
 		return Session{}, fmt.Errorf("create new session: %w", err)

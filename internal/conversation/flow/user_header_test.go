@@ -22,8 +22,8 @@ func TestFormatUserHeaderIncludesAttachments(t *testing.T) {
 		Timezone:          "UTC",
 	}, "hello")
 
-	if !strings.Contains(header, "attachments:\n  - /tmp/a.txt\n") {
-		t.Fatalf("expected attachment path in header: %s", header)
+	if !strings.Contains(header, "<attachment path=\"/tmp/a.txt\"/>") {
+		t.Fatalf("expected attachment tag in header: %s", header)
 	}
 }
 
@@ -39,7 +39,7 @@ func TestFormatUserHeaderWithoutAttachmentsUsesEmptyList(t *testing.T) {
 		Time:              time.Now().UTC(),
 	}, "hello")
 
-	if !strings.Contains(header, "attachments: []\n") {
-		t.Fatalf("expected empty attachments list in header: %s", header)
+	if strings.Contains(header, "<attachment ") {
+		t.Fatalf("expected no attachment tag in header: %s", header)
 	}
 }

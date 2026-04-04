@@ -59,9 +59,10 @@ type Executor struct {
 
 // SendResult is the success payload returned after sending a message.
 type SendResult struct {
-	BotID    string
-	Platform string
-	Target   string
+	BotID     string
+	Platform  string
+	Target    string
+	MessageID string
 	// Local is true when the message targets the current conversation.
 	// The caller should emit the resolved attachments as stream events.
 	Local            bool
@@ -180,6 +181,50 @@ func (e *Executor) Send(ctx context.Context, session SessionContext, args map[st
 	if err := e.Sender.Send(ctx, botID, channelType, channel.SendRequest{Target: target, Message: outboundMessage}); err != nil {
 		if e.Logger != nil {
 			e.Logger.Warn("send failed", slog.Any("error", err), slog.String("bot_id", botID), slog.String("platform", string(channelType)))
+		}
+		return nil, err
+	}
+	return &SendResult{BotID: botID, Platform: channelType.String(), Target: target}, nil
+}
+
+// SendDirect sends a message via the channel adapter without the same-conversation
+// local shortcut. Used by discuss mode where there is no active stream emitter.
+func (e *Executor) SendDirect(ctx context.Context, session SessionContext, target string, args map[string]any) (*SendResult, error) {
+	if e.Sender == nil || e.Resolver == nil {
+		return nil, errors.New("message service not available")
+	}
+	botID, err := e.resolveBotID(args, session)
+	if err != nil {
+		return nil, err
+	}
+	channelType, err := e.resolvePlatform(args, session)
+	if err != nil {
+		return nil, err
+	}
+	if target == "" {
+		target = strings.TrimSpace(session.ReplyTarget)
+	}
+	if target == "" {
+		return nil, errors.New("target is required")
+	}
+
+	messageText := firstStringArg(args, "text")
+	outboundMessage, parseErr := ParseOutboundMessage(args, messageText)
+	if parseErr != nil {
+		outboundMessage = channel.Message{Text: strings.TrimSpace(messageText)}
+	}
+	if outboundMessage.IsEmpty() {
+		return nil, errors.New("message or attachments required")
+	}
+	if replyTo := firstStringArg(args, "reply_to"); replyTo != "" {
+		outboundMessage.Reply = &channel.ReplyRef{MessageID: replyTo}
+	}
+	if outboundMessage.Format == "" && channel.ContainsMarkdown(outboundMessage.Text) {
+		outboundMessage.Format = channel.MessageFormatMarkdown
+	}
+	if err := e.Sender.Send(ctx, botID, channelType, channel.SendRequest{Target: target, Message: outboundMessage}); err != nil {
+		if e.Logger != nil {
+			e.Logger.Warn("send direct failed", slog.Any("error", err), slog.String("bot_id", botID), slog.String("platform", string(channelType)))
 		}
 		return nil, err
 	}
