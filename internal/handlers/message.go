@@ -172,7 +172,6 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
-	h.messageService.FillDisplayContent(c.Request().Context(), messages)
 	return c.JSON(http.StatusOK, map[string]any{"items": messages})
 }
 

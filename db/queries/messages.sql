@@ -11,7 +11,8 @@ INSERT INTO bot_history_messages (
   metadata,
   usage,
   model_id,
-  event_id
+  event_id,
+  display_text
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -25,7 +26,8 @@ VALUES (
   sqlc.arg(metadata),
   sqlc.arg(usage),
   sqlc.narg(model_id)::uuid,
-  sqlc.narg(event_id)::uuid
+  sqlc.narg(event_id)::uuid,
+  sqlc.narg(display_text)::text
 )
 RETURNING
   id,
@@ -40,6 +42,7 @@ RETURNING
   metadata,
   usage,
   event_id,
+  display_text,
   created_at;
 
 -- name: ListMessages :many
@@ -56,6 +59,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -81,6 +85,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -106,6 +111,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -131,6 +137,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -156,6 +163,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
@@ -183,6 +191,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
@@ -210,6 +219,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -236,6 +246,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -262,6 +273,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -287,6 +299,7 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,

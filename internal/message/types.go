@@ -70,6 +70,7 @@ type PersistInput struct {
 	Assets                  []AssetRef
 	ModelID                 string
 	EventID                 string
+	DisplayText             string
 }
 
 // Writer defines write behavior needed by the inbound router.
@@ -93,5 +94,4 @@ type Service interface {
 	DeleteByBot(ctx context.Context, botID string) error
 	DeleteBySession(ctx context.Context, sessionID string) error
 	LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error
-	FillDisplayContent(ctx context.Context, messages []Message)
 }

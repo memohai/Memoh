@@ -1076,6 +1076,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		Metadata:                meta,
 		Assets:                  assets,
 		EventID:                 eventID,
+		DisplayText:             trimmedText,
 	}); err != nil && p.logger != nil {
 		p.logger.Warn("persist passive message failed", slog.Any("error", err), slog.String("bot_id", botID))
 	}
