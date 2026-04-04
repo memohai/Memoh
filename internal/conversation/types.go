@@ -236,6 +236,7 @@ type ChatRequest struct {
 	ConversationType        string `json:"-"`
 	ConversationName        string `json:"-"`
 	UserMessagePersisted    bool   `json:"-"`
+	EventID                 string `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
 	// Set by the inbound channel processor; called by the resolver at persist time.

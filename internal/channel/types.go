@@ -294,6 +294,8 @@ type ThreadRef struct {
 type ReplyRef struct {
 	Target    string `json:"target,omitempty"`
 	MessageID string `json:"message_id,omitempty"`
+	Sender    string `json:"sender,omitempty"`
+	Preview   string `json:"preview,omitempty"`
 }
 
 // Message is the unified message structure used across all channels.

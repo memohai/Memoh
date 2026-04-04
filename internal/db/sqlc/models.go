@@ -131,6 +131,7 @@ type BotHistoryMessage struct {
 	Usage                   []byte             `json:"usage"`
 	ModelID                 pgtype.UUID        `json:"model_id"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
+	EventID                 pgtype.UUID        `json:"event_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 

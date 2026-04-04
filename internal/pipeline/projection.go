@@ -213,6 +213,12 @@ func reduceMessage(ic *IntermediateContext, event MessageEvent) {
 				}
 			}
 		}
+		if msg.ReplyToSender == nil && event.ReplyToSender != "" {
+			msg.ReplyToSender = &CanonicalUser{DisplayName: event.ReplyToSender}
+		}
+		if msg.ReplyToPreview == "" && event.ReplyToPreview != "" {
+			msg.ReplyToPreview = truncate(event.ReplyToPreview, replyPreviewMax)
+		}
 	}
 	if event.ForwardInfo != nil {
 		msg.ForwardInfo = event.ForwardInfo

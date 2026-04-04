@@ -410,8 +410,14 @@ func TestMatrixHandleEventExpandsRepliedImageContext(t *testing.T) {
 	if !delivered {
 		t.Fatal("expected event to be delivered")
 	}
-	if got := captured.Message.Text; got != "[Reply to Memoh: [image]]\nWhere is Antelope Canyon?" {
+	if got := captured.Message.Text; got != "Where is Antelope Canyon?" {
 		t.Fatalf("unexpected message text: %q", got)
+	}
+	if captured.Message.Reply == nil {
+		t.Fatal("expected ReplyRef to be set")
+	}
+	if captured.Message.Reply.Sender != "Memoh" {
+		t.Fatalf("unexpected reply sender: %q", captured.Message.Reply.Sender)
 	}
 	if len(captured.Message.Attachments) != 1 {
 		t.Fatalf("expected one quoted attachment, got %d", len(captured.Message.Attachments))
@@ -422,9 +428,6 @@ func TestMatrixHandleEventExpandsRepliedImageContext(t *testing.T) {
 	isReplyToBot, _ := captured.Metadata["is_reply_to_bot"].(bool)
 	if !isReplyToBot {
 		t.Fatalf("expected is_reply_to_bot metadata to be true")
-	}
-	if rawText, _ := captured.Metadata["raw_text"].(string); rawText != "Where is Antelope Canyon?" {
-		t.Fatalf("unexpected raw_text metadata: %q", rawText)
 	}
 }
 

@@ -62,6 +62,10 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	if err != nil {
 		return Message{}, fmt.Errorf("invalid model id: %w", err)
 	}
+	pgEventID, err := parseOptionalUUID(input.EventID)
+	if err != nil {
+		return Message{}, fmt.Errorf("invalid event id: %w", err)
+	}
 
 	metaBytes, err := json.Marshal(nonNilMap(input.Metadata))
 	if err != nil {
@@ -85,6 +89,7 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		Metadata:                metaBytes,
 		Usage:                   input.Usage,
 		ModelID:                 pgModelID,
+		EventID:                 pgEventID,
 	})
 	if err != nil {
 		return Message{}, err
@@ -389,6 +394,7 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 }
@@ -417,6 +423,7 @@ func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 }
@@ -437,6 +444,7 @@ func toMessageFromSessionListRow(row sqlc.ListMessagesBySessionRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 }
@@ -457,6 +465,7 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 }
@@ -477,6 +486,7 @@ func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Mess
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 }
@@ -497,6 +507,7 @@ func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 	if row.CompactID.Valid {
@@ -521,6 +532,7 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 	if row.CompactID.Valid {
@@ -545,6 +557,7 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 }
@@ -565,6 +578,7 @@ func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Me
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 }
@@ -585,6 +599,7 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 }
@@ -605,6 +620,7 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
 		row.CreatedAt,
 	)
 }
@@ -624,9 +640,10 @@ func toMessageFields(
 	content []byte,
 	metadata []byte,
 	usage []byte,
+	eventID pgtype.UUID,
 	createdAt pgtype.Timestamptz,
 ) Message {
-	return Message{
+	m := Message{
 		ID:                      id.String(),
 		BotID:                   botID.String(),
 		SessionID:               sessionID.String(),
@@ -643,6 +660,10 @@ func toMessageFields(
 		Usage:                   json.RawMessage(usage),
 		CreatedAt:               createdAt.Time,
 	}
+	if eventID.Valid {
+		m.EventID = eventID.String()
+	}
+	return m
 }
 
 func toMessagesFromList(rows []sqlc.ListMessagesRow) []Message {
@@ -858,4 +879,45 @@ func unmarshalMetadata(b []byte) map[string]any {
 		return nil
 	}
 	return m
+}
+
+// FillDisplayContent populates DisplayContent for user messages that have an
+// associated event_id by extracting plain text from the event's content nodes.
+func (s *DBService) FillDisplayContent(ctx context.Context, messages []Message) {
+	for i := range messages {
+		if messages[i].EventID == "" || messages[i].Role != "user" {
+			continue
+		}
+		pgEventID, err := dbpkg.ParseUUID(messages[i].EventID)
+		if err != nil {
+			continue
+		}
+		rows, err := s.queries.ListSessionEventsByEventID(ctx, pgEventID)
+		if err != nil || len(rows) == 0 {
+			continue
+		}
+		messages[i].DisplayContent = extractEventText(rows[0].EventData)
+	}
+}
+
+func extractEventText(eventData []byte) string {
+	var envelope struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(eventData, &envelope); err != nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, node := range envelope.Content {
+		if node.Type == "text" && node.Text != "" {
+			if sb.Len() > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(node.Text)
+		}
+	}
+	return sb.String()
 }

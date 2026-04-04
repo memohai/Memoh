@@ -3,10 +3,12 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbpkg "github.com/memohai/memoh/internal/db"
@@ -31,19 +33,21 @@ func NewEventStore(log *slog.Logger, queries *sqlc.Queries) *EventStore {
 }
 
 // PersistEvent writes a CanonicalEvent to the bot_session_events table.
-func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, event CanonicalEvent) error {
+// Returns the UUID of the persisted event row, or empty string if the event
+// was a duplicate (ON CONFLICT DO NOTHING).
+func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, event CanonicalEvent) (string, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
 	if err != nil {
-		return fmt.Errorf("invalid bot id: %w", err)
+		return "", fmt.Errorf("invalid bot id: %w", err)
 	}
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
-		return fmt.Errorf("invalid session id: %w", err)
+		return "", fmt.Errorf("invalid session id: %w", err)
 	}
 
 	eventData, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("marshal event data: %w", err)
+		return "", fmt.Errorf("marshal event data: %w", err)
 	}
 
 	externalMessageID := extractExternalMessageID(event)
@@ -61,7 +65,7 @@ func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, 
 		}
 	}
 
-	if err = s.queries.CreateSessionEvent(ctx, sqlc.CreateSessionEventParams{
+	pgID, err := s.queries.CreateSessionEvent(ctx, sqlc.CreateSessionEventParams{
 		BotID:                   pgBotID,
 		SessionID:               pgSessionID,
 		EventKind:               string(event.Kind()),
@@ -69,11 +73,18 @@ func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, 
 		ExternalMessageID:       pgExternalMsgID,
 		SenderChannelIdentityID: pgSenderID,
 		ReceivedAtMs:            event.GetReceivedAtMs(),
-	}); err != nil {
-		return fmt.Errorf("persist session event: %w", err)
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("persist session event: %w", err)
 	}
 
-	return nil
+	if pgID.Valid {
+		return pgID.String(), nil
+	}
+	return "", nil
 }
 
 // LoadEvents loads all events for a session, ordered by received_at_ms.

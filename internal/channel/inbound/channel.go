@@ -380,7 +380,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	if !aclAllowed {
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID)
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
 		if p.logger != nil {
 			p.logger.Info(
 				"inbound denied by acl — event not ingested",
@@ -396,14 +396,20 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Push event into the DCP pipeline (persist + in-memory projection).
 	// On first access for a session, replay persisted events to warm the pipeline.
 	var latestRC pipelinepkg.RenderedContext
+	var eventID string
 	if p.pipeline != nil && sessionID != "" {
 		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
 			p.replayPipelineSession(ctx, sessionID)
 		}
 		event := pipelinepkg.AdaptInbound(msg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
 		if p.eventStore != nil {
-			if err := p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event); err != nil && p.logger != nil {
-				p.logger.Warn("persist pipeline event failed", slog.Any("error", err))
+			eid, persistErr := p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event)
+			if persistErr != nil {
+				if p.logger != nil {
+					p.logger.Warn("persist pipeline event failed", slog.Any("error", persistErr))
+				}
+			} else {
+				eventID = eid
 			}
 		}
 		latestRC = p.pipeline.PushEvent(sessionID, event)
@@ -421,7 +427,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationName:  strings.TrimSpace(msg.Conversation.Name),
 		})
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID)
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
 		return nil
 	}
 
@@ -434,7 +440,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply
 
 	if !shouldTrigger {
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID)
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
 		if p.logger != nil {
 			p.logger.Info(
 				"inbound not triggering assistant (group trigger condition not met)",
@@ -494,7 +500,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				return nil
 
 			case ModeQueue:
-				p.persistPassiveMessage(ctx, identity, msg, text, attachments, routeID, sessionID)
+				p.persistPassiveMessage(ctx, identity, msg, text, attachments, routeID, sessionID, eventID)
 				p.dispatcher.Enqueue(routeID, QueuedTask{
 					Ctx:     ctx,
 					Cfg:     cfg,
@@ -701,6 +707,7 @@ startStream:
 		UserMessagePersisted:    false,
 		Attachments:             attachments,
 		OutboundAssetCollector:  assetCollector,
+		EventID:                 eventID,
 	}
 	if convInjectCh != nil {
 		chatReq.InjectCh = convInjectCh
@@ -996,7 +1003,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	msg channel.InboundMessage,
 	text string,
 	attachments []conversation.ChatAttachment,
-	routeID, sessionID string,
+	routeID, sessionID, eventID string,
 ) {
 	if p.message == nil {
 		return
@@ -1072,6 +1079,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		Content:                 serialized,
 		Metadata:                meta,
 		Assets:                  assets,
+		EventID:                 eventID,
 	}); err != nil && p.logger != nil {
 		p.logger.Warn("persist passive message failed", slog.Any("error", err), slog.String("bot_id", botID))
 	}
@@ -1326,55 +1334,8 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 	}
 }
 
-func buildInboundQuery(message channel.Message, attachments []conversation.ChatAttachment) string {
-	text := strings.TrimSpace(message.PlainText())
-	if text != "" {
-		return text
-	}
-	if len(message.Attachments) == 0 {
-		return ""
-	}
-	count := len(message.Attachments)
-	fallback := fmt.Sprintf("[User sent %d attachments]", count)
-	if count == 1 {
-		fallback = "[User sent 1 attachment]"
-	}
-	refs := collectContainerAttachmentRefs(attachments)
-	if len(refs) == 0 {
-		return fallback
-	}
-	var sb strings.Builder
-	sb.WriteString(fallback)
-	sb.WriteString("\n[Attachment refs: container paths]\n")
-	for _, ref := range refs {
-		sb.WriteString("- ")
-		sb.WriteString(ref)
-		sb.WriteByte('\n')
-	}
-	return strings.TrimSpace(sb.String())
-}
-
-func collectContainerAttachmentRefs(attachments []conversation.ChatAttachment) []string {
-	if len(attachments) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(attachments))
-	refs := make([]string, 0, len(attachments))
-	for _, att := range attachments {
-		ref := strings.TrimSpace(att.Path)
-		if ref == "" {
-			continue
-		}
-		if _, exists := seen[ref]; exists {
-			continue
-		}
-		seen[ref] = struct{}{}
-		refs = append(refs, ref)
-	}
-	if len(refs) == 0 {
-		return nil
-	}
-	return refs
+func buildInboundQuery(message channel.Message, _ []conversation.ChatAttachment) string {
+	return strings.TrimSpace(message.PlainText())
 }
 
 func normalizeContentPartType(raw string) channel.MessagePartType {
