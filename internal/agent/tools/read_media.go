@@ -6,20 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
-	"path"
 	"strings"
-
-	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
-	ReadMediaToolName        = "read_media"
-	toolReadMedia            = ReadMediaToolName
-	defaultReadMediaRoot     = "/data"
+	// ReadMediaToolName is the tool name that the agent decoration layer
+	// matches on to intercept image payloads. After the merge this is "read".
+	ReadMediaToolName        = "read"
 	defaultReadMediaMaxBytes = 20 * 1024 * 1024
 )
 
@@ -48,144 +44,68 @@ type ReadMediaToolOutput struct {
 	ImageMediaType string
 }
 
-type readMediaToolOutput = ReadMediaToolOutput
+// mimeSniffSize is the number of bytes http.DetectContentType needs.
+const mimeSniffSize = 512
 
-type ReadMediaProvider struct {
-	clients  bridge.Provider
-	rootDir  string
-	maxBytes int64
-	logger   *slog.Logger
-}
+// ReadImageFromContainer reads a binary file through the bridge client,
+// validates that it is a supported image format, and returns a
+// ReadMediaToolOutput ready for the agent decoration pipeline.
+//
+// It reads only a small header first to sniff the MIME type, avoiding
+// buffering large non-image binaries just to reject them.
+func ReadImageFromContainer(ctx context.Context, client *bridge.Client, path string, maxBytes int64) ReadMediaToolOutput {
+	if maxBytes <= 0 {
+		maxBytes = defaultReadMediaMaxBytes
+	}
 
-func NewReadMediaProvider(log *slog.Logger, clients bridge.Provider, rootDir string) *ReadMediaProvider {
-	if log == nil {
-		log = slog.Default()
-	}
-	root := strings.TrimSpace(rootDir)
-	if root == "" {
-		root = defaultReadMediaRoot
-	}
-	return &ReadMediaProvider{
-		clients:  clients,
-		rootDir:  path.Clean(root),
-		maxBytes: defaultReadMediaMaxBytes,
-		logger:   log.With(slog.String("tool", "read_media")),
-	}
-}
-
-func (p *ReadMediaProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if p == nil || p.clients == nil || !session.SupportsImageInput {
-		return nil, nil
-	}
-	root := p.rootDir
-	if root == "" {
-		root = defaultReadMediaRoot
-	}
-	sess := session
-	return []sdk.Tool{
-		{
-			Name:        toolReadMedia,
-			Description: fmt.Sprintf("Load an image file from %s into model context so you can inspect it. Relative paths are resolved under %s.", root, root),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"path": map[string]any{
-						"type":        "string",
-						"description": fmt.Sprintf("Image file path under %s. Absolute paths must stay under %s; relative paths are resolved under %s.", root, root, root),
-					},
-				},
-				"required": []string{"path"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execReadMedia(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-	}, nil
-}
-
-func (p *ReadMediaProvider) execReadMedia(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	client, err := p.getClient(ctx, session.BotID)
+	reader, err := client.ReadRaw(ctx, path)
 	if err != nil {
-		return readMediaErrorResult(err.Error()), nil
-	}
-
-	resolvedPath, err := p.resolveImagePath(StringArg(args, "path"))
-	if err != nil {
-		return readMediaErrorResult(err.Error()), nil
-	}
-
-	reader, err := client.ReadRaw(ctx, resolvedPath)
-	if err != nil {
-		return readMediaErrorResult(err.Error()), nil
+		return readMediaErrorResult(err.Error())
 	}
 	defer func() { _ = reader.Close() }()
 
-	data, err := io.ReadAll(io.LimitReader(reader, p.maxBytes+1))
-	if err != nil {
-		return readMediaErrorResult("read_media failed to load image: " + err.Error()), nil
+	// Read only the sniff header first so non-image binaries fail fast.
+	header := make([]byte, mimeSniffSize)
+	n, err := io.ReadAtLeast(reader, header, 1)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return readMediaErrorResult("failed to load image: " + err.Error())
 	}
-	if int64(len(data)) > p.maxBytes {
-		return readMediaErrorResult(fmt.Sprintf("read_media failed to load image: file exceeds %d bytes", p.maxBytes)), nil
+	header = header[:n]
+
+	mimeType, err := detectReadMediaMime(header)
+	if err != nil {
+		return readMediaErrorResult(err.Error())
 	}
 
-	mimeType, err := detectReadMediaMime(data)
+	// MIME looks good — read the remainder up to the size limit.
+	rest, err := io.ReadAll(io.LimitReader(reader, maxBytes-int64(n)+1))
 	if err != nil {
-		return readMediaErrorResult(err.Error()), nil
+		return readMediaErrorResult("failed to load image: " + err.Error())
+	}
+	data := make([]byte, 0, len(header)+len(rest))
+	data = append(data, header...)
+	data = append(data, rest...)
+	if int64(len(data)) > maxBytes {
+		return readMediaErrorResult(fmt.Sprintf("failed to load image: file exceeds %d bytes", maxBytes))
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(data)
 	return ReadMediaToolOutput{
 		Public: ReadMediaToolResult{
 			OK:   true,
-			Path: resolvedPath,
+			Path: path,
 			Mime: mimeType,
 			Size: len(data),
 		},
 		ImageBase64:    encoded,
 		ImageMediaType: mimeType,
-	}, nil
-}
-
-func (p *ReadMediaProvider) getClient(ctx context.Context, botID string) (*bridge.Client, error) {
-	botID = strings.TrimSpace(botID)
-	if botID == "" {
-		return nil, errors.New("bot_id is required")
 	}
-	client, err := p.clients.MCPClient(ctx, botID)
-	if err != nil {
-		return nil, fmt.Errorf("container not reachable: %w", err)
-	}
-	return client, nil
-}
-
-func (p *ReadMediaProvider) resolveImagePath(raw string) (string, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "", errors.New("path is required")
-	}
-
-	root := p.rootDir
-	if root == "" {
-		root = defaultReadMediaRoot
-	}
-	root = path.Clean(root)
-
-	resolved := trimmed
-	if !strings.HasPrefix(resolved, "/") {
-		resolved = path.Join(root, resolved)
-	}
-	resolved = path.Clean(resolved)
-
-	if resolved == root || !strings.HasPrefix(resolved, root+"/") {
-		return "", fmt.Errorf("path must be under %s", root)
-	}
-	return resolved, nil
 }
 
 func readMediaErrorResult(message string) ReadMediaToolOutput {
 	msg := strings.TrimSpace(message)
 	if msg == "" {
-		msg = "read_media failed"
+		msg = "read failed"
 	}
 	return ReadMediaToolOutput{
 		Public: ReadMediaToolResult{
@@ -203,11 +123,11 @@ func detectReadMediaMime(data []byte) (string, error) {
 
 	switch {
 	case sniffedMime == "":
-		return "", errors.New("read_media only supports PNG, JPEG, GIF, or WebP image bytes")
+		return "", errors.New("only supports PNG, JPEG, GIF, or WebP image bytes")
 	case isSupportedReadMediaMime(sniffedMime):
 		return sniffedMime, nil
 	default:
-		return "", errors.New("read_media only supports PNG, JPEG, GIF, or WebP image bytes")
+		return "", errors.New("only supports PNG, JPEG, GIF, or WebP image bytes")
 	}
 }
 

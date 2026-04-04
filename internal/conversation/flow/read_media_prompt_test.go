@@ -8,7 +8,9 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 )
 
-func TestPrepareRunConfigIncludesReadMediaWhenImageInputIsSupported(t *testing.T) {
+const imageReadHint = "also supports images: PNG, JPEG, GIF, WebP"
+
+func TestPrepareRunConfigIncludesImageReadHintWhenImageInputIsSupported(t *testing.T) {
 	t.Parallel()
 
 	resolver := &Resolver{}
@@ -21,12 +23,12 @@ func TestPrepareRunConfigIncludesReadMediaWhenImageInputIsSupported(t *testing.T
 	}
 
 	prepared := resolver.prepareRunConfig(context.Background(), cfg)
-	if !strings.Contains(prepared.System, "`read_media`") {
-		t.Fatalf("expected system prompt to include read_media tool, got:\n%s", prepared.System)
+	if !strings.Contains(prepared.System, imageReadHint) {
+		t.Fatalf("expected system prompt to contain %q, got:\n%s", imageReadHint, prepared.System)
 	}
 }
 
-func TestPrepareRunConfigOmitsReadMediaWhenImageInputIsUnsupported(t *testing.T) {
+func TestPrepareRunConfigOmitsImageReadHintWhenImageInputIsUnsupported(t *testing.T) {
 	t.Parallel()
 
 	resolver := &Resolver{}
@@ -39,7 +41,7 @@ func TestPrepareRunConfigOmitsReadMediaWhenImageInputIsUnsupported(t *testing.T)
 	}
 
 	prepared := resolver.prepareRunConfig(context.Background(), cfg)
-	if strings.Contains(prepared.System, "`read_media`") {
-		t.Fatalf("expected system prompt to omit read_media tool, got:\n%s", prepared.System)
+	if strings.Contains(prepared.System, imageReadHint) {
+		t.Fatalf("expected system prompt to NOT contain %q, got:\n%s", imageReadHint, prepared.System)
 	}
 }

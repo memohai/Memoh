@@ -392,10 +392,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)
-			if text == "" {
-				writer.SendJSON(map[string]string{"type": "error", "message": "message text is required"})
-				continue
-			}
 
 			chatAttachments := make([]conversation.ChatAttachment, 0, len(msg.Attachments))
 			for _, rawAtt := range msg.Attachments {
@@ -403,6 +399,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if err := json.Unmarshal(rawAtt, &att); err == nil {
 					chatAttachments = append(chatAttachments, att)
 				}
+			}
+
+			if text == "" && len(chatAttachments) == 0 {
+				writer.SendJSON(map[string]string{"type": "error", "message": "message text or attachments required"})
+				continue
 			}
 
 			// Drain any previous abort signal.

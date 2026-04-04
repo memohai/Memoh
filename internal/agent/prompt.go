@@ -110,12 +110,11 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 		timezoneName = "UTC"
 	}
 
-	basicTools := []string{
-		"- `read`: read file content",
-	}
+	readToolDesc := "- `read`: read file content"
 	if params.SupportsImageInput {
-		basicTools = append(basicTools, "- `read_media`: view the media")
+		readToolDesc += " (also supports images: PNG, JPEG, GIF, WebP)"
 	}
+	basicTools := []string{readToolDesc}
 	basicTools = append(basicTools,
 		"- `write`: write file content",
 		"- `list`: list directory entries",

@@ -62,6 +62,10 @@ type SendResult struct {
 	BotID    string
 	Platform string
 	Target   string
+	// Local is true when the message targets the current conversation.
+	// The caller should emit the resolved attachments as stream events.
+	Local            bool
+	LocalAttachments []channel.Attachment
 }
 
 // ReactResult is the success payload returned after reacting.
@@ -95,6 +99,59 @@ func (e *Executor) Send(ctx context.Context, session SessionContext, args map[st
 		}
 		outboundMessage = channel.Message{Text: strings.TrimSpace(messageText)}
 	}
+	target := firstStringArg(args, "target")
+	if target == "" {
+		target = strings.TrimSpace(session.ReplyTarget)
+	}
+
+	// Same-conversation send: no explicit target from the LLM, or target
+	// matches the current session. Pass raw paths through for downstream
+	// ingestOutboundAttachments to resolve (matches old tag-based flow).
+	isSameConv := target == "" || IsSameConversation(session, channelType.String(), target)
+	if isSameConv {
+		if rawAttachments, ok := args["attachments"]; ok && rawAttachments != nil {
+			for _, item := range NormalizeAttachmentInputs(rawAttachments) {
+				ref := ""
+				name := ""
+				attType := ""
+				switch v := item.(type) {
+				case string:
+					ref = strings.TrimSpace(v)
+				case map[string]any:
+					ref = firstStringArg(v, "path", "url")
+					name = firstStringArg(v, "name")
+					attType = firstStringArg(v, "type")
+				}
+				if ref == "" {
+					continue
+				}
+				lower := strings.ToLower(ref)
+				if !strings.HasPrefix(ref, "/") &&
+					!strings.HasPrefix(lower, "http://") &&
+					!strings.HasPrefix(lower, "https://") &&
+					!strings.HasPrefix(lower, "data:") {
+					ref = "/data/" + ref
+				}
+				if name == "" {
+					name = filepath.Base(ref)
+				}
+				t := channel.AttachmentType(attType)
+				if t == "" {
+					t = InferAttachmentTypeFromExt(ref)
+				}
+				outboundMessage.Attachments = append(outboundMessage.Attachments,
+					channel.Attachment{Type: t, URL: ref, Name: name})
+			}
+		}
+		if outboundMessage.IsEmpty() {
+			return nil, errors.New("message or attachments required")
+		}
+		return &SendResult{
+			BotID: botID, Platform: channelType.String(), Target: target,
+			Local: true, LocalAttachments: outboundMessage.Attachments,
+		}, nil
+	}
+
 	if rawAttachments, ok := args["attachments"]; ok && rawAttachments != nil {
 		items := NormalizeAttachmentInputs(rawAttachments)
 		if items == nil {
@@ -117,18 +174,8 @@ func (e *Executor) Send(ctx context.Context, session SessionContext, args map[st
 	if outboundMessage.Format == "" && channel.ContainsMarkdown(outboundMessage.Text) {
 		outboundMessage.Format = channel.MessageFormatMarkdown
 	}
-	target := firstStringArg(args, "target")
 	if target == "" {
-		target = strings.TrimSpace(session.ReplyTarget)
-	}
-	if target == "" {
-		return nil, errors.New("target is required")
-	}
-	if strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) &&
-		target == strings.TrimSpace(session.ReplyTarget) {
-		return nil, errors.New("you are trying to send a message to the same conversation you are already in. " +
-			"Do not use the send tool for this. Instead, write your reply as plain text directly. " +
-			"To include files, use the <attachments> block in your response (e.g. <attachments>[{\"type\":\"image\",\"path\":\"/data/media/file.jpg\"}]</attachments>)")
+		return nil, errors.New("target is required for cross-conversation send")
 	}
 	if err := e.Sender.Send(ctx, botID, channelType, channel.SendRequest{Target: target, Message: outboundMessage}); err != nil {
 		if e.Logger != nil {
@@ -188,6 +235,23 @@ func (e *Executor) CanSend() bool { return e.Sender != nil && e.Resolver != nil 
 
 // CanReact returns true if the executor has a reactor and resolver configured.
 func (e *Executor) CanReact() bool { return e.Reactor != nil && e.Resolver != nil }
+
+// IsSameConversation reports whether platform+target matches the session's
+// current conversation.
+func IsSameConversation(session SessionContext, platform, target string) bool {
+	replyTarget := strings.TrimSpace(session.ReplyTarget)
+	if replyTarget == "" {
+		return false
+	}
+	if platform == "" {
+		platform = strings.TrimSpace(session.CurrentPlatform)
+	}
+	if target == "" {
+		target = replyTarget
+	}
+	return strings.EqualFold(platform, strings.TrimSpace(session.CurrentPlatform)) &&
+		target == replyTarget
+}
 
 func (*Executor) resolveBotID(args map[string]any, session SessionContext) (string, error) {
 	botID := firstStringArg(args, "bot_id")
@@ -262,6 +326,11 @@ func (e *Executor) resolveAttachmentRef(ctx context.Context, botID, ref, attType
 			t = channel.AttachmentImage
 		}
 		return &channel.Attachment{Type: t, Base64: ref, Name: name}
+	}
+	// Resolve relative paths against the container's data mount.
+	// LLMs often pass bare filenames like "IDENTITY.md" instead of "/data/IDENTITY.md".
+	if !strings.HasPrefix(ref, "/") {
+		ref = "/data/" + ref
 	}
 	if name == "" {
 		name = filepath.Base(ref)

@@ -19,8 +19,9 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
-const containerRef = ref<HTMLDivElement>()
+const editorRef = ref<HTMLDivElement>()
 const settings = useSettingsStore()
+let observer: MutationObserver | null = null
 
 function resolveLanguage(): string {
   if (props.language) return props.language
@@ -44,6 +45,8 @@ const {
   themes: ['vitesse-dark', 'vitesse-light'],
   readOnly: props.readonly,
   automaticLayout: true,
+  autoScrollInitial: false,
+  autoScrollOnUpdate: false,
   minimap: { enabled: false },
   scrollBeyondLastLine: true,
   fontSize: 13,
@@ -54,12 +57,34 @@ const {
   padding: { top: 8, bottom: 8 },
 })
 
-onMounted(async () => {
-  if (!containerRef.value) return
+function clearInlineHeightStyles(el: HTMLElement) {
+  let changed = false
+  for (const prop of ['height', 'max-height', 'min-height', 'overflow'] as const) {
+    if (el.style.getPropertyValue(prop)) {
+      el.style.removeProperty(prop)
+      changed = true
+    }
+  }
+  return changed
+}
 
-  await createEditor(containerRef.value, props.modelValue, resolveLanguage())
+onMounted(async () => {
+  if (!editorRef.value) return
+
+  await createEditor(editorRef.value, props.modelValue, resolveLanguage())
+
+  clearInlineHeightStyles(editorRef.value)
+
+  observer = new MutationObserver(() => {
+    if (editorRef.value) clearInlineHeightStyles(editorRef.value)
+  })
+  observer.observe(editorRef.value, { attributes: true, attributeFilter: ['style'] })
 
   const editor = getEditorView()
+  if (editor) {
+    editor.setPosition({ lineNumber: 1, column: 1 })
+    editor.revealLine(1)
+  }
   editor?.onDidChangeModelContent(() => {
     const value = editor.getValue() ?? ''
     emit('update:modelValue', value)
@@ -67,6 +92,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  observer?.disconnect()
+  observer = null
   cleanupEditor()
 })
 
@@ -93,7 +120,7 @@ watch(() => settings.theme, () => {
 
 <template>
   <div
-    ref="containerRef"
+    ref="editorRef"
     class="h-full w-full overflow-hidden"
   />
 </template>

@@ -2,10 +2,11 @@ import { Elysia } from 'elysia'
 import { loadConfig } from '@memohai/config'
 import { corsMiddleware } from './middlewares/cors'
 import { errorMiddleware } from './middlewares/error'
-import { initBrowsers, browsers } from './browser'
+import { initBrowsers, browsers, closeAllBotBrowsers } from './browser'
 import { contextModule } from './modules/context'
 import { devicesModule } from './modules/devices'
 import { coresModule } from './modules/cores'
+import { sessionModule, closeAllSessions } from './modules/session'
 
 const configuredPath = process.env.MEMOH_CONFIG_PATH?.trim() || process.env.CONFIG_PATH?.trim()
 const configPath = configuredPath && configuredPath.length > 0 ? configuredPath : '../../config.toml'
@@ -23,8 +24,11 @@ const app = new Elysia()
   }))
   .use(coresModule)
   .use(contextModule)
+  .use(sessionModule)
   .use(devicesModule)
   .onStop(async () => {
+    await closeAllSessions()
+    await closeAllBotBrowsers()
     for (const browser of browsers.values()) {
       await browser.close()
     }
