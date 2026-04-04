@@ -105,9 +105,8 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 	if target == "" {
 		target = strings.TrimSpace(session.ReplyTarget)
 	}
-	if target == "" {
-		return nil, errors.New("target is required")
-	}
+
+	isSameConv := target == "" || session.IsSameConversation(channelType.String(), target)
 
 	botSettings, err := p.settings.GetBot(ctx, botID)
 	if err != nil {
@@ -121,19 +120,27 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 		return nil, fmt.Errorf("speech synthesis failed: %s", synthErr.Error())
 	}
 
-	// Same-conversation: emit as a speech stream event for inline delivery.
-	if session.IsSameConversation(channelType.String(), target) && session.Emitter != nil {
+	dataURL := fmt.Sprintf("data:%s;base64,%s", contentType, base64.StdEncoding.EncodeToString(audioData))
+
+	// Same-conversation: emit the synthesized audio as a voice attachment.
+	if isSameConv && session.Emitter != nil {
 		session.Emitter(ToolStreamEvent{
-			Type:     StreamEventSpeech,
-			Speeches: []Speech{{Text: text}},
+			Type: StreamEventAttachment,
+			Attachments: []Attachment{{
+				Type: "voice",
+				URL:  dataURL,
+				Mime: contentType,
+				Size: int64(len(audioData)),
+			}},
 		})
 		return map[string]any{
 			"ok":        true,
 			"delivered": "current_conversation",
 		}, nil
 	}
-
-	dataURL := fmt.Sprintf("data:%s;base64,%s", contentType, base64.StdEncoding.EncodeToString(audioData))
+	if target == "" {
+		return nil, errors.New("target is required for cross-conversation speak")
+	}
 	msg := channel.Message{
 		Attachments: []channel.Attachment{{Type: channel.AttachmentVoice, URL: dataURL, Mime: contentType, Size: int64(len(audioData))}},
 	}
