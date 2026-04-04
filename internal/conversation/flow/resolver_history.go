@@ -253,9 +253,13 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 
 	messages := make([]conversation.ModelMessage, 0, len(composed.Messages))
 	for _, m := range composed.Messages {
+		contentJSON, err := json.Marshal(m.Content)
+		if err != nil {
+			continue
+		}
 		messages = append(messages, conversation.ModelMessage{
 			Role:    m.Role,
-			Content: json.RawMessage(`"` + strings.ReplaceAll(m.Content, `"`, `\"`) + `"`),
+			Content: contentJSON,
 		})
 	}
 	return messages
