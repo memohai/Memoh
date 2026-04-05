@@ -201,6 +201,7 @@
     "sessionTypeHeartbeat": "Heartbeat",
     "sessionTypeSchedule": "Scheduled Task",
     "sessionTypeSubagent": "Subagent",
+    "sessionTypeDiscuss": "Discuss",
     "sessionTypeChat": "Chat",
     "sessionFilterAll": "All",
     "sessionSourcePrefix": "From:",
