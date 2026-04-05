@@ -243,7 +243,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		Time:              time.Now().In(tz),
 		Timezone:          runCfg.Identity.Timezone,
 	}, req.Query)
-
 	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
