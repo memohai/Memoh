@@ -197,6 +197,7 @@
     "sessionTypeHeartbeat": "心跳",
     "sessionTypeSchedule": "定时任务",
     "sessionTypeSubagent": "子智能体",
+    "sessionTypeDiscuss": "讨论",
     "sessionTypeChat": "对话",
     "sessionFilterAll": "全部",
     "sessionSourcePrefix": "来自：",

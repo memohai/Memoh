@@ -149,7 +149,7 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
-import { Search, Plus, ChevronDown, Check, LoaderCircle, MessageSquare, HeartPulse, Clock, GitBranch } from 'lucide-vue-next'
+import { Search, Plus, ChevronDown, Check, LoaderCircle, MessageSquare, MessageCircle, HeartPulse, Clock, GitBranch } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -215,6 +215,7 @@ const filterType = ref<string>('chat')
 
 const filterOptions = computed(() => [
   { value: 'chat', label: t('chat.sessionTypeChat') },
+  { value: 'discuss', label: t('chat.sessionTypeDiscuss') },
   { value: 'heartbeat', label: t('chat.sessionTypeHeartbeat') },
   { value: 'schedule', label: t('chat.sessionTypeSchedule') },
   { value: 'subagent', label: t('chat.sessionTypeSubagent') },
@@ -227,6 +228,7 @@ const filterLabel = computed(() => {
 
 const filterIconComponent = computed<Component>(() => {
   switch (filterType.value) {
+    case 'discuss': return MessageCircle
     case 'heartbeat': return HeartPulse
     case 'schedule': return Clock
     case 'subagent': return GitBranch
@@ -236,6 +238,7 @@ const filterIconComponent = computed<Component>(() => {
 
 const filterIconClass = computed(() => {
   switch (filterType.value) {
+    case 'discuss': return 'text-sky-400'
     case 'heartbeat': return 'text-rose-400'
     case 'schedule': return 'text-amber-400'
     case 'subagent': return 'text-violet-400'
@@ -245,7 +248,12 @@ const filterIconClass = computed(() => {
 
 const filteredSessions = computed(() => {
   let list = sessions.value
-  list = list.filter(s => s.type === filterType.value)
+  if (filterType.value === 'chat') {
+    // Keep discuss sessions visible in the default chat view.
+    list = list.filter(s => s.type === 'chat' || s.type === 'discuss')
+  } else {
+    list = list.filter(s => s.type === filterType.value)
+  }
   const q = searchQuery.value.trim().toLowerCase()
   if (q) {
     list = list.filter(s =>
