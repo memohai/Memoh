@@ -10,6 +10,8 @@ export default defineConfig(({ command }) => {
   const defaultPort = 8082
   const defaultHost = '127.0.0.1'
   const defaultApiBaseUrl = process.env.VITE_API_URL ?? 'http://localhost:8080'
+  // In containerized dev, compose should provide an internal Docker-network target
+  // like http://server:8080 instead of relying on host-published ports.
   const configuredProxyTarget = process.env.MEMOH_WEB_PROXY_TARGET?.trim()
   const configuredPath = process.env.MEMOH_CONFIG_PATH?.trim() || process.env.CONFIG_PATH?.trim()
   const configPath = configuredPath && configuredPath.length > 0 ? configuredPath : '../../config.toml'
