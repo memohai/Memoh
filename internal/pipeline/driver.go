@@ -29,6 +29,11 @@ type RunConfigResolver interface {
 	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
 
+// discussStreamer abstracts the agent streaming capability for testability.
+type discussStreamer interface {
+	Stream(ctx context.Context, cfg agentpkg.RunConfig) <-chan agentpkg.StreamEvent
+}
+
 // DiscussDriverDeps holds dependencies injected into the DiscussDriver.
 type DiscussDriverDeps struct {
 	Pipeline       *Pipeline
@@ -204,9 +209,12 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 }
 
 func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, rc RenderedContext, log *slog.Logger) {
+	d.handleReplyWithAgent(ctx, sess, rc, log, d.deps.Agent)
+}
+
+func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussSession, rc RenderedContext, log *slog.Logger, agent discussStreamer) {
 	cfg := sess.config
 
-	// Load assistant/tool messages from bot_history_messages as TRs.
 	trs := d.loadTurnResponses(ctx, cfg.SessionID)
 
 	maxTokens := cfg.MaxContextTokens
@@ -222,7 +230,6 @@ func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, r
 		slog.Int("messages", len(composed.Messages)),
 		slog.Int("estimated_tokens", composed.EstimatedTokens))
 
-	// Resolve full RunConfig via the resolver (model, system prompt, tools).
 	if d.deps.Resolver == nil {
 		log.Error("discuss driver: resolver not configured")
 		return
@@ -236,34 +243,137 @@ func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, r
 	}
 	runConfig := resolved.RunConfig
 
-	// Replace messages with RC-based context.
 	runConfig.Messages = contextMessagesToSDK(composed.Messages)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
 
-	// Inject late-binding prompt as a final user message with action hints.
 	isMentioned := wasRecentlyMentioned(rc, sess.lastProcessedMs)
 	lateBinding := buildLateBindingPrompt(isMentioned)
 	runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(lateBinding))
 
-	result, err := d.deps.Agent.Generate(ctx, runConfig)
-	if err != nil {
-		log.Error("discuss LLM call failed", slog.Any("error", err))
-		return
+	eventCh := agent.Stream(ctx, runConfig)
+
+	persisted := make(map[string]struct{})
+	var finalMessages json.RawMessage
+
+	for event := range eventCh {
+		switch event.Type {
+		case agentpkg.EventError:
+			log.Error("discuss stream error", slog.String("error", event.Error))
+
+		case agentpkg.EventToolCallEnd:
+			if event.ToolName == "send" && isSendToCurrentConversation(event.Result) {
+				toolCallID := strings.TrimSpace(event.ToolCallID)
+				if _, dup := persisted[toolCallID]; !dup {
+					if persistErr := d.persistDiscussSend(ctx, cfg, event, resolved.ModelID, log); persistErr != nil {
+						log.Error("discuss: immediate persist failed",
+							slog.String("tool_call_id", toolCallID),
+							slog.Any("error", persistErr))
+					} else {
+						persisted[toolCallID] = struct{}{}
+					}
+				}
+			}
+
+		case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
+			finalMessages = event.Messages
+		}
 	}
 
 	now := time.Now()
 
-	if d.deps.Resolver != nil && len(result.Messages) > 0 {
-		if storeErr := d.deps.Resolver.StoreRound(ctx,
-			cfg.BotID, cfg.SessionID, cfg.ChannelIdentityID, cfg.CurrentPlatform,
-			result.Messages, resolved.ModelID,
-		); storeErr != nil {
-			log.Error("discuss: store round failed", slog.Any("error", storeErr))
+	// Always persist the full round (thinking, tool calls, tool results).
+	// The immediate send-text persist above provides real-time visibility;
+	// StoreRound adds the complete conversation context.
+	if d.deps.Resolver != nil && len(finalMessages) > 0 {
+		var sdkMsgs []sdk.Message
+		if json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
+			if storeErr := d.deps.Resolver.StoreRound(ctx,
+				cfg.BotID, cfg.SessionID, cfg.ChannelIdentityID, cfg.CurrentPlatform,
+				sdkMsgs, resolved.ModelID,
+			); storeErr != nil {
+				log.Error("discuss: store round failed", slog.Any("error", storeErr))
+			}
 		}
 	}
 
 	sess.lastProcessedMs = now.UnixMilli()
+}
+
+// isSendToCurrentConversation checks the tool result for "delivered":"current_conversation".
+func isSendToCurrentConversation(result any) bool {
+	m, ok := result.(map[string]any)
+	if !ok {
+		return false
+	}
+	delivered, _ := m["delivered"].(string)
+	return delivered == "current_conversation"
+}
+
+// persistDiscussSend immediately persists the assistant message produced by
+// a successful same-conversation send tool call. This triggers the
+// message_created event so the Web UI sees it without a full reload.
+func (d *DiscussDriver) persistDiscussSend(
+	ctx context.Context,
+	cfg DiscussSessionConfig,
+	event agentpkg.StreamEvent,
+	modelID string,
+	log *slog.Logger,
+) error {
+	if d.deps.MessageService == nil {
+		return nil
+	}
+
+	text := extractSendToolText(event.Input)
+	if text == "" {
+		return nil
+	}
+
+	content, err := json.Marshal(conversation.ModelMessage{
+		Role:    "assistant",
+		Content: conversation.NewTextContent(text),
+	})
+	if err != nil {
+		return err
+	}
+
+	meta := map[string]any{}
+	if strings.TrimSpace(cfg.CurrentPlatform) != "" {
+		meta["platform"] = cfg.CurrentPlatform
+	}
+	meta["discuss_tool_call_id"] = strings.TrimSpace(event.ToolCallID)
+
+	_, persistErr := d.deps.MessageService.Persist(ctx, messagepkg.PersistInput{
+		BotID:     cfg.BotID,
+		SessionID: cfg.SessionID,
+		Role:      "assistant",
+		Content:   content,
+		Metadata:  meta,
+		ModelID:   modelID,
+	})
+	if persistErr != nil {
+		return persistErr
+	}
+	log.Info("discuss: persisted send-tool message",
+		slog.String("tool_call_id", event.ToolCallID))
+	return nil
+}
+
+// extractSendToolText extracts the "text" field from a send tool's input.
+func extractSendToolText(input any) string {
+	m, ok := input.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if text, ok := m["text"].(string); ok && strings.TrimSpace(text) != "" {
+		return strings.TrimSpace(text)
+	}
+	if msg, ok := m["message"].(map[string]any); ok {
+		if text, ok := msg["text"].(string); ok && strings.TrimSpace(text) != "" {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
 }
 
 func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string) []TurnResponseEntry {
