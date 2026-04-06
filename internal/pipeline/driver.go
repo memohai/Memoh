@@ -57,7 +57,6 @@ type DiscussSessionConfig struct {
 	BotID             string
 	SessionID         string
 	ChannelIdentityID string
-	MaxContextTokens  int
 	ReplyTarget       string
 	CurrentPlatform   string
 	ConversationType  string
@@ -231,11 +230,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 
 	trs := d.loadTurnResponses(ctx, cfg.SessionID)
 
-	maxTokens := cfg.MaxContextTokens
-	if maxTokens <= 0 {
-		maxTokens = 200000
-	}
-	composed := ComposeContext(rc, trs, maxTokens, "")
+	composed := ComposeContext(rc, trs, "")
 	if composed == nil {
 		return
 	}

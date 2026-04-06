@@ -245,8 +245,7 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 
 	trs := r.loadTurnResponses(ctx, sessionID)
 
-	maxTokens := 200000
-	composed := pipelinepkg.ComposeContext(rc, trs, maxTokens, "")
+	composed := pipelinepkg.ComposeContext(rc, trs, "")
 	if composed == nil {
 		return nil
 	}

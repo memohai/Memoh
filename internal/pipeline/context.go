@@ -3,14 +3,10 @@ package pipeline
 import (
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 )
 
-const (
-	charsPerToken = 2
-	imageTokens   = 100
-)
+const charsPerToken = 2
 
 // TurnResponseEntry represents an assistant or tool message from bot_history_messages,
 // used as the "TR" stream in context composition.
@@ -28,9 +24,8 @@ type ContextMessage struct {
 
 // ComposeContextResult holds the output of ComposeContext.
 type ComposeContextResult struct {
-	Messages           []ContextMessage
-	EstimatedTokens    int
-	RawEstimatedTokens int
+	Messages        []ContextMessage
+	EstimatedTokens int
 }
 
 // LatestExternalEventMs returns the receivedAtMs of the latest non-self segment
@@ -127,9 +122,8 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 	return messages
 }
 
-// ComposeContext merges RC and TRs, optionally prepends a compaction summary,
-// and trims to fit within maxTokens.
-func ComposeContext(rc RenderedContext, trs []TurnResponseEntry, maxTokens int, compactSummary string) *ComposeContextResult {
+// ComposeContext merges RC and TRs, optionally prepends a compaction summary.
+func ComposeContext(rc RenderedContext, trs []TurnResponseEntry, compactSummary string) *ComposeContextResult {
 	allMessages := MergeContext(rc, trs)
 	if len(allMessages) == 0 && compactSummary == "" {
 		return nil
@@ -140,96 +134,10 @@ func ComposeContext(rc RenderedContext, trs []TurnResponseEntry, maxTokens int, 
 		allMessages = append([]ContextMessage{summary}, allMessages...)
 	}
 
-	rawEstimatedTokens := estimateMessagesTokens(allMessages)
-	trimmed, estimatedTokens := TrimContext(allMessages, maxTokens)
-
 	return &ComposeContextResult{
-		Messages:           trimmed,
-		EstimatedTokens:    estimatedTokens,
-		RawEstimatedTokens: rawEstimatedTokens,
+		Messages:        allMessages,
+		EstimatedTokens: estimateMessagesTokens(allMessages),
 	}
-}
-
-// TrimContext drops messages from the front (oldest) to fit within maxTokens.
-// For user messages, drops individual content. For assistant messages with tool
-// context, also drops following tool messages. Returns trimmed messages and
-// their estimated token count.
-func TrimContext(messages []ContextMessage, maxTokens int) ([]ContextMessage, int) {
-	totalTokens := estimateMessagesTokens(messages)
-	if totalTokens <= maxTokens {
-		return messages, totalTokens
-	}
-
-	result := make([]ContextMessage, len(messages))
-	copy(result, messages)
-
-	for totalTokens > maxTokens && len(result) > 1 {
-		dropped := result[0]
-		droppedTokens := estimateMessageTokens(dropped)
-		result = result[1:]
-		totalTokens -= droppedTokens
-
-		// If dropped an assistant, also drop following tool messages
-		if dropped.Role == "assistant" {
-			for len(result) > 0 && result[0].Role == "tool" {
-				totalTokens -= estimateMessageTokens(result[0])
-				result = result[1:]
-			}
-		}
-	}
-
-	// Don't start with orphaned tool messages
-	for len(result) > 1 && result[0].Role == "tool" {
-		totalTokens -= estimateMessageTokens(result[0])
-		result = result[1:]
-	}
-
-	return result, totalTokens
-}
-
-// FindWorkingWindowCursor walks backward from the newest entries (RC + TRs),
-// accumulating token cost until the budget is exceeded. Returns the timestamp
-// of the cutoff point.
-func FindWorkingWindowCursor(rc RenderedContext, trs []TurnResponseEntry, budgetTokens int) int64 {
-	type entry struct {
-		timeMs int64
-		tokens int
-	}
-
-	var entries []entry
-	for _, seg := range rc {
-		tokens := 0
-		for _, p := range seg.Content {
-			if p.Type == "text" {
-				tokens += int(math.Ceil(float64(len(p.Text)) / charsPerToken))
-			} else {
-				tokens += imageTokens
-			}
-		}
-		entries = append(entries, entry{timeMs: seg.ReceivedAtMs, tokens: tokens})
-	}
-
-	for _, tr := range trs {
-		tokens := int(math.Ceil(float64(len(tr.Content)) / charsPerToken))
-		entries = append(entries, entry{timeMs: tr.RequestedAtMs, tokens: tokens})
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].timeMs > entries[j].timeMs
-	})
-
-	accum := 0
-	for _, e := range entries {
-		accum += e.tokens
-		if accum > budgetTokens {
-			return e.timeMs
-		}
-	}
-
-	if len(entries) > 0 {
-		return entries[len(entries)-1].timeMs
-	}
-	return 0
 }
 
 func estimateMessagesTokens(messages []ContextMessage) int {
@@ -242,14 +150,4 @@ func estimateMessagesTokens(messages []ContextMessage) int {
 
 func estimateMessageTokens(m ContextMessage) int {
 	return int(math.Ceil(float64(len(m.Content)) / charsPerToken))
-}
-
-// EstimateTokens estimates the token count for a string using the chars-per-token heuristic.
-func EstimateTokens(s string) int {
-	return int(math.Ceil(float64(len(s)) / charsPerToken))
-}
-
-// FormatLastProcessedMs returns the lastProcessedMs as a string for metadata storage.
-func FormatLastProcessedMs(ms int64) string {
-	return strconv.FormatInt(ms, 10)
 }
