@@ -57,21 +57,19 @@ CREATE TABLE IF NOT EXISTS user_channel_bindings (
 
 CREATE INDEX IF NOT EXISTS idx_user_channel_bindings_user_id ON user_channel_bindings(user_id);
 
-CREATE TABLE IF NOT EXISTS providers (
+CREATE TABLE IF NOT EXISTS llm_providers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  api_key TEXT NOT NULL,
   client_type TEXT NOT NULL DEFAULT 'openai-completions',
   icon TEXT,
   enable BOOLEAN NOT NULL DEFAULT true,
-  config JSONB NOT NULL DEFAULT '{}'::jsonb,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT providers_name_unique UNIQUE (name),
-  CONSTRAINT providers_client_type_check CHECK (client_type IN (
-    'openai-responses', 'openai-completions', 'anthropic-messages',
-    'google-generative-ai', 'openai-codex', 'edge-speech'
-  ))
+  CONSTRAINT llm_providers_name_unique UNIQUE (name),
+  CONSTRAINT llm_providers_client_type_check CHECK (client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai', 'openai-codex'))
 );
 
 CREATE TABLE IF NOT EXISTS search_providers (
@@ -89,13 +87,13 @@ CREATE TABLE IF NOT EXISTS models (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   model_id TEXT NOT NULL,
   name TEXT,
-  provider_id UUID NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+  llm_provider_id UUID NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
   type TEXT NOT NULL DEFAULT 'chat',
   config JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT models_provider_id_model_id_unique UNIQUE (provider_id, model_id),
-  CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding', 'speech'))
+  CONSTRAINT models_provider_model_id_unique UNIQUE (llm_provider_id, model_id),
+  CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding'))
 );
 
 CREATE TABLE IF NOT EXISTS model_variants (
@@ -122,6 +120,30 @@ CREATE TABLE IF NOT EXISTS memory_providers (
   CONSTRAINT memory_providers_name_unique UNIQUE (name)
 );
 
+-- tts_providers: pluggable TTS service backends
+CREATE TABLE IF NOT EXISTS tts_providers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  enable BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT tts_providers_name_unique UNIQUE (name)
+);
+
+-- tts_models: available models per TTS provider with per-model configuration
+CREATE TABLE IF NOT EXISTS tts_models (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  model_id TEXT NOT NULL,
+  name TEXT,
+  tts_provider_id UUID NOT NULL REFERENCES tts_providers(id) ON DELETE CASCADE,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tts_models_provider_id ON tts_models(tts_provider_id);
 
 CREATE TABLE IF NOT EXISTS browser_contexts (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -157,7 +179,7 @@ CREATE TABLE IF NOT EXISTS bots (
   title_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   image_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   discuss_probe_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-  tts_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  tts_model_id UUID REFERENCES tts_models(id) ON DELETE SET NULL,
   browser_context_id UUID REFERENCES browser_contexts(id) ON DELETE SET NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -629,20 +651,3 @@ CREATE TABLE IF NOT EXISTS email_outbox (
 
 CREATE INDEX IF NOT EXISTS idx_email_outbox_provider_id ON email_outbox(provider_id);
 CREATE INDEX IF NOT EXISTS idx_email_outbox_bot_id ON email_outbox(bot_id, created_at DESC);
-
--- provider_oauth_tokens: OAuth token storage for providers (e.g. OpenAI Codex OAuth)
-CREATE TABLE IF NOT EXISTS provider_oauth_tokens (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  provider_id UUID NOT NULL UNIQUE REFERENCES providers(id) ON DELETE CASCADE,
-  access_token TEXT NOT NULL DEFAULT '',
-  refresh_token TEXT NOT NULL DEFAULT '',
-  expires_at TIMESTAMPTZ,
-  scope TEXT NOT NULL DEFAULT '',
-  token_type TEXT NOT NULL DEFAULT '',
-  state TEXT NOT NULL DEFAULT '',
-  pkce_code_verifier TEXT NOT NULL DEFAULT '',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_provider_oauth_tokens_state ON provider_oauth_tokens(state) WHERE state != '';
