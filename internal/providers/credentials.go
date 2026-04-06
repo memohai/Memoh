@@ -19,14 +19,15 @@ type ModelCredentials struct {
 	CodexAccountID string
 }
 
-func SupportsOpenAICodexOAuth(provider sqlc.LlmProvider) bool {
+func SupportsOpenAICodexOAuth(provider sqlc.Provider) bool {
 	return supportsOAuth(provider)
 }
 
-func (s *Service) ResolveModelCredentials(ctx context.Context, provider sqlc.LlmProvider) (ModelCredentials, error) {
+func (s *Service) ResolveModelCredentials(ctx context.Context, provider sqlc.Provider) (ModelCredentials, error) {
 	if models.ClientType(provider.ClientType) != models.ClientTypeOpenAICodex {
+		apiKey := ProviderConfigString(provider, "api_key")
 		return ModelCredentials{
-			APIKey: provider.ApiKey,
+			APIKey: apiKey,
 		}, nil
 	}
 

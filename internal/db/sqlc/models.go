@@ -298,33 +298,6 @@ type LifecycleEvent struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type LlmProvider struct {
-	ID         pgtype.UUID        `json:"id"`
-	Name       string             `json:"name"`
-	BaseUrl    string             `json:"base_url"`
-	ApiKey     string             `json:"api_key"`
-	Icon       pgtype.Text        `json:"icon"`
-	Enable     bool               `json:"enable"`
-	Metadata   []byte             `json:"metadata"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	ClientType string             `json:"client_type"`
-}
-
-type LlmProviderOauthToken struct {
-	ID               pgtype.UUID        `json:"id"`
-	LlmProviderID    pgtype.UUID        `json:"llm_provider_id"`
-	AccessToken      string             `json:"access_token"`
-	RefreshToken     string             `json:"refresh_token"`
-	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
-	Scope            string             `json:"scope"`
-	TokenType        string             `json:"token_type"`
-	State            string             `json:"state"`
-	PkceCodeVerifier string             `json:"pkce_code_verifier"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-}
-
 type McpConnection struct {
 	ID            pgtype.UUID        `json:"id"`
 	BotID         pgtype.UUID        `json:"bot_id"`
@@ -393,14 +366,14 @@ type MemoryProvider struct {
 }
 
 type Model struct {
-	ID            pgtype.UUID        `json:"id"`
-	ModelID       string             `json:"model_id"`
-	Name          pgtype.Text        `json:"name"`
-	LlmProviderID pgtype.UUID        `json:"llm_provider_id"`
-	Type          string             `json:"type"`
-	Config        []byte             `json:"config"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID         pgtype.UUID        `json:"id"`
+	ModelID    string             `json:"model_id"`
+	Name       pgtype.Text        `json:"name"`
+	ProviderID pgtype.UUID        `json:"provider_id"`
+	Type       string             `json:"type"`
+	Config     []byte             `json:"config"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ModelVariant struct {
@@ -411,6 +384,32 @@ type ModelVariant struct {
 	Metadata  []byte             `json:"metadata"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Provider struct {
+	ID         pgtype.UUID        `json:"id"`
+	Name       string             `json:"name"`
+	ClientType string             `json:"client_type"`
+	Icon       pgtype.Text        `json:"icon"`
+	Enable     bool               `json:"enable"`
+	Config     []byte             `json:"config"`
+	Metadata   []byte             `json:"metadata"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProviderOauthToken struct {
+	ID               pgtype.UUID        `json:"id"`
+	ProviderID       pgtype.UUID        `json:"provider_id"`
+	AccessToken      string             `json:"access_token"`
+	RefreshToken     string             `json:"refresh_token"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	Scope            string             `json:"scope"`
+	TokenType        string             `json:"token_type"`
+	State            string             `json:"state"`
+	PkceCodeVerifier string             `json:"pkce_code_verifier"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Schedule struct {
@@ -467,26 +466,6 @@ type StorageProvider struct {
 	Name      string             `json:"name"`
 	Provider  string             `json:"provider"`
 	Config    []byte             `json:"config"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-type TtsModel struct {
-	ID            pgtype.UUID        `json:"id"`
-	ModelID       string             `json:"model_id"`
-	Name          pgtype.Text        `json:"name"`
-	TtsProviderID pgtype.UUID        `json:"tts_provider_id"`
-	Config        []byte             `json:"config"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-}
-
-type TtsProvider struct {
-	ID        pgtype.UUID        `json:"id"`
-	Name      string             `json:"name"`
-	Provider  string             `json:"provider"`
-	Config    []byte             `json:"config"`
-	Enable    bool               `json:"enable"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }

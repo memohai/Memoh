@@ -251,7 +251,7 @@ func runServe() {
 			provideServerHandler(weixin.NewQRServerHandler),
 			provideServerHandler(provideUsersHandler),
 			provideServerHandler(handlers.NewMemoryProvidersHandler),
-			provideServerHandler(handlers.NewTtsProvidersHandler),
+			provideServerHandler(handlers.NewSpeechHandler),
 			provideServerHandler(handlers.NewBotTtsHandler),
 			provideServerHandler(handlers.NewEmailProvidersHandler),
 			provideServerHandler(handlers.NewEmailBindingsHandler),
@@ -274,7 +274,7 @@ func runServe() {
 			startRegistrySync,
 			startMemoryProviderBootstrap,
 			startSearchProviderBootstrap,
-			startTtsProviderBootstrap,
+
 			startScheduleService,
 			startHeartbeatService,
 			startChannelManager,
@@ -878,7 +878,7 @@ func provideServer(params serverParams) *server.Server {
 func startRegistrySync(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, queries *dbsqlc.Queries) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			defs, err := registry.Load(cfg.Registry.ProvidersPath())
+			defs, err := registry.Load(log, cfg.Registry.ProvidersPath())
 			if err != nil {
 				log.Warn("registry: failed to load provider definitions", slog.Any("error", err))
 				return nil
@@ -904,17 +904,6 @@ func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *
 				log.Warn("failed to instantiate default memory provider", slog.Any("error", regErr))
 			} else {
 				log.Info("default memory provider ready", slog.String("id", resp.ID), slog.String("provider", resp.Provider))
-			}
-			return nil
-		},
-	})
-}
-
-func startTtsProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, ttsService *ttspkg.Service) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			if err := ttsService.EnsureDefaults(ctx); err != nil {
-				log.Warn("failed to ensure default tts providers", slog.Any("error", err))
 			}
 			return nil
 		},
@@ -1128,8 +1117,8 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memprovider.LLM, error) {
 	}
 	return memllm.New(memllm.Config{
 		ModelID:    memoryModel.ModelID,
-		BaseURL:    strings.TrimRight(memoryProvider.BaseUrl, "/"),
-		APIKey:     memoryProvider.ApiKey,
+		BaseURL:    strings.TrimRight(providers.ProviderConfigString(memoryProvider, "base_url"), "/"),
+		APIKey:     providers.ProviderConfigString(memoryProvider, "api_key"),
 		ClientType: memoryProvider.ClientType,
 		Timeout:    c.timeout,
 	}), nil

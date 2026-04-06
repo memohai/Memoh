@@ -95,7 +95,7 @@ SELECT
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens
 FROM bot_history_messages m
 LEFT JOIN models mo ON mo.id = m.model_id
-LEFT JOIN llm_providers lp ON lp.id = mo.llm_provider_id
+LEFT JOIN providers lp ON lp.id = mo.provider_id
 WHERE m.bot_id = $1
   AND m.usage IS NOT NULL
   AND m.created_at >= $2

@@ -525,6 +525,8 @@ export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'cod
 
 export type ChannelReplyRef = {
     message_id?: string;
+    preview?: string;
+    sender?: string;
     target?: string;
 };
 
@@ -1260,6 +1262,8 @@ export type MessageMessage = {
     compact_id?: string;
     content?: Array<number>;
     created_at?: string;
+    display_content?: string;
+    event_id?: string;
     external_message_id?: string;
     id?: string;
     metadata?: {
@@ -1291,9 +1295,9 @@ export type MessageMessageAsset = {
 
 export type ModelsAddRequest = {
     config?: ModelsModelConfig;
-    llm_provider_id?: string;
     model_id?: string;
     name?: string;
+    provider_id?: string;
     type?: ModelsModelType;
 };
 
@@ -1309,9 +1313,9 @@ export type ModelsCountResponse = {
 export type ModelsGetResponse = {
     config?: ModelsModelConfig;
     id?: string;
-    llm_provider_id?: string;
     model_id?: string;
     name?: string;
+    provider_id?: string;
     type?: ModelsModelType;
 };
 
@@ -1322,7 +1326,7 @@ export type ModelsModelConfig = {
     reasoning_efforts?: Array<string>;
 };
 
-export type ModelsModelType = 'chat' | 'embedding';
+export type ModelsModelType = 'chat' | 'embedding' | 'speech';
 
 export type ModelsTestResponse = {
     latency_ms?: number;
@@ -1335,9 +1339,9 @@ export type ModelsTestStatus = 'ok' | 'auth_error' | 'model_not_supported' | 'er
 
 export type ModelsUpdateRequest = {
     config?: ModelsModelConfig;
-    llm_provider_id?: string;
     model_id?: string;
     name?: string;
+    provider_id?: string;
     type?: ModelsModelType;
 };
 
@@ -1346,9 +1350,10 @@ export type ProvidersCountResponse = {
 };
 
 export type ProvidersCreateRequest = {
-    api_key?: string;
-    base_url: string;
     client_type: string;
+    config?: {
+        [key: string]: unknown;
+    };
     icon?: string;
     metadata?: {
         [key: string]: unknown;
@@ -1357,9 +1362,10 @@ export type ProvidersCreateRequest = {
 };
 
 export type ProvidersGetResponse = {
-    api_key?: string;
-    base_url?: string;
     client_type?: string;
+    config?: {
+        [key: string]: unknown;
+    };
     created_at?: string;
     enable?: boolean;
     icon?: string;
@@ -1392,9 +1398,10 @@ export type ProvidersTestResponse = {
 };
 
 export type ProvidersUpdateRequest = {
-    api_key?: string;
-    base_url?: string;
     client_type?: string;
+    config?: {
+        [key: string]: unknown;
+    };
     enable?: boolean;
     icon?: string;
     metadata?: {
@@ -1541,6 +1548,7 @@ export type SettingsSettings = {
     compaction_model_id?: string;
     compaction_ratio?: number;
     compaction_threshold?: number;
+    discuss_probe_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -1562,6 +1570,7 @@ export type SettingsUpsertRequest = {
     compaction_model_id?: string;
     compaction_ratio?: number;
     compaction_threshold?: number;
+    discuss_probe_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -1573,20 +1582,6 @@ export type SettingsUpsertRequest = {
     search_provider_id?: string;
     title_model_id?: string;
     tts_model_id?: string;
-};
-
-export type TtsCreateModelRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    model_id?: string;
-    name?: string;
-    tts_provider_id?: string;
-};
-
-export type TtsCreateProviderRequest = {
-    name?: string;
-    provider?: string;
 };
 
 export type TtsModelCapabilities = {
@@ -1601,19 +1596,6 @@ export type TtsModelInfo = {
     description?: string;
     id?: string;
     name?: string;
-};
-
-export type TtsModelResponse = {
-    config?: {
-        [key: string]: unknown;
-    };
-    created_at?: string;
-    id?: string;
-    model_id?: string;
-    name?: string;
-    provider_type?: string;
-    tts_provider_id?: string;
-    updated_at?: string;
 };
 
 export type TtsParamConstraint = {
@@ -1631,12 +1613,25 @@ export type TtsProviderMetaResponse = {
     provider?: string;
 };
 
-export type TtsProviderResponse = {
+export type TtsSpeechModelResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    model_id?: string;
+    name?: string;
+    provider_id?: string;
+    provider_type?: string;
+    updated_at?: string;
+};
+
+export type TtsSpeechProviderResponse = {
+    client_type?: string;
     created_at?: string;
     enable?: boolean;
     id?: string;
     name?: string;
-    provider?: string;
     updated_at?: string;
 };
 
@@ -1645,18 +1640,6 @@ export type TtsTestSynthesizeRequest = {
         [key: string]: unknown;
     };
     text?: string;
-};
-
-export type TtsUpdateModelRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    name?: string;
-};
-
-export type TtsUpdateProviderRequest = {
-    enable?: boolean;
-    name?: string;
 };
 
 export type TtsVoiceInfo = {
@@ -8018,6 +8001,167 @@ export type PutSearchProvidersByIdResponses = {
 
 export type PutSearchProvidersByIdResponse = PutSearchProvidersByIdResponses[keyof PutSearchProvidersByIdResponses];
 
+export type GetSpeechModelsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/speech-models';
+};
+
+export type GetSpeechModelsErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetSpeechModelsError = GetSpeechModelsErrors[keyof GetSpeechModelsErrors];
+
+export type GetSpeechModelsResponses = {
+    /**
+     * OK
+     */
+    200: Array<TtsSpeechModelResponse>;
+};
+
+export type GetSpeechModelsResponse = GetSpeechModelsResponses[keyof GetSpeechModelsResponses];
+
+export type GetSpeechModelsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Model ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/speech-models/{id}';
+};
+
+export type GetSpeechModelsByIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetSpeechModelsByIdError = GetSpeechModelsByIdErrors[keyof GetSpeechModelsByIdErrors];
+
+export type GetSpeechModelsByIdResponses = {
+    /**
+     * OK
+     */
+    200: TtsSpeechModelResponse;
+};
+
+export type GetSpeechModelsByIdResponse = GetSpeechModelsByIdResponses[keyof GetSpeechModelsByIdResponses];
+
+export type GetSpeechModelsByIdCapabilitiesData = {
+    body?: never;
+    path: {
+        /**
+         * Model ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/speech-models/{id}/capabilities';
+};
+
+export type GetSpeechModelsByIdCapabilitiesErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetSpeechModelsByIdCapabilitiesError = GetSpeechModelsByIdCapabilitiesErrors[keyof GetSpeechModelsByIdCapabilitiesErrors];
+
+export type GetSpeechModelsByIdCapabilitiesResponses = {
+    /**
+     * OK
+     */
+    200: TtsModelCapabilities;
+};
+
+export type GetSpeechModelsByIdCapabilitiesResponse = GetSpeechModelsByIdCapabilitiesResponses[keyof GetSpeechModelsByIdCapabilitiesResponses];
+
+export type PostSpeechModelsByIdTestData = {
+    /**
+     * Text to synthesize
+     */
+    body: TtsTestSynthesizeRequest;
+    path: {
+        /**
+         * Model ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/speech-models/{id}/test';
+};
+
+export type PostSpeechModelsByIdTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostSpeechModelsByIdTestError = PostSpeechModelsByIdTestErrors[keyof PostSpeechModelsByIdTestErrors];
+
+export type PostSpeechModelsByIdTestResponses = {
+    /**
+     * Audio data
+     */
+    200: unknown;
+};
+
+export type GetSpeechProvidersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/speech-providers';
+};
+
+export type GetSpeechProvidersErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetSpeechProvidersError = GetSpeechProvidersErrors[keyof GetSpeechProvidersErrors];
+
+export type GetSpeechProvidersResponses = {
+    /**
+     * OK
+     */
+    200: Array<TtsSpeechProviderResponse>;
+};
+
+export type GetSpeechProvidersResponse = GetSpeechProvidersResponses[keyof GetSpeechProvidersResponses];
+
+export type GetSpeechProvidersMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/speech-providers/meta';
+};
+
+export type GetSpeechProvidersMetaResponses = {
+    /**
+     * OK
+     */
+    200: Array<TtsProviderMetaResponse>;
+};
+
+export type GetSpeechProvidersMetaResponse = GetSpeechProvidersMetaResponses[keyof GetSpeechProvidersMetaResponses];
+
 export type GetSupermarketMcpsData = {
     body?: never;
     path?: never;
@@ -8198,456 +8342,6 @@ export type GetSupermarketTagsResponses = {
 };
 
 export type GetSupermarketTagsResponse = GetSupermarketTagsResponses[keyof GetSupermarketTagsResponses];
-
-export type GetTtsModelsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/tts-models';
-};
-
-export type GetTtsModelsErrors = {
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetTtsModelsError = GetTtsModelsErrors[keyof GetTtsModelsErrors];
-
-export type GetTtsModelsResponses = {
-    /**
-     * OK
-     */
-    200: Array<TtsModelResponse>;
-};
-
-export type GetTtsModelsResponse = GetTtsModelsResponses[keyof GetTtsModelsResponses];
-
-export type PostTtsModelsData = {
-    /**
-     * TTS model configuration
-     */
-    body: TtsCreateModelRequest;
-    path?: never;
-    query?: never;
-    url: '/tts-models';
-};
-
-export type PostTtsModelsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostTtsModelsError = PostTtsModelsErrors[keyof PostTtsModelsErrors];
-
-export type PostTtsModelsResponses = {
-    /**
-     * Created
-     */
-    201: TtsModelResponse;
-};
-
-export type PostTtsModelsResponse = PostTtsModelsResponses[keyof PostTtsModelsResponses];
-
-export type DeleteTtsModelsByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Model ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/tts-models/{id}';
-};
-
-export type DeleteTtsModelsByIdErrors = {
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteTtsModelsByIdError = DeleteTtsModelsByIdErrors[keyof DeleteTtsModelsByIdErrors];
-
-export type DeleteTtsModelsByIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetTtsModelsByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Model ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/tts-models/{id}';
-};
-
-export type GetTtsModelsByIdErrors = {
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetTtsModelsByIdError = GetTtsModelsByIdErrors[keyof GetTtsModelsByIdErrors];
-
-export type GetTtsModelsByIdResponses = {
-    /**
-     * OK
-     */
-    200: TtsModelResponse;
-};
-
-export type GetTtsModelsByIdResponse = GetTtsModelsByIdResponses[keyof GetTtsModelsByIdResponses];
-
-export type PutTtsModelsByIdData = {
-    /**
-     * Updated configuration
-     */
-    body: TtsUpdateModelRequest;
-    path: {
-        /**
-         * Model ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/tts-models/{id}';
-};
-
-export type PutTtsModelsByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutTtsModelsByIdError = PutTtsModelsByIdErrors[keyof PutTtsModelsByIdErrors];
-
-export type PutTtsModelsByIdResponses = {
-    /**
-     * OK
-     */
-    200: TtsModelResponse;
-};
-
-export type PutTtsModelsByIdResponse = PutTtsModelsByIdResponses[keyof PutTtsModelsByIdResponses];
-
-export type GetTtsModelsByIdCapabilitiesData = {
-    body?: never;
-    path: {
-        /**
-         * Model ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/tts-models/{id}/capabilities';
-};
-
-export type GetTtsModelsByIdCapabilitiesErrors = {
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetTtsModelsByIdCapabilitiesError = GetTtsModelsByIdCapabilitiesErrors[keyof GetTtsModelsByIdCapabilitiesErrors];
-
-export type GetTtsModelsByIdCapabilitiesResponses = {
-    /**
-     * OK
-     */
-    200: TtsModelCapabilities;
-};
-
-export type GetTtsModelsByIdCapabilitiesResponse = GetTtsModelsByIdCapabilitiesResponses[keyof GetTtsModelsByIdCapabilitiesResponses];
-
-export type PostTtsModelsByIdTestData = {
-    /**
-     * Text to synthesize
-     */
-    body: TtsTestSynthesizeRequest;
-    path: {
-        /**
-         * Model ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/tts-models/{id}/test';
-};
-
-export type PostTtsModelsByIdTestErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostTtsModelsByIdTestError = PostTtsModelsByIdTestErrors[keyof PostTtsModelsByIdTestErrors];
-
-export type PostTtsModelsByIdTestResponses = {
-    /**
-     * Audio data
-     */
-    200: unknown;
-};
-
-export type GetTtsProvidersData = {
-    body?: never;
-    path?: never;
-    query?: {
-        /**
-         * Provider type filter
-         */
-        provider?: string;
-    };
-    url: '/tts-providers';
-};
-
-export type GetTtsProvidersErrors = {
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetTtsProvidersError = GetTtsProvidersErrors[keyof GetTtsProvidersErrors];
-
-export type GetTtsProvidersResponses = {
-    /**
-     * OK
-     */
-    200: Array<TtsProviderResponse>;
-};
-
-export type GetTtsProvidersResponse = GetTtsProvidersResponses[keyof GetTtsProvidersResponses];
-
-export type PostTtsProvidersData = {
-    /**
-     * TTS provider configuration
-     */
-    body: TtsCreateProviderRequest;
-    path?: never;
-    query?: never;
-    url: '/tts-providers';
-};
-
-export type PostTtsProvidersErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostTtsProvidersError = PostTtsProvidersErrors[keyof PostTtsProvidersErrors];
-
-export type PostTtsProvidersResponses = {
-    /**
-     * Created
-     */
-    201: TtsProviderResponse;
-};
-
-export type PostTtsProvidersResponse = PostTtsProvidersResponses[keyof PostTtsProvidersResponses];
-
-export type GetTtsProvidersMetaData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/tts-providers/meta';
-};
-
-export type GetTtsProvidersMetaResponses = {
-    /**
-     * OK
-     */
-    200: Array<TtsProviderMetaResponse>;
-};
-
-export type GetTtsProvidersMetaResponse = GetTtsProvidersMetaResponses[keyof GetTtsProvidersMetaResponses];
-
-export type DeleteTtsProvidersByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/tts-providers/{id}';
-};
-
-export type DeleteTtsProvidersByIdErrors = {
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteTtsProvidersByIdError = DeleteTtsProvidersByIdErrors[keyof DeleteTtsProvidersByIdErrors];
-
-export type DeleteTtsProvidersByIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetTtsProvidersByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/tts-providers/{id}';
-};
-
-export type GetTtsProvidersByIdErrors = {
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetTtsProvidersByIdError = GetTtsProvidersByIdErrors[keyof GetTtsProvidersByIdErrors];
-
-export type GetTtsProvidersByIdResponses = {
-    /**
-     * OK
-     */
-    200: TtsProviderResponse;
-};
-
-export type GetTtsProvidersByIdResponse = GetTtsProvidersByIdResponses[keyof GetTtsProvidersByIdResponses];
-
-export type PutTtsProvidersByIdData = {
-    /**
-     * Updated configuration
-     */
-    body: TtsUpdateProviderRequest;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/tts-providers/{id}';
-};
-
-export type PutTtsProvidersByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutTtsProvidersByIdError = PutTtsProvidersByIdErrors[keyof PutTtsProvidersByIdErrors];
-
-export type PutTtsProvidersByIdResponses = {
-    /**
-     * OK
-     */
-    200: TtsProviderResponse;
-};
-
-export type PutTtsProvidersByIdResponse = PutTtsProvidersByIdResponses[keyof PutTtsProvidersByIdResponses];
-
-export type PostTtsProvidersByIdImportModelsData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/tts-providers/{id}/import-models';
-};
-
-export type PostTtsProvidersByIdImportModelsErrors = {
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostTtsProvidersByIdImportModelsError = PostTtsProvidersByIdImportModelsErrors[keyof PostTtsProvidersByIdImportModelsErrors];
-
-export type PostTtsProvidersByIdImportModelsResponses = {
-    /**
-     * OK
-     */
-    200: Array<TtsModelResponse>;
-};
-
-export type PostTtsProvidersByIdImportModelsResponse = PostTtsProvidersByIdImportModelsResponses[keyof PostTtsProvidersByIdImportModelsResponses];
-
-export type GetTtsProvidersByIdModelsData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/tts-providers/{id}/models';
-};
-
-export type GetTtsProvidersByIdModelsErrors = {
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetTtsProvidersByIdModelsError = GetTtsProvidersByIdModelsErrors[keyof GetTtsProvidersByIdModelsErrors];
-
-export type GetTtsProvidersByIdModelsResponses = {
-    /**
-     * OK
-     */
-    200: Array<TtsModelResponse>;
-};
-
-export type GetTtsProvidersByIdModelsResponse = GetTtsProvidersByIdModelsResponses[keyof GetTtsProvidersByIdModelsResponses];
 
 export type GetUsersData = {
     body?: never;

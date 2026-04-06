@@ -120,7 +120,7 @@ func (h *Handler) resolveModelName(cc CommandContext, modelID string) string {
 	}
 	provName := ""
 	if h.providersService != nil {
-		p, err := h.providersService.Get(cc.Ctx, m.LlmProviderID)
+		p, err := h.providersService.Get(cc.Ctx, m.ProviderID)
 		if err == nil {
 			provName = p.Name
 		}

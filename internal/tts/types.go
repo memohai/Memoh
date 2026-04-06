@@ -2,27 +2,7 @@ package tts
 
 import "time"
 
-// --- Provider types ---
-
-type CreateProviderRequest struct {
-	Name     string  `json:"name"`
-	Provider TtsType `json:"provider"`
-}
-
-type UpdateProviderRequest struct {
-	Name   *string `json:"name,omitempty"`
-	Enable *bool   `json:"enable,omitempty"`
-}
-
-type ProviderResponse struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Provider  string    `json:"provider"`
-	Enable    bool      `json:"enable"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
+// ProviderMetaResponse exposes adapter metadata (from the registry, not DB).
 type ProviderMetaResponse struct {
 	Provider     string      `json:"provider"`
 	DisplayName  string      `json:"display_name"`
@@ -31,33 +11,41 @@ type ProviderMetaResponse struct {
 	Models       []ModelInfo `json:"models"`
 }
 
-// --- Model types ---
-
-type ModelResponse struct {
-	ID            string         `json:"id"`
-	ModelID       string         `json:"model_id"`
-	Name          string         `json:"name"`
-	TtsProviderID string         `json:"tts_provider_id"`
-	ProviderType  string         `json:"provider_type,omitempty"`
-	Config        map[string]any `json:"config,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+// SpeechProviderResponse represents a speech-capable provider from the unified providers table.
+type SpeechProviderResponse struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	ClientType string    `json:"client_type"`
+	Enable     bool      `json:"enable"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-type CreateModelRequest struct {
-	ModelID       string         `json:"model_id"`
-	Name          string         `json:"name"`
-	TtsProviderID string         `json:"tts_provider_id"`
-	Config        map[string]any `json:"config,omitempty"`
+// SpeechModelResponse represents a speech model from the unified models table.
+type SpeechModelResponse struct {
+	ID           string         `json:"id"`
+	ModelID      string         `json:"model_id"`
+	Name         string         `json:"name"`
+	ProviderID   string         `json:"provider_id"`
+	ProviderType string         `json:"provider_type,omitempty"`
+	Config       map[string]any `json:"config,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
-type UpdateModelRequest struct {
+// UpdateSpeechProviderRequest is used for updating a speech provider.
+type UpdateSpeechProviderRequest struct {
+	Name   *string `json:"name,omitempty"`
+	Enable *bool   `json:"enable,omitempty"`
+}
+
+// UpdateSpeechModelRequest is used for updating a speech model.
+type UpdateSpeechModelRequest struct {
 	Name   *string        `json:"name,omitempty"`
 	Config map[string]any `json:"config,omitempty"`
 }
 
-// --- Synthesis types ---
-
+// TestSynthesizeRequest represents a text-to-speech test request.
 type TestSynthesizeRequest struct {
 	Text   string         `json:"text"`
 	Config map[string]any `json:"config,omitempty"`

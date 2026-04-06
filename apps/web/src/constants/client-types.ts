@@ -30,6 +30,11 @@ export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
     label: 'Google Generative AI',
     hint: 'Gemini API',
   },
+  'edge-speech': {
+    value: 'edge-speech',
+    label: 'Edge Speech',
+    hint: 'Microsoft Edge Read Aloud TTS',
+  },
 }
 
 export const CLIENT_TYPE_LIST: ClientTypeMeta[] = Object.values(CLIENT_TYPE_META)

@@ -4,8 +4,8 @@ import { type _JSONValue, defineQueryOptions, type UseMutationOptions } from '@p
 
 import { serializeQueryKeyValue } from '../client';
 import { client } from '../client.gen';
-import { deleteBotsByBotIdAclRulesByRuleId, deleteBotsByBotIdCompactionLogs, deleteBotsByBotIdContainer, deleteBotsByBotIdContainerSkills, deleteBotsByBotIdEmailBindingsById, deleteBotsByBotIdHeartbeatLogs, deleteBotsByBotIdMcpById, deleteBotsByBotIdMcpByIdOauthToken, deleteBotsByBotIdMemory, deleteBotsByBotIdMemoryById, deleteBotsByBotIdMessages, deleteBotsByBotIdScheduleById, deleteBotsByBotIdScheduleLogs, deleteBotsByBotIdSessionsBySessionId, deleteBotsByBotIdSettings, deleteBotsById, deleteBotsByIdChannelByPlatform, deleteBrowserContextsById, deleteEmailProvidersById, deleteEmailProvidersByIdOauthToken, deleteMemoryProvidersById, deleteModelsById, deleteModelsModelByModelId, deleteProvidersById, deleteProvidersByIdOauthToken, deleteSearchProvidersById, deleteTtsModelsById, deleteTtsProvidersById, getBots, getBotsByBotIdAclChannelIdentities, getBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversations, getBotsByBotIdAclChannelTypesByChannelTypeConversations, getBotsByBotIdAclDefaultEffect, getBotsByBotIdAclRules, getBotsByBotIdCompactionLogs, getBotsByBotIdContainer, getBotsByBotIdContainerFs, getBotsByBotIdContainerFsDownload, getBotsByBotIdContainerFsList, getBotsByBotIdContainerFsRead, getBotsByBotIdContainerSkills, getBotsByBotIdContainerSnapshots, getBotsByBotIdContainerTerminal, getBotsByBotIdContainerTerminalWs, getBotsByBotIdEmailBindings, getBotsByBotIdEmailOutbox, getBotsByBotIdEmailOutboxById, getBotsByBotIdHeartbeatLogs, getBotsByBotIdLocalWs, getBotsByBotIdMcp, getBotsByBotIdMcpById, getBotsByBotIdMcpByIdOauthStatus, getBotsByBotIdMcpExport, getBotsByBotIdMemory, getBotsByBotIdMemoryStatus, getBotsByBotIdMemoryUsage, getBotsByBotIdMessages, getBotsByBotIdSchedule, getBotsByBotIdScheduleById, getBotsByBotIdScheduleByIdLogs, getBotsByBotIdScheduleLogs, getBotsByBotIdSessions, getBotsByBotIdSessionsBySessionId, getBotsByBotIdSessionsBySessionIdStatus, getBotsByBotIdSettings, getBotsByBotIdTokenUsage, getBotsById, getBotsByIdChannelByPlatform, getBotsByIdChecks, getBrowserContexts, getBrowserContextsById, getBrowserContextsCores, getChannels, getChannelsByPlatform, getEmailOauthCallback, getEmailProviders, getEmailProvidersById, getEmailProvidersByIdOauthAuthorize, getEmailProvidersByIdOauthStatus, getEmailProvidersMeta, getMemoryProviders, getMemoryProvidersById, getMemoryProvidersByIdStatus, getMemoryProvidersMeta, getModels, getModelsById, getModelsCount, getModelsModelByModelId, getPing, getProviders, getProvidersById, getProvidersByIdModels, getProvidersByIdOauthAuthorize, getProvidersByIdOauthStatus, getProvidersCount, getProvidersNameByName, getProvidersOauthCallback, getSearchProviders, getSearchProvidersById, getSearchProvidersMeta, getSupermarketMcps, getSupermarketMcpsById, getSupermarketSkills, getSupermarketSkillsById, getSupermarketTags, getTtsModels, getTtsModelsById, getTtsModelsByIdCapabilities, getTtsProviders, getTtsProvidersById, getTtsProvidersByIdModels, getTtsProvidersMeta, getUsers, getUsersById, getUsersMe, getUsersMeChannelsByPlatform, getUsersMeIdentities, type Options, patchBotsByBotIdSessionsBySessionId, patchBotsByIdChannelByPlatformStatus, postAuthLogin, postAuthRefresh, postBots, postBotsByBotIdAclRules, postBotsByBotIdContainer, postBotsByBotIdContainerDataExport, postBotsByBotIdContainerDataImport, postBotsByBotIdContainerDataRestore, postBotsByBotIdContainerFsDelete, postBotsByBotIdContainerFsMkdir, postBotsByBotIdContainerFsRename, postBotsByBotIdContainerFsUpload, postBotsByBotIdContainerFsWrite, postBotsByBotIdContainerSkills, postBotsByBotIdContainerSnapshots, postBotsByBotIdContainerSnapshotsRollback, postBotsByBotIdContainerStart, postBotsByBotIdContainerStop, postBotsByBotIdEmailBindings, postBotsByBotIdLocalMessages, postBotsByBotIdMcp, postBotsByBotIdMcpByIdOauthAuthorize, postBotsByBotIdMcpByIdOauthDiscover, postBotsByBotIdMcpByIdOauthExchange, postBotsByBotIdMcpByIdProbe, postBotsByBotIdMcpOpsBatchDelete, postBotsByBotIdMcpStdio, postBotsByBotIdMcpStdioByConnectionId, postBotsByBotIdMemory, postBotsByBotIdMemoryCompact, postBotsByBotIdMemoryRebuild, postBotsByBotIdMemorySearch, postBotsByBotIdSchedule, postBotsByBotIdSessions, postBotsByBotIdSettings, postBotsByBotIdSupermarketInstallMcp, postBotsByBotIdSupermarketInstallSkill, postBotsByBotIdTools, postBotsByBotIdTtsSynthesize, postBotsByIdChannelByPlatformSend, postBotsByIdChannelByPlatformSendChat, postBrowserContexts, postEmailMailgunWebhookByConfigId, postEmailProviders, postMemoryProviders, postModels, postModelsByIdTest, postProviders, postProvidersByIdImportModels, postProvidersByIdTest, postSearchProviders, postTtsModels, postTtsModelsByIdTest, postTtsProviders, postTtsProvidersByIdImportModels, postUsers, putBotsByBotIdAclDefaultEffect, putBotsByBotIdAclRulesByRuleId, putBotsByBotIdAclRulesReorder, putBotsByBotIdEmailBindingsById, putBotsByBotIdMcpById, putBotsByBotIdMcpImport, putBotsByBotIdScheduleById, putBotsByBotIdSettings, putBotsById, putBotsByIdChannelByPlatform, putBotsByIdOwner, putBrowserContextsById, putEmailProvidersById, putMemoryProvidersById, putModelsById, putModelsModelByModelId, putProvidersById, putSearchProvidersById, putTtsModelsById, putTtsProvidersById, putUsersById, putUsersByIdPassword, putUsersMe, putUsersMeChannelsByPlatform, putUsersMePassword } from '../sdk.gen';
-import type { DeleteBotsByBotIdAclRulesByRuleIdData, DeleteBotsByBotIdAclRulesByRuleIdError, DeleteBotsByBotIdCompactionLogsData, DeleteBotsByBotIdCompactionLogsError, DeleteBotsByBotIdContainerData, DeleteBotsByBotIdContainerError, DeleteBotsByBotIdContainerSkillsData, DeleteBotsByBotIdContainerSkillsError, DeleteBotsByBotIdContainerSkillsResponse, DeleteBotsByBotIdEmailBindingsByIdData, DeleteBotsByBotIdEmailBindingsByIdError, DeleteBotsByBotIdHeartbeatLogsData, DeleteBotsByBotIdHeartbeatLogsError, DeleteBotsByBotIdMcpByIdData, DeleteBotsByBotIdMcpByIdError, DeleteBotsByBotIdMcpByIdOauthTokenData, DeleteBotsByBotIdMcpByIdOauthTokenError, DeleteBotsByBotIdMemoryByIdData, DeleteBotsByBotIdMemoryByIdError, DeleteBotsByBotIdMemoryByIdResponse, DeleteBotsByBotIdMemoryData, DeleteBotsByBotIdMemoryError, DeleteBotsByBotIdMemoryResponse, DeleteBotsByBotIdMessagesData, DeleteBotsByBotIdMessagesError, DeleteBotsByBotIdScheduleByIdData, DeleteBotsByBotIdScheduleByIdError, DeleteBotsByBotIdScheduleLogsData, DeleteBotsByBotIdScheduleLogsError, DeleteBotsByBotIdSessionsBySessionIdData, DeleteBotsByBotIdSessionsBySessionIdError, DeleteBotsByBotIdSettingsData, DeleteBotsByBotIdSettingsError, DeleteBotsByIdChannelByPlatformData, DeleteBotsByIdChannelByPlatformError, DeleteBotsByIdData, DeleteBotsByIdError, DeleteBotsByIdResponse, DeleteBrowserContextsByIdData, DeleteBrowserContextsByIdError, DeleteEmailProvidersByIdData, DeleteEmailProvidersByIdError, DeleteEmailProvidersByIdOauthTokenData, DeleteEmailProvidersByIdOauthTokenError, DeleteMemoryProvidersByIdData, DeleteMemoryProvidersByIdError, DeleteModelsByIdData, DeleteModelsByIdError, DeleteModelsModelByModelIdData, DeleteModelsModelByModelIdError, DeleteProvidersByIdData, DeleteProvidersByIdError, DeleteProvidersByIdOauthTokenData, DeleteProvidersByIdOauthTokenError, DeleteSearchProvidersByIdData, DeleteSearchProvidersByIdError, DeleteTtsModelsByIdData, DeleteTtsModelsByIdError, DeleteTtsProvidersByIdData, DeleteTtsProvidersByIdError, GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsData, GetBotsByBotIdAclChannelIdentitiesData, GetBotsByBotIdAclChannelTypesByChannelTypeConversationsData, GetBotsByBotIdAclDefaultEffectData, GetBotsByBotIdAclRulesData, GetBotsByBotIdCompactionLogsData, GetBotsByBotIdContainerData, GetBotsByBotIdContainerFsData, GetBotsByBotIdContainerFsDownloadData, GetBotsByBotIdContainerFsListData, GetBotsByBotIdContainerFsReadData, GetBotsByBotIdContainerSkillsData, GetBotsByBotIdContainerSnapshotsData, GetBotsByBotIdContainerTerminalData, GetBotsByBotIdContainerTerminalWsData, GetBotsByBotIdEmailBindingsData, GetBotsByBotIdEmailOutboxByIdData, GetBotsByBotIdEmailOutboxData, GetBotsByBotIdHeartbeatLogsData, GetBotsByBotIdLocalWsData, GetBotsByBotIdMcpByIdData, GetBotsByBotIdMcpByIdOauthStatusData, GetBotsByBotIdMcpData, GetBotsByBotIdMcpExportData, GetBotsByBotIdMemoryData, GetBotsByBotIdMemoryStatusData, GetBotsByBotIdMemoryUsageData, GetBotsByBotIdMessagesData, GetBotsByBotIdScheduleByIdData, GetBotsByBotIdScheduleByIdLogsData, GetBotsByBotIdScheduleData, GetBotsByBotIdScheduleLogsData, GetBotsByBotIdSessionsBySessionIdData, GetBotsByBotIdSessionsBySessionIdStatusData, GetBotsByBotIdSessionsData, GetBotsByBotIdSettingsData, GetBotsByBotIdTokenUsageData, GetBotsByIdChannelByPlatformData, GetBotsByIdChecksData, GetBotsByIdData, GetBotsData, GetBrowserContextsByIdData, GetBrowserContextsCoresData, GetBrowserContextsData, GetChannelsByPlatformData, GetChannelsData, GetEmailOauthCallbackData, GetEmailProvidersByIdData, GetEmailProvidersByIdOauthAuthorizeData, GetEmailProvidersByIdOauthStatusData, GetEmailProvidersData, GetEmailProvidersMetaData, GetMemoryProvidersByIdData, GetMemoryProvidersByIdStatusData, GetMemoryProvidersData, GetMemoryProvidersMetaData, GetModelsByIdData, GetModelsCountData, GetModelsData, GetModelsModelByModelIdData, GetPingData, GetProvidersByIdData, GetProvidersByIdModelsData, GetProvidersByIdOauthAuthorizeData, GetProvidersByIdOauthStatusData, GetProvidersCountData, GetProvidersData, GetProvidersNameByNameData, GetProvidersOauthCallbackData, GetSearchProvidersByIdData, GetSearchProvidersData, GetSearchProvidersMetaData, GetSupermarketMcpsByIdData, GetSupermarketMcpsData, GetSupermarketSkillsByIdData, GetSupermarketSkillsData, GetSupermarketTagsData, GetTtsModelsByIdCapabilitiesData, GetTtsModelsByIdData, GetTtsModelsData, GetTtsProvidersByIdData, GetTtsProvidersByIdModelsData, GetTtsProvidersData, GetTtsProvidersMetaData, GetUsersByIdData, GetUsersData, GetUsersMeChannelsByPlatformData, GetUsersMeData, GetUsersMeIdentitiesData, PatchBotsByBotIdSessionsBySessionIdData, PatchBotsByBotIdSessionsBySessionIdError, PatchBotsByBotIdSessionsBySessionIdResponse, PatchBotsByIdChannelByPlatformStatusData, PatchBotsByIdChannelByPlatformStatusError, PatchBotsByIdChannelByPlatformStatusResponse, PostAuthLoginData, PostAuthLoginError, PostAuthLoginResponse, PostAuthRefreshData, PostAuthRefreshError, PostAuthRefreshResponse, PostBotsByBotIdAclRulesData, PostBotsByBotIdAclRulesError, PostBotsByBotIdAclRulesResponse, PostBotsByBotIdContainerData, PostBotsByBotIdContainerDataExportData, PostBotsByBotIdContainerDataExportError, PostBotsByBotIdContainerDataImportData, PostBotsByBotIdContainerDataImportError, PostBotsByBotIdContainerDataImportResponse, PostBotsByBotIdContainerDataRestoreData, PostBotsByBotIdContainerDataRestoreError, PostBotsByBotIdContainerDataRestoreResponse, PostBotsByBotIdContainerError, PostBotsByBotIdContainerFsDeleteData, PostBotsByBotIdContainerFsDeleteError, PostBotsByBotIdContainerFsDeleteResponse, PostBotsByBotIdContainerFsMkdirData, PostBotsByBotIdContainerFsMkdirError, PostBotsByBotIdContainerFsMkdirResponse, PostBotsByBotIdContainerFsRenameData, PostBotsByBotIdContainerFsRenameError, PostBotsByBotIdContainerFsRenameResponse, PostBotsByBotIdContainerFsUploadData, PostBotsByBotIdContainerFsUploadError, PostBotsByBotIdContainerFsUploadResponse, PostBotsByBotIdContainerFsWriteData, PostBotsByBotIdContainerFsWriteError, PostBotsByBotIdContainerFsWriteResponse, PostBotsByBotIdContainerResponse, PostBotsByBotIdContainerSkillsData, PostBotsByBotIdContainerSkillsError, PostBotsByBotIdContainerSkillsResponse, PostBotsByBotIdContainerSnapshotsData, PostBotsByBotIdContainerSnapshotsError, PostBotsByBotIdContainerSnapshotsResponse, PostBotsByBotIdContainerSnapshotsRollbackData, PostBotsByBotIdContainerSnapshotsRollbackError, PostBotsByBotIdContainerSnapshotsRollbackResponse, PostBotsByBotIdContainerStartData, PostBotsByBotIdContainerStartError, PostBotsByBotIdContainerStartResponse, PostBotsByBotIdContainerStopData, PostBotsByBotIdContainerStopError, PostBotsByBotIdContainerStopResponse, PostBotsByBotIdEmailBindingsData, PostBotsByBotIdEmailBindingsError, PostBotsByBotIdEmailBindingsResponse, PostBotsByBotIdLocalMessagesData, PostBotsByBotIdLocalMessagesError, PostBotsByBotIdLocalMessagesResponse, PostBotsByBotIdMcpByIdOauthAuthorizeData, PostBotsByBotIdMcpByIdOauthAuthorizeError, PostBotsByBotIdMcpByIdOauthAuthorizeResponse, PostBotsByBotIdMcpByIdOauthDiscoverData, PostBotsByBotIdMcpByIdOauthDiscoverError, PostBotsByBotIdMcpByIdOauthDiscoverResponse, PostBotsByBotIdMcpByIdOauthExchangeData, PostBotsByBotIdMcpByIdOauthExchangeError, PostBotsByBotIdMcpByIdOauthExchangeResponse, PostBotsByBotIdMcpByIdProbeData, PostBotsByBotIdMcpByIdProbeError, PostBotsByBotIdMcpByIdProbeResponse, PostBotsByBotIdMcpData, PostBotsByBotIdMcpError, PostBotsByBotIdMcpOpsBatchDeleteData, PostBotsByBotIdMcpOpsBatchDeleteError, PostBotsByBotIdMcpResponse, PostBotsByBotIdMcpStdioByConnectionIdData, PostBotsByBotIdMcpStdioByConnectionIdError, PostBotsByBotIdMcpStdioByConnectionIdResponse, PostBotsByBotIdMcpStdioData, PostBotsByBotIdMcpStdioError, PostBotsByBotIdMcpStdioResponse, PostBotsByBotIdMemoryCompactData, PostBotsByBotIdMemoryCompactError, PostBotsByBotIdMemoryCompactResponse, PostBotsByBotIdMemoryData, PostBotsByBotIdMemoryError, PostBotsByBotIdMemoryRebuildData, PostBotsByBotIdMemoryRebuildError, PostBotsByBotIdMemoryRebuildResponse, PostBotsByBotIdMemoryResponse, PostBotsByBotIdMemorySearchData, PostBotsByBotIdMemorySearchError, PostBotsByBotIdMemorySearchResponse, PostBotsByBotIdScheduleData, PostBotsByBotIdScheduleError, PostBotsByBotIdScheduleResponse, PostBotsByBotIdSessionsData, PostBotsByBotIdSessionsError, PostBotsByBotIdSessionsResponse, PostBotsByBotIdSettingsData, PostBotsByBotIdSettingsError, PostBotsByBotIdSettingsResponse, PostBotsByBotIdSupermarketInstallMcpData, PostBotsByBotIdSupermarketInstallMcpError, PostBotsByBotIdSupermarketInstallMcpResponse, PostBotsByBotIdSupermarketInstallSkillData, PostBotsByBotIdSupermarketInstallSkillError, PostBotsByBotIdSupermarketInstallSkillResponse, PostBotsByBotIdToolsData, PostBotsByBotIdToolsError, PostBotsByBotIdToolsResponse, PostBotsByBotIdTtsSynthesizeData, PostBotsByBotIdTtsSynthesizeError, PostBotsByBotIdTtsSynthesizeResponse, PostBotsByIdChannelByPlatformSendChatData, PostBotsByIdChannelByPlatformSendChatError, PostBotsByIdChannelByPlatformSendChatResponse, PostBotsByIdChannelByPlatformSendData, PostBotsByIdChannelByPlatformSendError, PostBotsByIdChannelByPlatformSendResponse, PostBotsData, PostBotsError, PostBotsResponse, PostBrowserContextsData, PostBrowserContextsError, PostBrowserContextsResponse, PostEmailMailgunWebhookByConfigIdData, PostEmailMailgunWebhookByConfigIdError, PostEmailMailgunWebhookByConfigIdResponse, PostEmailProvidersData, PostEmailProvidersError, PostEmailProvidersResponse, PostMemoryProvidersData, PostMemoryProvidersError, PostMemoryProvidersResponse, PostModelsByIdTestData, PostModelsByIdTestError, PostModelsByIdTestResponse, PostModelsData, PostModelsError, PostModelsResponse, PostProvidersByIdImportModelsData, PostProvidersByIdImportModelsError, PostProvidersByIdImportModelsResponse, PostProvidersByIdTestData, PostProvidersByIdTestError, PostProvidersByIdTestResponse, PostProvidersData, PostProvidersError, PostProvidersResponse, PostSearchProvidersData, PostSearchProvidersError, PostSearchProvidersResponse, PostTtsModelsByIdTestData, PostTtsModelsByIdTestError, PostTtsModelsData, PostTtsModelsError, PostTtsModelsResponse, PostTtsProvidersByIdImportModelsData, PostTtsProvidersByIdImportModelsError, PostTtsProvidersByIdImportModelsResponse, PostTtsProvidersData, PostTtsProvidersError, PostTtsProvidersResponse, PostUsersData, PostUsersError, PostUsersResponse, PutBotsByBotIdAclDefaultEffectData, PutBotsByBotIdAclDefaultEffectError, PutBotsByBotIdAclRulesByRuleIdData, PutBotsByBotIdAclRulesByRuleIdError, PutBotsByBotIdAclRulesByRuleIdResponse, PutBotsByBotIdAclRulesReorderData, PutBotsByBotIdAclRulesReorderError, PutBotsByBotIdEmailBindingsByIdData, PutBotsByBotIdEmailBindingsByIdError, PutBotsByBotIdEmailBindingsByIdResponse, PutBotsByBotIdMcpByIdData, PutBotsByBotIdMcpByIdError, PutBotsByBotIdMcpByIdResponse, PutBotsByBotIdMcpImportData, PutBotsByBotIdMcpImportError, PutBotsByBotIdMcpImportResponse, PutBotsByBotIdScheduleByIdData, PutBotsByBotIdScheduleByIdError, PutBotsByBotIdScheduleByIdResponse, PutBotsByBotIdSettingsData, PutBotsByBotIdSettingsError, PutBotsByBotIdSettingsResponse, PutBotsByIdChannelByPlatformData, PutBotsByIdChannelByPlatformError, PutBotsByIdChannelByPlatformResponse, PutBotsByIdData, PutBotsByIdError, PutBotsByIdOwnerData, PutBotsByIdOwnerError, PutBotsByIdOwnerResponse, PutBotsByIdResponse, PutBrowserContextsByIdData, PutBrowserContextsByIdError, PutBrowserContextsByIdResponse, PutEmailProvidersByIdData, PutEmailProvidersByIdError, PutEmailProvidersByIdResponse, PutMemoryProvidersByIdData, PutMemoryProvidersByIdError, PutMemoryProvidersByIdResponse, PutModelsByIdData, PutModelsByIdError, PutModelsByIdResponse, PutModelsModelByModelIdData, PutModelsModelByModelIdError, PutModelsModelByModelIdResponse, PutProvidersByIdData, PutProvidersByIdError, PutProvidersByIdResponse, PutSearchProvidersByIdData, PutSearchProvidersByIdError, PutSearchProvidersByIdResponse, PutTtsModelsByIdData, PutTtsModelsByIdError, PutTtsModelsByIdResponse, PutTtsProvidersByIdData, PutTtsProvidersByIdError, PutTtsProvidersByIdResponse, PutUsersByIdData, PutUsersByIdError, PutUsersByIdPasswordData, PutUsersByIdPasswordError, PutUsersByIdResponse, PutUsersMeChannelsByPlatformData, PutUsersMeChannelsByPlatformError, PutUsersMeChannelsByPlatformResponse, PutUsersMeData, PutUsersMeError, PutUsersMePasswordData, PutUsersMePasswordError, PutUsersMeResponse } from '../types.gen';
+import { deleteBotsByBotIdAclRulesByRuleId, deleteBotsByBotIdCompactionLogs, deleteBotsByBotIdContainer, deleteBotsByBotIdContainerSkills, deleteBotsByBotIdEmailBindingsById, deleteBotsByBotIdHeartbeatLogs, deleteBotsByBotIdMcpById, deleteBotsByBotIdMcpByIdOauthToken, deleteBotsByBotIdMemory, deleteBotsByBotIdMemoryById, deleteBotsByBotIdMessages, deleteBotsByBotIdScheduleById, deleteBotsByBotIdScheduleLogs, deleteBotsByBotIdSessionsBySessionId, deleteBotsByBotIdSettings, deleteBotsById, deleteBotsByIdChannelByPlatform, deleteBrowserContextsById, deleteEmailProvidersById, deleteEmailProvidersByIdOauthToken, deleteMemoryProvidersById, deleteModelsById, deleteModelsModelByModelId, deleteProvidersById, deleteProvidersByIdOauthToken, deleteSearchProvidersById, getBots, getBotsByBotIdAclChannelIdentities, getBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversations, getBotsByBotIdAclChannelTypesByChannelTypeConversations, getBotsByBotIdAclDefaultEffect, getBotsByBotIdAclRules, getBotsByBotIdCompactionLogs, getBotsByBotIdContainer, getBotsByBotIdContainerFs, getBotsByBotIdContainerFsDownload, getBotsByBotIdContainerFsList, getBotsByBotIdContainerFsRead, getBotsByBotIdContainerSkills, getBotsByBotIdContainerSnapshots, getBotsByBotIdContainerTerminal, getBotsByBotIdContainerTerminalWs, getBotsByBotIdEmailBindings, getBotsByBotIdEmailOutbox, getBotsByBotIdEmailOutboxById, getBotsByBotIdHeartbeatLogs, getBotsByBotIdLocalWs, getBotsByBotIdMcp, getBotsByBotIdMcpById, getBotsByBotIdMcpByIdOauthStatus, getBotsByBotIdMcpExport, getBotsByBotIdMemory, getBotsByBotIdMemoryStatus, getBotsByBotIdMemoryUsage, getBotsByBotIdMessages, getBotsByBotIdSchedule, getBotsByBotIdScheduleById, getBotsByBotIdScheduleByIdLogs, getBotsByBotIdScheduleLogs, getBotsByBotIdSessions, getBotsByBotIdSessionsBySessionId, getBotsByBotIdSessionsBySessionIdStatus, getBotsByBotIdSettings, getBotsByBotIdTokenUsage, getBotsById, getBotsByIdChannelByPlatform, getBotsByIdChecks, getBrowserContexts, getBrowserContextsById, getBrowserContextsCores, getChannels, getChannelsByPlatform, getEmailOauthCallback, getEmailProviders, getEmailProvidersById, getEmailProvidersByIdOauthAuthorize, getEmailProvidersByIdOauthStatus, getEmailProvidersMeta, getMemoryProviders, getMemoryProvidersById, getMemoryProvidersByIdStatus, getMemoryProvidersMeta, getModels, getModelsById, getModelsCount, getModelsModelByModelId, getPing, getProviders, getProvidersById, getProvidersByIdModels, getProvidersByIdOauthAuthorize, getProvidersByIdOauthStatus, getProvidersCount, getProvidersNameByName, getProvidersOauthCallback, getSearchProviders, getSearchProvidersById, getSearchProvidersMeta, getSpeechModels, getSpeechModelsById, getSpeechModelsByIdCapabilities, getSpeechProviders, getSpeechProvidersMeta, getSupermarketMcps, getSupermarketMcpsById, getSupermarketSkills, getSupermarketSkillsById, getSupermarketTags, getUsers, getUsersById, getUsersMe, getUsersMeChannelsByPlatform, getUsersMeIdentities, type Options, patchBotsByBotIdSessionsBySessionId, patchBotsByIdChannelByPlatformStatus, postAuthLogin, postAuthRefresh, postBots, postBotsByBotIdAclRules, postBotsByBotIdContainer, postBotsByBotIdContainerDataExport, postBotsByBotIdContainerDataImport, postBotsByBotIdContainerDataRestore, postBotsByBotIdContainerFsDelete, postBotsByBotIdContainerFsMkdir, postBotsByBotIdContainerFsRename, postBotsByBotIdContainerFsUpload, postBotsByBotIdContainerFsWrite, postBotsByBotIdContainerSkills, postBotsByBotIdContainerSnapshots, postBotsByBotIdContainerSnapshotsRollback, postBotsByBotIdContainerStart, postBotsByBotIdContainerStop, postBotsByBotIdEmailBindings, postBotsByBotIdLocalMessages, postBotsByBotIdMcp, postBotsByBotIdMcpByIdOauthAuthorize, postBotsByBotIdMcpByIdOauthDiscover, postBotsByBotIdMcpByIdOauthExchange, postBotsByBotIdMcpByIdProbe, postBotsByBotIdMcpOpsBatchDelete, postBotsByBotIdMcpStdio, postBotsByBotIdMcpStdioByConnectionId, postBotsByBotIdMemory, postBotsByBotIdMemoryCompact, postBotsByBotIdMemoryRebuild, postBotsByBotIdMemorySearch, postBotsByBotIdSchedule, postBotsByBotIdSessions, postBotsByBotIdSettings, postBotsByBotIdSupermarketInstallMcp, postBotsByBotIdSupermarketInstallSkill, postBotsByBotIdTools, postBotsByBotIdTtsSynthesize, postBotsByIdChannelByPlatformSend, postBotsByIdChannelByPlatformSendChat, postBrowserContexts, postEmailMailgunWebhookByConfigId, postEmailProviders, postMemoryProviders, postModels, postModelsByIdTest, postProviders, postProvidersByIdImportModels, postProvidersByIdTest, postSearchProviders, postSpeechModelsByIdTest, postUsers, putBotsByBotIdAclDefaultEffect, putBotsByBotIdAclRulesByRuleId, putBotsByBotIdAclRulesReorder, putBotsByBotIdEmailBindingsById, putBotsByBotIdMcpById, putBotsByBotIdMcpImport, putBotsByBotIdScheduleById, putBotsByBotIdSettings, putBotsById, putBotsByIdChannelByPlatform, putBotsByIdOwner, putBrowserContextsById, putEmailProvidersById, putMemoryProvidersById, putModelsById, putModelsModelByModelId, putProvidersById, putSearchProvidersById, putUsersById, putUsersByIdPassword, putUsersMe, putUsersMeChannelsByPlatform, putUsersMePassword } from '../sdk.gen';
+import type { DeleteBotsByBotIdAclRulesByRuleIdData, DeleteBotsByBotIdAclRulesByRuleIdError, DeleteBotsByBotIdCompactionLogsData, DeleteBotsByBotIdCompactionLogsError, DeleteBotsByBotIdContainerData, DeleteBotsByBotIdContainerError, DeleteBotsByBotIdContainerSkillsData, DeleteBotsByBotIdContainerSkillsError, DeleteBotsByBotIdContainerSkillsResponse, DeleteBotsByBotIdEmailBindingsByIdData, DeleteBotsByBotIdEmailBindingsByIdError, DeleteBotsByBotIdHeartbeatLogsData, DeleteBotsByBotIdHeartbeatLogsError, DeleteBotsByBotIdMcpByIdData, DeleteBotsByBotIdMcpByIdError, DeleteBotsByBotIdMcpByIdOauthTokenData, DeleteBotsByBotIdMcpByIdOauthTokenError, DeleteBotsByBotIdMemoryByIdData, DeleteBotsByBotIdMemoryByIdError, DeleteBotsByBotIdMemoryByIdResponse, DeleteBotsByBotIdMemoryData, DeleteBotsByBotIdMemoryError, DeleteBotsByBotIdMemoryResponse, DeleteBotsByBotIdMessagesData, DeleteBotsByBotIdMessagesError, DeleteBotsByBotIdScheduleByIdData, DeleteBotsByBotIdScheduleByIdError, DeleteBotsByBotIdScheduleLogsData, DeleteBotsByBotIdScheduleLogsError, DeleteBotsByBotIdSessionsBySessionIdData, DeleteBotsByBotIdSessionsBySessionIdError, DeleteBotsByBotIdSettingsData, DeleteBotsByBotIdSettingsError, DeleteBotsByIdChannelByPlatformData, DeleteBotsByIdChannelByPlatformError, DeleteBotsByIdData, DeleteBotsByIdError, DeleteBotsByIdResponse, DeleteBrowserContextsByIdData, DeleteBrowserContextsByIdError, DeleteEmailProvidersByIdData, DeleteEmailProvidersByIdError, DeleteEmailProvidersByIdOauthTokenData, DeleteEmailProvidersByIdOauthTokenError, DeleteMemoryProvidersByIdData, DeleteMemoryProvidersByIdError, DeleteModelsByIdData, DeleteModelsByIdError, DeleteModelsModelByModelIdData, DeleteModelsModelByModelIdError, DeleteProvidersByIdData, DeleteProvidersByIdError, DeleteProvidersByIdOauthTokenData, DeleteProvidersByIdOauthTokenError, DeleteSearchProvidersByIdData, DeleteSearchProvidersByIdError, GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsData, GetBotsByBotIdAclChannelIdentitiesData, GetBotsByBotIdAclChannelTypesByChannelTypeConversationsData, GetBotsByBotIdAclDefaultEffectData, GetBotsByBotIdAclRulesData, GetBotsByBotIdCompactionLogsData, GetBotsByBotIdContainerData, GetBotsByBotIdContainerFsData, GetBotsByBotIdContainerFsDownloadData, GetBotsByBotIdContainerFsListData, GetBotsByBotIdContainerFsReadData, GetBotsByBotIdContainerSkillsData, GetBotsByBotIdContainerSnapshotsData, GetBotsByBotIdContainerTerminalData, GetBotsByBotIdContainerTerminalWsData, GetBotsByBotIdEmailBindingsData, GetBotsByBotIdEmailOutboxByIdData, GetBotsByBotIdEmailOutboxData, GetBotsByBotIdHeartbeatLogsData, GetBotsByBotIdLocalWsData, GetBotsByBotIdMcpByIdData, GetBotsByBotIdMcpByIdOauthStatusData, GetBotsByBotIdMcpData, GetBotsByBotIdMcpExportData, GetBotsByBotIdMemoryData, GetBotsByBotIdMemoryStatusData, GetBotsByBotIdMemoryUsageData, GetBotsByBotIdMessagesData, GetBotsByBotIdScheduleByIdData, GetBotsByBotIdScheduleByIdLogsData, GetBotsByBotIdScheduleData, GetBotsByBotIdScheduleLogsData, GetBotsByBotIdSessionsBySessionIdData, GetBotsByBotIdSessionsBySessionIdStatusData, GetBotsByBotIdSessionsData, GetBotsByBotIdSettingsData, GetBotsByBotIdTokenUsageData, GetBotsByIdChannelByPlatformData, GetBotsByIdChecksData, GetBotsByIdData, GetBotsData, GetBrowserContextsByIdData, GetBrowserContextsCoresData, GetBrowserContextsData, GetChannelsByPlatformData, GetChannelsData, GetEmailOauthCallbackData, GetEmailProvidersByIdData, GetEmailProvidersByIdOauthAuthorizeData, GetEmailProvidersByIdOauthStatusData, GetEmailProvidersData, GetEmailProvidersMetaData, GetMemoryProvidersByIdData, GetMemoryProvidersByIdStatusData, GetMemoryProvidersData, GetMemoryProvidersMetaData, GetModelsByIdData, GetModelsCountData, GetModelsData, GetModelsModelByModelIdData, GetPingData, GetProvidersByIdData, GetProvidersByIdModelsData, GetProvidersByIdOauthAuthorizeData, GetProvidersByIdOauthStatusData, GetProvidersCountData, GetProvidersData, GetProvidersNameByNameData, GetProvidersOauthCallbackData, GetSearchProvidersByIdData, GetSearchProvidersData, GetSearchProvidersMetaData, GetSpeechModelsByIdCapabilitiesData, GetSpeechModelsByIdData, GetSpeechModelsData, GetSpeechProvidersData, GetSpeechProvidersMetaData, GetSupermarketMcpsByIdData, GetSupermarketMcpsData, GetSupermarketSkillsByIdData, GetSupermarketSkillsData, GetSupermarketTagsData, GetUsersByIdData, GetUsersData, GetUsersMeChannelsByPlatformData, GetUsersMeData, GetUsersMeIdentitiesData, PatchBotsByBotIdSessionsBySessionIdData, PatchBotsByBotIdSessionsBySessionIdError, PatchBotsByBotIdSessionsBySessionIdResponse, PatchBotsByIdChannelByPlatformStatusData, PatchBotsByIdChannelByPlatformStatusError, PatchBotsByIdChannelByPlatformStatusResponse, PostAuthLoginData, PostAuthLoginError, PostAuthLoginResponse, PostAuthRefreshData, PostAuthRefreshError, PostAuthRefreshResponse, PostBotsByBotIdAclRulesData, PostBotsByBotIdAclRulesError, PostBotsByBotIdAclRulesResponse, PostBotsByBotIdContainerData, PostBotsByBotIdContainerDataExportData, PostBotsByBotIdContainerDataExportError, PostBotsByBotIdContainerDataImportData, PostBotsByBotIdContainerDataImportError, PostBotsByBotIdContainerDataImportResponse, PostBotsByBotIdContainerDataRestoreData, PostBotsByBotIdContainerDataRestoreError, PostBotsByBotIdContainerDataRestoreResponse, PostBotsByBotIdContainerError, PostBotsByBotIdContainerFsDeleteData, PostBotsByBotIdContainerFsDeleteError, PostBotsByBotIdContainerFsDeleteResponse, PostBotsByBotIdContainerFsMkdirData, PostBotsByBotIdContainerFsMkdirError, PostBotsByBotIdContainerFsMkdirResponse, PostBotsByBotIdContainerFsRenameData, PostBotsByBotIdContainerFsRenameError, PostBotsByBotIdContainerFsRenameResponse, PostBotsByBotIdContainerFsUploadData, PostBotsByBotIdContainerFsUploadError, PostBotsByBotIdContainerFsUploadResponse, PostBotsByBotIdContainerFsWriteData, PostBotsByBotIdContainerFsWriteError, PostBotsByBotIdContainerFsWriteResponse, PostBotsByBotIdContainerResponse, PostBotsByBotIdContainerSkillsData, PostBotsByBotIdContainerSkillsError, PostBotsByBotIdContainerSkillsResponse, PostBotsByBotIdContainerSnapshotsData, PostBotsByBotIdContainerSnapshotsError, PostBotsByBotIdContainerSnapshotsResponse, PostBotsByBotIdContainerSnapshotsRollbackData, PostBotsByBotIdContainerSnapshotsRollbackError, PostBotsByBotIdContainerSnapshotsRollbackResponse, PostBotsByBotIdContainerStartData, PostBotsByBotIdContainerStartError, PostBotsByBotIdContainerStartResponse, PostBotsByBotIdContainerStopData, PostBotsByBotIdContainerStopError, PostBotsByBotIdContainerStopResponse, PostBotsByBotIdEmailBindingsData, PostBotsByBotIdEmailBindingsError, PostBotsByBotIdEmailBindingsResponse, PostBotsByBotIdLocalMessagesData, PostBotsByBotIdLocalMessagesError, PostBotsByBotIdLocalMessagesResponse, PostBotsByBotIdMcpByIdOauthAuthorizeData, PostBotsByBotIdMcpByIdOauthAuthorizeError, PostBotsByBotIdMcpByIdOauthAuthorizeResponse, PostBotsByBotIdMcpByIdOauthDiscoverData, PostBotsByBotIdMcpByIdOauthDiscoverError, PostBotsByBotIdMcpByIdOauthDiscoverResponse, PostBotsByBotIdMcpByIdOauthExchangeData, PostBotsByBotIdMcpByIdOauthExchangeError, PostBotsByBotIdMcpByIdOauthExchangeResponse, PostBotsByBotIdMcpByIdProbeData, PostBotsByBotIdMcpByIdProbeError, PostBotsByBotIdMcpByIdProbeResponse, PostBotsByBotIdMcpData, PostBotsByBotIdMcpError, PostBotsByBotIdMcpOpsBatchDeleteData, PostBotsByBotIdMcpOpsBatchDeleteError, PostBotsByBotIdMcpResponse, PostBotsByBotIdMcpStdioByConnectionIdData, PostBotsByBotIdMcpStdioByConnectionIdError, PostBotsByBotIdMcpStdioByConnectionIdResponse, PostBotsByBotIdMcpStdioData, PostBotsByBotIdMcpStdioError, PostBotsByBotIdMcpStdioResponse, PostBotsByBotIdMemoryCompactData, PostBotsByBotIdMemoryCompactError, PostBotsByBotIdMemoryCompactResponse, PostBotsByBotIdMemoryData, PostBotsByBotIdMemoryError, PostBotsByBotIdMemoryRebuildData, PostBotsByBotIdMemoryRebuildError, PostBotsByBotIdMemoryRebuildResponse, PostBotsByBotIdMemoryResponse, PostBotsByBotIdMemorySearchData, PostBotsByBotIdMemorySearchError, PostBotsByBotIdMemorySearchResponse, PostBotsByBotIdScheduleData, PostBotsByBotIdScheduleError, PostBotsByBotIdScheduleResponse, PostBotsByBotIdSessionsData, PostBotsByBotIdSessionsError, PostBotsByBotIdSessionsResponse, PostBotsByBotIdSettingsData, PostBotsByBotIdSettingsError, PostBotsByBotIdSettingsResponse, PostBotsByBotIdSupermarketInstallMcpData, PostBotsByBotIdSupermarketInstallMcpError, PostBotsByBotIdSupermarketInstallMcpResponse, PostBotsByBotIdSupermarketInstallSkillData, PostBotsByBotIdSupermarketInstallSkillError, PostBotsByBotIdSupermarketInstallSkillResponse, PostBotsByBotIdToolsData, PostBotsByBotIdToolsError, PostBotsByBotIdToolsResponse, PostBotsByBotIdTtsSynthesizeData, PostBotsByBotIdTtsSynthesizeError, PostBotsByBotIdTtsSynthesizeResponse, PostBotsByIdChannelByPlatformSendChatData, PostBotsByIdChannelByPlatformSendChatError, PostBotsByIdChannelByPlatformSendChatResponse, PostBotsByIdChannelByPlatformSendData, PostBotsByIdChannelByPlatformSendError, PostBotsByIdChannelByPlatformSendResponse, PostBotsData, PostBotsError, PostBotsResponse, PostBrowserContextsData, PostBrowserContextsError, PostBrowserContextsResponse, PostEmailMailgunWebhookByConfigIdData, PostEmailMailgunWebhookByConfigIdError, PostEmailMailgunWebhookByConfigIdResponse, PostEmailProvidersData, PostEmailProvidersError, PostEmailProvidersResponse, PostMemoryProvidersData, PostMemoryProvidersError, PostMemoryProvidersResponse, PostModelsByIdTestData, PostModelsByIdTestError, PostModelsByIdTestResponse, PostModelsData, PostModelsError, PostModelsResponse, PostProvidersByIdImportModelsData, PostProvidersByIdImportModelsError, PostProvidersByIdImportModelsResponse, PostProvidersByIdTestData, PostProvidersByIdTestError, PostProvidersByIdTestResponse, PostProvidersData, PostProvidersError, PostProvidersResponse, PostSearchProvidersData, PostSearchProvidersError, PostSearchProvidersResponse, PostSpeechModelsByIdTestData, PostSpeechModelsByIdTestError, PostUsersData, PostUsersError, PostUsersResponse, PutBotsByBotIdAclDefaultEffectData, PutBotsByBotIdAclDefaultEffectError, PutBotsByBotIdAclRulesByRuleIdData, PutBotsByBotIdAclRulesByRuleIdError, PutBotsByBotIdAclRulesByRuleIdResponse, PutBotsByBotIdAclRulesReorderData, PutBotsByBotIdAclRulesReorderError, PutBotsByBotIdEmailBindingsByIdData, PutBotsByBotIdEmailBindingsByIdError, PutBotsByBotIdEmailBindingsByIdResponse, PutBotsByBotIdMcpByIdData, PutBotsByBotIdMcpByIdError, PutBotsByBotIdMcpByIdResponse, PutBotsByBotIdMcpImportData, PutBotsByBotIdMcpImportError, PutBotsByBotIdMcpImportResponse, PutBotsByBotIdScheduleByIdData, PutBotsByBotIdScheduleByIdError, PutBotsByBotIdScheduleByIdResponse, PutBotsByBotIdSettingsData, PutBotsByBotIdSettingsError, PutBotsByBotIdSettingsResponse, PutBotsByIdChannelByPlatformData, PutBotsByIdChannelByPlatformError, PutBotsByIdChannelByPlatformResponse, PutBotsByIdData, PutBotsByIdError, PutBotsByIdOwnerData, PutBotsByIdOwnerError, PutBotsByIdOwnerResponse, PutBotsByIdResponse, PutBrowserContextsByIdData, PutBrowserContextsByIdError, PutBrowserContextsByIdResponse, PutEmailProvidersByIdData, PutEmailProvidersByIdError, PutEmailProvidersByIdResponse, PutMemoryProvidersByIdData, PutMemoryProvidersByIdError, PutMemoryProvidersByIdResponse, PutModelsByIdData, PutModelsByIdError, PutModelsByIdResponse, PutModelsModelByModelIdData, PutModelsModelByModelIdError, PutModelsModelByModelIdResponse, PutProvidersByIdData, PutProvidersByIdError, PutProvidersByIdResponse, PutSearchProvidersByIdData, PutSearchProvidersByIdError, PutSearchProvidersByIdResponse, PutUsersByIdData, PutUsersByIdError, PutUsersByIdPasswordData, PutUsersByIdPasswordError, PutUsersByIdResponse, PutUsersMeChannelsByPlatformData, PutUsersMeChannelsByPlatformError, PutUsersMeChannelsByPlatformResponse, PutUsersMeData, PutUsersMeError, PutUsersMePasswordData, PutUsersMePasswordError, PutUsersMeResponse } from '../types.gen';
 
 /**
  * Login
@@ -2887,6 +2887,113 @@ export const putSearchProvidersByIdMutation = (options?: Partial<Options<PutSear
     }
 });
 
+export const getSpeechModelsQueryKey = (options?: Options<GetSpeechModelsData>) => createQueryKey('getSpeechModels', options);
+
+/**
+ * List all speech models
+ *
+ * List all models of type 'speech' (filtered view of unified models table)
+ */
+export const getSpeechModelsQuery = defineQueryOptions((options?: Options<GetSpeechModelsData>) => ({
+    key: getSpeechModelsQueryKey(options),
+    query: async (context) => {
+        const { data } = await getSpeechModels({
+            ...options,
+            ...context,
+            throwOnError: true
+        });
+        return data;
+    }
+}));
+
+export const getSpeechModelsByIdQueryKey = (options: Options<GetSpeechModelsByIdData>) => createQueryKey('getSpeechModelsById', options);
+
+/**
+ * Get a speech model
+ */
+export const getSpeechModelsByIdQuery = defineQueryOptions((options: Options<GetSpeechModelsByIdData>) => ({
+    key: getSpeechModelsByIdQueryKey(options),
+    query: async (context) => {
+        const { data } = await getSpeechModelsById({
+            ...options,
+            ...context,
+            throwOnError: true
+        });
+        return data;
+    }
+}));
+
+export const getSpeechModelsByIdCapabilitiesQueryKey = (options: Options<GetSpeechModelsByIdCapabilitiesData>) => createQueryKey('getSpeechModelsByIdCapabilities', options);
+
+/**
+ * Get speech model capabilities
+ */
+export const getSpeechModelsByIdCapabilitiesQuery = defineQueryOptions((options: Options<GetSpeechModelsByIdCapabilitiesData>) => ({
+    key: getSpeechModelsByIdCapabilitiesQueryKey(options),
+    query: async (context) => {
+        const { data } = await getSpeechModelsByIdCapabilities({
+            ...options,
+            ...context,
+            throwOnError: true
+        });
+        return data;
+    }
+}));
+
+/**
+ * Test speech model synthesis
+ *
+ * Synthesize text using a specific model's config and return audio
+ */
+export const postSpeechModelsByIdTestMutation = (options?: Partial<Options<PostSpeechModelsByIdTestData>>): UseMutationOptions<unknown, Options<PostSpeechModelsByIdTestData>, PostSpeechModelsByIdTestError> => ({
+    mutation: async (vars) => {
+        const { data } = await postSpeechModelsByIdTest({
+            ...options,
+            ...vars,
+            throwOnError: true
+        });
+        return data;
+    }
+});
+
+export const getSpeechProvidersQueryKey = (options?: Options<GetSpeechProvidersData>) => createQueryKey('getSpeechProviders', options);
+
+/**
+ * List speech providers
+ *
+ * List providers that support speech (filtered view of unified providers table)
+ */
+export const getSpeechProvidersQuery = defineQueryOptions((options?: Options<GetSpeechProvidersData>) => ({
+    key: getSpeechProvidersQueryKey(options),
+    query: async (context) => {
+        const { data } = await getSpeechProviders({
+            ...options,
+            ...context,
+            throwOnError: true
+        });
+        return data;
+    }
+}));
+
+export const getSpeechProvidersMetaQueryKey = (options?: Options<GetSpeechProvidersMetaData>) => createQueryKey('getSpeechProvidersMeta', options);
+
+/**
+ * List speech provider metadata
+ *
+ * List available speech provider types with their models and capabilities
+ */
+export const getSpeechProvidersMetaQuery = defineQueryOptions((options?: Options<GetSpeechProvidersMetaData>) => ({
+    key: getSpeechProvidersMetaQueryKey(options),
+    query: async (context) => {
+        const { data } = await getSpeechProvidersMeta({
+            ...options,
+            ...context,
+            throwOnError: true
+        });
+        return data;
+    }
+}));
+
 export const getSupermarketMcpsQueryKey = (options?: Options<GetSupermarketMcpsData>) => createQueryKey('getSupermarketMcps', options);
 
 /**
@@ -2964,247 +3071,6 @@ export const getSupermarketTagsQuery = defineQueryOptions((options?: Options<Get
     key: getSupermarketTagsQueryKey(options),
     query: async (context) => {
         const { data } = await getSupermarketTags({
-            ...options,
-            ...context,
-            throwOnError: true
-        });
-        return data;
-    }
-}));
-
-export const getTtsModelsQueryKey = (options?: Options<GetTtsModelsData>) => createQueryKey('getTtsModels', options);
-
-/**
- * List all TTS models
- */
-export const getTtsModelsQuery = defineQueryOptions((options?: Options<GetTtsModelsData>) => ({
-    key: getTtsModelsQueryKey(options),
-    query: async (context) => {
-        const { data } = await getTtsModels({
-            ...options,
-            ...context,
-            throwOnError: true
-        });
-        return data;
-    }
-}));
-
-/**
- * Create a TTS model
- *
- * Manually create a TTS model under a specific provider
- */
-export const postTtsModelsMutation = (options?: Partial<Options<PostTtsModelsData>>): UseMutationOptions<PostTtsModelsResponse, Options<PostTtsModelsData>, PostTtsModelsError> => ({
-    mutation: async (vars) => {
-        const { data } = await postTtsModels({
-            ...options,
-            ...vars,
-            throwOnError: true
-        });
-        return data;
-    }
-});
-
-/**
- * Delete a TTS model
- */
-export const deleteTtsModelsByIdMutation = (options?: Partial<Options<DeleteTtsModelsByIdData>>): UseMutationOptions<unknown, Options<DeleteTtsModelsByIdData>, DeleteTtsModelsByIdError> => ({
-    mutation: async (vars) => {
-        const { data } = await deleteTtsModelsById({
-            ...options,
-            ...vars,
-            throwOnError: true
-        });
-        return data;
-    }
-});
-
-export const getTtsModelsByIdQueryKey = (options: Options<GetTtsModelsByIdData>) => createQueryKey('getTtsModelsById', options);
-
-/**
- * Get a TTS model
- */
-export const getTtsModelsByIdQuery = defineQueryOptions((options: Options<GetTtsModelsByIdData>) => ({
-    key: getTtsModelsByIdQueryKey(options),
-    query: async (context) => {
-        const { data } = await getTtsModelsById({
-            ...options,
-            ...context,
-            throwOnError: true
-        });
-        return data;
-    }
-}));
-
-/**
- * Update a TTS model
- */
-export const putTtsModelsByIdMutation = (options?: Partial<Options<PutTtsModelsByIdData>>): UseMutationOptions<PutTtsModelsByIdResponse, Options<PutTtsModelsByIdData>, PutTtsModelsByIdError> => ({
-    mutation: async (vars) => {
-        const { data } = await putTtsModelsById({
-            ...options,
-            ...vars,
-            throwOnError: true
-        });
-        return data;
-    }
-});
-
-export const getTtsModelsByIdCapabilitiesQueryKey = (options: Options<GetTtsModelsByIdCapabilitiesData>) => createQueryKey('getTtsModelsByIdCapabilities', options);
-
-/**
- * Get TTS model capabilities
- */
-export const getTtsModelsByIdCapabilitiesQuery = defineQueryOptions((options: Options<GetTtsModelsByIdCapabilitiesData>) => ({
-    key: getTtsModelsByIdCapabilitiesQueryKey(options),
-    query: async (context) => {
-        const { data } = await getTtsModelsByIdCapabilities({
-            ...options,
-            ...context,
-            throwOnError: true
-        });
-        return data;
-    }
-}));
-
-/**
- * Test TTS model synthesis
- *
- * Synthesize text using a specific model's config and return audio
- */
-export const postTtsModelsByIdTestMutation = (options?: Partial<Options<PostTtsModelsByIdTestData>>): UseMutationOptions<unknown, Options<PostTtsModelsByIdTestData>, PostTtsModelsByIdTestError> => ({
-    mutation: async (vars) => {
-        const { data } = await postTtsModelsByIdTest({
-            ...options,
-            ...vars,
-            throwOnError: true
-        });
-        return data;
-    }
-});
-
-export const getTtsProvidersQueryKey = (options?: Options<GetTtsProvidersData>) => createQueryKey('getTtsProviders', options);
-
-/**
- * List TTS providers
- */
-export const getTtsProvidersQuery = defineQueryOptions((options?: Options<GetTtsProvidersData>) => ({
-    key: getTtsProvidersQueryKey(options),
-    query: async (context) => {
-        const { data } = await getTtsProviders({
-            ...options,
-            ...context,
-            throwOnError: true
-        });
-        return data;
-    }
-}));
-
-/**
- * Create a TTS provider
- *
- * Create a TTS provider and auto-import its available models
- */
-export const postTtsProvidersMutation = (options?: Partial<Options<PostTtsProvidersData>>): UseMutationOptions<PostTtsProvidersResponse, Options<PostTtsProvidersData>, PostTtsProvidersError> => ({
-    mutation: async (vars) => {
-        const { data } = await postTtsProviders({
-            ...options,
-            ...vars,
-            throwOnError: true
-        });
-        return data;
-    }
-});
-
-export const getTtsProvidersMetaQueryKey = (options?: Options<GetTtsProvidersMetaData>) => createQueryKey('getTtsProvidersMeta', options);
-
-/**
- * List TTS provider metadata
- *
- * List available TTS provider types with their models and capabilities
- */
-export const getTtsProvidersMetaQuery = defineQueryOptions((options?: Options<GetTtsProvidersMetaData>) => ({
-    key: getTtsProvidersMetaQueryKey(options),
-    query: async (context) => {
-        const { data } = await getTtsProvidersMeta({
-            ...options,
-            ...context,
-            throwOnError: true
-        });
-        return data;
-    }
-}));
-
-/**
- * Delete a TTS provider
- */
-export const deleteTtsProvidersByIdMutation = (options?: Partial<Options<DeleteTtsProvidersByIdData>>): UseMutationOptions<unknown, Options<DeleteTtsProvidersByIdData>, DeleteTtsProvidersByIdError> => ({
-    mutation: async (vars) => {
-        const { data } = await deleteTtsProvidersById({
-            ...options,
-            ...vars,
-            throwOnError: true
-        });
-        return data;
-    }
-});
-
-export const getTtsProvidersByIdQueryKey = (options: Options<GetTtsProvidersByIdData>) => createQueryKey('getTtsProvidersById', options);
-
-/**
- * Get a TTS provider
- */
-export const getTtsProvidersByIdQuery = defineQueryOptions((options: Options<GetTtsProvidersByIdData>) => ({
-    key: getTtsProvidersByIdQueryKey(options),
-    query: async (context) => {
-        const { data } = await getTtsProvidersById({
-            ...options,
-            ...context,
-            throwOnError: true
-        });
-        return data;
-    }
-}));
-
-/**
- * Update a TTS provider
- */
-export const putTtsProvidersByIdMutation = (options?: Partial<Options<PutTtsProvidersByIdData>>): UseMutationOptions<PutTtsProvidersByIdResponse, Options<PutTtsProvidersByIdData>, PutTtsProvidersByIdError> => ({
-    mutation: async (vars) => {
-        const { data } = await putTtsProvidersById({
-            ...options,
-            ...vars,
-            throwOnError: true
-        });
-        return data;
-    }
-});
-
-/**
- * Import models for a TTS provider
- *
- * Discover and import available models from the TTS adapter
- */
-export const postTtsProvidersByIdImportModelsMutation = (options?: Partial<Options<PostTtsProvidersByIdImportModelsData>>): UseMutationOptions<PostTtsProvidersByIdImportModelsResponse, Options<PostTtsProvidersByIdImportModelsData>, PostTtsProvidersByIdImportModelsError> => ({
-    mutation: async (vars) => {
-        const { data } = await postTtsProvidersByIdImportModels({
-            ...options,
-            ...vars,
-            throwOnError: true
-        });
-        return data;
-    }
-});
-
-export const getTtsProvidersByIdModelsQueryKey = (options: Options<GetTtsProvidersByIdModelsData>) => createQueryKey('getTtsProvidersByIdModels', options);
-
-/**
- * List models for a TTS provider
- */
-export const getTtsProvidersByIdModelsQuery = defineQueryOptions((options: Options<GetTtsProvidersByIdModelsData>) => ({
-    key: getTtsProvidersByIdModelsQueryKey(options),
-    query: async (context) => {
-        const { data } = await getTtsProvidersByIdModels({
             ...options,
             ...context,
             throwOnError: true

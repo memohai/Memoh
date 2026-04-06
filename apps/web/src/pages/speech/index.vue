@@ -1,35 +1,32 @@
 <script setup lang="ts">
-import { computed, ref, provide, watch, reactive } from 'vue'
+import { computed, ref, provide, watch } from 'vue'
 import { useQuery } from '@pinia/colada'
 import {
-  Button,
   ScrollArea,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   Toggle,
   Empty,
-  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from '@memohai/ui'
-import { getTtsProviders } from '@memohai/sdk'
-import type { TtsProviderResponse } from '@memohai/sdk'
-import AddTtsProvider from './components/add-tts-provider.vue'
+import { getSpeechProviders } from '@memohai/sdk'
+import type { TtsSpeechProviderResponse } from '@memohai/sdk'
 import ProviderSetting from './components/provider-setting.vue'
-import { Volume2, Plus } from 'lucide-vue-next'
+import { Volume2 } from 'lucide-vue-next'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 const { data: providerData } = useQuery({
-  key: () => ['tts-providers'],
+  key: () => ['speech-providers'],
   query: async () => {
-    const { data } = await getTtsProviders({ throwOnError: true })
+    const { data } = await getSpeechProviders({ throwOnError: true })
     return data
   },
 })
-const curProvider = ref<TtsProviderResponse>()
+const curProvider = ref<TtsSpeechProviderResponse>()
 provide('curTtsProvider', curProvider)
 
 const selectProvider = (name: string) => computed(() => {
@@ -52,7 +49,7 @@ watch(filteredProviders, (list) => {
   }
   const currentId = curProvider.value?.id
   if (currentId) {
-    const stillExists = list.find((p: TtsProviderResponse) => p.id === currentId)
+    const stillExists = list.find((p: TtsSpeechProviderResponse) => p.id === currentId)
     if (stillExists) {
       curProvider.value = stillExists
       return
@@ -61,7 +58,6 @@ watch(filteredProviders, (list) => {
   curProvider.value = list[0]
 }, { immediate: true })
 
-const openStatus = reactive({ addOpen: false })
 </script>
 
 <template>
@@ -99,10 +95,6 @@ const openStatus = reactive({ addOpen: false })
       </SidebarMenu>
     </template>
 
-    <template #sidebar-footer>
-      <AddTtsProvider v-model:open="openStatus.addOpen" />
-    </template>
-
     <template #detail>
       <ScrollArea
         v-if="curProvider?.id"
@@ -121,16 +113,6 @@ const openStatus = reactive({ addOpen: false })
         </EmptyHeader>
         <EmptyTitle>{{ $t('speech.emptyTitle') }}</EmptyTitle>
         <EmptyDescription>{{ $t('speech.emptyDescription') }}</EmptyDescription>
-        <EmptyContent>
-          <Button
-            variant="outline"
-            @click="openStatus.addOpen = true"
-          >
-            <Plus
-              class="mr-1"
-            /> {{ $t('speech.add') }}
-          </Button>
-        </EmptyContent>
       </Empty>
     </template>
   </MasterDetailSidebarLayout>

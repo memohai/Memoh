@@ -122,7 +122,7 @@ const typeFilteredModels = computed(() =>
 
 const options = computed<ModelOption[]>(() =>
   typeFilteredModels.value.map((model) => {
-    const providerId = model.llm_provider_id ?? ''
+    const providerId = model.provider_id ?? ''
     const config = model.config as { compatibilities?: string[]; context_window?: number } | undefined
     return {
       value: model.id || model.model_id || '',

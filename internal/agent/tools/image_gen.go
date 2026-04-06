@@ -116,7 +116,7 @@ func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session Sessio
 		return nil, errors.New("configured model does not support image generation")
 	}
 
-	provider, err := models.FetchProviderByID(ctx, p.queries, modelResp.LlmProviderID)
+	provider, err := models.FetchProviderByID(ctx, p.queries, modelResp.ProviderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load model provider: %w", err)
 	}
@@ -131,7 +131,7 @@ func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session Sessio
 		ModelID:    modelResp.ModelID,
 		ClientType: provider.ClientType,
 		APIKey:     creds.APIKey,
-		BaseURL:    provider.BaseUrl,
+		BaseURL:    providers.ProviderConfigString(provider, "base_url"),
 	})
 
 	userMsg := fmt.Sprintf("Generate an image with the following description. Size: %s\n\n%s", size, prompt)

@@ -33,7 +33,7 @@
             <FormControl>
               <Input
                 type="password"
-                :placeholder="providerWithAuth?.api_key || $t('provider.apiKeyPlaceholder')"
+                :placeholder="(providerWithAuth?.config as Record<string, unknown> | undefined)?.api_key as string || $t('provider.apiKeyPlaceholder')"
                 :aria-label="$t('provider.apiKey')"
                 v-bind="componentField"
               />
@@ -317,7 +317,7 @@ const providerSchema = toTypedSchema(z.object({
     additionalProp1: z.object({}),
   }),
 }).superRefine((value, ctx) => {
-  if (value.client_type !== 'openai-codex' && !value.api_key?.trim() && !providerWithAuth.value?.api_key) {
+  if (value.client_type !== 'openai-codex' && !value.api_key?.trim() && !(providerWithAuth.value?.config as Record<string, unknown> | undefined)?.api_key) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['api_key'],
@@ -332,10 +332,11 @@ const form = useForm({
 
 watch(() => props.provider, (newVal) => {
   if (newVal) {
+    const cfg = newVal.config as Record<string, unknown> | undefined
     form.setValues({
       enable: newVal.enable ?? true,
       name: newVal.name,
-      base_url: newVal.base_url,
+      base_url: (cfg?.base_url as string) ?? '',
       api_key: '',
       client_type: newVal.client_type || 'openai-completions',
     })
@@ -362,6 +363,7 @@ watch(() => [props.provider?.id, form.values.client_type] as const, async ([id, 
 
 const hasChanges = computed(() => {
   const raw = props.provider
+  const cfg = raw?.config as Record<string, unknown> | undefined
   const baseChanged = JSON.stringify({
     enable: form.values.enable,
     name: form.values.name,
@@ -371,7 +373,7 @@ const hasChanges = computed(() => {
   }) !== JSON.stringify({
     enable: raw?.enable ?? true,
     name: raw?.name,
-    base_url: raw?.base_url,
+    base_url: (cfg?.base_url as string) ?? '',
     client_type: raw?.client_type || 'openai-completions',
     metadata: { additionalProp1: {} },
   })
@@ -381,15 +383,16 @@ const hasChanges = computed(() => {
 })
 
 const editProvider = form.handleSubmit(async (value) => {
+  const config: Record<string, unknown> = { base_url: value.base_url }
+  if (value.api_key && value.api_key.trim() !== '') {
+    config.api_key = value.api_key
+  }
   const payload: Record<string, unknown> = {
     enable: value.enable,
     name: value.name,
-    base_url: value.base_url,
+    config,
     client_type: value.client_type,
     metadata: value.metadata,
-  }
-  if (value.api_key && value.api_key.trim() !== '') {
-    payload.api_key = value.api_key
   }
   emit('submit', payload)
 })

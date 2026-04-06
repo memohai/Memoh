@@ -318,7 +318,7 @@ func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Mo
 	if err != nil {
 		return nil, "", err
 	}
-	provider, err := models.FetchProviderByID(ctx, p.queries, modelInfo.LlmProviderID)
+	provider, err := models.FetchProviderByID(ctx, p.queries, modelInfo.ProviderID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -335,7 +335,7 @@ func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Mo
 		provider.ClientType,
 		creds.APIKey,
 		creds.CodexAccountID,
-		provider.BaseUrl,
+		providers.ProviderConfigString(provider, "base_url"),
 		nil,
 	)
 	return sdkModel, modelInfo.ID, nil

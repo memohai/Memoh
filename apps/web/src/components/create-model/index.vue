@@ -297,7 +297,7 @@ async function addModel() {
   const payload: Record<string, unknown> = {
     type,
     model_id,
-    llm_provider_id: id,
+    provider_id: id,
     config,
   }
 

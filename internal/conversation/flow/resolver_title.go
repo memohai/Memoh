@@ -95,7 +95,7 @@ func (r *Resolver) maybeGenerateSessionTitle(ctx context.Context, req conversati
 	}
 }
 
-func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, provider sqlc.LlmProvider, userQuery string) string {
+func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, provider sqlc.Provider, userQuery string) string {
 	userSnippet := truncate(strings.TrimSpace(userQuery), titlePromptMaxInputChars)
 	if userSnippet == "" {
 		return ""
@@ -117,7 +117,7 @@ func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, 
 		ClientType:     provider.ClientType,
 		APIKey:         creds.APIKey,
 		CodexAccountID: creds.CodexAccountID,
-		BaseURL:        provider.BaseUrl,
+		BaseURL:        providers.ProviderConfigString(provider, "base_url"),
 	}
 	sdkModel := models.NewSDKChatModel(modelCfg)
 

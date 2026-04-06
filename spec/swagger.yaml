@@ -889,6 +889,10 @@ definitions:
     properties:
       message_id:
         type: string
+      preview:
+        type: string
+      sender:
+        type: string
       target:
         type: string
     type: object
@@ -2073,6 +2077,10 @@ definitions:
         type: array
       created_at:
         type: string
+      display_content:
+        type: string
+      event_id:
+        type: string
       external_message_id:
         type: string
       id:
@@ -2125,11 +2133,11 @@ definitions:
     properties:
       config:
         $ref: '#/definitions/models.ModelConfig'
-      llm_provider_id:
-        type: string
       model_id:
         type: string
       name:
+        type: string
+      provider_id:
         type: string
       type:
         $ref: '#/definitions/models.ModelType'
@@ -2152,11 +2160,11 @@ definitions:
         $ref: '#/definitions/models.ModelConfig'
       id:
         type: string
-      llm_provider_id:
-        type: string
       model_id:
         type: string
       name:
+        type: string
+      provider_id:
         type: string
       type:
         $ref: '#/definitions/models.ModelType'
@@ -2180,10 +2188,12 @@ definitions:
     enum:
     - chat
     - embedding
+    - speech
     type: string
     x-enum-varnames:
     - ModelTypeChat
     - ModelTypeEmbedding
+    - ModelTypeSpeech
   models.TestResponse:
     properties:
       latency_ms:
@@ -2211,11 +2221,11 @@ definitions:
     properties:
       config:
         $ref: '#/definitions/models.ModelConfig'
-      llm_provider_id:
-        type: string
       model_id:
         type: string
       name:
+        type: string
+      provider_id:
         type: string
       type:
         $ref: '#/definitions/models.ModelType'
@@ -2227,12 +2237,11 @@ definitions:
     type: object
   providers.CreateRequest:
     properties:
-      api_key:
-        type: string
-      base_url:
-        type: string
       client_type:
         type: string
+      config:
+        additionalProperties: {}
+        type: object
       icon:
         type: string
       metadata:
@@ -2241,18 +2250,16 @@ definitions:
       name:
         type: string
     required:
-    - base_url
     - client_type
     - name
     type: object
   providers.GetResponse:
     properties:
-      api_key:
-        type: string
-      base_url:
-        type: string
       client_type:
         type: string
+      config:
+        additionalProperties: {}
+        type: object
       created_at:
         type: string
       enable:
@@ -2304,12 +2311,11 @@ definitions:
     type: object
   providers.UpdateRequest:
     properties:
-      api_key:
-        type: string
-      base_url:
-        type: string
       client_type:
         type: string
+      config:
+        additionalProperties: {}
+        type: object
       enable:
         type: boolean
       icon:
@@ -2565,6 +2571,8 @@ definitions:
         type: integer
       compaction_threshold:
         type: integer
+      discuss_probe_model_id:
+        type: string
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -2604,6 +2612,8 @@ definitions:
         type: integer
       compaction_threshold:
         type: integer
+      discuss_probe_model_id:
+        type: string
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -2625,25 +2635,6 @@ definitions:
       title_model_id:
         type: string
       tts_model_id:
-        type: string
-    type: object
-  tts.CreateModelRequest:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      model_id:
-        type: string
-      name:
-        type: string
-      tts_provider_id:
-        type: string
-    type: object
-  tts.CreateProviderRequest:
-    properties:
-      name:
-        type: string
-      provider:
         type: string
     type: object
   tts.ModelCapabilities:
@@ -2670,26 +2661,6 @@ definitions:
       id:
         type: string
       name:
-        type: string
-    type: object
-  tts.ModelResponse:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      created_at:
-        type: string
-      id:
-        type: string
-      model_id:
-        type: string
-      name:
-        type: string
-      provider_type:
-        type: string
-      tts_provider_id:
-        type: string
-      updated_at:
         type: string
     type: object
   tts.ParamConstraint:
@@ -2720,8 +2691,30 @@ definitions:
       provider:
         type: string
     type: object
-  tts.ProviderResponse:
+  tts.SpeechModelResponse:
     properties:
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      model_id:
+        type: string
+      name:
+        type: string
+      provider_id:
+        type: string
+      provider_type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  tts.SpeechProviderResponse:
+    properties:
+      client_type:
+        type: string
       created_at:
         type: string
       enable:
@@ -2729,8 +2722,6 @@ definitions:
       id:
         type: string
       name:
-        type: string
-      provider:
         type: string
       updated_at:
         type: string
@@ -2741,21 +2732,6 @@ definitions:
         additionalProperties: {}
         type: object
       text:
-        type: string
-    type: object
-  tts.UpdateModelRequest:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-    type: object
-  tts.UpdateProviderRequest:
-    properties:
-      enable:
-        type: boolean
-      name:
         type: string
     type: object
   tts.VoiceInfo:
@@ -7924,6 +7900,138 @@ paths:
       summary: List search provider metadata
       tags:
       - search-providers
+  /speech-models:
+    get:
+      description: List all models of type 'speech' (filtered view of unified models
+        table)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.SpeechModelResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List all speech models
+      tags:
+      - speech-models
+  /speech-models/{id}:
+    get:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.SpeechModelResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a speech model
+      tags:
+      - speech-models
+  /speech-models/{id}/capabilities:
+    get:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ModelCapabilities'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get speech model capabilities
+      tags:
+      - speech-models
+  /speech-models/{id}/test:
+    post:
+      consumes:
+      - application/json
+      description: Synthesize text using a specific model's config and return audio
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Text to synthesize
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tts.TestSynthesizeRequest'
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Audio data
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Test speech model synthesis
+      tags:
+      - speech-models
+  /speech-providers:
+    get:
+      description: List providers that support speech (filtered view of unified providers
+        table)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.SpeechProviderResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List speech providers
+      tags:
+      - speech-providers
+  /speech-providers/meta:
+    get:
+      description: List available speech provider types with their models and capabilities
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.ProviderMetaResponse'
+            type: array
+      summary: List speech provider metadata
+      tags:
+      - speech-providers
   /supermarket/mcps:
     get:
       parameters:
@@ -8052,368 +8160,6 @@ paths:
       summary: List all tags from supermarket
       tags:
       - supermarket
-  /tts-models:
-    get:
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/tts.ModelResponse'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List all TTS models
-      tags:
-      - tts-models
-    post:
-      consumes:
-      - application/json
-      description: Manually create a TTS model under a specific provider
-      parameters:
-      - description: TTS model configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/tts.CreateModelRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/tts.ModelResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create a TTS model
-      tags:
-      - tts-models
-  /tts-models/{id}:
-    delete:
-      parameters:
-      - description: Model ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete a TTS model
-      tags:
-      - tts-models
-    get:
-      parameters:
-      - description: Model ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/tts.ModelResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get a TTS model
-      tags:
-      - tts-models
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: Model ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Updated configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/tts.UpdateModelRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/tts.ModelResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update a TTS model
-      tags:
-      - tts-models
-  /tts-models/{id}/capabilities:
-    get:
-      parameters:
-      - description: Model ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/tts.ModelCapabilities'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get TTS model capabilities
-      tags:
-      - tts-models
-  /tts-models/{id}/test:
-    post:
-      consumes:
-      - application/json
-      description: Synthesize text using a specific model's config and return audio
-      parameters:
-      - description: Model ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Text to synthesize
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/tts.TestSynthesizeRequest'
-      produces:
-      - application/octet-stream
-      responses:
-        "200":
-          description: Audio data
-          schema:
-            type: file
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Test TTS model synthesis
-      tags:
-      - tts-models
-  /tts-providers:
-    get:
-      parameters:
-      - description: Provider type filter
-        in: query
-        name: provider
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/tts.ProviderResponse'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List TTS providers
-      tags:
-      - tts-providers
-    post:
-      consumes:
-      - application/json
-      description: Create a TTS provider and auto-import its available models
-      parameters:
-      - description: TTS provider configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/tts.CreateProviderRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/tts.ProviderResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create a TTS provider
-      tags:
-      - tts-providers
-  /tts-providers/{id}:
-    delete:
-      parameters:
-      - description: Provider ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete a TTS provider
-      tags:
-      - tts-providers
-    get:
-      parameters:
-      - description: Provider ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/tts.ProviderResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get a TTS provider
-      tags:
-      - tts-providers
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: Provider ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Updated configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/tts.UpdateProviderRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/tts.ProviderResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update a TTS provider
-      tags:
-      - tts-providers
-  /tts-providers/{id}/import-models:
-    post:
-      description: Discover and import available models from the TTS adapter
-      parameters:
-      - description: Provider ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/tts.ModelResponse'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Import models for a TTS provider
-      tags:
-      - tts-providers
-  /tts-providers/{id}/models:
-    get:
-      parameters:
-      - description: Provider ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/tts.ModelResponse'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List models for a TTS provider
-      tags:
-      - tts-providers
-  /tts-providers/meta:
-    get:
-      description: List available TTS provider types with their models and capabilities
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/tts.ProviderMetaResponse'
-            type: array
-      summary: List TTS provider metadata
-      tags:
-      - tts-providers
   /users:
     get:
       description: List users

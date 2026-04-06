@@ -153,7 +153,7 @@ type usageInfo struct {
 type resolvedContext struct {
 	runConfig       agentpkg.RunConfig
 	model           models.GetResponse
-	provider        sqlc.LlmProvider
+	provider        sqlc.Provider
 	query           string // headerified query
 	injectedRecords *[]conversation.InjectedMessageRecord
 }
@@ -345,10 +345,10 @@ type baseRunConfigParams struct {
 // buildBaseRunConfig creates a RunConfig with model, credentials, skills,
 // identity and system prompt — everything except Messages/Query/InlineImages.
 // Both resolve() and ResolveRunConfig() delegate to this shared builder.
-func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams) (agentpkg.RunConfig, models.GetResponse, sqlc.LlmProvider, error) {
+func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams) (agentpkg.RunConfig, models.GetResponse, sqlc.Provider, error) {
 	botSettings, err := r.loadBotSettings(ctx, p.BotID)
 	if err != nil {
-		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.LlmProvider{}, err
+		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, p.BotID)
 	userTimezoneName, userClockLocation := r.resolveTimezone(ctx, p.BotID, p.UserID)
@@ -367,7 +367,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 
 	chatModel, provider, err := r.selectChatModel(ctx, req, botSettings, conversation.Settings{})
 	if err != nil {
-		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.LlmProvider{}, err
+		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 
 	reasoningEffort := p.ReasoningEffort
@@ -382,7 +382,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	authResolver := providers.NewService(nil, r.queries, "")
 	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
 	if err != nil {
-		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("resolve provider credentials: %w", err)
+		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("resolve provider credentials: %w", err)
 	}
 
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
@@ -390,7 +390,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		ClientType:      provider.ClientType,
 		APIKey:          creds.APIKey,
 		CodexAccountID:  creds.CodexAccountID,
-		BaseURL:         provider.BaseUrl,
+		BaseURL:         providers.ProviderConfigString(provider, "base_url"),
 		ReasoningConfig: reasoningConfig,
 	})
 

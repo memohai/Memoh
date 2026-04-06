@@ -27,7 +27,7 @@ LEFT JOIN models AS title_models ON title_models.id = bots.title_model_id
 LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
-LEFT JOIN tts_models ON tts_models.id = bots.tts_model_id
+LEFT JOIN models AS tts_models ON tts_models.id = bots.tts_model_id
 LEFT JOIN browser_contexts ON browser_contexts.id = bots.browser_context_id
 WHERE bots.id = $1;
 
@@ -84,7 +84,7 @@ LEFT JOIN models AS title_models ON title_models.id = updated.title_model_id
 LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id
-LEFT JOIN tts_models ON tts_models.id = updated.tts_model_id
+LEFT JOIN models AS tts_models ON tts_models.id = updated.tts_model_id
 LEFT JOIN browser_contexts ON browser_contexts.id = updated.browser_context_id;
 
 -- name: DeleteSettingsByBotID :exec

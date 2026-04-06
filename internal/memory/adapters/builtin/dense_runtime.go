@@ -548,10 +548,10 @@ func resolveDenseEmbeddingModel(ctx context.Context, queries *dbsqlc.Queries, mo
 	if row.Type != "embedding" {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: model %s is not an embedding model", modelRef)
 	}
-	if !row.LlmProviderID.Valid {
+	if !row.ProviderID.Valid {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: model %s has no provider", modelRef)
 	}
-	provider, err := queries.GetLlmProviderByID(ctx, row.LlmProviderID)
+	provider, err := queries.GetProviderByID(ctx, row.ProviderID)
 	if err != nil {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: get embedding provider: %w", err)
 	}
@@ -564,11 +564,17 @@ func resolveDenseEmbeddingModel(ctx context.Context, queries *dbsqlc.Queries, mo
 	if cfg.Dimensions == nil || *cfg.Dimensions <= 0 {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: embedding model %s missing dimensions", modelRef)
 	}
+	var providerCfg map[string]any
+	if len(provider.Config) > 0 {
+		_ = json.Unmarshal(provider.Config, &providerCfg)
+	}
+	baseURL, _ := providerCfg["base_url"].(string)
+	apiKey, _ := providerCfg["api_key"].(string)
 	return denseModelSpec{
 		modelID:    strings.TrimSpace(row.ModelID),
 		clientType: strings.TrimSpace(provider.ClientType),
-		baseURL:    strings.TrimSpace(provider.BaseUrl),
-		apiKey:     strings.TrimSpace(provider.ApiKey),
+		baseURL:    strings.TrimSpace(baseURL),
+		apiKey:     strings.TrimSpace(apiKey),
 		dimensions: *cfg.Dimensions,
 	}, nil
 }

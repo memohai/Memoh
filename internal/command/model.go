@@ -23,7 +23,7 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 			}
 			records := make([][]kv, 0, len(items))
 			for _, item := range items {
-				provName := h.resolveProviderName(cc, item.LlmProviderID)
+				provName := h.resolveProviderName(cc, item.ProviderID)
 				records = append(records, []kv{
 					{"Model", item.Name},
 					{"Provider", provName},

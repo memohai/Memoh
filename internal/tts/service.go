@@ -9,8 +9,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
@@ -36,332 +34,63 @@ func (s *Service) ListMeta(_ context.Context) []ProviderMetaResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Provider CRUD
+// Read helpers (speech-filtered views of unified tables)
 // ---------------------------------------------------------------------------
 
-func (s *Service) CreateProvider(ctx context.Context, req CreateProviderRequest) (ProviderResponse, error) {
-	adapter, err := s.registry.Get(req.Provider)
+// ListSpeechProviders returns providers with speech client types.
+func (s *Service) ListSpeechProviders(ctx context.Context) ([]SpeechProviderResponse, error) {
+	rows, err := s.queries.ListSpeechProviders(ctx)
 	if err != nil {
-		return ProviderResponse{}, fmt.Errorf("unsupported provider: %s", req.Provider)
+		return nil, fmt.Errorf("list speech providers: %w", err)
 	}
-	row, err := s.queries.CreateTtsProvider(ctx, sqlc.CreateTtsProviderParams{
-		Name:     strings.TrimSpace(req.Name),
-		Provider: string(req.Provider),
-		Config:   []byte("{}"),
-		Enable:   false,
-	})
-	if err != nil {
-		return ProviderResponse{}, fmt.Errorf("create tts provider: %w", err)
-	}
-
-	if importErr := s.importModelsForProvider(ctx, row.ID, adapter); importErr != nil {
-		s.logger.Warn("auto-import models failed", slog.String("provider_id", row.ID.String()), slog.Any("error", importErr))
-	}
-
-	return s.toProviderResponse(row), nil
-}
-
-func (s *Service) GetProvider(ctx context.Context, id string) (ProviderResponse, error) {
-	pgID, err := db.ParseUUID(id)
-	if err != nil {
-		return ProviderResponse{}, err
-	}
-	row, err := s.queries.GetTtsProviderByID(ctx, pgID)
-	if err != nil {
-		return ProviderResponse{}, fmt.Errorf("get tts provider: %w", err)
-	}
-	return s.toProviderResponse(row), nil
-}
-
-func (s *Service) ListProviders(ctx context.Context, provider string) ([]ProviderResponse, error) {
-	provider = strings.TrimSpace(provider)
-	var (
-		rows []sqlc.TtsProvider
-		err  error
-	)
-	if provider == "" {
-		rows, err = s.queries.ListTtsProviders(ctx)
-	} else {
-		rows, err = s.queries.ListTtsProvidersByProvider(ctx, provider)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("list tts providers: %w", err)
-	}
-	items := make([]ProviderResponse, 0, len(rows))
+	items := make([]SpeechProviderResponse, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, s.toProviderResponse(row))
+		items = append(items, toSpeechProviderResponse(row))
 	}
 	return items, nil
 }
 
-func (s *Service) UpdateProvider(ctx context.Context, id string, req UpdateProviderRequest) (ProviderResponse, error) {
-	pgID, err := db.ParseUUID(id)
+// ListSpeechModels returns all speech-type models.
+func (s *Service) ListSpeechModels(ctx context.Context) ([]SpeechModelResponse, error) {
+	rows, err := s.queries.ListSpeechModels(ctx)
 	if err != nil {
-		return ProviderResponse{}, err
+		return nil, fmt.Errorf("list speech models: %w", err)
 	}
-	current, err := s.queries.GetTtsProviderByID(ctx, pgID)
-	if err != nil {
-		return ProviderResponse{}, fmt.Errorf("get tts provider: %w", err)
-	}
-	name := current.Name
-	if req.Name != nil {
-		name = strings.TrimSpace(*req.Name)
-	}
-	enable := current.Enable
-	if req.Enable != nil {
-		enable = *req.Enable
-	}
-	updated, err := s.queries.UpdateTtsProvider(ctx, sqlc.UpdateTtsProviderParams{
-		ID:       pgID,
-		Name:     name,
-		Provider: current.Provider,
-		Config:   current.Config,
-		Enable:   enable,
-	})
-	if err != nil {
-		return ProviderResponse{}, fmt.Errorf("update tts provider: %w", err)
-	}
-	return s.toProviderResponse(updated), nil
-}
-
-func (s *Service) DeleteProvider(ctx context.Context, id string) error {
-	pgID, err := db.ParseUUID(id)
-	if err != nil {
-		return err
-	}
-	return s.queries.DeleteTtsProvider(ctx, pgID)
-}
-
-// EnsureDefaults creates a default TTS provider for each registered adapter
-// type that does not yet exist in the database.
-func (s *Service) EnsureDefaults(ctx context.Context) error {
-	rows, err := s.queries.ListTtsProviders(ctx)
-	if err != nil {
-		return fmt.Errorf("list tts providers: %w", err)
-	}
-	existing := make(map[string]struct{}, len(rows))
+	items := make([]SpeechModelResponse, 0, len(rows))
 	for _, row := range rows {
-		existing[row.Provider] = struct{}{}
+		items = append(items, toSpeechModelFromListRow(row))
 	}
-
-	for _, meta := range s.registry.ListMeta() {
-		if _, ok := existing[meta.Provider]; ok {
-			continue
-		}
-		adapter, adapterErr := s.registry.Get(TtsType(meta.Provider))
-		if adapterErr != nil {
-			continue
-		}
-		row, createErr := s.queries.CreateTtsProvider(ctx, sqlc.CreateTtsProviderParams{
-			Name:     meta.DisplayName,
-			Provider: meta.Provider,
-			Config:   []byte("{}"),
-			Enable:   false,
-		})
-		if createErr != nil {
-			s.logger.Warn("failed to create default tts provider",
-				slog.String("provider", meta.Provider),
-				slog.Any("error", createErr),
-			)
-			continue
-		}
-		if importErr := s.importModelsForProvider(ctx, row.ID, adapter); importErr != nil {
-			s.logger.Warn("auto-import models failed for default tts provider",
-				slog.String("provider", meta.Provider),
-				slog.Any("error", importErr),
-			)
-		}
-		s.logger.Info("created default tts provider", slog.String("provider", meta.Provider))
-	}
-	return nil
+	return items, nil
 }
 
-// ---------------------------------------------------------------------------
-// Model CRUD
-// ---------------------------------------------------------------------------
-
-func (s *Service) CreateModel(ctx context.Context, req CreateModelRequest) (ModelResponse, error) {
-	modelID := strings.TrimSpace(req.ModelID)
-	if modelID == "" {
-		return ModelResponse{}, errors.New("model_id is required")
-	}
-	providerPgID, err := db.ParseUUID(req.TtsProviderID)
-	if err != nil {
-		return ModelResponse{}, fmt.Errorf("invalid tts_provider_id: %w", err)
-	}
-	provider, err := s.queries.GetTtsProviderByID(ctx, providerPgID)
-	if err != nil {
-		return ModelResponse{}, fmt.Errorf("get tts provider: %w", err)
-	}
-	cfgJSON := []byte("{}")
-	if req.Config != nil {
-		cfgJSON, err = json.Marshal(req.Config)
-		if err != nil {
-			return ModelResponse{}, fmt.Errorf("marshal config: %w", err)
-		}
-	}
-	name := pgtype.Text{}
-	if n := strings.TrimSpace(req.Name); n != "" {
-		name = pgtype.Text{String: n, Valid: true}
-	}
-	row, err := s.queries.CreateTtsModel(ctx, sqlc.CreateTtsModelParams{
-		ModelID:       modelID,
-		Name:          name,
-		TtsProviderID: providerPgID,
-		Config:        cfgJSON,
-	})
-	if err != nil {
-		return ModelResponse{}, fmt.Errorf("create tts model: %w", err)
-	}
-	return s.toModelResponse(row, provider.Provider), nil
-}
-
-func (s *Service) ListModelsByProvider(ctx context.Context, providerID string) ([]ModelResponse, error) {
+// ListSpeechModelsByProvider returns speech models for a given provider.
+func (s *Service) ListSpeechModelsByProvider(ctx context.Context, providerID string) ([]SpeechModelResponse, error) {
 	pgID, err := db.ParseUUID(providerID)
 	if err != nil {
 		return nil, err
 	}
-	provider, err := s.queries.GetTtsProviderByID(ctx, pgID)
+	rows, err := s.queries.ListSpeechModelsByProviderID(ctx, pgID)
 	if err != nil {
-		return nil, fmt.Errorf("get tts provider: %w", err)
+		return nil, fmt.Errorf("list speech models by provider: %w", err)
 	}
-	rows, err := s.queries.ListTtsModelsByProviderID(ctx, pgID)
-	if err != nil {
-		return nil, fmt.Errorf("list tts models: %w", err)
-	}
-	items := make([]ModelResponse, 0, len(rows))
+	items := make([]SpeechModelResponse, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, s.toModelResponse(row, provider.Provider))
+		items = append(items, toSpeechModelFromModel(row, ""))
 	}
 	return items, nil
 }
 
-func (s *Service) ListAllModels(ctx context.Context) ([]ModelResponse, error) {
-	rows, err := s.queries.ListTtsModels(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list tts models: %w", err)
-	}
-	providerCache := make(map[string]string)
-	items := make([]ModelResponse, 0, len(rows))
-	for _, row := range rows {
-		providerType, ok := providerCache[row.TtsProviderID.String()]
-		if !ok {
-			p, pErr := s.queries.GetTtsProviderByID(ctx, row.TtsProviderID)
-			if pErr != nil {
-				providerType = ""
-			} else {
-				providerType = p.Provider
-			}
-			providerCache[row.TtsProviderID.String()] = providerType
-		}
-		items = append(items, s.toModelResponse(row, providerType))
-	}
-	return items, nil
-}
-
-func (s *Service) GetModel(ctx context.Context, id string) (ModelResponse, error) {
+// GetSpeechModel returns a speech model by ID.
+func (s *Service) GetSpeechModel(ctx context.Context, id string) (SpeechModelResponse, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
-		return ModelResponse{}, err
+		return SpeechModelResponse{}, err
 	}
-	row, err := s.queries.GetTtsModelWithProvider(ctx, pgID)
+	row, err := s.queries.GetSpeechModelWithProvider(ctx, pgID)
 	if err != nil {
-		return ModelResponse{}, fmt.Errorf("get tts model: %w", err)
+		return SpeechModelResponse{}, fmt.Errorf("get speech model: %w", err)
 	}
-	return s.toModelWithProviderResponse(row), nil
-}
-
-func (s *Service) UpdateModel(ctx context.Context, id string, req UpdateModelRequest) (ModelResponse, error) {
-	pgID, err := db.ParseUUID(id)
-	if err != nil {
-		return ModelResponse{}, err
-	}
-	current, err := s.queries.GetTtsModelByID(ctx, pgID)
-	if err != nil {
-		return ModelResponse{}, fmt.Errorf("get tts model: %w", err)
-	}
-	name := current.Name
-	if req.Name != nil {
-		name = pgtype.Text{String: strings.TrimSpace(*req.Name), Valid: true}
-	}
-	config := current.Config
-	if req.Config != nil {
-		configJSON, marshalErr := json.Marshal(req.Config)
-		if marshalErr != nil {
-			return ModelResponse{}, fmt.Errorf("marshal config: %w", marshalErr)
-		}
-		config = configJSON
-	}
-	updated, err := s.queries.UpdateTtsModel(ctx, sqlc.UpdateTtsModelParams{
-		ID:     pgID,
-		Name:   name,
-		Config: config,
-	})
-	if err != nil {
-		return ModelResponse{}, fmt.Errorf("update tts model: %w", err)
-	}
-	provider, _ := s.queries.GetTtsProviderByID(ctx, updated.TtsProviderID)
-	return s.toModelResponse(updated, provider.Provider), nil
-}
-
-func (s *Service) DeleteModel(ctx context.Context, id string) error {
-	pgID, err := db.ParseUUID(id)
-	if err != nil {
-		return err
-	}
-	return s.queries.DeleteTtsModel(ctx, pgID)
-}
-
-// ImportModels discovers models from the adapter and upserts them into the database.
-func (s *Service) ImportModels(ctx context.Context, providerID string) ([]ModelResponse, error) {
-	pgID, err := db.ParseUUID(providerID)
-	if err != nil {
-		return nil, err
-	}
-	provider, err := s.queries.GetTtsProviderByID(ctx, pgID)
-	if err != nil {
-		return nil, fmt.Errorf("get tts provider: %w", err)
-	}
-	adapter, err := s.registry.Get(TtsType(provider.Provider))
-	if err != nil {
-		return nil, fmt.Errorf("unsupported provider: %s", provider.Provider)
-	}
-	if importErr := s.importModelsForProvider(ctx, pgID, adapter); importErr != nil {
-		return nil, importErr
-	}
-	return s.ListModelsByProvider(ctx, providerID)
-}
-
-func (s *Service) importModelsForProvider(ctx context.Context, providerID pgtype.UUID, adapter TtsAdapter) error {
-	models := adapter.Models()
-	for _, m := range models {
-		existing, err := s.queries.GetTtsModelByProviderAndModelID(ctx, sqlc.GetTtsModelByProviderAndModelIDParams{
-			TtsProviderID: providerID,
-			ModelID:       m.ID,
-		})
-		name := pgtype.Text{String: m.Name, Valid: m.Name != ""}
-		if err == nil {
-			_, updateErr := s.queries.UpdateTtsModel(ctx, sqlc.UpdateTtsModelParams{
-				ID:     existing.ID,
-				Name:   name,
-				Config: existing.Config,
-			})
-			if updateErr != nil {
-				return fmt.Errorf("update tts model %s: %w", m.ID, updateErr)
-			}
-		} else {
-			_, createErr := s.queries.CreateTtsModel(ctx, sqlc.CreateTtsModelParams{
-				ModelID:       m.ID,
-				Name:          name,
-				TtsProviderID: providerID,
-				Config:        []byte("{}"),
-			})
-			if createErr != nil {
-				return fmt.Errorf("create tts model %s: %w", m.ID, createErr)
-			}
-		}
-	}
-	return nil
+	return toSpeechModelWithProviderResponse(row), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -375,22 +104,17 @@ func (s *Service) Synthesize(ctx context.Context, modelID string, text string, o
 	if err != nil {
 		return nil, "", err
 	}
-	modelRow, err := s.queries.GetTtsModelWithProvider(ctx, pgID)
+	modelRow, err := s.queries.GetSpeechModelWithProvider(ctx, pgID)
 	if err != nil {
-		return nil, "", fmt.Errorf("get tts model: %w", err)
+		return nil, "", fmt.Errorf("get speech model: %w", err)
 	}
-	adapter, err := s.registry.Get(TtsType(modelRow.ProviderType))
+	adapterType := clientTypeToTtsType(modelRow.ProviderType)
+	adapter, err := s.registry.Get(adapterType)
 	if err != nil {
 		return nil, "", fmt.Errorf("unsupported provider: %s", modelRow.ProviderType)
 	}
 
-	var savedCfg map[string]any
-	if len(modelRow.Config) > 0 {
-		_ = json.Unmarshal(modelRow.Config, &savedCfg)
-	}
-	if savedCfg == nil {
-		savedCfg = make(map[string]any)
-	}
+	savedCfg := parseModelConfig(modelRow.Config)
 	for k, v := range overrideCfg {
 		savedCfg[k] = v
 	}
@@ -417,23 +141,17 @@ func (s *Service) StreamToFile(ctx context.Context, modelID string, text string,
 	if err != nil {
 		return "", err
 	}
-	modelRow, err := s.queries.GetTtsModelWithProvider(ctx, pgID)
+	modelRow, err := s.queries.GetSpeechModelWithProvider(ctx, pgID)
 	if err != nil {
-		return "", fmt.Errorf("get tts model: %w", err)
+		return "", fmt.Errorf("get speech model: %w", err)
 	}
-	adapter, err := s.registry.Get(TtsType(modelRow.ProviderType))
+	adapterType := clientTypeToTtsType(modelRow.ProviderType)
+	adapter, err := s.registry.Get(adapterType)
 	if err != nil {
 		return "", fmt.Errorf("unsupported provider: %s", modelRow.ProviderType)
 	}
 
-	var savedCfg map[string]any
-	if len(modelRow.Config) > 0 {
-		_ = json.Unmarshal(modelRow.Config, &savedCfg)
-	}
-	if savedCfg == nil {
-		savedCfg = make(map[string]any)
-	}
-
+	savedCfg := parseModelConfig(modelRow.Config)
 	audioCfg := buildAudioConfig(savedCfg)
 	if err := audioCfg.Validate(); err != nil {
 		return "", fmt.Errorf("invalid audio config: %w", err)
@@ -463,7 +181,7 @@ func (s *Service) StreamToFile(ctx context.Context, modelID string, text string,
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Capabilities
 // ---------------------------------------------------------------------------
 
 // GetModelCapabilities returns the adapter-level capabilities for a stored model.
@@ -472,11 +190,12 @@ func (s *Service) GetModelCapabilities(ctx context.Context, modelID string) (*Mo
 	if err != nil {
 		return nil, err
 	}
-	modelRow, err := s.queries.GetTtsModelWithProvider(ctx, pgID)
+	modelRow, err := s.queries.GetSpeechModelWithProvider(ctx, pgID)
 	if err != nil {
-		return nil, fmt.Errorf("get tts model: %w", err)
+		return nil, fmt.Errorf("get speech model: %w", err)
 	}
-	adapter, err := s.registry.Get(TtsType(modelRow.ProviderType))
+	adapterType := clientTypeToTtsType(modelRow.ProviderType)
+	adapter, err := s.registry.Get(adapterType)
 	if err != nil {
 		return nil, fmt.Errorf("unsupported provider: %s", modelRow.ProviderType)
 	}
@@ -486,6 +205,34 @@ func (s *Service) GetModelCapabilities(ctx context.Context, modelID string) (*Mo
 		}
 	}
 	return nil, fmt.Errorf("model %s not found in adapter", modelRow.ModelID)
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// clientTypeToTtsType maps the unified client_type to the TTS adapter type.
+func clientTypeToTtsType(clientType string) TtsType {
+	switch clientType {
+	case "edge-speech":
+		return "edge"
+	default:
+		return TtsType(clientType)
+	}
+}
+
+func parseModelConfig(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return make(map[string]any)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return make(map[string]any)
+	}
+	if cfg == nil {
+		return make(map[string]any)
+	}
+	return cfg
 }
 
 func buildAudioConfig(cfg map[string]any) AudioConfig {
@@ -545,59 +292,76 @@ func resolveContentType(format string) string {
 	}
 }
 
-func (*Service) toProviderResponse(row sqlc.TtsProvider) ProviderResponse {
-	return ProviderResponse{
-		ID:        row.ID.String(),
-		Name:      row.Name,
-		Provider:  row.Provider,
-		Enable:    row.Enable,
-		CreatedAt: row.CreatedAt.Time,
-		UpdatedAt: row.UpdatedAt.Time,
+func toSpeechProviderResponse(row sqlc.Provider) SpeechProviderResponse {
+	return SpeechProviderResponse{
+		ID:         row.ID.String(),
+		Name:       row.Name,
+		ClientType: row.ClientType,
+		Enable:     row.Enable,
+		CreatedAt:  row.CreatedAt.Time,
+		UpdatedAt:  row.UpdatedAt.Time,
 	}
 }
 
-func (s *Service) toModelResponse(row sqlc.TtsModel, providerType string) ModelResponse {
+func toSpeechModelFromListRow(row sqlc.ListSpeechModelsRow) SpeechModelResponse {
 	var cfg map[string]any
 	if len(row.Config) > 0 {
-		if err := json.Unmarshal(row.Config, &cfg); err != nil {
-			s.logger.Warn("tts model config unmarshal failed", slog.String("id", row.ID.String()), slog.Any("error", err))
-		}
+		_ = json.Unmarshal(row.Config, &cfg)
 	}
 	name := ""
 	if row.Name.Valid {
 		name = row.Name.String
 	}
-	return ModelResponse{
-		ID:            row.ID.String(),
-		ModelID:       row.ModelID,
-		Name:          name,
-		TtsProviderID: row.TtsProviderID.String(),
-		ProviderType:  providerType,
-		Config:        cfg,
-		CreatedAt:     row.CreatedAt.Time,
-		UpdatedAt:     row.UpdatedAt.Time,
+	return SpeechModelResponse{
+		ID:           row.ID.String(),
+		ModelID:      row.ModelID,
+		Name:         name,
+		ProviderID:   row.ProviderID.String(),
+		ProviderType: row.ProviderType,
+		Config:       cfg,
+		CreatedAt:    row.CreatedAt.Time,
+		UpdatedAt:    row.UpdatedAt.Time,
 	}
 }
 
-func (s *Service) toModelWithProviderResponse(row sqlc.GetTtsModelWithProviderRow) ModelResponse {
+func toSpeechModelFromModel(row sqlc.Model, providerType string) SpeechModelResponse {
 	var cfg map[string]any
 	if len(row.Config) > 0 {
-		if err := json.Unmarshal(row.Config, &cfg); err != nil {
-			s.logger.Warn("tts model config unmarshal failed", slog.String("id", row.ID.String()), slog.Any("error", err))
-		}
+		_ = json.Unmarshal(row.Config, &cfg)
 	}
 	name := ""
 	if row.Name.Valid {
 		name = row.Name.String
 	}
-	return ModelResponse{
-		ID:            row.ID.String(),
-		ModelID:       row.ModelID,
-		Name:          name,
-		TtsProviderID: row.TtsProviderID.String(),
-		ProviderType:  row.ProviderType,
-		Config:        cfg,
-		CreatedAt:     row.CreatedAt.Time,
-		UpdatedAt:     row.UpdatedAt.Time,
+	return SpeechModelResponse{
+		ID:           row.ID.String(),
+		ModelID:      row.ModelID,
+		Name:         name,
+		ProviderID:   row.ProviderID.String(),
+		ProviderType: providerType,
+		Config:       cfg,
+		CreatedAt:    row.CreatedAt.Time,
+		UpdatedAt:    row.UpdatedAt.Time,
+	}
+}
+
+func toSpeechModelWithProviderResponse(row sqlc.GetSpeechModelWithProviderRow) SpeechModelResponse {
+	var cfg map[string]any
+	if len(row.Config) > 0 {
+		_ = json.Unmarshal(row.Config, &cfg)
+	}
+	name := ""
+	if row.Name.Valid {
+		name = row.Name.String
+	}
+	return SpeechModelResponse{
+		ID:           row.ID.String(),
+		ModelID:      row.ModelID,
+		Name:         name,
+		ProviderID:   row.ProviderID.String(),
+		ProviderType: row.ProviderType,
+		Config:       cfg,
+		CreatedAt:    row.CreatedAt.Time,
+		UpdatedAt:    row.UpdatedAt.Time,
 	}
 }
