@@ -11,6 +11,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	sessionpkg "github.com/memohai/memoh/internal/session"
@@ -34,6 +35,12 @@ type discussStreamer interface {
 	Stream(ctx context.Context, cfg agentpkg.RunConfig) <-chan agentpkg.StreamEvent
 }
 
+// DiscussStreamBroadcaster publishes stream events to local UI subscribers.
+// Implemented by local.RouteHub.
+type DiscussStreamBroadcaster interface {
+	PublishEvent(routeKey string, event channel.StreamEvent)
+}
+
 // DiscussDriverDeps holds dependencies injected into the DiscussDriver.
 type DiscussDriverDeps struct {
 	Pipeline       *Pipeline
@@ -41,6 +48,7 @@ type DiscussDriverDeps struct {
 	Agent          *agentpkg.Agent
 	MessageService messagepkg.Service
 	Resolver       RunConfigResolver
+	Broadcaster    DiscussStreamBroadcaster
 	Logger         *slog.Logger
 }
 
@@ -89,6 +97,12 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 // SetResolver sets the RunConfigResolver after construction (breaks DI cycles).
 func (d *DiscussDriver) SetResolver(r RunConfigResolver) {
 	d.deps.Resolver = r
+}
+
+// SetBroadcaster sets the stream broadcaster after construction so that
+// discuss-mode agent events are forwarded to the Web UI in real time.
+func (d *DiscussDriver) SetBroadcaster(b DiscussStreamBroadcaster) {
+	d.deps.Broadcaster = b
 }
 
 // NotifyRC pushes a new RenderedContext to the discuss session.
@@ -253,28 +267,13 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 
 	eventCh := agent.Stream(ctx, runConfig)
 
-	persisted := make(map[string]struct{})
 	var finalMessages json.RawMessage
-
 	for event := range eventCh {
+		d.broadcastDiscussEvent(cfg.BotID, event)
+
 		switch event.Type {
 		case agentpkg.EventError:
 			log.Error("discuss stream error", slog.String("error", event.Error))
-
-		case agentpkg.EventToolCallEnd:
-			if event.ToolName == "send" && isSendToCurrentConversation(event.Result) {
-				toolCallID := strings.TrimSpace(event.ToolCallID)
-				if _, dup := persisted[toolCallID]; !dup {
-					if persistErr := d.persistDiscussSend(ctx, cfg, event, resolved.ModelID, log); persistErr != nil {
-						log.Error("discuss: immediate persist failed",
-							slog.String("tool_call_id", toolCallID),
-							slog.Any("error", persistErr))
-					} else {
-						persisted[toolCallID] = struct{}{}
-					}
-				}
-			}
-
 		case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
 			finalMessages = event.Messages
 		}
@@ -282,9 +281,6 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 
 	now := time.Now()
 
-	// Always persist the full round (thinking, tool calls, tool results).
-	// The immediate send-text persist above provides real-time visibility;
-	// StoreRound adds the complete conversation context.
 	if d.deps.Resolver != nil && len(finalMessages) > 0 {
 		var sdkMsgs []sdk.Message
 		if json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
@@ -300,80 +296,54 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	sess.lastProcessedMs = now.UnixMilli()
 }
 
-// isSendToCurrentConversation checks the tool result for "delivered":"current_conversation".
-func isSendToCurrentConversation(result any) bool {
-	m, ok := result.(map[string]any)
-	if !ok {
-		return false
+// broadcastDiscussEvent forwards an agent stream event to the RouteHub so the
+// Web UI can display thinking, tool calls, and text deltas in real time.
+func (d *DiscussDriver) broadcastDiscussEvent(botID string, event agentpkg.StreamEvent) {
+	if d.deps.Broadcaster == nil {
+		return
 	}
-	delivered, _ := m["delivered"].(string)
-	return delivered == "current_conversation"
+	se, ok := agentEventToChannelEvent(event)
+	if !ok {
+		return
+	}
+	d.deps.Broadcaster.PublishEvent(botID, se)
 }
 
-// persistDiscussSend immediately persists the assistant message produced by
-// a successful same-conversation send tool call. This triggers the
-// message_created event so the Web UI sees it without a full reload.
-func (d *DiscussDriver) persistDiscussSend(
-	ctx context.Context,
-	cfg DiscussSessionConfig,
-	event agentpkg.StreamEvent,
-	modelID string,
-	log *slog.Logger,
-) error {
-	if d.deps.MessageService == nil {
-		return nil
+func agentEventToChannelEvent(e agentpkg.StreamEvent) (channel.StreamEvent, bool) {
+	switch e.Type {
+	case agentpkg.EventAgentStart:
+		return channel.StreamEvent{Type: channel.StreamEventAgentStart}, true
+	case agentpkg.EventTextStart:
+		return channel.StreamEvent{Type: channel.StreamEventPhaseStart, Phase: channel.StreamPhaseText}, true
+	case agentpkg.EventTextDelta:
+		return channel.StreamEvent{Type: channel.StreamEventDelta, Delta: e.Delta}, true
+	case agentpkg.EventTextEnd:
+		return channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText}, true
+	case agentpkg.EventReasoningStart:
+		return channel.StreamEvent{Type: channel.StreamEventPhaseStart, Phase: channel.StreamPhaseReasoning}, true
+	case agentpkg.EventReasoningDelta:
+		return channel.StreamEvent{Type: channel.StreamEventDelta, Delta: e.Delta, Phase: channel.StreamPhaseReasoning}, true
+	case agentpkg.EventReasoningEnd:
+		return channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseReasoning}, true
+	case agentpkg.EventToolCallStart:
+		return channel.StreamEvent{
+			Type:     channel.StreamEventToolCallStart,
+			ToolCall: &channel.StreamToolCall{Name: e.ToolName, CallID: e.ToolCallID, Input: e.Input},
+		}, true
+	case agentpkg.EventToolCallEnd:
+		return channel.StreamEvent{
+			Type:     channel.StreamEventToolCallEnd,
+			ToolCall: &channel.StreamToolCall{Name: e.ToolName, CallID: e.ToolCallID, Input: e.Input, Result: e.Result},
+		}, true
+	case agentpkg.EventAgentEnd:
+		return channel.StreamEvent{Type: channel.StreamEventAgentEnd}, true
+	case agentpkg.EventAgentAbort:
+		return channel.StreamEvent{Type: channel.StreamEventAgentEnd}, true
+	case agentpkg.EventError:
+		return channel.StreamEvent{Type: channel.StreamEventError, Error: e.Error}, true
+	default:
+		return channel.StreamEvent{}, false
 	}
-
-	text := extractSendToolText(event.Input)
-	if text == "" {
-		return nil
-	}
-
-	content, err := json.Marshal(conversation.ModelMessage{
-		Role:    "assistant",
-		Content: conversation.NewTextContent(text),
-	})
-	if err != nil {
-		return err
-	}
-
-	meta := map[string]any{}
-	if strings.TrimSpace(cfg.CurrentPlatform) != "" {
-		meta["platform"] = cfg.CurrentPlatform
-	}
-	meta["discuss_tool_call_id"] = strings.TrimSpace(event.ToolCallID)
-
-	_, persistErr := d.deps.MessageService.Persist(ctx, messagepkg.PersistInput{
-		BotID:     cfg.BotID,
-		SessionID: cfg.SessionID,
-		Role:      "assistant",
-		Content:   content,
-		Metadata:  meta,
-		ModelID:   modelID,
-	})
-	if persistErr != nil {
-		return persistErr
-	}
-	log.Info("discuss: persisted send-tool message",
-		slog.String("tool_call_id", event.ToolCallID))
-	return nil
-}
-
-// extractSendToolText extracts the "text" field from a send tool's input.
-func extractSendToolText(input any) string {
-	m, ok := input.(map[string]any)
-	if !ok {
-		return ""
-	}
-	if text, ok := m["text"].(string); ok && strings.TrimSpace(text) != "" {
-		return strings.TrimSpace(text)
-	}
-	if msg, ok := m["message"].(map[string]any); ok {
-		if text, ok := msg["text"].(string); ok && strings.TrimSpace(text) != "" {
-			return strings.TrimSpace(text)
-		}
-	}
-	return ""
 }
 
 func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string) []TurnResponseEntry {

@@ -477,6 +477,7 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 	processor.SetSessionEnsurer(&sessionEnsurerAdapter{svc: sessionService})
 	processor.SetPipeline(pipeline, eventStore, discussDriver)
 	discussDriver.SetResolver(resolver)
+	discussDriver.SetBroadcaster(hub)
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))

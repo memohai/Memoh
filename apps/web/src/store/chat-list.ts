@@ -458,6 +458,32 @@ export const useChatStore = defineStore('chat', () => {
     session.reject(err)
   }
 
+  function ensureDiscussStream(): PendingAssistantStream {
+    const assistantMsg: ChatMessage = {
+      id: nextId(),
+      role: 'assistant',
+      blocks: [],
+      timestamp: new Date(),
+      streaming: true,
+    }
+    messages.push(assistantMsg)
+    let resolveStream: () => void = () => {}
+    let rejectStream: (err: Error) => void = () => {}
+    new Promise<void>((resolve, reject) => { resolveStream = resolve; rejectStream = reject })
+      .catch(() => {})
+    const stream: PendingAssistantStream = {
+      assistantMsg,
+      textBlockIdx: -1,
+      thinkingBlockIdx: -1,
+      deferredAttachments: [],
+      done: false,
+      resolve: resolveStream,
+      reject: rejectStream,
+    }
+    pendingAssistantStream = stream
+    return stream
+  }
+
   function handleLocalStreamEvent(event: StreamEvent) {
     const meta = event.metadata as Record<string, unknown> | undefined
     const sourceChannel = meta?.source_channel as string | undefined
@@ -469,10 +495,21 @@ export const useChatStore = defineStore('chat', () => {
     // with proper session_id filtering via appendRealtimeMessage.
     if (isCrossChannel) return
 
-    const session = pendingAssistantStream
-    if (!session || session.done) return
-
     const type = (event.type ?? '').toLowerCase()
+
+    // Discuss mode: agent events arrive without a prior user send,
+    // so pendingAssistantStream may be null. Auto-create one on agent_start
+    // so that subsequent reasoning / tool_call / text events render.
+    if (!pendingAssistantStream || pendingAssistantStream.done) {
+      if (type === 'agent_start') {
+        ensureDiscussStream()
+      } else {
+        return
+      }
+    }
+
+    const session = pendingAssistantStream!
+
     switch (type) {
       case 'text_start':
         session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })
