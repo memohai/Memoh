@@ -712,7 +712,7 @@ func (q *Queries) ListModelsByType(ctx context.Context, type_ string) ([]Model, 
 
 const listProviders = `-- name: ListProviders :many
 SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
-WHERE client_type NOT LIKE '%-speech'
+WHERE client_type NOT IN ('edge-speech')
 ORDER BY created_at DESC
 `
 
@@ -835,7 +835,7 @@ func (q *Queries) ListSpeechModelsByProviderID(ctx context.Context, providerID p
 
 const listSpeechProviders = `-- name: ListSpeechProviders :many
 SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
-WHERE client_type LIKE '%-speech'
+WHERE client_type IN ('edge-speech')
 ORDER BY created_at DESC
 `
 
