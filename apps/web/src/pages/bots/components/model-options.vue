@@ -40,7 +40,7 @@
         type="button"
         role="option"
         :aria-selected="modelValue === option.value"
-        class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
+        class="relative flex  w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
         :class="{ 'bg-accent': modelValue === option.value }"
         @click="$emit('update:modelValue', option.value)"
       >
@@ -52,8 +52,8 @@
           v-else
           class="size-3.5 shrink-0"
         />
-        <span class="truncate">{{ option.label }}</span>
-        <span class="ml-auto flex items-center gap-1.5">
+        <span class="truncate  ">{{ option.label }}</span>
+        <span class="ml-auto min-w-[50%] flex items-center gap-1.5  text-right">
           <ModelCapabilities
             v-if="option.compatibilities?.length"
             :compatibilities="option.compatibilities"
@@ -61,7 +61,7 @@
           <ContextWindowBadge :context-window="option.contextWindow" />
           <span
             v-if="option.description"
-            class="text-xs text-muted-foreground"
+            class="text-xs text-muted-foreground truncate "
           >
             {{ option.description }}
           </span>

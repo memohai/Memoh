@@ -5,18 +5,18 @@
   >
     <button
       :class="[
-        'group/bot flex items-center gap-2.5 w-full h-[38px] px-2.5 rounded-lg transition-colors',
+        'group/bot flex items-center gap-2.5 w-full h-9.5 px-2.5 rounded-lg transition-colors',
         'group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0',
         isActive
-          ? 'bg-background'
+          ? 'bg-sidebar-accent'
           : bot.status === 'error'
             ? 'opacity-50 cursor-not-allowed'
-            : 'hover:bg-background/60',
+            : 'hover:bg-sidebar-accent/60',
       ]"
       :disabled="bot.status === 'error'"
       @click="handleSelect"
     >
-      <div class="size-[26px] shrink-0 rounded-full border border-border bg-accent overflow-hidden p-px group-data-[collapsible=icon]:mx-auto">
+      <div class="size-6.5 shrink-0 rounded-full border border-border bg-accent overflow-hidden p-px group-data-[collapsible=icon]:mx-auto">
         <img
           v-if="bot.avatar_url"
           :src="bot.avatar_url"
@@ -30,7 +30,7 @@
           {{ avatarFallback }}
         </span>
       </div>
-      <span class="truncate text-xs font-medium text-foreground leading-[18px] flex-1 text-left group-data-[collapsible=icon]:hidden">
+      <span class="truncate text-xs font-medium text-foreground leading-4.5 flex-1 text-left group-data-[collapsible=icon]:hidden">
         {{ bot.display_name || bot.id }}
       </span>
 
