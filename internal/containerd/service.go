@@ -466,21 +466,25 @@ func (s *DefaultService) StartContainer(ctx context.Context, containerID string,
 	return task.Start(ctx)
 }
 
-func (s *DefaultService) getTask(ctx context.Context, containerID string) (containerd.Task, error) {
+func (s *DefaultService) getTask(ctx context.Context, containerID string) (containerd.Task, context.Context, error) {
 	if containerID == "" {
-		return nil, ErrInvalidArgument
+		return nil, nil, ErrInvalidArgument
 	}
 
 	ctx = s.withNamespace(ctx)
 	container, err := s.client.LoadContainer(ctx, containerID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return container.Task(ctx, nil)
+	task, err := container.Task(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	return task, ctx, nil
 }
 
 func (s *DefaultService) GetTaskInfo(ctx context.Context, containerID string) (TaskInfo, error) {
-	task, err := s.getTask(ctx, containerID)
+	task, ctx, err := s.getTask(ctx, containerID)
 	if err != nil {
 		return TaskInfo{}, err
 	}
@@ -528,8 +532,7 @@ func (s *DefaultService) StopContainer(ctx context.Context, containerID string, 
 		return ErrInvalidArgument
 	}
 
-	ctx = s.withNamespace(ctx)
-	task, err := s.getTask(ctx, containerID)
+	task, ctx, err := s.getTask(ctx, containerID)
 	if err != nil {
 		return err
 	}
@@ -579,8 +582,7 @@ func (s *DefaultService) DeleteTask(ctx context.Context, containerID string, opt
 		return ErrInvalidArgument
 	}
 
-	ctx = s.withNamespace(ctx)
-	task, err := s.getTask(ctx, containerID)
+	task, ctx, err := s.getTask(ctx, containerID)
 	if err != nil {
 		return err
 	}
@@ -744,8 +746,7 @@ func (s *DefaultService) SnapshotMounts(ctx context.Context, snapshotter, key st
 }
 
 func (s *DefaultService) SetupNetwork(ctx context.Context, req NetworkSetupRequest) (NetworkResult, error) {
-	ctx = s.withNamespace(ctx)
-	task, err := s.getTask(ctx, req.ContainerID)
+	task, ctx, err := s.getTask(ctx, req.ContainerID)
 	if err != nil {
 		return NetworkResult{}, err
 	}
@@ -757,8 +758,7 @@ func (s *DefaultService) SetupNetwork(ctx context.Context, req NetworkSetupReque
 }
 
 func (s *DefaultService) RemoveNetwork(ctx context.Context, req NetworkSetupRequest) error {
-	ctx = s.withNamespace(ctx)
-	task, err := s.getTask(ctx, req.ContainerID)
+	task, ctx, err := s.getTask(ctx, req.ContainerID)
 	if err != nil {
 		return err
 	}

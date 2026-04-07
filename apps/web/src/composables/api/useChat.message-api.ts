@@ -1,5 +1,5 @@
 import { client } from '@memohai/sdk/client'
-import { getBotsByBotIdMessages, postBotsByBotIdWebMessages } from '@memohai/sdk'
+import { getBotsByBotIdMessages, postBotsByBotIdLocalMessages } from '@memohai/sdk'
 import type { ChannelAttachment, ChannelMessage } from '@memohai/sdk'
 import type {
   ChatAttachment,
@@ -55,7 +55,7 @@ export async function sendLocalChannelMessage(
   const body: Record<string, unknown> = { message: msg }
   if (overrides?.modelId) body.model_id = overrides.modelId
   if (overrides?.reasoningEffort) body.reasoning_effort = overrides.reasoningEffort
-  await postBotsByBotIdWebMessages({
+  await postBotsByBotIdLocalMessages({
     path: { bot_id: botId },
     body: body as { message: ChannelMessage; model_id?: string; reasoning_effort?: string },
     throwOnError: true,
@@ -71,7 +71,7 @@ export async function streamLocalChannel(
   if (!id) throw new Error('bot id is required')
 
   const response = await client.get({
-    url: '/bots/{bot_id}/web/stream',
+    url: '/bots/{bot_id}/local/stream',
     path: { bot_id: id },
     parseAs: 'stream',
     signal,

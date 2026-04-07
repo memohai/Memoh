@@ -63,16 +63,22 @@ func (a *Agent) Generate(ctx context.Context, cfg RunConfig) (*GenerateResult, e
 }
 
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
-	var tools []sdk.Tool
+	// Stream emitter: tools targeting the current conversation push
+	// side-effect events (attachments, reactions, speech) directly here.
+	streamEmitter := tools.StreamEmitter(func(evt tools.ToolStreamEvent) {
+		ch <- toolStreamEventToAgentEvent(evt)
+	})
+
+	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
 		var err error
-		tools, err = a.assembleTools(ctx, cfg)
+		sdkTools, err = a.assembleTools(ctx, cfg, streamEmitter)
 		if err != nil {
 			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("assemble tools: %v", err)}
 			return
 		}
 	}
-	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
+	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
 
 	// Loop detection setup
 	var textLoopGuard *TextLoopGuard
@@ -92,11 +98,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 
 	// Wrap tools with loop detection
 	if toolLoopGuard != nil {
-		tools = wrapToolsWithLoopGuard(tools, toolLoopGuard, toolLoopAbortCallIDs)
+		sdkTools = wrapToolsWithLoopGuard(sdkTools, toolLoopGuard, toolLoopAbortCallIDs)
 	}
-
-	tagResolvers := DefaultTagResolvers()
-	tagExtractor := NewStreamTagExtractor(tagResolvers)
 
 	var prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams
 	if readMediaState != nil {
@@ -143,7 +146,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		}
 	}
 
-	opts := a.buildGenerateOptions(cfg, tools, prepareStep)
+	opts := a.buildGenerateOptions(cfg, sdkTools, prepareStep)
 
 	streamResult, err := a.client.StreamText(ctx, opts...)
 	if err != nil {
@@ -170,29 +173,18 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			ch <- StreamEvent{Type: EventTextStart}
 
 		case *sdk.TextDeltaPart:
-			result := tagExtractor.Push(p.Text)
-			if result.VisibleText != "" {
+			if p.Text != "" {
 				if textLoopProbeBuffer != nil {
-					textLoopProbeBuffer.Push(result.VisibleText)
+					textLoopProbeBuffer.Push(p.Text)
 				}
-				ch <- StreamEvent{Type: EventTextDelta, Delta: result.VisibleText}
-				allText.WriteString(result.VisibleText)
+				ch <- StreamEvent{Type: EventTextDelta, Delta: p.Text}
+				allText.WriteString(p.Text)
 			}
-			emitTagEvents(ch, result.Events)
 
 		case *sdk.TextEndPart:
-			remainder := tagExtractor.FlushRemainder()
-			if remainder.VisibleText != "" {
-				if textLoopProbeBuffer != nil {
-					textLoopProbeBuffer.Push(remainder.VisibleText)
-				}
-				ch <- StreamEvent{Type: EventTextDelta, Delta: remainder.VisibleText}
-				allText.WriteString(remainder.VisibleText)
-			}
 			if textLoopProbeBuffer != nil {
 				textLoopProbeBuffer.Flush()
 			}
-			emitTagEvents(ch, remainder.Events)
 			ch <- StreamEvent{Type: EventTextEnd}
 
 		case *sdk.ReasoningStartPart:
@@ -205,18 +197,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			ch <- StreamEvent{Type: EventReasoningEnd}
 
 		case *sdk.StreamToolCallPart:
-			remainder := tagExtractor.FlushRemainder()
-			if remainder.VisibleText != "" {
-				if textLoopProbeBuffer != nil {
-					textLoopProbeBuffer.Push(remainder.VisibleText)
-				}
-				ch <- StreamEvent{Type: EventTextDelta, Delta: remainder.VisibleText}
-				allText.WriteString(remainder.VisibleText)
-			}
 			if textLoopProbeBuffer != nil {
 				textLoopProbeBuffer.Flush()
 			}
-			emitTagEvents(ch, remainder.Events)
 			ch <- StreamEvent{
 				Type:       EventToolCallStart,
 				ToolName:   p.ToolName,
@@ -316,15 +299,21 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult, error) {
-	var tools []sdk.Tool
+	// Collecting emitter: tools push side-effect events here during generation.
+	var collected []tools.ToolStreamEvent
+	collectEmitter := tools.StreamEmitter(func(evt tools.ToolStreamEvent) {
+		collected = append(collected, evt)
+	})
+
+	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
 		var err error
-		tools, err = a.assembleTools(ctx, cfg)
+		sdkTools, err = a.assembleTools(ctx, cfg, collectEmitter)
 		if err != nil {
 			return nil, fmt.Errorf("assemble tools: %w", err)
 		}
 	}
-	tools, readMediaState := decorateReadMediaTools(cfg.Model, tools)
+	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard
@@ -335,14 +324,14 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 	}
 
 	if toolLoopGuard != nil {
-		tools = wrapToolsWithLoopGuard(tools, toolLoopGuard, toolLoopAbortCallIDs)
+		sdkTools = wrapToolsWithLoopGuard(sdkTools, toolLoopGuard, toolLoopAbortCallIDs)
 	}
 
 	var prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams
 	if readMediaState != nil {
 		prepareStep = readMediaState.prepareStep
 	}
-	opts := a.buildGenerateOptions(cfg, tools, prepareStep)
+	opts := a.buildGenerateOptions(cfg, sdkTools, prepareStep)
 	opts = append(opts,
 		sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
 			if cfg.LoopDetection.Enabled {
@@ -365,31 +354,28 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		return nil, fmt.Errorf("generate: %w", err)
 	}
 
-	resolvers := DefaultTagResolvers()
-	cleanedText, events := ExtractTagsFromText(genResult.Text, resolvers)
-
+	// Drain collected tool-emitted side effects into the result.
 	var attachments []FileAttachment
 	var reactions []ReactionItem
 	var speeches []SpeechItem
-	for _, ev := range events {
-		switch ev.Tag {
-		case "attachments":
-			for _, d := range ev.Data {
-				if att, ok := d.(FileAttachment); ok {
-					attachments = append(attachments, att)
-				}
+	for _, evt := range collected {
+		switch evt.Type {
+		case tools.StreamEventAttachment:
+			for _, a := range evt.Attachments {
+				attachments = append(attachments, FileAttachment{
+					Type: a.Type, Path: a.Path, URL: a.URL,
+					Mime: a.Mime, Name: a.Name,
+					ContentHash: a.ContentHash, Size: a.Size,
+					Metadata: a.Metadata,
+				})
 			}
-		case "reactions":
-			for _, d := range ev.Data {
-				if r, ok := d.(ReactionItem); ok {
-					reactions = append(reactions, r)
-				}
+		case tools.StreamEventReaction:
+			for _, r := range evt.Reactions {
+				reactions = append(reactions, ReactionItem{Emoji: r.Emoji})
 			}
-		case "speech":
-			for _, d := range ev.Data {
-				if s, ok := d.(SpeechItem); ok {
-					speeches = append(speeches, s)
-				}
+		case tools.StreamEventSpeech:
+			for _, s := range evt.Speeches {
+				speeches = append(speeches, SpeechItem{Text: s.Text})
 			}
 		}
 	}
@@ -400,7 +386,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 	}
 	return &GenerateResult{
 		Messages:    finalMessages,
-		Text:        cleanedText,
+		Text:        genResult.Text,
 		Attachments: attachments,
 		Reactions:   reactions,
 		Speeches:    speeches,
@@ -432,7 +418,10 @@ func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep 
 }
 
 // assembleTools collects tools from all registered ToolProviders.
-func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, error) {
+// emitter is injected into the session context so that tools targeting the
+// current conversation can push side-effect events (attachments, reactions,
+// speech) directly into the agent stream.
+func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.StreamEmitter) ([]sdk.Tool, error) {
 	if len(a.toolProviders) == 0 {
 		return nil, nil
 	}
@@ -447,6 +436,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, e
 		BotID:              cfg.Identity.BotID,
 		ChatID:             cfg.Identity.ChatID,
 		SessionID:          cfg.Identity.SessionID,
+		SessionType:        cfg.SessionType,
 		ChannelIdentityID:  cfg.Identity.ChannelIdentityID,
 		SessionToken:       cfg.Identity.SessionToken,
 		CurrentPlatform:    cfg.Identity.CurrentPlatform,
@@ -455,6 +445,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, e
 		IsSubagent:         cfg.Identity.IsSubagent,
 		Skills:             skillsMap,
 		TimezoneLocation:   cfg.Identity.TimezoneLocation,
+		Emitter:            emitter,
 	}
 
 	var allTools []sdk.Tool
@@ -469,40 +460,35 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig) ([]sdk.Tool, e
 	return allTools, nil
 }
 
-func emitTagEvents(ch chan<- StreamEvent, events []TagEvent) {
-	for _, ev := range events {
-		switch ev.Tag {
-		case "attachments":
-			var atts []FileAttachment
-			for _, d := range ev.Data {
-				if att, ok := d.(FileAttachment); ok {
-					atts = append(atts, att)
-				}
-			}
-			if len(atts) > 0 {
-				ch <- StreamEvent{Type: EventAttachment, Attachments: atts}
-			}
-		case "reactions":
-			var reactions []ReactionItem
-			for _, d := range ev.Data {
-				if r, ok := d.(ReactionItem); ok {
-					reactions = append(reactions, r)
-				}
-			}
-			if len(reactions) > 0 {
-				ch <- StreamEvent{Type: EventReaction, Reactions: reactions}
-			}
-		case "speech":
-			var speeches []SpeechItem
-			for _, d := range ev.Data {
-				if s, ok := d.(SpeechItem); ok {
-					speeches = append(speeches, s)
-				}
-			}
-			if len(speeches) > 0 {
-				ch <- StreamEvent{Type: EventSpeech, Speeches: speeches}
-			}
+// toolStreamEventToAgentEvent converts a tool-layer ToolStreamEvent into an
+// agent-layer StreamEvent suitable for the output channel.
+func toolStreamEventToAgentEvent(evt tools.ToolStreamEvent) StreamEvent {
+	switch evt.Type {
+	case tools.StreamEventAttachment:
+		atts := make([]FileAttachment, 0, len(evt.Attachments))
+		for _, a := range evt.Attachments {
+			atts = append(atts, FileAttachment{
+				Type: a.Type, Path: a.Path, URL: a.URL,
+				Mime: a.Mime, Name: a.Name,
+				ContentHash: a.ContentHash, Size: a.Size,
+				Metadata: a.Metadata,
+			})
 		}
+		return StreamEvent{Type: EventAttachment, Attachments: atts}
+	case tools.StreamEventReaction:
+		rs := make([]ReactionItem, 0, len(evt.Reactions))
+		for _, r := range evt.Reactions {
+			rs = append(rs, ReactionItem{Emoji: r.Emoji})
+		}
+		return StreamEvent{Type: EventReaction, Reactions: rs}
+	case tools.StreamEventSpeech:
+		ss := make([]SpeechItem, 0, len(evt.Speeches))
+		for _, s := range evt.Speeches {
+			ss = append(ss, SpeechItem{Text: s.Text})
+		}
+		return StreamEvent{Type: EventSpeech, Speeches: ss}
+	default:
+		return StreamEvent{}
 	}
 }
 

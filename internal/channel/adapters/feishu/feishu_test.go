@@ -452,6 +452,64 @@ func TestExtractFeishuInboundMentionBotMatched(t *testing.T) {
 	}
 }
 
+func TestExtractFeishuInboundMentionKeyRewriteAndTargets(t *testing.T) {
+	t.Parallel()
+
+	text := `{"text":"@_user_1 hello @_user_2"}`
+	msgType := larkim.MsgTypeText
+	chatType := "group"
+	chatID := "oc_mention_rewrite"
+
+	openID1 := "ou_user_1"
+	name1 := "Alice"
+	mention1 := larkim.NewMentionEventBuilder().
+		Key("@_user_1").
+		Name(name1).
+		Id(larkim.NewUserIdBuilder().OpenId(openID1).Build()).
+		Build()
+
+	userID2 := "u_user_2"
+	name2 := "Bob"
+	mention2 := larkim.NewMentionEventBuilder().
+		Key("@_user_2").
+		Name(name2).
+		Id(larkim.NewUserIdBuilder().UserId(userID2).Build()).
+		Build()
+
+	event := &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Message: &larkim.EventMessage{
+				MessageType: &msgType,
+				Content:     &text,
+				ChatType:    &chatType,
+				ChatId:      &chatID,
+				Mentions:    []*larkim.MentionEvent{mention1, mention2},
+			},
+		},
+	}
+
+	got := extractFeishuInbound(event, "ou_bot_123")
+	if got.Message.PlainText() != "@Alice hello @Bob" {
+		t.Fatalf("unexpected rewritten text: %q", got.Message.PlainText())
+	}
+
+	targets, ok := got.Metadata["mentioned_targets"].([]string)
+	if !ok {
+		t.Fatalf("expected mentioned_targets to be []string, got %#v", got.Metadata["mentioned_targets"])
+	}
+	if len(targets) != 2 || targets[0] != "open_id:ou_user_1" || targets[1] != "user_id:u_user_2" {
+		t.Fatalf("unexpected mentioned_targets: %#v", targets)
+	}
+
+	mentions, ok := got.Metadata["mentions"].([]map[string]any)
+	if !ok || len(mentions) != 2 {
+		t.Fatalf("expected mentions metadata with 2 entries, got %#v", got.Metadata["mentions"])
+	}
+	if mentions[0]["target"] != "open_id:ou_user_1" || mentions[1]["target"] != "user_id:u_user_2" {
+		t.Fatalf("unexpected mention targets in metadata: %#v", mentions)
+	}
+}
+
 func TestExtractFeishuInboundMentionOtherUserIgnored(t *testing.T) {
 	t.Parallel()
 

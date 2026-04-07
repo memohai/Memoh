@@ -228,12 +228,6 @@ github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D
 github.com/mattn/go-runewidth v0.0.10/go.mod h1:RAqKPSqVFrSLVXbA8x7dzmKdmGzieGRCM46jaSJTDAk=
 github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7 h1:beehwOQperqGWj4m4EhcPhnSZKtDiuHK/7ZMoTPaQjw=
 github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7/go.mod h1:OvmxM7JmnXBmwJWWVqtreL3HSHSKuzPbtbhlg5MvBg0=
-github.com/memohai/twilight-ai v0.3.4-0.20260329101319-3ebcc563f5d9 h1:vpq3FgZ7UJAWr63M4mAtB8wvUWHSAdrgWibTFocXFBk=
-github.com/memohai/twilight-ai v0.3.4-0.20260329101319-3ebcc563f5d9/go.mod h1:GZTT9GUT3uSs6zram/FcF24GLTZMFSpiybbYmjr+gH8=
-github.com/memohai/twilight-ai v0.3.4-0.20260402145441-9e9f798cbd2d h1:tZYwJ0YDc6FUlh3mXYv+Tkw5dLfMD6IgP8VY5/+AfB0=
-github.com/memohai/twilight-ai v0.3.4-0.20260402145441-9e9f798cbd2d/go.mod h1:GZTT9GUT3uSs6zram/FcF24GLTZMFSpiybbYmjr+gH8=
-github.com/memohai/twilight-ai v0.3.4-0.20260402155501-497ad09c6724 h1:/Hw5vHfAeHRGx+duPKyetT5n2t6J5cYMfUysN/Xh9U0=
-github.com/memohai/twilight-ai v0.3.4-0.20260402155501-497ad09c6724/go.mod h1:GZTT9GUT3uSs6zram/FcF24GLTZMFSpiybbYmjr+gH8=
 github.com/memohai/twilight-ai v0.3.4-0.20260402160505-00db38ee4442 h1:mTy+OSkMCOvF1S6D5asKRdKx0A+icQvnu6A/f7aZolg=
 github.com/memohai/twilight-ai v0.3.4-0.20260402160505-00db38ee4442/go.mod h1:GZTT9GUT3uSs6zram/FcF24GLTZMFSpiybbYmjr+gH8=
 github.com/moby/docker-image-spec v1.3.1 h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3Nl2EsFP0=

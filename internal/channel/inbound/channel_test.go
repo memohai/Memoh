@@ -524,30 +524,7 @@ func TestChannelInboundProcessorIgnoreEmpty(t *testing.T) {
 	}
 }
 
-func TestBuildInboundQueryAttachmentFallback(t *testing.T) {
-	t.Parallel()
-
-	one := channel.Message{
-		Attachments: []channel.Attachment{
-			{Type: channel.AttachmentImage},
-		},
-	}
-	if got := buildInboundQuery(one, nil); got != "[User sent 1 attachment]" {
-		t.Fatalf("unexpected single attachment fallback: %q", got)
-	}
-
-	two := channel.Message{
-		Attachments: []channel.Attachment{
-			{Type: channel.AttachmentImage},
-			{Type: channel.AttachmentImage},
-		},
-	}
-	if got := buildInboundQuery(two, nil); got != "[User sent 2 attachments]" {
-		t.Fatalf("unexpected multiple attachment fallback: %q", got)
-	}
-}
-
-func TestBuildInboundQueryAttachmentFallbackWithContainerRefs(t *testing.T) {
+func TestBuildInboundQueryAttachmentOnlyReturnsEmpty(t *testing.T) {
 	t.Parallel()
 
 	msg := channel.Message{
@@ -556,17 +533,8 @@ func TestBuildInboundQueryAttachmentFallbackWithContainerRefs(t *testing.T) {
 			{Type: channel.AttachmentImage},
 		},
 	}
-	atts := []conversation.ChatAttachment{
-		{Path: "/data/media/ab/first.png"},
-		{Path: "/data/media/cd/second.png"},
-		{Path: "/data/media/ab/first.png"},
-	}
-	want := "[User sent 2 attachments]\n" +
-		"[Attachment refs: container paths]\n" +
-		"- /data/media/ab/first.png\n" +
-		"- /data/media/cd/second.png"
-	if got := buildInboundQuery(msg, atts); got != want {
-		t.Fatalf("unexpected attachment refs fallback:\nwant:\n%s\n\ngot:\n%s", want, got)
+	if got := buildInboundQuery(msg, nil); got != "" {
+		t.Fatalf("expected empty query for attachment-only message, got %q", got)
 	}
 }
 
@@ -606,8 +574,8 @@ func TestChannelInboundProcessorAttachmentOnlyUsesFallbackQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if gateway.gotReq.Query != "[User sent 2 attachments]" {
-		t.Fatalf("unexpected fallback query: %q", gateway.gotReq.Query)
+	if gateway.gotReq.Query != "" {
+		t.Fatalf("expected empty query for attachment-only message, got %q", gateway.gotReq.Query)
 	}
 	if len(gateway.gotReq.Attachments) != 2 {
 		t.Fatalf("expected attachments to pass through, got %d", len(gateway.gotReq.Attachments))
@@ -915,10 +883,10 @@ func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
 	sender := &fakeReplySender{}
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("fake-image-bytes"))
-	cfg := channel.ChannelConfig{ID: "cfg-base64", BotID: "bot-1", ChannelType: channel.ChannelType("web")}
+	cfg := channel.ChannelConfig{ID: "cfg-base64", BotID: "bot-1", ChannelType: channel.ChannelType("local")}
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
-		Channel: channel.ChannelType("web"),
+		Channel: channel.ChannelType("local"),
 		Message: channel.Message{
 			ID:   "msg-base64-1",
 			Text: "attachment base64 test",

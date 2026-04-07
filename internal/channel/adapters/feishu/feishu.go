@@ -538,28 +538,15 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 		return nil
 	}
 
-	var msgType string
-	var content string
-
-	if len(msg.Message.Parts) > 1 {
-		msgType = larkim.MsgTypePost
-		postContent, postErr := a.buildPostContent(msg.Message)
-		if postErr != nil {
-			return postErr
-		}
-		content = postContent
-	} else {
-		msgType = larkim.MsgTypeText
-		text := strings.TrimSpace(msg.Message.PlainText())
-		if text == "" {
-			return errors.New("message is required")
-		}
-		payload, marshalErr := json.Marshal(map[string]string{"text": text})
-		if marshalErr != nil {
-			return fmt.Errorf("failed to marshal text content: %w", marshalErr)
-		}
-		content = string(payload)
+	text := strings.TrimSpace(msg.Message.PlainText())
+	if text == "" {
+		return errors.New("message is required")
 	}
+	content, err := buildFeishuCardContent(text)
+	if err != nil {
+		return err
+	}
+	msgType := larkim.MsgTypeInteractive
 
 	reqBuilder := larkim.NewCreateMessageReqBodyBuilder().
 		ReceiveId(receiveID).
@@ -926,97 +913,4 @@ func resolveFeishuFileType(name, mime string) string {
 	default:
 		return larkim.FileTypeStream
 	}
-}
-
-func (*FeishuAdapter) buildPostContent(msg channel.Message) (string, error) {
-	type postContent struct {
-		ZhCn struct {
-			Title   string  `json:"title"`
-			Content [][]any `json:"content"`
-		} `json:"zh_cn"`
-	}
-
-	pc := postContent{}
-	pc.ZhCn.Title = ""
-
-	line := []any{}
-	for _, part := range msg.Parts {
-		switch part.Type {
-		case channel.MessagePartText:
-			text := strings.TrimSpace(part.Text)
-			if text == "" {
-				continue
-			}
-			line = append(line, map[string]any{
-				"tag":  "text",
-				"text": text,
-			})
-		case channel.MessagePartLink:
-			url := strings.TrimSpace(part.URL)
-			label := strings.TrimSpace(part.Text)
-			if label == "" {
-				label = url
-			}
-			if url == "" || label == "" {
-				continue
-			}
-			line = append(line, map[string]any{
-				"tag":  "a",
-				"text": label,
-				"href": url,
-			})
-		case channel.MessagePartCodeBlock:
-			code := strings.TrimSpace(part.Text)
-			if code == "" {
-				continue
-			}
-			language := strings.TrimSpace(part.Language)
-			if language != "" {
-				code = "```" + language + "\n" + code + "\n```"
-			} else {
-				code = "```\n" + code + "\n```"
-			}
-			line = append(line, map[string]any{
-				"tag":  "text",
-				"text": code,
-			})
-		case channel.MessagePartMention:
-			mention := strings.TrimSpace(part.Text)
-			if mention == "" {
-				mention = strings.TrimSpace(part.ChannelIdentityID)
-			}
-			if mention == "" {
-				continue
-			}
-			line = append(line, map[string]any{
-				"tag":  "text",
-				"text": "@" + mention,
-			})
-		case channel.MessagePartEmoji:
-			emoji := strings.TrimSpace(part.Emoji)
-			if emoji == "" {
-				emoji = strings.TrimSpace(part.Text)
-			}
-			if emoji == "" {
-				continue
-			}
-			line = append(line, map[string]any{
-				"tag":  "text",
-				"text": emoji,
-			})
-		}
-	}
-	if len(line) == 0 {
-		text := strings.TrimSpace(msg.PlainText())
-		if text != "" {
-			line = append(line, map[string]any{
-				"tag":  "text",
-				"text": text,
-			})
-		}
-	}
-	pc.ZhCn.Content = [][]any{line}
-
-	payload, err := json.Marshal(pc)
-	return string(payload), err
 }

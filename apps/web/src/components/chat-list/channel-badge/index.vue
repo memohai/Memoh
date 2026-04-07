@@ -27,7 +27,7 @@ const { t } = useI18n()
 const platformKey = computed(() => (props.platform ?? '').trim().toLowerCase())
 const isWebChannel = computed(() => {
   const k = platformKey.value
-  return k === 'web' || k === ''
+  return k === 'local' || k === ''
 })
 const channelLabel = computed(() => {
   if (!platformKey.value) return ''

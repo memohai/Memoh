@@ -201,6 +201,7 @@
     "sessionTypeHeartbeat": "Heartbeat",
     "sessionTypeSchedule": "Scheduled Task",
     "sessionTypeSubagent": "Subagent",
+    "sessionTypeDiscuss": "Discuss",
     "sessionTypeChat": "Chat",
     "sessionFilterAll": "All",
     "sessionSourcePrefix": "From:",
@@ -1010,7 +1011,6 @@
         "matrix": "Matrix",
         "telegram": "Telegram",
         "weixin": "WeChat",
-        "web": "Web",
         "local": "Local"
       },
       "typesShort": {
@@ -1020,8 +1020,7 @@
         "matrix": "MX",
         "telegram": "TG",
         "weixin": "WX",
-        "web": "Web",
-        "local": "CLI"
+        "local": "LC"
       }
     },
     "memory": {

@@ -36,10 +36,16 @@ func NewContainerProvider(log *slog.Logger, clients bridge.Provider, execWorkDir
 func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
 	wd := p.execWorkDir
 	sess := session
+
+	readDesc := fmt.Sprintf("Read file content inside the bot container. Supports pagination for large files. Max %d lines / %d bytes per call.", readMaxLines, readMaxBytes)
+	if sess.SupportsImageInput {
+		readDesc += " Also supports reading image files (PNG, JPEG, GIF, WebP) — binary images are loaded into model context automatically."
+	}
+
 	return []sdk.Tool{
 		{
 			Name:        "read",
-			Description: fmt.Sprintf("Read file content inside the bot container. Supports pagination for large files. Max %d lines / %d bytes per call.", readMaxLines, readMaxBytes),
+			Description: readDesc,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -187,7 +193,10 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 		return nil, err
 	}
 	if resp.GetBinary() {
-		return nil, errors.New("file appears to be binary. Read tool only supports text files")
+		if !session.SupportsImageInput {
+			return nil, errors.New("file appears to be binary. Read tool only supports text files (image reading not available for this model)")
+		}
+		return ReadImageFromContainer(ctx, client, filePath, defaultReadMediaMaxBytes), nil
 	}
 	content := addLineNumbers(resp.GetContent(), lineOffset)
 	return map[string]any{"content": content, "total_lines": resp.GetTotalLines()}, nil

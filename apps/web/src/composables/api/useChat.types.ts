@@ -42,6 +42,7 @@ export interface Message {
   content?: unknown
   metadata?: Record<string, unknown>
   assets?: MessageAsset[]
+  display_content?: string
   created_at?: string
 }
 

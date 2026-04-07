@@ -85,6 +85,7 @@ interface PendingAssistantStream {
   assistantMsg: ChatMessage
   textBlockIdx: number
   thinkingBlockIdx: number
+  deferredAttachments: Array<Record<string, unknown>>
   done: boolean
   resolve: () => void
   reject: (err: Error) => void
@@ -127,7 +128,7 @@ export const useChatStore = defineStore('chat', () => {
     const type = session.type ?? 'chat'
     if (type === 'heartbeat' || type === 'schedule' || type === 'subagent') return true
     const ct = (session.channel_type ?? '').trim().toLowerCase()
-    if (ct && ct !== 'web') return true
+    if (ct && ct !== 'local') return true
     return false
   })
 
@@ -195,7 +196,7 @@ export const useChatStore = defineStore('chat', () => {
     const createdAt = raw.created_at ? new Date(raw.created_at) : new Date()
     const timestamp = Number.isNaN(createdAt.getTime()) ? new Date() : createdAt
     const platform = (raw.platform ?? '').trim().toLowerCase()
-    const channelTag = platform && platform !== 'web' ? platform : undefined
+    const channelTag = platform && platform !== 'local' ? platform : undefined
 
     if (raw.role === 'user') {
       const isSelf = resolveIsSelf(raw)
@@ -259,7 +260,7 @@ export const useChatStore = defineStore('chat', () => {
         if (toolCalls.length > 0) {
           if (!pendingAssistant) {
             const platform = (raw.platform ?? '').trim().toLowerCase()
-            const channelTag = platform && platform !== 'web' ? platform : undefined
+            const channelTag = platform && platform !== 'local' ? platform : undefined
             pendingAssistant = {
               id: raw.id || nextId(),
               role: 'assistant',
@@ -310,11 +311,20 @@ export const useChatStore = defineStore('chat', () => {
       if (raw.role === 'tool') {
         const results = extractAllToolResults(raw)
         for (const r of results) {
-          if (r.toolCallId && pendingToolCallMap.has(r.toolCallId)) {
-            const block = pendingToolCallMap.get(r.toolCallId)!
-            block.result = r.output
-            block.done = true
+          if (!r.toolCallId || !pendingToolCallMap.has(r.toolCallId)) continue
+          const block = pendingToolCallMap.get(r.toolCallId)!
+          const output = r.output as Record<string, unknown> | null
+          if (output && typeof output === 'object' && output.delivered === 'current_conversation') {
+            // Same-conversation send/react/speak: remove the tool_call block
+            if (pendingAssistant) {
+              const idx = pendingAssistant.blocks.indexOf(block)
+              if (idx >= 0) pendingAssistant.blocks.splice(idx, 1)
+            }
+            pendingToolCallMap.delete(r.toolCallId)
+            continue
           }
+          block.result = r.output
+          block.done = true
         }
         continue
       }
@@ -326,7 +336,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function resolveIsSelf(raw: Message): boolean {
     const platform = (raw.platform ?? '').trim().toLowerCase()
-    if (!platform || platform === 'web') return true
+    if (!platform || platform === 'local') return true
     const senderUserId = (raw.sender_user_id ?? '').trim()
     if (!senderUserId) return false
     const userStore = useUserStore()
@@ -419,9 +429,21 @@ export const useChatStore = defineStore('chat', () => {
     return fallback
   }
 
+  function flushDeferredAttachments(session: PendingAssistantStream) {
+    if (session.deferredAttachments.length === 0) return
+    const lastBlock = session.assistantMsg.blocks[session.assistantMsg.blocks.length - 1]
+    if (lastBlock && lastBlock.type === 'attachment') {
+      lastBlock.attachments.push(...session.deferredAttachments)
+    } else {
+      pushAssistantBlock(session, { type: 'attachment', attachments: [...session.deferredAttachments] })
+    }
+    session.deferredAttachments = []
+  }
+
   function resolvePendingAssistantStream() {
     if (!pendingAssistantStream || pendingAssistantStream.done) return
     const session = pendingAssistantStream
+    flushDeferredAttachments(session)
     session.done = true
     pendingAssistantStream = null
     session.resolve()
@@ -430,9 +452,36 @@ export const useChatStore = defineStore('chat', () => {
   function rejectPendingAssistantStream(err: Error) {
     if (!pendingAssistantStream || pendingAssistantStream.done) return
     const session = pendingAssistantStream
+    flushDeferredAttachments(session)
     session.done = true
     pendingAssistantStream = null
     session.reject(err)
+  }
+
+  function ensureDiscussStream(): PendingAssistantStream {
+    const assistantMsg: ChatMessage = {
+      id: nextId(),
+      role: 'assistant',
+      blocks: [],
+      timestamp: new Date(),
+      streaming: true,
+    }
+    messages.push(assistantMsg)
+    let resolveStream: () => void = () => {}
+    let rejectStream: (err: Error) => void = () => {}
+    new Promise<void>((resolve, reject) => { resolveStream = resolve; rejectStream = reject })
+      .catch(() => {})
+    const stream: PendingAssistantStream = {
+      assistantMsg,
+      textBlockIdx: -1,
+      thinkingBlockIdx: -1,
+      deferredAttachments: [],
+      done: false,
+      resolve: resolveStream,
+      reject: rejectStream,
+    }
+    pendingAssistantStream = stream
+    return stream
   }
 
   function handleLocalStreamEvent(event: StreamEvent) {
@@ -446,10 +495,21 @@ export const useChatStore = defineStore('chat', () => {
     // with proper session_id filtering via appendRealtimeMessage.
     if (isCrossChannel) return
 
-    const session = pendingAssistantStream
-    if (!session || session.done) return
-
     const type = (event.type ?? '').toLowerCase()
+
+    // Discuss mode: agent events arrive without a prior user send,
+    // so pendingAssistantStream may be null. Auto-create one on agent_start
+    // so that subsequent reasoning / tool_call / text events render.
+    if (!pendingAssistantStream || pendingAssistantStream.done) {
+      if (type === 'agent_start') {
+        ensureDiscussStream()
+      } else {
+        return
+      }
+    }
+
+    const session = pendingAssistantStream!
+
     switch (type) {
       case 'text_start':
         session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })
@@ -497,6 +557,25 @@ export const useChatStore = defineStore('chat', () => {
         break
       case 'tool_call_end': {
         const callId = (event.toolCallId as string) ?? ''
+        const toolResult = event.result as Record<string, unknown> | null
+        const isLocalDelivery = (event.toolName === 'send' || event.toolName === 'react' || event.toolName === 'speak')
+          && toolResult != null
+          && typeof toolResult === 'object'
+          && toolResult.delivered === 'current_conversation'
+
+        if (isLocalDelivery) {
+          // Same-conversation send/react/speak: remove the tool_call block
+          // so the user only sees the attachment, not the tool invocation.
+          if (callId) {
+            const idx = session.assistantMsg.blocks.findIndex(
+              (b) => b.type === 'tool_call' && (b as ToolCallBlock).toolCallId === callId,
+            )
+            if (idx >= 0)
+              session.assistantMsg.blocks.splice(idx, 1)
+          }
+          break
+        }
+
         let matched = false
         if (callId) {
           for (let i = 0; i < session.assistantMsg.blocks.length; i++) {
@@ -526,12 +605,7 @@ export const useChatStore = defineStore('chat', () => {
       case 'attachment_delta': {
         const items = event.attachments
         if (Array.isArray(items) && items.length > 0) {
-          const lastBlock = session.assistantMsg.blocks[session.assistantMsg.blocks.length - 1]
-          if (lastBlock && lastBlock.type === 'attachment') {
-            lastBlock.attachments.push(...items)
-          } else {
-            pushAssistantBlock(session, { type: 'attachment', attachments: [...items] })
-          }
+          session.deferredAttachments.push(...items)
         }
         break
       }
@@ -617,7 +691,7 @@ export const useChatStore = defineStore('chat', () => {
     const msgSessionId = (raw.session_id ?? '').trim()
     if (msgSessionId && sessionId.value && msgSessionId !== sessionId.value) return
     const platform = resolveMessagePlatform(raw)
-    if (platform === 'web') return
+    if (platform === 'local') return
     const mid = String(raw.id ?? '').trim()
     if (mid && hasMessageWithId(mid)) return
     const item = messageToChat(raw)
@@ -885,6 +959,7 @@ export const useChatStore = defineStore('chat', () => {
           assistantMsg,
           textBlockIdx: -1,
           thinkingBlockIdx: -1,
+          deferredAttachments: [],
           done: false,
           resolve,
           reject,

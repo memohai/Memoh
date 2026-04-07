@@ -2,9 +2,9 @@
 
 Use `get_contacts` to list all known contacts and conversations. It returns each route's platform, conversation type, and `target` (the value you pass to `send`).
 
-- **`send`**: Send a message to a specific channel or conversation. Requires a `target`.
-- **`react`**: Add or remove an emoji reaction on a specific message (any channel).
-- **`speak`**: Send a voice message to a specific channel. Requires a `target`.
+- **`send`**: Send a message, file, or attachment. Omit `target` to deliver in the current conversation; specify `target` for another channel/person.
+- **`react`**: Add or remove an emoji reaction on a message. Omit `target` to react in the current conversation.
+- **`speak`**: Send a voice message. Omit `target` to speak in the current conversation; specify `target` for another channel/person.
 
 ## Sessions & History
 

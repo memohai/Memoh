@@ -17,11 +17,60 @@ type SkillDetail struct {
 	Content     string
 }
 
+// StreamEventType identifies the kind of stream event emitted by tools.
+type StreamEventType string
+
+const (
+	StreamEventAttachment StreamEventType = "attachment"
+	StreamEventReaction   StreamEventType = "reaction"
+	StreamEventSpeech     StreamEventType = "speech"
+)
+
+// ToolStreamEvent is a side-effect event emitted by a tool targeting the
+// current conversation (e.g. inline attachment, reaction, or TTS speech).
+// The agent framework converts these into the appropriate wire-level events.
+type ToolStreamEvent struct {
+	Type        StreamEventType
+	Attachments []Attachment
+	Reactions   []Reaction
+	Speeches    []Speech
+}
+
+// Attachment describes a file reference emitted by a tool.
+type Attachment struct {
+	Type        string         `json:"type"`
+	Path        string         `json:"path,omitempty"`
+	URL         string         `json:"url,omitempty"`
+	Mime        string         `json:"mime,omitempty"`
+	Name        string         `json:"name,omitempty"`
+	ContentHash string         `json:"content_hash,omitempty"`
+	Size        int64          `json:"size,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// Reaction describes an emoji reaction emitted by a tool.
+type Reaction struct {
+	Emoji     string `json:"emoji"`
+	MessageID string `json:"message_id"`
+	Remove    bool   `json:"remove,omitempty"`
+}
+
+// Speech describes a TTS speech request emitted by a tool.
+type Speech struct {
+	Text string `json:"text"`
+}
+
+// StreamEmitter pushes a side-effect event into the current agent stream.
+// Nil when no stream is available (e.g. subagent or non-streaming contexts
+// where the caller collects events after generation).
+type StreamEmitter func(ToolStreamEvent)
+
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
 	BotID              string
 	ChatID             string
 	SessionID          string
+	SessionType        string
 	ChannelIdentityID  string
 	SessionToken       string //nolint:gosec // carries session credential material at runtime
 	CurrentPlatform    string
@@ -30,6 +79,23 @@ type SessionContext struct {
 	IsSubagent         bool
 	Skills             map[string]SkillDetail
 	TimezoneLocation   *time.Location
+	Emitter            StreamEmitter
+}
+
+// IsSameConversation reports whether the given platform+target pair refers to
+// the conversation that the agent is currently replying to.
+func (s SessionContext) IsSameConversation(platform, target string) bool {
+	if strings.TrimSpace(s.ReplyTarget) == "" {
+		return false
+	}
+	if platform == "" {
+		platform = strings.TrimSpace(s.CurrentPlatform)
+	}
+	if target == "" {
+		target = strings.TrimSpace(s.ReplyTarget)
+	}
+	return strings.EqualFold(platform, strings.TrimSpace(s.CurrentPlatform)) &&
+		target == strings.TrimSpace(s.ReplyTarget)
 }
 
 // FormatTime formats a time.Time using the session timezone (falls back to UTC).

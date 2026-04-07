@@ -1,7 +1,7 @@
 <template>
   <component
-    v-if="iconComponent"
     :is="iconComponent"
+    v-if="iconComponent"
     :size="size"
     v-bind="$attrs"
   />
@@ -11,7 +11,7 @@
     :width="size"
     :height="size"
     v-bind="$attrs"
-  />
+  >
   <slot v-else />
 </template>
 

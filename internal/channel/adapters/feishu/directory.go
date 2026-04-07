@@ -282,13 +282,6 @@ func feishuMemberToEntry(m *larkim.ListMember) channel.DirectoryEntry {
 	}
 }
 
-func ptrStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return strings.TrimSpace(*s)
-}
-
 func feishuAvatarURL(avatar *larkcontact.AvatarInfo) string {
 	if avatar == nil || avatar.Avatar72 == nil {
 		return ""

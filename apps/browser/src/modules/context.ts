@@ -2,7 +2,7 @@ import { Elysia } from 'elysia'
 import { storage } from '../storage'
 import { z } from 'zod'
 import { BrowserContextConfigModel } from '../models'
-import { getBrowser } from '../browser'
+import { getBrowser, getOrCreateBotBrowser } from '../browser'
 import { actionModule } from './action'
 
 export const contextModule = new Elysia({ prefix: '/context' })
@@ -22,10 +22,25 @@ export const contextModule = new Elysia({ prefix: '/context' })
   })
   .post(
     '/',
-    async ({ body }) => {
-      const { name, config, id } = body
+    async ({ body, set }) => {
+      const { name, config, id, bot_id } = body
       const core = config.core ?? 'chromium'
-      const browser = getBrowser(core)
+
+      // Reject duplicate context IDs to prevent orphaning live contexts
+      if (storage.has(id)) {
+        set.status = 409
+        return { error: `context with id "${id}" already exists` }
+      }
+
+      // Use per-bot isolated browser process if bot_id provided, otherwise shared fallback
+      let browser
+      if (bot_id) {
+        const botEntry = await getOrCreateBotBrowser(bot_id, core)
+        browser = botEntry.browser
+      } else {
+        browser = getBrowser(core)
+      }
+
       const context = await browser.newContext({
         viewport: config.viewport,
         userAgent: config.userAgent,
@@ -39,7 +54,7 @@ export const contextModule = new Elysia({ prefix: '/context' })
         ignoreHTTPSErrors: config.ignoreHTTPSErrors,
         proxy: config.proxy,
       })
-      storage.set(id, { id, name, core, context, config })
+      storage.set(id, { id, name, botId: bot_id, core, context, config })
       return { id, name, core, config }
     },
     {
@@ -47,6 +62,7 @@ export const contextModule = new Elysia({ prefix: '/context' })
         name: z.string().default(''),
         config: BrowserContextConfigModel.default({}),
         id: z.string().default(crypto.randomUUID()),
+        bot_id: z.string().optional(),
       }),
     },
   )
@@ -58,3 +74,35 @@ export const contextModule = new Elysia({ prefix: '/context' })
     }
     return { success: true }
   })
+
+  // Export storage state (cookies + localStorage) from a context
+  .get('/:id/storage-state', async ({ params, set }) => {
+    const entry = storage.get(params.id)
+    if (!entry) {
+      set.status = 404
+      return { error: 'context not found' }
+    }
+    const state = await entry.context.storageState()
+    return state
+  })
+
+  // Import cookies into an existing context
+  .post(
+    '/:id/storage-state',
+    async ({ params, body, set }) => {
+      const entry = storage.get(params.id)
+      if (!entry) {
+        set.status = 404
+        return { error: 'context not found' }
+      }
+      if (body.cookies && Array.isArray(body.cookies)) {
+        await entry.context.addCookies(body.cookies)
+      }
+      return { success: true }
+    },
+    {
+      body: z.object({
+        cookies: z.array(z.any()).optional(),
+      }),
+    },
+  )

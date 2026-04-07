@@ -26,6 +26,7 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -72,6 +73,7 @@ type Resolver struct {
 	eventPublisher    messageevent.Publisher
 	skillLoader       SkillLoader
 	assetLoader       gatewayAssetLoader
+	pipeline          *pipelinepkg.Pipeline
 	timeout           time.Duration
 	clockLocation     *time.Location
 	logger            *slog.Logger
@@ -131,6 +133,18 @@ func (r *Resolver) SetCompactionService(s *compaction.Service) {
 	r.compactionService = s
 }
 
+// SetPipeline configures the DCP pipeline for RC-based context assembly.
+// When set, resolve() will use RC from the pipeline instead of loading
+// history from bot_history_messages for sessions that have pipeline data.
+func (r *Resolver) SetPipeline(p *pipelinepkg.Pipeline) {
+	r.pipeline = p
+}
+
+// Pipeline returns the configured pipeline, or nil.
+func (r *Resolver) Pipeline() *pipelinepkg.Pipeline {
+	return r.pipeline
+}
+
 type usageInfo struct {
 	InputTokens  *int `json:"inputTokens"`
 	OutputTokens *int `json:"outputTokens"`
@@ -155,26 +169,21 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		return resolvedContext{}, errors.New("chat id is required")
 	}
 
-	botSettings, err := r.loadBotSettings(ctx, req.BotID)
+	runCfg, chatModel, provider, err := r.buildBaseRunConfig(ctx, baseRunConfigParams{
+		BotID:             req.BotID,
+		ChatID:            req.ChatID,
+		SessionID:         req.SessionID,
+		UserID:            req.UserID,
+		ChannelIdentityID: req.SourceChannelIdentityID,
+		CurrentPlatform:   req.CurrentChannel,
+		ReplyTarget:       req.ReplyTarget,
+		ConversationType:  req.ConversationType,
+		SessionToken:      req.ChatToken,
+		ReasoningEffort:   req.ReasoningEffort,
+	})
 	if err != nil {
 		return resolvedContext{}, err
 	}
-	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, req.BotID)
-	userTimezoneName, userClockLocation := r.resolveTimezone(ctx, req.BotID, req.UserID)
-
-	var chatSettings conversation.Settings
-	if r.conversationSvc != nil {
-		chatSettings, err = r.conversationSvc.GetSettings(ctx, req.ChatID)
-		if err != nil {
-			return resolvedContext{}, err
-		}
-	}
-
-	chatModel, provider, err := r.selectChatModel(ctx, req, botSettings, chatSettings)
-	if err != nil {
-		return resolvedContext{}, err
-	}
-	clientType := provider.ClientType
 
 	memoryMsg := r.loadMemoryContextMessage(ctx, req)
 	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
@@ -183,8 +192,21 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		memoryMsg = &pruned
 	}
 
+	// When the DCP pipeline has data for this session, build context from
+	// the rendered event stream (RC) + bot turn responses (TR) instead of
+	// loading raw history from bot_history_messages. The current inbound
+	// message is already in the RC, so it must not be appended again.
+	usePipeline := r.pipeline != nil && strings.TrimSpace(req.SessionID) != ""
+	if usePipeline {
+		if _, loaded := r.pipeline.GetIC(strings.TrimSpace(req.SessionID)); !loaded {
+			usePipeline = false
+		}
+	}
+
 	var messages []conversation.ModelMessage
-	if r.conversationSvc != nil {
+	if usePipeline {
+		messages = r.buildMessagesFromPipeline(ctx, req)
+	} else if r.conversationSvc != nil {
 		loaded, loadErr := r.loadMessages(ctx, req.ChatID, req.SessionID, defaultMaxContextMinutes)
 		if loadErr != nil {
 			return resolvedContext{}, loadErr
@@ -197,102 +219,38 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if memoryMsg != nil {
 		messages = append(messages, *memoryMsg)
 	}
-	messages = append(messages, reqMessages...)
+	if !usePipeline {
+		messages = append(messages, reqMessages...)
+	}
 	messages = sanitizeMessages(messages)
-	var agentSkills []agentpkg.SkillEntry
-	if r.skillLoader != nil {
-		entries, err := r.skillLoader.LoadSkills(ctx, req.BotID)
-		if err != nil {
-			r.logger.Warn("failed to load usable skills", slog.String("bot_id", req.BotID), slog.Any("error", err))
-		} else {
-			agentSkills = make([]agentpkg.SkillEntry, 0, len(entries))
-			for _, e := range entries {
-				skill, ok := normalizeGatewaySkill(e)
-				if !ok {
-					continue
-				}
-				agentSkills = append(agentSkills, skill)
-			}
-		}
-	}
-	if agentSkills == nil {
-		agentSkills = []agentpkg.SkillEntry{}
-	}
 
 	displayName := r.resolveDisplayName(ctx, req)
 	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)
-	headerifiedQuery := FormatUserHeader(
-		strings.TrimSpace(req.ExternalMessageID),
-		strings.TrimSpace(req.SourceChannelIdentityID),
-		displayName,
-		req.CurrentChannel,
-		strings.TrimSpace(req.ConversationType),
-		strings.TrimSpace(req.ConversationName),
-		extractAttachmentPaths(mergedAttachments),
-		time.Now().In(userClockLocation),
-		userTimezoneName,
-		req.Query,
-	)
-	inlineImages := extractNativeImageParts(mergedAttachments)
 
-	reasoningEffort := ""
-	if chatModel.HasCompatibility(models.CompatReasoning) {
-		if re := strings.TrimSpace(req.ReasoningEffort); re != "" {
-			reasoningEffort = re
-		} else if botSettings.ReasoningEnabled {
-			reasoningEffort = botSettings.ReasoningEffort
-		}
+	tz := runCfg.Identity.TimezoneLocation
+	if tz == nil {
+		tz = time.UTC
 	}
-
-	var reasoningConfig *models.ReasoningConfig
-	if reasoningEffort != "" {
-		reasoningConfig = &models.ReasoningConfig{
-			Enabled: true,
-			Effort:  reasoningEffort,
-		}
+	headerifiedQuery := FormatUserHeader(UserMessageHeaderInput{
+		MessageID:         strings.TrimSpace(req.ExternalMessageID),
+		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
+		DisplayName:       displayName,
+		Channel:           req.CurrentChannel,
+		ConversationType:  strings.TrimSpace(req.ConversationType),
+		ConversationName:  strings.TrimSpace(req.ConversationName),
+		Target:            strings.TrimSpace(req.ReplyTarget),
+		AttachmentPaths:   extractAttachmentPaths(mergedAttachments),
+		Time:              time.Now().In(tz),
+		Timezone:          runCfg.Identity.Timezone,
+	}, req.Query)
+	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
+	// When using the pipeline the user message is already in the RC;
+	// don't send it to the LLM again. headerifiedQuery is still kept
+	// for storeRound so the user message gets persisted.
+	if !usePipeline {
+		runCfg.Query = headerifiedQuery
 	}
-
-	authResolver := providers.NewService(nil, r.queries, "")
-	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
-	if err != nil {
-		return resolvedContext{}, fmt.Errorf("resolve provider credentials: %w", err)
-	}
-
-	modelCfg := models.SDKModelConfig{
-		ModelID:         chatModel.ModelID,
-		ClientType:      clientType,
-		APIKey:          creds.APIKey,
-		CodexAccountID:  creds.CodexAccountID,
-		BaseURL:         provider.BaseUrl,
-		ReasoningConfig: reasoningConfig,
-	}
-
-	sdkModel := models.NewSDKChatModel(modelCfg)
-	sdkMessages := modelMessagesToSDKMessages(nonNilModelMessages(messages))
-
-	runCfg := agentpkg.RunConfig{
-		Model:              sdkModel,
-		ReasoningEffort:    reasoningEffort,
-		Messages:           sdkMessages,
-		Query:              headerifiedQuery,
-		SupportsImageInput: chatModel.HasCompatibility(models.CompatVision),
-		SupportsToolCall:   chatModel.HasCompatibility(models.CompatToolCall),
-		InlineImages:       inlineImages,
-		Identity: agentpkg.SessionContext{
-			BotID:             req.BotID,
-			ChatID:            req.ChatID,
-			SessionID:         req.SessionID,
-			ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
-			CurrentPlatform:   req.CurrentChannel,
-			ReplyTarget:       strings.TrimSpace(req.ReplyTarget),
-			ConversationType:  strings.TrimSpace(req.ConversationType),
-			Timezone:          userTimezoneName,
-			TimezoneLocation:  userClockLocation,
-			SessionToken:      req.ChatToken,
-		},
-		Skills:        agentSkills,
-		LoopDetection: agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
-	}
+	runCfg.InlineImages = extractNativeImageParts(mergedAttachments)
 
 	var injectedRecords *[]conversation.InjectedMessageRecord
 	if req.InjectCh != nil {
@@ -336,6 +294,9 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
+	if req.RawQuery == "" {
+		req.RawQuery = strings.TrimSpace(req.Query)
+	}
 	req.Query = rc.query
 
 	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.Query)
@@ -362,6 +323,146 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 		Messages: outputMessages,
 		Model:    rc.model.ModelID,
 		Provider: rc.provider.ClientType,
+	}, nil
+}
+
+// baseRunConfigParams holds parameters for buildBaseRunConfig that differ
+// between chat and discuss callers.
+type baseRunConfigParams struct {
+	BotID             string
+	ChatID            string
+	SessionID         string
+	UserID            string
+	ChannelIdentityID string
+	CurrentPlatform   string
+	ReplyTarget       string
+	ConversationType  string
+	SessionToken      string //nolint:gosec // session credential material, not a hardcoded secret
+	SessionType       string
+	ReasoningEffort   string // caller-provided override (empty = use bot default)
+}
+
+// buildBaseRunConfig creates a RunConfig with model, credentials, skills,
+// identity and system prompt — everything except Messages/Query/InlineImages.
+// Both resolve() and ResolveRunConfig() delegate to this shared builder.
+func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams) (agentpkg.RunConfig, models.GetResponse, sqlc.LlmProvider, error) {
+	botSettings, err := r.loadBotSettings(ctx, p.BotID)
+	if err != nil {
+		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.LlmProvider{}, err
+	}
+	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, p.BotID)
+	userTimezoneName, userClockLocation := r.resolveTimezone(ctx, p.BotID, p.UserID)
+
+	chatID := p.ChatID
+	if chatID == "" {
+		chatID = p.BotID
+	}
+
+	req := conversation.ChatRequest{
+		BotID:          p.BotID,
+		ChatID:         chatID,
+		SessionID:      p.SessionID,
+		CurrentChannel: p.CurrentPlatform,
+	}
+
+	chatModel, provider, err := r.selectChatModel(ctx, req, botSettings, conversation.Settings{})
+	if err != nil {
+		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.LlmProvider{}, err
+	}
+
+	reasoningEffort := p.ReasoningEffort
+	if reasoningEffort == "" && chatModel.HasCompatibility(models.CompatReasoning) && botSettings.ReasoningEnabled {
+		reasoningEffort = botSettings.ReasoningEffort
+	}
+	var reasoningConfig *models.ReasoningConfig
+	if reasoningEffort != "" {
+		reasoningConfig = &models.ReasoningConfig{Enabled: true, Effort: reasoningEffort}
+	}
+
+	authResolver := providers.NewService(nil, r.queries, "")
+	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("resolve provider credentials: %w", err)
+	}
+
+	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
+		ModelID:         chatModel.ModelID,
+		ClientType:      provider.ClientType,
+		APIKey:          creds.APIKey,
+		CodexAccountID:  creds.CodexAccountID,
+		BaseURL:         provider.BaseUrl,
+		ReasoningConfig: reasoningConfig,
+	})
+
+	var agentSkills []agentpkg.SkillEntry
+	if r.skillLoader != nil {
+		entries, skillErr := r.skillLoader.LoadSkills(ctx, p.BotID)
+		if skillErr != nil {
+			r.logger.Warn("failed to load skills", slog.String("bot_id", p.BotID), slog.Any("error", skillErr))
+		} else {
+			for _, e := range entries {
+				if skill, ok := normalizeGatewaySkill(e); ok {
+					agentSkills = append(agentSkills, skill)
+				}
+			}
+		}
+	}
+	if agentSkills == nil {
+		agentSkills = []agentpkg.SkillEntry{}
+	}
+
+	cfg := agentpkg.RunConfig{
+		Model:              sdkModel,
+		ReasoningEffort:    reasoningEffort,
+		SessionType:        p.SessionType,
+		SupportsImageInput: chatModel.HasCompatibility(models.CompatVision),
+		SupportsToolCall:   chatModel.HasCompatibility(models.CompatToolCall),
+		Identity: agentpkg.SessionContext{
+			BotID:             p.BotID,
+			ChatID:            chatID,
+			SessionID:         p.SessionID,
+			ChannelIdentityID: strings.TrimSpace(p.ChannelIdentityID),
+			CurrentPlatform:   p.CurrentPlatform,
+			ReplyTarget:       strings.TrimSpace(p.ReplyTarget),
+			ConversationType:  strings.TrimSpace(p.ConversationType),
+			Timezone:          userTimezoneName,
+			TimezoneLocation:  userClockLocation,
+			SessionToken:      p.SessionToken,
+		},
+		Skills:        agentSkills,
+		LoopDetection: agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
+	}
+
+	return cfg, chatModel, provider, nil
+}
+
+// ResolveRunConfig builds a complete RunConfig (model, system prompt, tools,
+// identity) for a bot+session without loading messages or requiring a query.
+// The caller is responsible for filling RunConfig.Messages.
+// Used by the discuss driver to reuse the resolver's model/tools/prompt pipeline.
+func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (pipelinepkg.ResolveRunConfigResult, error) {
+	if strings.TrimSpace(botID) == "" {
+		return pipelinepkg.ResolveRunConfigResult{}, errors.New("bot id is required")
+	}
+
+	cfg, chatModel, _, err := r.buildBaseRunConfig(ctx, baseRunConfigParams{
+		BotID:             botID,
+		SessionID:         sessionID,
+		ChannelIdentityID: channelIdentityID,
+		CurrentPlatform:   currentPlatform,
+		ReplyTarget:       replyTarget,
+		ConversationType:  conversationType,
+		SessionToken:      chatToken,
+		SessionType:       "discuss",
+	})
+	if err != nil {
+		return pipelinepkg.ResolveRunConfigResult{}, err
+	}
+
+	cfg = r.prepareRunConfig(ctx, cfg)
+	return pipelinepkg.ResolveRunConfigResult{
+		RunConfig: cfg,
+		ModelID:   chatModel.ID,
 	}, nil
 }
 

@@ -103,6 +103,23 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 				return p.execObserve(ctx.Context, sess, inputAsMap(input))
 			},
 		},
+		{
+			Name:        "browser_remote_session",
+			Description: "Manage a remote native Playwright session for full browser automation. Use 'create' to get a WebSocket endpoint that a Python Playwright client can connect to with full API access (including HttpOnly cookies, storage state, route interception, etc). Use 'close' to terminate a session. Use 'status' to check a session.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"action":        map[string]any{"type": "string", "enum": []string{"create", "close", "status"}, "description": "The session action to perform"},
+					"session_id":    map[string]any{"type": "string", "description": "Session ID (required for close and status)"},
+					"session_token": map[string]any{"type": "string", "description": "Session token (required for close and status, returned by create)"},
+					"core":          map[string]any{"type": "string", "enum": []string{"chromium", "firefox"}, "description": "Browser core to use (for create, default: chromium)"},
+				},
+				"required": []string{"action"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execRemoteSession(ctx.Context, sess, inputAsMap(input))
+			},
+		},
 	}, nil
 }
 
@@ -119,7 +136,7 @@ func (p *BrowserProvider) resolveContext(ctx context.Context, botID string) (str
 	if err != nil {
 		return "", browsercontexts.BrowserContext{}, fmt.Errorf("failed to load browser context config: %s", err.Error())
 	}
-	if err := p.ensureContext(ctx, browserCtxID, bcConfig); err != nil {
+	if err := p.ensureContext(ctx, botID, browserCtxID, bcConfig); err != nil {
 		return "", browsercontexts.BrowserContext{}, fmt.Errorf("failed to ensure browser context: %s", err.Error())
 	}
 	return browserCtxID, bcConfig, nil
@@ -185,7 +202,7 @@ func (p *BrowserProvider) execObserve(ctx context.Context, session SessionContex
 	return p.doGatewayAction(ctx, botID, contextID, payload)
 }
 
-func (p *BrowserProvider) ensureContext(ctx context.Context, contextID string, bc browsercontexts.BrowserContext) error {
+func (p *BrowserProvider) ensureContext(ctx context.Context, botID, contextID string, bc browsercontexts.BrowserContext) error {
 	existsURL := fmt.Sprintf("%s/context/%s/exists", p.gatewayBaseURL, contextID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, existsURL, nil)
 	if err != nil {
@@ -206,7 +223,7 @@ func (p *BrowserProvider) ensureContext(ctx context.Context, contextID string, b
 	if existsResp.Exists {
 		return nil
 	}
-	createPayload, _ := json.Marshal(map[string]any{"id": contextID, "name": bc.Name, "config": bc.Config})
+	createPayload, _ := json.Marshal(map[string]any{"id": contextID, "name": bc.Name, "config": bc.Config, "bot_id": botID})
 	createURL := fmt.Sprintf("%s/context", p.gatewayBaseURL)
 	createReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(createPayload))
 	if err != nil {
@@ -299,4 +316,120 @@ func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base
 			{"type": "image", "data": base64Data, "mimeType": mimeType},
 		},
 	}
+}
+
+func (p *BrowserProvider) execRemoteSession(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	botID := strings.TrimSpace(session.BotID)
+	if botID == "" {
+		return nil, errors.New("bot_id is required")
+	}
+	// Same access gate as browser_action/browser_observe
+	_, bcConfig, err := p.resolveContext(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+
+	action := StringArg(args, "action")
+	switch action {
+	case "create":
+		return p.createRemoteSession(ctx, botID, bcConfig, args)
+	case "close":
+		sessionID := StringArg(args, "session_id")
+		sessionToken := StringArg(args, "session_token")
+		if sessionID == "" {
+			return nil, errors.New("session_id is required for close")
+		}
+		if sessionToken == "" {
+			return nil, errors.New("session_token is required for close")
+		}
+		return p.closeRemoteSession(ctx, sessionID, sessionToken)
+	case "status":
+		sessionID := StringArg(args, "session_id")
+		sessionToken := StringArg(args, "session_token")
+		if sessionID == "" {
+			return nil, errors.New("session_id is required for status")
+		}
+		if sessionToken == "" {
+			return nil, errors.New("session_token is required for status")
+		}
+		return p.getRemoteSessionStatus(ctx, sessionID, sessionToken)
+	default:
+		return nil, fmt.Errorf("unknown session action: %s", action)
+	}
+}
+
+func (p *BrowserProvider) createRemoteSession(ctx context.Context, botID string, bcConfig browsercontexts.BrowserContext, args map[string]any) (any, error) {
+	core := StringArg(args, "core")
+	if core == "" {
+		core = "chromium"
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"bot_id":         botID,
+		"core":           core,
+		"context_config": bcConfig.Config,
+	})
+	url := fmt.Sprintf("%s/session", p.gatewayBaseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.httpClient.Do(req) //nolint:gosec
+	if err != nil {
+		return nil, fmt.Errorf("failed to create remote session: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("create session failed (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, errors.New("invalid session response")
+	}
+	return result, nil
+}
+
+func (p *BrowserProvider) closeRemoteSession(ctx context.Context, sessionID, sessionToken string) (any, error) {
+	reqURL := fmt.Sprintf("%s/session/%s?token=%s", p.gatewayBaseURL, sessionID, sessionToken)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := p.httpClient.Do(req) //nolint:gosec
+	if err != nil {
+		return nil, fmt.Errorf("failed to close remote session: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("close session failed (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, errors.New("invalid session response")
+	}
+	return result, nil
+}
+
+func (p *BrowserProvider) getRemoteSessionStatus(ctx context.Context, sessionID, sessionToken string) (any, error) {
+	reqURL := fmt.Sprintf("%s/session/%s?token=%s", p.gatewayBaseURL, sessionID, sessionToken)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := p.httpClient.Do(req) //nolint:gosec
+	if err != nil {
+		return nil, fmt.Errorf("failed to get remote session status: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("get session status failed (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, errors.New("invalid session response")
+	}
+	return result, nil
 }

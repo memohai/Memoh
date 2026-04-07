@@ -23,9 +23,22 @@ import (
 
 const agentReadMediaTestBufSize = 1 << 20
 
+// agentReadMediaContainerService implements both ReadFile and ReadRaw so
+// that the merged read tool (ContainerProvider) can detect binary files
+// and then delegate to ReadImageFromContainer.
 type agentReadMediaContainerService struct {
 	pb.UnimplementedContainerServiceServer
 	files map[string][]byte
+}
+
+func (s *agentReadMediaContainerService) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
+	data, ok := s.files[req.GetPath()]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "not found")
+	}
+	_ = data
+	// All files in this test fixture are images → binary.
+	return &pb.ReadFileResponse{Binary: true}, nil
 }
 
 func (s *agentReadMediaContainerService) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_ReadRawServer) error {
@@ -172,7 +185,7 @@ func TestAgentGenerateReadMediaInjectsImageIntoNextStep(t *testing.T) {
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-1",
-						ToolName:   "read_media",
+						ToolName:   "read",
 						Input:      map[string]any{"path": "/data/images/demo.png"},
 					}},
 				}, nil
@@ -235,11 +248,15 @@ func TestAgentGenerateReadMediaInjectsImageIntoNextStep(t *testing.T) {
 		},
 	}
 
+	// ContainerProvider normalizes paths by stripping the workdir prefix,
+	// so the mock files map must use the normalized (relative) path.
+	bp := newAgentReadMediaBridgeProvider(t, map[string][]byte{
+		"images/demo.png": pngBytes,
+	})
+
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		agenttools.NewReadMediaProvider(nil, newAgentReadMediaBridgeProvider(t, map[string][]byte{
-			"/data/images/demo.png": pngBytes,
-		}), "/data"),
+		agenttools.NewContainerProvider(nil, bp, "/data"),
 	})
 
 	result, err := a.Generate(context.Background(), RunConfig{
@@ -283,7 +300,7 @@ func TestAgentGenerateReadMediaInjectsAnthropicSafeImageIntoNextStep(t *testing.
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-1",
-						ToolName:   "read_media",
+						ToolName:   "read",
 						Input:      map[string]any{"path": "/data/images/demo.png"},
 					}},
 				}, nil
@@ -311,11 +328,15 @@ func TestAgentGenerateReadMediaInjectsAnthropicSafeImageIntoNextStep(t *testing.
 		},
 	}
 
+	// ContainerProvider normalizes paths by stripping the workdir prefix,
+	// so the mock files map must use the normalized (relative) path.
+	bp := newAgentReadMediaBridgeProvider(t, map[string][]byte{
+		"images/demo.png": pngBytes,
+	})
+
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		agenttools.NewReadMediaProvider(nil, newAgentReadMediaBridgeProvider(t, map[string][]byte{
-			"/data/images/demo.png": pngBytes,
-		}), "/data"),
+		agenttools.NewContainerProvider(nil, bp, "/data"),
 	})
 
 	_, err := a.Generate(context.Background(), RunConfig{
@@ -345,7 +366,7 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-1",
-						ToolName:   "read_media",
+						ToolName:   "read",
 						Input:      map[string]any{"path": "/data/images/demo.png"},
 					}},
 				}, nil
@@ -357,11 +378,15 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 		},
 	}
 
+	// ContainerProvider normalizes paths by stripping the workdir prefix,
+	// so the mock files map must use the normalized (relative) path.
+	bp := newAgentReadMediaBridgeProvider(t, map[string][]byte{
+		"images/demo.png": pngBytes,
+	})
+
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		agenttools.NewReadMediaProvider(nil, newAgentReadMediaBridgeProvider(t, map[string][]byte{
-			"/data/images/demo.png": pngBytes,
-		}), "/data"),
+		agenttools.NewContainerProvider(nil, bp, "/data"),
 	})
 
 	var terminal StreamEvent

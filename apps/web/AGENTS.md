@@ -386,13 +386,13 @@ Stores use Composition API style (`defineStore(() => { ... })`), with persistenc
 Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket**.
 
 #### SSE Streaming
-- **Endpoints**: `/bots/{bot_id}/web/stream` (send + stream), `/messages/events` (real-time message updates)
+- **Endpoints**: `/bots/{bot_id}/local/stream` (send + stream), `/messages/events` (real-time message updates)
 - **Parsing**: `composables/api/useChat.sse.ts` reads `ReadableStream<Uint8Array>` and parses SSE `data:` lines
 - **Events**: `text_delta`, `reasoning_delta`, `tool_call_start/end`, `attachment_delta`, `processing_completed/failed`
 - **Retry**: `useRetryingStream` composable provides exponential backoff for reconnection
 
 #### WebSocket
-- **Endpoint**: `/bots/{bot_id}/web/ws` (with token query param)
+- **Endpoint**: `/bots/{bot_id}/local/ws` (with token query param)
 - **Implementation**: `composables/api/useChat.ws.ts` wraps native `WebSocket` with send, abort, close, and auto-reconnect
 - **State**: `store/chat-list.ts` processes streaming events from either transport into reactive message blocks in real-time
 - **Abort**: Stream cancellation via `AbortSignal` (SSE) or close message (WS)

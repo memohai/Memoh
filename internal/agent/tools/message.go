@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/messaging"
 )
 
@@ -37,13 +39,13 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 	if p.exec.CanSend() {
 		tools = append(tools, sdk.Tool{
 			Name:        "send",
-			Description: "Send a message to a DIFFERENT channel or person — NOT for replying to the current conversation. Use this only for cross-channel messaging or forwarding.",
+			Description: "Send a message, file, or attachment. When target is omitted, delivers to the current conversation as an inline attachment/message. When target is specified, sends to that channel/person.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"bot_id":      map[string]any{"type": "string", "description": "Bot ID, optional and defaults to current bot"},
-					"platform":    map[string]any{"type": "string", "description": "Channel platform name"},
-					"target":      map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Use get_contacts to find available targets."},
+					"platform":    map[string]any{"type": "string", "description": "Channel platform name. Defaults to current session platform."},
+					"target":      map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to send in the current conversation. Use get_contacts to find targets for other conversations."},
 					"text":        map[string]any{"type": "string", "description": "Message text shortcut when message object is omitted"},
 					"reply_to":    map[string]any{"type": "string", "description": "Message ID to reply to. The reply will reference this message on the platform."},
 					"attachments": map[string]any{"type": "array", "description": "File paths or URLs to attach.", "items": map[string]any{"type": "string"}},
@@ -59,7 +61,7 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 	if p.exec.CanReact() {
 		tools = append(tools, sdk.Tool{
 			Name:        "react",
-			Description: "Add or remove an emoji reaction on a channel message",
+			Description: "Add or remove an emoji reaction on a message. When target/platform are omitted, reacts in the current conversation.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -85,13 +87,102 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	// Discuss mode: same-conversation sends must go through the channel
+	// adapter directly — there is no active stream to emit events into.
+	if result.Local && session.SessionType == "discuss" {
+		sendResult, err := p.exec.SendDirect(ctx, toMessagingSession(session), result.Target, args)
+		if err != nil {
+			return nil, err
+		}
+		resp := map[string]any{
+			"ok": true, "bot_id": sendResult.BotID, "platform": sendResult.Platform, "target": sendResult.Target,
+			"delivered": "current_conversation",
+		}
+		if sendResult.MessageID != "" {
+			resp["message_id"] = sendResult.MessageID
+		}
+		return resp, nil
+	}
+	if result.Local && session.Emitter != nil {
+		atts := channelAttachmentsToToolAttachments(result.LocalAttachments)
+		if len(atts) > 0 {
+			session.Emitter(ToolStreamEvent{
+				Type:        StreamEventAttachment,
+				Attachments: atts,
+			})
+		}
+		resp := map[string]any{
+			"ok":          true,
+			"delivered":   "current_conversation",
+			"attachments": len(atts),
+		}
+		if result.MessageID != "" {
+			resp["message_id"] = result.MessageID
+		}
+		return resp, nil
+	}
+	resp := map[string]any{
 		"ok": true, "bot_id": result.BotID, "platform": result.Platform, "target": result.Target,
-		"instruction": "Message delivered successfully. You have completed your response. Please STOP now and do not call any more tools.",
-	}, nil
+	}
+	if result.MessageID != "" {
+		resp["message_id"] = result.MessageID
+	}
+	return resp, nil
+}
+
+func channelAttachmentsToToolAttachments(atts []channel.Attachment) []Attachment {
+	if len(atts) == 0 {
+		return nil
+	}
+	result := make([]Attachment, 0, len(atts))
+	for _, a := range atts {
+		result = append(result, Attachment{
+			Type:        string(a.Type),
+			URL:         a.URL,
+			Mime:        a.Mime,
+			Name:        a.Name,
+			ContentHash: a.ContentHash,
+			Size:        a.Size,
+			Metadata:    a.Metadata,
+		})
+	}
+	return result
 }
 
 func (p *MessageProvider) execReact(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	// Check same-conversation before delegating to executor.
+	platform := FirstStringArg(args, "platform")
+	if platform == "" {
+		platform = strings.TrimSpace(session.CurrentPlatform)
+	}
+	target := FirstStringArg(args, "target")
+	if target == "" {
+		target = strings.TrimSpace(session.ReplyTarget)
+	}
+	if session.IsSameConversation(platform, target) && session.Emitter != nil {
+		messageID := FirstStringArg(args, "message_id")
+		emoji := FirstStringArg(args, "emoji")
+		remove, _, _ := BoolArg(args, "remove")
+		if messageID == "" {
+			return nil, nil
+		}
+		session.Emitter(ToolStreamEvent{
+			Type: StreamEventReaction,
+			Reactions: []Reaction{{
+				Emoji:     emoji,
+				MessageID: messageID,
+				Remove:    remove,
+			}},
+		})
+		action := "added"
+		if remove {
+			action = "removed"
+		}
+		return map[string]any{
+			"ok": true, "emoji": emoji, "action": action,
+			"delivered": "current_conversation",
+		}, nil
+	}
 	result, err := p.exec.React(ctx, toMessagingSession(session), args)
 	if err != nil {
 		return nil, err

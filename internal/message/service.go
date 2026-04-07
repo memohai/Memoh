@@ -62,6 +62,10 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	if err != nil {
 		return Message{}, fmt.Errorf("invalid model id: %w", err)
 	}
+	pgEventID, err := parseOptionalUUID(input.EventID)
+	if err != nil {
+		return Message{}, fmt.Errorf("invalid event id: %w", err)
+	}
 
 	metaBytes, err := json.Marshal(nonNilMap(input.Metadata))
 	if err != nil {
@@ -85,6 +89,8 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		Metadata:                metaBytes,
 		Usage:                   input.Usage,
 		ModelID:                 pgModelID,
+		EventID:                 pgEventID,
+		DisplayText:             toPgText(input.DisplayText),
 	})
 	if err != nil {
 		return Message{}, err
@@ -389,6 +395,8 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -417,6 +425,8 @@ func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -437,6 +447,8 @@ func toMessageFromSessionListRow(row sqlc.ListMessagesBySessionRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -457,6 +469,8 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -477,6 +491,8 @@ func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Mess
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -497,6 +513,8 @@ func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 	if row.CompactID.Valid {
@@ -521,6 +539,8 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 	if row.CompactID.Valid {
@@ -545,6 +565,8 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -565,6 +587,8 @@ func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Me
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -585,6 +609,8 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -605,6 +631,8 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.EventID,
+		row.DisplayText,
 		row.CreatedAt,
 	)
 }
@@ -624,9 +652,11 @@ func toMessageFields(
 	content []byte,
 	metadata []byte,
 	usage []byte,
+	eventID pgtype.UUID,
+	displayText pgtype.Text,
 	createdAt pgtype.Timestamptz,
 ) Message {
-	return Message{
+	m := Message{
 		ID:                      id.String(),
 		BotID:                   botID.String(),
 		SessionID:               sessionID.String(),
@@ -641,8 +671,13 @@ func toMessageFields(
 		Content:                 json.RawMessage(content),
 		Metadata:                parseJSONMap(metadata),
 		Usage:                   json.RawMessage(usage),
+		DisplayContent:          dbpkg.TextToString(displayText),
 		CreatedAt:               createdAt.Time,
 	}
+	if eventID.Valid {
+		m.EventID = eventID.String()
+	}
+	return m
 }
 
 func toMessagesFromList(rows []sqlc.ListMessagesRow) []Message {

@@ -560,7 +560,7 @@ const queryCache = useQueryCache()
 
 // ---- constants ----
 
-const commonChannels = ['discord', 'feishu', 'qq', 'telegram', 'wecom', 'web', 'cli']
+const commonChannels = ['discord', 'feishu', 'qq', 'telegram', 'wecom', 'local']
 
 
 const subjectKinds = computed(() => [

@@ -31,10 +31,9 @@ import (
 const Type channel.ChannelType = "matrix"
 
 const (
-	matrixDefaultTimeout   = 30 * time.Second
-	matrixEditThrottle     = 1200 * time.Millisecond
-	matrixRoutingStateKey  = "_matrix"
-	matrixQuotedTextMaxLen = 200
+	matrixDefaultTimeout  = 30 * time.Second
+	matrixEditThrottle    = 1200 * time.Millisecond
+	matrixRoutingStateKey = "_matrix"
 )
 
 type assetOpener interface {
@@ -626,6 +625,7 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 	}
 	rawText := body
 	isReplyToBot := false
+	var replySender, replyPreview string
 	if replyTo != "" {
 		repliedEvent, err := a.fetchRoomEvent(ctx, parsed, evt.RoomID, replyTo)
 		if err != nil {
@@ -638,17 +638,20 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 				)
 			}
 		} else {
-			if quotedText := buildMatrixQuotedText(repliedEvent); quotedText != "" {
-				if body != "" {
-					body = quotedText + "\n" + body
-				} else {
-					body = quotedText
-				}
-			}
 			if quotedAttachments := matrixQuotedAttachments(repliedEvent); len(quotedAttachments) > 0 {
 				attachments = append(attachments, quotedAttachments...)
 			}
 			isReplyToBot = strings.EqualFold(strings.TrimSpace(repliedEvent.Sender), parsed.UserID)
+			replySender = matrixDisplayName(repliedEvent)
+			preview, _ := extractMatrixInboundContent(repliedEvent.Content)
+			preview = strings.TrimSpace(preview)
+			if preview == "" {
+				preview = strings.TrimSpace(channel.ReadString(repliedEvent.Content, "body"))
+			}
+			if len([]rune(preview)) > 200 {
+				preview = string([]rune(preview)[:200]) + "..."
+			}
+			replyPreview = preview
 		}
 	}
 	conversationType := a.resolveConversationType(ctx, cfg.ID, parsed, evt.RoomID)
@@ -691,7 +694,12 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 		},
 	}
 	if replyTo != "" {
-		msg.Message.Reply = &channel.ReplyRef{Target: evt.RoomID, MessageID: replyTo}
+		msg.Message.Reply = &channel.ReplyRef{
+			Target:    evt.RoomID,
+			MessageID: replyTo,
+			Sender:    replySender,
+			Preview:   replyPreview,
+		}
 	}
 	if a.logger != nil {
 		a.logger.Info("inbound received",
@@ -1035,32 +1043,6 @@ func matrixAttachmentType(msgType string) channel.AttachmentType {
 	default:
 		return channel.AttachmentFile
 	}
-}
-
-func buildMatrixQuotedText(replyTo matrixEvent) string {
-	senderName := matrixDisplayName(replyTo)
-	text, attachments := extractMatrixInboundContent(replyTo.Content)
-	text = strings.TrimSpace(text)
-	if text == "" && len(attachments) > 0 {
-		types := make([]string, 0, len(attachments))
-		for _, att := range attachments {
-			types = append(types, string(att.Type))
-		}
-		text = "[" + strings.Join(types, ", ") + "]"
-	}
-	if text == "" {
-		text = strings.TrimSpace(channel.ReadString(replyTo.Content, "body"))
-	}
-	if text == "" {
-		return ""
-	}
-	if len([]rune(text)) > matrixQuotedTextMaxLen {
-		text = string([]rune(text)[:matrixQuotedTextMaxLen]) + "..."
-	}
-	if senderName != "" {
-		return fmt.Sprintf("[Reply to %s: %s]", senderName, text)
-	}
-	return fmt.Sprintf("[Reply to: %s]", text)
 }
 
 func matrixQuotedAttachments(replyTo matrixEvent) []channel.Attachment {
