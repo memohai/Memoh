@@ -1,8 +1,8 @@
 -- 0041_provider_model_refactor
 -- Move client_type to llm_providers, add icon, replace model columns with config JSONB.
 
--- 1. Add client_type and icon to llm_providers
-ALTER TABLE llm_providers
+-- 1. Add client_type and icon to llm_providers (IF EXISTS for fresh-schema compat)
+ALTER TABLE IF EXISTS llm_providers
   ADD COLUMN IF NOT EXISTS client_type TEXT NOT NULL DEFAULT 'openai-completions',
   ADD COLUMN IF NOT EXISTS icon TEXT;
 

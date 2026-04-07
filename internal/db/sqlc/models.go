@@ -298,6 +298,20 @@ type LifecycleEvent struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type LlmProviderOauthToken struct {
+	ID               pgtype.UUID        `json:"id"`
+	LlmProviderID    pgtype.UUID        `json:"llm_provider_id"`
+	AccessToken      string             `json:"access_token"`
+	RefreshToken     string             `json:"refresh_token"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	Scope            string             `json:"scope"`
+	TokenType        string             `json:"token_type"`
+	State            string             `json:"state"`
+	PkceCodeVerifier string             `json:"pkce_code_verifier"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type McpConnection struct {
 	ID            pgtype.UUID        `json:"id"`
 	BotID         pgtype.UUID        `json:"bot_id"`
@@ -366,16 +380,14 @@ type MemoryProvider struct {
 }
 
 type Model struct {
-	ID                pgtype.UUID        `json:"id"`
-	ModelID           string             `json:"model_id"`
-	Name              pgtype.Text        `json:"name"`
-	ProviderID        pgtype.UUID        `json:"provider_id"`
-	Type              string             `json:"type"`
-	Config            []byte             `json:"config"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	InputModalities   []string           `json:"input_modalities"`
-	SupportsReasoning bool               `json:"supports_reasoning"`
+	ID         pgtype.UUID        `json:"id"`
+	ModelID    string             `json:"model_id"`
+	Name       pgtype.Text        `json:"name"`
+	ProviderID pgtype.UUID        `json:"provider_id"`
+	Type       string             `json:"type"`
+	Config     []byte             `json:"config"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ModelVariant struct {
@@ -470,6 +482,26 @@ type StorageProvider struct {
 	Config    []byte             `json:"config"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TtsModel struct {
+	ID            pgtype.UUID        `json:"id"`
+	ModelID       string             `json:"model_id"`
+	Name          pgtype.Text        `json:"name"`
+	TtsProviderID pgtype.UUID        `json:"tts_provider_id"`
+	Config        []byte             `json:"config"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TtsProvider struct {
+	ID        pgtype.UUID        `json:"id"`
+	Name      string             `json:"name"`
+	Provider  string             `json:"provider"`
+	Config    []byte             `json:"config"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	Enable    bool               `json:"enable"`
 }
 
 type User struct {
