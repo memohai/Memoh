@@ -15,6 +15,7 @@ var promptsFS embed.FS
 
 var (
 	systemChatTmpl      string
+	systemDiscussTmpl   string
 	systemHeartbeatTmpl string
 	systemScheduleTmpl  string
 	systemSubagentTmpl  string
@@ -31,6 +32,7 @@ var includeRe = regexp.MustCompile(`\{\{include:(\w+)\}\}`)
 
 func init() {
 	systemChatTmpl = mustReadPrompt("prompts/system_chat.md")
+	systemDiscussTmpl = mustReadPrompt("prompts/system_discuss.md")
 	systemHeartbeatTmpl = mustReadPrompt("prompts/system_heartbeat.md")
 	systemScheduleTmpl = mustReadPrompt("prompts/system_schedule.md")
 	systemSubagentTmpl = mustReadPrompt("prompts/system_subagent.md")
@@ -48,6 +50,7 @@ func init() {
 	}
 
 	systemChatTmpl = resolveIncludes(systemChatTmpl)
+	systemDiscussTmpl = resolveIncludes(systemDiscussTmpl)
 	systemHeartbeatTmpl = resolveIncludes(systemHeartbeatTmpl)
 	systemScheduleTmpl = resolveIncludes(systemScheduleTmpl)
 	systemSubagentTmpl = resolveIncludes(systemSubagentTmpl)
@@ -87,6 +90,8 @@ func render(tmpl string, vars map[string]string) string {
 
 func selectSystemTemplate(sessionType string) string {
 	switch sessionType {
+	case "discuss":
+		return systemDiscussTmpl
 	case "heartbeat":
 		return systemHeartbeatTmpl
 	case "schedule":

@@ -39,7 +39,7 @@ type localTtsModelResolver interface {
 	ResolveTtsModelID(ctx context.Context, botID string) (string, error)
 }
 
-// LocalChannelHandler handles local channel (CLI/Web) routes backed by bot history.
+// LocalChannelHandler handles local channel routes (WebUI / API) backed by bot history.
 type LocalChannelHandler struct {
 	channelType      channel.ChannelType
 	channelManager   *channel.Manager
@@ -104,8 +104,7 @@ func (h *LocalChannelHandler) Register(e *echo.Echo) {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/web/stream [get]
-// @Router /bots/{bot_id}/cli/stream [get].
+// @Router /bots/{bot_id}/local/stream [get].
 func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -185,8 +184,7 @@ type LocalChannelMessageRequest struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/web/messages [post]
-// @Router /bots/{bot_id}/cli/messages [post].
+// @Router /bots/{bot_id}/local/messages [post].
 func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -332,8 +330,7 @@ func extractRawBearerToken(c echo.Context) string {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/web/ws [get]
-// @Router /bots/{bot_id}/cli/ws [get].
+// @Router /bots/{bot_id}/local/ws [get].
 func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {

@@ -2216,116 +2216,6 @@ export type PutBotsByBotIdAclRulesByRuleIdResponses = {
 
 export type PutBotsByBotIdAclRulesByRuleIdResponse = PutBotsByBotIdAclRulesByRuleIdResponses[keyof PutBotsByBotIdAclRulesByRuleIdResponses];
 
-export type PostBotsByBotIdCliMessagesData = {
-    /**
-     * Message payload
-     */
-    body: HandlersLocalChannelMessageRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/cli/messages';
-};
-
-export type PostBotsByBotIdCliMessagesErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdCliMessagesError = PostBotsByBotIdCliMessagesErrors[keyof PostBotsByBotIdCliMessagesErrors];
-
-export type PostBotsByBotIdCliMessagesResponses = {
-    /**
-     * OK
-     */
-    200: {
-        [key: string]: string;
-    };
-};
-
-export type PostBotsByBotIdCliMessagesResponse = PostBotsByBotIdCliMessagesResponses[keyof PostBotsByBotIdCliMessagesResponses];
-
-export type GetBotsByBotIdCliStreamData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/cli/stream';
-};
-
-export type GetBotsByBotIdCliStreamErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdCliStreamError = GetBotsByBotIdCliStreamErrors[keyof GetBotsByBotIdCliStreamErrors];
-
-export type GetBotsByBotIdCliStreamResponses = {
-    /**
-     * SSE stream
-     */
-    200: string;
-};
-
-export type GetBotsByBotIdCliStreamResponse = GetBotsByBotIdCliStreamResponses[keyof GetBotsByBotIdCliStreamResponses];
-
-export type GetBotsByBotIdCliWsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/cli/ws';
-};
-
-export type GetBotsByBotIdCliWsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdCliWsError = GetBotsByBotIdCliWsErrors[keyof GetBotsByBotIdCliWsErrors];
-
 export type DeleteBotsByBotIdCompactionLogsData = {
     body?: never;
     path: {
@@ -3671,6 +3561,116 @@ export type GetBotsByBotIdHeartbeatLogsResponses = {
 };
 
 export type GetBotsByBotIdHeartbeatLogsResponse = GetBotsByBotIdHeartbeatLogsResponses[keyof GetBotsByBotIdHeartbeatLogsResponses];
+
+export type PostBotsByBotIdLocalMessagesData = {
+    /**
+     * Message payload
+     */
+    body: HandlersLocalChannelMessageRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/local/messages';
+};
+
+export type PostBotsByBotIdLocalMessagesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdLocalMessagesError = PostBotsByBotIdLocalMessagesErrors[keyof PostBotsByBotIdLocalMessagesErrors];
+
+export type PostBotsByBotIdLocalMessagesResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type PostBotsByBotIdLocalMessagesResponse = PostBotsByBotIdLocalMessagesResponses[keyof PostBotsByBotIdLocalMessagesResponses];
+
+export type GetBotsByBotIdLocalStreamData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/local/stream';
+};
+
+export type GetBotsByBotIdLocalStreamErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdLocalStreamError = GetBotsByBotIdLocalStreamErrors[keyof GetBotsByBotIdLocalStreamErrors];
+
+export type GetBotsByBotIdLocalStreamResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetBotsByBotIdLocalStreamResponse = GetBotsByBotIdLocalStreamResponses[keyof GetBotsByBotIdLocalStreamResponses];
+
+export type GetBotsByBotIdLocalWsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/local/ws';
+};
+
+export type GetBotsByBotIdLocalWsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdLocalWsError = GetBotsByBotIdLocalWsErrors[keyof GetBotsByBotIdLocalWsErrors];
 
 export type GetBotsByBotIdMcpData = {
     body?: never;
@@ -5642,116 +5642,6 @@ export type PostBotsByBotIdTtsSynthesizeResponses = {
 };
 
 export type PostBotsByBotIdTtsSynthesizeResponse = PostBotsByBotIdTtsSynthesizeResponses[keyof PostBotsByBotIdTtsSynthesizeResponses];
-
-export type PostBotsByBotIdWebMessagesData = {
-    /**
-     * Message payload
-     */
-    body: HandlersLocalChannelMessageRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/web/messages';
-};
-
-export type PostBotsByBotIdWebMessagesErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdWebMessagesError = PostBotsByBotIdWebMessagesErrors[keyof PostBotsByBotIdWebMessagesErrors];
-
-export type PostBotsByBotIdWebMessagesResponses = {
-    /**
-     * OK
-     */
-    200: {
-        [key: string]: string;
-    };
-};
-
-export type PostBotsByBotIdWebMessagesResponse = PostBotsByBotIdWebMessagesResponses[keyof PostBotsByBotIdWebMessagesResponses];
-
-export type GetBotsByBotIdWebStreamData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/web/stream';
-};
-
-export type GetBotsByBotIdWebStreamErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdWebStreamError = GetBotsByBotIdWebStreamErrors[keyof GetBotsByBotIdWebStreamErrors];
-
-export type GetBotsByBotIdWebStreamResponses = {
-    /**
-     * SSE stream
-     */
-    200: string;
-};
-
-export type GetBotsByBotIdWebStreamResponse = GetBotsByBotIdWebStreamResponses[keyof GetBotsByBotIdWebStreamResponses];
-
-export type GetBotsByBotIdWebWsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/web/ws';
-};
-
-export type GetBotsByBotIdWebWsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
 
 export type DeleteBotsByIdData = {
     body?: never;

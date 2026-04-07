@@ -32,6 +32,7 @@ type Bot struct {
 	CompactionModelID   pgtype.UUID        `json:"compaction_model_id"`
 	TitleModelID        pgtype.UUID        `json:"title_model_id"`
 	ImageModelID        pgtype.UUID        `json:"image_model_id"`
+	DiscussProbeModelID pgtype.UUID        `json:"discuss_probe_model_id"`
 	TtsModelID          pgtype.UUID        `json:"tts_model_id"`
 	BrowserContextID    pgtype.UUID        `json:"browser_context_id"`
 	Metadata            []byte             `json:"metadata"`
@@ -130,6 +131,8 @@ type BotHistoryMessage struct {
 	Usage                   []byte             `json:"usage"`
 	ModelID                 pgtype.UUID        `json:"model_id"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -170,6 +173,18 @@ type BotSession struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type BotSessionEvent struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	EventKind               string             `json:"event_kind"`
+	EventData               []byte             `json:"event_data"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	ReceivedAtMs            int64              `json:"received_at_ms"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
 type BotStorageBinding struct {

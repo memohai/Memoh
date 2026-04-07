@@ -197,6 +197,7 @@
     "sessionTypeHeartbeat": "心跳",
     "sessionTypeSchedule": "定时任务",
     "sessionTypeSubagent": "子智能体",
+    "sessionTypeDiscuss": "讨论",
     "sessionTypeChat": "对话",
     "sessionFilterAll": "全部",
     "sessionSourcePrefix": "来自：",
@@ -1007,7 +1008,6 @@
         "misskey": "Misskey",
         "telegram": "Telegram",
         "weixin": "微信",
-        "web": "Web",
         "local": "本地"
       },
       "typesShort": {
@@ -1018,8 +1018,7 @@
         "misskey": "MK",
         "telegram": "TG",
         "weixin": "WX",
-        "web": "Web",
-        "local": "CLI"
+        "local": "本地"
       }
     },
     "memory": {

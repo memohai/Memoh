@@ -59,9 +59,10 @@ type Executor struct {
 
 // SendResult is the success payload returned after sending a message.
 type SendResult struct {
-	BotID    string
-	Platform string
-	Target   string
+	BotID     string
+	Platform  string
+	Target    string
+	MessageID string
 	// Local is true when the message targets the current conversation.
 	// The caller should emit the resolved attachments as stream events.
 	Local            bool
@@ -78,11 +79,98 @@ type ReactResult struct {
 	Action    string // "added" or "removed"
 }
 
+type sendMode struct {
+	name                   string
+	allowLocalShortcut     bool
+	requireTarget          bool
+	promoteDataAttachments bool
+}
+
+type sendPlan struct {
+	botID       string
+	channelType channel.ChannelType
+	target      string
+	sameConv    bool
+	message     channel.Message
+}
+
 // Send executes a send-message action. args are the tool call arguments.
 func (e *Executor) Send(ctx context.Context, session SessionContext, args map[string]any) (*SendResult, error) {
+	return e.sendWithMode(ctx, session, "", args, sendMode{
+		name:               "send",
+		allowLocalShortcut: true,
+	})
+}
+
+// SendDirect sends a message via the channel adapter without the same-conversation
+// local shortcut. Used by discuss mode where there is no active stream emitter.
+func (e *Executor) SendDirect(ctx context.Context, session SessionContext, target string, args map[string]any) (*SendResult, error) {
+	return e.sendWithMode(ctx, session, target, args, sendMode{
+		name:                   "send direct",
+		requireTarget:          true,
+		promoteDataAttachments: true,
+	})
+}
+
+func (e *Executor) sendWithMode(
+	ctx context.Context,
+	session SessionContext,
+	explicitTarget string,
+	args map[string]any,
+	mode sendMode,
+) (*SendResult, error) {
 	if e.Sender == nil || e.Resolver == nil {
 		return nil, errors.New("message service not available")
 	}
+
+	plan, err := e.prepareSendPlan(ctx, session, explicitTarget, args, mode)
+	if err != nil {
+		return nil, err
+	}
+
+	if mode.allowLocalShortcut && plan.sameConv {
+		return &SendResult{
+			BotID:            plan.botID,
+			Platform:         plan.channelType.String(),
+			Target:           plan.target,
+			Local:            true,
+			LocalAttachments: plan.message.Attachments,
+		}, nil
+	}
+
+	if mode.promoteDataAttachments {
+		e.promoteDataPathAttachmentsToAssets(ctx, plan.botID, &plan.message)
+	}
+
+	if err := e.Sender.Send(ctx, plan.botID, plan.channelType, channel.SendRequest{
+		Target:  plan.target,
+		Message: plan.message,
+	}); err != nil {
+		if e.Logger != nil {
+			e.Logger.Warn("outbound send failed",
+				slog.String("mode", mode.name),
+				slog.Any("error", err),
+				slog.String("bot_id", plan.botID),
+				slog.String("platform", string(plan.channelType)),
+			)
+		}
+		return nil, err
+	}
+
+	return &SendResult{
+		BotID:    plan.botID,
+		Platform: plan.channelType.String(),
+		Target:   plan.target,
+	}, nil
+}
+
+func (e *Executor) prepareSendPlan(
+	ctx context.Context,
+	session SessionContext,
+	explicitTarget string,
+	args map[string]any,
+	mode sendMode,
+) (*sendPlan, error) {
 	botID, err := e.resolveBotID(args, session)
 	if err != nil {
 		return nil, err
@@ -91,82 +179,63 @@ func (e *Executor) Send(ctx context.Context, session SessionContext, args map[st
 	if err != nil {
 		return nil, err
 	}
-	messageText := firstStringArg(args, "text")
-	outboundMessage, parseErr := ParseOutboundMessage(args, messageText)
-	if parseErr != nil {
-		if rawAtt, ok := args["attachments"]; !ok || rawAtt == nil {
-			return nil, parseErr
-		}
-		outboundMessage = channel.Message{Text: strings.TrimSpace(messageText)}
+	target := strings.TrimSpace(explicitTarget)
+	if target == "" {
+		target = firstStringArg(args, "target")
 	}
-	target := firstStringArg(args, "target")
 	if target == "" {
 		target = strings.TrimSpace(session.ReplyTarget)
 	}
 
-	// Same-conversation send: no explicit target from the LLM, or target
-	// matches the current session. Pass raw paths through for downstream
-	// ingestOutboundAttachments to resolve (matches old tag-based flow).
-	isSameConv := target == "" || IsSameConversation(session, channelType.String(), target)
-	if isSameConv {
-		if rawAttachments, ok := args["attachments"]; ok && rawAttachments != nil {
-			for _, item := range NormalizeAttachmentInputs(rawAttachments) {
-				ref := ""
-				name := ""
-				attType := ""
-				switch v := item.(type) {
-				case string:
-					ref = strings.TrimSpace(v)
-				case map[string]any:
-					ref = firstStringArg(v, "path", "url")
-					name = firstStringArg(v, "name")
-					attType = firstStringArg(v, "type")
-				}
-				if ref == "" {
-					continue
-				}
-				lower := strings.ToLower(ref)
-				if !strings.HasPrefix(ref, "/") &&
-					!strings.HasPrefix(lower, "http://") &&
-					!strings.HasPrefix(lower, "https://") &&
-					!strings.HasPrefix(lower, "data:") {
-					ref = "/data/" + ref
-				}
-				if name == "" {
-					name = filepath.Base(ref)
-				}
-				t := channel.AttachmentType(attType)
-				if t == "" {
-					t = InferAttachmentTypeFromExt(ref)
-				}
-				outboundMessage.Attachments = append(outboundMessage.Attachments,
-					channel.Attachment{Type: t, URL: ref, Name: name})
-			}
+	sameConv := target == "" || IsSameConversation(session, channelType.String(), target)
+	if mode.requireTarget && target == "" {
+		return nil, errors.New("target is required")
+	}
+	if !mode.allowLocalShortcut && target == "" {
+		return nil, errors.New("target is required for cross-conversation send")
+	}
+
+	msg, err := e.buildOutboundMessage(ctx, botID, session, channelType, target, args, sameConv)
+	if err != nil {
+		return nil, err
+	}
+
+	return &sendPlan{
+		botID:       botID,
+		channelType: channelType,
+		target:      target,
+		sameConv:    sameConv,
+		message:     msg,
+	}, nil
+}
+
+func (e *Executor) buildOutboundMessage(
+	ctx context.Context,
+	botID string,
+	session SessionContext,
+	channelType channel.ChannelType,
+	target string,
+	args map[string]any,
+	isSameConv bool,
+) (channel.Message, error) {
+	messageText := firstStringArg(args, "text")
+	outboundMessage, parseErr := ParseOutboundMessage(args, messageText)
+	if parseErr != nil {
+		if rawAtt, ok := args["attachments"]; !ok || rawAtt == nil {
+			return channel.Message{}, parseErr
 		}
-		if outboundMessage.IsEmpty() {
-			return nil, errors.New("message or attachments required")
-		}
-		return &SendResult{
-			BotID: botID, Platform: channelType.String(), Target: target,
-			Local: true, LocalAttachments: outboundMessage.Attachments,
-		}, nil
+		outboundMessage = channel.Message{Text: strings.TrimSpace(messageText)}
 	}
 
 	if rawAttachments, ok := args["attachments"]; ok && rawAttachments != nil {
-		items := NormalizeAttachmentInputs(rawAttachments)
-		if items == nil {
-			return nil, errors.New("attachments must be a string, object, or array")
+		attachments, err := e.resolveOutboundAttachments(ctx, botID, session, channelType, target, rawAttachments, isSameConv)
+		if err != nil {
+			return channel.Message{}, err
 		}
-		if len(items) > 0 {
-			resolved := e.ResolveAttachments(ctx, botID, items)
-			if len(resolved) == 0 {
-				return nil, errors.New("attachments could not be resolved")
-			}
-			outboundMessage.Attachments = append(outboundMessage.Attachments, resolved...)
-		}
+		outboundMessage.Attachments = append(outboundMessage.Attachments, attachments...)
 	}
 	if outboundMessage.IsEmpty() {
-		return nil, errors.New("message or attachments required")
+		return channel.Message{}, errors.New("message or attachments required")
 	}
 	if replyTo := firstStringArg(args, "reply_to"); replyTo != "" {
 		outboundMessage.Reply = &channel.ReplyRef{MessageID: replyTo}
@@ -174,16 +243,105 @@ func (e *Executor) Send(ctx context.Context, session SessionContext, args map[st
 	if outboundMessage.Format == "" && channel.ContainsMarkdown(outboundMessage.Text) {
 		outboundMessage.Format = channel.MessageFormatMarkdown
 	}
-	if target == "" {
-		return nil, errors.New("target is required for cross-conversation send")
+	return outboundMessage, nil
+}
+
+func (e *Executor) resolveOutboundAttachments(
+	ctx context.Context,
+	botID string,
+	session SessionContext,
+	channelType channel.ChannelType,
+	target string,
+	rawAttachments any,
+	isSameConv bool,
+) ([]channel.Attachment, error) {
+	if isSameConv || IsSameConversation(session, channelType.String(), target) {
+		return resolveSameConversationAttachments(rawAttachments), nil
 	}
-	if err := e.Sender.Send(ctx, botID, channelType, channel.SendRequest{Target: target, Message: outboundMessage}); err != nil {
-		if e.Logger != nil {
-			e.Logger.Warn("send failed", slog.Any("error", err), slog.String("bot_id", botID), slog.String("platform", string(channelType)))
+	items := NormalizeAttachmentInputs(rawAttachments)
+	if items == nil {
+		return nil, errors.New("attachments must be a string, object, or array")
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	resolved := e.ResolveAttachments(ctx, botID, items)
+	if len(resolved) == 0 {
+		return nil, errors.New("attachments could not be resolved")
+	}
+	return resolved, nil
+}
+
+func resolveSameConversationAttachments(rawAttachments any) []channel.Attachment {
+	items := NormalizeAttachmentInputs(rawAttachments)
+	if items == nil {
+		return nil
+	}
+	result := make([]channel.Attachment, 0, len(items))
+	for _, item := range items {
+		ref := ""
+		name := ""
+		attType := ""
+		switch v := item.(type) {
+		case string:
+			ref = strings.TrimSpace(v)
+		case map[string]any:
+			ref = firstStringArg(v, "path", "url")
+			name = firstStringArg(v, "name")
+			attType = firstStringArg(v, "type")
 		}
-		return nil, err
+		if ref == "" {
+			continue
+		}
+		lower := strings.ToLower(ref)
+		if !strings.HasPrefix(ref, "/") &&
+			!strings.HasPrefix(lower, "http://") &&
+			!strings.HasPrefix(lower, "https://") &&
+			!strings.HasPrefix(lower, "data:") {
+			ref = "/data/" + ref
+		}
+		if name == "" {
+			name = filepath.Base(ref)
+		}
+		t := channel.AttachmentType(attType)
+		if t == "" {
+			t = InferAttachmentTypeFromExt(ref)
+		}
+		result = append(result, channel.Attachment{Type: t, URL: ref, Name: name})
 	}
-	return &SendResult{BotID: botID, Platform: channelType.String(), Target: target}, nil
+	return result
+}
+
+// promoteDataPathAttachmentsToAssets converts /data/* attachment references
+// into content_hash-backed attachments before channel send.
+// This avoids adapters treating local container paths as HTTP URLs.
+func (e *Executor) promoteDataPathAttachmentsToAssets(ctx context.Context, botID string, msg *channel.Message) {
+	if e.AssetResolver == nil || msg == nil || len(msg.Attachments) == 0 {
+		return
+	}
+	for i := range msg.Attachments {
+		att := msg.Attachments[i]
+		if strings.TrimSpace(att.ContentHash) != "" {
+			continue
+		}
+		ref := strings.TrimSpace(att.URL)
+		if !strings.HasPrefix(ref, "/data/") {
+			continue
+		}
+		asset, err := e.AssetResolver.IngestContainerFile(ctx, botID, ref)
+		if err != nil {
+			continue
+		}
+		converted := AssetMetaToAttachment(asset, botID, string(att.Type), strings.TrimSpace(att.Name))
+		if converted == nil {
+			continue
+		}
+		// Preserve explicit type if caller already provided one.
+		if att.Type != "" {
+			converted.Type = att.Type
+		}
+		msg.Attachments[i] = *converted
+	}
 }
 
 // React executes a react action. args are the tool call arguments.

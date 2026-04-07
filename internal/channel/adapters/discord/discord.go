@@ -22,9 +22,8 @@ import (
 )
 
 const (
-	inboundDedupTTL            = time.Minute
-	discordMaxLength           = 2000
-	discordQuotedTextMaxLength = 200
+	inboundDedupTTL  = time.Minute
+	discordMaxLength = 2000
 )
 
 // assetOpener reads stored asset bytes by content hash.
@@ -175,20 +174,24 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 			chatType = channel.ConversationTypeGroup
 		}
 
-		// Prepend quoted message context so the AI can see what is being replied to,
-		// and include quoted attachments so the LLM can see the actual media.
 		var replyRef *channel.ReplyRef
 		if m.ReferencedMessage != nil {
-			if quotedText := buildDiscordQuotedText(m.ReferencedMessage); quotedText != "" {
-				text = quotedText + "\n" + text
-			}
 			if quotedAttachments := a.collectAttachments(m.ReferencedMessage); len(quotedAttachments) > 0 {
 				attachments = append(attachments, quotedAttachments...)
 			}
+			ref := m.ReferencedMessage
 			replyRef = &channel.ReplyRef{
-				MessageID: m.ReferencedMessage.ID,
+				MessageID: ref.ID,
 				Target:    m.ChannelID,
 			}
+			if ref.Author != nil {
+				replyRef.Sender = strings.TrimSpace(ref.Author.Username)
+			}
+			preview := strings.TrimSpace(ref.Content)
+			if len([]rune(preview)) > 200 {
+				preview = string([]rune(preview)[:200]) + "..."
+			}
+			replyRef.Preview = preview
 		}
 
 		isMentioned := a.isBotMentioned(m.Message, botID)
@@ -655,44 +658,4 @@ func (a *DiscordAdapter) clearSessionState(token string) func() {
 	delete(a.handlerRemovers, token)
 	delete(a.sessions, token)
 	return remove
-}
-
-// buildDiscordQuotedText extracts a textual summary of the replied-to message
-// so the AI can see what message the user is replying to.
-func buildDiscordQuotedText(ref *discordgo.Message) string {
-	if ref == nil {
-		return ""
-	}
-	senderName := ""
-	if ref.Author != nil {
-		senderName = strings.TrimSpace(ref.Author.Username)
-	}
-	text := strings.TrimSpace(ref.Content)
-	if text == "" && len(ref.Attachments) > 0 {
-		types := make([]string, 0, len(ref.Attachments))
-		for _, att := range ref.Attachments {
-			contentType := strings.TrimSpace(att.ContentType)
-			switch {
-			case strings.HasPrefix(contentType, "image/"):
-				types = append(types, "image")
-			case strings.HasPrefix(contentType, "video/"):
-				types = append(types, "video")
-			case strings.HasPrefix(contentType, "audio/"):
-				types = append(types, "audio")
-			default:
-				types = append(types, "file")
-			}
-		}
-		text = "[" + strings.Join(types, ", ") + "]"
-	}
-	if text == "" {
-		return ""
-	}
-	if len([]rune(text)) > discordQuotedTextMaxLength {
-		text = string([]rune(text)[:discordQuotedTextMaxLength]) + "..."
-	}
-	if senderName != "" {
-		return fmt.Sprintf("[Reply to %s: %s]", senderName, text)
-	}
-	return fmt.Sprintf("[Reply to: %s]", text)
 }

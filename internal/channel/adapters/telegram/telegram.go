@@ -505,12 +505,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 		return channel.InboundMessage{}, false
 	}
 	rawText := text
-	// Prepend quoted message context so the AI can see what is being replied to,
-	// and include quoted attachments so the LLM can see the actual media.
 	if raw.ReplyToMessage != nil {
-		if quotedText := a.buildTelegramQuotedText(raw.ReplyToMessage); quotedText != "" {
-			text = quotedText + "\n" + text
-		}
 		if quotedAttachments := a.collectTelegramAttachments(bot, raw.ReplyToMessage); len(quotedAttachments) > 0 {
 			attachments = append(attachments, quotedAttachments...)
 		}
@@ -1080,48 +1075,23 @@ func buildTelegramReplyRef(msg *tgbotapi.Message, chatID string) *channel.ReplyR
 	if msg == nil || msg.ReplyToMessage == nil {
 		return nil
 	}
-	return &channel.ReplyRef{
-		MessageID: strconv.Itoa(msg.ReplyToMessage.MessageID),
+	replyTo := msg.ReplyToMessage
+	ref := &channel.ReplyRef{
+		MessageID: strconv.Itoa(replyTo.MessageID),
 		Target:    strings.TrimSpace(chatID),
+		Sender:    resolveTelegramDisplayName(replyTo.From),
 	}
-}
-
-const telegramQuotedTextMaxLength = 200
-
-// buildTelegramQuotedText extracts a textual summary of the replied-to message
-// so the AI can see what message the user is replying to.
-// Returns an empty string when no useful context can be extracted.
-func (a *TelegramAdapter) buildTelegramQuotedText(replyTo *tgbotapi.Message) string {
-	if replyTo == nil {
-		return ""
+	preview := strings.TrimSpace(replyTo.Text)
+	if preview == "" {
+		preview = strings.TrimSpace(replyTo.Caption)
 	}
-	senderName := resolveTelegramDisplayName(replyTo.From)
-	text := strings.TrimSpace(replyTo.Text)
-	if text == "" {
-		text = strings.TrimSpace(replyTo.Caption)
-	}
-	if text == "" {
-		// Reuse collectTelegramAttachments with nil bot to detect content
-		// types without making API calls to resolve file URLs.
-		attachments := a.collectTelegramAttachments(nil, replyTo)
-		if len(attachments) > 0 {
-			types := make([]string, 0, len(attachments))
-			for _, att := range attachments {
-				types = append(types, string(att.Type))
-			}
-			text = "[" + strings.Join(types, ", ") + "]"
+	if preview != "" {
+		if len([]rune(preview)) > 200 {
+			preview = string([]rune(preview)[:200]) + "..."
 		}
+		ref.Preview = preview
 	}
-	if text == "" {
-		return ""
-	}
-	if len([]rune(text)) > telegramQuotedTextMaxLength {
-		text = string([]rune(text)[:telegramQuotedTextMaxLength]) + "..."
-	}
-	if senderName != "" {
-		return fmt.Sprintf("[Reply to %s: %s]", senderName, text)
-	}
-	return fmt.Sprintf("[Reply to: %s]", text)
+	return ref
 }
 
 // resolveTelegramDisplayName returns a display name for a Telegram user.

@@ -10,6 +10,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 )
 
 type messageWithUsage struct {
@@ -226,4 +227,73 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []mess
 		})
 	}
 	return result
+}
+
+// buildMessagesFromPipeline assembles chat context from the DCP pipeline's
+// RenderedContext (RC) merged with assistant/tool turns (TR) from
+// bot_history_messages. This gives chat mode the same event-driven context
+// that discuss mode uses, replacing the legacy loadMessages path.
+func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversation.ChatRequest) []conversation.ModelMessage {
+	sessionID := strings.TrimSpace(req.SessionID)
+	if r.pipeline == nil || sessionID == "" {
+		return nil
+	}
+	rc := r.pipeline.GetRC(sessionID)
+	if len(rc) == 0 {
+		return nil
+	}
+
+	trs := r.loadTurnResponses(ctx, sessionID)
+
+	composed := pipelinepkg.ComposeContext(rc, trs, "")
+	if composed == nil {
+		return nil
+	}
+
+	messages := make([]conversation.ModelMessage, 0, len(composed.Messages))
+	for _, m := range composed.Messages {
+		contentJSON, err := json.Marshal(m.Content)
+		if err != nil {
+			continue
+		}
+		messages = append(messages, conversation.ModelMessage{
+			Role:    m.Role,
+			Content: contentJSON,
+		})
+	}
+	return messages
+}
+
+// loadTurnResponses loads recent assistant/tool messages from bot_history_messages
+// for use as the TR stream in pipeline-based context assembly.
+func (r *Resolver) loadTurnResponses(ctx context.Context, sessionID string) []pipelinepkg.TurnResponseEntry {
+	if r.messageService == nil {
+		return nil
+	}
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	msgs, err := r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
+	if err != nil {
+		r.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		return nil
+	}
+	var trs []pipelinepkg.TurnResponseEntry
+	for _, m := range msgs {
+		if m.Role != "assistant" && m.Role != "tool" {
+			continue
+		}
+		var mm conversation.ModelMessage
+		if err := json.Unmarshal(m.Content, &mm); err != nil {
+			continue
+		}
+		contentStr := ""
+		if mm.Content != nil {
+			contentStr = string(mm.Content)
+		}
+		trs = append(trs, pipelinepkg.TurnResponseEntry{
+			RequestedAtMs: m.CreatedAt.UnixMilli(),
+			Role:          m.Role,
+			Content:       contentStr,
+		})
+	}
+	return trs
 }

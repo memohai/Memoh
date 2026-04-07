@@ -26,6 +26,8 @@ import (
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
 var base64Std = base64.StdEncoding
@@ -76,12 +78,14 @@ type SessionEnsurer interface {
 	EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
 	// CreateNewSession always creates a fresh session and sets it as the
 	// active session for the given route, replacing any previous one.
-	CreateNewSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
+	// sessionType defaults to "chat" if empty.
+	CreateNewSession(ctx context.Context, botID, routeID, channelType, sessionType string) (SessionResult, error)
 }
 
 // SessionResult carries the minimum fields needed from a session.
 type SessionResult struct {
-	ID string
+	ID   string
+	Type string
 }
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
@@ -104,6 +108,9 @@ type ChannelInboundProcessor struct {
 	ttsService       ttsSynthesizer
 	ttsModelResolver ttsModelResolver
 	sessionEnsurer   SessionEnsurer
+	pipeline         *pipelinepkg.Pipeline
+	eventStore       *pipelinepkg.EventStore
+	discussDriver    *pipelinepkg.DiscussDriver
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -205,6 +212,16 @@ func (p *ChannelInboundProcessor) SetCommandHandler(handler *command.Handler) {
 		return
 	}
 	p.commandHandler = handler
+}
+
+// SetPipeline configures the DCP pipeline, event store, and discuss driver.
+func (p *ChannelInboundProcessor) SetPipeline(pipeline *pipelinepkg.Pipeline, store *pipelinepkg.EventStore, driver *pipelinepkg.DiscussDriver) {
+	if p == nil {
+		return
+	}
+	p.pipeline = pipeline
+	p.eventStore = store
+	p.discussDriver = driver
 }
 
 // SetDispatcher configures the per-route message dispatcher for inject/queue/parallel modes.
@@ -328,6 +345,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	// Resolve or auto-create the active session for this route.
 	sessionID := ""
+	sessionType := ""
 	if p.sessionEnsurer != nil {
 		sess, sessErr := p.sessionEnsurer.EnsureActiveSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
 		if sessErr != nil {
@@ -336,18 +354,16 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 		} else {
 			sessionID = sess.ID
+			sessionType = sess.Type
 		}
 	}
 
-	// Bot-centric history container:
-	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
-	activeChatID := strings.TrimSpace(identity.BotID)
-	if activeChatID == "" {
-		activeChatID = strings.TrimSpace(resolved.ChatID)
-	}
-	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply
-	if shouldTrigger && p.acl != nil {
-		allowed, err := p.acl.Evaluate(ctx, acl.EvaluateRequest{
+	// ACL gate: evaluate before events enter the pipeline. If denied, the
+	// message is not persisted in the event store and not pushed into the
+	// in-memory pipeline. This applies uniformly to chat and discuss modes.
+	aclAllowed := true
+	if p.acl != nil {
+		allowed, aclErr := p.acl.Evaluate(ctx, acl.EvaluateRequest{
 			BotID:             identity.BotID,
 			ChannelIdentityID: identity.ChannelIdentityID,
 			ChannelType:       msg.Channel.String(),
@@ -357,26 +373,74 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				ThreadID:         threadID,
 			},
 		})
-		if err != nil {
-			return fmt.Errorf("authorize chat trigger: %w", err)
+		if aclErr != nil {
+			return fmt.Errorf("evaluate acl: %w", aclErr)
 		}
-		if !allowed {
-			shouldTrigger = false
-			if p.logger != nil {
-				p.logger.Info(
-					"inbound trigger denied by acl",
-					slog.String("channel", msg.Channel.String()),
-					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
-					slog.String("user_id", strings.TrimSpace(identity.UserID)),
-					slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
-					slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
-				)
-			}
-		}
+		aclAllowed = allowed
 	}
 
+	if !aclAllowed {
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
+		if p.logger != nil {
+			p.logger.Info(
+				"inbound denied by acl — event not ingested",
+				slog.String("channel", msg.Channel.String()),
+				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+				slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
+				slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
+			)
+		}
+		return nil
+	}
+
+	// Push event into the DCP pipeline (persist + in-memory projection).
+	// On first access for a session, replay persisted events to warm the pipeline.
+	var latestRC pipelinepkg.RenderedContext
+	var eventID string
+	if p.pipeline != nil && sessionID != "" {
+		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
+			p.replayPipelineSession(ctx, sessionID)
+		}
+		event := pipelinepkg.AdaptInbound(msg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
+		if p.eventStore != nil {
+			eid, persistErr := p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event)
+			if persistErr != nil {
+				if p.logger != nil {
+					p.logger.Warn("persist pipeline event failed", slog.Any("error", persistErr))
+				}
+			} else {
+				eventID = eid
+			}
+		}
+		latestRC = p.pipeline.PushEvent(sessionID, event)
+	}
+
+	// Discuss mode: dispatch to the discuss driver and return.
+	// The discuss driver autonomously decides whether to call the LLM.
+	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
+		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, pipelinepkg.DiscussSessionConfig{
+			BotID:             identity.BotID,
+			SessionID:         sessionID,
+			ChannelIdentityID: identity.ChannelIdentityID,
+			ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
+			CurrentPlatform:   msg.Channel.String(),
+			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
+			ConversationName:  strings.TrimSpace(msg.Conversation.Name),
+		})
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
+		return nil
+	}
+
+	// Bot-centric history container:
+	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
+	activeChatID := strings.TrimSpace(identity.BotID)
+	if activeChatID == "" {
+		activeChatID = strings.TrimSpace(resolved.ChatID)
+	}
+	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply
+
 	if !shouldTrigger {
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID)
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
 		if p.logger != nil {
 			p.logger.Info(
 				"inbound not triggering assistant (group trigger condition not met)",
@@ -400,18 +464,17 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// short-circuit here instead of starting a new stream.
 	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
 		if p.dispatcher.IsActive(routeID) {
-			headerifiedText := flow.FormatUserHeader(
-				strings.TrimSpace(msg.Message.ID),
-				strings.TrimSpace(identity.ChannelIdentityID),
-				strings.TrimSpace(identity.DisplayName),
-				msg.Channel.String(),
-				strings.TrimSpace(msg.Conversation.Type),
-				strings.TrimSpace(msg.Conversation.Name),
-				collectAttachmentPaths(attachments),
-				time.Now().UTC(),
-				"",
-				text,
-			)
+			headerifiedText := flow.FormatUserHeader(flow.UserMessageHeaderInput{
+				MessageID:         strings.TrimSpace(msg.Message.ID),
+				ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
+				DisplayName:       strings.TrimSpace(identity.DisplayName),
+				Channel:           msg.Channel.String(),
+				ConversationType:  strings.TrimSpace(msg.Conversation.Type),
+				ConversationName:  strings.TrimSpace(msg.Conversation.Name),
+				Target:            strings.TrimSpace(msg.ReplyTarget),
+				AttachmentPaths:   collectAttachmentPaths(attachments),
+				Time:              time.Now().UTC(),
+			}, text)
 
 			switch inboundMode {
 			case ModeInject:
@@ -435,7 +498,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				return nil
 
 			case ModeQueue:
-				p.persistPassiveMessage(ctx, identity, msg, text, attachments, routeID, sessionID)
+				p.persistPassiveMessage(ctx, identity, msg, text, attachments, routeID, sessionID, eventID)
 				p.dispatcher.Enqueue(routeID, QueuedTask{
 					Ctx:     ctx,
 					Cfg:     cfg,
@@ -642,6 +705,7 @@ startStream:
 		UserMessagePersisted:    false,
 		Attachments:             attachments,
 		OutboundAssetCollector:  assetCollector,
+		EventID:                 eventID,
 	}
 	if convInjectCh != nil {
 		chatReq.InjectCh = convInjectCh
@@ -937,7 +1001,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	msg channel.InboundMessage,
 	text string,
 	attachments []conversation.ChatAttachment,
-	routeID, sessionID string,
+	routeID, sessionID, eventID string,
 ) {
 	if p.message == nil {
 		return
@@ -958,18 +1022,17 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		}
 	}
 
-	headerifiedText := flow.FormatUserHeader(
-		strings.TrimSpace(msg.Message.ID),
-		strings.TrimSpace(ident.ChannelIdentityID),
-		strings.TrimSpace(ident.DisplayName),
-		msg.Channel.String(),
-		strings.TrimSpace(msg.Conversation.Type),
-		strings.TrimSpace(msg.Conversation.Name),
-		attachmentPaths,
-		time.Now().UTC(),
-		"",
-		trimmedText,
-	)
+	headerifiedText := flow.FormatUserHeader(flow.UserMessageHeaderInput{
+		MessageID:         strings.TrimSpace(msg.Message.ID),
+		ChannelIdentityID: strings.TrimSpace(ident.ChannelIdentityID),
+		DisplayName:       strings.TrimSpace(ident.DisplayName),
+		Channel:           msg.Channel.String(),
+		ConversationType:  strings.TrimSpace(msg.Conversation.Type),
+		ConversationName:  strings.TrimSpace(msg.Conversation.Name),
+		Target:            strings.TrimSpace(msg.ReplyTarget),
+		AttachmentPaths:   attachmentPaths,
+		Time:              time.Now().UTC(),
+	}, trimmedText)
 
 	modelMsg := conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(headerifiedText)}
 	serialized, err := json.Marshal(modelMsg)
@@ -1012,6 +1075,8 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		Content:                 serialized,
 		Metadata:                meta,
 		Assets:                  assets,
+		EventID:                 eventID,
+		DisplayText:             trimmedText,
 	}); err != nil && p.logger != nil {
 		p.logger.Warn("persist passive message failed", slog.Any("error", err), slog.String("bot_id", botID))
 	}
@@ -1266,55 +1331,8 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 	}
 }
 
-func buildInboundQuery(message channel.Message, attachments []conversation.ChatAttachment) string {
-	text := strings.TrimSpace(message.PlainText())
-	if text != "" {
-		return text
-	}
-	if len(message.Attachments) == 0 {
-		return ""
-	}
-	count := len(message.Attachments)
-	fallback := fmt.Sprintf("[User sent %d attachments]", count)
-	if count == 1 {
-		fallback = "[User sent 1 attachment]"
-	}
-	refs := collectContainerAttachmentRefs(attachments)
-	if len(refs) == 0 {
-		return fallback
-	}
-	var sb strings.Builder
-	sb.WriteString(fallback)
-	sb.WriteString("\n[Attachment refs: container paths]\n")
-	for _, ref := range refs {
-		sb.WriteString("- ")
-		sb.WriteString(ref)
-		sb.WriteByte('\n')
-	}
-	return strings.TrimSpace(sb.String())
-}
-
-func collectContainerAttachmentRefs(attachments []conversation.ChatAttachment) []string {
-	if len(attachments) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(attachments))
-	refs := make([]string, 0, len(attachments))
-	for _, att := range attachments {
-		ref := strings.TrimSpace(att.Path)
-		if ref == "" {
-			continue
-		}
-		if _, exists := seen[ref]; exists {
-			continue
-		}
-		seen[ref] = struct{}{}
-		refs = append(refs, ref)
-	}
-	if len(refs) == 0 {
-		return nil
-	}
-	return refs
+func buildInboundQuery(message channel.Message, _ []conversation.ChatAttachment) string {
+	return strings.TrimSpace(message.PlainText())
 }
 
 func normalizeContentPartType(raw string) channel.MessagePartType {
@@ -2044,10 +2062,31 @@ func extractStorageKey(accessPath string, _ string) string {
 }
 
 // isLocalChannelType returns true for channels that already publish to RouteHub
-// natively (e.g. web, cli). Wrapping these with a tee would cause duplicate events.
+// natively (e.g. web). Wrapping these with a tee would cause duplicate events.
 func isLocalChannelType(ct channel.ChannelType) bool {
 	s := strings.ToLower(strings.TrimSpace(string(ct)))
-	return s == "web" || s == "cli"
+	return s == "local"
+}
+
+// replayPipelineSession loads persisted events from the DB and replays them
+// into the pipeline. Called lazily on first access per session after cold start.
+func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, sessionID string) {
+	if p.eventStore == nil || p.pipeline == nil {
+		return
+	}
+	events, err := p.eventStore.LoadEvents(ctx, sessionID)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		}
+		return
+	}
+	if len(events) > 0 {
+		p.pipeline.ReplaySession(sessionID, events)
+		if p.logger != nil {
+			p.logger.Info("pipeline session replayed", slog.String("session_id", sessionID), slog.Int("events", len(events)))
+		}
+	}
 }
 
 // broadcastInboundMessage notifies the observer about the user's inbound
@@ -2396,6 +2435,12 @@ func buildRouteMetadata(msg channel.InboundMessage, identity InboundIdentity) ma
 			m["sender_username"] = v
 		}
 	}
+	if mentions, ok := msg.Metadata["mentions"]; ok && mentions != nil {
+		m["mentions"] = mentions
+	}
+	if targets, ok := msg.Metadata["mentioned_targets"]; ok && targets != nil {
+		m["mentioned_targets"] = targets
+	}
 
 	return m
 }
@@ -2456,9 +2501,41 @@ func isNewSessionCommand(cmdText string) bool {
 	return parsed.Resource == "new"
 }
 
+// resolveNewSessionType determines the session type for /new command.
+// /new chat → chat, /new discuss → discuss, /new (no arg) → default by context.
+// WebUI (local channel) always defaults to chat.
+// Groups default to discuss, DMs default to chat.
+func resolveNewSessionType(cmdText string, msg channel.InboundMessage) (string, error) {
+	extracted := command.ExtractCommandText(cmdText)
+	parsed, _ := command.Parse(extracted)
+
+	explicit := strings.ToLower(strings.TrimSpace(parsed.Action))
+	switch explicit {
+	case "chat":
+		return sessionpkg.TypeChat, nil
+	case "discuss":
+		if isLocalChannelType(msg.Channel) {
+			return "", errors.New("discuss mode is not supported via WebUI — use a channel adapter (Telegram, Discord, etc.)")
+		}
+		return sessionpkg.TypeDiscuss, nil
+	case "":
+		// Default: local → chat, group → discuss, DM → chat.
+		if isLocalChannelType(msg.Channel) {
+			return sessionpkg.TypeChat, nil
+		}
+		if channel.IsPrivateConversationType(msg.Conversation.Type) {
+			return sessionpkg.TypeChat, nil
+		}
+		return sessionpkg.TypeDiscuss, nil
+	default:
+		return "", fmt.Errorf("unknown session type %q — use /new, /new chat, or /new discuss", explicit)
+	}
+}
+
 // handleNewSessionCommand resolves the route for the current message and
 // creates a brand-new active session, effectively starting a fresh
 // conversation in the same IM thread/chat.
+// Supports: /new (default), /new chat, /new discuss.
 func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	ctx context.Context,
 	cfg channel.ChannelConfig,
@@ -2469,6 +2546,15 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
 		return errors.New("reply target missing for /new command")
+	}
+
+	cmdText := rawTextForCommand(msg, "")
+	sessType, err := resolveNewSessionType(cmdText, msg)
+	if err != nil {
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: " + err.Error()},
+		})
 	}
 
 	if p.routeResolver == nil {
@@ -2508,7 +2594,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		})
 	}
 
-	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
+	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), sessType)
 	if err != nil {
 		if p.logger != nil {
 			p.logger.Warn("create new session via /new command failed", slog.Any("error", err))
@@ -2519,16 +2605,21 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		})
 	}
 
+	modeLabel := "chat"
+	if sess.Type == sessionpkg.TypeDiscuss {
+		modeLabel = "discuss"
+	}
 	if p.logger != nil {
 		p.logger.Info("new session created via /new command",
 			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
 			slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
 			slog.String("session_id", strings.TrimSpace(sess.ID)),
+			slog.String("session_type", sess.Type),
 			slog.String("channel", msg.Channel.String()),
 		)
 	}
 	return sender.Send(ctx, channel.OutboundMessage{
 		Target:  target,
-		Message: channel.Message{Text: "New conversation started."},
+		Message: channel.Message{Text: fmt.Sprintf("New %s conversation started.", modeLabel)},
 	})
 }

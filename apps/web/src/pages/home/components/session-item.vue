@@ -80,7 +80,7 @@ defineEmits<{
 
 const { t } = useI18n()
 
-const WEB_CHANNELS = new Set(['web', ''])
+const WEB_CHANNELS = new Set(['local', ''])
 
 const isIMSession = computed(() => {
   const ct = (props.session.channel_type ?? '').trim().toLowerCase()
@@ -137,6 +137,7 @@ const avatarFallback = computed(() => {
 })
 
 const subLabel = computed(() => {
+  if (props.session.type === 'discuss') return t('chat.sessionTypeDiscuss')
   if (props.session.type === 'heartbeat') return t('chat.sessionTypeHeartbeat')
   if (props.session.type === 'schedule') return t('chat.sessionTypeSchedule')
   if (props.session.type === 'subagent') return t('chat.sessionTypeSubagent')

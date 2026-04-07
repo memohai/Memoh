@@ -74,6 +74,7 @@ import (
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/messaging"
 	"github.com/memohai/memoh/internal/models"
+	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/registry"
@@ -199,6 +200,11 @@ func runServe() {
 			provideMessageService,
 			provideMediaService,
 
+			// DCP pipeline
+			providePipeline,
+			provideEventStore,
+			provideDiscussDriver,
+
 			// channel infrastructure
 			local.NewRouteHub,
 			provideChannelRegistry,
@@ -260,7 +266,6 @@ func runServe() {
 			provideServerHandler(handlers.NewSessionInfoHandler),
 			provideServerHandler(handlers.NewBrowserContextsHandler),
 			provideServerHandler(handlers.NewSupermarketHandler),
-			provideServerHandler(provideCLIHandler),
 			provideServerHandler(provideWebHandler),
 
 			provideServer,
@@ -394,6 +399,24 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 // domain service providers (interface adapters)
 // ---------------------------------------------------------------------------
 
+func providePipeline() *pipelinepkg.Pipeline {
+	return pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+}
+
+func provideEventStore(log *slog.Logger, queries *dbsqlc.Queries) *pipelinepkg.EventStore {
+	return pipelinepkg.NewEventStore(log, queries)
+}
+
+func provideDiscussDriver(log *slog.Logger, pipeline *pipelinepkg.Pipeline, eventStore *pipelinepkg.EventStore, agent *agentpkg.Agent, msgService *message.DBService) *pipelinepkg.DiscussDriver {
+	return pipelinepkg.NewDiscussDriver(pipelinepkg.DiscussDriverDeps{
+		Pipeline:       pipeline,
+		EventStore:     eventStore,
+		Agent:          agent,
+		MessageService: msgService,
+		Logger:         log,
+	})
+}
+
 func provideRouteService(log *slog.Logger, queries *dbsqlc.Queries, chatService *conversation.Service) *route.DBService {
 	return route.NewService(log, queries, chatService)
 }
@@ -460,7 +483,7 @@ func injectToolProviders(a *agentpkg.Agent, msgService *message.DBService, provi
 	}
 }
 
-func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, rc *boot.RuntimeConfig) *flow.Resolver {
+func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
@@ -468,6 +491,7 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 	resolver.SetSessionService(sessionService)
 	resolver.SetEventPublisher(eventHub)
 	resolver.SetCompactionService(compactionService)
+	resolver.SetPipeline(pipeline)
 	return resolver
 }
 
@@ -502,7 +526,6 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	weixinAdapter := weixin.NewWeixinAdapter(log)
 	weixinAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(weixinAdapter)
-	registry.MustRegister(local.NewCLIAdapter(hub))
 	registry.MustRegister(local.NewWebAdapter(hub))
 
 	// Misskey
@@ -540,6 +563,9 @@ func provideChannelRouter(
 	queries *dbsqlc.Queries,
 	containerdHandler *handlers.ContainerdHandler,
 	manager *workspace.Manager,
+	pipeline *pipelinepkg.Pipeline,
+	eventStore *pipelinepkg.EventStore,
+	discussDriver *pipelinepkg.DiscussDriver,
 	rc *boot.RuntimeConfig,
 ) *inbound.ChannelInboundProcessor {
 	adapter, ok := registry.Get(qq.Type)
@@ -555,6 +581,9 @@ func provideChannelRouter(
 
 	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, policyService, bindService, rc.JwtSecret, 5*time.Minute)
 	processor.SetSessionEnsurer(&sessionEnsurerAdapter{svc: sessionService})
+	processor.SetPipeline(pipeline, eventStore, discussDriver)
+	discussDriver.SetResolver(resolver)
+	discussDriver.SetBroadcaster(hub)
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
@@ -698,14 +727,6 @@ func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, ide
 	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelStore, channelLifecycle, channelManager, registry)
 }
 
-func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver, mediaService *media.Service, ttsService *ttspkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
-	h := handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelStore, chatService, hub, botService, accountService)
-	h.SetResolver(resolver)
-	h.SetMediaService(mediaService)
-	h.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
-	return h
-}
-
 func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver, mediaService *media.Service, ttsService *ttspkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
 	h.SetResolver(resolver)
@@ -754,15 +775,15 @@ func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, 
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}
-	return inbound.SessionResult{ID: sess.ID}, nil
+	return inbound.SessionResult{ID: sess.ID, Type: sess.Type}, nil
 }
 
-func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, routeID, channelType string) (inbound.SessionResult, error) {
-	sess, err := a.svc.CreateNewSession(ctx, botID, routeID, channelType)
+func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, routeID, channelType, sessionType string) (inbound.SessionResult, error) {
+	sess, err := a.svc.CreateNewSession(ctx, botID, routeID, channelType, sessionType)
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}
-	return inbound.SessionResult{ID: sess.ID}, nil
+	return inbound.SessionResult{ID: sess.ID, Type: sess.Type}, nil
 }
 
 type settingsTtsModelResolver struct {

@@ -303,9 +303,8 @@ func extractReadableFromJSON(text string) string {
 	return text
 }
 
-func buildFeishuStreamCardContent(text string) (string, error) {
-	content := normalizeFeishuStreamText(extractReadableFromJSON(text))
-	body := processFeishuCardMarkdown(content)
+func buildFeishuCardContent(text string) (string, error) {
+	body := processFeishuCardMarkdown(strings.TrimSpace(text))
 	card := map[string]any{
 		"config": map[string]any{
 			"wide_screen_mode": true,
@@ -332,6 +331,11 @@ func buildFeishuStreamCardContent(text string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func buildFeishuStreamCardContent(text string) (string, error) {
+	content := normalizeFeishuStreamText(extractReadableFromJSON(text))
+	return buildFeishuCardContent(content)
 }
 
 var feishuCardHeadingPrefix = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)

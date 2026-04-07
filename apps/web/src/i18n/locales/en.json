@@ -201,6 +201,7 @@
     "sessionTypeHeartbeat": "Heartbeat",
     "sessionTypeSchedule": "Scheduled Task",
     "sessionTypeSubagent": "Subagent",
+    "sessionTypeDiscuss": "Discuss",
     "sessionTypeChat": "Chat",
     "sessionFilterAll": "All",
     "sessionSourcePrefix": "From:",
@@ -1011,7 +1012,6 @@
         "misskey": "Misskey",
         "telegram": "Telegram",
         "weixin": "WeChat",
-        "web": "Web",
         "local": "Local"
       },
       "typesShort": {
@@ -1022,8 +1022,7 @@
         "misskey": "MK",
         "telegram": "TG",
         "weixin": "WX",
-        "web": "Web",
-        "local": "CLI"
+        "local": "LC"
       }
     },
     "memory": {
