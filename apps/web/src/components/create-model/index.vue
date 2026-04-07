@@ -109,7 +109,7 @@
 
           <!-- Compatibilities (chat only) -->
           <div v-if="selectedType === 'chat'">
-            <Label class="mb-2">
+            <Label class="mb-4">
               {{ $t('models.compatibilities') }}
             </Label>
             <div class="flex flex-wrap gap-3 mt-2">

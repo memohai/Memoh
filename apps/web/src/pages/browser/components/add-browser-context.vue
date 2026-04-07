@@ -26,12 +26,12 @@
             name="name"
           >
             <FormItem>
-              <Label :for="componentField.id || 'browser-context-name'">
+              <Label :for="'browser-context-name'">
                 {{ $t('browser.name') }}
               </Label>
               <FormControl>
                 <Input
-                  :id="componentField.id || 'browser-context-name'"
+                  :id="'browser-context-name'"
                   type="text"
                   :placeholder="$t('browser.namePlaceholder')"
                   v-bind="componentField"
@@ -78,7 +78,10 @@ const { mutateAsync: createMutation, isLoading } = useMutation({
     })
     return result
   },
-  onSettled: () => queryCache.invalidateQueries({ key: ['browser-contexts'] }),
+  onSettled: () => queryCache.invalidateQueries({ key: ['browser-contexts'] }).catch((err)=>{console.error(err)}), 
+  onError: (_, __, previous) => {
+    queryCache.setQueryData(['browser-contexts'], previous)
+  },
 })
 
 const schema = toTypedSchema(z.object({

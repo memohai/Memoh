@@ -25,12 +25,12 @@
             name="name"
           >
             <FormItem>
-              <Label :for="componentField.id || 'email-provider-name'">
+              <Label :for="'email-provider-name'">
                 {{ $t('common.name') }}
               </Label>
               <FormControl>
                 <Input
-                  :id="componentField.id || 'email-provider-name'"
+                  :id="'email-provider-name'"
                   type="text"
                   :placeholder="$t('common.namePlaceholder')"
                   v-bind="componentField"
@@ -68,17 +68,17 @@
           >
             <Input
               :id="`email-field-${field.key}`"
-              v-model="configData[field.key]"
-              :type="visibleSecrets[field.key] ? 'text' : 'password'"
+              v-model="configData[field.key!] as string"
+              :type="visibleSecrets[field.key!] ? 'text' : 'password'"
               :placeholder="field.example ? String(field.example) : ''"
             />
             <button
               type="button"
               class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
+              @click="visibleSecrets[field.key!] = !visibleSecrets[field.key!]"
             >
               <component
-                :is="visibleSecrets[field.key] ? EyeOff : Eye"
+                :is="visibleSecrets[field.key!] ? EyeOff : Eye"
                 class="size-3.5"
               />
             </button>
@@ -86,22 +86,22 @@
 
           <Switch
             v-else-if="field.type === 'bool'"
-            :model-value="!!configData[field.key]"
-            @update:model-value="(val) => configData[field.key] = !!val"
+            :model-value="!!configData[field.key!]"
+            @update:model-value="(val) => configData[field.key!] = !!val"
           />
 
           <Input
             v-else-if="field.type === 'number'"
             :id="`email-field-${field.key}`"
-            v-model.number="configData[field.key]"
+            v-model.number="configData[field.key!] as string"
             type="number"
             :placeholder="field.example ? String(field.example) : ''"
           />
 
           <Select
             v-else-if="field.type === 'enum' && field.enum"
-            :model-value="String(configData[field.key] || '')"
-            @update:model-value="(val) => configData[field.key] = val"
+            :model-value="String(configData[field.key!] || '')"
+            @update:model-value="(val) => configData[field.key!] = val"
           >
             <SelectTrigger>
               <SelectValue :placeholder="field.title || field.key" />
@@ -120,7 +120,7 @@
           <Input
             v-else
             :id="`email-field-${field.key}`"
-            v-model="configData[field.key]"
+            v-model="configData[field.key !] as string"
             type="text"
             :placeholder="field.example ? String(field.example) : ''"
           />
@@ -133,7 +133,7 @@
         class="mt-6 p-4 border rounded-lg bg-muted/30"
       >
         <div class="flex flex-wrap items-start justify-between gap-4">
-          <div class="flex-1 min-w-[220px]">
+          <div class="flex-1 min-w-55">
             <p class="text-xs font-medium">
               {{ $t('email.oauth.title') }}
             </p>
