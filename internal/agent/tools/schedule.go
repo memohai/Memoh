@@ -92,7 +92,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 				"properties": map[string]any{
 					"name": map[string]any{"type": "string"}, "description": map[string]any{"type": "string"},
 					"pattern": map[string]any{"type": "string"}, "command": map[string]any{"type": "string"},
-					"max_calls": map[string]any{"type": []string{"integer", "null"}, "description": "Optional max calls, null means unlimited"},
+					"max_calls": map[string]any{"anyOf": []map[string]any{{"type": "integer"}, {"type": "null"}}, "description": "Optional max calls, null means unlimited"},
 					"enabled":   map[string]any{"type": "boolean"},
 				},
 				"required": []string{"name", "description", "pattern", "command"},
@@ -136,7 +136,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 					"id": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"},
 					"description": map[string]any{"type": "string"}, "pattern": map[string]any{"type": "string"},
 					"command":   map[string]any{"type": "string"},
-					"max_calls": map[string]any{"type": []string{"integer", "null"}},
+					"max_calls": map[string]any{"anyOf": []map[string]any{{"type": "integer"}, {"type": "null"}}},
 					"enabled":   map[string]any{"type": "boolean"},
 				},
 				"required": []string{"id"},
