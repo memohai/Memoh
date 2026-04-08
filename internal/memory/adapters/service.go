@@ -131,6 +131,21 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 				},
 			},
 		},
+		{
+			Provider:    string(ProviderNowledgeMem),
+			DisplayName: "Nowledge Mem",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Nowledge Mem API base URL. Defaults to http://127.0.0.1:14242 when empty.",
+						Required:    false,
+						Example:     "http://127.0.0.1:14242",
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -331,7 +346,7 @@ func (s *Service) tryEvictAndReinstantiate(id, providerType string, config map[s
 
 func isValidProviderType(t ProviderType) bool {
 	switch t {
-	case ProviderBuiltin, ProviderMem0, ProviderOpenViking:
+	case ProviderBuiltin, ProviderMem0, ProviderOpenViking, ProviderNowledgeMem:
 		return true
 	default:
 		return false

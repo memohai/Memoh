@@ -68,6 +68,7 @@ import (
 	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
 	memmem0 "github.com/memohai/memoh/internal/memory/adapters/mem0"
 	memopenviking "github.com/memohai/memoh/internal/memory/adapters/openviking"
+	memnowledgemem "github.com/memohai/memoh/internal/memory/adapters/nowledgemem"
 	"github.com/memohai/memoh/internal/memory/memllm"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/message"
@@ -278,6 +279,9 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 	})
 	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, config map[string]any) (memprovider.Provider, error) {
 		return memopenviking.NewOpenVikingProvider(log, config)
+	})
+	registry.RegisterFactory(string(memprovider.ProviderNowledgeMem), func(_ string, config map[string]any) (memprovider.Provider, error) {
+		return memnowledgemem.NewNowledgeMemProvider(log, config)
 	})
 	defaultProvider := membuiltin.NewBuiltinProvider(log, builtinRuntime, chatService, accountService)
 	defaultProvider.SetLLM(llm)

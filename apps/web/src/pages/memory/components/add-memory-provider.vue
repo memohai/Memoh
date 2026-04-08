@@ -40,6 +40,9 @@
                 <SelectItem value="openviking">
                   {{ $t('memory.providerNames.openviking') }}
                 </SelectItem>
+                <SelectItem value="nowledgemem">
+                  {{ $t('memory.providerNames.nowledgemem') }}
+                </SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>

@@ -238,9 +238,10 @@ type MemoryStatusResponse struct {
 type ProviderType string
 
 const (
-	ProviderBuiltin    ProviderType = "builtin"
-	ProviderMem0       ProviderType = "mem0"
-	ProviderOpenViking ProviderType = "openviking"
+	ProviderBuiltin     ProviderType = "builtin"
+	ProviderMem0        ProviderType = "mem0"
+	ProviderOpenViking  ProviderType = "openviking"
+	ProviderNowledgeMem ProviderType = "nowledgemem"
 )
 
 type ProviderCreateRequest struct {

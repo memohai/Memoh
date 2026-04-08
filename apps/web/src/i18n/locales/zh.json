@@ -378,7 +378,8 @@
     "providerNames": {
       "builtin": "内置",
       "mem0": "Mem0",
-      "openviking": "OpenViking"
+      "openviking": "OpenViking",
+      "nowledgemem": "Nowledge Mem"
     }
   },
   "speech": {

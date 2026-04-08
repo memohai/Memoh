@@ -271,7 +271,7 @@ export type AdaptersProviderStatusResponse = {
     provider_type?: string;
 };
 
-export type AdaptersProviderType = 'builtin' | 'mem0' | 'openviking';
+export type AdaptersProviderType = 'builtin' | 'mem0' | 'openviking' | 'nowledgemem';
 
 export type AdaptersProviderUpdateRequest = {
     config?: {
