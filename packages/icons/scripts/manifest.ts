@@ -82,7 +82,9 @@ const channelPlatforms: string[] = [
   'slack',
   'feishu',
   'wechat',
+  'wecom',
   'matrix',
+  'dingtalk',
 ]
 
 // ---------------------------------------------------------------------------

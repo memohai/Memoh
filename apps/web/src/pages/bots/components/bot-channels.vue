@@ -48,7 +48,7 @@
             </span>
             <div class="flex-1 text-left">
               <div class="font-medium">
-                {{ item.meta.display_name }}
+                {{ channelTitle(item.meta) }}
               </div>
               <div class="text-xs">
                 <span
@@ -107,7 +107,7 @@
                   size="1em"
                 />
               </span>
-              <span>{{ item.meta.display_name }}</span>
+              <span>{{ channelTitle(item.meta) }}</span>
             </button>
           </PopoverContent>
         </Popover>
@@ -136,6 +136,7 @@
 <script setup lang="ts">
 import { LoaderCircle, Plus } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   Button,
   Popover,
@@ -148,6 +149,7 @@ import { getChannels, getBotsByIdChannelByPlatform } from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig } from '@memohai/sdk'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
+import { channelTypeDisplayName } from '@/utils/channel-type-label'
 
 export interface BotChannelItem {
   meta: HandlersChannelMeta
@@ -158,6 +160,12 @@ export interface BotChannelItem {
 const props = defineProps<{
   botId: string
 }>()
+
+const { t } = useI18n()
+
+function channelTitle(meta: HandlersChannelMeta) {
+  return channelTypeDisplayName(t, meta.type, meta.display_name)
+}
 
 const botIdRef = computed(() => props.botId)
 

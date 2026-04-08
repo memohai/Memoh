@@ -989,6 +989,7 @@
       "feishuWebhookSecurityHint": "出于安全考虑，Webhook 模式必须配置 Encrypt Key 或 Verification Token 之一；未受保护的回调地址不应直接暴露在公网上。",
       "feishuWebhookSecretRequired": "出于安全考虑，请至少配置 Encrypt Key 或 Verification Token 之一。",
       "noAvailableTypes": "所有平台类型均已配置",
+      "platformKey": "平台标识：{key}",
       "weixinQr": {
         "title": "扫码登录",
         "description": "使用微信扫描二维码以连接微信账号。",
@@ -1007,6 +1008,10 @@
         "matrix": "Matrix",
         "telegram": "Telegram",
         "weixin": "微信",
+        "wecom": "企业微信",
+        "dingtalk": "钉钉",
+        "web": "Web",
+        "cli": "本地 CLI",
         "local": "本地"
       },
       "typesShort": {
@@ -1016,6 +1021,10 @@
         "matrix": "MX",
         "telegram": "TG",
         "weixin": "WX",
+        "wecom": "企微",
+        "dingtalk": "钉",
+        "web": "Web",
+        "cli": "CLI",
         "local": "本地"
       }
     },

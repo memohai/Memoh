@@ -26,6 +26,7 @@ require (
 	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
 	github.com/mailgun/mailgun-go/v5 v5.14.0
 	github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7
+	github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978
 	github.com/memohai/twilight-ai v0.3.4-0.20260402160505-00db38ee4442
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/opencontainers/image-spec v1.1.1
