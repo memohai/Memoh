@@ -2073,7 +2073,7 @@ func extractStorageKey(accessPath string, _ string) string {
 // natively (e.g. web). Wrapping these with a tee would cause duplicate events.
 func isLocalChannelType(ct channel.ChannelType) bool {
 	s := strings.ToLower(strings.TrimSpace(string(ct)))
-	return s == "local"
+	return s == "web" || s == "cli"
 }
 
 // replayPipelineSession loads persisted events from the DB and replays them

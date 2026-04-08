@@ -116,12 +116,13 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 					p = override
 				}
 			}
-			for {
-				select {
-				case injected, ok := <-cfg.InjectCh:
-					if !ok {
-						break
-					}
+		injectLoop:
+		for {
+			select {
+			case injected, ok := <-cfg.InjectCh:
+				if !ok {
+					break injectLoop
+				}
 					text := strings.TrimSpace(injected.HeaderifiedText)
 					if text == "" {
 						text = strings.TrimSpace(injected.Text)
