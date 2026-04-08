@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -867,11 +868,12 @@ func sendTelegramAttachmentWithAssets(ctx context.Context, bot *tgbotapi.BotAPI,
 
 func sendTelegramAttachmentImpl(ctx context.Context, bot *tgbotapi.BotAPI, target string, att channel.Attachment, caption string, replyTo int, parseMode string, opener assetOpener) error {
 	urlRef := strings.TrimSpace(att.URL)
+	pathRef := strings.TrimSpace(att.Path)
 	keyRef := strings.TrimSpace(att.PlatformKey)
 	sourcePlatform := strings.TrimSpace(att.SourcePlatform)
 	base64Ref := strings.TrimSpace(att.Base64)
 	assetID := strings.TrimSpace(att.ContentHash)
-	if urlRef == "" && keyRef == "" && base64Ref == "" && assetID == "" {
+	if urlRef == "" && pathRef == "" && keyRef == "" && base64Ref == "" && assetID == "" {
 		return errors.New("attachment reference is required")
 	}
 	if strings.TrimSpace(caption) == "" && strings.TrimSpace(att.Caption) != "" {
@@ -883,7 +885,7 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tgbotapi.BotAPI, targe
 			botID = bid
 		}
 	}
-	file, err := resolveTelegramFile(ctx, urlRef, keyRef, base64Ref, sourcePlatform, att, assetID, botID, opener)
+	file, err := resolveTelegramFile(ctx, urlRef, pathRef, keyRef, base64Ref, sourcePlatform, att, assetID, botID, opener)
 	if err != nil {
 		return err
 	}
@@ -980,8 +982,8 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tgbotapi.BotAPI, targe
 }
 
 // resolveTelegramFile determines the best tgbotapi.RequestFileData for an attachment.
-// Priority: PlatformKey > ContentHash (storage) > public URL > base64 data URL.
-func resolveTelegramFile(ctx context.Context, urlRef, keyRef, base64Ref, sourcePlatform string, att channel.Attachment, assetID, botID string, opener assetOpener) (tgbotapi.RequestFileData, error) {
+// Priority: PlatformKey > ContentHash (storage) > local path > public URL > base64 data URL.
+func resolveTelegramFile(ctx context.Context, urlRef, pathRef, keyRef, base64Ref, sourcePlatform string, att channel.Attachment, assetID, botID string, opener assetOpener) (tgbotapi.RequestFileData, error) {
 	if keyRef != "" && (sourcePlatform == "" || strings.EqualFold(sourcePlatform, Type.String())) {
 		return tgbotapi.FileID(keyRef), nil
 	}
@@ -997,6 +999,16 @@ func resolveTelegramFile(ctx context.Context, urlRef, keyRef, base64Ref, sourceP
 				}
 				return tgbotapi.FileBytes{Name: name, Bytes: data}, nil
 			}
+		}
+	}
+	if pathRef != "" {
+		data, err := os.ReadFile(pathRef) //nolint:gosec // G304: path comes from agent FileAttachment, not user input
+		if err == nil && len(data) > 0 {
+			name := strings.TrimSpace(att.Name)
+			if name == "" {
+				name = fileNameFromMime(att.Mime, string(att.Type))
+			}
+			return tgbotapi.FileBytes{Name: name, Bytes: data}, nil
 		}
 	}
 	if urlRef != "" && !strings.HasPrefix(strings.ToLower(urlRef), "data:") && !strings.HasPrefix(urlRef, "/") {

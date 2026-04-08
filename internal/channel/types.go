@@ -248,6 +248,7 @@ const (
 type Attachment struct {
 	Type           AttachmentType `json:"type"`
 	URL            string         `json:"url,omitempty"`
+	Path           string         `json:"path,omitempty"` // local filesystem path
 	PlatformKey    string         `json:"platform_key,omitempty"`
 	SourcePlatform string         `json:"source_platform,omitempty"`
 	ContentHash    string         `json:"content_hash,omitempty"`

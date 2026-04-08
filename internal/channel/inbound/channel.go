@@ -2219,16 +2219,21 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 	attachments := make([]channel.Attachment, 0, len(items))
 	for _, item := range items {
 		url := strings.TrimSpace(item.URL)
-		if url == "" {
-			url = strings.TrimSpace(item.Path)
-		}
+		path := strings.TrimSpace(item.Path)
 		name := strings.TrimSpace(item.Name)
-		if name == "" && url != "" && !isDataURL(url) {
-			name = filepath.Base(url)
+		if name == "" {
+			ref := url
+			if ref == "" {
+				ref = path
+			}
+			if ref != "" && !isDataURL(ref) {
+				name = filepath.Base(ref)
+			}
 		}
 		attachments = append(attachments, channel.Attachment{
 			Type:        channel.AttachmentType(strings.TrimSpace(item.Type)),
 			URL:         url,
+			Path:        path,
 			PlatformKey: strings.TrimSpace(item.PlatformKey),
 			ContentHash: strings.TrimSpace(item.ContentHash),
 			Name:        name,
