@@ -344,17 +344,28 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	// Resolve or auto-create the active session for this route.
+	// Retry up to 3 times with short backoff to avoid persisting messages with NULL session_id.
 	sessionID := ""
 	sessionType := ""
 	if p.sessionEnsurer != nil {
-		sess, sessErr := p.sessionEnsurer.EnsureActiveSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
-		if sessErr != nil {
+		for attempt := range 3 {
+			sess, sessErr := p.sessionEnsurer.EnsureActiveSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
+			if sessErr == nil {
+				sessionID = sess.ID
+				break
+			}
 			if p.logger != nil {
-				p.logger.Warn("ensure active session failed", slog.Any("error", sessErr))
+				p.logger.Warn("ensure active session failed",
+					slog.Int("attempt", attempt+1),
+					slog.Any("error", sessErr))
+			}
+			if attempt < 2 {
+				time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
 			}
 		} else {
 			sessionID = sess.ID
 			sessionType = sess.Type
+		}
 		}
 	}
 
