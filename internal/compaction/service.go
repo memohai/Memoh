@@ -101,7 +101,7 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 	for _, m := range toCompact {
 		entries = append(entries, messageEntry{
 			Role:    m.Role,
-			Content: extractToolResultContent(m.Content, m.ToolCalls),  // New extraction
+			Content: string(m.Content),
 		})
 		messageIDs = append(messageIDs, m.ID)
 	}

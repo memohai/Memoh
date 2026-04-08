@@ -352,6 +352,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			sess, sessErr := p.sessionEnsurer.EnsureActiveSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
 			if sessErr == nil {
 				sessionID = sess.ID
+				sessionType = sess.Type
 				break
 			}
 			if p.logger != nil {
@@ -362,10 +363,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			if attempt < 2 {
 				time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
 			}
-		} else {
-			sessionID = sess.ID
-			sessionType = sess.Type
-		}
 		}
 	}
 
