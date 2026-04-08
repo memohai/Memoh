@@ -102,16 +102,133 @@ func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*p
 		linesRead++
 	}
 
-	// Drain remaining lines for total count.
-	for scanner.Scan() {
-		totalLines++
+	// Task Management Service Impl
+func (s *containerServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.ListTasksResponse, error) {
+	sessionID := req.GetSessionId()
+	if sessionID == "" {
+		return nil, status.Error(codes.InvalidArgument, "session_id required")
 	}
 
-	return &pb.ReadFileResponse{
-		Content:    out.String(),
-		TotalLines: totalLines,
-	}, nil
+	query := `
+		SELECT id, session_id, status, pid, command, started_at, finished_at, exit_code, output
+		FROM tasks
+		WHERE session_id = $1 AND status != 'killed'
+		ORDER BY started_at DESC
+		LIMIT 50`
+	rows, err := s.db.Query(query, sessionID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "DB query failed: %v", err)
+	}
+	defer rows.Close()
+
+	var tasks []pb.Task
+	for rows.Next() {
+		var t pb.Task
+		var started, finished time.Time
+		err := rows.Scan(&t.Id, &t.SessionId, &t.Status, &t.Pid, &t.Command, &started, &finished, &t.ExitCode, &t.Output)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Scan failed: %v", err)
+		}
+		t.StartedAt = timestamppb.New(started)
+		if !finished.IsZero() {
+			t.FinishedAt = timestamppb.New(finished)
+		}
+		// Real-time from exec_status
+		if t.Status == "running" {
+			esReq := &pb.ExecStatusRequest{ExecId: t.Id}
+			if es, err := s.ExecStatus(ctx, esReq); err == nil {
+				t.Status = es.Status
+				t.ExitCode = int32(es.ExitCode)
+				t.Output = es.Output
+			}
+		}
+		tasks = append(tasks, t)
+	}
+	return &pb.ListTasksResponse{Tasks: tasks}, nil
 }
+
+func (s *containerServer) KillTask(ctx context.Context, req *pb.KillTaskRequest) (*pb.KillTaskResponse, error) {
+	taskID := req.GetTaskId()
+	if taskID == "" {
+		return nil, status.Error(codes.InvalidArgument, "task_id required")
+	}
+
+	var pid int64
+	err := s.db.QueryRow("SELECT pid FROM tasks WHERE id = $1 AND status = 'running'", taskID).Scan(&pid)
+	if err == sql.ErrNoRows {
+		return &pb.KillTaskResponse{Success: false, Message: "Task not running"}, nil
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Query failed: %v", err)
+	}
+
+	signal := req.GetSignal()
+	if signal == "" {
+		signal = "TERM"
+	}
+	cmd := exec.Command("kill", "-"+signal, fmt.Sprintf("%d", pid))
+	if err := cmd.Run(); err != nil {
+		return &pb.KillTaskResponse{Success: false, Message: fmt.Sprintf("Kill failed: %v", err)}, nil
+	}
+
+	_, err = s.db.Exec("UPDATE tasks SET status = 'killed', finished_at = NOW() WHERE id = $1", taskID)
+	if err != nil {
+		return &pb.KillTaskResponse{Success: false, Message: "DB update failed"}, nil
+	}
+
+	return &pb.KillTaskResponse{Success: true, Message: "Task killed"}, nil
+}
+
+func (s *containerServer) GetTaskLogs(req *pb.TaskLogsRequest, stream pb.TaskService_GetTaskLogsServer) error {
+	taskID := req.GetTaskId()
+	if taskID == "" {
+		return status.Error(codes.InvalidArgument, "task_id required")
+	}
+
+	offset := req.GetOffset()
+	limit := req.GetLimit()
+	if limit == 0 {
+		limit = 10240
+	}
+
+	logPath := fmt.Sprintf("/data/logs/%s.log", taskID)
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		var output string
+		err = s.db.QueryRow("SELECT output FROM tasks WHERE id = $1", taskID).Scan(&output)
+		if err != nil {
+			return status.Errorf(codes.NotFound, "Logs not found: %v", err)
+		}
+		data = []byte(output)
+	}
+
+	eof := false
+	currentOffset := offset
+	for currentOffset < int64(len(data)) {
+		end := currentOffset + int64(limit)
+		if end > int64(len(data)) {
+			end = int64(len(data))
+			eof = true
+		}
+		chunk := data[currentOffset:end]
+
+		resp := &pb.TaskLogsResponse{
+			Logs: chunk,
+			Eof:  eof,
+		}
+		if err := stream.Send(resp); err != nil {
+			return err
+		}
+		if eof {
+			break
+		}
+		currentOffset = end
+	}
+	return nil
+}
+
+// In main or server setup
+// pb.RegisterTaskServiceServer(s, &containerServer{db: db})
 
 func (*containerServer) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
 	path := req.GetPath()
