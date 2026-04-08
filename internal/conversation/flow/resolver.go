@@ -257,10 +257,16 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		agentInjectCh := make(chan agentpkg.InjectMessage, cap(req.InjectCh))
 		go func() {
 			for msg := range req.InjectCh {
-				agentInjectCh <- agentpkg.InjectMessage{
+				agentMsg := agentpkg.InjectMessage{
 					Text:            msg.Text,
 					HeaderifiedText: msg.HeaderifiedText,
 				}
+				// Inline any image attachments from the injected message so the
+				// model receives them as vision input alongside the text.
+				if runCfg.SupportsImageInput && len(msg.Attachments) > 0 {
+					agentMsg.ImageParts = r.inlineInjectAttachments(ctx, req.BotID, msg.Attachments)
+				}
+				agentInjectCh <- agentMsg
 			}
 			close(agentInjectCh)
 		}()
@@ -500,6 +506,29 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 			}
 		}
 		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query, extra...))
+	} else if len(cfg.InlineImages) > 0 {
+		// Pipeline path: the user query is already embedded in the RC messages,
+		// but image parts are not rendered by the pipeline renderer. Inject the
+		// inline images into the last user message so the model receives them.
+		imageParts := make([]sdk.MessagePart, 0, len(cfg.InlineImages))
+		for _, img := range cfg.InlineImages {
+			if strings.TrimSpace(img.Image) != "" {
+				imageParts = append(imageParts, img)
+			}
+		}
+		if len(imageParts) > 0 {
+			injected := false
+			for i := len(cfg.Messages) - 1; i >= 0; i-- {
+				if cfg.Messages[i].Role == sdk.MessageRoleUser {
+					cfg.Messages[i].Content = append(cfg.Messages[i].Content, imageParts...)
+					injected = true
+					break
+				}
+			}
+			if !injected {
+				cfg.Messages = append(cfg.Messages, sdk.UserMessage("", imageParts...))
+			}
+		}
 	}
 
 	return cfg

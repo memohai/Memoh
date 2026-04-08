@@ -26,12 +26,12 @@ func (*mockAdapter) Descriptor() Descriptor {
 	}
 }
 
-func (m *mockAdapter) Send(_ context.Context, _ ChannelConfig, msg OutboundMessage) error {
-	m.sentMessages = append(m.sentMessages, msg)
+func (m *mockAdapter) Send(_ context.Context, _ ChannelConfig, msg PreparedOutboundMessage) error {
+	m.sentMessages = append(m.sentMessages, msg.LogicalMessage())
 	return nil
 }
 
-func (m *mockAdapter) OpenStream(_ context.Context, _ ChannelConfig, _ string, _ StreamOptions) (OutboundStream, error) {
+func (m *mockAdapter) OpenStream(_ context.Context, _ ChannelConfig, _ string, _ StreamOptions) (PreparedOutboundStream, error) {
 	return &mockAdapterStream{adapter: m}, nil
 }
 
@@ -39,15 +39,16 @@ type mockAdapterStream struct {
 	adapter *mockAdapter
 }
 
-func (s *mockAdapterStream) Push(_ context.Context, event StreamEvent) error {
+func (s *mockAdapterStream) Push(_ context.Context, event PreparedStreamEvent) error {
 	if s == nil || s.adapter == nil {
 		return nil
 	}
-	s.adapter.streamEvents = append(s.adapter.streamEvents, event)
-	if event.Type == StreamEventFinal && event.Final != nil && !event.Final.Message.IsEmpty() {
+	logical := event.LogicalEvent()
+	s.adapter.streamEvents = append(s.adapter.streamEvents, logical)
+	if logical.Type == StreamEventFinal && logical.Final != nil && !logical.Final.Message.IsEmpty() {
 		s.adapter.sentMessages = append(s.adapter.sentMessages, OutboundMessage{
 			Target:  "stream-target",
-			Message: event.Final.Message,
+			Message: logical.Final.Message,
 		})
 	}
 	return nil

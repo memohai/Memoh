@@ -12,8 +12,24 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/channel/channeltest"
 	"github.com/memohai/memoh/internal/media"
 )
+
+func sendPreparedQQ(t *testing.T, adapter *QQAdapter, cfg channel.ChannelConfig, store channel.OutboundAttachmentStore, msg channel.OutboundMessage) error {
+	t.Helper()
+	if cfg.ChannelType == "" {
+		cfg.ChannelType = Type
+	}
+	if store == nil {
+		store = channeltest.NewMemoryAttachmentStore()
+	}
+	prepared, err := channel.PrepareOutboundMessage(context.Background(), store, cfg, msg)
+	if err != nil {
+		return err
+	}
+	return adapter.Send(context.Background(), cfg, prepared)
+}
 
 func TestQQSendTextReply(t *testing.T) {
 	t.Parallel()
@@ -42,14 +58,14 @@ func TestQQSendTextReply(t *testing.T) {
 	defer server.Close()
 
 	adapter := newTestQQAdapter(server)
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	err := sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-1",
 		BotID: "bot-1",
 		Credentials: map[string]any{
 			"appId":        "1024",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, nil, channel.OutboundMessage{
 		Target: "c2c:user-openid",
 		Message: channel.Message{
 			Text:  "hello",
@@ -118,19 +134,24 @@ func TestQQSendImageAttachment(t *testing.T) {
 			Mime:        "image/png",
 		},
 	})
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	store := channeltest.NewMemoryAttachmentStore()
+	asset, err := store.SeedAsset("bot-2", []byte("png-bytes"), "image/png", ".png")
+	if err != nil {
+		t.Fatalf("seed asset: %v", err)
+	}
+	err = sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-2",
 		BotID: "bot-2",
 		Credentials: map[string]any{
 			"appId":        "2048",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, store, channel.OutboundMessage{
 		Target: "group:group-openid",
 		Message: channel.Message{
 			Attachments: []channel.Attachment{{
 				Type:        channel.AttachmentImage,
-				ContentHash: "hash-1",
+				ContentHash: asset.ContentHash,
 				Name:        "image.png",
 			}},
 			Reply: &channel.ReplyRef{MessageID: "source-msg"},
@@ -202,14 +223,14 @@ func TestQQSendImageAttachmentCaptionUsesMediaContent(t *testing.T) {
 	defer server.Close()
 
 	adapter := newTestQQAdapter(server)
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	err := sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-2b",
 		BotID: "bot-2b",
 		Credentials: map[string]any{
 			"appId":        "2049",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, nil, channel.OutboundMessage{
 		Target: "c2c:user-openid",
 		Message: channel.Message{
 			Attachments: []channel.Attachment{{
@@ -292,19 +313,20 @@ func TestQQSendChannelImageIsUnsupported(t *testing.T) {
 	defer server.Close()
 
 	adapter := newTestQQAdapter(server)
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	err := sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-4",
 		BotID: "bot-4",
 		Credentials: map[string]any{
 			"appId":        "8192",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, nil, channel.OutboundMessage{
 		Target: "channel:channel-1",
 		Message: channel.Message{
 			Attachments: []channel.Attachment{{
-				Type: channel.AttachmentImage,
-				URL:  "https://example.com/output.png",
+				Type:   channel.AttachmentImage,
+				Base64: "iVBORw0KGgo=",
+				Name:   "output.png",
 			}},
 		},
 	})
@@ -339,14 +361,14 @@ func TestQQSendChannelReplyIncludesMessageReference(t *testing.T) {
 	defer server.Close()
 
 	adapter := newTestQQAdapter(server)
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	err := sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-5",
 		BotID: "bot-5",
 		Credentials: map[string]any{
 			"appId":        "16384",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, nil, channel.OutboundMessage{
 		Target: "channel:channel-1",
 		Message: channel.Message{
 			Text:  "hello",
@@ -402,14 +424,14 @@ func TestQQSendGroupFileUsesNativeUpload(t *testing.T) {
 	defer server.Close()
 
 	adapter := newTestQQAdapter(server)
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	err := sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-6",
 		BotID: "bot-6",
 		Credentials: map[string]any{
 			"appId":        "32768",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, nil, channel.OutboundMessage{
 		Target: "group:group-openid",
 		Message: channel.Message{
 			Attachments: []channel.Attachment{{
@@ -455,20 +477,20 @@ func TestQQSendChannelFileIsUnsupported(t *testing.T) {
 	defer server.Close()
 
 	adapter := newTestQQAdapter(server)
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	err := sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-7",
 		BotID: "bot-7",
 		Credentials: map[string]any{
 			"appId":        "65536",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, nil, channel.OutboundMessage{
 		Target: "channel:channel-1",
 		Message: channel.Message{
 			Attachments: []channel.Attachment{{
-				Type: channel.AttachmentFile,
-				URL:  "https://example.com/files/report.pdf",
-				Name: "report.pdf",
+				Type:   channel.AttachmentFile,
+				Base64: "JVBERi0xLjQ=",
+				Name:   "report.pdf",
 			}},
 			Reply: &channel.ReplyRef{MessageID: "source-msg"},
 		},
@@ -504,14 +526,14 @@ func TestQQSendImageWithLocalPathFailsBeforeAPI(t *testing.T) {
 	defer server.Close()
 
 	adapter := newTestQQAdapter(server)
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	err := sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-8",
 		BotID: "bot-8",
 		Credentials: map[string]any{
 			"appId":        "131072",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, nil, channel.OutboundMessage{
 		Target: "group:group-openid",
 		Message: channel.Message{
 			Attachments: []channel.Attachment{{
@@ -524,7 +546,7 @@ func TestQQSendImageWithLocalPathFailsBeforeAPI(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected local path error")
 	}
-	if !strings.Contains(err.Error(), "requires http(s) URL, base64, or content_hash") {
+	if !strings.Contains(err.Error(), "attachment reference is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if tokenCalls != 0 {
@@ -567,20 +589,25 @@ func TestQQSendChannelImageFromStoredAssetIsUnsupported(t *testing.T) {
 		},
 	}
 	adapter.SetAssetOpener(opener)
+	store := channeltest.NewMemoryAttachmentStore()
+	asset, err := store.SeedAsset("bot-4", []byte("png-bytes"), "image/png", ".png")
+	if err != nil {
+		t.Fatalf("seed asset: %v", err)
+	}
 
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	err = sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-4",
 		BotID: "bot-4",
 		Credentials: map[string]any{
 			"appId":        "8192",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, store, channel.OutboundMessage{
 		Target: "channel:channel-1",
 		Message: channel.Message{
 			Attachments: []channel.Attachment{{
 				Type:        channel.AttachmentImage,
-				ContentHash: "hash-1",
+				ContentHash: asset.ContentHash,
 				Name:        "image.png",
 			}},
 		},
@@ -640,14 +667,14 @@ func TestQQSendVoiceAttachmentFromHTTPURLUsesDetectedMime(t *testing.T) {
 	defer server.Close()
 
 	adapter := newTestQQAdapter(server)
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	err := sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-voice",
 		BotID: "bot-voice",
 		Credentials: map[string]any{
 			"appId":        "524288",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, nil, channel.OutboundMessage{
 		Target: "group:group-openid",
 		Message: channel.Message{
 			Attachments: []channel.Attachment{{
@@ -712,14 +739,14 @@ func TestQQSendImageAttachmentFromHTTPURLUsesFetchedBytes(t *testing.T) {
 	defer server.Close()
 
 	adapter := newTestQQAdapter(server)
-	err := adapter.Send(context.Background(), channel.ChannelConfig{
+	err := sendPreparedQQ(t, adapter, channel.ChannelConfig{
 		ID:    "cfg-9",
 		BotID: "bot-9",
 		Credentials: map[string]any{
 			"appId":        "262144",
 			"clientSecret": "secret",
 		},
-	}, channel.OutboundMessage{
+	}, nil, channel.OutboundMessage{
 		Target: "group:group-openid",
 		Message: channel.Message{
 			Attachments: []channel.Attachment{{

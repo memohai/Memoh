@@ -12,6 +12,18 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 )
 
+func mustPreparedTelegramEvent(t *testing.T, event channel.StreamEvent) channel.PreparedStreamEvent {
+	t.Helper()
+	prepared, err := channel.PrepareStreamEvent(context.Background(), nil, channel.ChannelConfig{
+		BotID:       "bot-test",
+		ChannelType: Type,
+	}, event)
+	if err != nil {
+		t.Fatalf("prepare telegram stream event: %v", err)
+	}
+	return prepared
+}
+
 func TestTelegramOutboundStream_CloseNil(t *testing.T) {
 	t.Parallel()
 
@@ -30,7 +42,7 @@ func TestTelegramOutboundStream_PushClosed(t *testing.T) {
 	s.closed.Store(true)
 
 	ctx := context.Background()
-	err := s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "x"})
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "x"}))
 	if err == nil {
 		t.Fatal("Push on closed stream should return error")
 	}
@@ -46,7 +58,7 @@ func TestTelegramOutboundStream_PushStatusNoOp(t *testing.T) {
 	s := &telegramOutboundStream{adapter: adapter}
 
 	ctx := context.Background()
-	err := s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventStatus})
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventStatus}))
 	if err != nil {
 		t.Fatalf("StreamEventStatus should be no-op: %v", err)
 	}
@@ -57,7 +69,7 @@ func TestTelegramOutboundStream_PushNilAdapter(t *testing.T) {
 
 	s := &telegramOutboundStream{adapter: nil}
 	ctx := context.Background()
-	err := s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "x"})
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "x"}))
 	if err == nil {
 		t.Fatal("Push with nil adapter should return error")
 	}
@@ -73,7 +85,7 @@ func TestTelegramOutboundStream_PushUnknownEventTypeSkipped(t *testing.T) {
 	s := &telegramOutboundStream{adapter: adapter}
 	ctx := context.Background()
 
-	err := s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventType("unknown")})
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventType("unknown")}))
 	if err != nil {
 		t.Fatalf("Push with unknown event type should be silently skipped: %v", err)
 	}
@@ -86,7 +98,7 @@ func TestTelegramOutboundStream_PushEmptyDeltaNoOp(t *testing.T) {
 	s := &telegramOutboundStream{adapter: adapter}
 	ctx := context.Background()
 
-	err := s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: ""})
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: ""}))
 	if err != nil {
 		t.Fatalf("empty delta should be no-op: %v", err)
 	}
@@ -99,7 +111,7 @@ func TestTelegramOutboundStream_PushErrorEventEmptyNoOp(t *testing.T) {
 	s := &telegramOutboundStream{adapter: adapter}
 	ctx := context.Background()
 
-	err := s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: ""})
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventError, Error: ""}))
 	if err != nil {
 		t.Fatalf("empty error event should be no-op: %v", err)
 	}
@@ -140,7 +152,7 @@ func TestTelegramOutboundStream_PushErrorEventRedactsRegisteredTokenFragments(t 
 	}()
 
 	prefixHalf := botToken[:len(botToken)/2]
-	err = s.Push(context.Background(), channel.StreamEvent{Type: channel.StreamEventError, Error: "request failed: " + prefixHalf})
+	err = s.Push(context.Background(), mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventError, Error: "request failed: " + prefixHalf}))
 	if err != nil {
 		t.Fatalf("push error event: %v", err)
 	}
@@ -504,7 +516,7 @@ func TestDraftMode_DeltaUsesSendDraft(t *testing.T) {
 		sendDraftForTest = origDraft
 	}()
 
-	err := s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "Hello "})
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "Hello "}))
 	if err != nil {
 		t.Fatalf("Push delta should succeed: %v", err)
 	}
@@ -532,10 +544,10 @@ func TestDraftMode_PhaseEndTextIsNoOp(t *testing.T) {
 	s.buf.WriteString("some content")
 	ctx := context.Background()
 
-	err := s.Push(ctx, channel.StreamEvent{
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
 		Type:  channel.StreamEventPhaseEnd,
 		Phase: channel.StreamPhaseText,
-	})
+	}))
 	if err != nil {
 		t.Fatalf("PhaseEnd in draft mode should be no-op: %v", err)
 	}
@@ -575,7 +587,7 @@ func TestDraftMode_ToolCallStartSendsPermanentMessage(t *testing.T) {
 		sendTextForTest = origSendText
 	}()
 
-	err := s.Push(ctx, channel.StreamEvent{Type: channel.StreamEventToolCallStart})
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventToolCallStart}))
 	if err != nil {
 		t.Fatalf("Push ToolCallStart should succeed: %v", err)
 	}
@@ -624,12 +636,12 @@ func TestDraftMode_FinalEmptyBufferSkipsDuplicate(t *testing.T) {
 		sendTextForTest = origSendText
 	}()
 
-	err := s.Push(ctx, channel.StreamEvent{
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
 		Type: channel.StreamEventFinal,
 		Final: &channel.StreamFinalizePayload{
 			Message: channel.Message{Text: "already sent text"},
 		},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("StreamEventFinal with empty buffer in draft mode should succeed: %v", err)
 	}
@@ -672,12 +684,12 @@ func TestDraftMode_MultipleFinalEventsOnlyOneSend(t *testing.T) {
 	// Push 3 StreamEventFinal events (simulating 3 assistant outputs).
 	// Only the first should actually send a message.
 	for i, text := range []string{"intermediate 1", "intermediate 2", "final summary"} {
-		err := s.Push(ctx, channel.StreamEvent{
+		err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
 			Type: channel.StreamEventFinal,
 			Final: &channel.StreamFinalizePayload{
 				Message: channel.Message{Text: text},
 			},
-		})
+		}))
 		if err != nil {
 			t.Fatalf("StreamEventFinal #%d should succeed: %v", i+1, err)
 		}

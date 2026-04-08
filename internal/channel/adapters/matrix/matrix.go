@@ -12,7 +12,6 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
-	pathpkg "path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -377,8 +376,8 @@ func matrixHTTPErrorSummary(statusCode int, data []byte) string {
 	return fmt.Sprintf("%s (HTTP %d)", textutil.TruncateRunes(message, 300), statusCode)
 }
 
-func (a *MatrixAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
-	if msg.Message.IsEmpty() {
+func (a *MatrixAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
+	if msg.Message.Message.IsEmpty() {
 		return errors.New("message is required")
 	}
 	parsed, err := parseConfig(cfg.Credentials)
@@ -389,9 +388,9 @@ func (a *MatrixAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 	if err != nil {
 		return err
 	}
-	text := strings.TrimSpace(msg.Message.PlainText())
+	text := strings.TrimSpace(msg.Message.Message.PlainText())
 	if text != "" {
-		textMsg := msg.Message
+		textMsg := msg.Message.Message
 		textMsg.Attachments = nil
 		textMsg.Text = text
 		textMsg.Parts = nil
@@ -402,16 +401,16 @@ func (a *MatrixAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 	for i, att := range msg.Message.Attachments {
 		mediaMsg := channel.Message{}
 		if text == "" && i == 0 {
-			mediaMsg.Reply = msg.Message.Reply
+			mediaMsg.Reply = msg.Message.Message.Reply
 		}
-		if err := a.sendMediaAttachment(ctx, parsed, roomID, cfg.BotID, mediaMsg, att); err != nil {
+		if err := a.sendMediaAttachment(ctx, parsed, roomID, mediaMsg, att); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (a *MatrixAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *MatrixAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	if err := validateTarget(target); err != nil {
 		return nil, err
 	}
@@ -431,7 +430,7 @@ func (a *MatrixAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig,
 	}, nil
 }
 
-func (a *MatrixAdapter) Update(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, msg channel.Message) error {
+func (a *MatrixAdapter) Update(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, msg channel.PreparedMessage) error {
 	parsed, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
@@ -440,7 +439,7 @@ func (a *MatrixAdapter) Update(ctx context.Context, cfg channel.ChannelConfig, t
 	if err != nil {
 		return err
 	}
-	_, err = a.sendTextEvent(ctx, parsed, roomID, buildMatrixMessageContent(msg, true, strings.TrimSpace(messageID)))
+	_, err = a.sendTextEvent(ctx, parsed, roomID, buildMatrixMessageContent(msg.Message, true, strings.TrimSpace(messageID)))
 	return err
 }
 
@@ -1283,8 +1282,8 @@ func (a *MatrixAdapter) sendTextEvent(ctx context.Context, cfg Config, roomID st
 	return strings.TrimSpace(resp.EventID), nil
 }
 
-func (a *MatrixAdapter) sendMediaAttachment(ctx context.Context, cfg Config, roomID string, fallbackBotID string, msg channel.Message, att channel.Attachment) error {
-	contentURI, resolved, err := a.resolveMatrixContentURI(ctx, cfg, fallbackBotID, att)
+func (a *MatrixAdapter) sendMediaAttachment(ctx context.Context, cfg Config, roomID string, msg channel.Message, att channel.PreparedAttachment) error {
+	contentURI, resolved, err := a.resolveMatrixContentURI(ctx, cfg, att)
 	if err != nil {
 		return err
 	}
@@ -1292,22 +1291,15 @@ func (a *MatrixAdapter) sendMediaAttachment(ctx context.Context, cfg Config, roo
 	return err
 }
 
-func (a *MatrixAdapter) resolveMatrixContentURI(ctx context.Context, cfg Config, fallbackBotID string, att channel.Attachment) (string, channel.Attachment, error) {
-	if ref := strings.TrimSpace(att.PlatformKey); isMatrixContentURI(ref) {
-		resolved := att
+func (a *MatrixAdapter) resolveMatrixContentURI(ctx context.Context, cfg Config, att channel.PreparedAttachment) (string, channel.Attachment, error) {
+	if ref := strings.TrimSpace(att.NativeRef); att.Kind == channel.PreparedAttachmentNativeRef && isMatrixContentURI(ref) {
+		resolved := att.Logical
 		if resolved.SourcePlatform == "" {
 			resolved.SourcePlatform = Type.String()
 		}
 		return ref, resolved, nil
 	}
-	if ref := strings.TrimSpace(att.URL); isMatrixContentURI(ref) {
-		resolved := att
-		if resolved.SourcePlatform == "" {
-			resolved.SourcePlatform = Type.String()
-		}
-		return ref, resolved, nil
-	}
-	payload, resolved, err := a.prepareMatrixUpload(ctx, fallbackBotID, att)
+	payload, resolved, err := prepareMatrixUpload(ctx, att)
 	if err != nil {
 		return "", channel.Attachment{}, err
 	}
@@ -1329,105 +1321,42 @@ type matrixUploadPayload struct {
 	name string
 }
 
-func (a *MatrixAdapter) prepareMatrixUpload(ctx context.Context, fallbackBotID string, att channel.Attachment) (matrixUploadPayload, channel.Attachment, error) {
-	resolved := att
-	assetID := strings.TrimSpace(att.ContentHash)
-	botID := strings.TrimSpace(fallbackBotID)
-	if att.Metadata != nil {
-		if value, ok := att.Metadata["bot_id"].(string); ok && strings.TrimSpace(value) != "" {
-			botID = strings.TrimSpace(value)
-		}
+func prepareMatrixUpload(ctx context.Context, att channel.PreparedAttachment) (matrixUploadPayload, channel.Attachment, error) {
+	if att.Kind != channel.PreparedAttachmentUpload {
+		return matrixUploadPayload{}, channel.Attachment{}, fmt.Errorf("matrix attachment requires upload source, got %s", att.Kind)
 	}
-	if assetID != "" && a.assets != nil && botID != "" {
-		reader, asset, err := a.assets.Open(ctx, botID, assetID)
-		if err == nil {
-			defer func() { _ = reader.Close() }()
-			data, readErr := media.ReadAllWithLimit(reader, media.MaxAssetBytes)
-			if readErr != nil {
-				return matrixUploadPayload{}, channel.Attachment{}, readErr
-			}
-			if strings.TrimSpace(resolved.Mime) == "" {
-				resolved.Mime = strings.TrimSpace(asset.Mime)
-			}
-			if resolved.Size <= 0 {
-				resolved.Size = asset.SizeBytes
-			}
-			name := deriveMatrixUploadName(resolved, resolved.Mime, "")
-			return matrixUploadPayload{data: data, mime: strings.TrimSpace(resolved.Mime), name: name}, resolved, nil
-		}
+	if att.Open == nil {
+		return matrixUploadPayload{}, channel.Attachment{}, errors.New("matrix attachment upload is not openable")
 	}
-
-	rawBase64 := strings.TrimSpace(att.Base64)
-	refURL := strings.TrimSpace(att.URL)
-	if rawBase64 == "" && strings.HasPrefix(strings.ToLower(refURL), "data:") {
-		rawBase64 = refURL
-	}
-	if rawBase64 != "" {
-		decoded, err := attachmentpkg.DecodeBase64(rawBase64, media.MaxAssetBytes)
-		if err != nil {
-			return matrixUploadPayload{}, channel.Attachment{}, fmt.Errorf("decode matrix attachment base64: %w", err)
-		}
-		data, err := media.ReadAllWithLimit(decoded, media.MaxAssetBytes)
-		if err != nil {
-			return matrixUploadPayload{}, channel.Attachment{}, fmt.Errorf("read matrix attachment base64: %w", err)
-		}
-		if strings.TrimSpace(resolved.Mime) == "" {
-			resolved.Mime = strings.TrimSpace(attachmentpkg.MimeFromDataURL(rawBase64))
-		}
-		if resolved.Size <= 0 {
-			resolved.Size = int64(len(data))
-		}
-		name := deriveMatrixUploadName(resolved, resolved.Mime, "")
-		return matrixUploadPayload{data: data, mime: strings.TrimSpace(resolved.Mime), name: name}, resolved, nil
-	}
-
-	if refURL == "" {
-		return matrixUploadPayload{}, channel.Attachment{}, errors.New("matrix attachment requires content_hash, base64, mxc url, or http(s) url")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, refURL, nil)
-	if err != nil {
-		return matrixUploadPayload{}, channel.Attachment{}, fmt.Errorf("build matrix attachment download request: %w", err)
-	}
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req) //nolint:gosec // URL is a user-provided or cross-platform attachment reference.
-	if err != nil {
-		return matrixUploadPayload{}, channel.Attachment{}, fmt.Errorf("download matrix attachment: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return matrixUploadPayload{}, channel.Attachment{}, fmt.Errorf("download matrix attachment status: %d", resp.StatusCode)
-	}
-	if resp.ContentLength > media.MaxAssetBytes {
-		return matrixUploadPayload{}, channel.Attachment{}, fmt.Errorf("%w: max %d bytes", media.ErrAssetTooLarge, media.MaxAssetBytes)
-	}
-	data, err := media.ReadAllWithLimit(resp.Body, media.MaxAssetBytes)
+	reader, err := att.Open(ctx)
 	if err != nil {
 		return matrixUploadPayload{}, channel.Attachment{}, err
 	}
+	defer func() { _ = reader.Close() }()
+	data, err := media.ReadAllWithLimit(reader, media.MaxAssetBytes)
+	if err != nil {
+		return matrixUploadPayload{}, channel.Attachment{}, err
+	}
+	resolved := att.Logical
 	if strings.TrimSpace(resolved.Mime) == "" {
-		resolved.Mime = strings.TrimSpace(resp.Header.Get("Content-Type"))
-		resolved.Mime = attachmentpkg.NormalizeMime(resolved.Mime)
+		resolved.Mime = strings.TrimSpace(att.Mime)
 	}
 	if resolved.Size <= 0 {
-		if resp.ContentLength > 0 {
-			resolved.Size = resp.ContentLength
-		} else {
+		resolved.Size = att.Size
+		if resolved.Size <= 0 {
 			resolved.Size = int64(len(data))
 		}
 	}
-	name := deriveMatrixUploadName(resolved, resolved.Mime, refURL)
-	return matrixUploadPayload{data: data, mime: strings.TrimSpace(resolved.Mime), name: name}, resolved, nil
+	name := deriveMatrixUploadName(resolved, strings.TrimSpace(att.Mime), att.Name)
+	return matrixUploadPayload{data: data, mime: strings.TrimSpace(att.Mime), name: name}, resolved, nil
 }
 
-func deriveMatrixUploadName(att channel.Attachment, mime, refURL string) string {
+func deriveMatrixUploadName(att channel.Attachment, mime, fallbackName string) string {
 	if name := strings.TrimSpace(att.Name); name != "" {
 		return name
 	}
-	if refURL != "" {
-		if parsed, err := url.Parse(refURL); err == nil {
-			if base := strings.TrimSpace(pathpkg.Base(parsed.Path)); base != "" && base != "." && base != "/" {
-				return base
-			}
-		}
+	if name := strings.TrimSpace(fallbackName); name != "" {
+		return name
 	}
 	return matrixAttachmentBody(channel.Attachment{Type: att.Type, Mime: mime, Caption: att.Caption})
 }

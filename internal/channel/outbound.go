@@ -161,7 +161,7 @@ func ChunkMarkdownText(text string, limit int) []string {
 }
 
 func runeLen(value string) int {
-	return len([]rune(value))
+	return utf8.RuneCountInString(value)
 }
 
 func splitLongLine(line string, limit int) []string {
@@ -224,10 +224,16 @@ func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]Outbou
 			if len(chunks) > 1 && idx < len(chunks)-1 {
 				actions = nil
 			}
+			// Message.ID signals an edit operation; only the first chunk carries it
+			// so subsequent chunks are delivered as new messages rather than repeated edits.
+			var messageID string
+			if idx == 0 {
+				messageID = base.ID
+			}
 			item := OutboundMessage{
 				Target: msg.Target,
 				Message: Message{
-					ID:          base.ID,
+					ID:          messageID,
 					Format:      base.Format,
 					Text:        chunk,
 					Parts:       base.Parts,
@@ -360,6 +366,13 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 	if err := validateMessageCapabilities(m.registry, cfg.ChannelType, normalized.Message); err != nil {
 		return err
 	}
+	prepared, err := PrepareOutboundMessage(ctx, m.attachmentStore, cfg, OutboundMessage{
+		Target:  target,
+		Message: normalized.Message,
+	})
+	if err != nil {
+		return err
+	}
 	editor, _ := m.registry.GetMessageEditor(cfg.ChannelType)
 	if strings.TrimSpace(normalized.Message.ID) != "" {
 		if editor == nil {
@@ -367,8 +380,15 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 		}
 		var lastErr error
 		for i := 0; i < policy.RetryMax; i++ {
-			err := editor.Update(ctx, cfg, target, strings.TrimSpace(normalized.Message.ID), normalized.Message)
+			err := editor.Update(ctx, cfg, target, strings.TrimSpace(normalized.Message.ID), prepared.Message)
 			if err == nil {
+				if m.logger != nil {
+					m.logger.Debug("edit outbound success",
+						slog.String("channel", cfg.ChannelType.String()),
+						slog.String("bot_id", cfg.BotID),
+						slog.String("target", target),
+					)
+				}
 				return nil
 			}
 			lastErr = err
@@ -378,14 +398,23 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 					slog.Int("attempt", i+1),
 					slog.Any("error", err))
 			}
-			time.Sleep(time.Duration(i+1) * time.Duration(policy.RetryBackoffMs) * time.Millisecond)
+			if !sleepWithContext(ctx, time.Duration(i+1)*time.Duration(policy.RetryBackoffMs)*time.Millisecond) {
+				return fmt.Errorf("edit outbound cancelled: %w", ctx.Err())
+			}
 		}
 		return fmt.Errorf("edit outbound failed after retries: %w", lastErr)
 	}
 	var lastErr error
 	for i := 0; i < policy.RetryMax; i++ {
-		err := sender.Send(ctx, cfg, OutboundMessage{Target: target, Message: normalized.Message})
+		err := sender.Send(ctx, cfg, prepared)
 		if err == nil {
+			if m.logger != nil {
+				m.logger.Debug("send outbound success",
+					slog.String("channel", cfg.ChannelType.String()),
+					slog.String("bot_id", cfg.BotID),
+					slog.String("target", target),
+				)
+			}
 			return nil
 		}
 		lastErr = err
@@ -395,7 +424,9 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 				slog.Int("attempt", i+1),
 				slog.Any("error", err))
 		}
-		time.Sleep(time.Duration(i+1) * time.Duration(policy.RetryBackoffMs) * time.Millisecond)
+		if !sleepWithContext(ctx, time.Duration(i+1)*time.Duration(policy.RetryBackoffMs)*time.Millisecond) {
+			return fmt.Errorf("send outbound cancelled: %w", ctx.Err())
+		}
 	}
 	return fmt.Errorf("send outbound failed after retries: %w", lastErr)
 }
@@ -548,13 +579,15 @@ func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts
 	}
 	return &managerOutboundStream{
 		manager:     s.manager,
+		config:      s.config,
 		stream:      stream,
 		channelType: s.channelType,
+		policy:      s.manager.resolveOutboundPolicy(s.channelType),
 		send: func(ctx context.Context, msg OutboundMessage) error {
 			msg.Target = target
 			return s.Send(ctx, msg)
 		},
-		reopen: func(ctx context.Context) (OutboundStream, error) {
+		reopen: func(ctx context.Context) (PreparedOutboundStream, error) {
 			return s.streamSender.OpenStream(ctx, s.config, target, StreamOptions{
 				SourceMessageID: opts.SourceMessageID,
 				Metadata:        opts.Metadata,
@@ -563,12 +596,19 @@ func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts
 	}, nil
 }
 
+// managerOutboundStream wraps a PreparedOutboundStream and adds text-chunking,
+// stream-splitting, and attachment fallback on top of the raw adapter stream.
+//
+// Push and Close must be called from a single goroutine; this type is not
+// safe for concurrent use.
 type managerOutboundStream struct {
 	manager     *Manager
-	stream      OutboundStream
+	config      ChannelConfig
+	stream      PreparedOutboundStream
 	channelType ChannelType
+	policy      OutboundPolicy // cached at open time; immutable after creation
 	send        func(ctx context.Context, msg OutboundMessage) error
-	reopen      func(ctx context.Context) (OutboundStream, error)
+	reopen      func(ctx context.Context) (PreparedOutboundStream, error)
 	deltaRunes  int
 	deltaText   strings.Builder
 	splitCount  int
@@ -592,7 +632,7 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 		}
 		return s.pushFinalWithChunking(ctx, event)
 	}
-	return s.stream.Push(ctx, event)
+	return s.pushPrepared(ctx, event)
 }
 
 // streamSplitSoftRatio controls the soft-limit window. The soft limit is
@@ -606,10 +646,10 @@ const streamSplitSoftRatio = 4
 // the soft and hard limits it looks for natural break points (sentence ends,
 // line breaks) so messages don't get cut mid-sentence.
 func (s *managerOutboundStream) pushDelta(ctx context.Context, event StreamEvent) error {
-	policy := s.manager.resolveOutboundPolicy(s.channelType)
+	policy := s.policy
 	if policy.TextChunkLimit <= 0 || s.reopen == nil {
 		s.deltaRunes += runeLen(event.Delta)
-		return s.stream.Push(ctx, event)
+		return s.pushPrepared(ctx, event)
 	}
 
 	newRunes := runeLen(event.Delta)
@@ -620,13 +660,13 @@ func (s *managerOutboundStream) pushDelta(ctx context.Context, event StreamEvent
 	if afterRunes <= softLimit {
 		s.deltaRunes = afterRunes
 		s.deltaText.WriteString(event.Delta)
-		return s.stream.Push(ctx, event)
+		return s.pushPrepared(ctx, event)
 	}
 
 	if afterRunes <= hardLimit {
 		s.deltaRunes = afterRunes
 		s.deltaText.WriteString(event.Delta)
-		if err := s.stream.Push(ctx, event); err != nil {
+		if err := s.pushPrepared(ctx, event); err != nil {
 			return err
 		}
 		if isNaturalBreakPoint(s.deltaText.String()) {
@@ -643,14 +683,14 @@ func (s *managerOutboundStream) pushDelta(ctx context.Context, event StreamEvent
 	s.deltaRunes = newRunes
 	s.deltaText.Reset()
 	s.deltaText.WriteString(event.Delta)
-	return s.stream.Push(ctx, event)
+	return s.pushPrepared(ctx, event)
 }
 
 // splitStream finalizes the current adapter stream, opens a continuation
 // stream, and sends Status(Started) so the adapter creates a new platform
 // message before the first delta arrives.
 func (s *managerOutboundStream) splitStream(ctx context.Context) error {
-	if err := s.stream.Push(ctx, StreamEvent{
+	if err := s.pushPrepared(ctx, StreamEvent{
 		Type:  StreamEventFinal,
 		Final: &StreamFinalizePayload{},
 	}); err != nil {
@@ -667,7 +707,7 @@ func (s *managerOutboundStream) splitStream(ctx context.Context) error {
 	s.stream = newStream
 	s.splitCount++
 
-	return s.stream.Push(ctx, StreamEvent{
+	return s.pushPrepared(ctx, StreamEvent{
 		Type:   StreamEventStatus,
 		Status: StreamStatusStarted,
 	})
@@ -699,7 +739,7 @@ func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event S
 		Final:    &StreamFinalizePayload{},
 		Metadata: event.Metadata,
 	}
-	if err := s.stream.Push(ctx, bufferFinal); err != nil {
+	if err := s.pushPrepared(ctx, bufferFinal); err != nil {
 		return err
 	}
 
@@ -723,7 +763,7 @@ func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event S
 }
 
 func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event StreamEvent) error {
-	policy := s.manager.resolveOutboundPolicy(s.channelType)
+	policy := s.policy
 	if policy.TextChunkLimit <= 0 {
 		if s.manager.logger != nil {
 			s.manager.logger.Debug("stream final chunking skipped: non-positive chunk limit",
@@ -731,7 +771,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 				slog.Int("chunk_limit", policy.TextChunkLimit),
 			)
 		}
-		return s.stream.Push(ctx, event)
+		return s.pushPrepared(ctx, event)
 	}
 	msg := normalizeOutboundMessage(event.Final.Message)
 	text := strings.TrimSpace(msg.PlainText())
@@ -753,7 +793,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 				slog.Int("chunk_limit", policy.TextChunkLimit),
 			)
 		}
-		return s.stream.Push(ctx, event)
+		return s.pushPrepared(ctx, event)
 	}
 
 	chunker := policy.Chunker
@@ -768,7 +808,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 				slog.Int("chunks", len(chunks)),
 			)
 		}
-		return s.stream.Push(ctx, event)
+		return s.pushPrepared(ctx, event)
 	}
 
 	hasAttachments := len(msg.Attachments) > 0
@@ -792,7 +832,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 	}
 	firstChunkCtx, cancelFirstChunk := context.WithTimeout(ctx, streamFinalFirstChunkTimeout)
 	defer cancelFirstChunk()
-	if err := s.stream.Push(firstChunkCtx, firstChunkEvent); err != nil {
+	if err := s.pushPrepared(firstChunkCtx, firstChunkEvent); err != nil {
 		if s.manager.logger != nil {
 			s.manager.logger.Warn("stream final first chunk push failed, fallback to direct sends",
 				slog.String("channel", s.channelType.String()),
@@ -803,6 +843,17 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 		return s.sendChunkedFinal(ctx, msg, chunks, 0, hasAttachments)
 	}
 	return s.sendChunkedFinal(ctx, msg, chunks, 1, hasAttachments)
+}
+
+func (s *managerOutboundStream) pushPrepared(ctx context.Context, event StreamEvent) error {
+	if s.manager == nil || s.stream == nil {
+		return errors.New("stream is not configured")
+	}
+	prepared, err := PrepareStreamEvent(ctx, s.manager.attachmentStore, s.config, event)
+	if err != nil {
+		return err
+	}
+	return s.stream.Push(ctx, prepared)
 }
 
 func (s *managerOutboundStream) sendChunkedFinal(ctx context.Context, msg Message, chunks []string, startIndex int, hasAttachments bool) error {
@@ -877,4 +928,17 @@ func (s *managerOutboundStream) Close(ctx context.Context) error {
 		return errors.New("stream is not configured")
 	}
 	return s.stream.Close(ctx)
+}
+
+// sleepWithContext waits for d or until ctx is cancelled.
+// It returns true if the sleep completed normally, false if ctx was cancelled.
+func sleepWithContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }

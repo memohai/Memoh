@@ -28,7 +28,7 @@ type matrixOutboundStream struct {
 	lastEditedAt    time.Time
 }
 
-func (s *matrixOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
+func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s == nil || s.adapter == nil {
 		return errors.New("matrix stream not configured")
 	}
@@ -82,8 +82,8 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		if event.Final == nil {
 			return errors.New("matrix stream final payload is required")
 		}
-		text := strings.TrimSpace(event.Final.Message.PlainText())
-		format := event.Final.Message.Format
+		text := strings.TrimSpace(event.Final.Message.Message.PlainText())
+		format := event.Final.Message.Message.Format
 		if format == "" {
 			format = channel.MessageFormatPlain
 		}
@@ -196,7 +196,7 @@ func (s *matrixOutboundStream) resetMessageState() {
 	s.mu.Unlock()
 }
 
-func (s *matrixOutboundStream) pushAttachments(ctx context.Context, attachments []channel.Attachment) error {
+func (s *matrixOutboundStream) pushAttachments(ctx context.Context, attachments []channel.PreparedAttachment) error {
 	if len(attachments) == 0 {
 		return nil
 	}
@@ -223,7 +223,7 @@ func (s *matrixOutboundStream) pushAttachments(ctx context.Context, attachments 
 		if idx == 0 && originalEventID == "" {
 			mediaMsg.Reply = reply
 		}
-		if err := s.adapter.sendMediaAttachment(ctx, s.cfg, roomID, "", mediaMsg, att); err != nil {
+		if err := s.adapter.sendMediaAttachment(ctx, s.cfg, roomID, mediaMsg, att); err != nil {
 			return err
 		}
 	}

@@ -23,11 +23,11 @@ type dingtalkOutboundStream struct {
 	closed      atomic.Bool
 	finalSent   atomic.Bool
 	textBuilder strings.Builder
-	attachments []channel.Attachment
-	final       *channel.Message
+	attachments []channel.PreparedAttachment
+	final       *channel.PreparedMessage
 }
 
-func (s *dingtalkOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
+func (s *dingtalkOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s.closed.Load() {
 		return errors.New("dingtalk stream is closed")
 	}
@@ -88,7 +88,9 @@ func (s *dingtalkOutboundStream) Push(ctx context.Context, event channel.StreamE
 			return nil
 		}
 		s.mu.Lock()
-		s.final = &channel.Message{Format: channel.MessageFormatPlain, Text: "Error: " + text}
+		s.final = &channel.PreparedMessage{
+			Message: channel.Message{Format: channel.MessageFormatPlain, Text: "Error: " + text},
+		}
 		s.mu.Unlock()
 		return s.flush(ctx)
 	}
@@ -112,13 +114,13 @@ func (s *dingtalkOutboundStream) flush(ctx context.Context) error {
 	if s.finalSent.Load() {
 		return nil
 	}
-	msg := s.snapshotMessage()
-	if msg.IsEmpty() {
+	prepared := s.snapshotPrepared()
+	if prepared.Message.IsEmpty() && len(prepared.Attachments) == 0 {
 		return nil
 	}
-	if err := s.adapter.Send(ctx, s.cfg, channel.OutboundMessage{
+	if err := s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
 		Target:  s.target,
-		Message: msg,
+		Message: prepared,
 	}); err != nil {
 		return err
 	}
@@ -126,22 +128,26 @@ func (s *dingtalkOutboundStream) flush(ctx context.Context) error {
 	return nil
 }
 
-func (s *dingtalkOutboundStream) snapshotMessage() channel.Message {
+func (s *dingtalkOutboundStream) snapshotPrepared() channel.PreparedMessage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	msg := channel.Message{}
+	var prepared channel.PreparedMessage
 	if s.final != nil {
-		msg = *s.final
+		prepared = *s.final
 	}
-	if strings.TrimSpace(msg.Text) == "" {
-		msg.Text = strings.TrimSpace(s.textBuilder.String())
+	if strings.TrimSpace(prepared.Message.Text) == "" {
+		prepared.Message.Text = strings.TrimSpace(s.textBuilder.String())
 	}
-	if len(msg.Attachments) == 0 && len(s.attachments) > 0 {
-		msg.Attachments = append(msg.Attachments, s.attachments...)
+	if len(prepared.Attachments) == 0 && len(s.attachments) > 0 {
+		prepared.Attachments = append(prepared.Attachments, s.attachments...)
+		prepared.Message.Attachments = make([]channel.Attachment, 0, len(s.attachments))
+		for _, att := range s.attachments {
+			prepared.Message.Attachments = append(prepared.Message.Attachments, att.Logical)
+		}
 	}
-	if msg.Reply == nil && s.reply != nil {
-		msg.Reply = s.reply
+	if prepared.Message.Reply == nil && s.reply != nil {
+		prepared.Message.Reply = s.reply
 	}
-	return msg
+	return prepared
 }

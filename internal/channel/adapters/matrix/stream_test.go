@@ -10,6 +10,18 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 )
 
+func mustPreparedMatrixEvent(t *testing.T, event channel.StreamEvent) channel.PreparedStreamEvent {
+	t.Helper()
+	prepared, err := channel.PrepareStreamEvent(context.Background(), nil, channel.ChannelConfig{
+		BotID:       "bot-test",
+		ChannelType: Type,
+	}, event)
+	if err != nil {
+		t.Fatalf("prepare matrix stream event: %v", err)
+	}
+	return prepared
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -38,13 +50,13 @@ func TestMatrixStreamDoesNotSendDeltaBeforeTextPhaseEnds(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "draft", Phase: channel.StreamPhaseText}); err != nil {
+	if err := stream.Push(ctx, mustPreparedMatrixEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "draft", Phase: channel.StreamPhaseText})); err != nil {
 		t.Fatalf("push delta: %v", err)
 	}
 	if requests != 0 {
 		t.Fatalf("expected no request before text phase ends, got %d", requests)
 	}
-	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText}); err != nil {
+	if err := stream.Push(ctx, mustPreparedMatrixEvent(t, channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText})); err != nil {
 		t.Fatalf("push phase end: %v", err)
 	}
 	if requests != 1 {
@@ -74,19 +86,19 @@ func TestMatrixStreamDropsBufferedTextWhenToolStarts(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "I will inspect first", Phase: channel.StreamPhaseText}); err != nil {
+	if err := stream.Push(ctx, mustPreparedMatrixEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "I will inspect first", Phase: channel.StreamPhaseText})); err != nil {
 		t.Fatalf("push delta: %v", err)
 	}
-	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventToolCallStart}); err != nil {
+	if err := stream.Push(ctx, mustPreparedMatrixEvent(t, channel.StreamEvent{Type: channel.StreamEventToolCallStart})); err != nil {
 		t.Fatalf("push tool call start: %v", err)
 	}
 	if requests != 0 {
 		t.Fatalf("expected no request for discarded pre-tool text, got %d", requests)
 	}
-	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "Final answer", Phase: channel.StreamPhaseText}); err != nil {
+	if err := stream.Push(ctx, mustPreparedMatrixEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "Final answer", Phase: channel.StreamPhaseText})); err != nil {
 		t.Fatalf("push final delta: %v", err)
 	}
-	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: "Final answer"}}}); err != nil {
+	if err := stream.Push(ctx, mustPreparedMatrixEvent(t, channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: "Final answer"}}})); err != nil {
 		t.Fatalf("push final: %v", err)
 	}
 	if requests != 1 {
@@ -120,13 +132,13 @@ func TestMatrixStreamFinalMarkdownUpdatesFormattedContent(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "**bold**", Phase: channel.StreamPhaseText}); err != nil {
+	if err := stream.Push(ctx, mustPreparedMatrixEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "**bold**", Phase: channel.StreamPhaseText})); err != nil {
 		t.Fatalf("push delta: %v", err)
 	}
-	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText}); err != nil {
+	if err := stream.Push(ctx, mustPreparedMatrixEvent(t, channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText})); err != nil {
 		t.Fatalf("push phase end: %v", err)
 	}
-	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: "**bold**", Format: channel.MessageFormatMarkdown}}}); err != nil {
+	if err := stream.Push(ctx, mustPreparedMatrixEvent(t, channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: "**bold**", Format: channel.MessageFormatMarkdown}}})); err != nil {
 		t.Fatalf("push final: %v", err)
 	}
 	if len(bodies) != 2 {
@@ -166,7 +178,7 @@ func TestMatrixStreamFinalSendsAttachments(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{
+	if err := stream.Push(ctx, mustPreparedMatrixEvent(t, channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{
 		Text: "done",
 		Attachments: []channel.Attachment{{
 			Type:           channel.AttachmentImage,
@@ -174,7 +186,7 @@ func TestMatrixStreamFinalSendsAttachments(t *testing.T) {
 			Name:           "image.png",
 			SourcePlatform: Type.String(),
 		}},
-	}}}); err != nil {
+	}}})); err != nil {
 		t.Fatalf("push final: %v", err)
 	}
 	if len(bodies) != 2 {

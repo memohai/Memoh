@@ -46,7 +46,7 @@ func (*WebAdapter) Descriptor() channel.Descriptor {
 }
 
 // Send publishes an outbound message to the Web route hub.
-func (a *WebAdapter) Send(_ context.Context, _ channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *WebAdapter) Send(_ context.Context, _ channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	if a.hub == nil {
 		return errors.New("web hub not configured")
 	}
@@ -54,15 +54,16 @@ func (a *WebAdapter) Send(_ context.Context, _ channel.ChannelConfig, msg channe
 	if target == "" {
 		return errors.New("web target is required")
 	}
-	if msg.Message.IsEmpty() {
+	logical := msg.LogicalMessage()
+	if logical.Message.IsEmpty() {
 		return errors.New("message is required")
 	}
-	a.hub.Publish(target, msg)
+	a.hub.Publish(target, logical)
 	return nil
 }
 
 // OpenStream opens a local stream session bound to the target route.
-func (a *WebAdapter) OpenStream(ctx context.Context, _ channel.ChannelConfig, target string, _ channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *WebAdapter) OpenStream(ctx context.Context, _ channel.ChannelConfig, target string, _ channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	if a.hub == nil {
 		return nil, errors.New("web hub not configured")
 	}

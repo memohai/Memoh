@@ -608,13 +608,14 @@ func provideChannelRouter(
 	return processor
 }
 
-func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor) *channel.Manager {
+func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor, mediaService *media.Service) *channel.Manager {
 	if adapter, ok := registry.Get(matrix.Type); ok {
 		if matrixAdapter, ok := adapter.(*matrix.MatrixAdapter); ok {
 			matrixAdapter.SetSyncStateSaver(channelStore.SaveMatrixSyncSinceToken)
 		}
 	}
 	mgr := channel.NewManager(log, registry, channelStore, channelRouter)
+	mgr.SetAttachmentStore(mediaService)
 	if mw := channelRouter.IdentityMiddleware(); mw != nil {
 		mgr.Use(mw)
 	}
@@ -1154,36 +1155,46 @@ type mediaAssetResolverAdapter struct {
 	media *media.Service
 }
 
+func (a *mediaAssetResolverAdapter) Stat(ctx context.Context, botID, contentHash string) (media.Asset, error) {
+	if a == nil || a.media == nil {
+		return media.Asset{}, errors.New("media service not configured")
+	}
+	return a.media.Stat(ctx, botID, contentHash)
+}
+
+func (a *mediaAssetResolverAdapter) Open(ctx context.Context, botID, contentHash string) (io.ReadCloser, media.Asset, error) {
+	if a == nil || a.media == nil {
+		return nil, media.Asset{}, errors.New("media service not configured")
+	}
+	return a.media.Open(ctx, botID, contentHash)
+}
+
+func (a *mediaAssetResolverAdapter) Ingest(ctx context.Context, input media.IngestInput) (media.Asset, error) {
+	if a == nil || a.media == nil {
+		return media.Asset{}, errors.New("media service not configured")
+	}
+	return a.media.Ingest(ctx, input)
+}
+
 func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, storageKey string) (messaging.AssetMeta, error) {
 	if a == nil || a.media == nil {
 		return messaging.AssetMeta{}, errors.New("media service not configured")
 	}
-	asset, err := a.media.GetByStorageKey(ctx, botID, storageKey)
-	if err != nil {
-		return messaging.AssetMeta{}, err
+	return a.media.GetByStorageKey(ctx, botID, storageKey)
+}
+
+func (a *mediaAssetResolverAdapter) AccessPath(asset media.Asset) string {
+	if a == nil || a.media == nil {
+		return ""
 	}
-	return messaging.AssetMeta{
-		ContentHash: asset.ContentHash,
-		Mime:        asset.Mime,
-		SizeBytes:   asset.SizeBytes,
-		StorageKey:  asset.StorageKey,
-	}, nil
+	return a.media.AccessPath(asset)
 }
 
 func (a *mediaAssetResolverAdapter) IngestContainerFile(ctx context.Context, botID, containerPath string) (messaging.AssetMeta, error) {
 	if a == nil || a.media == nil {
 		return messaging.AssetMeta{}, errors.New("media service not configured")
 	}
-	asset, err := a.media.IngestContainerFile(ctx, botID, containerPath)
-	if err != nil {
-		return messaging.AssetMeta{}, err
-	}
-	return messaging.AssetMeta{
-		ContentHash: asset.ContentHash,
-		Mime:        asset.Mime,
-		SizeBytes:   asset.SizeBytes,
-		StorageKey:  asset.StorageKey,
-	}, nil
+	return a.media.IngestContainerFile(ctx, botID, containerPath)
 }
 
 // gatewayAssetLoaderAdapter bridges media service to flow gateway asset loader.

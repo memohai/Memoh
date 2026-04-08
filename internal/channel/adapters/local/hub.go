@@ -98,14 +98,14 @@ type localOutboundStream struct {
 	closed atomic.Bool
 }
 
-func newLocalOutboundStream(hub *RouteHub, target string) channel.OutboundStream {
+func newLocalOutboundStream(hub *RouteHub, target string) channel.PreparedOutboundStream {
 	return &localOutboundStream{
 		hub:    hub,
 		target: target,
 	}
 }
 
-func (s *localOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
+func (s *localOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s == nil || s.hub == nil {
 		return errors.New("route hub not configured")
 	}
@@ -117,7 +117,7 @@ func (s *localOutboundStream) Push(ctx context.Context, event channel.StreamEven
 		return ctx.Err()
 	default:
 	}
-	s.hub.PublishEvent(s.target, event)
+	s.hub.PublishEvent(s.target, event.LogicalEvent())
 	return nil
 }
 

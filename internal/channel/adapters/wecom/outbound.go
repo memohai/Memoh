@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/media"
 )
 
 func (a *WeComAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
@@ -86,6 +87,10 @@ func buildRespondPayload(msg channel.Message, replyReqID string) (any, string, s
 	return buildRespondPayloadWithStream(msg, replyReqID, "", true)
 }
 
+func buildPreparedRespondPayload(ctx context.Context, msg channel.PreparedMessage, replyReqID string) (any, string, string, error) {
+	return buildPreparedRespondPayloadWithStream(ctx, msg, replyReqID, "", true)
+}
+
 func buildRespondPayloadWithStream(msg channel.Message, replyReqID string, streamID string, finish bool) (any, string, string, error) {
 	reqID := strings.TrimSpace(replyReqID)
 	if reqID == "" {
@@ -118,23 +123,8 @@ func buildRespondPayloadWithStream(msg channel.Message, replyReqID string, strea
 	if feedbackID := readFeedbackID(msg.Metadata); feedbackID != "" {
 		stream.Feedback = &StreamReplyFeedback{ID: feedbackID}
 	}
-	if finish && len(msg.Attachments) > 0 {
-		first := msg.Attachments[0]
-		base64Data := extractBase64Content(first.Base64)
-		if base64Data != "" {
-			raw, err := base64.StdEncoding.DecodeString(base64Data)
-			if err == nil && len(raw) > 0 {
-				stream.MsgItems = []StreamReplyItem{
-					{
-						MsgType: "image",
-						Image: &StreamReplyImage{
-							Base64: base64.StdEncoding.EncodeToString(raw),
-							MD5:    fmt.Sprintf("%x", md5.Sum(raw)), //nolint:gosec // WeCom protocol mandates md5 field for base64 images.
-						},
-					},
-				}
-			}
-		}
+	if finish {
+		stream.MsgItems = buildLegacyStreamReplyItems(msg)
 	}
 	if card, ok := readTemplateCard(msg.Metadata); ok {
 		return StreamWithTemplateCardReplyBody{
@@ -147,6 +137,137 @@ func buildRespondPayloadWithStream(msg channel.Message, replyReqID string, strea
 		MsgType: "stream",
 		Stream:  stream,
 	}, WSCmdRespond, reqID, nil
+}
+
+func buildPreparedRespondPayloadWithStream(
+	ctx context.Context,
+	msg channel.PreparedMessage,
+	replyReqID string,
+	streamID string,
+	finish bool,
+) (any, string, string, error) {
+	logical := msg.LogicalMessage()
+	reqID := strings.TrimSpace(replyReqID)
+	if reqID == "" {
+		return nil, "", "", errors.New("reply req_id is required")
+	}
+	if finish {
+		if body, ok := buildWelcomePayload(logical); ok {
+			return body, WSCmdRespondWelcome, reqID, nil
+		}
+		if body, ok := readUpdateTemplateCard(logical.Metadata); ok {
+			return body, WSCmdRespondUpdate, reqID, nil
+		}
+	}
+	text := strings.TrimSpace(logical.PlainText())
+	if finish && text == "" && len(logical.Attachments) == 0 && len(msg.Attachments) == 0 {
+		return nil, "", "", errors.New("wecom reply payload is empty")
+	}
+	if !finish && text == "" {
+		return nil, "", "", errors.New("wecom stream delta content is empty")
+	}
+	streamID = strings.TrimSpace(streamID)
+	if streamID == "" {
+		streamID = NewReqID("stream")
+	}
+	stream := StreamReplyBlock{
+		ID:      streamID,
+		Finish:  finish,
+		Content: text,
+	}
+	if feedbackID := readFeedbackID(logical.Metadata); feedbackID != "" {
+		stream.Feedback = &StreamReplyFeedback{ID: feedbackID}
+	}
+	if finish {
+		items, err := buildPreparedStreamReplyItems(ctx, msg)
+		if err != nil {
+			return nil, "", "", err
+		}
+		stream.MsgItems = items
+	}
+	if card, ok := readTemplateCard(logical.Metadata); ok {
+		return StreamWithTemplateCardReplyBody{
+			MsgType:      "stream_with_template_card",
+			Stream:       stream,
+			TemplateCard: card,
+		}, WSCmdRespond, reqID, nil
+	}
+	return StreamReplyBody{
+		MsgType: "stream",
+		Stream:  stream,
+	}, WSCmdRespond, reqID, nil
+}
+
+func buildPreparedStreamReplyItems(ctx context.Context, msg channel.PreparedMessage) ([]StreamReplyItem, error) {
+	if len(msg.Attachments) == 0 {
+		return buildLegacyStreamReplyItems(msg.Message), nil
+	}
+	item, err := buildPreparedStreamReplyItem(ctx, msg.Attachments[0])
+	if err != nil {
+		return nil, err
+	}
+	return []StreamReplyItem{item}, nil
+}
+
+func buildPreparedStreamReplyItem(ctx context.Context, att channel.PreparedAttachment) (StreamReplyItem, error) {
+	if !isWeComReplyImageAttachment(att) {
+		return StreamReplyItem{}, errors.New("wecom reply attachments only support images")
+	}
+	if att.Open == nil {
+		return StreamReplyItem{}, errors.New("wecom reply attachment reader is required")
+	}
+	reader, err := att.Open(ctx)
+	if err != nil {
+		return StreamReplyItem{}, err
+	}
+	defer func() { _ = reader.Close() }()
+
+	raw, err := media.ReadAllWithLimit(reader, media.MaxAssetBytes)
+	if err != nil {
+		return StreamReplyItem{}, err
+	}
+	if len(raw) == 0 {
+		return StreamReplyItem{}, errors.New("wecom reply attachment is empty")
+	}
+	return StreamReplyItem{
+		MsgType: "image",
+		Image: &StreamReplyImage{
+			Base64: base64.StdEncoding.EncodeToString(raw),
+			MD5:    fmt.Sprintf("%x", md5.Sum(raw)), //nolint:gosec // WeCom protocol mandates md5 field for base64 images.
+		},
+	}, nil
+}
+
+func buildLegacyStreamReplyItems(msg channel.Message) []StreamReplyItem {
+	if len(msg.Attachments) == 0 {
+		return nil
+	}
+	first := msg.Attachments[0]
+	base64Data := extractBase64Content(first.Base64)
+	if base64Data == "" {
+		return nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	return []StreamReplyItem{
+		{
+			MsgType: "image",
+			Image: &StreamReplyImage{
+				Base64: base64.StdEncoding.EncodeToString(raw),
+				MD5:    fmt.Sprintf("%x", md5.Sum(raw)), //nolint:gosec // WeCom protocol mandates md5 field for base64 images.
+			},
+		},
+	}
+}
+
+func isWeComReplyImageAttachment(att channel.PreparedAttachment) bool {
+	switch att.Logical.Type {
+	case channel.AttachmentImage, channel.AttachmentGIF:
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(att.Mime)), "image/")
 }
 
 func buildWelcomePayload(msg channel.Message) (any, bool) {

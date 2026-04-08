@@ -3,7 +3,6 @@ package telegram
 import (
 	"cmp"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -581,7 +580,7 @@ func (a *TelegramAdapter) logTelegramInbound(configID string, msg channel.Inboun
 }
 
 // Send delivers an outbound message to Telegram, handling text, attachments, and replies.
-func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		if a.logger != nil {
@@ -597,12 +596,12 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	if err != nil {
 		return err
 	}
-	if msg.Message.IsEmpty() {
+	if msg.Message.Message.IsEmpty() {
 		return errors.New("message is required")
 	}
-	text := strings.TrimSpace(msg.Message.PlainText())
-	text, parseMode := formatTelegramOutput(text, msg.Message.Format)
-	replyTo := parseReplyToMessageID(msg.Message.Reply)
+	text := strings.TrimSpace(msg.Message.Message.PlainText())
+	text, parseMode := formatTelegramOutput(text, msg.Message.Message.Format)
+	replyTo := parseReplyToMessageID(msg.Message.Message.Reply)
 	if len(msg.Message.Attachments) > 0 {
 		usedCaption := false
 		for i, att := range msg.Message.Attachments {
@@ -615,7 +614,7 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 			if i > 0 {
 				applyReply = 0
 			}
-			if err := sendTelegramAttachmentWithAssets(ctx, bot, to, att, caption, applyReply, parseMode, a.assets); err != nil {
+			if err := sendTelegramAttachmentWithAssets(ctx, bot, to, att, caption, applyReply, parseMode); err != nil {
 				if a.logger != nil {
 					a.logger.Error("send attachment failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 				}
@@ -635,7 +634,7 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 // animation, then sends a final permanent message via sendMessage.
 // For group/channel chats, sends one message then edits it in place as deltas
 // arrive (editMessageText), avoiding one message per delta and rate limits.
-func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return nil, errors.New("telegram target is required")
@@ -861,29 +860,15 @@ func getTelegramRetryAfter(err error) time.Duration {
 	return 0
 }
 
-func sendTelegramAttachmentWithAssets(ctx context.Context, bot *tgbotapi.BotAPI, target string, att channel.Attachment, caption string, replyTo int, parseMode string, opener assetOpener) error {
-	return sendTelegramAttachmentImpl(ctx, bot, target, att, caption, replyTo, parseMode, opener)
+func sendTelegramAttachmentWithAssets(ctx context.Context, bot *tgbotapi.BotAPI, target string, att channel.PreparedAttachment, caption string, replyTo int, parseMode string) error {
+	return sendTelegramAttachmentImpl(ctx, bot, target, att, caption, replyTo, parseMode)
 }
 
-func sendTelegramAttachmentImpl(ctx context.Context, bot *tgbotapi.BotAPI, target string, att channel.Attachment, caption string, replyTo int, parseMode string, opener assetOpener) error {
-	urlRef := strings.TrimSpace(att.URL)
-	keyRef := strings.TrimSpace(att.PlatformKey)
-	sourcePlatform := strings.TrimSpace(att.SourcePlatform)
-	base64Ref := strings.TrimSpace(att.Base64)
-	assetID := strings.TrimSpace(att.ContentHash)
-	if urlRef == "" && keyRef == "" && base64Ref == "" && assetID == "" {
-		return errors.New("attachment reference is required")
+func sendTelegramAttachmentImpl(ctx context.Context, bot *tgbotapi.BotAPI, target string, att channel.PreparedAttachment, caption string, replyTo int, parseMode string) error {
+	if strings.TrimSpace(caption) == "" && strings.TrimSpace(att.Logical.Caption) != "" {
+		caption = strings.TrimSpace(att.Logical.Caption)
 	}
-	if strings.TrimSpace(caption) == "" && strings.TrimSpace(att.Caption) != "" {
-		caption = strings.TrimSpace(att.Caption)
-	}
-	var botID string
-	if att.Metadata != nil {
-		if bid, ok := att.Metadata["bot_id"].(string); ok {
-			botID = bid
-		}
-	}
-	file, err := resolveTelegramFile(ctx, urlRef, keyRef, base64Ref, sourcePlatform, att, assetID, botID, opener)
+	file, err := resolveTelegramFile(ctx, att)
 	if err != nil {
 		return err
 	}
@@ -892,7 +877,7 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tgbotapi.BotAPI, targe
 		return targetErr
 	}
 	isChannel := channelUsername != ""
-	switch att.Type {
+	switch att.Logical.Type {
 	case channel.AttachmentImage:
 		var photo tgbotapi.PhotoConfig
 		if isChannel {
@@ -975,67 +960,44 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tgbotapi.BotAPI, targe
 		_, err = bot.Send(animation)
 		return err
 	default:
-		return fmt.Errorf("unsupported attachment type: %s", att.Type)
+		return fmt.Errorf("unsupported attachment type: %s", att.Logical.Type)
 	}
 }
 
-// resolveTelegramFile determines the best tgbotapi.RequestFileData for an attachment.
-// Priority: PlatformKey > ContentHash (storage) > public URL > base64 data URL.
-func resolveTelegramFile(ctx context.Context, urlRef, keyRef, base64Ref, sourcePlatform string, att channel.Attachment, assetID, botID string, opener assetOpener) (tgbotapi.RequestFileData, error) {
-	if keyRef != "" && (sourcePlatform == "" || strings.EqualFold(sourcePlatform, Type.String())) {
-		return tgbotapi.FileID(keyRef), nil
-	}
-	if assetID != "" && opener != nil {
-		reader, asset, err := opener.Open(ctx, botID, assetID)
-		if err == nil {
-			data, readErr := io.ReadAll(io.LimitReader(reader, media.MaxAssetBytes+1))
-			_ = reader.Close()
-			if readErr == nil && len(data) > 0 {
-				name := strings.TrimSpace(att.Name)
-				if name == "" {
-					name = fileNameFromMime(asset.Mime, string(att.Type))
-				}
-				return tgbotapi.FileBytes{Name: name, Bytes: data}, nil
-			}
+// resolveTelegramFile maps a prepared attachment into Telegram's file input model.
+func resolveTelegramFile(ctx context.Context, att channel.PreparedAttachment) (tgbotapi.RequestFileData, error) {
+	switch att.Kind {
+	case channel.PreparedAttachmentNativeRef:
+		if strings.TrimSpace(att.NativeRef) == "" {
+			return nil, errors.New("telegram native ref is required")
 		}
-	}
-	if urlRef != "" && !strings.HasPrefix(strings.ToLower(urlRef), "data:") && !strings.HasPrefix(urlRef, "/") {
-		return tgbotapi.FileURL(urlRef), nil
-	}
-	raw := base64Ref
-	if raw == "" {
-		raw = urlRef
-	}
-	if raw != "" && strings.HasPrefix(strings.ToLower(raw), "data:") {
-		decoded, err := decodeDataURLBytes(raw)
+		return tgbotapi.FileID(strings.TrimSpace(att.NativeRef)), nil
+	case channel.PreparedAttachmentPublicURL:
+		if strings.TrimSpace(att.PublicURL) == "" {
+			return nil, errors.New("telegram public url is required")
+		}
+		return tgbotapi.FileURL(strings.TrimSpace(att.PublicURL)), nil
+	case channel.PreparedAttachmentUpload:
+		if att.Open == nil {
+			return nil, errors.New("telegram upload attachment is not openable")
+		}
+		reader, err := att.Open(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("decode data url for telegram upload: %w", err)
+			return nil, err
+		}
+		defer func() { _ = reader.Close() }()
+		data, err := media.ReadAllWithLimit(reader, media.MaxAssetBytes)
+		if err != nil {
+			return nil, err
 		}
 		name := strings.TrimSpace(att.Name)
 		if name == "" {
-			name = fileNameFromMime(att.Mime, string(att.Type))
+			name = fileNameFromMime(att.Mime, string(att.Logical.Type))
 		}
-		return tgbotapi.FileBytes{Name: name, Bytes: decoded}, nil
+		return tgbotapi.FileBytes{Name: name, Bytes: data}, nil
+	default:
+		return nil, fmt.Errorf("unsupported telegram attachment kind: %s", att.Kind)
 	}
-	if urlRef != "" {
-		return tgbotapi.FileURL(urlRef), nil
-	}
-	return nil, errors.New("no usable attachment reference for telegram")
-}
-
-func decodeDataURLBytes(dataURL string) ([]byte, error) {
-	value := dataURL
-	if _, after, ok := strings.Cut(value, ","); ok {
-		value = after
-	}
-	return io.ReadAll(io.LimitReader(
-		base64StdDecoder(strings.NewReader(value)),
-		media.MaxAssetBytes+1,
-	))
-}
-
-func base64StdDecoder(r io.Reader) io.Reader {
-	return base64.NewDecoder(base64.StdEncoding, r)
 }
 
 func fileNameFromMime(mime, fallbackType string) string {

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/channel"
 )
 
@@ -240,7 +239,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 
 // -- StreamSender (block-streaming: buffer deltas, send final as one message) --
 
-func (a *WeixinAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, _ channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *WeixinAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, _ channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return nil, errors.New("weixin target is required")
@@ -254,7 +253,7 @@ func (a *WeixinAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig,
 
 // -- Sender --
 
-func (a *WeixinAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *WeixinAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	parsed, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
@@ -272,18 +271,18 @@ func (a *WeixinAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 
 	// Send attachments first if present (media + text in one flow).
 	if len(msg.Message.Attachments) > 0 {
-		return a.sendWithAttachments(ctx, parsed, cfg.BotID, target, contextToken, msg.Message)
+		return a.sendWithAttachments(ctx, parsed, target, contextToken, msg.Message)
 	}
 
-	text := strings.TrimSpace(msg.Message.PlainText())
+	text := strings.TrimSpace(msg.Message.Message.PlainText())
 	if text == "" {
 		return errors.New("weixin: message is empty")
 	}
 	return sendText(ctx, a.client, parsed, target, text, contextToken)
 }
 
-func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConfig, botID, target, contextToken string, msg channel.Message) error {
-	text := strings.TrimSpace(msg.PlainText())
+func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConfig, target, contextToken string, msg channel.PreparedMessage) error {
+	text := strings.TrimSpace(msg.Message.PlainText())
 
 	for i, att := range msg.Attachments {
 		caption := ""
@@ -291,16 +290,12 @@ func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConf
 			caption = text
 		}
 
-		r, err := a.openAttachment(ctx, botID, att)
+		r, err := openAttachment(ctx, att)
 		if err != nil {
-			a.logger.Error("weixin: open attachment failed",
-				slog.String("type", string(att.Type)),
-				slog.Any("error", err),
-			)
-			continue
+			return fmt.Errorf("weixin: open attachment: %w", err)
 		}
 
-		switch att.Type {
+		switch att.Logical.Type {
 		case channel.AttachmentImage, channel.AttachmentGIF:
 			if err := sendImageFromReader(ctx, a.client, cfg, target, contextToken, caption, r, a.logger); err != nil {
 				_ = r.Close()
@@ -328,32 +323,17 @@ func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConf
 		_ = r.Close()
 	}
 
-	// If there are attachments but no text was sent as caption and there is text, send separately.
-	if len(msg.Attachments) == 0 && text != "" {
-		return sendText(ctx, a.client, cfg, target, text, contextToken)
-	}
 	return nil
 }
 
-func (a *WeixinAdapter) openAttachment(ctx context.Context, botID string, att channel.Attachment) (io.ReadCloser, error) {
-	// Try content hash first (from media store).
-	if strings.TrimSpace(att.ContentHash) != "" && a.assets != nil {
-		r, _, err := a.assets.Open(ctx, botID, att.ContentHash)
-		if err == nil {
-			return r, nil
-		}
+func openAttachment(ctx context.Context, att channel.PreparedAttachment) (io.ReadCloser, error) {
+	if att.Kind != channel.PreparedAttachmentUpload {
+		return nil, fmt.Errorf("weixin attachment requires upload source, got %s", att.Kind)
 	}
-	// Try base64 data URL.
-	if strings.TrimSpace(att.Base64) != "" {
-		r, err := attachmentpkg.DecodeBase64(att.Base64, 100*1024*1024)
-		if err == nil {
-			data, readErr := io.ReadAll(r)
-			if readErr == nil {
-				return io.NopCloser(bytes.NewReader(data)), nil
-			}
-		}
+	if att.Open == nil {
+		return nil, errors.New("weixin attachment upload is not openable")
 	}
-	return nil, errors.New("weixin: cannot open attachment (no content_hash or base64)")
+	return att.Open(ctx)
 }
 
 // -- AttachmentResolver (for inbound media download/decrypt) --
@@ -465,12 +445,12 @@ type weixinBlockStream struct {
 	cfg         channel.ChannelConfig
 	target      string
 	textBuilder strings.Builder
-	attachments []channel.Attachment
-	final       *channel.Message
+	attachments []channel.PreparedAttachment
+	final       *channel.PreparedMessage
 	closed      bool
 }
 
-func (s *weixinBlockStream) Push(_ context.Context, event channel.StreamEvent) error {
+func (s *weixinBlockStream) Push(_ context.Context, event channel.PreparedStreamEvent) error {
 	if s.closed {
 		return nil
 	}
@@ -496,23 +476,35 @@ func (s *weixinBlockStream) Close(ctx context.Context) error {
 	}
 	s.closed = true
 
-	msg := channel.Message{Format: channel.MessageFormatPlain}
+	msg := channel.PreparedMessage{Message: channel.Message{Format: channel.MessageFormatPlain}}
 	if s.final != nil {
 		msg = *s.final
 	}
-	if strings.TrimSpace(msg.Text) == "" {
-		msg.Text = strings.TrimSpace(s.textBuilder.String())
+	if strings.TrimSpace(msg.Message.Text) == "" {
+		msg.Message.Text = strings.TrimSpace(s.textBuilder.String())
 	}
 	if len(msg.Attachments) == 0 && len(s.attachments) > 0 {
 		msg.Attachments = append(msg.Attachments, s.attachments...)
+		msg.Message.Attachments = weixinLogicalAttachments(msg.Attachments)
 	}
-	if msg.IsEmpty() {
+	if msg.Message.IsEmpty() && len(msg.Attachments) == 0 {
 		return nil
 	}
-	return s.adapter.Send(ctx, s.cfg, channel.OutboundMessage{
+	return s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
 		Target:  s.target,
 		Message: msg,
 	})
+}
+
+func weixinLogicalAttachments(attachments []channel.PreparedAttachment) []channel.Attachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	logical := make([]channel.Attachment, 0, len(attachments))
+	for _, att := range attachments {
+		logical = append(logical, att.Logical)
+	}
+	return logical
 }
 
 // sleepCtx sleeps for the given duration or until the context is cancelled.

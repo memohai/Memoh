@@ -3,6 +3,7 @@ package dingtalk
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -52,11 +53,15 @@ func (*DingTalkAdapter) Descriptor() channel.Descriptor {
 		Type:        Type,
 		DisplayName: "DingTalk",
 		Capabilities: channel.ChannelCapabilities{
-			Text:        true,
-			Markdown:    true,
-			Attachments: true,
-			Media:       true,
-			ChatTypes:   []string{channel.ConversationTypePrivate, channel.ConversationTypeGroup},
+			Text:           true,
+			Markdown:       true,
+			Attachments:    true,
+			Media:          true,
+			BlockStreaming: true,
+			// Reply is handled via session webhook (fast path in Send).
+			// The OpenAPI path silently ignores the reply context.
+			Reply:     true,
+			ChatTypes: []string{channel.ConversationTypePrivate, channel.ConversationTypeGroup},
 		},
 		ConfigSchema: channel.ConfigSchema{
 			Version: 1,
@@ -184,47 +189,71 @@ func (a *DingTalkAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 
 // Send delivers an outbound message to a DingTalk user or group.
 // It first tries the session webhook (if cached and valid), then falls back to the OpenAPI.
-func (a *DingTalkAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *DingTalkAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	target := strings.TrimSpace(msg.Target)
 	if target == "" {
 		return errors.New("dingtalk: target is required")
 	}
-	if msg.Message.IsEmpty() {
+	logicalMsg := msg.Message.LogicalMessage()
+	if logicalMsg.IsEmpty() && len(msg.Message.Attachments) == 0 {
 		return errors.New("dingtalk: message is empty")
 	}
 
 	// Session webhook fast path: immediate reply without access_token round-trip.
-	if whCtx, ok := a.lookupWebhook(msg.Message.Reply); ok && whCtx.isValid() {
-		body, bodyErr := buildWebhookBody(msg.Message)
-		if bodyErr == nil {
-			apiCli := a.getOrNewAPIClient(cfg)
-			if webhookErr := apiCli.sendViaWebhook(ctx, whCtx.SessionWebhook, body); webhookErr == nil {
-				return nil
+	// Webhooks only support text/markdown; attachments fall through to the OpenAPI.
+	if len(msg.Message.Attachments) == 0 {
+		if whCtx, ok := a.lookupWebhook(logicalMsg.Reply); ok && whCtx.isValid() {
+			body, bodyErr := buildWebhookBody(logicalMsg)
+			if bodyErr == nil {
+				apiCli := a.getOrNewAPIClient(cfg)
+				if webhookErr := apiCli.sendViaWebhook(ctx, whCtx.SessionWebhook, body); webhookErr == nil {
+					return nil
+				}
+				// Webhook failed (possibly expired mid-flight); fall through to OpenAPI.
 			}
-			// Webhook failed (possibly expired mid-flight); fall through to OpenAPI.
 		}
 	}
 
-	return a.sendViaAPI(ctx, cfg, msg)
+	return a.sendViaAPI(ctx, cfg, target, logicalMsg, msg.Message.Attachments)
 }
 
 // sendViaAPI sends a message through the DingTalk OpenAPI.
-func (a *DingTalkAdapter) sendViaAPI(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *DingTalkAdapter) sendViaAPI(
+	ctx context.Context,
+	cfg channel.ChannelConfig,
+	target string,
+	logicalMsg channel.Message,
+	prepared []channel.PreparedAttachment,
+) error {
 	parsed, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
 	}
 	apiCli := a.getOrNewAPIClient(cfg)
 
-	msgKey, msgParam, err := buildAPIPayload(msg.Message)
+	// For Upload-kind image attachments, upload to DingTalk media first to get a mediaId.
+	// DingTalk's sampleImageMsg requires a publicly accessible photoURL, which is unavailable
+	// when using local filesystem storage. Uploading converts the local asset to a platform mediaId.
+	resolved, err := resolveUploadAttachments(ctx, apiCli, prepared)
 	if err != nil {
 		return err
 	}
 
-	kind, id, ok := parseTarget(msg.Target)
+	msgKey, msgParam, err := buildAPIPayload(logicalMsg, resolved)
+	if err != nil {
+		return err
+	}
+
+	kind, id, ok := parseTarget(target)
 	if !ok {
 		return errors.New("dingtalk: invalid target")
 	}
+	a.logger.Debug("dingtalk: sendViaAPI",
+		slog.String("target", target),
+		slog.String("kind", kind),
+		slog.String("id", id),
+		slog.String("robot_code", parsed.AppKey),
+	)
 	switch kind {
 	case "user":
 		return apiCli.sendToUser(ctx, parsed.AppKey, []string{id}, msgKey, msgParam)
@@ -235,8 +264,85 @@ func (a *DingTalkAdapter) sendViaAPI(ctx context.Context, cfg channel.ChannelCon
 	}
 }
 
+// resolveUploadAttachments uploads any Upload-kind attachments to DingTalk and
+// returns a new slice where those entries are replaced by NativeRef attachments
+// carrying the resulting mediaId. PublicURL and NativeRef attachments pass through unchanged.
+func resolveUploadAttachments(
+	ctx context.Context,
+	apiCli *apiClient,
+	prepared []channel.PreparedAttachment,
+) ([]channel.PreparedAttachment, error) {
+	if len(prepared) == 0 {
+		return prepared, nil
+	}
+	result := make([]channel.PreparedAttachment, 0, len(prepared))
+	for _, att := range prepared {
+		if att.Kind != channel.PreparedAttachmentUpload || att.Open == nil {
+			result = append(result, att)
+			continue
+		}
+		mediaType := dingtalkMediaType(att)
+		reader, err := att.Open(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("dingtalk: open attachment for upload: %w", err)
+		}
+		mediaID, uploadErr := apiCli.uploadMedia(ctx, mediaType, att.Name, reader)
+		_ = reader.Close()
+		if uploadErr != nil {
+			return nil, fmt.Errorf("dingtalk: upload media: %w", uploadErr)
+		}
+		uploaded := att
+		uploaded.Kind = channel.PreparedAttachmentNativeRef
+		uploaded.NativeRef = mediaID
+		uploaded.Open = nil
+		result = append(result, uploaded)
+	}
+	return result, nil
+}
+
+// dingtalkMediaType maps an attachment to the DingTalk media type string for upload.
+func dingtalkMediaType(att channel.PreparedAttachment) string {
+	switch att.Logical.Type {
+	case channel.AttachmentImage, channel.AttachmentGIF:
+		return "image"
+	case channel.AttachmentAudio, channel.AttachmentVoice:
+		return "voice"
+	case channel.AttachmentVideo:
+		return "video"
+	default:
+		return "file"
+	}
+}
+
+// ResolveAttachment implements channel.AttachmentResolver. It downloads a file
+// received by the bot (identified by its downloadCode stored in PlatformKey)
+// via the DingTalk OpenAPI and returns a readable payload.
+func (a *DingTalkAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, att channel.Attachment) (channel.AttachmentPayload, error) {
+	downloadCode := strings.TrimSpace(att.PlatformKey)
+	if downloadCode == "" {
+		return channel.AttachmentPayload{}, errors.New("dingtalk: attachment has no downloadCode (platform_key)")
+	}
+	parsed, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return channel.AttachmentPayload{}, fmt.Errorf("dingtalk: resolve attachment config: %w", err)
+	}
+	apiCli := a.getOrNewAPIClient(cfg)
+	reader, mimeType, err := apiCli.downloadMessageFile(ctx, parsed.AppKey, downloadCode)
+	if err != nil {
+		return channel.AttachmentPayload{}, err
+	}
+	if strings.TrimSpace(att.Mime) != "" {
+		mimeType = strings.TrimSpace(att.Mime)
+	}
+	return channel.AttachmentPayload{
+		Reader: reader,
+		Mime:   mimeType,
+		Name:   strings.TrimSpace(att.Name),
+	}, nil
+}
+
 // OpenStream creates a new accumulating outbound stream for the given target.
-func (a *DingTalkAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *DingTalkAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -277,6 +383,14 @@ func (a *DingTalkAdapter) newChatBotHandler(cfg channel.ChannelConfig, handler c
 				SenderID:       data.SenderId,
 			})
 		}
+
+		a.logger.Debug("dingtalk: inbound callback",
+			slog.String("sender_id", data.SenderId),
+			slog.String("sender_staff_id", data.SenderStaffId),
+			slog.String("sender_corp_id", data.SenderCorpId),
+			slog.String("conversation_type", data.ConversationType),
+			slog.String("conversation_id", data.ConversationId),
+		)
 
 		if handler == nil {
 			return nil, nil

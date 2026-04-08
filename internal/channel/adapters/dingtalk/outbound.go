@@ -8,13 +8,16 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 )
 
-// buildAPIPayload converts a channel.Message to a DingTalk OpenAPI msgKey + msgParam pair.
-// Markdown messages map to sampleMarkdown; all others fall back to sampleText.
-// Attachments with a URL map to the corresponding media message type.
-func buildAPIPayload(msg channel.Message) (msgKey, msgParam string, err error) {
+// buildAPIPayload converts a channel.Message and its prepared attachments to a DingTalk
+// OpenAPI msgKey + msgParam pair. Markdown messages map to sampleMarkdown; all others fall
+// back to sampleText. Attachments map to the corresponding DingTalk media message type.
+//
+// prepared is the adapter-facing attachment list; it is used to get the correct public URL
+// or native ref rather than the local media-store access path stored in the logical message.
+func buildAPIPayload(msg channel.Message, prepared []channel.PreparedAttachment) (msgKey, msgParam string, err error) {
 	// Attachment-only message: use the first attachment to determine message type.
-	if strings.TrimSpace(msg.PlainText()) == "" && len(msg.Attachments) > 0 {
-		return buildAttachmentPayload(msg.Attachments[0])
+	if strings.TrimSpace(msg.PlainText()) == "" && len(prepared) > 0 {
+		return buildAttachmentPayload(prepared[0])
 	}
 
 	text := strings.TrimSpace(msg.PlainText())
@@ -41,35 +44,68 @@ func buildMarkdownAPIPayload(text string) (string, string, error) {
 	return "sampleMarkdown", string(param), nil
 }
 
-func buildAttachmentPayload(att channel.Attachment) (string, string, error) {
-	switch att.Type {
+// buildAttachmentPayload converts a PreparedAttachment to a DingTalk API message.
+//
+// Images/GIF: photoURL accepts either a public HTTP URL or a DingTalk mediaId
+// (returned by the media upload API). resolveUploadAttachments pre-uploads local
+// assets and converts Upload kind to NativeRef before this function is called,
+// so here NativeRef carries a valid mediaId for all attachment types.
+func buildAttachmentPayload(att channel.PreparedAttachment) (string, string, error) {
+	logical := att.Logical
+
+	switch logical.Type {
 	case channel.AttachmentImage, channel.AttachmentGIF:
-		url := strings.TrimSpace(att.URL)
-		if url == "" {
-			return "", "", errors.New("dingtalk: image attachment requires URL")
+		var photoURL string
+		switch att.Kind {
+		case channel.PreparedAttachmentPublicURL:
+			photoURL = att.PublicURL
+		case channel.PreparedAttachmentNativeRef:
+			// mediaId returned by DingTalk upload API is accepted as photoURL value.
+			photoURL = att.NativeRef
+		default:
+			// Upload kind should have been resolved to NativeRef by resolveUploadAttachments.
+			// Fallback: use logical URL only if it looks like a public HTTP URL.
+			if u := strings.TrimSpace(logical.URL); strings.HasPrefix(strings.ToLower(u), "http") {
+				photoURL = u
+			}
 		}
-		param, _ := json.Marshal(map[string]string{"photoURL": url})
+		if photoURL == "" {
+			return "", "", errors.New("dingtalk: image attachment requires a publicly accessible URL or uploaded mediaId")
+		}
+		param, _ := json.Marshal(map[string]string{"photoURL": photoURL})
 		return "sampleImageMsg", string(param), nil
 
 	case channel.AttachmentFile:
-		fileType := resolveFileType(att)
+		mediaID := strings.TrimSpace(att.NativeRef)
+		if mediaID == "" {
+			mediaID = strings.TrimSpace(logical.PlatformKey)
+		}
+		fileType := resolveFileType(logical)
 		param, _ := json.Marshal(map[string]string{
-			"mediaId":  strings.TrimSpace(att.PlatformKey),
-			"fileName": strings.TrimSpace(att.Name),
+			"mediaId":  mediaID,
+			"fileName": strings.TrimSpace(logical.Name),
 			"fileType": fileType,
 		})
 		return "sampleFile", string(param), nil
 
 	case channel.AttachmentAudio, channel.AttachmentVoice:
+		mediaID := strings.TrimSpace(att.NativeRef)
+		if mediaID == "" {
+			mediaID = strings.TrimSpace(logical.PlatformKey)
+		}
 		param, _ := json.Marshal(map[string]string{
-			"mediaId":  strings.TrimSpace(att.PlatformKey),
+			"mediaId":  mediaID,
 			"duration": "0",
 		})
 		return "sampleAudio", string(param), nil
 
 	case channel.AttachmentVideo:
+		mediaID := strings.TrimSpace(att.NativeRef)
+		if mediaID == "" {
+			mediaID = strings.TrimSpace(logical.PlatformKey)
+		}
 		param, _ := json.Marshal(map[string]string{
-			"mediaId":   strings.TrimSpace(att.PlatformKey),
+			"mediaId":   mediaID,
 			"videoType": "mp4",
 		})
 		return "sampleVideo", string(param), nil

@@ -2,9 +2,11 @@ package messaging
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/media"
 )
 
 type testSender struct {
@@ -29,8 +31,24 @@ type testAssetResolver struct {
 	lastPath     string
 }
 
+func (*testAssetResolver) Stat(_ context.Context, _, _ string) (AssetMeta, error) {
+	return AssetMeta{}, context.Canceled
+}
+
 func (*testAssetResolver) GetByStorageKey(_ context.Context, _, _ string) (AssetMeta, error) {
 	return AssetMeta{}, context.Canceled
+}
+
+func (*testAssetResolver) Open(_ context.Context, _, _ string) (io.ReadCloser, media.Asset, error) {
+	return nil, media.Asset{}, context.Canceled
+}
+
+func (*testAssetResolver) Ingest(_ context.Context, _ media.IngestInput) (media.Asset, error) {
+	return media.Asset{}, context.Canceled
+}
+
+func (*testAssetResolver) AccessPath(asset media.Asset) string {
+	return "https://example.com/media/" + asset.ContentHash
 }
 
 func (r *testAssetResolver) IngestContainerFile(_ context.Context, _, containerPath string) (AssetMeta, error) {
@@ -164,7 +182,7 @@ func TestSendDirectPromotesDataPathAttachmentToContentHash(t *testing.T) {
 	if att.ContentHash != "hash_1" {
 		t.Fatalf("expected promoted content hash, got %q", att.ContentHash)
 	}
-	if att.URL != "" {
-		t.Fatalf("expected URL cleared after promotion, got %q", att.URL)
+	if att.URL != "https://example.com/media/hash_1" {
+		t.Fatalf("expected public access URL after promotion, got %q", att.URL)
 	}
 }

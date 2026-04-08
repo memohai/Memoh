@@ -126,15 +126,24 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 					if text == "" {
 						text = strings.TrimSpace(injected.Text)
 					}
-					if text != "" {
+					if text != "" || (cfg.SupportsImageInput && len(injected.ImageParts) > 0) {
 						insertAfter := len(p.Messages) - initialMsgCount
-						p.Messages = append(p.Messages, sdk.UserMessage(text))
+						var extra []sdk.MessagePart
+						if cfg.SupportsImageInput {
+							for _, img := range injected.ImageParts {
+								if strings.TrimSpace(img.Image) != "" {
+									extra = append(extra, img)
+								}
+							}
+						}
+						p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
 						if cfg.InjectedRecorder != nil {
 							cfg.InjectedRecorder(text, insertAfter)
 						}
 						a.logger.Info("injected user message into agent stream",
 							slog.String("bot_id", cfg.Identity.BotID),
 							slog.Int("insert_after", insertAfter),
+							slog.Int("image_parts", len(extra)),
 						)
 					}
 					continue

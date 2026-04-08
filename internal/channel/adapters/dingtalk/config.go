@@ -128,6 +128,10 @@ func matchBinding(raw map[string]any, criteria channel.BindingCriteria) bool {
 	if err != nil {
 		return false
 	}
+	// Match against staff_id or user_id to handle both ISV and enterprise bots.
+	if v := strings.TrimSpace(criteria.Attribute("staff_id")); v != "" && v == cfg.UserID {
+		return true
+	}
 	if v := strings.TrimSpace(criteria.Attribute("user_id")); v != "" && v == cfg.UserID {
 		return true
 	}
@@ -144,8 +148,14 @@ func matchBinding(raw map[string]any, criteria channel.BindingCriteria) bool {
 
 func buildUserConfig(identity channel.Identity) map[string]any {
 	out := map[string]any{}
-	if v := strings.TrimSpace(identity.Attribute("user_id")); v != "" {
-		out["user_id"] = v
+	// Prefer staff_id (DingTalk staffId required by OpenAPI batchSend).
+	// user_id may be senderId/unionId which is rejected by the API in ISV apps.
+	userID := strings.TrimSpace(identity.Attribute("staff_id"))
+	if userID == "" {
+		userID = strings.TrimSpace(identity.Attribute("user_id"))
+	}
+	if userID != "" {
+		out["user_id"] = userID
 	}
 	if v := strings.TrimSpace(identity.Attribute("open_conversation_id")); v != "" {
 		out["open_conversation_id"] = v

@@ -3,12 +3,10 @@ package discord
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -269,7 +267,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 	return channel.NewConnection(cfg, stop), nil
 }
 
-func (a *DiscordAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *DiscordAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	discordCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
@@ -284,28 +282,21 @@ func (a *DiscordAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, ms
 	if channelID == "" {
 		return errors.New("discord target is required")
 	}
-
-	// Get botID from config metadata if available
-	botID := ""
-	if cfg.BotID != "" {
-		botID = cfg.BotID
-	}
-
-	return a.sendDiscordMessage(ctx, session, channelID, botID, msg)
+	return sendDiscordMessage(ctx, session, channelID, msg)
 }
 
-func (a *DiscordAdapter) sendDiscordMessage(ctx context.Context, session *discordgo.Session, channelID, _ string, msg channel.OutboundMessage) error {
-	content := truncateDiscordText(msg.Message.Text)
+func sendDiscordMessage(ctx context.Context, session *discordgo.Session, channelID string, msg channel.PreparedOutboundMessage) error {
+	content := truncateDiscordText(msg.Message.Message.Text)
 
 	// Build message send parameters
 	messageSend := &discordgo.MessageSend{
 		Content: content,
 	}
 
-	if msg.Message.Reply != nil && msg.Message.Reply.MessageID != "" {
+	if msg.Message.Message.Reply != nil && msg.Message.Message.Reply.MessageID != "" {
 		messageSend.Reference = &discordgo.MessageReference{
 			ChannelID: channelID,
-			MessageID: msg.Message.Reply.MessageID,
+			MessageID: msg.Message.Message.Reply.MessageID,
 		}
 	}
 
@@ -313,10 +304,11 @@ func (a *DiscordAdapter) sendDiscordMessage(ctx context.Context, session *discor
 	if len(msg.Message.Attachments) > 0 {
 		files := make([]*discordgo.File, 0, len(msg.Message.Attachments))
 		for _, att := range msg.Message.Attachments {
-			file := discordAttachmentToFile(ctx, att, a.assets)
-			if file != nil {
-				files = append(files, file)
+			file, err := discordPreparedAttachmentToFile(ctx, att)
+			if err != nil {
+				return err
 			}
+			files = append(files, file)
 		}
 		messageSend.Files = files
 
@@ -343,8 +335,8 @@ func truncateDiscordText(text string) string {
 	return string(runes[:discordMaxLength-3]) + "..."
 }
 
-// discordAttachmentToFile converts a channel attachment to discordgo.File.
-func discordAttachmentToFile(ctx context.Context, att channel.Attachment, opener assetOpener) *discordgo.File {
+// discordPreparedAttachmentToFile converts a prepared attachment to discordgo.File.
+func discordPreparedAttachmentToFile(ctx context.Context, att channel.PreparedAttachment) (*discordgo.File, error) {
 	// Get file name
 	name := att.Name
 	if name == "" {
@@ -355,73 +347,25 @@ func discordAttachmentToFile(ctx context.Context, att channel.Attachment, opener
 		}
 	}
 
-	var reader io.Reader
-
-	// Prefer bot_id from attachment metadata (allows cross-bot file forwarding)
-	var botID string
-	if att.Metadata != nil {
-		if bid, ok := att.Metadata["bot_id"].(string); ok && bid != "" {
-			botID = bid
-		}
+	if att.Kind != channel.PreparedAttachmentUpload {
+		return nil, fmt.Errorf("discord attachment requires upload source, got %s", att.Kind)
 	}
-
-	// Try asset opener first (for ContentHash from media store)
-	if att.ContentHash != "" && botID != "" && opener != nil {
-		if rc, _, err := opener.Open(ctx, botID, att.ContentHash); err == nil {
-			data, _ := io.ReadAll(rc)
-			_ = rc.Close()
-			if len(data) > 0 {
-				reader = bytes.NewReader(data)
-			}
-		}
+	if att.Open == nil {
+		return nil, errors.New("discord attachment upload is not openable")
 	}
-
-	// Fallback to Base64
-	if reader == nil && att.Base64 != "" {
-		data, err := base64DataURLToBytes(att.Base64)
-		if err == nil {
-			reader = bytes.NewReader(data)
-		}
+	reader, err := att.Open(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	// Fallback to data URL in URL field (e.g. TTS voice when media ingestion failed)
-	if reader == nil && att.URL != "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(att.URL)), "data:") {
-		data, err := base64DataURLToBytes(att.URL)
-		if err == nil {
-			reader = bytes.NewReader(data)
-		}
+	defer func() { _ = reader.Close() }()
+	data, err := media.ReadAllWithLimit(reader, media.MaxAssetBytes)
+	if err != nil {
+		return nil, err
 	}
-
-	// Fallback to HTTP URL
-	if reader == nil && att.URL != "" {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, att.URL, nil)
-		if err == nil {
-			resp, doErr := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is a Discord attachment URL received from the Discord API
-			if doErr == nil {
-				defer func() { _ = resp.Body.Close() }()
-				data, _ := io.ReadAll(resp.Body)
-				reader = bytes.NewReader(data)
-			}
-		}
-	}
-
-	if reader == nil {
-		return nil
-	}
-
 	return &discordgo.File{
 		Name:   name,
-		Reader: reader,
-	}
-}
-
-// base64DataURLToBytes decodes a base64 data URL to bytes.
-func base64DataURLToBytes(dataURL string) ([]byte, error) {
-	parts := strings.SplitN(dataURL, ",", 2)
-	if len(parts) != 2 {
-		return nil, errors.New("invalid data URL")
-	}
-	return base64.StdEncoding.DecodeString(parts[1])
+		Reader: bytes.NewReader(data),
+	}, nil
 }
 
 // mimeExtension returns file extension for common mime types.
@@ -454,7 +398,7 @@ func mimeExtension(mime string) string {
 	}
 }
 
-func (a *DiscordAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *DiscordAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return nil, errors.New("discord target is required")

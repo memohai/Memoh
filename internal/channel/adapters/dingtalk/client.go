@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"sync"
@@ -200,6 +201,112 @@ type botInfoResponse struct {
 		RobotCode string `json:"robotCode"`
 	} `json:"result"`
 	RequestID string `json:"requestId"`
+}
+
+type uploadMediaResponse struct {
+	MediaID string `json:"media_id"`
+	ErrCode int    `json:"errcode"`
+	ErrMsg  string `json:"errmsg"`
+}
+
+// uploadMedia uploads a media file to DingTalk and returns the resulting mediaId.
+// mediaType must be one of: "image", "voice", "video", "file".
+// filename is used as the multipart filename; Content-Type is determined by the multipart writer.
+func (c *apiClient) uploadMedia(ctx context.Context, mediaType, filename string, data io.Reader) (string, error) {
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	// The "type" field tells DingTalk which media category this is.
+	if err := mw.WriteField("type", mediaType); err != nil {
+		return "", fmt.Errorf("dingtalk upload: write type field: %w", err)
+	}
+
+	// The file part must be named "media".
+	part, err := mw.CreateFormFile("media", filename)
+	if err != nil {
+		return "", fmt.Errorf("dingtalk upload: create form file: %w", err)
+	}
+	if _, err := io.Copy(part, data); err != nil {
+		return "", fmt.Errorf("dingtalk upload: copy media: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return "", fmt.Errorf("dingtalk upload: close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.base+"/media/upload?access_token="+token, &buf)
+	if err != nil {
+		return "", fmt.Errorf("dingtalk upload: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := c.http.Do(req) //nolint:gosec // URL is the DingTalk OpenAPI media endpoint
+	if err != nil {
+		return "", fmt.Errorf("dingtalk upload: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("dingtalk upload: read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("dingtalk upload: status %d: %s", resp.StatusCode, string(raw))
+	}
+	var result uploadMediaResponse
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("dingtalk upload: parse response: %w", err)
+	}
+	if result.ErrCode != 0 {
+		return "", fmt.Errorf("dingtalk upload: errcode %d: %s", result.ErrCode, result.ErrMsg)
+	}
+	if strings.TrimSpace(result.MediaID) == "" {
+		return "", fmt.Errorf("dingtalk upload: empty media_id in response: %s", string(raw))
+	}
+	return result.MediaID, nil
+}
+
+type downloadFileResponse struct {
+	DownloadURL string `json:"downloadUrl"`
+}
+
+// downloadMessageFile resolves a downloadCode received in an inbound message to a
+// temporary download URL, then streams the file content to the caller.
+// The caller is responsible for closing the returned ReadCloser.
+func (c *apiClient) downloadMessageFile(ctx context.Context, robotCode, downloadCode string) (io.ReadCloser, string, error) {
+	data, err := c.doPost(ctx, "/v1.0/robot/messageFiles/download", map[string]string{
+		"downloadCode": downloadCode,
+		"robotCode":    robotCode,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("dingtalk download file: %w", err)
+	}
+	var result downloadFileResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, "", fmt.Errorf("dingtalk download file: parse response: %w", err)
+	}
+	downloadURL := strings.TrimSpace(result.DownloadURL)
+	if downloadURL == "" {
+		return nil, "", fmt.Errorf("dingtalk download file: empty downloadUrl in response: %s", string(data))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("dingtalk download file: build request: %w", err)
+	}
+	resp, err := c.http.Do(req) //nolint:gosec // G107: URL is returned by DingTalk API, not user-supplied
+	if err != nil {
+		return nil, "", fmt.Errorf("dingtalk download file: fetch: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		_ = resp.Body.Close()
+		return nil, "", fmt.Errorf("dingtalk download file: status %d", resp.StatusCode)
+	}
+	mimeType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	return resp.Body, mimeType, nil
 }
 
 // getBotInfo retrieves the bot's own profile via the OpenAPI.

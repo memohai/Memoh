@@ -14,16 +14,16 @@ import (
 type qqOutboundStream struct {
 	target string
 	reply  *channel.ReplyRef
-	send   func(context.Context, channel.OutboundMessage) error
+	send   func(context.Context, channel.PreparedOutboundMessage) error
 
 	closed      atomic.Bool
 	mu          sync.Mutex
 	buffer      strings.Builder
-	attachments []channel.Attachment
+	attachments []channel.PreparedAttachment
 	sentText    bool
 }
 
-func (a *QQAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *QQAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	parsed, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return nil, fmt.Errorf("qq open stream: %w", err)
@@ -32,19 +32,19 @@ func (a *QQAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, tar
 	return &qqOutboundStream{
 		target: target,
 		reply:  opts.Reply,
-		send: func(ctx context.Context, msg channel.OutboundMessage) error {
+		send: func(ctx context.Context, msg channel.PreparedOutboundMessage) error {
 			if msg.Target == "" {
 				msg.Target = target
 			}
-			if msg.Message.Reply == nil && opts.Reply != nil {
-				msg.Message.Reply = opts.Reply
+			if msg.Message.Message.Reply == nil && opts.Reply != nil {
+				msg.Message.Message.Reply = opts.Reply
 			}
 			return a.Send(ctx, cfg, msg)
 		},
 	}, nil
 }
 
-func (s *qqOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
+func (s *qqOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s == nil || s.send == nil {
 		return errors.New("qq stream not configured")
 	}
@@ -90,8 +90,10 @@ func (s *qqOutboundStream) Push(ctx context.Context, event channel.StreamEvent) 
 		if errText == "" {
 			return nil
 		}
-		return s.flush(ctx, channel.Message{
-			Text: "Error: " + errText,
+		return s.flush(ctx, channel.PreparedMessage{
+			Message: channel.Message{
+				Text: "Error: " + errText,
+			},
 		})
 	case channel.StreamEventFinal:
 		if event.Final == nil {
@@ -116,43 +118,62 @@ func (s *qqOutboundStream) Close(ctx context.Context) error {
 	return nil
 }
 
-func (s *qqOutboundStream) flush(ctx context.Context, msg channel.Message) error {
+func (s *qqOutboundStream) flush(ctx context.Context, msg channel.PreparedMessage) error {
 	s.mu.Lock()
 	bufferedText := strings.TrimSpace(s.buffer.String())
-	bufferedAttachments := append([]channel.Attachment(nil), s.attachments...)
+	bufferedAttachments := append([]channel.PreparedAttachment(nil), s.attachments...)
 	alreadySentText := s.sentText
 	s.buffer.Reset()
 	s.attachments = nil
 	s.mu.Unlock()
 
+	logicalMsg := msg.LogicalMessage()
 	if bufferedText != "" {
-		msg.Text = bufferedText
-		msg.Parts = nil
-		if msg.Format == "" {
-			msg.Format = channel.MessageFormatPlain
+		logicalMsg.Text = bufferedText
+		logicalMsg.Parts = nil
+		if logicalMsg.Format == "" {
+			logicalMsg.Format = channel.MessageFormatPlain
 		}
-	} else if alreadySentText && len(bufferedAttachments) == 0 && len(msg.Attachments) == 0 && strings.TrimSpace(msg.PlainText()) != "" {
+	} else if alreadySentText && len(bufferedAttachments) == 0 && len(msg.Attachments) == 0 && strings.TrimSpace(logicalMsg.PlainText()) != "" {
 		return nil
 	}
+	preparedAttachments := append([]channel.PreparedAttachment(nil), bufferedAttachments...)
 	if len(bufferedAttachments) > 0 {
-		msg.Attachments = append(bufferedAttachments, msg.Attachments...)
+		logicalMsg.Attachments = append(preparedAttachmentLogicals(bufferedAttachments), logicalMsg.Attachments...)
+		preparedAttachments = append(preparedAttachments, msg.Attachments...)
+	} else {
+		preparedAttachments = append(preparedAttachments, msg.Attachments...)
 	}
-	if msg.Reply == nil && s.reply != nil {
-		msg.Reply = s.reply
+	if logicalMsg.Reply == nil && s.reply != nil {
+		logicalMsg.Reply = s.reply
 	}
-	if msg.IsEmpty() {
+	if logicalMsg.IsEmpty() && len(preparedAttachments) == 0 {
 		return nil
 	}
-	if err := s.send(ctx, channel.OutboundMessage{
-		Target:  s.target,
-		Message: msg,
+	if err := s.send(ctx, channel.PreparedOutboundMessage{
+		Target: s.target,
+		Message: channel.PreparedMessage{
+			Message:     logicalMsg,
+			Attachments: preparedAttachments,
+		},
 	}); err != nil {
 		return err
 	}
-	if strings.TrimSpace(msg.PlainText()) != "" {
+	if strings.TrimSpace(logicalMsg.PlainText()) != "" {
 		s.mu.Lock()
 		s.sentText = true
 		s.mu.Unlock()
 	}
 	return nil
+}
+
+func preparedAttachmentLogicals(attachments []channel.PreparedAttachment) []channel.Attachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	logical := make([]channel.Attachment, 0, len(attachments))
+	for _, att := range attachments {
+		logical = append(logical, att.Logical)
+	}
+	return logical
 }

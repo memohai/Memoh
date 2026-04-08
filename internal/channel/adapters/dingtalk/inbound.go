@@ -146,12 +146,24 @@ func buildInboundMessage(data *chatbot.BotCallbackDataModel) (channel.InboundMes
 		convID = strings.TrimSpace(data.SenderId)
 	}
 
-	// ReplyTarget: for private chat use user:{senderId}, for group chat use group:{conversationId}.
-	replyTarget := buildReplyTarget(convType, data.ConversationId, data.SenderId)
+	// ReplyTarget: for private chat prefer senderStaffId (required by DingTalk OpenAPI),
+	// falling back to senderId (works for session webhook but may be unionId in ISV apps).
+	// For group chat use group:{conversationId}.
+	replyTarget := buildReplyTarget(convType, data.ConversationId, data.SenderId, data.SenderStaffId)
 
 	// Sanitize @ mentions from text body (DingTalk prepends "@botNick " in group messages).
 	if strings.TrimSpace(text) != "" {
 		text = strings.TrimSpace(text)
+	}
+
+	// Use staffId as SubjectID when available: it is the stable employee identifier
+	// accepted by the DingTalk OpenAPI. senderId may be a unionId ($:LWCP_v1:$...)
+	// which the batchSend API rejects with "staffId.notExisted".
+	senderID := strings.TrimSpace(data.SenderId)
+	staffID := strings.TrimSpace(data.SenderStaffId)
+	subjectID := staffID
+	if subjectID == "" {
+		subjectID = senderID
 	}
 
 	return channel.InboundMessage{
@@ -164,11 +176,11 @@ func buildInboundMessage(data *chatbot.BotCallbackDataModel) (channel.InboundMes
 		},
 		ReplyTarget: replyTarget,
 		Sender: channel.Identity{
-			SubjectID:   strings.TrimSpace(data.SenderId),
+			SubjectID:   subjectID,
 			DisplayName: strings.TrimSpace(data.SenderNick),
 			Attributes: map[string]string{
-				"user_id":         strings.TrimSpace(data.SenderId),
-				"staff_id":        strings.TrimSpace(data.SenderStaffId),
+				"user_id":         senderID,
+				"staff_id":        staffID,
 				"corp_id":         strings.TrimSpace(data.SenderCorpId),
 				"chatbot_user_id": strings.TrimSpace(data.ChatbotUserId),
 			},
@@ -351,8 +363,13 @@ func normalizeDingTalkConversationType(raw string) string {
 }
 
 // buildReplyTarget produces the canonical reply target for a DingTalk inbound message.
-func buildReplyTarget(convType, conversationID, senderID string) string {
+// For private chat, staffID is preferred over senderID because the DingTalk OpenAPI's
+// batchSend endpoint requires the staffId, while senderId may be a unionId in ISV apps.
+func buildReplyTarget(convType, conversationID, senderID, staffID string) string {
 	if channel.IsPrivateConversationType(convType) {
+		if v := strings.TrimSpace(staffID); v != "" {
+			return "user:" + v
+		}
 		if v := strings.TrimSpace(senderID); v != "" {
 			return "user:" + v
 		}

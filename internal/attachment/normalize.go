@@ -59,17 +59,23 @@ func MimeFromDataURL(raw string) string {
 }
 
 // ResolveMime resolves source MIME and sniffed MIME into final MIME.
+//
+// For image attachments, content sniffing takes precedence over the platform-reported
+// MIME because platforms sometimes declare the wrong image subtype (e.g. "image/png"
+// for a JPEG file). Using the wrong MIME causes multimodal API rejections (HTTP 400).
 func ResolveMime(mediaType media.MediaType, sourceMime, sniffedMime string) string {
 	source := NormalizeMime(sourceMime)
 	sniffed := NormalizeMime(sniffedMime)
 	sourceGeneric := source == "" || source == "application/octet-stream"
 
 	if mediaType == media.MediaTypeImage {
-		if strings.HasPrefix(source, "image/") {
-			return source
-		}
+		// Prefer the sniffed MIME for images: it is derived from the actual file
+		// bytes and is always more accurate than the platform-declared value.
 		if strings.HasPrefix(sniffed, "image/") {
 			return sniffed
+		}
+		if strings.HasPrefix(source, "image/") {
+			return source
 		}
 		if !sourceGeneric {
 			return source
