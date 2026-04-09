@@ -93,6 +93,17 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 				slog.String("model_id", rc.model.ID),
 				slog.Duration("idle_timeout", idleTimeout),
 			)
+			// Notify the client that the stream was terminated due to idle timeout.
+			timeoutEvent := agentpkg.StreamEvent{
+				Type:  agentpkg.EventError,
+				Error: "stream timeout: no response from model provider",
+			}
+			if data, err := json.Marshal(timeoutEvent); err == nil {
+				select {
+				case chunkCh <- conversation.StreamChunk(data):
+				case <-ctx.Done():
+				}
+			}
 		}
 	}()
 	return chunkCh, errCh
@@ -177,6 +188,17 @@ func (r *Resolver) StreamChatWS(
 			slog.String("model_id", modelID),
 			slog.Duration("idle_timeout", idleTimeout),
 		)
+		// Notify the client that the stream was terminated due to idle timeout.
+		timeoutEvent := agentpkg.StreamEvent{
+			Type:  agentpkg.EventError,
+			Error: "stream timeout: no response from model provider",
+		}
+		if data, err := json.Marshal(timeoutEvent); err == nil {
+			select {
+			case eventCh <- json.RawMessage(data):
+			case <-ctx.Done():
+			}
+		}
 	}
 
 	return nil

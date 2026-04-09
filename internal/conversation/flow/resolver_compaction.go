@@ -41,6 +41,7 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		SessionID:        req.SessionID,
 		Ratio:            ratio,
 		TotalInputTokens: inputTokens,
+		HTTPClient:       r.streamHTTPClient,
 	}
 
 	model, err := r.modelsService.GetByID(ctx, modelID)

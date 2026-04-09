@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -64,7 +63,7 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 
 	compactErr := s.doCompaction(ctx, logRow.ID, sessionUUID, cfg)
 	if compactErr != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", compactErr.Error(), nil, pgtype.UUID{})
+		s.completeLog(ctx, logRow.ID, "error", "", compactErr.Error(), 0, nil, pgtype.UUID{})
 	}
 	return compactErr
 }
@@ -75,13 +74,13 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		return err
 	}
 	if len(messages) == 0 {
-		s.completeLog(ctx, logID, "ok", "", "", nil, pgtype.UUID{})
+		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
 		return nil
 	}
 
 	toCompact := splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
 	if len(toCompact) == 0 {
-		s.completeLog(ctx, logID, "ok", "", "", nil, pgtype.UUID{})
+		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
 		return nil
 	}
 
@@ -137,16 +136,16 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		return err
 	}
 
-	s.completeLog(ctx, logID, "ok", result.Text, "", usageJSON, modelUUID)
+	s.completeLog(ctx, logID, "ok", result.Text, "", len(messageIDs), usageJSON, modelUUID)
 	return nil
 }
 
-func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, usage []byte, modelID pgtype.UUID) {
+func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID) {
 	if _, err := s.queries.CompleteCompactionLog(ctx, sqlc.CompleteCompactionLogParams{
 		ID:           logID,
 		Status:       status,
 		Summary:      summary,
-		MessageCount: 0,
+		MessageCount: int32(messageCount), //nolint:gosec // count always small
 		ErrorMessage: errMsg,
 		Usage:        usage,
 		ModelID:      modelID,
@@ -231,45 +230,15 @@ func formatUUID(id pgtype.UUID) string {
 	return uuid.UUID(id.Bytes).String()
 }
 
-// extractTextContent extracts plain text from a message content JSONB field.
-// The content may be a JSON string, an array of content parts, or raw bytes.
-func extractTextContent(content []byte) string {
-	if len(content) == 0 {
-		return ""
-	}
-
-	var s string
-	if json.Unmarshal(content, &s) == nil {
-		return s
-	}
-
-	var parts []map[string]any
-	if json.Unmarshal(content, &parts) == nil {
-		var texts []string
-		for _, p := range parts {
-			if t, ok := p["type"].(string); ok && t == "text" {
-				if text, ok := p["text"].(string); ok {
-					texts = append(texts, text)
-				}
-			}
-		}
-		if len(texts) > 0 {
-			return joinTexts(texts)
-		}
-	}
-
-	return string(content)
-}
-
-func joinTexts(parts []string) string {
-	return strings.Join(parts, " ")
-}
-
 // splitByRatio splits messages so that roughly the first ratio% (by token weight)
 // are returned for compaction, and the rest are kept as-is.
-// When ratio >= 100 or totalInputTokens <= 0, all messages are returned.
+// When ratio >= 100, all messages are returned for compaction.
+// When ratio <= 0 or totalInputTokens <= 0 or messages is empty, nil is returned (no compaction).
 func splitByRatio(messages []sqlc.ListUncompactedMessagesBySessionRow, totalInputTokens, ratio int) []sqlc.ListUncompactedMessagesBySessionRow {
-	if ratio >= 100 || ratio <= 0 || totalInputTokens <= 0 || len(messages) == 0 {
+	if ratio <= 0 || totalInputTokens <= 0 || len(messages) == 0 {
+		return nil
+	}
+	if ratio >= 100 {
 		return messages
 	}
 
