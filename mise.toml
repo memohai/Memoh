@@ -69,6 +69,14 @@ set -e
 docker compose -f devenv/docker-compose.yml up --build
 """
 
+[tasks."dev:minify"]
+description = "Start development environment with minified services"
+run = """
+#!/bin/bash
+set -e
+docker compose -f devenv/docker-compose.minify.yml up --build
+"""
+
 [tasks."dev:selinux"]
 description = "Start development environment on SELinux systems"
 run = """

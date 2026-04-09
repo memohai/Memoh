@@ -3,6 +3,7 @@ import './style.css'
 import App from './App.vue'
 import router from './router'
 import { setupApiClient } from './lib/api-client'
+import 'animate.css'
 
 // Configure SDK client before anything else
 setupApiClient()

@@ -1,6 +1,12 @@
 package wecom
 
 import (
+	"context"
+	"crypto/md5" //nolint:gosec // test verifies protocol checksum formatting.
+	"encoding/base64"
+	"fmt"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel"
@@ -235,5 +241,71 @@ func TestBuildRespondPayload_WelcomeTemplateCard(t *testing.T) {
 	}
 	if p.MsgType != "template_card" {
 		t.Fatalf("unexpected msg type: %q", p.MsgType)
+	}
+}
+
+func TestBuildPreparedRespondPayloadWithStream_ImageAttachment(t *testing.T) {
+	const rawImage = "image-bytes"
+
+	payload, cmd, reqID, err := buildPreparedRespondPayloadWithStream(context.Background(), channel.PreparedMessage{
+		Message: channel.Message{
+			Reply: &channel.ReplyRef{MessageID: "msg_1"},
+		},
+		Attachments: []channel.PreparedAttachment{
+			{
+				Logical: channel.Attachment{Type: channel.AttachmentImage},
+				Kind:    channel.PreparedAttachmentUpload,
+				Mime:    "image/png",
+				Open: func(context.Context) (io.ReadCloser, error) {
+					return io.NopCloser(strings.NewReader(rawImage)), nil
+				},
+			},
+		},
+	}, "req_abc", "stream_1", true)
+	if err != nil {
+		t.Fatalf("buildPreparedRespondPayloadWithStream error = %v", err)
+	}
+	if cmd != WSCmdRespond {
+		t.Fatalf("unexpected cmd: %q", cmd)
+	}
+	if reqID != "req_abc" {
+		t.Fatalf("unexpected req id: %q", reqID)
+	}
+	p, ok := payload.(StreamReplyBody)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", payload)
+	}
+	if p.Stream.ID != "stream_1" || !p.Stream.Finish {
+		t.Fatalf("unexpected stream block: %+v", p.Stream)
+	}
+	if len(p.Stream.MsgItems) != 1 || p.Stream.MsgItems[0].Image == nil {
+		t.Fatalf("expected one image item, got %+v", p.Stream.MsgItems)
+	}
+	if got := p.Stream.MsgItems[0].Image.Base64; got != base64.StdEncoding.EncodeToString([]byte(rawImage)) {
+		t.Fatalf("unexpected image base64: %q", got)
+	}
+	if got := p.Stream.MsgItems[0].Image.MD5; got != fmt.Sprintf("%x", md5.Sum([]byte(rawImage))) { //nolint:gosec
+		t.Fatalf("unexpected image md5: %q", got)
+	}
+}
+
+func TestBuildPreparedRespondPayloadWithStream_RejectsNonImageAttachment(t *testing.T) {
+	_, _, _, err := buildPreparedRespondPayloadWithStream(context.Background(), channel.PreparedMessage{
+		Attachments: []channel.PreparedAttachment{
+			{
+				Logical: channel.Attachment{Type: channel.AttachmentFile},
+				Kind:    channel.PreparedAttachmentUpload,
+				Mime:    "application/pdf",
+				Open: func(context.Context) (io.ReadCloser, error) {
+					return io.NopCloser(strings.NewReader("pdf")), nil
+				},
+			},
+		},
+	}, "req_abc", "stream_1", true)
+	if err == nil {
+		t.Fatal("expected non-image attachment error")
+	}
+	if !strings.Contains(err.Error(), "only support images") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

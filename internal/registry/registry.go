@@ -17,7 +17,8 @@ import (
 
 // Load reads all .yaml / .yml files from dir and returns parsed provider
 // definitions. It returns nil (no error) when the directory does not exist.
-func Load(dir string) ([]ProviderDefinition, error) {
+// Malformed files are skipped with a warning logged via log.
+func Load(log *slog.Logger, dir string) ([]ProviderDefinition, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -42,7 +43,9 @@ func Load(dir string) ([]ProviderDefinition, error) {
 		}
 		var def ProviderDefinition
 		if err := yaml.Unmarshal(data, &def); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", path, err)
+			log.Warn("registry: skipping malformed provider file",
+				slog.String("path", path), slog.Any("error", err))
+			continue
 		}
 		if def.Name == "" {
 			continue
@@ -63,11 +66,25 @@ func Sync(ctx context.Context, logger *slog.Logger, queries *sqlc.Queries, defs 
 			icon = pgtype.Text{String: def.Icon, Valid: true}
 		}
 
+		providerCfg := make(map[string]any)
+		for k, v := range def.Config {
+			providerCfg[k] = v
+		}
+		if def.BaseURL != "" {
+			providerCfg["base_url"] = def.BaseURL
+		}
+		providerConfigJSON, err := json.Marshal(providerCfg)
+		if err != nil {
+			logger.Warn("registry: failed to marshal provider config",
+				slog.String("name", def.Name), slog.Any("error", err))
+			continue
+		}
+
 		provider, err := queries.UpsertRegistryProvider(ctx, sqlc.UpsertRegistryProviderParams{
 			Name:       def.Name,
-			BaseUrl:    def.BaseURL,
 			ClientType: def.ClientType,
 			Icon:       icon,
+			Config:     providerConfigJSON,
 		})
 		if err != nil {
 			logger.Warn("registry: failed to upsert provider", slog.String("name", def.Name), slog.Any("error", err))
@@ -93,11 +110,11 @@ func Sync(ctx context.Context, logger *slog.Logger, queries *sqlc.Queries, defs 
 			}
 
 			_, err = queries.UpsertRegistryModel(ctx, sqlc.UpsertRegistryModelParams{
-				ModelID:       m.ModelID,
-				Name:          name,
-				LlmProviderID: provider.ID,
-				Type:          typ,
-				Config:        configJSON,
+				ModelID:    m.ModelID,
+				Name:       name,
+				ProviderID: provider.ID,
+				Type:       typ,
+				Config:     configJSON,
 			})
 			if err != nil {
 				logger.Warn("registry: failed to upsert model",

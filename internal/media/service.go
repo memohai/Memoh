@@ -99,6 +99,12 @@ func (s *Service) Resolve(ctx context.Context, botID, contentHash string) (Asset
 	return s.resolveByContentHash(ctx, botID, contentHash)
 }
 
+// Stat returns asset metadata for the given content hash without opening the file.
+// It satisfies the channel.OutboundAttachmentStore interface.
+func (s *Service) Stat(ctx context.Context, botID, contentHash string) (Asset, error) {
+	return s.Resolve(ctx, botID, contentHash)
+}
+
 // Open returns a reader for the media asset identified by content hash.
 // It locates the file by scanning extensions under the hash prefix and derives MIME from the extension.
 func (s *Service) Open(ctx context.Context, botID, contentHash string) (io.ReadCloser, Asset, error) {

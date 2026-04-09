@@ -11,6 +11,11 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 )
 
+// InjectMessage is an alias for conversation.InjectMessage, re-exported so
+// callers within this package do not need to import the conversation package
+// directly for inject-related types.
+type InjectMessage = conversation.InjectMessage
+
 // InboundMode determines how a new inbound message is handled when an agent
 // stream is already active for the same route.
 type InboundMode int
@@ -27,14 +32,6 @@ const (
 	// current agent stream completes.
 	ModeQueue
 )
-
-// InjectMessage carries a user message to be injected into a running agent stream.
-type InjectMessage struct {
-	Text        string
-	Attachments []conversation.ChatAttachment
-	// HeaderifiedText is the formatted user header text ready for SDK injection.
-	HeaderifiedText string
-}
 
 // QueuedTask holds everything needed to start an agent stream for a queued message.
 type QueuedTask struct {

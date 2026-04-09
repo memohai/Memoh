@@ -51,6 +51,9 @@ type LoopDetectionConfig struct {
 type InjectMessage struct {
 	Text            string
 	HeaderifiedText string
+	// ImageParts carries inline images (data URL or public URL) to attach
+	// alongside the injected text when the model supports vision input.
+	ImageParts []sdk.ImagePart
 }
 
 // RunConfig holds everything needed for a single agent invocation.

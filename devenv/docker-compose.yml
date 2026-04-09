@@ -117,9 +117,7 @@ services:
     command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "8082"]
     environment:
       MEMOH_CONFIG_PATH: /workspace/devenv/app.dev.toml
-      MEMOH_WEB_PROXY_TARGET: http://host.docker.internal:18080
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      MEMOH_WEB_PROXY_TARGET: http://server:8080
     volumes:
       - ..:/workspace
       - node_modules:/workspace/node_modules

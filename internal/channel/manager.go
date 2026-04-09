@@ -62,6 +62,7 @@ type Manager struct {
 	registry        *Registry
 	service         ManagerStore
 	processor       InboundProcessor
+	attachmentStore OutboundAttachmentStore
 	refreshInterval time.Duration
 	logger          *slog.Logger
 	middlewares     []Middleware
@@ -77,15 +78,48 @@ type Manager struct {
 	connectionMeta map[string]ConnectionStatus
 }
 
+// ManagerOption configures a Manager during construction.
+type ManagerOption func(*Manager)
+
+// WithInboundQueueSize sets the capacity of the inbound message queue.
+// The default is 256. Larger values trade memory for lower drop rate under burst load.
+func WithInboundQueueSize(size int) ManagerOption {
+	return func(m *Manager) {
+		if size > 0 {
+			m.inboundQueue = make(chan inboundTask, size)
+		}
+	}
+}
+
+// WithInboundWorkers sets the number of goroutines that process inbound messages
+// concurrently. The default is 4.
+func WithInboundWorkers(n int) ManagerOption {
+	return func(m *Manager) {
+		if n > 0 {
+			m.inboundWorkers = n
+		}
+	}
+}
+
+// WithRefreshInterval overrides the periodic connection reconcile interval.
+// The default is 5 minutes.
+func WithRefreshInterval(d time.Duration) ManagerOption {
+	return func(m *Manager) {
+		if d > 0 {
+			m.refreshInterval = d
+		}
+	}
+}
+
 // NewManager creates a Manager with the given logger, registry, config store, and inbound processor.
-func NewManager(log *slog.Logger, registry *Registry, service ManagerStore, processor InboundProcessor) *Manager {
+func NewManager(log *slog.Logger, registry *Registry, service ManagerStore, processor InboundProcessor, opts ...ManagerOption) *Manager {
 	if log == nil {
 		log = slog.Default()
 	}
 	if registry == nil {
 		registry = NewRegistry()
 	}
-	return &Manager{
+	m := &Manager{
 		registry:        registry,
 		service:         service,
 		processor:       processor,
@@ -97,6 +131,10 @@ func NewManager(log *slog.Logger, registry *Registry, service ManagerStore, proc
 		inboundQueue:    make(chan inboundTask, 256),
 		inboundWorkers:  4,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // Registry returns the adapter registry used by this manager.
@@ -107,6 +145,12 @@ func (m *Manager) Registry() *Registry {
 // Use appends middleware to the inbound processing chain.
 func (m *Manager) Use(mw ...Middleware) {
 	m.middlewares = append(m.middlewares, mw...)
+}
+
+// SetAttachmentStore wires the shared outbound attachment store used by the
+// prepared outbound layer.
+func (m *Manager) SetAttachmentStore(store OutboundAttachmentStore) {
+	m.attachmentStore = store
 }
 
 // RegisterAdapter adds an adapter to the registry and logs the registration.
@@ -144,6 +188,7 @@ func (m *Manager) RemoveAdapter(ctx context.Context, channelType ChannelType) {
 				}
 			}
 			delete(m.connections, id)
+			delete(m.connectionMeta, id)
 		}
 	}
 	m.mu.Unlock()

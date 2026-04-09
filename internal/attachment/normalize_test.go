@@ -64,17 +64,71 @@ func TestMimeFromDataURL(t *testing.T) {
 }
 
 func TestResolveMime(t *testing.T) {
-	if got := ResolveMime(media.MediaTypeImage, "application/octet-stream", "image/jpeg"); got != "image/jpeg" {
-		t.Fatalf("ResolveMime image unexpected result: %q", got)
+	cases := []struct {
+		name      string
+		mediaType media.MediaType
+		source    string
+		sniffed   string
+		want      string
+	}{
+		{
+			name:      "image: sniffed preferred over generic source",
+			mediaType: media.MediaTypeImage,
+			source:    "application/octet-stream",
+			sniffed:   "image/jpeg",
+			want:      "image/jpeg",
+		},
+		{
+			name:      "image: sniffed preferred over wrong platform mime",
+			mediaType: media.MediaTypeImage,
+			source:    "image/png",
+			sniffed:   "image/jpeg",
+			want:      "image/jpeg",
+		},
+		{
+			name:      "image: fallback to source when sniff fails",
+			mediaType: media.MediaTypeImage,
+			source:    "image/png",
+			sniffed:   "",
+			want:      "image/png",
+		},
+		{
+			name:      "image: both empty returns octet-stream",
+			mediaType: media.MediaTypeImage,
+			source:    "",
+			sniffed:   "",
+			want:      "application/octet-stream",
+		},
+		{
+			name:      "file: source preferred over sniffed",
+			mediaType: media.MediaTypeFile,
+			source:    "application/pdf",
+			sniffed:   "application/octet-stream",
+			want:      "application/pdf",
+		},
+		{
+			name:      "file: sniffed used when source is generic",
+			mediaType: media.MediaTypeFile,
+			source:    "application/octet-stream",
+			sniffed:   "application/pdf",
+			want:      "application/pdf",
+		},
+		{
+			name:      "file: sniffed used when source token is invalid",
+			mediaType: media.MediaTypeFile,
+			source:    "file",
+			sniffed:   "text/plain",
+			want:      "text/plain",
+		},
 	}
-	if got := ResolveMime(media.MediaTypeFile, "application/octet-stream", "application/pdf"); got != "application/pdf" {
-		t.Fatalf("ResolveMime file unexpected result: %q", got)
-	}
-	if got := ResolveMime(media.MediaTypeFile, "file", "text/plain"); got != "text/plain" {
-		t.Fatalf("ResolveMime should prefer sniffed mime for invalid source token, got %q", got)
-	}
-	if got := ResolveMime(media.MediaTypeImage, "", ""); got != "application/octet-stream" {
-		t.Fatalf("ResolveMime empty unexpected result: %q", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveMime(tc.mediaType, tc.source, tc.sniffed)
+			if got != tc.want {
+				t.Fatalf("ResolveMime(%v, %q, %q) = %q, want %q",
+					tc.mediaType, tc.source, tc.sniffed, got, tc.want)
+			}
+		})
 	}
 }
 

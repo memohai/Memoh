@@ -104,7 +104,7 @@ func (s *Service) oauthConfig(metadata map[string]any) openAIOAuthConfig {
 	return cfg
 }
 
-func supportsOAuth(provider sqlc.LlmProvider) bool {
+func supportsOAuth(provider sqlc.Provider) bool {
 	return models.ClientType(provider.ClientType) == models.ClientTypeOpenAICodex
 }
 
@@ -113,7 +113,7 @@ func (s *Service) StartOAuthAuthorization(ctx context.Context, providerID string
 	if err != nil {
 		return "", err
 	}
-	provider, err := s.queries.GetLlmProviderByID(ctx, providerUUID)
+	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
 	if err != nil {
 		return "", fmt.Errorf("get provider: %w", err)
 	}
@@ -160,7 +160,7 @@ func (s *Service) HandleOAuthCallback(ctx context.Context, state, code string) (
 	if err != nil {
 		return "", err
 	}
-	provider, err := s.queries.GetLlmProviderByID(ctx, providerUUID)
+	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
 	if err != nil {
 		return "", fmt.Errorf("get provider: %w", err)
 	}
@@ -193,7 +193,7 @@ func (s *Service) GetOAuthStatus(ctx context.Context, providerID string) (*OAuth
 	if err != nil {
 		return nil, err
 	}
-	provider, err := s.queries.GetLlmProviderByID(ctx, providerUUID)
+	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
@@ -226,14 +226,14 @@ func (s *Service) RevokeOAuthToken(ctx context.Context, providerID string) error
 	if err != nil {
 		return err
 	}
-	provider, err := s.queries.GetLlmProviderByID(ctx, providerUUID)
+	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
 	if err != nil {
 		return fmt.Errorf("get provider: %w", err)
 	}
 	if !supportsOAuth(provider) {
 		return errors.New("provider does not support oauth")
 	}
-	return s.queries.DeleteLlmProviderOAuthToken(ctx, providerUUID)
+	return s.queries.DeleteProviderOAuthToken(ctx, providerUUID)
 }
 
 func (s *Service) GetValidAccessToken(ctx context.Context, providerID string) (string, error) {
@@ -255,7 +255,7 @@ func (s *Service) GetValidAccessToken(ctx context.Context, providerID string) (s
 	if err != nil {
 		return "", err
 	}
-	provider, err := s.queries.GetLlmProviderByID(ctx, providerUUID)
+	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
 	if err != nil {
 		return "", fmt.Errorf("get provider: %w", err)
 	}
@@ -285,7 +285,7 @@ func (s *Service) getOAuthToken(ctx context.Context, providerID string) (*provid
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.queries.GetLlmProviderOAuthTokenByProvider(ctx, providerUUID)
+	row, err := s.queries.GetProviderOAuthTokenByProvider(ctx, providerUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +293,7 @@ func (s *Service) getOAuthToken(ctx context.Context, providerID string) (*provid
 }
 
 func (s *Service) getOAuthTokenByState(ctx context.Context, state string) (*providerOAuthToken, error) {
-	row, err := s.queries.GetLlmProviderOAuthTokenByState(ctx, state)
+	row, err := s.queries.GetProviderOAuthTokenByState(ctx, state)
 	if err != nil {
 		return nil, err
 	}
@@ -305,8 +305,8 @@ func (s *Service) updateOAuthState(ctx context.Context, providerID, state, codeV
 	if err != nil {
 		return err
 	}
-	return s.queries.UpdateLlmProviderOAuthState(ctx, sqlc.UpdateLlmProviderOAuthStateParams{
-		LlmProviderID:    providerUUID,
+	return s.queries.UpdateProviderOAuthState(ctx, sqlc.UpdateProviderOAuthStateParams{
+		ProviderID:       providerUUID,
 		State:            state,
 		PkceCodeVerifier: codeVerifier,
 	})
@@ -321,8 +321,8 @@ func (s *Service) saveOAuthToken(ctx context.Context, providerID string, token p
 	if !token.ExpiresAt.IsZero() {
 		expiresAt = pgtype.Timestamptz{Time: token.ExpiresAt, Valid: true}
 	}
-	_, err = s.queries.UpsertLlmProviderOAuthToken(ctx, sqlc.UpsertLlmProviderOAuthTokenParams{
-		LlmProviderID:    providerUUID,
+	_, err = s.queries.UpsertProviderOAuthToken(ctx, sqlc.UpsertProviderOAuthTokenParams{
+		ProviderID:       providerUUID,
 		AccessToken:      token.AccessToken,
 		RefreshToken:     token.RefreshToken,
 		ExpiresAt:        expiresAt,
@@ -334,9 +334,9 @@ func (s *Service) saveOAuthToken(ctx context.Context, providerID string, token p
 	return err
 }
 
-func toProviderOAuthToken(row sqlc.LlmProviderOauthToken) *providerOAuthToken {
+func toProviderOAuthToken(row sqlc.ProviderOauthToken) *providerOAuthToken {
 	token := &providerOAuthToken{
-		ProviderID:       row.LlmProviderID.String(),
+		ProviderID:       row.ProviderID.String(),
 		AccessToken:      row.AccessToken,
 		RefreshToken:     row.RefreshToken,
 		Scope:            row.Scope,

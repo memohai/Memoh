@@ -27,7 +27,7 @@ type discordOutboundStream struct {
 	lastUpdate time.Time
 }
 
-func (s *discordOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
+func (s *discordOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s == nil || s.adapter == nil {
 		return errors.New("discord stream not configured")
 	}
@@ -67,8 +67,8 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.StreamEv
 		bufText := strings.TrimSpace(s.buffer.String())
 		s.mu.Unlock()
 		finalText := bufText
-		if finalText == "" && event.Final != nil && !event.Final.Message.IsEmpty() {
-			finalText = strings.TrimSpace(event.Final.Message.PlainText())
+		if finalText == "" && event.Final != nil && !event.Final.Message.Message.IsEmpty() {
+			finalText = strings.TrimSpace(event.Final.Message.Message.PlainText())
 		}
 		if finalText != "" {
 			return s.finalizeMessage(finalText)
@@ -207,10 +207,10 @@ func (s *discordOutboundStream) finalizeMessage(text string) error {
 	return err
 }
 
-func (s *discordOutboundStream) sendAttachment(ctx context.Context, att channel.Attachment) error {
-	file := discordAttachmentToFile(ctx, att, s.adapter.assets)
-	if file == nil {
-		return nil
+func (s *discordOutboundStream) sendAttachment(ctx context.Context, att channel.PreparedAttachment) error {
+	file, err := discordPreparedAttachmentToFile(ctx, att)
+	if err != nil {
+		return err
 	}
 
 	messageSend := &discordgo.MessageSend{
@@ -225,6 +225,6 @@ func (s *discordOutboundStream) sendAttachment(ctx context.Context, att channel.
 		}
 	}
 
-	_, err := s.session.ChannelMessageSendComplex(s.target, messageSend)
+	_, err = s.session.ChannelMessageSendComplex(s.target, messageSend)
 	return err
 }

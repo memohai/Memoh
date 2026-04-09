@@ -3,7 +3,7 @@
     <Sidebar collapsible="icon">
       <SidebarHeader class="p-0 border-0">
         <div class="h-1.5 group-data-[collapsible=icon]:hidden" />
-        <div class="h-[38px] flex items-center group-data-[collapsible=icon]:justify-center">
+        <div class="h-9.5 flex items-center group-data-[collapsible=icon]:justify-center">
           <div class="flex items-center gap-1 ml-3 group-data-[collapsible=icon]:hidden">
             <span class="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.7px]">
               {{ t('sidebar.bots') }}
@@ -56,7 +56,7 @@
       <SidebarRail />
 
       <SidebarFooter class="relative border-0 px-2 pb-3.5 pt-2.5">
-        <div class="pointer-events-none absolute -top-[120px] left-0 h-[153px] w-full bg-linear-to-t from-(--sidebar-background) from-18% to-transparent z-10 group-data-[collapsible=icon]:hidden" />
+        <div class="pointer-events-none absolute -top-30 left-0 h-38.25 w-full bg-linear-to-t from-(--sidebar-background) from-18% to-transparent z-10 group-data-[collapsible=icon]:hidden" />
         <SidebarMenu class="gap-2.5">
           <!-- <SidebarMenuItem>
             <SidebarMenuButton

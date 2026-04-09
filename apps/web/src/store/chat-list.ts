@@ -842,13 +842,13 @@ export const useChatStore = defineStore('chat', () => {
         messageEventsSince = ''
         sessionId.value = null
         replaceMessages([])
-        return
+      } else {
+        const activeSessionId = sessionId.value && visible.some((s) => s.id === sessionId.value)
+          ? sessionId.value
+          : visible[0]!.id
+        sessionId.value = activeSessionId
+        await loadMessages(bid, activeSessionId)
       }
-      const activeSessionId = sessionId.value && visible.some((s) => s.id === sessionId.value)
-        ? sessionId.value
-        : visible[0]!.id
-      sessionId.value = activeSessionId
-      await loadMessages(bid, activeSessionId)
       startWebSocket(bid)
       startMessageEvents(bid)
       startLocalStream(bid)

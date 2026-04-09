@@ -64,7 +64,12 @@ func TestFeishuGateway_Integration(t *testing.T) {
 			},
 		}
 
-		if err := adapter.Send(ctx, c, reply); err != nil {
+		if err := adapter.Send(ctx, c, channel.PreparedOutboundMessage{
+			Target: reply.Target,
+			Message: channel.PreparedMessage{
+				Message: reply.Message,
+			},
+		}); err != nil {
 			return fmt.Errorf("failed to send reply: %w", err)
 		}
 
@@ -78,7 +83,12 @@ func TestFeishuGateway_Integration(t *testing.T) {
 			}
 			pushCtx, pushCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer pushCancel()
-			_ = adapter.Send(pushCtx, c, pushMsg)
+			_ = adapter.Send(pushCtx, c, channel.PreparedOutboundMessage{
+				Target: pushMsg.Target,
+				Message: channel.PreparedMessage{
+					Message: pushMsg.Message,
+				},
+			})
 		}()
 
 		return nil

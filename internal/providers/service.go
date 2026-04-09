@@ -40,11 +40,16 @@ func NewService(log *slog.Logger, queries *sqlc.Queries, callbackURL string) *Se
 	}
 }
 
-// Create creates a new LLM provider.
+// Create creates a new provider.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
 	metadataJSON, err := json.Marshal(req.Metadata)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	configJSON, err := json.Marshal(req.Config)
+	if err != nil {
+		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
 
 	clientType := req.ClientType
@@ -57,13 +62,12 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		icon = pgtype.Text{String: req.Icon, Valid: true}
 	}
 
-	provider, err := s.queries.CreateLlmProvider(ctx, sqlc.CreateLlmProviderParams{
+	provider, err := s.queries.CreateProvider(ctx, sqlc.CreateProviderParams{
 		Name:       req.Name,
-		BaseUrl:    req.BaseURL,
-		ApiKey:     req.APIKey,
 		ClientType: clientType,
 		Icon:       icon,
 		Enable:     true,
+		Config:     configJSON,
 		Metadata:   metadataJSON,
 	})
 	if err != nil {
@@ -80,7 +84,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 		return GetResponse{}, err
 	}
 
-	provider, err := s.queries.GetLlmProviderByID(ctx, providerID)
+	provider, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get provider: %w", err)
 	}
@@ -90,7 +94,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 
 // GetByName retrieves a provider by name.
 func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, error) {
-	provider, err := s.queries.GetLlmProviderByName(ctx, name)
+	provider, err := s.queries.GetProviderByName(ctx, name)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get provider by name: %w", err)
 	}
@@ -100,7 +104,7 @@ func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, erro
 
 // List retrieves all providers.
 func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
-	providers, err := s.queries.ListLlmProviders(ctx)
+	providers, err := s.queries.ListProviders(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list providers: %w", err)
 	}
@@ -119,7 +123,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		return GetResponse{}, err
 	}
 
-	existing, err := s.queries.GetLlmProviderByID(ctx, providerID)
+	existing, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get provider: %w", err)
 	}
@@ -128,13 +132,6 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	if req.Name != nil {
 		name = *req.Name
 	}
-
-	baseURL := existing.BaseUrl
-	if req.BaseURL != nil {
-		baseURL = *req.BaseURL
-	}
-
-	apiKey := resolveUpdatedAPIKey(existing.ApiKey, req.APIKey)
 
 	clientType := existing.ClientType
 	if req.ClientType != nil {
@@ -151,6 +148,20 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		enable = *req.Enable
 	}
 
+	existingConfig := providerConfig(existing.Config)
+	if req.Config != nil {
+		existingAPIKey := configString(existingConfig, "api_key")
+		newAPIKey := configString(req.Config, "api_key")
+		if newAPIKey != "" && newAPIKey == maskAPIKey(existingAPIKey) {
+			req.Config["api_key"] = existingAPIKey
+		}
+		existingConfig = req.Config
+	}
+	configJSON, err := json.Marshal(existingConfig)
+	if err != nil {
+		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
+	}
+
 	metadataMap := providerMetadata(existing.Metadata)
 	if req.Metadata != nil {
 		metadataMap = req.Metadata
@@ -160,14 +171,13 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
 	}
 
-	updated, err := s.queries.UpdateLlmProvider(ctx, sqlc.UpdateLlmProviderParams{
+	updated, err := s.queries.UpdateProvider(ctx, sqlc.UpdateProviderParams{
 		ID:         providerID,
 		Name:       name,
-		BaseUrl:    baseURL,
-		ApiKey:     apiKey,
 		ClientType: clientType,
 		Icon:       icon,
 		Enable:     enable,
+		Config:     configJSON,
 		Metadata:   metadataJSON,
 	})
 	if err != nil {
@@ -184,7 +194,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 
-	if err := s.queries.DeleteLlmProvider(ctx, providerID); err != nil {
+	if err := s.queries.DeleteProvider(ctx, providerID); err != nil {
 		return fmt.Errorf("delete provider: %w", err)
 	}
 	return nil
@@ -192,7 +202,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 
 // Count returns the total count of providers.
 func (s *Service) Count(ctx context.Context) (int64, error) {
-	count, err := s.queries.CountLlmProviders(ctx)
+	count, err := s.queries.CountProviders(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("count providers: %w", err)
 	}
@@ -209,12 +219,13 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		return TestResponse{}, err
 	}
 
-	provider, err := s.queries.GetLlmProviderByID(ctx, providerID)
+	provider, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
 		return TestResponse{}, fmt.Errorf("get provider: %w", err)
 	}
 
-	baseURL := strings.TrimRight(provider.BaseUrl, "/")
+	cfg := providerConfig(provider.Config)
+	baseURL := strings.TrimRight(configString(cfg, "base_url"), "/")
 
 	clientType := models.ClientType(provider.ClientType)
 	creds, err := s.ResolveModelCredentials(ctx, provider)
@@ -242,7 +253,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, err
 	}
 
-	provider, err := s.queries.GetLlmProviderByID(ctx, providerID)
+	provider, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
@@ -270,7 +281,9 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return remoteModels, nil
 	}
 
-	baseURL := strings.TrimRight(provider.BaseUrl, "/")
+	cfg := providerConfig(provider.Config)
+	baseURL := strings.TrimRight(configString(cfg, "base_url"), "/")
+	apiKey := configString(cfg, "api_key")
 	modelsURL := fmt.Sprintf("%s/models", baseURL)
 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
@@ -281,11 +294,11 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	if provider.ApiKey != "" && !supportsOAuth(provider) {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", provider.ApiKey))
+	if apiKey != "" && !supportsOAuth(provider) {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	}
 
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured provider base URL
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
@@ -305,7 +318,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 }
 
 // toGetResponse converts a database provider to a response.
-func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
+func (s *Service) toGetResponse(provider sqlc.Provider) GetResponse {
 	var metadata map[string]any
 	if len(provider.Metadata) > 0 {
 		if err := json.Unmarshal(provider.Metadata, &metadata); err != nil {
@@ -315,7 +328,8 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 		}
 	}
 
-	maskedAPIKey := maskAPIKey(provider.ApiKey)
+	cfg := providerConfig(provider.Config)
+	maskedCfg := maskConfigAPIKey(cfg)
 
 	var icon string
 	if provider.Icon.Valid {
@@ -325,15 +339,55 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 	return GetResponse{
 		ID:         provider.ID.String(),
 		Name:       provider.Name,
-		BaseURL:    provider.BaseUrl,
-		APIKey:     maskedAPIKey,
 		ClientType: provider.ClientType,
 		Icon:       icon,
 		Enable:     provider.Enable,
+		Config:     maskedCfg,
 		Metadata:   metadata,
 		CreatedAt:  provider.CreatedAt.Time,
 		UpdatedAt:  provider.UpdatedAt.Time,
 	}
+}
+
+// providerConfig parses the provider config JSONB.
+func providerConfig(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return map[string]any{}
+	}
+	if cfg == nil {
+		return map[string]any{}
+	}
+	return cfg
+}
+
+// configString extracts a string from the config map.
+func configString(cfg map[string]any, key string) string {
+	if cfg == nil {
+		return ""
+	}
+	v, _ := cfg[key].(string)
+	return v
+}
+
+// ProviderConfigString is a public helper for extracting a string from the config JSONB.
+func ProviderConfigString(provider sqlc.Provider, key string) string {
+	return configString(providerConfig(provider.Config), key)
+}
+
+// maskConfigAPIKey returns a copy of config with api_key masked.
+func maskConfigAPIKey(cfg map[string]any) map[string]any {
+	result := make(map[string]any, len(cfg))
+	for k, v := range cfg {
+		result[k] = v
+	}
+	if apiKey, _ := result["api_key"].(string); apiKey != "" {
+		result["api_key"] = maskAPIKey(apiKey)
+	}
+	return result
 }
 
 // maskAPIKey masks an API key for security.
@@ -345,15 +399,4 @@ func maskAPIKey(apiKey string) string {
 		return strings.Repeat("*", len(apiKey))
 	}
 	return apiKey[:8] + strings.Repeat("*", len(apiKey)-8)
-}
-
-// resolveUpdatedAPIKey keeps the original key when the request value matches the masked version.
-func resolveUpdatedAPIKey(existing string, updated *string) string {
-	if updated == nil {
-		return existing
-	}
-	if *updated == maskAPIKey(existing) {
-		return existing
-	}
-	return *updated
 }

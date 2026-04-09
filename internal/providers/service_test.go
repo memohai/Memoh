@@ -2,39 +2,35 @@ package providers
 
 import "testing"
 
-func TestResolveUpdatedAPIKey(t *testing.T) {
+func TestMaskAPIKey(t *testing.T) {
 	t.Parallel()
 
-	existing := "sk-1234567890abcdef"
-	masked := maskAPIKey(existing)
-
-	t.Run("nil update keeps existing", func(t *testing.T) {
+	t.Run("short key is fully masked", func(t *testing.T) {
 		t.Parallel()
-		if got := resolveUpdatedAPIKey(existing, nil); got != existing {
-			t.Fatalf("expected existing key, got %q", got)
+		if got := maskAPIKey("sk-12"); got != "*****" {
+			t.Fatalf("expected fully masked, got %q", got)
 		}
 	})
 
-	t.Run("masked update keeps existing", func(t *testing.T) {
+	t.Run("long key preserves prefix", func(t *testing.T) {
 		t.Parallel()
-		if got := resolveUpdatedAPIKey(existing, &masked); got != existing {
-			t.Fatalf("expected existing key, got %q", got)
+		key := "sk-1234567890abcdef"
+		masked := maskAPIKey(key)
+		if masked == key {
+			t.Fatal("masked key should differ from original")
+		}
+		if len(masked) != len(key) {
+			t.Fatalf("masked length %d != original length %d", len(masked), len(key))
+		}
+		if masked[:8] != key[:8] {
+			t.Fatalf("prefix mismatch: %q vs %q", masked[:8], key[:8])
 		}
 	})
 
-	t.Run("new key replaces existing", func(t *testing.T) {
+	t.Run("empty key returns empty", func(t *testing.T) {
 		t.Parallel()
-		next := "sk-new-secret"
-		if got := resolveUpdatedAPIKey(existing, &next); got != next {
-			t.Fatalf("expected new key, got %q", got)
-		}
-	})
-
-	t.Run("empty update clears key", func(t *testing.T) {
-		t.Parallel()
-		empty := ""
-		if got := resolveUpdatedAPIKey(existing, &empty); got != empty {
-			t.Fatalf("expected empty key, got %q", got)
+		if got := maskAPIKey(""); got != "" {
+			t.Fatalf("expected empty, got %q", got)
 		}
 	})
 }

@@ -205,6 +205,30 @@ type fakeMediaIngestor struct {
 	storageKeyErr   error
 }
 
+func (f *fakeMediaIngestor) Stat(_ context.Context, _, contentHash string) (media.Asset, error) {
+	asset := f.storageKeyAsset
+	if asset.ContentHash == "" {
+		asset = media.Asset{
+			ContentHash: contentHash,
+			Mime:        "application/octet-stream",
+			StorageKey:  "test/" + contentHash,
+		}
+	}
+	return asset, nil
+}
+
+func (f *fakeMediaIngestor) Open(_ context.Context, _, contentHash string) (io.ReadCloser, media.Asset, error) {
+	asset := f.storageKeyAsset
+	if asset.ContentHash == "" {
+		asset = media.Asset{
+			ContentHash: contentHash,
+			Mime:        "application/octet-stream",
+			StorageKey:  "test/" + contentHash,
+		}
+	}
+	return io.NopCloser(bytes.NewReader([]byte("test"))), asset, nil
+}
+
 func (f *fakeMediaIngestor) Ingest(_ context.Context, input media.IngestInput) (media.Asset, error) {
 	f.calls++
 	f.inputs = append(f.inputs, input)
@@ -533,7 +557,7 @@ func TestBuildInboundQueryAttachmentOnlyReturnsEmpty(t *testing.T) {
 			{Type: channel.AttachmentImage},
 		},
 	}
-	if got := buildInboundQuery(msg, nil); got != "" {
+	if got := strings.TrimSpace(msg.PlainText()); got != "" {
 		t.Fatalf("expected empty query for attachment-only message, got %q", got)
 	}
 }
@@ -1525,7 +1549,7 @@ func TestIngestOutboundAttachments_DataURL(t *testing.T) {
 		{Type: channel.AttachmentImage, URL: "data:image/png;base64,iVBORw0KGgo=", Mime: "image/png"},
 	}
 	// Without media service, attachments pass through unchanged.
-	result := p.ingestOutboundAttachments(context.Background(), "bot-1", attachments)
+	result := p.ingestOutboundAttachments(context.Background(), "bot-1", channel.ChannelType("telegram"), attachments)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 attachment, got %d", len(result))
 	}
@@ -1542,7 +1566,7 @@ func TestIngestOutboundAttachments_NonDataURL(t *testing.T) {
 		{Type: channel.AttachmentImage, URL: "https://example.com/img.png"},
 		{Type: channel.AttachmentImage, ContentHash: "existing-asset", URL: "/data/media/img.png"},
 	}
-	result := p.ingestOutboundAttachments(context.Background(), "bot-1", attachments)
+	result := p.ingestOutboundAttachments(context.Background(), "bot-1", channel.ChannelType("telegram"), attachments)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 attachments, got %d", len(result))
 	}
@@ -1644,7 +1668,7 @@ func TestIngestOutboundAttachments_ContainerPath(t *testing.T) {
 	attachments := []channel.Attachment{
 		{Type: channel.AttachmentImage, URL: "/data/media/26da/26da0cc7.jpg"},
 	}
-	result := p.ingestOutboundAttachments(context.Background(), "bot-1", attachments)
+	result := p.ingestOutboundAttachments(context.Background(), "bot-1", channel.ChannelType("telegram"), attachments)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 attachment, got %d", len(result))
 	}
@@ -1666,9 +1690,12 @@ func TestIngestOutboundAttachments_ContainerPathNotFound(t *testing.T) {
 	attachments := []channel.Attachment{
 		{Type: channel.AttachmentImage, URL: "/data/media/26da/missing.jpg"},
 	}
-	result := p.ingestOutboundAttachments(context.Background(), "bot-1", attachments)
+	result := p.ingestOutboundAttachments(context.Background(), "bot-1", channel.ChannelType("telegram"), attachments)
 	if len(result) != 1 {
-		t.Fatalf("expected 1 attachment, got %d", len(result))
+		t.Fatalf("expected unresolved container attachment to remain unchanged, got %d", len(result))
+	}
+	if result[0].URL != "/data/media/26da/missing.jpg" {
+		t.Fatalf("expected original path preserved, got %q", result[0].URL)
 	}
 	if result[0].ContentHash != "" {
 		t.Fatalf("expected empty content_hash for unresolved path, got %q", result[0].ContentHash)

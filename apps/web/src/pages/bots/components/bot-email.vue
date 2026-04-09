@@ -52,79 +52,84 @@
           </PopoverContent>
         </Popover>
       </div>
-
-      <div
-        v-if="bindingsLoading"
-        class="flex items-center gap-2 text-xs text-muted-foreground p-4"
-      >
-        <Spinner />
-        <span>{{ $t('common.loading') }}</span>
-      </div>
-
-      <div
-        v-else-if="!bindings?.length"
-        class="rounded-md border p-4"
-      >
-        <p class="text-xs text-muted-foreground">
-          {{ $t('bots.email.noBindings') }}
-        </p>
-      </div>
-
-      <div
-        v-else
-        class="space-y-2"
+      <Transition
+        enter-active-class="animate__fadeIn animate__animated"
+        leave-active-class="animate__fadeOut"
+        mode="out-in"
       >
         <div
-          v-for="binding in bindings"
-          :key="binding.id"
+          v-if="bindingsLoading"
+          class="flex items-center gap-2 text-xs text-muted-foreground p-4"
+        >
+          <Spinner />
+          <span>{{ $t('common.loading') }}</span>
+        </div>
+
+        <div
+          v-else-if="!bindings?.length"
           class="rounded-md border p-4"
         >
-          <div class="flex items-center justify-between">
-            <div class="min-w-0">
-              <p class="font-medium text-xs">
-                {{ providerNameMap[binding.email_provider_id!] || binding.email_provider_id }}
-              </p>
-              <p
-                v-if="binding.email_address"
-                class="text-xs text-muted-foreground mt-0.5"
-              >
-                {{ binding.email_address }}
-              </p>
-            </div>
-            <ConfirmPopover
-              :message="$t('bots.email.unbindConfirm')"
-              :loading="deletingId === binding.id"
-              @confirm="handleDeleteBinding(binding.id!)"
-            >
-              <template #trigger>
-                <Button
-                  variant="destructive"
-                  size="sm"
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.email.noBindings') }}
+          </p>
+        </div>
+
+        <div
+          v-else
+          class="space-y-2"
+        >
+          <div
+            v-for="binding in bindings"
+            :key="binding.id"
+            class="rounded-md border p-4"
+          >
+            <div class="flex items-center justify-between">
+              <div class="min-w-0">
+                <p class="font-medium text-xs">
+                  {{ providerNameMap[binding.email_provider_id!] || binding.email_provider_id }}
+                </p>
+                <p
+                  v-if="binding.email_address"
+                  class="text-xs text-muted-foreground mt-0.5"
                 >
-                  {{ $t('bots.email.unbind') }}
-                </Button>
-              </template>
-            </ConfirmPopover>
-          </div>
-          <Separator class="my-3" />
-          <div class="flex gap-6 text-xs">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <Switch
-                :model-value="binding.can_read"
-                @update:model-value="(v) => handleTogglePerm(binding, 'can_read', !!v)"
-              />
-              <span>{{ $t('bots.email.canRead') }}</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <Switch
-                :model-value="binding.can_write"
-                @update:model-value="(v) => handleTogglePerm(binding, 'can_write', !!v)"
-              />
-              <span>{{ $t('bots.email.canWrite') }}</span>
-            </label>
+                  {{ binding.email_address }}
+                </p>
+              </div>
+              <ConfirmPopover
+                :message="$t('bots.email.unbindConfirm')"
+                :loading="deletingId === binding.id"
+                @confirm="handleDeleteBinding(binding.id!)"
+              >
+                <template #trigger>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                  >
+                    {{ $t('bots.email.unbind') }}
+                  </Button>
+                </template>
+              </ConfirmPopover>
+            </div>
+            <Separator class="my-3" />
+            <div class="flex gap-6 text-xs">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <Switch
+                  :model-value="binding.can_read"
+                  @update:model-value="(v) => handleTogglePerm(binding, 'can_read', !!v)"
+                />
+                <span>{{ $t('bots.email.canRead') }}</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <Switch
+                  :model-value="binding.can_write"
+                  @update:model-value="(v) => handleTogglePerm(binding, 'can_write', !!v)"
+                />
+                <span>{{ $t('bots.email.canWrite') }}</span>
+              </label>
+            </div>
           </div>
         </div>
-      </div>
+      </Transition>
     </div>
 
     <Separator />

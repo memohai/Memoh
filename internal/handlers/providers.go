@@ -62,9 +62,6 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 	if req.Name == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
-	if req.BaseURL == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "base_url is required")
-	}
 
 	resp, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
@@ -327,10 +324,10 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			name = m.ID
 		}
 		_, err := h.modelsService.Create(c.Request().Context(), models.AddRequest{
-			ModelID:       m.ID,
-			Name:          name,
-			LlmProviderID: id,
-			Type:          modelType,
+			ModelID:    m.ID,
+			Name:       name,
+			ProviderID: id,
+			Type:       modelType,
 			Config: models.ModelConfig{
 				Compatibilities:  compatibilities,
 				ReasoningEfforts: m.ReasoningEfforts,

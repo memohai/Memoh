@@ -26,12 +26,12 @@
             name="name"
           >
             <FormItem>
-              <Label :for="componentField.id || 'email-provider-name'">
+              <Label :for="'email-provider-name'">
                 {{ $t('common.name') }}
               </Label>
               <FormControl>
                 <Input
-                  :id="componentField.id || 'email-provider-name'"
+                  :id="'email-provider-name'"
                   type="text"
                   :placeholder="$t('common.namePlaceholder')"
                   v-bind="componentField"
@@ -44,13 +44,13 @@
             name="provider"
           >
             <FormItem>
-              <Label :for="componentField.id || 'email-provider-type'">
+              <Label :for=" 'email-provider-type'">
                 {{ $t('email.providerType') }}
               </Label>
               <FormControl>
                 <Select v-bind="componentField">
                   <SelectTrigger
-                    :id="componentField.id || 'email-provider-type'"
+                    :id="'email-provider-type'"
                     class="w-full"
                   >
                     <SelectValue :placeholder="$t('common.typePlaceholder')" />

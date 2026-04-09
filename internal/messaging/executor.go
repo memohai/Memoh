@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/media"
 )
 
 // SessionContext carries request-scoped identity for tool execution.
@@ -35,17 +36,13 @@ type ChannelTypeResolver interface {
 }
 
 // AssetMeta holds resolved metadata for a media asset.
-type AssetMeta struct {
-	ContentHash string
-	Mime        string
-	SizeBytes   int64
-	StorageKey  string
-}
+type AssetMeta = media.Asset
 
-// AssetResolver looks up persisted media assets by storage key.
+// AssetResolver looks up persisted media assets by storage key and can
+// optionally ingest files from a bot's container filesystem.
 type AssetResolver interface {
-	GetByStorageKey(ctx context.Context, botID, storageKey string) (AssetMeta, error)
-	IngestContainerFile(ctx context.Context, botID, containerPath string) (AssetMeta, error)
+	channel.OutboundAttachmentStore
+	channel.ContainerAttachmentIngester
 }
 
 // Executor provides send and react operations for channel messaging.
@@ -139,7 +136,7 @@ func (e *Executor) sendWithMode(
 	}
 
 	if mode.promoteDataAttachments {
-		e.promoteDataPathAttachmentsToAssets(ctx, plan.botID, &plan.message)
+		e.promoteDataPathAttachmentsToAssets(ctx, plan.botID, plan.channelType, &plan.message)
 	}
 
 	if err := e.Sender.Send(ctx, plan.botID, plan.channelType, channel.SendRequest{
@@ -315,33 +312,20 @@ func resolveSameConversationAttachments(rawAttachments any) []channel.Attachment
 // promoteDataPathAttachmentsToAssets converts /data/* attachment references
 // into content_hash-backed attachments before channel send.
 // This avoids adapters treating local container paths as HTTP URLs.
-func (e *Executor) promoteDataPathAttachmentsToAssets(ctx context.Context, botID string, msg *channel.Message) {
+func (e *Executor) promoteDataPathAttachmentsToAssets(ctx context.Context, botID string, channelType channel.ChannelType, msg *channel.Message) {
 	if e.AssetResolver == nil || msg == nil || len(msg.Attachments) == 0 {
 		return
 	}
-	for i := range msg.Attachments {
-		att := msg.Attachments[i]
-		if strings.TrimSpace(att.ContentHash) != "" {
-			continue
-		}
-		ref := strings.TrimSpace(att.URL)
-		if !strings.HasPrefix(ref, "/data/") {
-			continue
-		}
-		asset, err := e.AssetResolver.IngestContainerFile(ctx, botID, ref)
-		if err != nil {
-			continue
-		}
-		converted := AssetMetaToAttachment(asset, botID, string(att.Type), strings.TrimSpace(att.Name))
-		if converted == nil {
-			continue
-		}
-		// Preserve explicit type if caller already provided one.
-		if att.Type != "" {
-			converted.Type = att.Type
-		}
-		msg.Attachments[i] = *converted
+	prepared, err := channel.PrepareOutboundMessage(ctx, e.AssetResolver, channel.ChannelConfig{
+		BotID:       botID,
+		ChannelType: channelType,
+	}, channel.OutboundMessage{
+		Message: *msg,
+	})
+	if err != nil {
+		return
 	}
+	msg.Attachments = prepared.Message.Message.Attachments
 }
 
 // React executes a react action. args are the tool call arguments.
@@ -571,7 +555,7 @@ func ParseOutboundMessage(arguments map[string]any, fallbackText string) (channe
 }
 
 // AssetMetaToAttachment converts an AssetMeta to a channel.Attachment.
-func AssetMetaToAttachment(asset AssetMeta, botID, attType, name string) *channel.Attachment {
+func AssetMetaToAttachment(asset media.Asset, botID, attType, name string) *channel.Attachment {
 	t := channel.AttachmentType(attType)
 	if t == "" {
 		t = InferAttachmentTypeFromMime(asset.Mime)

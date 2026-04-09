@@ -1,15 +1,18 @@
 -- 0041_provider_model_refactor
 -- Move client_type to llm_providers, add icon, replace model columns with config JSONB.
 
--- 1. Add client_type and icon to llm_providers
-ALTER TABLE llm_providers
+-- 1. Add client_type and icon to llm_providers (IF EXISTS for fresh-schema compat)
+ALTER TABLE IF EXISTS llm_providers
   ADD COLUMN IF NOT EXISTS client_type TEXT NOT NULL DEFAULT 'openai-completions',
   ADD COLUMN IF NOT EXISTS icon TEXT;
 
 -- 2–6. Backfill and migrate only when old columns exist (idempotent for fresh DBs).
 DO $$ BEGIN
-  -- Back-fill provider client_type from models.client_type (old column)
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'models' AND column_name = 'client_type') THEN
+  -- Back-fill provider client_type from models.client_type (old column).
+  -- Only runs on pre-0061 schema where llm_providers table still exists.
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'llm_providers')
+     AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'models' AND column_name = 'client_type')
+  THEN
     UPDATE llm_providers p
     SET client_type = sub.client_type
     FROM (
@@ -21,8 +24,10 @@ DO $$ BEGIN
     WHERE p.id = sub.llm_provider_id;
   END IF;
 
-  -- Add CHECK constraint (skip if already present)
-  IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'llm_providers_client_type_check') THEN
+  -- Add CHECK constraint (skip if already present or table renamed)
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'llm_providers')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'llm_providers_client_type_check')
+  THEN
     ALTER TABLE llm_providers
       ADD CONSTRAINT llm_providers_client_type_check
       CHECK (client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai'));

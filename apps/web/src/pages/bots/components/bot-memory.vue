@@ -176,7 +176,7 @@
         <!-- Charts Section -->
         <div
           v-if="showChartSection"
-          class="h-[240px] border-t flex flex-col bg-muted/5 shrink-0"
+          class="h-60 border-t flex flex-col bg-muted/5 shrink-0"
         >
           <div class="px-3 py-1.5 border-b bg-muted/10 flex items-center justify-between shrink-0">
             <h5 class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
@@ -222,7 +222,7 @@
         <h3 class="text-xs font-medium text-foreground">
           {{ $t('bots.memory.title') }}
         </h3>
-        <p class="text-xs mt-1 max-w-[240px]">
+        <p class="text-xs mt-1 max-w-60">
           Select a file from the sidebar to view or edit, or create a new one to persist long-term information for your bot.
         </p>
         <Button

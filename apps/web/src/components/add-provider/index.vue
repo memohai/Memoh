@@ -186,8 +186,13 @@ const clientTypeOptions = computed(() =>
 const queryCache = useQueryCache()
 const { mutateAsync: createProviderMutation, isLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
+    const config: Record<string, unknown> = {}
+    if (data.base_url) config.base_url = data.base_url
+    if (data.api_key) config.api_key = data.api_key
     const payload = {
-      ...data,
+      name: data.name,
+      client_type: data.client_type,
+      config,
       metadata: { additionalProp1: {} },
     }
     const { data: result } = await postProviders({ body: payload as ProvidersCreateRequest, throwOnError: true })

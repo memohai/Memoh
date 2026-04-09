@@ -343,7 +343,7 @@ import MemoryProviderSelect from './memory-provider-select.vue'
 import TtsModelSelect from './tts-model-select.vue'
 import BrowserContextSelect from './browser-context-select.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getTtsProviders, getBrowserContexts, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
+import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getBrowserContexts, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -404,23 +404,18 @@ const { data: memoryProviderData } = useQuery({
 })
 
 const { data: ttsProviderData } = useQuery({
-  key: ['tts-providers'],
+  key: ['speech-providers'],
   query: async () => {
-    const { data } = await getTtsProviders({ throwOnError: true })
+    const { data } = await getSpeechProviders({ throwOnError: true })
     return data
   },
 })
 
 const { data: ttsModelData } = useQuery({
-  key: ['tts-models'],
+  key: ['speech-models'],
   query: async () => {
-    const apiBase = import.meta.env.VITE_API_URL?.trim() || '/api'
-    const token = localStorage.getItem('token')
-    const resp = await fetch(`${apiBase}/tts-models`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-    if (!resp.ok) throw new Error('Failed to fetch TTS models')
-    return resp.json()
+    const { data } = await getSpeechModels({ throwOnError: true })
+    return data
   },
 })
 
@@ -463,7 +458,7 @@ const searchProviders = computed(() => (searchProviderData.value ?? []).filter((
 const memoryProviders = computed(() => memoryProviderData.value ?? [])
 const ttsProviders = computed(() => (ttsProviderData.value ?? []).filter((p) => p.enable !== false))
 const enabledTtsProviderIds = computed(() => new Set(ttsProviders.value.map((p) => p.id)))
-const ttsModels = computed(() => (ttsModelData.value ?? []).filter((m: Record<string, unknown>) => enabledTtsProviderIds.value.has(m.tts_provider_id as string)))
+const ttsModels = computed(() => (ttsModelData.value ?? []).filter((m: Record<string, unknown>) => enabledTtsProviderIds.value.has(m.provider_id as string)))
 const browserContexts = computed(() => browserContextData.value ?? [])
 
 // ---- Form ----

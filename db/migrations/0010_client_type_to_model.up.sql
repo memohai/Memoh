@@ -43,6 +43,6 @@ BEGIN
   END IF;
 END $$;
 
--- 7) Drop client_type from llm_providers
-ALTER TABLE llm_providers DROP CONSTRAINT IF EXISTS llm_providers_client_type_check;
-ALTER TABLE llm_providers DROP COLUMN IF EXISTS client_type;
+-- 7) Drop client_type from llm_providers (IF EXISTS for fresh-schema compat)
+ALTER TABLE IF EXISTS llm_providers DROP CONSTRAINT IF EXISTS llm_providers_client_type_check;
+ALTER TABLE IF EXISTS llm_providers DROP COLUMN IF EXISTS client_type;

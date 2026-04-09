@@ -113,9 +113,9 @@ func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, _ InboundH
 	return NewConnection(cfg, stop), nil
 }
 
-func (f *fakeAdapter) Send(_ context.Context, _ ChannelConfig, msg OutboundMessage) error {
+func (f *fakeAdapter) Send(_ context.Context, _ ChannelConfig, msg PreparedOutboundMessage) error {
 	f.mu.Lock()
-	f.sent = append(f.sent, msg)
+	f.sent = append(f.sent, msg.LogicalMessage())
 	f.mu.Unlock()
 	return nil
 }

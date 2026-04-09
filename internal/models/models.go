@@ -43,9 +43,9 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 		return AddResponse{}, fmt.Errorf("validation failed: %w", err)
 	}
 
-	llmProviderID, err := db.ParseUUID(model.LlmProviderID)
+	providerID, err := db.ParseUUID(model.ProviderID)
 	if err != nil {
-		return AddResponse{}, fmt.Errorf("invalid llm provider ID: %w", err)
+		return AddResponse{}, fmt.Errorf("invalid provider ID: %w", err)
 	}
 
 	configJSON, err := json.Marshal(model.Config)
@@ -54,10 +54,10 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 	}
 
 	params := sqlc.CreateModelParams{
-		ModelID:       model.ModelID,
-		LlmProviderID: llmProviderID,
-		Type:          string(model.Type),
-		Config:        configJSON,
+		ModelID:    model.ModelID,
+		ProviderID: providerID,
+		Type:       string(model.Type),
+		Config:     configJSON,
 	}
 
 	if model.Name != "" {
@@ -126,9 +126,9 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	return s.convertToGetResponseList(dbModels), nil
 }
 
-// ListByType returns models filtered by type (chat or embedding).
+// ListByType returns models filtered by type (chat, embedding, or speech).
 func (s *Service) ListByType(ctx context.Context, modelType ModelType) ([]GetResponse, error) {
-	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech {
 		return nil, fmt.Errorf("invalid model type: %s", modelType)
 	}
 
@@ -165,7 +165,7 @@ func (s *Service) ListEnabled(ctx context.Context) ([]GetResponse, error) {
 
 // ListEnabledByType returns models from enabled providers filtered by type.
 func (s *Service) ListEnabledByType(ctx context.Context, modelType ModelType) ([]GetResponse, error) {
-	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech {
 		return nil, fmt.Errorf("invalid model type: %s", modelType)
 	}
 	dbModels, err := s.queries.ListEnabledModelsByType(ctx, string(modelType))
@@ -206,7 +206,7 @@ func (s *Service) ListByProviderID(ctx context.Context, providerID string) ([]Ge
 
 // ListByProviderIDAndType returns models filtered by provider ID and type.
 func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string, modelType ModelType) ([]GetResponse, error) {
-	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech {
 		return nil, fmt.Errorf("invalid model type: %s", modelType)
 	}
 	if strings.TrimSpace(providerID) == "" {
@@ -217,8 +217,8 @@ func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string
 		return nil, fmt.Errorf("invalid provider id: %w", err)
 	}
 	dbModels, err := s.queries.ListModelsByProviderIDAndType(ctx, sqlc.ListModelsByProviderIDAndTypeParams{
-		LlmProviderID: uuid,
-		Type:          string(modelType),
+		ProviderID: uuid,
+		Type:       string(modelType),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by provider and type: %w", err)
@@ -238,9 +238,9 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		return GetResponse{}, fmt.Errorf("validation failed: %w", err)
 	}
 
-	llmProviderID, err := db.ParseUUID(model.LlmProviderID)
+	providerID, err := db.ParseUUID(model.ProviderID)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("invalid llm provider ID: %w", err)
+		return GetResponse{}, fmt.Errorf("invalid provider ID: %w", err)
 	}
 
 	configJSON, err := json.Marshal(model.Config)
@@ -249,11 +249,11 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 	}
 
 	params := sqlc.UpdateModelParams{
-		ID:            uuid,
-		ModelID:       model.ModelID,
-		LlmProviderID: llmProviderID,
-		Type:          string(model.Type),
-		Config:        configJSON,
+		ID:         uuid,
+		ModelID:    model.ModelID,
+		ProviderID: providerID,
+		Type:       string(model.Type),
+		Config:     configJSON,
 	}
 
 	if model.Name != "" {
@@ -286,9 +286,9 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 		return GetResponse{}, fmt.Errorf("validation failed: %w", err)
 	}
 
-	llmProviderID, err := db.ParseUUID(model.LlmProviderID)
+	providerID, err := db.ParseUUID(model.ProviderID)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("invalid llm provider ID: %w", err)
+		return GetResponse{}, fmt.Errorf("invalid provider ID: %w", err)
 	}
 
 	configJSON, err := json.Marshal(model.Config)
@@ -297,11 +297,11 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 	}
 
 	params := sqlc.UpdateModelParams{
-		ID:            current.ID,
-		ModelID:       model.ModelID,
-		LlmProviderID: llmProviderID,
-		Type:          string(model.Type),
-		Config:        configJSON,
+		ID:         current.ID,
+		ModelID:    model.ModelID,
+		ProviderID: providerID,
+		Type:       string(model.Type),
+		Config:     configJSON,
 	}
 
 	if model.Name != "" {
@@ -361,7 +361,7 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 
 // CountByType returns the number of models of a specific type.
 func (s *Service) CountByType(ctx context.Context, modelType ModelType) (int64, error) {
-	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech {
 		return 0, fmt.Errorf("invalid model type: %s", modelType)
 	}
 
@@ -382,8 +382,8 @@ func (s *Service) convertToGetResponse(dbModel sqlc.Model) GetResponse {
 		},
 	}
 
-	if dbModel.LlmProviderID.Valid {
-		resp.LlmProviderID = dbModel.LlmProviderID.String()
+	if dbModel.ProviderID.Valid {
+		resp.ProviderID = dbModel.ProviderID.String()
 	}
 
 	if dbModel.Name.Valid {
@@ -427,7 +427,9 @@ func IsValidClientType(clientType ClientType) bool {
 	case ClientTypeOpenAIResponses,
 		ClientTypeOpenAICompletions,
 		ClientTypeAnthropicMessages,
-		ClientTypeGoogleGenerativeAI:
+		ClientTypeGoogleGenerativeAI,
+		ClientTypeOpenAICodex,
+		ClientTypeEdgeSpeech:
 		return true
 	default:
 		return false
@@ -435,45 +437,46 @@ func IsValidClientType(clientType ClientType) bool {
 }
 
 // SelectMemoryModel selects a chat model for memory operations.
-func SelectMemoryModel(ctx context.Context, modelsService *Service, queries *sqlc.Queries) (GetResponse, sqlc.LlmProvider, error) {
+func SelectMemoryModel(ctx context.Context, modelsService *Service, queries *sqlc.Queries) (GetResponse, sqlc.Provider, error) {
 	if modelsService == nil {
-		return GetResponse{}, sqlc.LlmProvider{}, errors.New("models service not configured")
+		return GetResponse{}, sqlc.Provider{}, errors.New("models service not configured")
 	}
 	if queries == nil {
-		return GetResponse{}, sqlc.LlmProvider{}, errors.New("queries not configured")
+		return GetResponse{}, sqlc.Provider{}, errors.New("queries not configured")
 	}
 	candidates, err := modelsService.ListByType(ctx, ModelTypeChat)
 	if err != nil || len(candidates) == 0 {
-		return GetResponse{}, sqlc.LlmProvider{}, errors.New("no chat models available for memory operations")
+		return GetResponse{}, sqlc.Provider{}, errors.New("no chat models available for memory operations")
 	}
 	selected := candidates[0]
-	provider, err := FetchProviderByID(ctx, queries, selected.LlmProviderID)
+	provider, err := FetchProviderByID(ctx, queries, selected.ProviderID)
 	if err != nil {
-		return GetResponse{}, sqlc.LlmProvider{}, err
+		return GetResponse{}, sqlc.Provider{}, err
 	}
 	return selected, provider, nil
 }
 
 // SelectMemoryModelForBot delegates to SelectMemoryModel.
-func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, queries *sqlc.Queries, _ string) (GetResponse, sqlc.LlmProvider, error) {
+func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, queries *sqlc.Queries, _ string) (GetResponse, sqlc.Provider, error) {
 	return SelectMemoryModel(ctx, modelsService, queries)
 }
 
 // FetchProviderByID fetches a provider by ID.
-func FetchProviderByID(ctx context.Context, queries *sqlc.Queries, providerID string) (sqlc.LlmProvider, error) {
+func FetchProviderByID(ctx context.Context, queries *sqlc.Queries, providerID string) (sqlc.Provider, error) {
 	if strings.TrimSpace(providerID) == "" {
-		return sqlc.LlmProvider{}, errors.New("provider id missing")
+		return sqlc.Provider{}, errors.New("provider id missing")
 	}
 	parsed, err := db.ParseUUID(providerID)
 	if err != nil {
-		return sqlc.LlmProvider{}, err
+		return sqlc.Provider{}, err
 	}
-	provider, err := queries.GetLlmProviderByID(ctx, parsed)
+	provider, err := queries.GetProviderByID(ctx, parsed)
 	if err != nil {
-		return sqlc.LlmProvider{}, err
+		return sqlc.Provider{}, err
 	}
-	if strings.TrimSpace(provider.ApiKey) != "" {
-		channel.SetIMErrorSecrets("llm-provider:"+providerID, provider.ApiKey)
+	apiKey := providerConfigString(provider.Config, "api_key")
+	if strings.TrimSpace(apiKey) != "" {
+		channel.SetIMErrorSecrets("provider:"+providerID, apiKey)
 	}
 	return provider, nil
 }

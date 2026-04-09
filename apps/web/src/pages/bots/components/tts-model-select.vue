@@ -59,14 +59,14 @@ export interface TtsModelOption {
   id: string
   model_id: string
   name: string
-  tts_provider_id: string
+  provider_id: string
   provider_type?: string
 }
 
 export interface TtsProviderOption {
   id: string
   name: string
-  provider: string
+  client_type: string
 }
 
 const props = defineProps<{
@@ -96,8 +96,8 @@ const options = computed<SearchableSelectOption[]>(() => {
     value: model.id || '',
     label: model.name || model.model_id || '',
     description: model.model_id,
-    group: model.tts_provider_id,
-    groupLabel: providerMap.value.get(model.tts_provider_id) ?? model.tts_provider_id,
+    group: model.provider_id,
+    groupLabel: providerMap.value.get(model.provider_id) ?? model.provider_id,
     keywords: [model.name ?? '', model.model_id ?? '', model.provider_type ?? ''],
   }))
   return [noneOption, ...modelOptions]

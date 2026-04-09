@@ -49,7 +49,7 @@ func TestDiscordOutboundStream_PushErrorEventRedactsSecrets(t *testing.T) {
 		session: session,
 	}
 
-	err = stream.Push(context.Background(), channel.StreamEvent{
+	err = stream.Push(context.Background(), channel.PreparedStreamEvent{
 		Type:  channel.StreamEventError,
 		Error: "request failed: " + prefixHalf,
 	})

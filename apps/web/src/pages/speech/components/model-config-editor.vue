@@ -371,7 +371,7 @@ async function handleTest() {
         try {
           const apiBase = import.meta.env.VITE_API_URL?.trim() || '/api'
           const token = localStorage.getItem('token')
-          const resp = await fetch(`${apiBase}/tts-models/${props.modelId}/test`, {
+          const resp = await fetch(`${apiBase}/speech-models/${props.modelId}/test`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

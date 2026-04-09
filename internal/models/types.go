@@ -11,6 +11,7 @@ type ModelType string
 const (
 	ModelTypeChat      ModelType = "chat"
 	ModelTypeEmbedding ModelType = "embedding"
+	ModelTypeSpeech    ModelType = "speech"
 )
 
 type ClientType string
@@ -21,6 +22,7 @@ const (
 	ClientTypeAnthropicMessages  ClientType = "anthropic-messages"
 	ClientTypeGoogleGenerativeAI ClientType = "google-generative-ai"
 	ClientTypeOpenAICodex        ClientType = "openai-codex"
+	ClientTypeEdgeSpeech         ClientType = "edge-speech"
 )
 
 const (
@@ -60,24 +62,24 @@ type ModelConfig struct {
 }
 
 type Model struct {
-	ModelID       string      `json:"model_id"`
-	Name          string      `json:"name"`
-	LlmProviderID string      `json:"llm_provider_id"`
-	Type          ModelType   `json:"type"`
-	Config        ModelConfig `json:"config"`
+	ModelID    string      `json:"model_id"`
+	Name       string      `json:"name"`
+	ProviderID string      `json:"provider_id"`
+	Type       ModelType   `json:"type"`
+	Config     ModelConfig `json:"config"`
 }
 
 func (m *Model) Validate() error {
 	if m.ModelID == "" {
 		return errors.New("model ID is required")
 	}
-	if m.LlmProviderID == "" {
-		return errors.New("llm provider ID is required")
+	if m.ProviderID == "" {
+		return errors.New("provider ID is required")
 	}
-	if _, err := uuid.Parse(m.LlmProviderID); err != nil {
-		return errors.New("llm provider ID must be a valid UUID")
+	if _, err := uuid.Parse(m.ProviderID); err != nil {
+		return errors.New("provider ID must be a valid UUID")
 	}
-	if m.Type != ModelTypeChat && m.Type != ModelTypeEmbedding {
+	if m.Type != ModelTypeChat && m.Type != ModelTypeEmbedding && m.Type != ModelTypeSpeech {
 		return errors.New("invalid model type")
 	}
 	if m.Type == ModelTypeEmbedding {

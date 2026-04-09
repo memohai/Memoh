@@ -11,10 +11,10 @@
         </span>
         <div>
           <h3 class="text-sm font-semibold">
-            {{ channelItem.meta.display_name }}
+            {{ channelTitle }}
           </h3>
           <p class="text-xs text-muted-foreground">
-            {{ channelItem.meta.type }}
+            {{ platformKeyLine }}
           </p>
         </div>
       </div>
@@ -273,6 +273,7 @@ import { client } from '@memohai/sdk/client'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
+import { channelTypeDisplayName } from '@/utils/channel-type-label'
 
 interface BotChannelItem {
   meta: HandlersChannelMeta
@@ -292,6 +293,13 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const botIdRef = computed(() => props.botId)
 const platformType = computed(() => String(props.channelItem.meta.type || '').trim())
+
+const channelTitle = computed(() =>
+  channelTypeDisplayName(t, props.channelItem.meta.type, props.channelItem.meta.display_name),
+)
+const platformKeyLine = computed(() =>
+  t('bots.channels.platformKey', { key: platformType.value }),
+)
 const queryCache = useQueryCache()
 const { mutateAsync: upsertChannel, isLoading } = useMutation({
   mutation: async ({ platform, data }: { platform: string; data: ChannelUpsertConfigRequest }) => {

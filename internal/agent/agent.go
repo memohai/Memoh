@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -117,78 +116,51 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 					p = override
 				}
 			}
-		injectLoop:
-		for {
-			select {
-			case injected, ok := <-cfg.InjectCh:
-				if !ok {
-					break injectLoop
-				}
-				text := strings.TrimSpace(injected.HeaderifiedText)
-				if text == "" {
-					text = strings.TrimSpace(injected.Text)
-				}
-				if text != "" {
-					insertAfter := len(p.Messages) - initialMsgCount
-					p.Messages = append(p.Messages, sdk.UserMessage(text))
-					if cfg.InjectedRecorder != nil {
-						cfg.InjectedRecorder(text, insertAfter)
+			for {
+				select {
+				case injected, ok := <-cfg.InjectCh:
+					if !ok {
+						break
 					}
-					a.logger.Info("injected user message into agent stream",
-						slog.String("bot_id", cfg.Identity.BotID),
-						slog.Int("insert_after", insertAfter),
-					)
+					text := strings.TrimSpace(injected.HeaderifiedText)
+					if text == "" {
+						text = strings.TrimSpace(injected.Text)
+					}
+					if text != "" || (cfg.SupportsImageInput && len(injected.ImageParts) > 0) {
+						insertAfter := len(p.Messages) - initialMsgCount
+						var extra []sdk.MessagePart
+						if cfg.SupportsImageInput {
+							for _, img := range injected.ImageParts {
+								if strings.TrimSpace(img.Image) != "" {
+									extra = append(extra, img)
+								}
+							}
+						}
+						p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
+						if cfg.InjectedRecorder != nil {
+							cfg.InjectedRecorder(text, insertAfter)
+						}
+						a.logger.Info("injected user message into agent stream",
+							slog.String("bot_id", cfg.Identity.BotID),
+							slog.Int("insert_after", insertAfter),
+							slog.Int("image_parts", len(extra)),
+						)
+					}
+					continue
+				default:
 				}
-				continue
-			default:
+				break
 			}
-		break
-	}
-	return p
-	}
+			return p
+		}
 	}
 
 	opts := a.buildGenerateOptions(cfg, sdkTools, prepareStep)
 
-	retryCfg := cfg.Retry
-	if retryCfg.MaxAttempts <= 0 {
-		retryCfg = DefaultRetryConfig()
-	}
-
-	var streamResult *sdk.StreamResult
-	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
-		var err error
-		streamResult, err = a.client.StreamText(ctx, opts...)
-		if err == nil {
-			break
-		}
-		if !isRetryableStreamError(err) {
-			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: %v", err)}
-			return
-		}
-		a.logger.Warn("stream start failed, retrying",
-			slog.Int("attempt", attempt+1),
-			slog.Int("max_attempts", retryCfg.MaxAttempts),
-			slog.String("error", err.Error()),
-		)
-		ch <- StreamEvent{
-			Type:       EventRetry,
-			Attempt:    attempt + 1,
-			MaxAttempt: retryCfg.MaxAttempts,
-			RetryError: err.Error(),
-		}
-		if attempt+1 < retryCfg.MaxAttempts {
-			backoff := retryBackoff(attempt, retryCfg)
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: context cancelled during retry: %v", ctx.Err())}
-				return
-			}
-		} else {
-			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: all %d attempts failed (last: %v)", retryCfg.MaxAttempts, err)}
-			return
-		}
+	streamResult, err := a.client.StreamText(ctx, opts...)
+	if err != nil {
+		ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: %v", err)}
+		return
 	}
 
 	ch <- StreamEvent{Type: EventAgentStart}

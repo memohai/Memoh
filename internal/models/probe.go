@@ -36,12 +36,12 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		return TestResponse{}, fmt.Errorf("get model: %w", err)
 	}
 
-	provider, err := s.queries.GetLlmProviderByID(ctx, model.LlmProviderID)
+	provider, err := s.queries.GetProviderByID(ctx, model.ProviderID)
 	if err != nil {
 		return TestResponse{}, fmt.Errorf("get provider: %w", err)
 	}
 
-	baseURL := strings.TrimRight(provider.BaseUrl, "/")
+	baseURL := strings.TrimRight(providerConfigString(provider.Config, "base_url"), "/")
 	clientType := ClientType(provider.ClientType)
 	creds, err := s.resolveModelCredentials(ctx, provider)
 	if err != nil {
@@ -199,12 +199,14 @@ type modelCredentials struct {
 	CodexAccountID string
 }
 
-func (s *Service) resolveModelCredentials(ctx context.Context, provider sqlc.LlmProvider) (modelCredentials, error) {
+func (s *Service) resolveModelCredentials(ctx context.Context, provider sqlc.Provider) (modelCredentials, error) {
+	apiKey := providerConfigString(provider.Config, "api_key")
+
 	if ClientType(provider.ClientType) != ClientTypeOpenAICodex {
-		return modelCredentials{APIKey: provider.ApiKey}, nil
+		return modelCredentials{APIKey: apiKey}, nil
 	}
 
-	tokenRow, err := s.queries.GetLlmProviderOAuthTokenByProvider(ctx, provider.ID)
+	tokenRow, err := s.queries.GetProviderOAuthTokenByProvider(ctx, provider.ID)
 	if err != nil {
 		return modelCredentials{}, err
 	}

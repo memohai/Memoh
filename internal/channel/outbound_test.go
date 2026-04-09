@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/memohai/memoh/internal/channel/channeltest"
 )
 
 type streamValidationAdapter struct {
@@ -112,10 +114,10 @@ type recordingStream struct {
 	events []StreamEvent
 }
 
-func (r *recordingStream) Push(_ context.Context, event StreamEvent) error {
+func (r *recordingStream) Push(_ context.Context, event PreparedStreamEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.events = append(r.events, event)
+	r.events = append(r.events, event.LogicalEvent())
 	return nil
 }
 
@@ -133,7 +135,7 @@ type failingFinalStream struct {
 	recordingStream
 }
 
-func (f *failingFinalStream) Push(ctx context.Context, event StreamEvent) error {
+func (f *failingFinalStream) Push(ctx context.Context, event PreparedStreamEvent) error {
 	if event.Type == StreamEventFinal {
 		return context.DeadlineExceeded
 	}
@@ -142,15 +144,16 @@ func (f *failingFinalStream) Push(ctx context.Context, event StreamEvent) error 
 
 func newChunkingTestStream(t *testing.T, chunkLimit int) (*managerOutboundStream, *recordingStream, *[]OutboundMessage) {
 	t.Helper()
+	channelType := ChannelType("telegram")
 	registry := NewRegistry()
 	adapter := &streamValidationAdapter{
-		channelType:    ChannelType("test"),
+		channelType:    channelType,
 		outboundPolicy: OutboundPolicy{TextChunkLimit: chunkLimit},
 	}
 	if err := registry.Register(adapter); err != nil {
 		t.Fatalf("register adapter failed: %v", err)
 	}
-	manager := &Manager{registry: registry}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
 
 	rec := &recordingStream{}
 	var sent []OutboundMessage
@@ -158,8 +161,10 @@ func newChunkingTestStream(t *testing.T, chunkLimit int) (*managerOutboundStream
 
 	stream := &managerOutboundStream{
 		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
 		stream:      rec,
-		channelType: ChannelType("test"),
+		channelType: channelType,
+		policy:      manager.resolveOutboundPolicy(channelType),
 		send: func(_ context.Context, msg OutboundMessage) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -507,22 +512,25 @@ func TestPushFinalWithChunking_ThreadPropagated(t *testing.T) {
 func TestPushFinalWithChunking_FirstChunkPushFailureFallback(t *testing.T) {
 	t.Parallel()
 
+	channelType := ChannelType("telegram")
 	registry := NewRegistry()
 	adapter := &streamValidationAdapter{
-		channelType:    ChannelType("test"),
+		channelType:    channelType,
 		outboundPolicy: OutboundPolicy{TextChunkLimit: 100},
 	}
 	if err := registry.Register(adapter); err != nil {
 		t.Fatalf("register adapter failed: %v", err)
 	}
-	manager := &Manager{registry: registry}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
 
 	rec := &failingFinalStream{}
 	var sent []OutboundMessage
 	stream := &managerOutboundStream{
 		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
 		stream:      rec,
-		channelType: ChannelType("test"),
+		channelType: channelType,
+		policy:      manager.resolveOutboundPolicy(channelType),
 		send: func(_ context.Context, msg OutboundMessage) error {
 			sent = append(sent, msg)
 			return nil
@@ -572,7 +580,7 @@ func (r *reopenableStream) current() *recordingStream {
 	return r.streams[r.idx]
 }
 
-func (r *reopenableStream) reopen(_ context.Context) (OutboundStream, error) {
+func (r *reopenableStream) reopen(_ context.Context) (PreparedOutboundStream, error) {
 	r.idx++
 	if r.idx >= len(r.streams) {
 		return nil, errors.New("no more streams")
@@ -582,15 +590,16 @@ func (r *reopenableStream) reopen(_ context.Context) (OutboundStream, error) {
 
 func newDeltaSplitTestStream(t *testing.T, chunkLimit int, streamCount int) (*managerOutboundStream, *reopenableStream, *[]OutboundMessage) {
 	t.Helper()
+	channelType := ChannelType("telegram")
 	registry := NewRegistry()
 	adapter := &streamValidationAdapter{
-		channelType:    ChannelType("test"),
+		channelType:    channelType,
 		outboundPolicy: OutboundPolicy{TextChunkLimit: chunkLimit},
 	}
 	if err := registry.Register(adapter); err != nil {
 		t.Fatalf("register adapter failed: %v", err)
 	}
-	manager := &Manager{registry: registry}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
 
 	streams := make([]*recordingStream, streamCount)
 	for i := range streams {
@@ -603,8 +612,10 @@ func newDeltaSplitTestStream(t *testing.T, chunkLimit int, streamCount int) (*ma
 
 	stream := &managerOutboundStream{
 		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
 		stream:      streams[0],
-		channelType: ChannelType("test"),
+		channelType: channelType,
+		policy:      manager.resolveOutboundPolicy(channelType),
 		send: func(_ context.Context, msg OutboundMessage) error {
 			mu.Lock()
 			defer mu.Unlock()

@@ -109,7 +109,7 @@
 
           <!-- Compatibilities (chat only) -->
           <div v-if="selectedType === 'chat'">
-            <Label class="mb-2">
+            <Label class="mb-4">
               {{ $t('models.compatibilities') }}
             </Label>
             <div class="flex flex-wrap gap-3 mt-2">
@@ -297,7 +297,7 @@ async function addModel() {
   const payload: Record<string, unknown> = {
     type,
     model_id,
-    llm_provider_id: id,
+    provider_id: id,
     config,
   }
 

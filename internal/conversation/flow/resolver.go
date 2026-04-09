@@ -176,7 +176,7 @@ type usageInfo struct {
 type resolvedContext struct {
 	runConfig       agentpkg.RunConfig
 	model           models.GetResponse
-	provider        sqlc.LlmProvider
+	provider        sqlc.Provider
 	query           string // headerified query
 	injectedRecords *[]conversation.InjectedMessageRecord
 }
@@ -280,10 +280,16 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		agentInjectCh := make(chan agentpkg.InjectMessage, cap(req.InjectCh))
 		go func() {
 			for msg := range req.InjectCh {
-				agentInjectCh <- agentpkg.InjectMessage{
+				agentMsg := agentpkg.InjectMessage{
 					Text:            msg.Text,
 					HeaderifiedText: msg.HeaderifiedText,
 				}
+				// Inline any image attachments from the injected message so the
+				// model receives them as vision input alongside the text.
+				if runCfg.SupportsImageInput && len(msg.Attachments) > 0 {
+					agentMsg.ImageParts = r.inlineInjectAttachments(ctx, req.BotID, msg.Attachments)
+				}
+				agentInjectCh <- agentMsg
 			}
 			close(agentInjectCh)
 		}()
@@ -368,10 +374,10 @@ type baseRunConfigParams struct {
 // buildBaseRunConfig creates a RunConfig with model, credentials, skills,
 // identity and system prompt — everything except Messages/Query/InlineImages.
 // Both resolve() and ResolveRunConfig() delegate to this shared builder.
-func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams) (agentpkg.RunConfig, models.GetResponse, sqlc.LlmProvider, error) {
+func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams) (agentpkg.RunConfig, models.GetResponse, sqlc.Provider, error) {
 	botSettings, err := r.loadBotSettings(ctx, p.BotID)
 	if err != nil {
-		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.LlmProvider{}, err
+		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, p.BotID)
 	userTimezoneName, userClockLocation := r.resolveTimezone(ctx, p.BotID, p.UserID)
@@ -390,7 +396,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 
 	chatModel, provider, err := r.selectChatModel(ctx, req, botSettings, conversation.Settings{})
 	if err != nil {
-		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.LlmProvider{}, err
+		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 
 	reasoningEffort := p.ReasoningEffort
@@ -405,7 +411,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	authResolver := providers.NewService(nil, r.queries, "")
 	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
 	if err != nil {
-		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.LlmProvider{}, fmt.Errorf("resolve provider credentials: %w", err)
+		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("resolve provider credentials: %w", err)
 	}
 
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
@@ -413,7 +419,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		ClientType:      provider.ClientType,
 		APIKey:          creds.APIKey,
 		CodexAccountID:  creds.CodexAccountID,
-		BaseURL:         provider.BaseUrl,
+		BaseURL:         providers.ProviderConfigString(provider, "base_url"),
 		HTTPClient:      r.streamHTTPClient,
 		ReasoningConfig: reasoningConfig,
 	})
@@ -524,6 +530,29 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 			}
 		}
 		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query, extra...))
+	} else if len(cfg.InlineImages) > 0 {
+		// Pipeline path: the user query is already embedded in the RC messages,
+		// but image parts are not rendered by the pipeline renderer. Inject the
+		// inline images into the last user message so the model receives them.
+		imageParts := make([]sdk.MessagePart, 0, len(cfg.InlineImages))
+		for _, img := range cfg.InlineImages {
+			if strings.TrimSpace(img.Image) != "" {
+				imageParts = append(imageParts, img)
+			}
+		}
+		if len(imageParts) > 0 {
+			injected := false
+			for i := len(cfg.Messages) - 1; i >= 0; i-- {
+				if cfg.Messages[i].Role == sdk.MessageRoleUser {
+					cfg.Messages[i].Content = append(cfg.Messages[i].Content, imageParts...)
+					injected = true
+					break
+				}
+			}
+			if !injected {
+				cfg.Messages = append(cfg.Messages, sdk.UserMessage("", imageParts...))
+			}
+		}
 	}
 
 	return cfg

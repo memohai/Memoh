@@ -32,7 +32,7 @@
       <section class="flex flex-col gap-4">
         <ModelItem
           v-for="model in displayedModels"
-          :key="model.id || `${model.llm_provider_id}:${model.model_id}`"
+          :key="model.id || `${model.provider_id}:${model.model_id}`"
           :model="model"
           :delete-loading="deleteModelLoading"
           @edit="(model) => $emit('edit', model)"

@@ -2,24 +2,22 @@ package providers
 
 import "time"
 
-// CreateRequest represents a request to create a new LLM provider.
+// CreateRequest represents a request to create a new provider.
 type CreateRequest struct {
 	Name       string         `json:"name" validate:"required"`
-	BaseURL    string         `json:"base_url" validate:"required,url"`
-	APIKey     string         `json:"api_key"` //nolint:gosec // intentional: LLM provider API key supplied by operator
 	ClientType string         `json:"client_type" validate:"required"`
 	Icon       string         `json:"icon,omitempty"`
+	Config     map[string]any `json:"config,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
-// UpdateRequest represents a request to update an existing LLM provider.
+// UpdateRequest represents a request to update an existing provider.
 type UpdateRequest struct {
 	Name       *string        `json:"name,omitempty"`
-	BaseURL    *string        `json:"base_url,omitempty"`
-	APIKey     *string        `json:"api_key,omitempty"` //nolint:gosec // intentional: LLM provider API key update field
 	ClientType *string        `json:"client_type,omitempty"`
 	Icon       *string        `json:"icon,omitempty"`
 	Enable     *bool          `json:"enable,omitempty"`
+	Config     map[string]any `json:"config,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
@@ -27,11 +25,10 @@ type UpdateRequest struct {
 type GetResponse struct {
 	ID         string         `json:"id"`
 	Name       string         `json:"name"`
-	BaseURL    string         `json:"base_url"`
-	APIKey     string         `json:"api_key,omitempty"` //nolint:gosec // intentional: partially masked API key for display
 	ClientType string         `json:"client_type"`
 	Icon       string         `json:"icon,omitempty"`
 	Enable     bool           `json:"enable"`
+	Config     map[string]any `json:"config,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`

@@ -1,7 +1,12 @@
 package discord
 
 import (
+	"context"
+	"io"
+	"strings"
 	"testing"
+
+	"github.com/memohai/memoh/internal/channel"
 )
 
 func TestMimeExtension(t *testing.T) {
@@ -28,19 +33,30 @@ func TestMimeExtension(t *testing.T) {
 	}
 }
 
-func TestBase64DataURLToBytes(t *testing.T) {
-	// Test valid data URL
-	data, err := base64DataURLToBytes("data:text/plain;base64,SGVsbG8=")
+func TestDiscordPreparedAttachmentToFile(t *testing.T) {
+	file, err := discordPreparedAttachmentToFile(context.Background(), channel.PreparedAttachment{
+		Logical: channel.Attachment{Type: channel.AttachmentFile},
+		Kind:    channel.PreparedAttachmentUpload,
+		Name:    "hello.txt",
+		Open: func(context.Context) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("Hello")), nil
+		},
+	})
 	if err != nil {
-		t.Errorf("base64DataURLToBytes() error = %v", err)
+		t.Fatalf("discordPreparedAttachmentToFile() error = %v", err)
+	}
+	data, err := io.ReadAll(file.Reader)
+	if err != nil {
+		t.Fatalf("read prepared file: %v", err)
 	}
 	if string(data) != "Hello" {
-		t.Errorf("base64DataURLToBytes() = %q, want %q", string(data), "Hello")
+		t.Errorf("prepared attachment data = %q, want %q", string(data), "Hello")
 	}
-
-	// Test invalid data URL
-	_, err = base64DataURLToBytes("invalid")
+	_, err = discordPreparedAttachmentToFile(context.Background(), channel.PreparedAttachment{
+		Logical: channel.Attachment{Type: channel.AttachmentFile},
+		Kind:    channel.PreparedAttachmentPublicURL,
+	})
 	if err == nil {
-		t.Error("base64DataURLToBytes() expected error for invalid URL")
+		t.Error("discordPreparedAttachmentToFile() expected error for non-upload kind")
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
@@ -75,14 +77,24 @@ func (r *Resolver) prepareGatewayAttachments(ctx context.Context, req conversati
 			transport = gatewayTransportInlineDataURL
 		} else {
 			rawURL := strings.TrimSpace(raw.URL)
+			contentHash := strings.TrimSpace(raw.ContentHash)
 			switch {
 			case isDataURL(rawURL):
 				payload = rawURL
 				transport = gatewayTransportInlineDataURL
-			case isLikelyPublicURL(rawURL):
+			case isLikelyPublicURL(rawURL) && contentHash == "":
+				// Only treat a public HTTP URL as direct vision input when the
+				// attachment has not been persisted yet. If ContentHash is set,
+				// the file is already in the media store and will be inlined
+				// by inlineImageAttachmentAssetIfNeeded below — prefer that path
+				// so we never expose ephemeral or credentialed platform URLs
+				// directly to the model.
 				payload = rawURL
 				transport = gatewayTransportPublicURL
 			case rawURL != "" && fallbackPath == "":
+				// URL is either a persisted local path (contentHash set) or an
+				// unresolvable reference; store it as fallbackPath so the agent
+				// can access it via the file tool if needed.
 				fallbackPath = rawURL
 			}
 		}
@@ -138,6 +150,39 @@ func isLikelyPublicURL(raw string) bool {
 func isDataURL(raw string) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(raw))
 	return strings.HasPrefix(trimmed, "data:")
+}
+
+// inlineInjectAttachments converts image attachments from an injected message
+// into sdk.ImagePart values for direct vision input. Non-image attachments and
+// images that cannot be inlined are silently skipped.
+func (r *Resolver) inlineInjectAttachments(ctx context.Context, botID string, atts []conversation.ChatAttachment) []sdk.ImagePart {
+	var parts []sdk.ImagePart
+	for _, att := range atts {
+		if strings.ToLower(strings.TrimSpace(att.Type)) != "image" {
+			continue
+		}
+		contentHash := strings.TrimSpace(att.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		dataURL, mime, err := r.inlineAssetAsDataURL(ctx, botID, contentHash, "image", strings.TrimSpace(att.Mime))
+		if err != nil {
+			if r != nil && r.logger != nil {
+				r.logger.Warn(
+					"inline inject image attachment failed",
+					slog.Any("error", err),
+					slog.String("bot_id", botID),
+					slog.String("content_hash", contentHash),
+				)
+			}
+			continue
+		}
+		parts = append(parts, sdk.ImagePart{
+			Image:     dataURL,
+			MediaType: mime,
+		})
+	}
+	return parts
 }
 
 func (r *Resolver) inlineImageAttachmentAssetIfNeeded(ctx context.Context, botID string, item gatewayAttachment) gatewayAttachment {

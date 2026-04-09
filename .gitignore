@@ -63,6 +63,7 @@ lerna-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+mise.local.toml
 
 # IDE
 .idea/

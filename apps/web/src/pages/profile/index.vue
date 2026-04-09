@@ -228,6 +228,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 import { useClipboard } from '@/composables/useClipboard'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import { channelTypeDisplayName } from '@/utils/channel-type-label'
 
 interface IssueBindCodeResponse {
   token: string
@@ -287,10 +288,7 @@ const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
 
 function platformLabel(platformKey: string): string {
   if (!platformKey?.trim()) return platformKey ?? ''
-  const key = platformKey.trim().toLowerCase()
-  const i18nKey = `bots.channels.types.${key}`
-  const out = t(i18nKey)
-  return out !== i18nKey ? out : platformKey
+  return channelTypeDisplayName(t, platformKey, null) || platformKey
 }
 
 const platformOptions = computed(() => {

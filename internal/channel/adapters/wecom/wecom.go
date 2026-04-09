@@ -175,8 +175,9 @@ func (a *WeComAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, h
 	return channel.NewConnection(cfg, stop), nil
 }
 
-func (a *WeComAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
-	targetKind, targetID, ok := parseTarget(msg.Target)
+func (a *WeComAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
+	logical := msg.LogicalMessage()
+	targetKind, targetID, ok := parseTarget(logical.Target)
 	if !ok {
 		return errors.New("wecom target is required")
 	}
@@ -188,7 +189,7 @@ func (a *WeComAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg 
 	if client == nil {
 		return errors.New("wecom connection is not active")
 	}
-	if msg.Message.IsEmpty() {
+	if logical.Message.IsEmpty() {
 		return errors.New("message is required")
 	}
 	var (
@@ -197,11 +198,11 @@ func (a *WeComAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg 
 		reqID    string
 		buildErr error
 	)
-	if ctxMeta, ok := a.lookupCallbackContext(msg.Message.Reply); ok {
-		payload, cmd, reqID, buildErr = buildRespondPayload(msg.Message, ctxMeta.ReqID)
+	if ctxMeta, ok := a.lookupCallbackContext(msg.Message.Message.Reply); ok {
+		payload, cmd, reqID, buildErr = buildPreparedRespondPayload(ctx, msg.Message, ctxMeta.ReqID)
 	} else {
 		_ = targetKind
-		payload, cmd, reqID, buildErr = buildSendPayload(msg.Message, targetID)
+		payload, cmd, reqID, buildErr = buildSendPayload(logical.Message, targetID)
 	}
 	if buildErr != nil {
 		return buildErr
@@ -216,7 +217,7 @@ func (a *WeComAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg 
 	return nil
 }
 
-func (a *WeComAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *WeComAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -251,13 +252,13 @@ type wecomOutboundStream struct {
 	closed      atomic.Bool
 	finalSent   atomic.Bool
 	textBuilder strings.Builder
-	attachments []channel.Attachment
-	final       *channel.Message
+	attachments []channel.PreparedAttachment
+	final       *channel.PreparedMessage
 	streamID    string
 	lastPreview string
 }
 
-func (s *wecomOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
+func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s.adapter == nil {
 		return errors.New("wecom stream not configured")
 	}
@@ -315,7 +316,9 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.StreamEven
 			return nil
 		}
 		s.mu.Lock()
-		s.final = &channel.Message{Format: channel.MessageFormatPlain, Text: "Error: " + text}
+		s.final = &channel.PreparedMessage{
+			Message: channel.Message{Format: channel.MessageFormatPlain, Text: "Error: " + text},
+		}
 		s.mu.Unlock()
 		return s.flush(ctx)
 	}
@@ -340,17 +343,17 @@ func (s *wecomOutboundStream) flush(ctx context.Context) error {
 		return nil
 	}
 	msg, streamID := s.snapshotMessage(true)
-	if msg.IsEmpty() {
+	if msg.LogicalMessage().IsEmpty() {
 		return nil
 	}
-	if ctxMeta, ok := s.adapter.lookupCallbackContext(msg.Reply); ok {
+	if ctxMeta, ok := s.adapter.lookupCallbackContext(msg.Message.Reply); ok {
 		if err := s.adapter.sendRespondStream(ctx, s.cfg, msg, ctxMeta.ReqID, streamID, true); err != nil {
 			return err
 		}
 		s.finalSent.Store(true)
 		return nil
 	}
-	if err := s.adapter.Send(ctx, s.cfg, channel.OutboundMessage{
+	if err := s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
 		Target:  s.target,
 		Message: msg,
 	}); err != nil {
@@ -365,7 +368,7 @@ func (s *wecomOutboundStream) pushPreview(ctx context.Context) error {
 		return nil
 	}
 	msg, streamID := s.snapshotMessage(false)
-	text := strings.TrimSpace(msg.PlainText())
+	text := strings.TrimSpace(msg.LogicalMessage().PlainText())
 	if text == "" {
 		return nil
 	}
@@ -375,7 +378,7 @@ func (s *wecomOutboundStream) pushPreview(ctx context.Context) error {
 		return nil
 	}
 	s.mu.Unlock()
-	if ctxMeta, ok := s.adapter.lookupCallbackContext(msg.Reply); ok {
+	if ctxMeta, ok := s.adapter.lookupCallbackContext(msg.Message.Reply); ok {
 		if err := s.adapter.sendRespondStream(ctx, s.cfg, msg, ctxMeta.ReqID, streamID, false); err != nil {
 			return err
 		}
@@ -386,21 +389,27 @@ func (s *wecomOutboundStream) pushPreview(ctx context.Context) error {
 	return nil
 }
 
-func (s *wecomOutboundStream) snapshotMessage(includeAttachments bool) (channel.Message, string) {
+func (s *wecomOutboundStream) snapshotMessage(includeAttachments bool) (channel.PreparedMessage, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	msg := channel.Message{}
+	msg := channel.PreparedMessage{}
 	if s.final != nil {
 		msg = *s.final
 	}
-	if strings.TrimSpace(msg.Text) == "" {
-		msg.Text = strings.TrimSpace(s.textBuilder.String())
+	if strings.TrimSpace(msg.Message.Text) == "" {
+		msg.Message.Text = strings.TrimSpace(s.textBuilder.String())
 	}
 	if includeAttachments && len(msg.Attachments) == 0 && len(s.attachments) > 0 {
 		msg.Attachments = append(msg.Attachments, s.attachments...)
 	}
-	if msg.Reply == nil && s.reply != nil {
-		msg.Reply = s.reply
+	if len(msg.Message.Attachments) == 0 && len(msg.Attachments) > 0 {
+		msg.Message.Attachments = make([]channel.Attachment, 0, len(msg.Attachments))
+		for _, att := range msg.Attachments {
+			msg.Message.Attachments = append(msg.Message.Attachments, att.Logical)
+		}
+	}
+	if msg.Message.Reply == nil && s.reply != nil {
+		msg.Message.Reply = s.reply
 	}
 	if s.streamID == "" {
 		s.streamID = NewReqID("stream")
@@ -408,7 +417,7 @@ func (s *wecomOutboundStream) snapshotMessage(includeAttachments bool) (channel.
 	return msg, s.streamID
 }
 
-func (a *WeComAdapter) sendRespondStream(ctx context.Context, cfg channel.ChannelConfig, msg channel.Message, reqID string, streamID string, finish bool) error {
+func (a *WeComAdapter) sendRespondStream(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedMessage, reqID string, streamID string, finish bool) error {
 	parsed, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
@@ -417,7 +426,7 @@ func (a *WeComAdapter) sendRespondStream(ctx context.Context, cfg channel.Channe
 	if client == nil {
 		return errors.New("wecom connection is not active")
 	}
-	payload, cmd, ackReqID, err := buildRespondPayloadWithStream(msg, reqID, streamID, finish)
+	payload, cmd, ackReqID, err := buildPreparedRespondPayloadWithStream(ctx, msg, reqID, streamID, finish)
 	if err != nil {
 		return err
 	}

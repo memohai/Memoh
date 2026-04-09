@@ -1,0 +1,190 @@
+name: "memoh-dev"
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: memoh-dev-postgres
+    environment:
+      POSTGRES_DB: memoh
+      POSTGRES_USER: memoh
+      POSTGRES_PASSWORD: memoh123
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "${MEMOH_DEV_POSTGRES_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memoh"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: memoh-dev-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "${MEMOH_DEV_QDRANT_HTTP_PORT:-16333}:6333"
+      - "${MEMOH_DEV_QDRANT_GRPC_PORT:-16334}:6334"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  deps:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.web
+    container_name: memoh-dev-deps
+    working_dir: /workspace
+    command: ["pnpm", "install"]
+    volumes:
+      - ..:/workspace
+      - node_modules:/workspace/node_modules
+      - pnpm_store:/root/.local/share/pnpm/store
+    restart: "no"
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.server
+    container_name: memoh-dev-migrate
+    working_dir: /workspace
+    entrypoint: []
+    command: ["go", "run", "./cmd/agent/main.go", "migrate", "up"]
+    environment:
+      CONFIG_PATH: /workspace/devenv/app.dev.toml
+      GOFLAGS: -buildvcs=false
+    volumes:
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    restart: "no"
+
+  server:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.server
+    container_name: memoh-dev-server
+    working_dir: /workspace
+    privileged: true
+    pid: host
+    command: ["air", "-c", ".air.toml"]
+    environment:
+      CONFIG_PATH: /workspace/devenv/app.dev.toml
+      GOFLAGS: -buildvcs=false
+    volumes:
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - containerd_data:/var/lib/containerd
+      - server_cni_state:/var/lib/cni
+      - memoh_data:/opt/memoh/data
+      # Toolkit: run ./docker/toolkit/install.sh once before first use
+      - ../.toolkit:/opt/memoh/runtime/toolkit
+      - ../docker/toolkit/bin:/opt/memoh/runtime/toolkit/bin
+      - ../cmd/bridge/template:/opt/memoh/runtime/templates
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "${MEMOH_DEV_SERVER_PORT:-18080}:8080"
+      - "${MEMOH_DEV_OAUTH_PORT:-1455}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.web
+    container_name: memoh-dev-web
+    working_dir: /workspace/apps/web
+    command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "8082"]
+    environment:
+      MEMOH_CONFIG_PATH: /workspace/devenv/app.dev.toml
+      MEMOH_WEB_PROXY_TARGET: http://server:8080
+    volumes:
+      - ..:/workspace
+      - node_modules:/workspace/node_modules
+    ports:
+      - "${MEMOH_DEV_WEB_PORT:-18082}:8082"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # browser:
+  #   build:
+  #     context: ..
+  #     dockerfile: devenv/Dockerfile.browser
+  #     args:
+  #       BROWSER_CORES: ${BROWSER_CORES:-chromium,firefox}
+  #   container_name: memoh-dev-browser
+  #   working_dir: /workspace/apps/browser
+  #   command: ["bun", "run", "--watch", "src/index.ts"]
+  #   environment:
+  #     - MEMOH_CONFIG_PATH=/workspace/devenv/app.dev.toml
+  #     - BROWSER_CORES=${BROWSER_CORES:-chromium,firefox}
+  #   volumes:
+  #     - ..:/workspace
+  #     - node_modules:/workspace/node_modules
+  #   ports:
+  #     - "${MEMOH_DEV_BROWSER_PORT:-18083}:8083"
+  #   depends_on:
+  #     deps:
+  #       condition: service_completed_successfully
+  #     server:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # sparse:
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile.sparse
+  #   container_name: memoh-dev-sparse
+  #   ports:
+  #     - "${MEMOH_DEV_SPARSE_PORT:-18085}:8085"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/health')\" || exit 1"]
+  #     interval: 15s
+  #     timeout: 10s
+  #     start_period: 30s
+  #     retries: 3
+  #   restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  go_mod_cache:
+    driver: local
+  go_build_cache:
+    driver: local
+  containerd_data:
+    driver: local
+  memoh_data:
+    driver: local
+  server_cni_state:
+    driver: local
+  node_modules:
+    driver: local
+  pnpm_store:
+    driver: local

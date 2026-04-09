@@ -432,3 +432,17 @@ type ReactRequest struct {
 	Emoji     string `json:"emoji"`
 	Remove    bool   `json:"remove,omitempty"`
 }
+
+// Well-known ChannelType values for platforms with special handling in the core channel package.
+// Adapter packages define their own identical constant as their package-local Type.
+const (
+	ChannelTypeTelegram ChannelType = "telegram"
+	ChannelTypeFeishu   ChannelType = "feishu"
+	ChannelTypeDingtalk ChannelType = "dingtalk"
+	ChannelTypeMatrix   ChannelType = "matrix"
+	ChannelTypeDiscord  ChannelType = "discord"
+	ChannelTypeQQ       ChannelType = "qq"
+	ChannelTypeWecom    ChannelType = "wecom"
+	ChannelTypeWeixin   ChannelType = "weixin"
+	ChannelTypeLocal    ChannelType = "local"
+)

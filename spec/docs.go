@@ -7767,6 +7767,205 @@ const docTemplate = `{
                 }
             }
         },
+        "/speech-models": {
+            "get": {
+                "description": "List all models of type 'speech' (filtered view of unified models table)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "speech-models"
+                ],
+                "summary": "List all speech models",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/tts.SpeechModelResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/speech-models/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "speech-models"
+                ],
+                "summary": "Get a speech model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/tts.SpeechModelResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/speech-models/{id}/capabilities": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "speech-models"
+                ],
+                "summary": "Get speech model capabilities",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/tts.ModelCapabilities"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/speech-models/{id}/test": {
+            "post": {
+                "description": "Synthesize text using a specific model's config and return audio",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "speech-models"
+                ],
+                "summary": "Test speech model synthesis",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Text to synthesize",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/tts.TestSynthesizeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Audio data",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/speech-providers": {
+            "get": {
+                "description": "List providers that support speech (filtered view of unified providers table)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "speech-providers"
+                ],
+                "summary": "List speech providers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/tts.SpeechProviderResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/speech-providers/meta": {
+            "get": {
+                "description": "List available speech provider types with their models and capabilities",
+                "tags": [
+                    "speech-providers"
+                ],
+                "summary": "List speech provider metadata",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/tts.ProviderMetaResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/supermarket/mcps": {
             "get": {
                 "tags": [
@@ -7958,560 +8157,6 @@ const docTemplate = `{
                     },
                     "502": {
                         "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/tts-models": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-models"
-                ],
-                "summary": "List all TTS models",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/tts.ModelResponse"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Manually create a TTS model under a specific provider",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-models"
-                ],
-                "summary": "Create a TTS model",
-                "parameters": [
-                    {
-                        "description": "TTS model configuration",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/tts.CreateModelRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/tts.ModelResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/tts-models/{id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-models"
-                ],
-                "summary": "Get a TTS model",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/tts.ModelResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-models"
-                ],
-                "summary": "Update a TTS model",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Updated configuration",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/tts.UpdateModelRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/tts.ModelResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "tags": [
-                    "tts-models"
-                ],
-                "summary": "Delete a TTS model",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/tts-models/{id}/capabilities": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-models"
-                ],
-                "summary": "Get TTS model capabilities",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/tts.ModelCapabilities"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/tts-models/{id}/test": {
-            "post": {
-                "description": "Synthesize text using a specific model's config and return audio",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/octet-stream"
-                ],
-                "tags": [
-                    "tts-models"
-                ],
-                "summary": "Test TTS model synthesis",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Text to synthesize",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/tts.TestSynthesizeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Audio data",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/tts-providers": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-providers"
-                ],
-                "summary": "List TTS providers",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider type filter",
-                        "name": "provider",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/tts.ProviderResponse"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Create a TTS provider and auto-import its available models",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-providers"
-                ],
-                "summary": "Create a TTS provider",
-                "parameters": [
-                    {
-                        "description": "TTS provider configuration",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/tts.CreateProviderRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/tts.ProviderResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/tts-providers/meta": {
-            "get": {
-                "description": "List available TTS provider types with their models and capabilities",
-                "tags": [
-                    "tts-providers"
-                ],
-                "summary": "List TTS provider metadata",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/tts.ProviderMetaResponse"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/tts-providers/{id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-providers"
-                ],
-                "summary": "Get a TTS provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/tts.ProviderResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-providers"
-                ],
-                "summary": "Update a TTS provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Updated configuration",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/tts.UpdateProviderRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/tts.ProviderResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "tags": [
-                    "tts-providers"
-                ],
-                "summary": "Delete a TTS provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/tts-providers/{id}/import-models": {
-            "post": {
-                "description": "Discover and import available models from the TTS adapter",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-providers"
-                ],
-                "summary": "Import models for a TTS provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/tts.ModelResponse"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/tts-providers/{id}/models": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "tts-providers"
-                ],
-                "summary": "List models for a TTS provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/tts.ModelResponse"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -10321,6 +9966,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "message_id": {
+                    "type": "string"
+                },
+                "preview": {
+                    "type": "string"
+                },
+                "sender": {
                     "type": "string"
                 },
                 "target": {
@@ -12136,6 +11787,12 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "display_content": {
+                    "type": "string"
+                },
+                "event_id": {
+                    "type": "string"
+                },
                 "external_message_id": {
                     "type": "string"
                 },
@@ -12214,13 +11871,13 @@ const docTemplate = `{
                 "config": {
                     "$ref": "#/definitions/models.ModelConfig"
                 },
-                "llm_provider_id": {
-                    "type": "string"
-                },
                 "model_id": {
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "provider_id": {
                     "type": "string"
                 },
                 "type": {
@@ -12256,13 +11913,13 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
-                "llm_provider_id": {
-                    "type": "string"
-                },
                 "model_id": {
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "provider_id": {
                     "type": "string"
                 },
                 "type": {
@@ -12297,11 +11954,13 @@ const docTemplate = `{
             "type": "string",
             "enum": [
                 "chat",
-                "embedding"
+                "embedding",
+                "speech"
             ],
             "x-enum-varnames": [
                 "ModelTypeChat",
-                "ModelTypeEmbedding"
+                "ModelTypeEmbedding",
+                "ModelTypeSpeech"
             ]
         },
         "models.TestResponse": {
@@ -12342,13 +12001,13 @@ const docTemplate = `{
                 "config": {
                     "$ref": "#/definitions/models.ModelConfig"
                 },
-                "llm_provider_id": {
-                    "type": "string"
-                },
                 "model_id": {
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "provider_id": {
                     "type": "string"
                 },
                 "type": {
@@ -12367,19 +12026,16 @@ const docTemplate = `{
         "providers.CreateRequest": {
             "type": "object",
             "required": [
-                "base_url",
                 "client_type",
                 "name"
             ],
             "properties": {
-                "api_key": {
-                    "type": "string"
-                },
-                "base_url": {
-                    "type": "string"
-                },
                 "client_type": {
                     "type": "string"
+                },
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "icon": {
                     "type": "string"
@@ -12396,14 +12052,12 @@ const docTemplate = `{
         "providers.GetResponse": {
             "type": "object",
             "properties": {
-                "api_key": {
-                    "type": "string"
-                },
-                "base_url": {
-                    "type": "string"
-                },
                 "client_type": {
                     "type": "string"
+                },
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "created_at": {
                     "type": "string"
@@ -12483,14 +12137,12 @@ const docTemplate = `{
         "providers.UpdateRequest": {
             "type": "object",
             "properties": {
-                "api_key": {
-                    "type": "string"
-                },
-                "base_url": {
-                    "type": "string"
-                },
                 "client_type": {
                     "type": "string"
+                },
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "enable": {
                     "type": "boolean"
@@ -12867,6 +12519,9 @@ const docTemplate = `{
                 "compaction_threshold": {
                     "type": "integer"
                 },
+                "discuss_probe_model_id": {
+                    "type": "string"
+                },
                 "heartbeat_enabled": {
                     "type": "boolean"
                 },
@@ -12926,6 +12581,9 @@ const docTemplate = `{
                 "compaction_threshold": {
                     "type": "integer"
                 },
+                "discuss_probe_model_id": {
+                    "type": "string"
+                },
                 "heartbeat_enabled": {
                     "type": "boolean"
                 },
@@ -12957,35 +12615,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tts_model_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "tts.CreateModelRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "model_id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "tts_provider_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "tts.CreateProviderRequest": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string"
-                },
-                "provider": {
                     "type": "string"
                 }
             }
@@ -13026,36 +12655,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "tts.ModelResponse": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "model_id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "provider_type": {
-                    "type": "string"
-                },
-                "tts_provider_id": {
-                    "type": "string"
-                },
-                "updated_at": {
                     "type": "string"
                 }
             }
@@ -13103,9 +12702,42 @@ const docTemplate = `{
                 }
             }
         },
-        "tts.ProviderResponse": {
+        "tts.SpeechModelResponse": {
             "type": "object",
             "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "provider_type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "tts.SpeechProviderResponse": {
+            "type": "object",
+            "properties": {
+                "client_type": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -13116,9 +12748,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
-                },
-                "provider": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -13134,29 +12763,6 @@ const docTemplate = `{
                     "additionalProperties": {}
                 },
                 "text": {
-                    "type": "string"
-                }
-            }
-        },
-        "tts.UpdateModelRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "tts.UpdateProviderRequest": {
-            "type": "object",
-            "properties": {
-                "enable": {
-                    "type": "boolean"
-                },
-                "name": {
                     "type": "string"
                 }
             }

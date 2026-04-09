@@ -1,14 +1,12 @@
 package feishu
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -19,7 +17,6 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/common"
 	"github.com/memohai/memoh/internal/media"
@@ -513,7 +510,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 }
 
 // Send delivers an outbound message to Feishu, handling attachments, rich text, and replies.
-func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		if a.logger != nil {
@@ -531,14 +528,14 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 
 	if len(msg.Message.Attachments) > 0 {
 		for _, att := range msg.Message.Attachments {
-			if err := a.sendAttachment(ctx, client, receiveID, receiveType, cfg.BotID, att); err != nil {
+			if err := a.sendAttachment(ctx, client, receiveID, receiveType, att); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	text := strings.TrimSpace(msg.Message.PlainText())
+	text := strings.TrimSpace(msg.Message.Message.PlainText())
 	if text == "" {
 		return errors.New("message is required")
 	}
@@ -559,9 +556,9 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 		Body(reqBuilder.Build()).
 		Build()
 
-	if msg.Message.Reply != nil && msg.Message.Reply.MessageID != "" {
+	if msg.Message.Message.Reply != nil && msg.Message.Message.Reply.MessageID != "" {
 		replyReq := larkim.NewReplyMessageReqBuilder().
-			MessageId(msg.Message.Reply.MessageID).
+			MessageId(msg.Message.Message.Reply.MessageID).
 			Body(larkim.NewReplyMessageReqBodyBuilder().
 				Content(content).
 				MsgType(msgType).
@@ -578,7 +575,7 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 
 // OpenStream opens a Feishu streaming session.
 // The adapter strategy uses one interactive card and patches it incrementally.
-func (a *FeishuAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *FeishuAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return nil, errors.New("feishu target is required")
@@ -659,28 +656,26 @@ func (a *FeishuAdapter) handleResponse(configID string, resp *larkim.CreateMessa
 	return nil
 }
 
-func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client, receiveID, receiveType, botID string, att channel.Attachment) error {
+func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client, receiveID, receiveType string, att channel.PreparedAttachment) error {
 	var msgType string
 	var contentMap map[string]string
-	sourcePlatform := strings.TrimSpace(att.SourcePlatform)
-	platformKey := strings.TrimSpace(att.PlatformKey)
-	if platformKey != "" && (sourcePlatform == "" || strings.EqualFold(sourcePlatform, Type.String())) {
-		if strings.HasPrefix(att.Mime, "image/") || att.Type == channel.AttachmentImage {
+	if att.Kind == channel.PreparedAttachmentNativeRef && strings.TrimSpace(att.NativeRef) != "" {
+		if strings.HasPrefix(att.Mime, "image/") || att.Logical.Type == channel.AttachmentImage {
 			msgType = larkim.MsgTypeImage
-			contentMap = map[string]string{"image_key": platformKey}
+			contentMap = map[string]string{"image_key": strings.TrimSpace(att.NativeRef)}
 		} else {
 			msgType = larkim.MsgTypeFile
-			contentMap = map[string]string{"file_key": platformKey}
+			contentMap = map[string]string{"file_key": strings.TrimSpace(att.NativeRef)}
 		}
 	} else {
-		reader, resolvedMime, resolvedName, err := a.resolveAttachmentUploadReader(ctx, att, botID)
+		reader, resolvedMime, resolvedName, err := resolveAttachmentUploadReader(ctx, att)
 		if err != nil {
 			return err
 		}
 		defer func() {
 			_ = reader.Close()
 		}()
-		typeProbe := att
+		typeProbe := att.Logical
 		if strings.TrimSpace(typeProbe.Mime) == "" {
 			typeProbe.Mime = strings.TrimSpace(resolvedMime)
 		}
@@ -751,74 +746,18 @@ func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client,
 	return a.handleResponse("", sendResp, err)
 }
 
-func (a *FeishuAdapter) resolveAttachmentUploadReader(ctx context.Context, att channel.Attachment, fallbackBotID string) (io.ReadCloser, string, string, error) {
-	assetID := strings.TrimSpace(att.ContentHash)
-	botID := strings.TrimSpace(fallbackBotID)
-	if botID == "" && att.Metadata != nil {
-		if value, ok := att.Metadata["bot_id"].(string); ok {
-			botID = strings.TrimSpace(value)
-		}
+func resolveAttachmentUploadReader(ctx context.Context, att channel.PreparedAttachment) (io.ReadCloser, string, string, error) {
+	if att.Kind != channel.PreparedAttachmentUpload {
+		return nil, "", "", fmt.Errorf("feishu attachment requires upload source, got %s", att.Kind)
 	}
-	if assetID != "" && botID != "" && a.assets != nil {
-		reader, asset, err := a.assets.Open(ctx, botID, assetID)
-		if err == nil {
-			resolvedMime := strings.TrimSpace(att.Mime)
-			if resolvedMime == "" {
-				resolvedMime = strings.TrimSpace(asset.Mime)
-			}
-			return reader, resolvedMime, strings.TrimSpace(att.Name), nil
-		}
-		if a.logger != nil {
-			a.logger.Debug("feishu attachment storage open failed",
-				slog.String("bot_id", botID),
-				slog.String("content_hash", assetID),
-				slog.Any("error", err),
-			)
-		}
+	if att.Open == nil {
+		return nil, "", "", errors.New("feishu attachment upload is not openable")
 	}
-
-	rawBase64 := strings.TrimSpace(att.Base64)
-	downloadURL := strings.TrimSpace(att.URL)
-	if rawBase64 == "" && strings.HasPrefix(strings.ToLower(downloadURL), "data:") {
-		rawBase64 = downloadURL
-	}
-	if rawBase64 != "" {
-		decoded, err := attachmentpkg.DecodeBase64(rawBase64, media.MaxAssetBytes)
-		if err != nil {
-			return nil, "", "", fmt.Errorf("failed to decode attachment base64: %w", err)
-		}
-		data, err := media.ReadAllWithLimit(decoded, media.MaxAssetBytes)
-		if err != nil {
-			return nil, "", "", fmt.Errorf("failed to read attachment base64: %w", err)
-		}
-		resolvedMime := strings.TrimSpace(att.Mime)
-		if resolvedMime == "" {
-			resolvedMime = strings.TrimSpace(attachmentpkg.MimeFromDataURL(rawBase64))
-		}
-		return io.NopCloser(bytes.NewReader(data)), resolvedMime, strings.TrimSpace(att.Name), nil
-	}
-
-	if downloadURL == "" {
-		return nil, "", "", errors.New("attachment reference is required: provide platform_key/content_hash/base64/url")
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	reader, err := att.Open(ctx)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("failed to build download request: %w", err)
+		return nil, "", "", err
 	}
-	httpClient := &http.Client{Timeout: 60 * time.Second}
-	resp, err := httpClient.Do(httpReq) //nolint:gosec // G704: URL is a Feishu file download URL from the Feishu API
-	if err != nil {
-		return nil, "", "", fmt.Errorf("failed to download attachment: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		_ = resp.Body.Close()
-		return nil, "", "", fmt.Errorf("failed to download attachment, status: %d", resp.StatusCode)
-	}
-	if resp.ContentLength > media.MaxAssetBytes {
-		_ = resp.Body.Close()
-		return nil, "", "", fmt.Errorf("%w: max %d bytes", media.ErrAssetTooLarge, media.MaxAssetBytes)
-	}
-	return resp.Body, strings.TrimSpace(att.Mime), strings.TrimSpace(att.Name), nil
+	return reader, strings.TrimSpace(att.Mime), strings.TrimSpace(att.Name), nil
 }
 
 // ResolveAttachment resolves a Feishu attachment reference to a byte stream.

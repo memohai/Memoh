@@ -127,13 +127,15 @@ func TestWeComAdapter_ReplyUsesRespondCmd(t *testing.T) {
 		t.Fatal("timeout waiting inbound callback")
 	}
 
-	err = adapter.Send(context.Background(), cfg, channel.OutboundMessage{
+	err = adapter.Send(context.Background(), cfg, channel.PreparedOutboundMessage{
 		Target: "chat_id:chat_1",
-		Message: channel.Message{
-			Format: channel.MessageFormatPlain,
-			Text:   "reply content",
-			Reply: &channel.ReplyRef{
-				MessageID: "msg_1",
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Format: channel.MessageFormatPlain,
+				Text:   "reply content",
+				Reply: &channel.ReplyRef{
+					MessageID: "msg_1",
+				},
 			},
 		},
 	})

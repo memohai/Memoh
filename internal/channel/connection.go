@@ -329,16 +329,16 @@ func (m *Manager) Stop(ctx context.Context, configID string) error {
 	}
 	m.mu.Lock()
 	entry := m.connections[configID]
+	if entry != nil {
+		delete(m.connections, configID)
+		delete(m.connectionMeta, configID)
+	}
 	m.mu.Unlock()
+
 	if entry == nil || entry.connection == nil {
 		return nil
 	}
-	err := entry.connection.Stop(ctx)
-	if err != nil {
-		return err
-	}
-	m.markConnectionStatus(entry.config, false, nil)
-	return nil
+	return entry.connection.Stop(ctx)
 }
 
 // StopByBot terminates all connections belonging to the given bot.
@@ -348,14 +348,30 @@ func (m *Manager) StopByBot(ctx context.Context, botID string) error {
 		return errors.New("bot id is required")
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var toStop []*connectionEntry
 	for id, entry := range m.connections {
 		if entry != nil && entry.config.BotID == botID {
-			if entry.connection != nil {
-				_ = entry.connection.Stop(ctx)
-			}
+			toStop = append(toStop, entry)
 			delete(m.connections, id)
 			delete(m.connectionMeta, id)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, entry := range toStop {
+		if entry.connection == nil {
+			continue
+		}
+		if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) {
+			if m.logger != nil {
+				m.logger.Warn(
+					"connection stop failed",
+					slog.String("bot_id", botID),
+					slog.String("channel", entry.config.ChannelType.String()),
+					slog.String("config_id", entry.config.ID),
+					slog.Any("error", err),
+				)
+			}
 		}
 	}
 	return nil

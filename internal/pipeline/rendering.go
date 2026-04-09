@@ -140,16 +140,6 @@ func renderMessage(msg *ICMessage, params RenderParams) RenderedSegment {
 
 	pieces := []RenderedContentPiece{{Type: "text", Text: text}}
 
-	// Append thumbnail images as separate content pieces for multimodal models.
-	for _, att := range msg.Attachments {
-		if att.AltText == "" && att.ThumbnailB64 != "" {
-			pieces = append(pieces, RenderedContentPiece{
-				Type: "image",
-				URL:  "data:image/webp;base64," + att.ThumbnailB64,
-			})
-		}
-	}
-
 	return RenderedSegment{
 		ReceivedAtMs: msg.ReceivedAtMs,
 		Content:      pieces,

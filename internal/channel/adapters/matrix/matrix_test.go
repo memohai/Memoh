@@ -863,6 +863,11 @@ func TestMatrixSendUploadsBase64AttachmentAndSendsMediaEvent(t *testing.T) {
 		}, nil
 	})}
 
+	logicalAttachment := channel.Attachment{
+		Type: channel.AttachmentImage,
+		Name: "chart.png",
+		Mime: "image/png",
+	}
 	err := adapter.Send(context.Background(), channel.ChannelConfig{
 		BotID: "bot-1",
 		Credentials: map[string]any{
@@ -870,14 +875,20 @@ func TestMatrixSendUploadsBase64AttachmentAndSendsMediaEvent(t *testing.T) {
 			"userId":        "@memoh:example.com",
 			"accessToken":   "tok",
 		},
-	}, channel.OutboundMessage{
+	}, channel.PreparedOutboundMessage{
 		Target: "!room:example.com",
-		Message: channel.Message{
-			Attachments: []channel.Attachment{{
-				Type:   channel.AttachmentImage,
-				Name:   "chart.png",
-				Mime:   "image/png",
-				Base64: "data:image/png;base64,aGVsbG8=",
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Attachments: []channel.Attachment{logicalAttachment},
+			},
+			Attachments: []channel.PreparedAttachment{{
+				Logical: logicalAttachment,
+				Kind:    channel.PreparedAttachmentUpload,
+				Name:    "chart.png",
+				Mime:    "image/png",
+				Open: func(context.Context) (io.ReadCloser, error) {
+					return io.NopCloser(strings.NewReader("hello")), nil
+				},
 			}},
 		},
 	})
@@ -922,10 +933,12 @@ func TestMatrixSendResolvesRoomAlias(t *testing.T) {
 			"userId":        "@memoh:example.com",
 			"accessToken":   "tok",
 		},
-	}, channel.OutboundMessage{
+	}, channel.PreparedOutboundMessage{
 		Target: "#ops:example.com",
-		Message: channel.Message{
-			Text: "ping",
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Text: "ping",
+			},
 		},
 	})
 	if err != nil {

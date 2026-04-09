@@ -20,7 +20,15 @@ type StreamReplySender interface {
 	OpenStream(ctx context.Context, target string, opts StreamOptions) (OutboundStream, error)
 }
 
+// PreparedOutboundStream is the adapter-facing stream session.
+type PreparedOutboundStream interface {
+	Push(ctx context.Context, event PreparedStreamEvent) error
+	Close(ctx context.Context) error
+}
+
 // OutboundStream is a live stream session for emitting outbound events.
+// Implementations are not required to be safe for concurrent use; callers
+// must serialize Push and Close calls within a single goroutine.
 type OutboundStream interface {
 	Push(ctx context.Context, event StreamEvent) error
 	Close(ctx context.Context) error
@@ -105,17 +113,17 @@ type BindingMatcher interface {
 
 // Sender is an adapter capable of sending outbound messages.
 type Sender interface {
-	Send(ctx context.Context, cfg ChannelConfig, msg OutboundMessage) error
+	Send(ctx context.Context, cfg ChannelConfig, msg PreparedOutboundMessage) error
 }
 
 // StreamSender is an adapter capable of opening outbound stream sessions.
 type StreamSender interface {
-	OpenStream(ctx context.Context, cfg ChannelConfig, target string, opts StreamOptions) (OutboundStream, error)
+	OpenStream(ctx context.Context, cfg ChannelConfig, target string, opts StreamOptions) (PreparedOutboundStream, error)
 }
 
 // MessageEditor updates and deletes already-sent messages when supported.
 type MessageEditor interface {
-	Update(ctx context.Context, cfg ChannelConfig, target string, messageID string, msg Message) error
+	Update(ctx context.Context, cfg ChannelConfig, target string, messageID string, msg PreparedMessage) error
 	Unsend(ctx context.Context, cfg ChannelConfig, target string, messageID string) error
 }
 
@@ -186,8 +194,11 @@ func (c *BaseConnection) Stop(ctx context.Context) error {
 	if c.stop == nil {
 		return ErrStopNotSupported
 	}
+	if err := c.stop(ctx); err != nil {
+		return err
+	}
 	c.running.Store(false)
-	return c.stop(ctx)
+	return nil
 }
 
 // Running reports whether the connection is still active.

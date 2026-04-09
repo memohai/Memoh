@@ -19,20 +19,20 @@ func TestModel_Validate(t *testing.T) {
 		{
 			name: "valid chat model",
 			model: models.Model{
-				ModelID:       "gpt-4",
-				Name:          "GPT-4",
-				LlmProviderID: "11111111-1111-1111-1111-111111111111",
-				Type:          models.ModelTypeChat,
+				ModelID:    "gpt-4",
+				Name:       "GPT-4",
+				ProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:       models.ModelTypeChat,
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid chat model with compatibilities",
 			model: models.Model{
-				ModelID:       "gpt-4o",
-				Name:          "GPT-4o",
-				LlmProviderID: "11111111-1111-1111-1111-111111111111",
-				Type:          models.ModelTypeChat,
+				ModelID:    "gpt-4o",
+				Name:       "GPT-4o",
+				ProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:       models.ModelTypeChat,
 				Config: models.ModelConfig{
 					Compatibilities: []string{"vision", "tool-call", "reasoning"},
 				},
@@ -42,24 +42,24 @@ func TestModel_Validate(t *testing.T) {
 		{
 			name: "valid embedding model",
 			model: models.Model{
-				ModelID:       "text-embedding-ada-002",
-				Name:          "Ada Embeddings",
-				LlmProviderID: "11111111-1111-1111-1111-111111111111",
-				Type:          models.ModelTypeEmbedding,
-				Config:        models.ModelConfig{Dimensions: intPtr(1536)},
+				ModelID:    "text-embedding-ada-002",
+				Name:       "Ada Embeddings",
+				ProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:       models.ModelTypeEmbedding,
+				Config:     models.ModelConfig{Dimensions: intPtr(1536)},
 			},
 			wantErr: false,
 		},
 		{
 			name: "missing model_id",
 			model: models.Model{
-				LlmProviderID: "11111111-1111-1111-1111-111111111111",
-				Type:          models.ModelTypeChat,
+				ProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:       models.ModelTypeChat,
 			},
 			wantErr: true,
 		},
 		{
-			name: "missing llm_provider_id",
+			name: "missing provider_id",
 			model: models.Model{
 				ModelID: "gpt-4",
 				Type:    models.ModelTypeChat,
@@ -67,38 +67,38 @@ func TestModel_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid llm_provider_id",
+			name: "invalid provider_id",
 			model: models.Model{
-				ModelID:       "gpt-4",
-				LlmProviderID: "not-a-uuid",
-				Type:          models.ModelTypeChat,
+				ModelID:    "gpt-4",
+				ProviderID: "not-a-uuid",
+				Type:       models.ModelTypeChat,
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid model type",
 			model: models.Model{
-				ModelID:       "gpt-4",
-				LlmProviderID: "11111111-1111-1111-1111-111111111111",
-				Type:          "invalid",
+				ModelID:    "gpt-4",
+				ProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:       "invalid",
 			},
 			wantErr: true,
 		},
 		{
 			name: "embedding model missing dimensions",
 			model: models.Model{
-				ModelID:       "text-embedding-ada-002",
-				LlmProviderID: "11111111-1111-1111-1111-111111111111",
-				Type:          models.ModelTypeEmbedding,
+				ModelID:    "text-embedding-ada-002",
+				ProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:       models.ModelTypeEmbedding,
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid compatibility",
 			model: models.Model{
-				ModelID:       "gpt-4",
-				LlmProviderID: "11111111-1111-1111-1111-111111111111",
-				Type:          models.ModelTypeChat,
+				ModelID:    "gpt-4",
+				ProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:       models.ModelTypeChat,
 				Config: models.ModelConfig{
 					Compatibilities: []string{"vision", "smell"},
 				},

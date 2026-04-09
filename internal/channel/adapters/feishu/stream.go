@@ -40,7 +40,7 @@ type feishuOutboundStream struct {
 	closed        atomic.Bool
 }
 
-func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEvent) error {
+func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s == nil || s.adapter == nil {
 		return errors.New("feishu stream not configured")
 	}
@@ -90,26 +90,28 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		if len(event.Attachments) == 0 {
 			return nil
 		}
-		media := channel.Message{
-			Attachments: event.Attachments,
-		}
-		return s.adapter.Send(ctx, s.cfg, channel.OutboundMessage{
-			Target:  s.target,
-			Message: media,
+		return s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
+			Target: s.target,
+			Message: channel.PreparedMessage{
+				Message: channel.Message{
+					Attachments: feishuLogicalAttachments(event.Attachments),
+				},
+				Attachments: event.Attachments,
+			},
 		})
 	case channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd:
 		return nil
 	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted, channel.StreamEventProcessingFailed:
 		return nil
 	case channel.StreamEventFinal:
-		if event.Final == nil || event.Final.Message.IsEmpty() {
+		if event.Final == nil || event.Final.Message.Message.IsEmpty() {
 			return nil
 		}
 		msg := event.Final.Message
 		bufText := strings.TrimSpace(s.textBuffer.String())
 		finalText := bufText
 		if finalText == "" {
-			finalText = strings.TrimSpace(msg.PlainText())
+			finalText = strings.TrimSpace(msg.Message.PlainText())
 		}
 		if finalText != "" {
 			if err := s.ensureCard(ctx, feishuStreamThinkingText); err != nil {
@@ -121,12 +123,13 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEve
 		}
 		if len(msg.Attachments) > 0 {
 			media := msg
-			media.Format = ""
-			media.Text = ""
-			media.Parts = nil
-			media.Actions = nil
-			media.Reply = nil
-			return s.adapter.Send(ctx, s.cfg, channel.OutboundMessage{
+			media.Message.Format = ""
+			media.Message.Text = ""
+			media.Message.Parts = nil
+			media.Message.Actions = nil
+			media.Message.Reply = nil
+			media.Message.Attachments = feishuLogicalAttachments(media.Attachments)
+			return s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
 				Target:  s.target,
 				Message: media,
 			})
@@ -144,6 +147,17 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.StreamEve
 	default:
 		return nil
 	}
+}
+
+func feishuLogicalAttachments(attachments []channel.PreparedAttachment) []channel.Attachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	logical := make([]channel.Attachment, 0, len(attachments))
+	for _, att := range attachments {
+		logical = append(logical, att.Logical)
+	}
+	return logical
 }
 
 func (s *feishuOutboundStream) Close(ctx context.Context) error {

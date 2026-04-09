@@ -51,7 +51,7 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 	}
 	cfg.ModelID = model.ModelID
 
-	provider, err := models.FetchProviderByID(ctx, r.queries, model.LlmProviderID)
+	provider, err := models.FetchProviderByID(ctx, r.queries, model.ProviderID)
 	if err != nil {
 		r.logger.Warn("compaction: failed to fetch provider", slog.Any("error", err))
 		return
@@ -65,7 +65,7 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 	cfg.ClientType = provider.ClientType
 	cfg.APIKey = creds.APIKey
 	cfg.CodexAccountID = creds.CodexAccountID
-	cfg.BaseURL = provider.BaseUrl
+	cfg.BaseURL = providers.ProviderConfigString(provider, "base_url")
 
 	r.compactionService.TriggerCompaction(ctx, cfg)
 }

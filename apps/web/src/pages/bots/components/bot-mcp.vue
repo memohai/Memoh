@@ -578,7 +578,7 @@
       <p class="text-xs text-muted-foreground mt-2">
         {{ $t('mcp.importHint') }}
       </p>
-      <div class="h-[350px] rounded-md border overflow-hidden mt-3">
+      <div class="h-87.5 rounded-md border overflow-hidden mt-3">
         <MonacoEditor
           v-model="importJson"
           language="json"
@@ -610,7 +610,7 @@
       <DialogHeader>
         <DialogTitle>{{ $t('common.export') }} mcpServers</DialogTitle>
       </DialogHeader>
-      <div class="h-[350px] rounded-md border overflow-hidden mt-4">
+      <div class="h-87.5 rounded-md border overflow-hidden mt-4">
         <MonacoEditor
           :model-value="exportJson"
           language="json"
