@@ -565,6 +565,8 @@ const { data: botSettings } = useQuery({
 const models = computed<ModelsGetResponse[]>(() => modelData.value ?? [])
 const providers = computed<ProvidersGetResponse[]>(() => providerData.value ?? [])
 
+// activeModel resolves the effective model for capability checks:
+// user override takes priority, falling back to the bot's default.
 const activeModel = computed(() => {
   const id = overrideModelId.value || botSettings.value?.chat_model_id || ''
   return models.value.find((m) => m.id === id)
@@ -580,14 +582,22 @@ const availableReasoningEfforts = computed(() => {
   return efforts.length > 0 ? efforts : ['low', 'medium', 'high']
 })
 
+// selectedModelLabel shows the user-chosen override name, or the bot default
+// name as a hint. overrideModelId itself stays empty until the user explicitly
+// picks a model, so the backend uses its own default when no override is sent.
 const selectedModelLabel = computed(() => {
-  const m = models.value.find((m) => m.id === overrideModelId.value)
+  if (overrideModelId.value) {
+    const m = models.value.find((m) => m.id === overrideModelId.value)
+    return m?.name || m?.model_id || t('chat.modelDefault')
+  }
+  const defaultId = botSettings.value?.chat_model_id || ''
+  const m = models.value.find((m) => m.id === defaultId)
   return m?.name || m?.model_id || t('chat.modelDefault')
 })
 
 const selectedReasoningLabel = computed(() => {
   const v = overrideReasoningEffort.value
-  if (v === 'off') return t('chat.reasoningOff')
+  if (!v || v === 'off') return t('chat.reasoningOff')
   return t(EFFORT_LABELS[v] ?? 'chat.modelDefault')
 })
 
@@ -595,21 +605,16 @@ const reasoningTriggerOpacity = computed(() =>
   EFFORT_OPACITY[overrideReasoningEffort.value] ?? 0.5,
 )
 
-function initFromBotSettings() {
-  if (!botSettings.value) return
-  if (!overrideModelId.value) {
-    overrideModelId.value = botSettings.value.chat_model_id ?? ''
-  }
-  if (!overrideReasoningEffort.value) {
-    if (botSettings.value.reasoning_enabled && botSettings.value.reasoning_effort) {
-      overrideReasoningEffort.value = botSettings.value.reasoning_effort
-    } else {
-      overrideReasoningEffort.value = 'off'
-    }
+function initReasoningFromBotSettings() {
+  if (!botSettings.value || overrideReasoningEffort.value) return
+  if (botSettings.value.reasoning_enabled && botSettings.value.reasoning_effort) {
+    overrideReasoningEffort.value = botSettings.value.reasoning_effort
+  } else {
+    overrideReasoningEffort.value = 'off'
   }
 }
 
-watch(botSettings, () => initFromBotSettings(), { immediate: true })
+watch(botSettings, () => initReasoningFromBotSettings(), { immediate: true })
 
 watch(currentBotId, () => {
   overrideModelId.value = ''
