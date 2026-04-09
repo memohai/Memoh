@@ -388,6 +388,17 @@ func execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) err
 		return status.Errorf(codes.Internal, "start: %v", err)
 	}
 
+	// When the context deadline fires, exec.CommandContext sends SIGKILL to the
+	// main process.  However, child processes may still hold the stdout/stderr
+	// pipe file descriptors open, causing streamPipe's Read to block forever.
+	// Closing the pipes here unblocks those reads so the function can proceed
+	// to cmd.Wait and send the EXIT message back to the client.
+	go func() {
+		<-ctx.Done()
+		_ = stdoutPipe.Close()
+		_ = stderrPipe.Close()
+	}()
+
 	go func() {
 		for {
 			msg, recvErr := stream.Recv()
