@@ -1707,3 +1707,30 @@ func TestMapChannelToChatAttachments(t *testing.T) {
 		t.Fatalf("expected non-asset attachment URL, got %q", mapped[1].URL)
 	}
 }
+
+func TestParseAttachmentDeltaPreservesBase64(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal([]conversation.ChatAttachment{{
+		Type:   string(channel.AttachmentVideo),
+		URL:    "/data/media/output.mp4",
+		Base64: "data:video/mp4;base64,AAAA",
+		Name:   "output.mp4",
+		Mime:   "video/mp4",
+	}})
+	if err != nil {
+		t.Fatalf("marshal attachments: %v", err)
+	}
+
+	attachments := parseAttachmentDelta(raw)
+
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(attachments))
+	}
+	if got := attachments[0].Base64; got != "data:video/mp4;base64,AAAA" {
+		t.Fatalf("expected base64 preserved, got %q", got)
+	}
+	if got := attachments[0].URL; got != "/data/media/output.mp4" {
+		t.Fatalf("expected url preserved, got %q", got)
+	}
+}

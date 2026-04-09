@@ -860,3 +860,21 @@ func TestFileNameFromMime(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveTelegramFile_ContainerPathWithBase64FallbackForVideo(t *testing.T) {
+	t.Parallel()
+
+	dataURL := "data:video/mp4;base64,AAAA"
+	att := channel.Attachment{Type: channel.AttachmentVideo, URL: "/data/media/output.mp4", Base64: dataURL, Name: "output.mp4", Mime: "video/mp4"}
+	file, err := resolveTelegramFile(context.Background(), att.URL, "", att.Base64, "", att, "", "", nil)
+	if err != nil {
+		t.Fatalf("resolveTelegramFile returned error: %v", err)
+	}
+	bytes, ok := file.(tgbotapi.FileBytes)
+	if !ok {
+		t.Fatalf("expected FileBytes, got %T", file)
+	}
+	if bytes.Name != "output.mp4" {
+		t.Fatalf("expected output.mp4, got %q", bytes.Name)
+	}
+}

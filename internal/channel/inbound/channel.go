@@ -2208,6 +2208,7 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 		Path        string         `json:"path"`
 		PlatformKey string         `json:"platform_key"`
 		ContentHash string         `json:"content_hash"`
+		Base64      string         `json:"base64"`
 		Name        string         `json:"name"`
 		Mime        string         `json:"mime"`
 		Size        int64          `json:"size"`
@@ -2231,6 +2232,7 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 			URL:         url,
 			PlatformKey: strings.TrimSpace(item.PlatformKey),
 			ContentHash: strings.TrimSpace(item.ContentHash),
+			Base64:      strings.TrimSpace(item.Base64),
 			Name:        name,
 			Mime:        strings.TrimSpace(item.Mime),
 			Size:        item.Size,
