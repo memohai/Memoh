@@ -237,7 +237,12 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		loaded = pruneHistoryForGateway(loaded)
 		loaded = dedupePersistedCurrentUserMessage(loaded, req)
 		loaded = r.replaceCompactedMessages(ctx, loaded)
-		messages = trimMessagesByTokens(r.logger, loaded, 0)
+		botSettings, _ := r.loadBotSettings(ctx, req.BotID)
+		contextTokenBudget := 0
+		if botSettings.ContextTokenBudget > 0 {
+			contextTokenBudget = botSettings.ContextTokenBudget
+		}
+		messages = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
 	}
 	if memoryMsg != nil {
 		messages = append(messages, *memoryMsg)

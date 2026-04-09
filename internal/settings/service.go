@@ -98,6 +98,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if req.CompactionRatio != nil && *req.CompactionRatio >= 1 && *req.CompactionRatio <= 100 {
 		current.CompactionRatio = *req.CompactionRatio
 	}
+	if req.PersistFullToolResults != nil {
+		current.PersistFullToolResults = *req.PersistFullToolResults
+	}
 	timezoneValue := pgtype.Text{}
 	if req.Timezone != nil {
 		normalized, err := normalizeOptionalTimezone(*req.Timezone)
@@ -180,27 +183,35 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		browserContextUUID = ctxID
 	}
+	contextTokenBudgetValue := pgtype.Int4{}
+	if req.ContextTokenBudget != nil && *req.ContextTokenBudget >= 0 {
+		current.ContextTokenBudget = *req.ContextTokenBudget
+		contextTokenBudgetValue = pgtype.Int4{Int32: int32(*req.ContextTokenBudget), Valid: true}
+	}
+
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
-		ID:                  pgID,
-		Timezone:            timezoneValue,
-		Language:            current.Language,
-		ReasoningEnabled:    current.ReasoningEnabled,
-		ReasoningEffort:     current.ReasoningEffort,
-		HeartbeatEnabled:    current.HeartbeatEnabled,
-		HeartbeatInterval:   int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
-		HeartbeatPrompt:     "",
-		CompactionEnabled:   current.CompactionEnabled,
-		CompactionThreshold: int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
-		CompactionRatio:     int32(current.CompactionRatio),     //nolint:gosec // bounded 1-100 above
-		ChatModelID:         chatModelUUID,
-		HeartbeatModelID:    heartbeatModelUUID,
-		CompactionModelID:   compactionModelUUID,
-		TitleModelID:        titleModelUUID,
-		ImageModelID:        imageModelUUID,
-		SearchProviderID:    searchProviderUUID,
-		MemoryProviderID:    memoryProviderUUID,
-		TtsModelID:          ttsModelUUID,
-		BrowserContextID:    browserContextUUID,
+		ID:                      pgID,
+		Timezone:                timezoneValue,
+		Language:                current.Language,
+		ReasoningEnabled:        current.ReasoningEnabled,
+		ReasoningEffort:         current.ReasoningEffort,
+		HeartbeatEnabled:        current.HeartbeatEnabled,
+		HeartbeatInterval:       int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
+		HeartbeatPrompt:         "",
+		CompactionEnabled:       current.CompactionEnabled,
+		CompactionThreshold:     int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
+		CompactionRatio:         int32(current.CompactionRatio),     //nolint:gosec // bounded 1-100 above
+		ChatModelID:             chatModelUUID,
+		HeartbeatModelID:        heartbeatModelUUID,
+		CompactionModelID:       compactionModelUUID,
+		TitleModelID:            titleModelUUID,
+		ImageModelID:            imageModelUUID,
+		SearchProviderID:        searchProviderUUID,
+		MemoryProviderID:        memoryProviderUUID,
+		TtsModelID:              ttsModelUUID,
+		BrowserContextID:        browserContextUUID,
+		ContextTokenBudget:      contextTokenBudgetValue,
+		PersistFullToolResults:  current.PersistFullToolResults,
 	})
 	if err != nil {
 		return Settings{}, err
@@ -294,6 +305,8 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.BrowserContextID,
+		row.ContextTokenBudget,
+		row.PersistFullToolResults,
 	)
 }
 
@@ -317,6 +330,8 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.BrowserContextID,
+		row.ContextTokenBudget,
+		row.PersistFullToolResults,
 	)
 }
 
@@ -339,6 +354,8 @@ func normalizeBotSettingsFields(
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
 	browserContextID pgtype.UUID,
+	contextTokenBudget pgtype.Int4,
+	persistFullToolResults bool,
 ) Settings {
 	settings := normalizeBotSetting(language, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionRatio)
 	if timezone.Valid {
@@ -371,6 +388,10 @@ func normalizeBotSettingsFields(
 	if browserContextID.Valid {
 		settings.BrowserContextID = uuid.UUID(browserContextID.Bytes).String()
 	}
+	if contextTokenBudget.Valid {
+		settings.ContextTokenBudget = int(contextTokenBudget.Int32)
+	}
+	settings.PersistFullToolResults = persistFullToolResults
 	return settings
 }
 

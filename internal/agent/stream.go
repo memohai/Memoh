@@ -21,6 +21,7 @@ const (
 	EventAgentEnd       StreamEventType = "agent_end"
 	EventAgentAbort     StreamEventType = "agent_abort"
 	EventRetry          StreamEventType = "retry"
+	EventProgress      StreamEventType = "progress"
 	EventError          StreamEventType = "error"
 )
 
@@ -42,6 +43,9 @@ type StreamEvent struct {
 	Attempt     int              `json:"attempt,omitempty"`
 	MaxAttempt  int              `json:"maxAttempt,omitempty"`
 	RetryError  string           `json:"retryError,omitempty"`
+	StepNumber  int              `json:"stepNumber,omitempty"`
+	TotalSteps  int              `json:"totalSteps,omitempty"`
+	ProgressStatus string         `json:"progressStatus,omitempty"`
 }
 
 // IsTerminal returns true for events that signal end of stream.

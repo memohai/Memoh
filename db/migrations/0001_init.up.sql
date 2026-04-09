@@ -155,6 +155,8 @@ CREATE TABLE IF NOT EXISTS bots (
   discuss_probe_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   browser_context_id UUID REFERENCES browser_contexts(id) ON DELETE SET NULL,
+  context_token_budget INTEGER,
+  persist_full_tool_results BOOLEAN NOT NULL DEFAULT false,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

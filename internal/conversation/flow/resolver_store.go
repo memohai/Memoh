@@ -60,6 +60,12 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	if strings.TrimSpace(req.BotID) == "" {
 		return
 	}
+
+	// Check bot setting for full tool result persistence.
+	pruneToolResults := true
+	if botSettings, err := r.loadBotSettings(ctx, req.BotID); err == nil {
+		pruneToolResults = !botSettings.PersistFullToolResults
+	}
 	meta := buildRouteMetadata(req)
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
 
@@ -80,6 +86,15 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 
 	for i, msg := range messages {
 		msg = normalizeUserMessageContent(msg)
+
+		// Prune tool results at store time to reduce DB bloat.
+		// This prevents ~10KB+ tool outputs from being stored verbatim.
+		if pruneToolResults {
+			if pruned, changed := pruneMessageForGateway(msg); changed {
+				msg = pruned
+			}
+		}
+
 		content, err := json.Marshal(msg)
 		if err != nil {
 			r.logger.Warn("storeMessages: marshal failed", slog.Any("error", err))

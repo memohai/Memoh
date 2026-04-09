@@ -50,14 +50,21 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		cfg := rc.runConfig
 		cfg = r.prepareRunConfig(ctx, cfg)
 
-		// Wrap with idle timeout: if no events arrive within 90s, cancel the stream.
+		// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
 		idleCtx, idleCancel := withIdleTimeout(ctx)
 		defer idleCancel.Stop()
 
 		eventCh := r.agent.Stream(idleCtx, cfg)
 		stored := false
+		var toolCallCount int
 		for event := range eventCh {
 			idleCancel.Reset() // each event resets the idle timer
+
+			// Track tool calls for adaptive idle timeout and progress events
+			if event.Type == agentpkg.EventToolCallStart {
+				toolCallCount++
+				idleCancel.RecordToolCall()
+			}
 
 			if event.Type == agentpkg.EventError {
 				r.logger.Error("agent stream error",
@@ -86,17 +93,23 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			}
 		}
 
+		// Intermediate persistence on abort/error: if stream ended without
+		// storing results and we accumulated tool calls, persist partial results.
+		if !stored && toolCallCount > 0 {
+			r.persistPartialResult(ctx, streamReq, rc, toolCallCount, idleCancel.DidFire())
+		}
+
 		if idleCancel.DidFire() {
 			r.logger.Warn("agent stream aborted: idle timeout (no events from provider)",
 				slog.String("bot_id", streamReq.BotID),
 				slog.String("chat_id", streamReq.ChatID),
 				slog.String("model_id", rc.model.ID),
-				slog.Duration("idle_timeout", idleTimeout),
+				slog.Int("tool_calls", toolCallCount),
 			)
 			// Notify the client that the stream was terminated due to idle timeout.
 			timeoutEvent := agentpkg.StreamEvent{
 				Type:  agentpkg.EventError,
-				Error: "stream timeout: no response from model provider",
+				Error: fmt.Sprintf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount),
 			}
 			if data, err := json.Marshal(timeoutEvent); err == nil {
 				select {
@@ -142,15 +155,22 @@ func (r *Resolver) StreamChatWS(
 	cfg := rc.runConfig
 	cfg = r.prepareRunConfig(streamCtx, cfg)
 
-	// Wrap with idle timeout: if no events arrive within 90s, cancel the stream.
+	// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
 	idleCtx, idleCancel := withIdleTimeout(streamCtx)
 	defer idleCancel.Stop()
 
 	agentEventCh := r.agent.Stream(idleCtx, cfg)
 	modelID := rc.model.ID
 	stored := false
+	var toolCallCount int
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
+
+		// Track tool calls for adaptive idle timeout
+		if event.Type == agentpkg.EventToolCallStart {
+			toolCallCount++
+			idleCancel.RecordToolCall()
+		}
 
 		if event.Type == agentpkg.EventError {
 			r.logger.Error("agent stream error",
@@ -181,17 +201,22 @@ func (r *Resolver) StreamChatWS(
 		}
 	}
 
+	// Intermediate persistence on abort/error
+	if !stored && toolCallCount > 0 {
+		r.persistPartialResult(ctx, req, rc, toolCallCount, idleCancel.DidFire())
+	}
+
 	if idleCancel.DidFire() {
 		r.logger.Warn("agent ws stream aborted: idle timeout (no events from provider)",
 			slog.String("bot_id", req.BotID),
 			slog.String("chat_id", req.ChatID),
 			slog.String("model_id", modelID),
-			slog.Duration("idle_timeout", idleTimeout),
+			slog.Int("tool_calls", toolCallCount),
 		)
 		// Notify the client that the stream was terminated due to idle timeout.
 		timeoutEvent := agentpkg.StreamEvent{
 			Type:  agentpkg.EventError,
-			Error: "stream timeout: no response from model provider",
+			Error: fmt.Sprintf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount),
 		}
 		if data, err := json.Marshal(timeoutEvent); err == nil {
 			select {
@@ -238,6 +263,35 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	}
 
 	return true, nil
+}
+
+// persistPartialResult stores a synthetic assistant message when the agent
+// stream was interrupted (error, abort, idle timeout) after completing tool
+// calls but before producing a final response. This preserves intermediate
+// progress so the user can see what was accomplished and ask the bot to continue.
+func (r *Resolver) persistPartialResult(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, toolCallCount int, wasIdleTimeout bool) {
+	reason := "provider error"
+	if wasIdleTimeout {
+		reason = "provider idle timeout"
+	}
+	syntheticMsg := fmt.Sprintf("[Agent interrupted after %d tool calls: %s. Partial results saved — ask the bot to continue.]", toolCallCount, reason)
+
+	roundMessages := []conversation.ModelMessage{
+		{Role: "assistant", Content: conversation.NewTextContent(syntheticMsg)},
+	}
+
+	if err := r.storeRound(context.WithoutCancel(ctx), req, roundMessages, rc.model.ID); err != nil {
+		r.logger.Error("failed to persist partial result",
+			slog.String("bot_id", req.BotID),
+			slog.Any("error", err),
+		)
+	} else {
+		r.logger.Info("persisted partial result after interruption",
+			slog.String("bot_id", req.BotID),
+			slog.Int("tool_calls", toolCallCount),
+			slog.String("reason", reason),
+		)
+	}
 }
 
 // interleaveInjectedMessages inserts injected user messages at their correct
