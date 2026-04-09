@@ -57,7 +57,7 @@ services:
       - memoh-network
 
   web:
-    image: memohai/web:local
+    image: memohai/web:latest
     container_name: memoh-web
     ports:
       - "8082:8082"

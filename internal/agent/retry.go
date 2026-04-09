@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -15,6 +15,9 @@ type RetryConfig struct {
 	BaseDelay   time.Duration
 	MaxDelay    time.Duration
 }
+
+// serverErrPattern matches "api error 5XX" where XX is any two digits.
+var serverErrPattern = regexp.MustCompile(`api error 5\d{2}`)
 
 // DefaultRetryConfig returns sensible defaults for LLM provider retries.
 func DefaultRetryConfig() RetryConfig {
@@ -48,10 +51,8 @@ func isRetryableStreamError(err error) bool {
 	if strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "rate_limit") {
 		return true
 	}
-	for code := 500; code <= 599; code++ {
-		if strings.Contains(errStr, fmt.Sprintf("api error %d", code)) {
-			return true
-		}
+	if serverErrPattern.MatchString(errStr) {
+		return true
 	}
 	// Connection reset / EOF
 	if strings.Contains(errStr, "connection reset") ||
@@ -64,8 +65,5 @@ func isRetryableStreamError(err error) bool {
 
 func retryBackoff(attempt int, cfg RetryConfig) time.Duration {
 	delay := cfg.BaseDelay * time.Duration(1<<uint(attempt)) // exponential
-	if delay > cfg.MaxDelay {
-		delay = cfg.MaxDelay
-	}
-	return delay
+	return min(delay, cfg.MaxDelay)
 }

@@ -124,28 +124,28 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				if !ok {
 					break injectLoop
 				}
-					text := strings.TrimSpace(injected.HeaderifiedText)
-					if text == "" {
-						text = strings.TrimSpace(injected.Text)
-					}
-					if text != "" {
-						insertAfter := len(p.Messages) - initialMsgCount
-						p.Messages = append(p.Messages, sdk.UserMessage(text))
-						if cfg.InjectedRecorder != nil {
-							cfg.InjectedRecorder(text, insertAfter)
-						}
-						a.logger.Info("injected user message into agent stream",
-							slog.String("bot_id", cfg.Identity.BotID),
-							slog.Int("insert_after", insertAfter),
-						)
-					}
-					continue
-				default:
+				text := strings.TrimSpace(injected.HeaderifiedText)
+				if text == "" {
+					text = strings.TrimSpace(injected.Text)
 				}
-				break
+				if text != "" {
+					insertAfter := len(p.Messages) - initialMsgCount
+					p.Messages = append(p.Messages, sdk.UserMessage(text))
+					if cfg.InjectedRecorder != nil {
+						cfg.InjectedRecorder(text, insertAfter)
+					}
+					a.logger.Info("injected user message into agent stream",
+						slog.String("bot_id", cfg.Identity.BotID),
+						slog.Int("insert_after", insertAfter),
+					)
+				}
+				continue
+			default:
 			}
-			return p
-		}
+		break
+	}
+	return p
+	}
 	}
 
 	opts := a.buildGenerateOptions(cfg, sdkTools, prepareStep)
