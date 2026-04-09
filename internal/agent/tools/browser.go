@@ -287,8 +287,7 @@ func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base
 		p.emitScreenshotAttachment(session, base64Data, mimeType, "", 0)
 		return map[string]any{
 			"content": []map[string]any{
-				{"type": "text", "text": "Screenshot captured (failed to decode for saving)"},
-				{"type": "image", "data": base64Data, "mimeType": mimeType},
+				{"type": "text", "text": "Screenshot captured and sent to user (failed to decode for saving to disk)"},
 			},
 		}
 	}
@@ -298,8 +297,7 @@ func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base
 		p.emitScreenshotAttachment(session, base64Data, mimeType, "", int64(len(imgBytes)))
 		return map[string]any{
 			"content": []map[string]any{
-				{"type": "text", "text": "Screenshot captured (container not reachable, not saved to disk)"},
-				{"type": "image", "data": base64Data, "mimeType": mimeType},
+				{"type": "text", "text": "Screenshot captured and sent to user (container not reachable, not saved to disk)"},
 			},
 		}
 	}
@@ -309,16 +307,14 @@ func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base
 		p.emitScreenshotAttachment(session, base64Data, mimeType, "", int64(len(imgBytes)))
 		return map[string]any{
 			"content": []map[string]any{
-				{"type": "text", "text": fmt.Sprintf("Screenshot captured (failed to save: %s)", writeErr.Error())},
-				{"type": "image", "data": base64Data, "mimeType": mimeType},
+				{"type": "text", "text": fmt.Sprintf("Screenshot captured and sent to user (failed to save: %s)", writeErr.Error())},
 			},
 		}
 	}
 	p.emitScreenshotAttachment(session, base64Data, mimeType, containerPath, int64(len(imgBytes)))
 	return map[string]any{
 		"content": []map[string]any{
-			{"type": "text", "text": fmt.Sprintf("Screenshot saved to %s", containerPath)},
-			{"type": "image", "data": base64Data, "mimeType": mimeType},
+			{"type": "text", "text": fmt.Sprintf("Screenshot saved to %s and sent to user", containerPath)},
 		},
 	}
 }
