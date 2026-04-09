@@ -6,6 +6,8 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/usagejson"
+
 	"github.com/memohai/memoh/internal/conversation"
 )
 
@@ -26,7 +28,7 @@ func sdkMessagesToModelMessages(msgs []sdk.Message) []conversation.ModelMessage 
 		}
 		var usage json.RawMessage
 		if msg.Usage != nil {
-			usage, _ = json.Marshal(msg.Usage)
+			usage = usagejson.MarshalPtr(msg.Usage)
 		}
 		result = append(result, conversation.ModelMessage{
 			Role:    string(msg.Role),

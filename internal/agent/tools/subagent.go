@@ -12,6 +12,8 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/usagejson"
+
 	"github.com/memohai/memoh/internal/db/sqlc"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
@@ -278,7 +280,7 @@ func (p *SpawnProvider) persistMessages(
 		}
 		var usage json.RawMessage
 		if msg.Usage != nil {
-			usage, _ = json.Marshal(msg.Usage)
+			usage = usagejson.MarshalPtr(msg.Usage)
 		}
 		if _, err := p.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:     botID,

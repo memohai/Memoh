@@ -10,6 +10,8 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/usagejson"
+
 	"github.com/memohai/memoh/internal/agent/tools"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -284,7 +286,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		totalUsage.OutputTokenDetails.TextTokens += step.Usage.OutputTokenDetails.TextTokens
 		totalUsage.OutputTokenDetails.ReasoningTokens += step.Usage.OutputTokenDetails.ReasoningTokens
 	}
-	usageJSON, _ := json.Marshal(totalUsage)
+	usageJSON := usagejson.Marshal(totalUsage)
 
 	termEvent := StreamEvent{
 		Messages: mustMarshal(finalMessages),

@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/usagejson"
+
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/models"
@@ -126,7 +128,7 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		return err
 	}
 
-	usageJSON, _ := json.Marshal(result.Usage)
+	usageJSON := usagejson.Marshal(result.Usage)
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
 

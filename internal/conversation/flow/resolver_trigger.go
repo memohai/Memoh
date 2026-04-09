@@ -9,6 +9,8 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/usagejson"
+
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/heartbeat"
@@ -61,7 +63,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 	roundMessages := prependUserMessage(req.Query, outputMessages)
 	storeErr := r.storeRound(ctx, req, roundMessages, rc.model.ID)
 
-	totalUsageJSON, _ := json.Marshal(result.Usage)
+	totalUsageJSON := usagejson.Marshal(result.Usage)
 	return schedule.TriggerResult{
 		Status:     "ok",
 		Text:       strings.TrimSpace(result.Text),
@@ -131,7 +133,7 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 	roundMessages := prependUserMessage(heartbeatPrompt, outputMessages)
 	_ = r.storeRound(ctx, req, roundMessages, rc.model.ID)
 
-	totalUsageJSON, _ := json.Marshal(result.Usage)
+	totalUsageJSON := usagejson.Marshal(result.Usage)
 	return heartbeat.TriggerResult{
 		Status:     status,
 		Text:       text,
