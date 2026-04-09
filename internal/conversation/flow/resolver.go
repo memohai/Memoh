@@ -179,6 +179,8 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		ReplyTarget:       req.ReplyTarget,
 		ConversationType:  req.ConversationType,
 		SessionToken:      req.ChatToken,
+		Model:             req.Model,
+		Provider:          req.Provider,
 		ReasoningEffort:   req.ReasoningEffort,
 	})
 	if err != nil {
@@ -339,6 +341,8 @@ type baseRunConfigParams struct {
 	ConversationType  string
 	SessionToken      string //nolint:gosec // session credential material, not a hardcoded secret
 	SessionType       string
+	Model             string
+	Provider          string
 	ReasoningEffort   string // caller-provided override (empty = use bot default)
 }
 
@@ -358,12 +362,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		chatID = p.BotID
 	}
 
-	req := conversation.ChatRequest{
-		BotID:          p.BotID,
-		ChatID:         chatID,
-		SessionID:      p.SessionID,
-		CurrentChannel: p.CurrentPlatform,
-	}
+	req := buildModelSelectionRequest(p, chatID)
 
 	chatModel, provider, err := r.selectChatModel(ctx, req, botSettings, conversation.Settings{})
 	if err != nil {
@@ -434,6 +433,17 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	}
 
 	return cfg, chatModel, provider, nil
+}
+
+func buildModelSelectionRequest(p baseRunConfigParams, chatID string) conversation.ChatRequest {
+	return conversation.ChatRequest{
+		BotID:          p.BotID,
+		ChatID:         chatID,
+		SessionID:      p.SessionID,
+		CurrentChannel: p.CurrentPlatform,
+		Model:          p.Model,
+		Provider:       p.Provider,
+	}
 }
 
 // ResolveRunConfig builds a complete RunConfig (model, system prompt, tools,
