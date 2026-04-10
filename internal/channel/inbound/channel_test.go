@@ -369,20 +369,20 @@ func (*fakeStorageProvider) AccessPath(key string) string {
 	return "/data/media/" + key
 }
 
-type fakeResolverAdapter struct {
+type fakeAttachmentResolverAdapter struct {
 	typ     channel.ChannelType
 	payload channel.AttachmentPayload
 	calls   int
 }
 
-func (f *fakeResolverAdapter) Type() channel.ChannelType {
+func (f *fakeAttachmentResolverAdapter) Type() channel.ChannelType {
 	if f != nil && strings.TrimSpace(f.typ.String()) != "" {
 		return f.typ
 	}
 	return channel.ChannelType("resolver-test")
 }
 
-func (f *fakeResolverAdapter) Descriptor() channel.Descriptor {
+func (f *fakeAttachmentResolverAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        f.Type(),
 		DisplayName: "ResolverTest",
@@ -393,7 +393,7 @@ func (f *fakeResolverAdapter) Descriptor() channel.Descriptor {
 	}
 }
 
-func (f *fakeResolverAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, att channel.Attachment) (channel.AttachmentPayload, error) {
+func (f *fakeAttachmentResolverAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, att channel.Attachment) (channel.AttachmentPayload, error) {
 	if strings.TrimSpace(att.PlatformKey) == "" && strings.TrimSpace(att.SourcePlatform) == "" {
 		return channel.AttachmentPayload{}, channel.ErrAttachmentNotResolvable
 	}
@@ -1049,7 +1049,7 @@ func TestChannelInboundProcessorIngestsPlatformKeyWithResolver(t *testing.T) {
 		},
 	}
 	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeResolverAdapter{})
+	registry.MustRegister(&fakeAttachmentResolverAdapter{})
 	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	mediaSvc := &fakeMediaIngestor{nextID: "asset-resolved-1", nextMime: "application/octet-stream"}
 	processor.SetMediaService(mediaSvc)
@@ -1178,7 +1178,7 @@ func TestChannelInboundProcessorIngestsQQFileAttachmentKeepsOriginalExtWhenMimeG
 		},
 	}
 	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeResolverAdapter{
+	registry.MustRegister(&fakeAttachmentResolverAdapter{
 		typ: channel.ChannelType("qq"),
 		payload: channel.AttachmentPayload{
 			Reader: io.NopCloser(bytes.NewReader([]byte{0x00, 0x01, 0x02, 0x03, 0x04})),
@@ -1318,7 +1318,7 @@ func TestChannelInboundProcessorUsesPlatformResolver(t *testing.T) {
 			},
 		},
 	}
-	resolver := &fakeResolverAdapter{
+	resolver := &fakeAttachmentResolverAdapter{
 		typ: channel.ChannelType("resolver-test"),
 		payload: channel.AttachmentPayload{
 			Reader: io.NopCloser(strings.NewReader("resolver-image-bytes")),
