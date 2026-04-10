@@ -313,7 +313,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			// the agent run from the accumulated state.
 			if isRetryableStreamError(p.Error) && stepNumber > 0 {
 				streamResult, aborted = a.runMidStreamRetry(
-					ctx, ch, cfg, sdkTools, streamResult,
+					ctx, ch, cfg, sdkTools, prepareStep, streamResult,
 					stepNumber, errMsg, &allText,
 				)
 			} else {
@@ -478,13 +478,21 @@ func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep 
 	// When the message array grows large during multi-tool runs, this prunes
 	// older tool results to keep the context window manageable.
 	basePrepare := prepareStep
+	keepSteps := cfg.MidTaskPruneKeepSteps
+	if keepSteps <= 0 {
+		keepSteps = MidTaskPruneKeepStepsDefault
+	}
+	threshold := cfg.MidTaskPruneThreshold
+	if threshold <= 0 {
+		threshold = MidTaskPruneThresholdDefault
+	}
 	midTaskPrune := func(p *sdk.GenerateParams) *sdk.GenerateParams {
 		if basePrepare != nil {
 			if override := basePrepare(p); override != nil {
 				p = override
 			}
 		}
-		return pruneOldToolResults(p)
+		return pruneOldToolResults(p, keepSteps, threshold)
 	}
 	opts = append(opts, sdk.WithPrepareStep(midTaskPrune))
 
@@ -607,32 +615,51 @@ func wrapToolsWithLoopGuard(tools []sdk.Tool, guard *ToolLoopGuard, abortCallIDs
 }
 
 const (
-	// midTaskPruneKeepSteps is the number of recent tool-call steps to keep
+	// MidTaskPruneKeepStepsDefault is the number of recent tool-call steps to keep
 	// intact when pruning older tool results during a multi-step agent run.
-	midTaskPruneKeepSteps = 4
-	// midTaskPruneThreshold is the minimum number of messages before pruning activates.
-	midTaskPruneThreshold = 20
+	MidTaskPruneKeepStepsDefault = 4
+	// MidTaskPruneThresholdDefault is the minimum number of messages before pruning activates.
+	MidTaskPruneThresholdDefault = 20
 )
 
 // pruneOldToolResults prunes older tool result messages in the SDK params to
 // keep the context window manageable during long multi-tool agent runs. It
-// keeps the most recent `midTaskPruneKeepSteps` tool-call cycles intact and
-// replaces older tool results with size summaries.
-func pruneOldToolResults(p *sdk.GenerateParams) *sdk.GenerateParams {
+// keeps the most recent keepSteps tool-call cycles intact and replaces older
+// tool results with size summaries.
+func pruneOldToolResults(p *sdk.GenerateParams, keepSteps, threshold int) *sdk.GenerateParams {
 	msgs := p.Messages
-	if len(msgs) < midTaskPruneThreshold {
+	if len(msgs) < threshold {
 		return p
 	}
 
-	// Count tool messages from the end to find the cutoff.
-	toolMsgCount := 0
+	// Count complete tool-call cycles (tool-result pair) from the end to find the cutoff.
+	toolResultCount := 0
 	cutoffIdx := len(msgs)
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == sdk.MessageRoleTool {
-			toolMsgCount++
-			if toolMsgCount > midTaskPruneKeepSteps {
-				cutoffIdx = i
-				break
+			// Check that the preceding assistant message contains the matching tool call
+			// to ensure we count complete cycles, not orphaned results.
+			hasMatchingCall := false
+			for j := i - 1; j >= 0; j-- {
+				if msgs[j].Role == sdk.MessageRoleAssistant {
+					// If there's another tool result between this and the assistant msg,
+					// it means this assistant message belongs to a different cycle.
+					if j+1 < i && msgs[j+1].Role == sdk.MessageRoleTool {
+						break
+					}
+					hasMatchingCall = true
+					break
+				}
+				if msgs[j].Role == sdk.MessageRoleUser {
+					break
+				}
+			}
+			if hasMatchingCall {
+				toolResultCount++
+				if toolResultCount > keepSteps {
+					cutoffIdx = i
+					break
+				}
 			}
 		}
 	}
@@ -640,24 +667,30 @@ func pruneOldToolResults(p *sdk.GenerateParams) *sdk.GenerateParams {
 		return p // not enough tool messages to prune
 	}
 
-	// Prune tool messages before the cutoff.
-	pruned := make([]sdk.Message, len(msgs))
-	copy(pruned, msgs)
-	for i := 0; i < cutoffIdx; i++ {
-		if pruned[i].Role != sdk.MessageRoleTool {
+	// Build a new slice so the original messages can be GC'd.
+	pruned := make([]sdk.Message, 0, len(msgs))
+	pruned = append(pruned, msgs[:cutoffIdx]...)
+	for i := cutoffIdx; i < len(msgs); i++ {
+		if msgs[i].Role != sdk.MessageRoleTool {
+			pruned = append(pruned, msgs[i])
 			continue
 		}
 		// Measure content size from ToolResultPart entries.
 		contentSize := 0
-		for _, part := range pruned[i].Content {
+		for _, part := range msgs[i].Content {
 			if tr, ok := part.(sdk.ToolResultPart); ok {
 				contentSize += len(fmt.Sprintf("%v", tr.Result))
 			}
 		}
 		if contentSize > 512 { // only prune if content is large enough
-			pruned[i].Content = []sdk.MessagePart{
-				sdk.TextPart{Text: fmt.Sprintf("[tool result pruned: %d bytes]", contentSize)},
-			}
+			pruned = append(pruned, sdk.Message{
+				Role: msgs[i].Role,
+				Content: []sdk.MessagePart{
+					sdk.TextPart{Text: fmt.Sprintf("[tool result pruned: %d bytes]", contentSize)},
+				},
+			})
+		} else {
+			pruned = append(pruned, msgs[i])
 		}
 	}
 
@@ -673,6 +706,7 @@ func (a *Agent) runMidStreamRetry(
 	ch chan<- StreamEvent,
 	cfg RunConfig,
 	sdkTools []sdk.Tool,
+	prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams,
 	prevResult *sdk.StreamResult,
 	stepNumber int,
 	errMsg string,
@@ -700,23 +734,12 @@ func (a *Agent) runMidStreamRetry(
 			}
 		}
 
-		// Re-invoke StreamText with accumulated messages
-		retryOpts := []sdk.GenerateOption{
-			sdk.WithModel(cfg.Model),
-			sdk.WithMessages(prevResult.Messages),
-			sdk.WithSystem(cfg.System),
-			sdk.WithMaxSteps(-1),
-		}
-		if len(sdkTools) > 0 && cfg.SupportsToolCall {
-			retryOpts = append(retryOpts, sdk.WithTools(sdkTools))
-		}
-		retryOpts = append(retryOpts, models.BuildReasoningOptions(models.SDKModelConfig{
-			ClientType: models.ResolveClientType(cfg.Model),
-			ReasoningConfig: &models.ReasoningConfig{
-				Enabled: cfg.ReasoningEffort != "",
-				Effort:  cfg.ReasoningEffort,
-			},
-		})...)
+		// Re-invoke StreamText with accumulated messages.
+		// Use buildGenerateOptions so retry benefits from mid-task pruning,
+		// media resolution, and other prepare-step logic — same as initial stream.
+		retryCfgCopy := cfg
+		retryCfgCopy.Messages = prevResult.Messages
+		retryOpts := a.buildGenerateOptions(retryCfgCopy, sdkTools, prepareStep)
 
 		retryResult, retryErr := a.client.StreamText(ctx, retryOpts...)
 		if retryErr != nil {
@@ -724,6 +747,8 @@ func (a *Agent) runMidStreamRetry(
 				slog.Int("attempt", attempt+1),
 				slog.String("error", retryErr.Error()),
 			)
+			// Update errMsg so the next retry event shows the latest error.
+			errMsg = retryErr.Error()
 			continue
 		}
 
