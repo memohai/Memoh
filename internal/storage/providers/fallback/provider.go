@@ -5,6 +5,7 @@ package fallback
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/memohai/memoh/internal/storage"
@@ -84,12 +85,16 @@ func tryListPrefix(ctx context.Context, p storage.Provider, prefix string) ([]st
 
 // OpenContainerFile delegates to whichever inner provider implements
 // storage.ContainerFileOpener, trying the primary first.
+// If the primary implements the interface but returns an error, that error
+// is propagated rather than silently swallowed — the secondary is only tried
+// when the primary does not implement ContainerFileOpener at all.
 func (p *Provider) OpenContainerFile(ctx context.Context, botID, containerPath string) (io.ReadCloser, error) {
 	if opener, ok := p.primary.(storage.ContainerFileOpener); ok {
 		rc, err := opener.OpenContainerFile(ctx, botID, containerPath)
-		if err == nil {
-			return rc, nil
+		if err != nil {
+			return nil, fmt.Errorf("primary provider: %w", err)
 		}
+		return rc, nil
 	}
 	if opener, ok := p.secondary.(storage.ContainerFileOpener); ok {
 		return opener.OpenContainerFile(ctx, botID, containerPath)
