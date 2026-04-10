@@ -67,3 +67,19 @@ func TestWeixinAdapter_Interfaces(_ *testing.T) {
 	// ProcessingStatusNotifier
 	var _ channel.ProcessingStatusNotifier = adapter
 }
+
+func TestWeixinCanResolveRejectsURLOnlyAttachment(t *testing.T) {
+	adapter := NewWeixinAdapter(nil)
+
+	if adapter.CanResolve(channel.ChannelConfig{}, channel.Attachment{URL: "https://example.com/file.jpg"}) {
+		t.Fatal("expected URL-only attachment to fall back to generic resolver")
+	}
+	if !adapter.CanResolve(channel.ChannelConfig{}, channel.Attachment{PlatformKey: "enc-param"}) {
+		t.Fatal("expected platform_key attachment to use weixin resolver")
+	}
+	if !adapter.CanResolve(channel.ChannelConfig{}, channel.Attachment{
+		Metadata: map[string]any{"encrypt_query_param": "enc-param"},
+	}) {
+		t.Fatal("expected encrypt_query_param attachment to use weixin resolver")
+	}
+}

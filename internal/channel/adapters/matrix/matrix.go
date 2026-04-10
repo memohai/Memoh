@@ -1568,6 +1568,14 @@ func (a *MatrixAdapter) joinRoom(ctx context.Context, cfg Config, roomID string)
 	return a.doJSON(ctx, cfg, http.MethodPost, path, nil, nil)
 }
 
+func (*MatrixAdapter) CanResolve(_ channel.ChannelConfig, attachment channel.Attachment) bool {
+	contentURI := strings.TrimSpace(attachment.PlatformKey)
+	if contentURI == "" {
+		contentURI = strings.TrimSpace(attachment.URL)
+	}
+	return isMatrixContentURI(contentURI)
+}
+
 func (a *MatrixAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
 	contentURI := strings.TrimSpace(attachment.PlatformKey)
 	if contentURI == "" {

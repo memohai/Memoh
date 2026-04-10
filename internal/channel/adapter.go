@@ -72,6 +72,7 @@ type AttachmentPayload struct {
 // AttachmentResolver resolves attachment references (for example platform_key)
 // into readable bytes for persistence or transformation pipelines.
 type AttachmentResolver interface {
+	CanResolve(cfg ChannelConfig, attachment Attachment) bool
 	ResolveAttachment(ctx context.Context, cfg ChannelConfig, attachment Attachment) (AttachmentPayload, error)
 }
 

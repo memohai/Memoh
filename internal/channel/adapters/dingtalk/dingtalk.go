@@ -314,6 +314,10 @@ func dingtalkMediaType(att channel.PreparedAttachment) string {
 	}
 }
 
+func (*DingTalkAdapter) CanResolve(_ channel.ChannelConfig, att channel.Attachment) bool {
+	return strings.TrimSpace(att.PlatformKey) != ""
+}
+
 // ResolveAttachment implements channel.AttachmentResolver. It downloads a file
 // received by the bot (identified by its downloadCode stored in PlatformKey)
 // via the DingTalk OpenAPI and returns a readable payload.

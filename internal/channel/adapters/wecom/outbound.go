@@ -14,6 +14,10 @@ import (
 	"github.com/memohai/memoh/internal/media"
 )
 
+func (*WeComAdapter) CanResolve(_ channel.ChannelConfig, attachment channel.Attachment) bool {
+	return strings.TrimSpace(attachment.URL) != ""
+}
+
 func (a *WeComAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
 	_ = cfg
 	if a.http == nil {

@@ -268,6 +268,19 @@ func (r *Registry) GetAttachmentResolver(channelType ChannelType) (AttachmentRes
 	return resolver, ok
 }
 
+// EffectiveAttachmentResolver returns a composed attachment resolver for the
+// given channel type. Platform-specific resolvers take precedence; the default
+// resolver handles base64 and public URLs.
+func (r *Registry) EffectiveAttachmentResolver(channelType ChannelType) AttachmentResolver {
+	var platform AttachmentResolver
+	if r != nil {
+		if resolver, ok := r.GetAttachmentResolver(channelType); ok {
+			platform = resolver
+		}
+	}
+	return newEffectiveAttachmentResolver(platform)
+}
+
 // DiscoverSelf calls the SelfDiscoverer for the given channel type if supported.
 func (r *Registry) DiscoverSelf(ctx context.Context, channelType ChannelType, credentials map[string]any) (map[string]any, string, error) {
 	adapter, ok := r.Get(channelType)

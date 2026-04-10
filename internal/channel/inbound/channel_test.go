@@ -369,19 +369,20 @@ func (*fakeStorageProvider) AccessPath(key string) string {
 	return "/data/media/" + key
 }
 
-type fakeAttachmentResolverAdapter struct {
+type fakeResolverAdapter struct {
 	typ     channel.ChannelType
 	payload channel.AttachmentPayload
+	calls   int
 }
 
-func (f *fakeAttachmentResolverAdapter) Type() channel.ChannelType {
+func (f *fakeResolverAdapter) Type() channel.ChannelType {
 	if f != nil && strings.TrimSpace(f.typ.String()) != "" {
 		return f.typ
 	}
 	return channel.ChannelType("resolver-test")
 }
 
-func (f *fakeAttachmentResolverAdapter) Descriptor() channel.Descriptor {
+func (f *fakeResolverAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        f.Type(),
 		DisplayName: "ResolverTest",
@@ -392,7 +393,14 @@ func (f *fakeAttachmentResolverAdapter) Descriptor() channel.Descriptor {
 	}
 }
 
-func (f *fakeAttachmentResolverAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, _ channel.Attachment) (channel.AttachmentPayload, error) {
+func (*fakeResolverAdapter) CanResolve(_ channel.ChannelConfig, attachment channel.Attachment) bool {
+	return strings.TrimSpace(attachment.PlatformKey) != "" || strings.TrimSpace(attachment.SourcePlatform) != ""
+}
+
+func (f *fakeResolverAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, _ channel.Attachment) (channel.AttachmentPayload, error) {
+	if f != nil {
+		f.calls++
+	}
 	if f != nil && f.payload.Reader != nil {
 		return f.payload, nil
 	}
@@ -1042,7 +1050,7 @@ func TestChannelInboundProcessorIngestsPlatformKeyWithResolver(t *testing.T) {
 		},
 	}
 	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeAttachmentResolverAdapter{})
+	registry.MustRegister(&fakeResolverAdapter{})
 	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
 	mediaSvc := &fakeMediaIngestor{nextID: "asset-resolved-1", nextMime: "application/octet-stream"}
 	processor.SetMediaService(mediaSvc)
@@ -1171,7 +1179,7 @@ func TestChannelInboundProcessorIngestsQQFileAttachmentKeepsOriginalExtWhenMimeG
 		},
 	}
 	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeAttachmentResolverAdapter{
+	registry.MustRegister(&fakeResolverAdapter{
 		typ: channel.ChannelType("qq"),
 		payload: channel.AttachmentPayload{
 			Reader: io.NopCloser(bytes.NewReader([]byte{0x00, 0x01, 0x02, 0x03, 0x04})),
@@ -1297,6 +1305,76 @@ func TestChannelInboundProcessorPipelineUsesResolvedAttachments(t *testing.T) {
 	}
 	if strings.Contains(atts[0].FilePath, "api.telegram.org") {
 		t.Fatalf("expected pipeline attachment path to avoid telegram url, got %q", atts[0].FilePath)
+	}
+}
+
+func TestChannelInboundProcessorUsesPlatformResolver(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "cid-platform"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-platform", RouteID: "route-platform"}}
+	gateway := &fakeChatGateway{
+		resp: conversation.ChatResponse{
+			Messages: []conversation.ModelMessage{
+				{Role: "assistant", Content: conversation.NewTextContent("ok")},
+			},
+		},
+	}
+	resolver := &fakeResolverAdapter{
+		typ: channel.ChannelType("resolver-test"),
+		payload: channel.AttachmentPayload{
+			Reader: io.NopCloser(strings.NewReader("resolver-image-bytes")),
+			Mime:   "image/png",
+			Name:   "resolver.png",
+			Size:   int64(len("resolver-image-bytes")),
+		},
+	}
+	registry := channel.NewRegistry()
+	registry.MustRegister(resolver)
+	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
+	mediaSvc := &fakeMediaIngestor{nextID: "asset-platform-1", nextMime: "image/png"}
+	processor.SetMediaService(mediaSvc)
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-platform", BotID: "bot-1", ChannelType: channel.ChannelType("resolver-test")}
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("resolver-test"),
+		Message: channel.Message{
+			ID:   "msg-platform-1",
+			Text: "platform test",
+			Attachments: []channel.Attachment{
+				{
+					Type:           channel.AttachmentImage,
+					URL:            "https://files.slack.test/files-pri/T1-F1/image.png",
+					PlatformKey:    "F1",
+					SourcePlatform: "resolver-test",
+					Name:           "image.png",
+					Mime:           "image/png",
+				},
+			},
+		},
+		ReplyTarget: "rt-platform",
+		Sender:      channel.Identity{SubjectID: "user-platform"},
+		Conversation: channel.Conversation{
+			ID:   "conv-platform",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("expected platform resolver to be called once, got %d", resolver.calls)
+	}
+	if len(mediaSvc.payloads) != 1 || string(mediaSvc.payloads[0]) != "resolver-image-bytes" {
+		t.Fatalf("unexpected ingested payload: %+v", mediaSvc.payloads)
+	}
+	if len(gateway.gotReq.Attachments) != 1 {
+		t.Fatalf("expected one gateway attachment, got %d", len(gateway.gotReq.Attachments))
+	}
+	if got := gateway.gotReq.Attachments[0].ContentHash; got != "asset-platform-1" {
+		t.Fatalf("expected resolved asset id, got %q", got)
 	}
 }
 

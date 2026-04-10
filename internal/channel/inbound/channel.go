@@ -1836,50 +1836,16 @@ func (p *ChannelInboundProcessor) loadInboundAttachmentPayload(
 	msg channel.InboundMessage,
 	att channel.Attachment,
 ) (inboundAttachmentPayload, error) {
-	rawURL := strings.TrimSpace(att.URL)
-	if rawURL != "" {
-		payload, err := openInboundAttachmentURL(ctx, rawURL)
-		if err == nil {
-			if strings.TrimSpace(att.Mime) != "" {
-				payload.mime = strings.TrimSpace(att.Mime)
-			}
-			if strings.TrimSpace(payload.name) == "" {
-				payload.name = strings.TrimSpace(att.Name)
-			}
-			return payload, nil
-		}
-		// When URL download fails and no other source exists, return URL error.
-		if strings.TrimSpace(att.PlatformKey) == "" && strings.TrimSpace(att.Base64) == "" {
-			return inboundAttachmentPayload{}, err
-		}
-	}
-	rawBase64 := strings.TrimSpace(att.Base64)
-	if rawBase64 != "" {
-		decoded, err := attachment.DecodeBase64(rawBase64, media.MaxAssetBytes)
-		if err != nil {
-			return inboundAttachmentPayload{}, fmt.Errorf("decode attachment base64: %w", err)
-		}
-		mimeType := strings.TrimSpace(att.Mime)
-		if mimeType == "" {
-			mimeType = strings.TrimSpace(attachment.MimeFromDataURL(rawBase64))
-		}
-		return inboundAttachmentPayload{
-			reader: io.NopCloser(decoded),
-			mime:   mimeType,
-			name:   strings.TrimSpace(att.Name),
-		}, nil
-	}
-	platformKey := strings.TrimSpace(att.PlatformKey)
-	if platformKey == "" {
-		return inboundAttachmentPayload{}, errors.New("attachment has no ingestible payload")
-	}
 	resolver := p.resolveAttachmentResolver(msg.Channel)
 	if resolver == nil {
-		return inboundAttachmentPayload{}, fmt.Errorf("attachment resolver not supported for channel: %s", msg.Channel.String())
+		return inboundAttachmentPayload{}, errors.New("attachment resolver is not configured")
+	}
+	if !resolver.CanResolve(cfg, att) {
+		return inboundAttachmentPayload{}, errors.New("attachment has no ingestible payload")
 	}
 	resolved, err := resolver.ResolveAttachment(ctx, cfg, att)
 	if err != nil {
-		return inboundAttachmentPayload{}, fmt.Errorf("resolve attachment by platform key: %w", err)
+		return inboundAttachmentPayload{}, fmt.Errorf("resolve attachment payload: %w", err)
 	}
 	if resolved.Reader == nil {
 		return inboundAttachmentPayload{}, errors.New("resolved attachment reader is nil")
@@ -1931,14 +1897,13 @@ func openInboundAttachmentURL(ctx context.Context, rawURL string) (inboundAttach
 }
 
 func (p *ChannelInboundProcessor) resolveAttachmentResolver(channelType channel.ChannelType) channel.AttachmentResolver {
-	if p == nil || p.registry == nil {
+	if p == nil {
 		return nil
 	}
-	resolver, ok := p.registry.GetAttachmentResolver(channelType)
-	if !ok {
-		return nil
+	if p.registry == nil {
+		return channel.NewRegistry().EffectiveAttachmentResolver(channelType)
 	}
-	return resolver
+	return p.registry.EffectiveAttachmentResolver(channelType)
 }
 
 // ingestOutboundAttachments persists LLM-generated attachment data URLs via the

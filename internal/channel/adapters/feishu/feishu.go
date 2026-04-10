@@ -764,6 +764,10 @@ func resolveAttachmentUploadReader(ctx context.Context, att channel.PreparedAtta
 // User-sent resources must be fetched via the message-resource API which
 // requires both message_id and file_key. The message_id is expected in
 // attachment.Metadata["message_id"].
+func (*FeishuAdapter) CanResolve(_ channel.ChannelConfig, attachment channel.Attachment) bool {
+	return strings.TrimSpace(attachment.PlatformKey) != ""
+}
+
 func (*FeishuAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
 	platformKey := strings.TrimSpace(attachment.PlatformKey)
 	if platformKey == "" {
