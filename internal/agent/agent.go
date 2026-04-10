@@ -314,7 +314,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			if isRetryableStreamError(p.Error) && stepNumber > 0 {
 				streamResult, aborted = a.runMidStreamRetry(
 					ctx, ch, cfg, sdkTools, prepareStep, streamResult,
-					stepNumber, errMsg, &allText,
+					stepNumber, errMsg, &allText, textLoopProbeBuffer,
 				)
 			} else {
 				aborted = true
@@ -691,11 +691,23 @@ func pruneOldToolResults(p *sdk.GenerateParams, keepSteps, threshold int) *sdk.G
 			}
 		}
 		if contentSize > 512 { // only prune if content is large enough
+			// Build replacement parts preserving ToolResultPart type so that
+			// provider serializers that validate part types per role stay happy.
+			replacementParts := make([]sdk.MessagePart, 0, len(msgs[i].Content))
+			for _, part := range msgs[i].Content {
+				if tr, ok := part.(sdk.ToolResultPart); ok {
+					replacementParts = append(replacementParts, sdk.ToolResultPart{
+						ToolCallID: tr.ToolCallID,
+						ToolName:   tr.ToolName,
+						Result:     fmt.Sprintf("[tool result pruned: %d bytes]", contentSize),
+					})
+				} else {
+					replacementParts = append(replacementParts, part)
+				}
+			}
 			pruned = append(pruned, sdk.Message{
-				Role: msgs[i].Role,
-				Content: []sdk.MessagePart{
-					sdk.TextPart{Text: fmt.Sprintf("[tool result pruned: %d bytes]", contentSize)},
-				},
+				Role:    msgs[i].Role,
+				Content: replacementParts,
 			})
 		} else {
 			pruned = append(pruned, msgs[i])
@@ -719,6 +731,7 @@ func (a *Agent) runMidStreamRetry(
 	stepNumber int,
 	errMsg string,
 	allText *strings.Builder,
+	textLoopProbeBuffer *TextLoopProbeBuffer,
 ) (*sdk.StreamResult, bool) {
 	retryCfg := DefaultRetryConfig()
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
@@ -768,13 +781,22 @@ func (a *Agent) runMidStreamRetry(
 				ch <- StreamEvent{Type: EventTextStart}
 			case *sdk.TextDeltaPart:
 				if rp.Text != "" {
+					if textLoopProbeBuffer != nil {
+						textLoopProbeBuffer.Push(rp.Text)
+					}
 					ch <- StreamEvent{Type: EventTextDelta, Delta: rp.Text}
 					allText.WriteString(rp.Text)
 				}
 			case *sdk.TextEndPart:
+				if textLoopProbeBuffer != nil {
+					textLoopProbeBuffer.Flush()
+				}
 				stepNumber++
 				ch <- StreamEvent{Type: EventTextEnd}
 			case *sdk.StreamToolCallPart:
+				if textLoopProbeBuffer != nil {
+					textLoopProbeBuffer.Flush()
+				}
 				ch <- StreamEvent{
 					Type:       EventToolCallStart,
 					ToolName:   rp.ToolName,

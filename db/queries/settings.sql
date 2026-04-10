@@ -57,7 +57,7 @@ WITH updated AS (
       tts_model_id = COALESCE(sqlc.narg(tts_model_id)::uuid, bots.tts_model_id),
       browser_context_id = COALESCE(sqlc.narg(browser_context_id)::uuid, bots.browser_context_id),
       context_token_budget = COALESCE(sqlc.narg(context_token_budget), bots.context_token_budget),
-      persist_full_tool_results = COALESCE(sqlc.narg(persist_full_tool_results), bots.persist_full_tool_results),
+      persist_full_tool_results = sqlc.arg(persist_full_tool_results),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
   RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id, bots.context_token_budget, bots.persist_full_tool_results
