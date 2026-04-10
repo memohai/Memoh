@@ -26,14 +26,45 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 		}
 		fullRound = append(fullRound, m)
 	}
-	if len(fullRound) == 0 {
+
+	// Filter out empty assistant messages (content: []) that result from LLM
+	// returning no useful output (e.g., context window overflow). These provide
+	// no value and pollute the conversation history, causing subsequent turns
+	// to also produce empty responses.
+	filtered := make([]conversation.ModelMessage, 0, len(fullRound))
+	for _, m := range fullRound {
+		if m.Role == "assistant" && isEmptyAssistantMessage(m) {
+			r.logger.Warn("skipping empty assistant message in storeRound",
+				slog.String("bot_id", req.BotID),
+			)
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+
+	if len(filtered) == 0 {
 		return nil
 	}
 
-	r.storeMessages(ctx, req, fullRound, modelID)
-	go r.storeMemory(context.WithoutCancel(ctx), req, fullRound)
+	r.storeMessages(ctx, req, filtered, modelID)
+	go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
 
 	return nil
+}
+
+// isEmptyAssistantMessage returns true if an assistant message has no
+// meaningful content: no text, no tool calls, and no attachments.
+func isEmptyAssistantMessage(m conversation.ModelMessage) bool {
+	if len(m.ToolCalls) > 0 {
+		return false
+	}
+	text := strings.TrimSpace(m.TextContent())
+	if text != "" {
+		return false
+	}
+	// Check if content is empty array "[]" or null/empty
+	content := strings.TrimSpace(string(m.Content))
+	return content == "" || content == "[]" || content == "null"
 }
 
 // StoreRound persists SDK messages as a complete round (assistant + tool

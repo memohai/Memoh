@@ -363,6 +363,14 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		termEvent.Type = EventAgentAbort
 	} else {
 		termEvent.Type = EventAgentEnd
+		// Warn if LLM produced no text and no tool calls — likely a context overflow.
+		if allText.Len() == 0 && stepNumber == 0 {
+			a.logger.Warn("agent produced empty response (no text, no tool calls)",
+				slog.String("bot_id", cfg.Identity.BotID),
+				slog.Int("input_messages", len(cfg.Messages)),
+				slog.Int("input_tokens", totalUsage.InputTokens),
+			)
+		}
 	}
 	ch <- termEvent
 }
