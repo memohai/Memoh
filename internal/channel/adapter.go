@@ -8,6 +8,11 @@ import (
 	"sync/atomic"
 )
 
+// ErrAttachmentNotResolvable is returned by an AttachmentResolver when the
+// given attachment is not within its responsibility. Composite resolvers use
+// this sentinel to fall back to the next resolver in the chain.
+var ErrAttachmentNotResolvable = errors.New("attachment not resolvable by this resolver")
+
 // ErrStopNotSupported is returned when a connection does not support graceful shutdown.
 var ErrStopNotSupported = errors.New("channel connection stop not supported")
 
@@ -72,7 +77,6 @@ type AttachmentPayload struct {
 // AttachmentResolver resolves attachment references (for example platform_key)
 // into readable bytes for persistence or transformation pipelines.
 type AttachmentResolver interface {
-	CanResolve(cfg ChannelConfig, attachment Attachment) bool
 	ResolveAttachment(ctx context.Context, cfg ChannelConfig, attachment Attachment) (AttachmentPayload, error)
 }
 

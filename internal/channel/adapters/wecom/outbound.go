@@ -14,18 +14,14 @@ import (
 	"github.com/memohai/memoh/internal/media"
 )
 
-func (*WeComAdapter) CanResolve(_ channel.ChannelConfig, attachment channel.Attachment) bool {
-	return strings.TrimSpace(attachment.URL) != ""
-}
-
 func (a *WeComAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
 	_ = cfg
-	if a.http == nil {
-		return channel.AttachmentPayload{}, errors.New("wecom http client not configured")
-	}
 	url := strings.TrimSpace(attachment.URL)
 	if url == "" {
-		return channel.AttachmentPayload{}, errors.New("wecom attachment url is required")
+		return channel.AttachmentPayload{}, channel.ErrAttachmentNotResolvable
+	}
+	if a.http == nil {
+		return channel.AttachmentPayload{}, errors.New("wecom http client not configured")
 	}
 	aesKey := ""
 	if attachment.Metadata != nil {

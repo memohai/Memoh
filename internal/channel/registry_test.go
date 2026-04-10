@@ -76,10 +76,6 @@ func (*attachmentResolverAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{Type: channel.ChannelType("attachment-test"), DisplayName: "AttachmentTest"}
 }
 
-func (*attachmentResolverAdapter) CanResolve(_ channel.ChannelConfig, _ channel.Attachment) bool {
-	return true
-}
-
 func (*attachmentResolverAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, _ channel.Attachment) (channel.AttachmentPayload, error) {
 	return channel.AttachmentPayload{
 		Reader: io.NopCloser(strings.NewReader("payload")),
@@ -99,11 +95,10 @@ func (*failingResolverAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{Type: channel.ChannelType("failing-attachment-test"), DisplayName: "FailingAttachmentTest"}
 }
 
-func (*failingResolverAdapter) CanResolve(_ channel.ChannelConfig, att channel.Attachment) bool {
-	return strings.TrimSpace(att.PlatformKey) != ""
-}
-
-func (*failingResolverAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, _ channel.Attachment) (channel.AttachmentPayload, error) {
+func (*failingResolverAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, att channel.Attachment) (channel.AttachmentPayload, error) {
+	if strings.TrimSpace(att.PlatformKey) == "" {
+		return channel.AttachmentPayload{}, channel.ErrAttachmentNotResolvable
+	}
 	return channel.AttachmentPayload{}, errors.New("platform API error")
 }
 
@@ -142,9 +137,6 @@ func TestEffectiveResolver_PublicURL(t *testing.T) {
 
 	reg := newTestConfigRegistry()
 	resolver := reg.EffectiveAttachmentResolver(testChannelType)
-	if !resolver.CanResolve(channel.ChannelConfig{}, channel.Attachment{URL: "https://public.example.test/cat.png"}) {
-		t.Fatal("expected effective resolver to handle public URL")
-	}
 	payload, err := resolver.ResolveAttachment(context.Background(), channel.ChannelConfig{}, channel.Attachment{
 		Type: channel.AttachmentImage,
 		URL:  "https://public.example.test/cat.png",
@@ -183,9 +175,6 @@ func TestEffectiveResolver_URLWithPlatformKey(t *testing.T) {
 		URL:         "https://cdn.discordapp.com/attachments/file.png",
 		PlatformKey: "discord-file-id",
 	}
-	if !resolver.CanResolve(channel.ChannelConfig{}, att) {
-		t.Fatal("expected effective resolver to handle URL attachment with platform key")
-	}
 	payload, err := resolver.ResolveAttachment(context.Background(), channel.ChannelConfig{}, att)
 	if err != nil {
 		t.Fatalf("ResolveAttachment: %v", err)
@@ -220,9 +209,6 @@ func TestEffectiveResolver_URLWithSourcePlatform(t *testing.T) {
 		Type:           channel.AttachmentImage,
 		URL:            "https://qq.example.test/files/image.jpg",
 		SourcePlatform: "qq",
-	}
-	if !resolver.CanResolve(channel.ChannelConfig{}, att) {
-		t.Fatal("expected effective resolver to handle URL attachment with source platform")
 	}
 	payload, err := resolver.ResolveAttachment(context.Background(), channel.ChannelConfig{}, att)
 	if err != nil {

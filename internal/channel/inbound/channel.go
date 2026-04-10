@@ -1840,10 +1840,10 @@ func (p *ChannelInboundProcessor) loadInboundAttachmentPayload(
 	if resolver == nil {
 		return inboundAttachmentPayload{}, errors.New("attachment resolver is not configured")
 	}
-	if !resolver.CanResolve(cfg, att) {
+	resolved, err := resolver.ResolveAttachment(ctx, cfg, att)
+	if errors.Is(err, channel.ErrAttachmentNotResolvable) {
 		return inboundAttachmentPayload{}, errors.New("attachment has no ingestible payload")
 	}
-	resolved, err := resolver.ResolveAttachment(ctx, cfg, att)
 	if err != nil {
 		return inboundAttachmentPayload{}, fmt.Errorf("resolve attachment payload: %w", err)
 	}

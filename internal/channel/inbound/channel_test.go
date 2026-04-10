@@ -393,11 +393,10 @@ func (f *fakeResolverAdapter) Descriptor() channel.Descriptor {
 	}
 }
 
-func (*fakeResolverAdapter) CanResolve(_ channel.ChannelConfig, attachment channel.Attachment) bool {
-	return strings.TrimSpace(attachment.PlatformKey) != "" || strings.TrimSpace(attachment.SourcePlatform) != ""
-}
-
-func (f *fakeResolverAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, _ channel.Attachment) (channel.AttachmentPayload, error) {
+func (f *fakeResolverAdapter) ResolveAttachment(_ context.Context, _ channel.ChannelConfig, att channel.Attachment) (channel.AttachmentPayload, error) {
+	if strings.TrimSpace(att.PlatformKey) == "" && strings.TrimSpace(att.SourcePlatform) == "" {
+		return channel.AttachmentPayload{}, channel.ErrAttachmentNotResolvable
+	}
 	if f != nil {
 		f.calls++
 	}

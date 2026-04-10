@@ -1,6 +1,8 @@
 package weixin
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel"
@@ -68,18 +70,11 @@ func TestWeixinAdapter_Interfaces(_ *testing.T) {
 	var _ channel.ProcessingStatusNotifier = adapter
 }
 
-func TestWeixinCanResolveRejectsURLOnlyAttachment(t *testing.T) {
+func TestWeixinResolveAttachmentRejectsURLOnlyAttachment(t *testing.T) {
 	adapter := NewWeixinAdapter(nil)
 
-	if adapter.CanResolve(channel.ChannelConfig{}, channel.Attachment{URL: "https://example.com/file.jpg"}) {
-		t.Fatal("expected URL-only attachment to fall back to generic resolver")
-	}
-	if !adapter.CanResolve(channel.ChannelConfig{}, channel.Attachment{PlatformKey: "enc-param"}) {
-		t.Fatal("expected platform_key attachment to use weixin resolver")
-	}
-	if !adapter.CanResolve(channel.ChannelConfig{}, channel.Attachment{
-		Metadata: map[string]any{"encrypt_query_param": "enc-param"},
-	}) {
-		t.Fatal("expected encrypt_query_param attachment to use weixin resolver")
+	_, err := adapter.ResolveAttachment(context.Background(), channel.ChannelConfig{}, channel.Attachment{URL: "https://example.com/file.jpg"})
+	if !errors.Is(err, channel.ErrAttachmentNotResolvable) {
+		t.Fatalf("expected ErrAttachmentNotResolvable for URL-only attachment, got %v", err)
 	}
 }

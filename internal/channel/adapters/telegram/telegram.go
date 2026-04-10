@@ -1345,15 +1345,11 @@ func (a *TelegramAdapter) buildTelegramAttachment(bot *tgbotapi.BotAPI, attType 
 
 // ResolveAttachment resolves a Telegram attachment reference to a byte stream.
 // It supports platform_key-based references and URL fallback.
-func (*TelegramAdapter) CanResolve(_ channel.ChannelConfig, attachment channel.Attachment) bool {
-	return strings.TrimSpace(attachment.PlatformKey) != "" ||
-		(strings.EqualFold(strings.TrimSpace(attachment.SourcePlatform), Type.String()) && strings.TrimSpace(attachment.URL) != "")
-}
-
 func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
 	fileID := strings.TrimSpace(attachment.PlatformKey)
-	if fileID == "" && strings.TrimSpace(attachment.URL) == "" {
-		return channel.AttachmentPayload{}, errors.New("telegram attachment requires platform_key or url")
+	hasPlatformURL := strings.EqualFold(strings.TrimSpace(attachment.SourcePlatform), Type.String()) && strings.TrimSpace(attachment.URL) != ""
+	if fileID == "" && !hasPlatformURL {
+		return channel.AttachmentPayload{}, channel.ErrAttachmentNotResolvable
 	}
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {

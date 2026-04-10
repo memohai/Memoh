@@ -338,24 +338,7 @@ func openAttachment(ctx context.Context, att channel.PreparedAttachment) (io.Rea
 
 // -- AttachmentResolver (for inbound media download/decrypt) --
 
-func (*WeixinAdapter) CanResolve(_ channel.ChannelConfig, attachment channel.Attachment) bool {
-	if strings.TrimSpace(attachment.PlatformKey) != "" {
-		return true
-	}
-	if attachment.Metadata != nil {
-		if value, ok := attachment.Metadata["encrypt_query_param"].(string); ok && strings.TrimSpace(value) != "" {
-			return true
-		}
-	}
-	return false
-}
-
 func (*WeixinAdapter) ResolveAttachment(_ context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
-	parsed, err := parseConfig(cfg.Credentials)
-	if err != nil {
-		return channel.AttachmentPayload{}, err
-	}
-
 	encryptedQP := ""
 	aesKey := ""
 	if attachment.Metadata != nil {
@@ -370,7 +353,12 @@ func (*WeixinAdapter) ResolveAttachment(_ context.Context, cfg channel.ChannelCo
 		encryptedQP = strings.TrimSpace(attachment.PlatformKey)
 	}
 	if encryptedQP == "" {
-		return channel.AttachmentPayload{}, errors.New("weixin: no encrypt_query_param for attachment")
+		return channel.AttachmentPayload{}, channel.ErrAttachmentNotResolvable
+	}
+
+	parsed, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return channel.AttachmentPayload{}, err
 	}
 
 	var data []byte

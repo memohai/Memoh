@@ -314,17 +314,13 @@ func dingtalkMediaType(att channel.PreparedAttachment) string {
 	}
 }
 
-func (*DingTalkAdapter) CanResolve(_ channel.ChannelConfig, att channel.Attachment) bool {
-	return strings.TrimSpace(att.PlatformKey) != ""
-}
-
 // ResolveAttachment implements channel.AttachmentResolver. It downloads a file
 // received by the bot (identified by its downloadCode stored in PlatformKey)
 // via the DingTalk OpenAPI and returns a readable payload.
 func (a *DingTalkAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, att channel.Attachment) (channel.AttachmentPayload, error) {
 	downloadCode := strings.TrimSpace(att.PlatformKey)
 	if downloadCode == "" {
-		return channel.AttachmentPayload{}, errors.New("dingtalk: attachment has no downloadCode (platform_key)")
+		return channel.AttachmentPayload{}, channel.ErrAttachmentNotResolvable
 	}
 	parsed, err := parseConfig(cfg.Credentials)
 	if err != nil {

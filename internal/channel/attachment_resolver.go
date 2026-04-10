@@ -29,31 +29,24 @@ func newEffectiveAttachmentResolver(platform AttachmentResolver) AttachmentResol
 	}
 }
 
-func (r effectiveAttachmentResolver) CanResolve(cfg ChannelConfig, attachment Attachment) bool {
-	if r.platform != nil && r.platform.CanResolve(cfg, attachment) {
-		return true
-	}
-	return r.fallback != nil && r.fallback.CanResolve(cfg, attachment)
-}
-
 func (r effectiveAttachmentResolver) ResolveAttachment(ctx context.Context, cfg ChannelConfig, attachment Attachment) (AttachmentPayload, error) {
-	if r.platform != nil && r.platform.CanResolve(cfg, attachment) {
-		return r.platform.ResolveAttachment(ctx, cfg, attachment)
+	if r.platform != nil {
+		result, err := r.platform.ResolveAttachment(ctx, cfg, attachment)
+		if !errors.Is(err, ErrAttachmentNotResolvable) {
+			return result, err
+		}
 	}
-	if r.fallback != nil && r.fallback.CanResolve(cfg, attachment) {
+	if r.fallback != nil {
 		return r.fallback.ResolveAttachment(ctx, cfg, attachment)
 	}
-	return AttachmentPayload{}, errors.New("attachment has no supported resolver")
-}
-
-func (defaultAttachmentResolver) CanResolve(_ ChannelConfig, attachment Attachment) bool {
-	if strings.TrimSpace(attachment.Base64) != "" {
-		return true
-	}
-	return isHTTPURL(strings.TrimSpace(attachment.URL))
+	return AttachmentPayload{}, ErrAttachmentNotResolvable
 }
 
 func (defaultAttachmentResolver) ResolveAttachment(ctx context.Context, _ ChannelConfig, attachment Attachment) (AttachmentPayload, error) {
+	if strings.TrimSpace(attachment.Base64) == "" && !isHTTPURL(strings.TrimSpace(attachment.URL)) {
+		return AttachmentPayload{}, ErrAttachmentNotResolvable
+	}
+
 	rawBase64 := strings.TrimSpace(attachment.Base64)
 	if rawBase64 != "" {
 		decoded, err := attachmentpkg.DecodeBase64(rawBase64, media.MaxAssetBytes)
@@ -73,7 +66,7 @@ func (defaultAttachmentResolver) ResolveAttachment(ctx context.Context, _ Channe
 
 	rawURL := strings.TrimSpace(attachment.URL)
 	if !isHTTPURL(rawURL) {
-		return AttachmentPayload{}, errors.New("attachment has no default-resolvable payload")
+		return AttachmentPayload{}, ErrAttachmentNotResolvable
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
