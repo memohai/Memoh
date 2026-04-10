@@ -22,11 +22,12 @@ import (
 )
 
 const (
-	BotLabelKey           = "memoh.bot_id"
-	WorkspaceLabelKey     = "memoh.workspace"
-	WorkspaceLabelValue   = "v3"
-	ContainerPrefix       = "workspace-"
-	LegacyContainerPrefix = "mcp-"
+	BotLabelKey                 = "memoh.bot_id"
+	WorkspaceLabelKey           = "memoh.workspace"
+	WorkspaceLabelValue         = "v3"
+	WorkspaceCDIDevicesLabelKey = "memoh.workspace.cdi_devices"
+	ContainerPrefix             = "workspace-"
+	LegacyContainerPrefix       = "mcp-"
 
 	legacyGRPCPort = 9090
 )
@@ -41,6 +42,7 @@ type ContainerStatus struct {
 	Status           string    `json:"status"`
 	Namespace        string    `json:"namespace"`
 	ContainerPath    string    `json:"container_path"`
+	CDIDevices       []string  `json:"cdi_devices,omitempty"`
 	TaskRunning      bool      `json:"task_running"`
 	HasPreservedData bool      `json:"has_preserved_data"`
 	Legacy           bool      `json:"legacy"`
@@ -183,23 +185,39 @@ func (m *Manager) EnsureBot(ctx context.Context, botID, imageOverride string) er
 	if imageOverride != "" {
 		image = config.NormalizeImageRef(imageOverride)
 	}
-	return m.ensureBotWithImage(ctx, botID, image)
-}
-
-func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string) error {
-	if err := validateBotID(botID); err != nil {
-		return err
-	}
-
-	resolvPath, err := ctr.ResolveConfSource(m.dataRoot())
+	gpu, err := m.resolveWorkspaceGPU(ctx, botID)
 	if err != nil {
 		return err
+	}
+	return m.ensureBotWithImage(ctx, botID, image, gpu)
+}
+
+func workspaceCDIDevicesLabelValue(devices []string) string {
+	devices = normalizeWorkspaceGPUDevices(devices)
+	return strings.Join(devices, ",")
+}
+
+func workspaceCDIDevicesFromLabels(labels map[string]string) []string {
+	if len(labels) == 0 {
+		return nil
+	}
+	value := strings.TrimSpace(labels[WorkspaceCDIDevicesLabelKey])
+	if value == "" {
+		return nil
+	}
+	return normalizeWorkspaceGPUDevices(strings.Split(value, ","))
+}
+
+func (m *Manager) buildWorkspaceContainerSpec(botID string, gpu WorkspaceGPUConfig) (ctr.ContainerSpec, error) {
+	resolvPath, err := ctr.ResolveConfSource(m.dataRoot())
+	if err != nil {
+		return ctr.ContainerSpec{}, err
 	}
 
 	runtimeDir := m.cfg.RuntimePath()
 	sockDir := m.socketDir(botID)
 	if err := os.MkdirAll(sockDir, 0o750); err != nil {
-		return fmt.Errorf("create socket dir: %w", err)
+		return ctr.ContainerSpec{}, fmt.Errorf("create socket dir: %w", err)
 	}
 
 	mounts := []ctr.MountSpec{
@@ -229,19 +247,37 @@ func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string) e
 	env = append(env, tzEnv...)
 	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
 
+	return ctr.ContainerSpec{
+		Cmd:        []string{"/opt/memoh/bridge"},
+		Mounts:     mounts,
+		Env:        env,
+		CDIDevices: normalizeWorkspaceGPUDevices(gpu.Devices),
+	}, nil
+}
+
+func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig) error {
+	if err := validateBotID(botID); err != nil {
+		return err
+	}
+	spec, err := m.buildWorkspaceContainerSpec(botID, gpu)
+	if err != nil {
+		return err
+	}
+
+	labels := map[string]string{
+		BotLabelKey:       botID,
+		WorkspaceLabelKey: WorkspaceLabelValue,
+	}
+	if value := workspaceCDIDevicesLabelValue(gpu.Devices); value != "" {
+		labels[WorkspaceCDIDevicesLabelKey] = value
+	}
+
 	_, err = m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
 		ID:          ContainerPrefix + botID,
 		ImageRef:    image,
 		Snapshotter: m.cfg.Snapshotter,
-		Labels: map[string]string{
-			BotLabelKey:       botID,
-			WorkspaceLabelKey: WorkspaceLabelValue,
-		},
-		Spec: ctr.ContainerSpec{
-			Cmd:    []string{"/opt/memoh/bridge"},
-			Mounts: mounts,
-			Env:    env,
-		},
+		Labels:      labels,
+		Spec:        spec,
 	})
 	if err == nil {
 		return nil
@@ -275,7 +311,11 @@ func (m *Manager) Start(ctx context.Context, botID string) error {
 	if err != nil {
 		return err
 	}
-	return m.startWithResolvedImage(ctx, botID, image)
+	gpu, err := m.resolveWorkspaceGPU(ctx, botID)
+	if err != nil {
+		return err
+	}
+	return m.startWithResolvedConfig(ctx, botID, image, gpu)
 }
 
 // StartWithImage creates and starts the MCP container for a bot.
@@ -286,7 +326,11 @@ func (m *Manager) StartWithImage(ctx context.Context, botID, imageOverride strin
 	if image == "" {
 		return m.Start(ctx, botID)
 	}
-	return m.startWithResolvedImage(ctx, botID, config.NormalizeImageRef(image))
+	gpu, err := m.resolveWorkspaceGPU(ctx, botID)
+	if err != nil {
+		return err
+	}
+	return m.startWithResolvedConfig(ctx, botID, config.NormalizeImageRef(image), gpu)
 }
 
 // StartWithResolvedImage creates and starts the workspace container for a bot
@@ -296,10 +340,22 @@ func (m *Manager) StartWithResolvedImage(ctx context.Context, botID, image strin
 	if image == "" {
 		return errors.New("image is required")
 	}
-	return m.startWithResolvedImage(ctx, botID, image)
+	gpu, err := m.resolveWorkspaceGPU(ctx, botID)
+	if err != nil {
+		return err
+	}
+	return m.startWithResolvedConfig(ctx, botID, image, gpu)
 }
 
-func (m *Manager) startWithResolvedImage(ctx context.Context, botID, image string) error {
+func (m *Manager) StartWithResolvedConfig(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig) error {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return errors.New("image is required")
+	}
+	return m.startWithResolvedConfig(ctx, botID, image, gpu)
+}
+
+func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig) error {
 	containerID := m.resolveContainerID(ctx, botID)
 
 	// Before creating a new container, check for an orphaned snapshot
@@ -311,7 +367,7 @@ func (m *Manager) startWithResolvedImage(ctx context.Context, botID, image strin
 		m.recoverOrphanedSnapshot(ctx, botID)
 	}
 
-	if err := m.ensureBotWithImage(ctx, botID, image); err != nil {
+	if err := m.ensureBotWithImage(ctx, botID, image, gpu); err != nil {
 		return err
 	}
 

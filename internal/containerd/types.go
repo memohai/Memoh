@@ -91,7 +91,10 @@ type ContainerSpec struct {
 	User    string
 	Mounts  []MountSpec
 	DNS     []string
-	TTY     bool
+	// CDIDevices contains fully-qualified CDI device names such as
+	// "nvidia.com/gpu=0" or "amd.com/gpu=0".
+	CDIDevices []string
+	TTY        bool
 }
 
 type LayerStatus struct {

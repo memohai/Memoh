@@ -1222,6 +1222,13 @@ definitions:
       user_config_schema:
         $ref: '#/definitions/channel.ConfigSchema'
     type: object
+  handlers.ContainerGPURequest:
+    properties:
+      devices:
+        items:
+          type: string
+        type: array
+    type: object
   handlers.ContextUsage:
     properties:
       context_window:
@@ -1231,6 +1238,8 @@ definitions:
     type: object
   handlers.CreateContainerRequest:
     properties:
+      gpu:
+        $ref: '#/definitions/handlers.ContainerGPURequest'
       image:
         type: string
       restore_data:
@@ -1240,6 +1249,10 @@ definitions:
     type: object
   handlers.CreateContainerResponse:
     properties:
+      cdi_devices:
+        items:
+          type: string
+        type: array
       container_id:
         type: string
       data_restored:
@@ -1363,6 +1376,10 @@ definitions:
     type: object
   handlers.GetContainerResponse:
     properties:
+      cdi_devices:
+        items:
+          type: string
+        type: array
       container_id:
         type: string
       container_path:

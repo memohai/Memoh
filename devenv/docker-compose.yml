@@ -88,6 +88,9 @@ services:
       - containerd_data:/var/lib/containerd
       - server_cni_state:/var/lib/cni
       - memoh_data:/opt/memoh/data
+      # Expose host CDI specs to the nested containerd used for bot workspaces.
+      - /etc/cdi:/etc/cdi:ro
+      - /var/run/cdi:/var/run/cdi:ro
       # Toolkit: run ./docker/toolkit/install.sh once before first use
       - ../.toolkit:/opt/memoh/runtime/toolkit
       - ../docker/toolkit/bin:/opt/memoh/runtime/toolkit/bin

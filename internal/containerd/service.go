@@ -13,15 +13,18 @@ import (
 	tasksv1 "github.com/containerd/containerd/api/services/tasks/v1"
 	tasktypes "github.com/containerd/containerd/api/types/task"
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/remotes/docker"
 	"github.com/containerd/containerd/v2/core/snapshots"
+	cdispec "github.com/containerd/containerd/v2/pkg/cdi"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
 	"github.com/opencontainers/image-spec/identity"
 	"github.com/opencontainers/runtime-spec/specs-go"
+	cdi "tags.cncf.io/container-device-interface/pkg/cdi"
 
 	"github.com/memohai/memoh/internal/config"
 )
@@ -248,8 +251,24 @@ func specOptsFromSpec(spec ContainerSpec) []oci.SpecOpts {
 		}
 		opts = append(opts, oci.WithMounts(mounts))
 	}
+	if len(spec.CDIDevices) > 0 {
+		opts = append(opts, withStaticCDIRegistry())
+		opts = append(opts, cdispec.WithCDIDevices(spec.CDIDevices...))
+	}
 
 	return opts
+}
+
+func withStaticCDIRegistry() oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, _ *oci.Spec) error {
+		_ = cdi.Configure(cdi.WithAutoRefresh(false))
+		if err := cdi.Refresh(); err != nil {
+			// Invalid specs for other vendors should not block injection of a
+			// resolvable device set for the current container.
+			return nil
+		}
+		return nil
+	}
 }
 
 func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error) {

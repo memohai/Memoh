@@ -370,7 +370,7 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	if err := m.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{CleanupSnapshot: false}); err != nil {
 		return err
 	}
-	spec, err := m.buildVersionSpec(botID)
+	spec, err := m.buildVersionSpec(ctx, botID, workspaceCDIDevicesFromLabels(info.Labels))
 	if err != nil {
 		return err
 	}
@@ -402,47 +402,15 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	return nil
 }
 
-func (m *Manager) buildVersionSpec(botID string) (ctr.ContainerSpec, error) {
-	resolvPath, err := ctr.ResolveConfSource(m.dataRoot())
-	if err != nil {
-		return ctr.ContainerSpec{}, err
+func (m *Manager) buildVersionSpec(ctx context.Context, botID string, cdiDevices []string) (ctr.ContainerSpec, error) {
+	if len(cdiDevices) == 0 {
+		gpu, err := m.resolveWorkspaceGPU(ctx, botID)
+		if err != nil {
+			return ctr.ContainerSpec{}, err
+		}
+		cdiDevices = gpu.Devices
 	}
-
-	runtimeDir := m.cfg.RuntimePath()
-	sockDir := m.socketDir(botID)
-
-	mounts := []ctr.MountSpec{
-		{
-			Destination: "/etc/resolv.conf",
-			Type:        "bind",
-			Source:      resolvPath,
-			Options:     []string{"rbind", "ro"},
-		},
-		{
-			Destination: "/opt/memoh",
-			Type:        "bind",
-			Source:      runtimeDir,
-			Options:     []string{"rbind", "ro"},
-		},
-		{
-			Destination: "/run/memoh",
-			Type:        "bind",
-			Source:      sockDir,
-			Options:     []string{"rbind", "rw"},
-		},
-	}
-	tzMounts, tzEnv := ctr.TimezoneSpec()
-	mounts = append(mounts, tzMounts...)
-
-	env := make([]string, 0, len(tzEnv)+1)
-	env = append(env, tzEnv...)
-	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
-
-	return ctr.ContainerSpec{
-		Cmd:    []string{"/opt/memoh/bridge"},
-		Mounts: mounts,
-		Env:    env,
-	}, nil
+	return m.buildWorkspaceContainerSpec(botID, WorkspaceGPUConfig{Devices: cdiDevices})
 }
 
 func (m *Manager) safeStopTask(ctx context.Context, containerID string) error {

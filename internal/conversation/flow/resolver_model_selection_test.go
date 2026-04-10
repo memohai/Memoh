@@ -57,3 +57,34 @@ func TestMatchesModelReference_TrimmedInput(t *testing.T) {
 		t.Fatal("expected trimmed model slug to match")
 	}
 }
+
+func TestBuildModelSelectionRequest_PreservesOverrides(t *testing.T) {
+	t.Parallel()
+
+	req := buildModelSelectionRequest(baseRunConfigParams{
+		BotID:           "bot-1",
+		SessionID:       "session-1",
+		CurrentPlatform: "web",
+		Model:           "model-override",
+		Provider:        "openai-responses",
+	}, "chat-1")
+
+	if req.BotID != "bot-1" {
+		t.Fatalf("unexpected bot id: %q", req.BotID)
+	}
+	if req.ChatID != "chat-1" {
+		t.Fatalf("unexpected chat id: %q", req.ChatID)
+	}
+	if req.SessionID != "session-1" {
+		t.Fatalf("unexpected session id: %q", req.SessionID)
+	}
+	if req.CurrentChannel != "web" {
+		t.Fatalf("unexpected current channel: %q", req.CurrentChannel)
+	}
+	if req.Model != "model-override" {
+		t.Fatalf("unexpected model override: %q", req.Model)
+	}
+	if req.Provider != "openai-responses" {
+		t.Fatalf("unexpected provider override: %q", req.Provider)
+	}
+}

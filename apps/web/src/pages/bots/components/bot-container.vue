@@ -4,6 +4,7 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useQuery } from '@pinia/colada'
+import { ChevronRight } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdContainer,
   getBotsByBotIdContainer,
@@ -25,7 +26,7 @@ import {
   type ContainerCreateLayerStatus,
   type ContainerCreateStreamEvent,
 } from '@/composables/api/useContainerStream'
-import { Button, Input, Label, Separator, Spinner, Switch } from '@memohai/ui'
+import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, Input, Label, Separator, Spinner, Switch, Textarea } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ContainerCreateProgress from './container-create-progress.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
@@ -59,6 +60,10 @@ const rollbackVersion = ref<number | null>(null)
 const createRestoreData = ref(false)
 const createImage = ref('')
 const createImagePrefilled = ref(false)
+const createGPUEnabled = ref(false)
+const createGPUDevices = ref('')
+const createGPUPrefilled = ref(false)
+const createAdvancedOpen = ref(false)
 const newSnapshotName = ref('')
 const importInputRef = ref<HTMLInputElement | null>(null)
 
@@ -178,7 +183,7 @@ async function handleRefreshContainer() {
   await runContainerAction('refresh', () => loadContainerData(false))
 }
 
-const { data: bot } = useQuery({
+const { data: bot, refetch: refetchBot } = useQuery({
   key: () => ['bot', botId.value],
   query: async () => {
     const { data } = await getBotsById({ path: { id: botId.value }, throwOnError: true })
@@ -194,8 +199,48 @@ function rememberedWorkspaceImage(metadata: Record<string, unknown> | undefined)
   return typeof image === 'string' ? shortenImageRef(image) : ''
 }
 
+type RememberedWorkspaceGPU = {
+  exists: boolean
+  devices: string[]
+}
+
+function rememberedWorkspaceGPU(metadata: Record<string, unknown> | undefined): RememberedWorkspaceGPU {
+  const workspace = metadata?.workspace
+  if (!workspace || typeof workspace !== 'object' || Array.isArray(workspace)) {
+    return { exists: false, devices: [] }
+  }
+
+  const workspaceRecord = workspace as Record<string, unknown>
+  if (!Object.prototype.hasOwnProperty.call(workspaceRecord, 'gpu')) {
+    return { exists: false, devices: [] }
+  }
+
+  const gpu = workspaceRecord.gpu
+  if (!gpu || typeof gpu !== 'object' || Array.isArray(gpu)) {
+    return { exists: true, devices: [] }
+  }
+
+  const rawDevices = (gpu as Record<string, unknown>).devices
+  const devices = Array.isArray(rawDevices)
+    ? rawDevices.filter((value): value is string => typeof value === 'string').map(value => value.trim()).filter(Boolean)
+    : []
+
+  return { exists: true, devices: [...new Set(devices)] }
+}
+
+function parseCDIDevices(value: string): string[] {
+  return [...new Set(
+    value
+      .split(/[\n,]/)
+      .map(item => item.trim())
+      .filter(Boolean),
+  )]
+}
+
 const rememberedCreateImage = computed(() => rememberedWorkspaceImage(bot.value?.metadata as Record<string, unknown> | undefined))
+const rememberedCreateGPU = computed(() => rememberedWorkspaceGPU(bot.value?.metadata as Record<string, unknown> | undefined))
 const displayedContainerImage = computed(() => shortenImageRef(containerInfo.value?.image))
+const displayedCDIDevices = computed(() => containerInfo.value?.cdi_devices ?? [])
 
 const { isPending: botLifecyclePending } = useBotStatusMeta(bot, t)
 
@@ -248,16 +293,29 @@ async function handleCreateContainer() {
   containerAction.value = 'create'
   createProgress.value = { phase: 'pulling' }
   try {
+    const gpuDevices = parseCDIDevices(createGPUDevices.value)
+    if (createGPUEnabled.value && gpuDevices.length === 0) {
+      throw new Error(t('bots.container.gpuDevicesRequired'))
+    }
+
     const body: HandlersCreateContainerRequest = {
       restore_data: createRestoreData.value,
     }
     const trimmedImage = createImage.value.trim()
     if (trimmedImage) body.image = trimmedImage
+    if (createGPUEnabled.value || rememberedCreateGPU.value.exists) {
+      body.gpu = {
+        devices: createGPUEnabled.value ? gpuDevices : [],
+      }
+    }
 
     const { dataRestored } = await createContainerSSE(body)
     createRestoreData.value = false
     createImage.value = ''
+    createGPUEnabled.value = false
+    createGPUDevices.value = ''
     await loadContainerData(false)
+    await refetchBot()
     toast.success(dataRestored
       ? t('bots.container.createRestoreSuccess')
       : t('bots.container.createSuccess'))
@@ -567,6 +625,8 @@ const activeTab = useSyncedQueryParam('tab', 'overview')
 watch(containerMissing, (missing) => {
   if (!missing) {
     createImagePrefilled.value = false
+    createGPUPrefilled.value = false
+    createAdvancedOpen.value = false
   }
 })
 
@@ -575,6 +635,15 @@ watch([containerMissing, rememberedCreateImage], ([missing, remembered]) => {
   if (!remembered || createImage.value.trim()) return
   createImage.value = remembered
   createImagePrefilled.value = true
+}, { immediate: true })
+
+watch([containerMissing, rememberedCreateGPU], ([missing, remembered]) => {
+  if (!missing || createGPUPrefilled.value) return
+  if (!remembered.exists) return
+  if (createGPUEnabled.value || createGPUDevices.value.trim()) return
+  createGPUEnabled.value = remembered.devices.length > 0
+  createGPUDevices.value = remembered.devices.join('\n')
+  createGPUPrefilled.value = true
 }, { immediate: true })
 
 watch([activeTab, botId], ([tab]) => {
@@ -685,6 +754,59 @@ watch([activeTab, botId], ([tab]) => {
           </p>
         </div>
 
+        <Collapsible v-model:open="createAdvancedOpen">
+          <div class="rounded-md border">
+            <CollapsibleTrigger class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40">
+              <div class="space-y-1">
+                <p class="text-xs font-medium">
+                  {{ $t('bots.container.createAdvancedTitle') }}
+                </p>
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('bots.container.createAdvancedDescription') }}
+                </p>
+              </div>
+              <ChevronRight
+                class="size-4 shrink-0 text-muted-foreground transition-transform"
+                :class="{ 'rotate-90': createAdvancedOpen }"
+              />
+            </CollapsibleTrigger>
+
+            <CollapsibleContent>
+              <div class="space-y-4 border-t px-3 py-3">
+                <div class="flex items-start justify-between gap-4 rounded-md border p-3">
+                  <div class="space-y-1">
+                    <Label>{{ $t('bots.container.createGpuLabel') }}</Label>
+                    <p class="text-xs text-muted-foreground">
+                      {{ $t('bots.container.createGpuDescription') }}
+                    </p>
+                  </div>
+                  <Switch
+                    :model-value="createGPUEnabled"
+                    :disabled="containerBusy || botLifecyclePending"
+                    @update:model-value="(value) => createGPUEnabled = !!value"
+                  />
+                </div>
+
+                <div
+                  v-if="createGPUEnabled"
+                  class="space-y-2"
+                >
+                  <Label>{{ $t('bots.container.createGpuDevicesLabel') }}</Label>
+                  <Textarea
+                    v-model="createGPUDevices"
+                    :placeholder="$t('bots.container.createGpuDevicesPlaceholder')"
+                    :disabled="containerBusy || botLifecyclePending"
+                    class="min-h-24 font-mono text-xs"
+                  />
+                  <p class="text-xs text-muted-foreground">
+                    {{ $t('bots.container.createGpuDevicesDescription') }}
+                  </p>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
+
         <div class="flex justify-end">
           <Button
             :disabled="containerBusy || botLifecyclePending"
@@ -786,6 +908,29 @@ watch([activeTab, botId], ([tab]) => {
           </div>
           <div class="space-y-1 sm:col-span-2">
             <dt class="text-muted-foreground">
+              {{ $t('bots.container.fields.cdiDevices') }}
+            </dt>
+            <dd
+              v-if="displayedCDIDevices.length === 0"
+              class="text-muted-foreground"
+            >
+              {{ $t('bots.container.cdiDevicesEmpty') }}
+            </dd>
+            <dd
+              v-else
+              class="space-y-1 font-mono text-xs"
+            >
+              <div
+                v-for="device in displayedCDIDevices"
+                :key="device"
+                class="break-all"
+              >
+                {{ device }}
+              </div>
+            </dd>
+          </div>
+          <div class="space-y-1 sm:col-span-2">
+            <dt class="text-muted-foreground">
               {{ $t('bots.container.fields.containerPath') }}
             </dt>
             <dd class="break-all">
@@ -811,6 +956,10 @@ watch([activeTab, botId], ([tab]) => {
             <dd>{{ formatDate(containerInfo.updated_at) }}</dd>
           </div>
         </dl>
+      </div>
+
+      <div class="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+        {{ $t('bots.container.gpuRecreateHint') }}
       </div>
 
       <div class="space-y-4 rounded-md border p-4">

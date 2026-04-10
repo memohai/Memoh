@@ -202,6 +202,10 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 		if parseErr == nil {
 			row, dbErr := m.queries.GetContainerByBotID(ctx, pgBotID)
 			if dbErr == nil {
+				cdiDevices := []string(nil)
+				if liveInfo, liveErr := m.service.GetContainer(ctx, row.ContainerID); liveErr == nil {
+					cdiDevices = workspaceCDIDevicesFromLabels(liveInfo.Labels)
+				}
 				createdAt := time.Time{}
 				if row.CreatedAt.Valid {
 					createdAt = row.CreatedAt.Time
@@ -216,6 +220,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 					Status:           row.Status,
 					Namespace:        row.Namespace,
 					ContainerPath:    row.ContainerPath,
+					CDIDevices:       cdiDevices,
 					TaskRunning:      m.isTaskRunning(ctx, row.ContainerID),
 					HasPreservedData: m.HasPreservedData(botID),
 					Legacy:           m.IsLegacyContainer(ctx, row.ContainerID),
@@ -242,6 +247,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 		Image:            info.Image,
 		Status:           "unknown",
 		Namespace:        m.namespace,
+		CDIDevices:       workspaceCDIDevicesFromLabels(info.Labels),
 		TaskRunning:      m.isTaskRunning(ctx, containerID),
 		HasPreservedData: m.HasPreservedData(botID),
 		Legacy:           m.IsLegacyContainer(ctx, containerID),
@@ -270,7 +276,7 @@ func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
 		return err
 	}
 
-	if err := m.startWithResolvedImage(ctx, botID, image); err != nil {
+	if err := m.StartWithResolvedImage(ctx, botID, image); err != nil {
 		m.logger.Error("setup bot container: start failed",
 			slog.String("bot_id", botID),
 			slog.Any("error", err))

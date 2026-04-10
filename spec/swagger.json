@@ -10464,6 +10464,17 @@
                 }
             }
         },
+        "handlers.ContainerGPURequest": {
+            "type": "object",
+            "properties": {
+                "devices": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "handlers.ContextUsage": {
             "type": "object",
             "properties": {
@@ -10478,6 +10489,9 @@
         "handlers.CreateContainerRequest": {
             "type": "object",
             "properties": {
+                "gpu": {
+                    "$ref": "#/definitions/handlers.ContainerGPURequest"
+                },
                 "image": {
                     "type": "string"
                 },
@@ -10492,6 +10506,12 @@
         "handlers.CreateContainerResponse": {
             "type": "object",
             "properties": {
+                "cdi_devices": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "container_id": {
                     "type": "string"
                 },
@@ -10683,6 +10703,12 @@
         "handlers.GetContainerResponse": {
             "type": "object",
             "properties": {
+                "cdi_devices": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "container_id": {
                     "type": "string"
                 },

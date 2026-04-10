@@ -16,7 +16,13 @@ import (
 const (
 	workspaceMetadataKey      = "workspace"
 	workspaceImageMetadataKey = "image"
+	workspaceGPUMetadataKey   = "gpu"
+	workspaceGPUDevicesKey    = "devices"
 )
+
+type WorkspaceGPUConfig struct {
+	Devices []string `json:"devices,omitempty"`
+}
 
 func decodeBotMetadata(payload []byte) (map[string]any, error) {
 	if len(payload) == 0 {
@@ -61,6 +67,54 @@ func workspaceImageFromMetadata(metadata map[string]any) string {
 	return strings.TrimSpace(image)
 }
 
+func normalizeWorkspaceGPUDevices(devices []string) []string {
+	if len(devices) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(devices))
+	normalized := make([]string, 0, len(devices))
+	for _, raw := range devices {
+		device := strings.TrimSpace(raw)
+		if device == "" {
+			continue
+		}
+		if _, ok := seen[device]; ok {
+			continue
+		}
+		seen[device] = struct{}{}
+		normalized = append(normalized, device)
+	}
+	return normalized
+}
+
+func workspaceGPUFromMetadata(metadata map[string]any) (WorkspaceGPUConfig, bool) {
+	section := workspaceSection(metadata)
+	raw, ok := section[workspaceGPUMetadataKey]
+	if !ok {
+		return WorkspaceGPUConfig{}, false
+	}
+
+	gpuSection, ok := raw.(map[string]any)
+	if !ok {
+		return WorkspaceGPUConfig{}, true
+	}
+
+	var devices []string
+	switch typed := gpuSection[workspaceGPUDevicesKey].(type) {
+	case []string:
+		devices = append(devices, typed...)
+	case []any:
+		for _, item := range typed {
+			if device, ok := item.(string); ok {
+				devices = append(devices, device)
+			}
+		}
+	}
+
+	return WorkspaceGPUConfig{Devices: normalizeWorkspaceGPUDevices(devices)}, true
+}
+
 func withWorkspaceImagePreference(metadata map[string]any, image string) map[string]any {
 	next := cloneAnyMap(metadata)
 	section := workspaceSection(next)
@@ -73,6 +127,28 @@ func withoutWorkspaceImagePreference(metadata map[string]any) map[string]any {
 	next := cloneAnyMap(metadata)
 	section := workspaceSection(next)
 	delete(section, workspaceImageMetadataKey)
+	if len(section) == 0 {
+		delete(next, workspaceMetadataKey)
+		return next
+	}
+	next[workspaceMetadataKey] = section
+	return next
+}
+
+func withWorkspaceGPUPreference(metadata map[string]any, gpu WorkspaceGPUConfig) map[string]any {
+	next := cloneAnyMap(metadata)
+	section := workspaceSection(next)
+	section[workspaceGPUMetadataKey] = map[string]any{
+		workspaceGPUDevicesKey: normalizeWorkspaceGPUDevices(gpu.Devices),
+	}
+	next[workspaceMetadataKey] = section
+	return next
+}
+
+func withoutWorkspaceGPUPreference(metadata map[string]any) map[string]any {
+	next := cloneAnyMap(metadata)
+	section := workspaceSection(next)
+	delete(section, workspaceGPUMetadataKey)
 	if len(section) == 0 {
 		delete(next, workspaceMetadataKey)
 		return next
@@ -132,6 +208,7 @@ func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, 
 		ID:          botUUID,
 		DisplayName: row.DisplayName,
 		AvatarUrl:   row.AvatarUrl,
+		Timezone:    row.Timezone,
 		IsActive:    row.IsActive,
 		Metadata:    payload,
 	})
@@ -146,8 +223,80 @@ func (m *Manager) ClearWorkspaceImagePreference(ctx context.Context, botID strin
 	return m.updateBotWorkspaceImagePreference(ctx, botID, "", true)
 }
 
+func (m *Manager) botWorkspaceGPUPreference(ctx context.Context, botID string) (WorkspaceGPUConfig, bool, error) {
+	if m.queries == nil {
+		return WorkspaceGPUConfig{}, false, nil
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return WorkspaceGPUConfig{}, false, err
+	}
+	row, err := m.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return WorkspaceGPUConfig{}, false, nil
+		}
+		return WorkspaceGPUConfig{}, false, err
+	}
+	metadata, err := decodeBotMetadata(row.Metadata)
+	if err != nil {
+		return WorkspaceGPUConfig{}, false, err
+	}
+	gpu, ok := workspaceGPUFromMetadata(metadata)
+	return gpu, ok, nil
+}
+
+func (m *Manager) updateBotWorkspaceGPUPreference(ctx context.Context, botID string, gpu WorkspaceGPUConfig, clearPreference bool) error {
+	if m.queries == nil {
+		return nil
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return err
+	}
+	row, err := m.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		return err
+	}
+	metadata, err := decodeBotMetadata(row.Metadata)
+	if err != nil {
+		return err
+	}
+	if clearPreference {
+		metadata = withoutWorkspaceGPUPreference(metadata)
+	} else {
+		metadata = withWorkspaceGPUPreference(metadata, gpu)
+	}
+	payload, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	_, err = m.queries.UpdateBotProfile(ctx, dbsqlc.UpdateBotProfileParams{
+		ID:          botUUID,
+		DisplayName: row.DisplayName,
+		AvatarUrl:   row.AvatarUrl,
+		Timezone:    row.Timezone,
+		IsActive:    row.IsActive,
+		Metadata:    payload,
+	})
+	return err
+}
+
+func (m *Manager) RememberWorkspaceGPU(ctx context.Context, botID string, gpu WorkspaceGPUConfig) error {
+	gpu.Devices = normalizeWorkspaceGPUDevices(gpu.Devices)
+	return m.updateBotWorkspaceGPUPreference(ctx, botID, gpu, false)
+}
+
+func (m *Manager) ClearWorkspaceGPUPreference(ctx context.Context, botID string) error {
+	return m.updateBotWorkspaceGPUPreference(ctx, botID, WorkspaceGPUConfig{}, true)
+}
+
 func (m *Manager) ResolveWorkspaceImage(ctx context.Context, botID string) (string, error) {
 	return m.resolveWorkspaceImage(ctx, botID)
+}
+
+func (m *Manager) ResolveWorkspaceGPU(ctx context.Context, botID string) (WorkspaceGPUConfig, error) {
+	return m.resolveWorkspaceGPU(ctx, botID)
 }
 
 func (m *Manager) resolveWorkspaceImage(ctx context.Context, botID string) (string, error) {
@@ -173,4 +322,17 @@ func (m *Manager) resolveWorkspaceImage(ctx context.Context, botID string) (stri
 	}
 
 	return m.imageRef(), nil
+}
+
+func (m *Manager) resolveWorkspaceGPU(ctx context.Context, botID string) (WorkspaceGPUConfig, error) {
+	preferredGPU, hasPreference, err := m.botWorkspaceGPUPreference(ctx, botID)
+	if err != nil {
+		return WorkspaceGPUConfig{}, err
+	}
+	if hasPreference {
+		preferredGPU.Devices = normalizeWorkspaceGPUDevices(preferredGPU.Devices)
+		return preferredGPU, nil
+	}
+
+	return WorkspaceGPUConfig{}, nil
 }

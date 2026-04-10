@@ -161,6 +161,9 @@ func (s *AppleService) CreateContainer(ctx context.Context, req CreateContainerR
 	if req.ID == "" || req.ImageRef == "" {
 		return ContainerInfo{}, ErrInvalidArgument
 	}
+	if len(req.Spec.CDIDevices) > 0 {
+		return ContainerInfo{}, ErrNotSupported
+	}
 	if err := s.ensureHealthy(ctx); err != nil {
 		return ContainerInfo{}, err
 	}

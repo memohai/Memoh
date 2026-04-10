@@ -33,6 +33,52 @@ The **Container** tab displays real-time data about the bot's runtime:
 - **Image**: The Docker/Containerd image used as the base.
 - **Paths**: Host and container paths for data persistence.
 - **Tasks**: Number of active background tasks running in the container.
+- **CDI Devices**: The effective GPU CDI devices currently attached to the container, if any.
+
+---
+
+## Advanced: Provide CDI Devices
+
+Memoh can provide host devices to a bot container through CDI (Container Device Interface). This is an advanced capability for users who want to expose host-managed devices, most commonly GPUs, to the container runtime.
+
+In the Web UI, this capability is placed under **Advanced options** in the **Container** tab. It is optional and only needs to be configured when the bot must access CDI-backed devices from the host.
+
+### Configure CDI Devices
+
+1. Open the Bot's **Container** tab.
+2. Click **Create** if the container does not exist, or recreate the container if you need to change GPU settings.
+3. Expand **Advanced options**.
+4. Enable **GPU**.
+5. Enter one or more CDI device names in **CDI devices**.
+
+You can enter CDI device names one per line or separated with commas. Common GPU-related examples:
+
+- `nvidia.com/gpu=0`
+- `nvidia.com/gpu=all`
+- `amd.com/gpu=0`
+- `amd.com/gpu=all`
+
+### Host Requirements
+
+Before configuring CDI devices in Memoh, the host machine must already provide working device drivers, vendor toolkit support where required, and valid CDI specs. In practice, this usually means:
+
+- the host GPU works normally outside the container
+- CDI spec files exist under `/etc/cdi` or `/var/run/cdi`
+- the device name you enter in Memoh matches a real CDI device on the host
+
+To discover the exact CDI device names exposed by the host, use the vendor tool on the host machine:
+
+- NVIDIA: `nvidia-ctk cdi list`
+- AMD: `amd-ctk cdi list`
+
+If Memoh reports an error such as `unresolvable CDI devices`, the configured device name does not match any CDI device visible to the container runtime.
+
+### Important Behavior
+
+- CDI device settings are applied when the container is created. Updating the setting later requires recreating the container.
+- Stopping and starting an existing container does not change its attached CDI devices.
+- The container image still needs the appropriate user-space libraries and tools if you want to run CUDA or ROCm software inside the container.
+- After creation, the **Container** tab shows the effective attached CDI devices for verification.
 
 ---
 

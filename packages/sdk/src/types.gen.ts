@@ -738,18 +738,24 @@ export type HandlersChannelMeta = {
     user_config_schema?: ChannelConfigSchema;
 };
 
+export type HandlersContainerGpuRequest = {
+    devices?: Array<string>;
+};
+
 export type HandlersContextUsage = {
     context_window?: number;
     used_tokens?: number;
 };
 
 export type HandlersCreateContainerRequest = {
+    gpu?: HandlersContainerGpuRequest;
     image?: string;
     restore_data?: boolean;
     snapshotter?: string;
 };
 
 export type HandlersCreateContainerResponse = {
+    cdi_devices?: Array<string>;
     container_id?: string;
     data_restored?: boolean;
     has_preserved_data?: boolean;
@@ -830,6 +836,7 @@ export type HandlersFsWriteRequest = {
 };
 
 export type HandlersGetContainerResponse = {
+    cdi_devices?: Array<string>;
     container_id?: string;
     container_path?: string;
     created_at?: string;
