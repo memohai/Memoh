@@ -7,6 +7,7 @@ import type {
   Message,
   MessageStreamEvent,
   StreamEventHandler,
+  UITurn,
 } from './useChat.types'
 import { parseStreamPayload, readSSEStream } from './useChat.sse'
 
@@ -26,6 +27,26 @@ export async function fetchMessages(
   })
 
   return (data as unknown as { items?: Message[] })?.items ?? []
+}
+
+export async function fetchMessagesUI(
+  botId: string,
+  sessionId?: string,
+  options?: FetchMessagesOptions,
+): Promise<UITurn[]> {
+  const response = await client.get({
+    url: '/bots/{bot_id}/messages',
+    path: { bot_id: botId },
+    query: {
+      limit: options?.limit ?? 30,
+      format: 'ui',
+      ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
+      ...(sessionId?.trim() ? { session_id: sessionId.trim() } : {}),
+    },
+    throwOnError: true,
+  })
+
+  return (response.data as { items?: UITurn[] } | undefined)?.items ?? []
 }
 
 export interface SendMessageOverrides {

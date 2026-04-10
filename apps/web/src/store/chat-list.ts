@@ -3,95 +3,77 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
+import { shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
   fetchSessions,
   type Bot,
   type SessionSummary,
-  type Message,
-  type StreamEvent,
   type MessageStreamEvent,
-  fetchBots,
-  fetchMessages,
-  extractMessageText,
-  extractToolCalls,
-  extractAllToolResults,
-  extractMessageReasoning,
-  sendLocalChannelMessage,
-  streamLocalChannel,
-  streamMessageEvents,
-  connectWebSocket,
   type ChatAttachment,
   type ChatWebSocket,
+  type UIAttachment,
+  type UIAttachmentsMessage,
+  type UIMessage,
+  type UIReasoningMessage,
+  type UITextMessage,
+  type UIToolMessage,
+  type UITurn,
+  type UIUserTurn,
+  type UIStreamEvent,
+  fetchBots,
+  fetchMessagesUI,
+  sendLocalChannelMessage,
+  streamMessageEvents,
+  connectWebSocket,
 } from '@/composables/api/useChat'
 
-// ---- Message model (blocks-based, aligned with main branch) ----
+export type TextBlock = UITextMessage
+export type ThinkingBlock = UIReasoningMessage
+export type AttachmentItem = UIAttachment
+export type AttachmentBlock = UIAttachmentsMessage
 
-export interface TextBlock {
-  type: 'text'
-  content: string
-}
-
-export interface ThinkingBlock {
-  type: 'thinking'
-  content: string
-  done: boolean
-}
-
-export interface ToolCallBlock {
-  type: 'tool_call'
+export interface ToolCallBlock extends UIToolMessage {
   toolCallId: string
   toolName: string
-  input: unknown
   result: unknown | null
   done: boolean
 }
 
-export interface AttachmentItem {
-  type: string
-  path?: string
-  name?: string
-  url?: string
-  base64?: string
-  content_hash?: string
-  bot_id?: string
-  mime?: string
-  size?: number
-  storage_key?: string
-  [key: string]: unknown
-}
-
-export interface AttachmentBlock {
-  type: 'attachment'
-  attachments: AttachmentItem[]
-}
-
 export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock
 
-export interface ChatMessage {
+export interface ChatUserTurn {
   id: string
-  role: 'user' | 'assistant'
-  blocks: ContentBlock[]
-  timestamp: Date
-  streaming: boolean
+  role: 'user'
+  text: string
+  attachments: AttachmentItem[]
+  timestamp: string
   platform?: string
   senderDisplayName?: string
   senderAvatarUrl?: string
-  isSelf?: boolean
+  senderUserId?: string
+  streaming: boolean
+  isSelf: boolean
 }
 
+export interface ChatAssistantTurn {
+  id: string
+  role: 'assistant'
+  messages: ContentBlock[]
+  timestamp: string
+  platform?: string
+  streaming: boolean
+}
+
+export type ChatMessage = ChatUserTurn | ChatAssistantTurn
+
 interface PendingAssistantStream {
-  assistantMsg: ChatMessage
-  textBlockIdx: number
-  thinkingBlockIdx: number
-  deferredAttachments: Array<Record<string, unknown>>
+  assistantTurn: ChatAssistantTurn
   done: boolean
   resolve: () => void
   reject: (err: Error) => void
 }
-
-// ---- Store ----
 
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
@@ -113,10 +95,10 @@ export const useChatStore = defineStore('chat', () => {
   let abortFn: (() => void) | null = null
   let messageEventsSince = ''
   let pendingAssistantStream: PendingAssistantStream | null = null
-  const knownServerMessageIds = new Set<string>()
-  const messageEventsStream = useRetryingStream()
-  const localStream = useRetryingStream()
   let activeWs: ChatWebSocket | null = null
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null
+  let refreshPromise: Promise<void> | null = null
+  const messageEventsStream = useRetryingStream()
 
   const activeSession = computed(() =>
     sessions.value.find((s) => s.id === sessionId.value) ?? null,
@@ -137,7 +119,6 @@ export const useChatStore = defineStore('chat', () => {
       void initialize()
     } else {
       stopMessageEvents()
-      stopLocalStream()
       stopWebSocket()
       rejectPendingAssistantStream(new Error('Bot stream stopped'))
       messageEventsSince = ''
@@ -152,192 +133,17 @@ export const useChatStore = defineStore('chat', () => {
   const isPendingBot = (bot: Bot | null | undefined) =>
     bot?.status === 'creating' || bot?.status === 'deleting'
 
-  // ---- Message adapter: convert server Message to ChatMessage ----
-
-  function mediaTypeFromMime(mime: string): string {
-    const m = (mime || '').toLowerCase().trim()
-    if (m.startsWith('image/')) return 'image'
-    if (m.startsWith('audio/')) return 'audio'
-    if (m.startsWith('video/')) return 'video'
-    return 'file'
+  function normalizeTimestamp(value?: string): string {
+    const raw = (value ?? '').trim()
+    if (!raw) return new Date().toISOString()
+    const parsed = new Date(raw)
+    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString()
   }
 
-  function buildAssetBlocks(raw: Message): AttachmentBlock[] {
-    if (!raw.assets?.length) return []
-    const items: Array<Record<string, unknown>> = raw.assets.map((a) => ({
-      type: mediaTypeFromMime(a.mime),
-      content_hash: a.content_hash,
-      bot_id: raw.bot_id,
-      mime: a.mime,
-      size: a.size_bytes,
-      storage_key: a.storage_key,
-      name: a.name || undefined,
-      metadata: a.metadata || undefined,
-    }))
-    return [{ type: 'attachment', attachments: items }]
-  }
-
-  function messageToChat(raw: Message): ChatMessage | null {
-    if (raw.role !== 'user' && raw.role !== 'assistant') return null
-
-    const text = extractMessageText(raw)
-    const assetBlocks = buildAssetBlocks(raw)
-    const reasoningTexts = extractMessageReasoning(raw)
-
-    if (!text && assetBlocks.length === 0 && reasoningTexts.length === 0) return null
-
-    const blocks: ContentBlock[] = []
-    for (const r of reasoningTexts) {
-      blocks.push({ type: 'thinking', content: r, done: true })
-    }
-    if (text) blocks.push({ type: 'text', content: text })
-    blocks.push(...assetBlocks)
-
-    const createdAt = raw.created_at ? new Date(raw.created_at) : new Date()
-    const timestamp = Number.isNaN(createdAt.getTime()) ? new Date() : createdAt
-    const platform = (raw.platform ?? '').trim().toLowerCase()
-    const channelTag = platform && platform !== 'local' ? platform : undefined
-
-    if (raw.role === 'user') {
-      const isSelf = resolveIsSelf(raw)
-      const senderName = (raw.sender_display_name ?? '').trim() || undefined
-      const senderAvatar = (raw.sender_avatar_url ?? '').trim() || undefined
-      return {
-        id: raw.id || nextId(),
-        role: 'user',
-        blocks,
-        timestamp,
-        streaming: false,
-        isSelf,
-        ...(channelTag && { platform: channelTag }),
-        ...(channelTag && { senderDisplayName: senderName, senderAvatarUrl: senderAvatar }),
-      }
-    }
-
-    return {
-      id: raw.id || nextId(),
-      role: 'assistant',
-      blocks,
-      timestamp,
-      streaming: false,
-      ...(channelTag && { platform: channelTag }),
-    }
-  }
-
-  function convertMessagesToChats(rows: Message[]): ChatMessage[] {
-    const result: ChatMessage[] = []
-    let pendingAssistant: ChatMessage | null = null
-    const pendingToolCallMap = new Map<string, ToolCallBlock>()
-
-    function flushPending() {
-      if (!pendingAssistant) return
-      for (const block of pendingAssistant.blocks) {
-        if (block.type === 'tool_call' && !block.done) block.done = true
-      }
-      result.push(pendingAssistant)
-      pendingAssistant = null
-      pendingToolCallMap.clear()
-    }
-
-    function makeTimestamp(raw: Message): Date {
-      const d = raw.created_at ? new Date(raw.created_at) : new Date()
-      return Number.isNaN(d.getTime()) ? new Date() : d
-    }
-
-    for (const raw of rows) {
-      if (raw.role === 'user') {
-        flushPending()
-        const chat = messageToChat(raw)
-        if (chat) result.push(chat)
-        continue
-      }
-
-      if (raw.role === 'assistant') {
-        const toolCalls = extractToolCalls(raw)
-        const text = extractMessageText(raw)
-        const reasoningTexts = extractMessageReasoning(raw)
-
-        if (toolCalls.length > 0) {
-          if (!pendingAssistant) {
-            const platform = (raw.platform ?? '').trim().toLowerCase()
-            const channelTag = platform && platform !== 'local' ? platform : undefined
-            pendingAssistant = {
-              id: raw.id || nextId(),
-              role: 'assistant',
-              blocks: [],
-              timestamp: makeTimestamp(raw),
-              streaming: false,
-              ...(channelTag && { platform: channelTag }),
-            }
-          }
-          for (const r of reasoningTexts) {
-            pendingAssistant.blocks.push({ type: 'thinking', content: r, done: true })
-          }
-          if (text) {
-            pendingAssistant.blocks.push({ type: 'text', content: text })
-          }
-          for (const tc of toolCalls) {
-            const block: ToolCallBlock = {
-              type: 'tool_call',
-              toolCallId: tc.id ?? '',
-              toolName: tc.name,
-              input: tc.input,
-              result: null,
-              done: false,
-            }
-            pendingAssistant.blocks.push(block)
-            if (tc.id) pendingToolCallMap.set(tc.id, block)
-          }
-          pendingAssistant.blocks.push(...buildAssetBlocks(raw))
-          continue
-        }
-
-        if (pendingAssistant && text) {
-          for (const r of reasoningTexts) {
-            pendingAssistant.blocks.push({ type: 'thinking', content: r, done: true })
-          }
-          pendingAssistant.blocks.push({ type: 'text', content: text })
-          pendingAssistant.blocks.push(...buildAssetBlocks(raw))
-          flushPending()
-          continue
-        }
-
-        flushPending()
-        const chat = messageToChat(raw)
-        if (chat) result.push(chat)
-        continue
-      }
-
-      if (raw.role === 'tool') {
-        const results = extractAllToolResults(raw)
-        for (const r of results) {
-          if (!r.toolCallId || !pendingToolCallMap.has(r.toolCallId)) continue
-          const block = pendingToolCallMap.get(r.toolCallId)!
-          const output = r.output as Record<string, unknown> | null
-          if (output && typeof output === 'object' && output.delivered === 'current_conversation') {
-            // Same-conversation send/react/speak: remove the tool_call block
-            if (pendingAssistant) {
-              const idx = pendingAssistant.blocks.indexOf(block)
-              if (idx >= 0) pendingAssistant.blocks.splice(idx, 1)
-            }
-            pendingToolCallMap.delete(r.toolCallId)
-            continue
-          }
-          block.result = r.output
-          block.done = true
-        }
-        continue
-      }
-    }
-
-    flushPending()
-    return result
-  }
-
-  function resolveIsSelf(raw: Message): boolean {
-    const platform = (raw.platform ?? '').trim().toLowerCase()
+  function resolveIsSelf(turn: UIUserTurn): boolean {
+    const platform = (turn.platform ?? '').trim().toLowerCase()
     if (!platform || platform === 'local') return true
-    const senderUserId = (raw.sender_user_id ?? '').trim()
+    const senderUserId = (turn.sender_user_id ?? '').trim()
     if (!senderUserId) return false
     const userStore = useUserStore()
     const currentUserId = (userStore.userInfo.id ?? '').trim()
@@ -345,45 +151,205 @@ export const useChatStore = defineStore('chat', () => {
     return senderUserId === currentUserId
   }
 
-  // ---- Abort ----
-
-  function abort() {
-    if (activeWs) {
-      activeWs.abort()
-    }
-    abortFn?.()
-    abortFn = null
-    for (const msg of messages) {
-      if (msg.streaming) msg.streaming = false
-    }
-    streamingSessionId.value = null
+  function normalizeAttachment(att: UIAttachment): AttachmentItem {
+    return { ...att }
   }
 
-  // ---- Message list management ----
-
-  function replaceMessages(items: ChatMessage[], serverRowIds?: string[]) {
-    messages.splice(0, messages.length, ...items)
-    knownServerMessageIds.clear()
-    for (const item of items) {
-      const tid = String(item.id ?? '').trim()
-      if (tid) knownServerMessageIds.add(tid)
+  function normalizeUIMessage(msg: UIMessage): ContentBlock {
+    switch (msg.type) {
+      case 'tool':
+        return {
+          ...msg,
+          toolCallId: msg.tool_call_id,
+          toolName: msg.name,
+          result: msg.output ?? null,
+          done: !msg.running,
+          progress: msg.progress ? [...msg.progress] : undefined,
+        }
+      case 'attachments':
+        return {
+          ...msg,
+          attachments: msg.attachments.map(normalizeAttachment),
+        }
+      default:
+        return { ...msg }
     }
-    if (serverRowIds) {
-      for (const id of serverRowIds) {
-        const tid = id.trim()
-        if (tid) knownServerMessageIds.add(tid)
+  }
+
+  function normalizeTurn(turn: UITurn): ChatMessage {
+    if (turn.role === 'user') {
+      return {
+        id: String(turn.id ?? nextId()),
+        role: 'user',
+        text: turn.text ?? '',
+        attachments: (turn.attachments ?? []).map(normalizeAttachment),
+        timestamp: normalizeTimestamp(turn.timestamp),
+        platform: (turn.platform ?? '').trim() || undefined,
+        senderDisplayName: (turn.sender_display_name ?? '').trim() || undefined,
+        senderAvatarUrl: (turn.sender_avatar_url ?? '').trim() || undefined,
+        senderUserId: (turn.sender_user_id ?? '').trim() || undefined,
+        streaming: false,
+        isSelf: resolveIsSelf(turn),
+      }
+    }
+
+    return {
+      id: String(turn.id ?? nextId()),
+      role: 'assistant',
+      messages: (turn.messages ?? []).map(normalizeUIMessage),
+      timestamp: normalizeTimestamp(turn.timestamp),
+      platform: (turn.platform ?? '').trim() || undefined,
+      streaming: false,
+    }
+  }
+
+  function updateSince(value?: string) {
+    const next = (value ?? '').trim()
+    if (!next) return
+    if (!messageEventsSince) {
+      messageEventsSince = next
+      return
+    }
+    const currentTs = Date.parse(messageEventsSince)
+    const nextTs = Date.parse(next)
+    if (!Number.isNaN(nextTs) && (Number.isNaN(currentTs) || nextTs > currentTs)) {
+      messageEventsSince = next
+    }
+  }
+
+  function updateSinceFromMessages(items: ChatMessage[]) {
+    messageEventsSince = ''
+    for (const item of items) {
+      updateSince(item.timestamp)
+    }
+  }
+
+  function replaceMessages(items: UITurn[]) {
+    const normalized = items.map(normalizeTurn)
+    messages.splice(0, messages.length, ...normalized)
+    updateSinceFromMessages(normalized)
+  }
+
+  function createCompletionForAssistantTurn(assistantTurn: ChatAssistantTurn): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      pendingAssistantStream = {
+        assistantTurn,
+        done: false,
+        resolve,
+        reject,
+      }
+    })
+  }
+
+  function createOptimisticAssistantTurn(): ChatAssistantTurn {
+    return {
+      id: nextId(),
+      role: 'assistant',
+      messages: [],
+      timestamp: new Date().toISOString(),
+      streaming: true,
+    }
+  }
+
+  function createOptimisticUserTurn(text: string, attachments?: ChatAttachment[]): ChatUserTurn {
+    return {
+      id: nextId(),
+      role: 'user',
+      text,
+      attachments: (attachments ?? []).map((attachment) => ({
+        type: attachment.type,
+        url: attachment.base64,
+        base64: attachment.base64,
+        name: attachment.name ?? '',
+        mime: attachment.mime ?? '',
+      })),
+      timestamp: new Date().toISOString(),
+      streaming: false,
+      isSelf: true,
+    }
+  }
+
+  function resolvePendingAssistantStream() {
+    if (!pendingAssistantStream || pendingAssistantStream.done) return
+    const session = pendingAssistantStream
+    session.assistantTurn.streaming = false
+    session.done = true
+    pendingAssistantStream = null
+    session.resolve()
+  }
+
+  function rejectPendingAssistantStream(err: Error) {
+    if (!pendingAssistantStream || pendingAssistantStream.done) return
+    const session = pendingAssistantStream
+    session.assistantTurn.streaming = false
+    session.done = true
+    pendingAssistantStream = null
+    session.reject(err)
+  }
+
+  function ensureDiscussStream(): PendingAssistantStream {
+    if (pendingAssistantStream && !pendingAssistantStream.done) {
+      return pendingAssistantStream
+    }
+    messages.push(createOptimisticAssistantTurn())
+    const assistantTurn = messages[messages.length - 1] as ChatAssistantTurn
+    void createCompletionForAssistantTurn(assistantTurn).catch(() => {})
+    return pendingAssistantStream!
+  }
+
+  function upsertAssistantUIMessage(turn: ChatAssistantTurn, message: UIMessage) {
+    const normalized = normalizeUIMessage(message)
+    turn.messages = upsertById(turn.messages, normalized)
+  }
+
+  function nextAssistantMessageId(turn: ChatAssistantTurn): number {
+    return turn.messages.reduce((maxId, message) => Math.max(maxId, message.id), -1) + 1
+  }
+
+  function appendAssistantError(session: PendingAssistantStream, errorMessage: string) {
+    const text = errorMessage.trim()
+    if (!text) return
+
+    for (let index = session.assistantTurn.messages.length - 1; index >= 0; index -= 1) {
+      const current = session.assistantTurn.messages[index]
+      if (current?.type === 'text') {
+        session.assistantTurn.messages[index] = {
+          ...current,
+          content: `${current.content}\n\n**Error:** ${text}`.trim(),
+        }
+        return
+      }
+    }
+
+    session.assistantTurn.messages.push({
+      id: nextAssistantMessageId(session.assistantTurn),
+      type: 'text',
+      content: `**Error:** ${text}`,
+    })
+  }
+
+  function handleWSStreamEvent(event: UIStreamEvent) {
+    switch (event.type) {
+      case 'start':
+        ensureDiscussStream()
+        break
+      case 'message':
+        upsertAssistantUIMessage(ensureDiscussStream().assistantTurn, event.data)
+        break
+      case 'end':
+        resolvePendingAssistantStream()
+        break
+      case 'error': {
+        const session = ensureDiscussStream()
+        appendAssistantError(session, event.message || 'stream error')
+        rejectPendingAssistantStream(new Error(event.message || 'stream error'))
+        break
       }
     }
   }
 
-  // ---- SSE real-time events ----
-
   function stopMessageEvents() {
     messageEventsStream.stop()
-  }
-
-  function stopLocalStream() {
-    localStream.stop()
   }
 
   function stopWebSocket() {
@@ -397,308 +363,58 @@ export const useChatStore = defineStore('chat', () => {
     const bid = targetBotId.trim()
     stopWebSocket()
     if (!bid) return
-
-    activeWs = connectWebSocket(
-      bid,
-      handleLocalStreamEvent,
-      (e) => handleStreamEvent(bid, e),
-    )
+    activeWs = connectWebSocket(bid, handleWSStreamEvent)
   }
 
-  function pushAssistantBlock(session: PendingAssistantStream, block: ContentBlock): number {
-    session.assistantMsg.blocks.push(block)
-    return session.assistantMsg.blocks.length - 1
-  }
-
-  function appendAssistantError(session: PendingAssistantStream, errorMessage: string) {
-    const message = errorMessage.trim()
-    if (!message) return
-    ensureAssistantTextBlock(session).content += `\n\n**Error:** ${message}`
-  }
-
-  function ensureAssistantTextBlock(session: PendingAssistantStream): TextBlock {
-    if (session.textBlockIdx < 0 || session.assistantMsg.blocks[session.textBlockIdx]?.type !== 'text') {
-      session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })
-    }
-    return session.assistantMsg.blocks[session.textBlockIdx] as TextBlock
-  }
-
-  function resolveStreamErrorMessage(event: StreamEvent, fallback: string): string {
-    if (typeof event.message === 'string') return event.message
-    if (typeof event.error === 'string') return event.error
-    return fallback
-  }
-
-  function flushDeferredAttachments(session: PendingAssistantStream) {
-    if (session.deferredAttachments.length === 0) return
-    const lastBlock = session.assistantMsg.blocks[session.assistantMsg.blocks.length - 1]
-    if (lastBlock && lastBlock.type === 'attachment') {
-      lastBlock.attachments.push(...session.deferredAttachments)
-    } else {
-      pushAssistantBlock(session, { type: 'attachment', attachments: [...session.deferredAttachments] })
-    }
-    session.deferredAttachments = []
-  }
-
-  function resolvePendingAssistantStream() {
-    if (!pendingAssistantStream || pendingAssistantStream.done) return
-    const session = pendingAssistantStream
-    flushDeferredAttachments(session)
-    session.done = true
-    pendingAssistantStream = null
-    session.resolve()
-  }
-
-  function rejectPendingAssistantStream(err: Error) {
-    if (!pendingAssistantStream || pendingAssistantStream.done) return
-    const session = pendingAssistantStream
-    flushDeferredAttachments(session)
-    session.done = true
-    pendingAssistantStream = null
-    session.reject(err)
-  }
-
-  function ensureDiscussStream(): PendingAssistantStream {
-    const assistantMsg: ChatMessage = {
-      id: nextId(),
-      role: 'assistant',
-      blocks: [],
-      timestamp: new Date(),
-      streaming: true,
-    }
-    messages.push(assistantMsg)
-    let resolveStream: () => void = () => {}
-    let rejectStream: (err: Error) => void = () => {}
-    new Promise<void>((resolve, reject) => { resolveStream = resolve; rejectStream = reject })
-      .catch(() => {})
-    const stream: PendingAssistantStream = {
-      assistantMsg,
-      textBlockIdx: -1,
-      thinkingBlockIdx: -1,
-      deferredAttachments: [],
-      done: false,
-      resolve: resolveStream,
-      reject: rejectStream,
-    }
-    pendingAssistantStream = stream
-    return stream
-  }
-
-  function handleLocalStreamEvent(event: StreamEvent) {
-    const meta = event.metadata as Record<string, unknown> | undefined
-    const sourceChannel = meta?.source_channel as string | undefined
-    const isCrossChannel = !!sourceChannel
-
-    // Cross-channel events (Telegram, Discord, etc.) don't carry session_id,
-    // so we can't determine which session they belong to. Skip them here;
-    // persisted messages will arrive through the SSE message events stream
-    // with proper session_id filtering via appendRealtimeMessage.
-    if (isCrossChannel) return
-
-    const type = (event.type ?? '').toLowerCase()
-
-    // Discuss mode: agent events arrive without a prior user send,
-    // so pendingAssistantStream may be null. Auto-create one on agent_start
-    // so that subsequent reasoning / tool_call / text events render.
-    if (!pendingAssistantStream || pendingAssistantStream.done) {
-      if (type === 'agent_start') {
-        ensureDiscussStream()
-      } else {
-        return
-      }
-    }
-
-    const session = pendingAssistantStream!
-
-    switch (type) {
-      case 'text_start':
-        session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })
-        break
-      case 'text_delta':
-        if (typeof event.delta === 'string') {
-          ensureAssistantTextBlock(session).content += event.delta
-        }
-        break
-      case 'text_end':
-        session.textBlockIdx = -1
-        break
-      case 'reasoning_start':
-        session.thinkingBlockIdx = pushAssistantBlock(session, { type: 'thinking', content: '', done: false })
-        break
-      case 'reasoning_delta':
-        if (typeof event.delta === 'string') {
-          if (session.thinkingBlockIdx < 0 || session.assistantMsg.blocks[session.thinkingBlockIdx]?.type !== 'thinking') {
-            session.thinkingBlockIdx = pushAssistantBlock(session, { type: 'thinking', content: '', done: false })
-          }
-          ;(session.assistantMsg.blocks[session.thinkingBlockIdx] as ThinkingBlock).content += event.delta
-        }
-        break
-      case 'reasoning_end':
-        if (session.thinkingBlockIdx >= 0 && session.assistantMsg.blocks[session.thinkingBlockIdx]?.type === 'thinking') {
-          const tb = session.assistantMsg.blocks[session.thinkingBlockIdx] as ThinkingBlock
-          if (tb.content.trim() === '') {
-            session.assistantMsg.blocks.splice(session.thinkingBlockIdx, 1)
-          } else {
-            tb.done = true
-          }
-        }
-        session.thinkingBlockIdx = -1
-        break
-      case 'tool_call_start':
-        pushAssistantBlock(session, {
-          type: 'tool_call',
-          toolCallId: (event.toolCallId as string) ?? '',
-          toolName: (event.toolName as string) ?? 'unknown',
-          input: event.input ?? null,
-          result: null,
-          done: false,
-        })
-        session.textBlockIdx = -1
-        break
-      case 'tool_call_end': {
-        const callId = (event.toolCallId as string) ?? ''
-        const toolResult = event.result as Record<string, unknown> | null
-        const isLocalDelivery = (event.toolName === 'send' || event.toolName === 'react' || event.toolName === 'speak')
-          && toolResult != null
-          && typeof toolResult === 'object'
-          && toolResult.delivered === 'current_conversation'
-
-        if (isLocalDelivery) {
-          // Same-conversation send/react/speak: remove the tool_call block
-          // so the user only sees the attachment, not the tool invocation.
-          if (callId) {
-            const idx = session.assistantMsg.blocks.findIndex(
-              (b) => b.type === 'tool_call' && (b as ToolCallBlock).toolCallId === callId,
-            )
-            if (idx >= 0)
-              session.assistantMsg.blocks.splice(idx, 1)
-          }
-          break
-        }
-
-        let matched = false
-        if (callId) {
-          for (let i = 0; i < session.assistantMsg.blocks.length; i++) {
-            const block = session.assistantMsg.blocks[i]
-            if (block && block.type === 'tool_call' && block.toolCallId === callId && !block.done) {
-              block.result = event.result ?? null
-              block.input = event.input ?? block.input
-              block.done = true
-              matched = true
-              break
-            }
-          }
-        }
-        if (!matched) {
-          for (let i = 0; i < session.assistantMsg.blocks.length; i++) {
-            const block = session.assistantMsg.blocks[i]
-            if (block && block.type === 'tool_call' && block.toolName === event.toolName && !block.done) {
-              block.result = event.result ?? null
-              block.input = event.input ?? block.input
-              block.done = true
-              break
-            }
-          }
-        }
-        break
-      }
-      case 'attachment_delta': {
-        const items = event.attachments
-        if (Array.isArray(items) && items.length > 0) {
-          session.deferredAttachments.push(...items)
-        }
-        break
-      }
-      case 'final':
-        break
-      case 'processing_started':
-        if (session.assistantMsg.blocks.length === 0) {
-          session.textBlockIdx = pushAssistantBlock(session, { type: 'text', content: '' })
-        }
-        break
-      case 'processing_completed':
-        resolvePendingAssistantStream()
-        break
-      case 'processing_failed': {
-        const message = resolveStreamErrorMessage(event, 'processing failed')
-        appendAssistantError(session, message)
-        rejectPendingAssistantStream(new Error(message))
-        break
-      }
-      case 'error': {
-        const message = resolveStreamErrorMessage(event, 'stream error')
-        appendAssistantError(session, message)
-        rejectPendingAssistantStream(new Error(message))
-        break
-      }
-      case 'agent_abort':
-      case 'agent_end':
-        resolvePendingAssistantStream()
-        break
-      case 'agent_start':
-      default: {
-        const fallback = extractFallbackText(event)
-        if (fallback) {
-          ensureAssistantTextBlock(session).content += fallback
-        }
-        break
-      }
-    }
-  }
-
-  function startLocalStream(targetBotId: string) {
+  function ensureWebSocket(targetBotId: string): ChatWebSocket | null {
     const bid = targetBotId.trim()
-    stopLocalStream()
-    if (!bid) return
-
-    localStream.start(async (signal) => {
-      await streamLocalChannel(bid, signal, handleLocalStreamEvent)
-    })
-  }
-
-  function updateSince(createdAt?: string) {
-    const v = (createdAt ?? '').trim()
-    if (!v) return
-    if (!messageEventsSince) { messageEventsSince = v; return }
-    const cur = Date.parse(messageEventsSince)
-    const next = Date.parse(v)
-    if (!Number.isNaN(next) && (Number.isNaN(cur) || next > cur)) {
-      messageEventsSince = v
+    if (!bid) return null
+    if (!activeWs) {
+      startWebSocket(bid)
     }
+    return activeWs
   }
 
-  function updateSinceFromRows(rows: Message[]) {
-    messageEventsSince = ''
-    for (const row of rows) updateSince(row.created_at)
+  async function refreshCurrentSession(targetBotId?: string, targetSessionId?: string) {
+    const bid = (targetBotId ?? currentBotId.value ?? '').trim()
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!bid || !sid) return
+
+    if (refreshPromise) {
+      await refreshPromise
+      return
+    }
+
+    refreshPromise = (async () => {
+      const turns = await fetchMessagesUI(bid, sid, { limit: PAGE_SIZE })
+      if (currentBotId.value !== bid || sessionId.value !== sid) return
+      replaceMessages(turns)
+      touchSession(sid)
+      const streamStillActive = streamingSessionId.value === sid && pendingAssistantStream && !pendingAssistantStream.done
+      if (!streamStillActive && pendingAssistantStream) {
+        pendingAssistantStream.assistantTurn.streaming = false
+        pendingAssistantStream = null
+      }
+      if (!streamStillActive) {
+        streamingSessionId.value = null
+      }
+    })().finally(() => {
+      refreshPromise = null
+    })
+
+    await refreshPromise
   }
 
-  function hasMessageWithId(id: string) {
-    const tid = id.trim()
-    if (!tid) return false
-    if (knownServerMessageIds.has(tid)) return true
-    return messages.some((m) => String(m.id).trim() === tid)
-  }
+  function scheduleRefreshCurrentSession(expectedSessionId?: string, delay = 100) {
+    const sid = (sessionId.value ?? '').trim()
+    if (!sid) return
+    if (expectedSessionId?.trim() && expectedSessionId.trim() !== sid) return
+    if (refreshTimer) return
 
-  function resolveMessagePlatform(raw: Message): string {
-    const direct = (raw.platform ?? '').trim().toLowerCase()
-    if (direct) return direct
-    const fromMeta = raw.metadata?.platform
-    return typeof fromMeta === 'string' ? fromMeta.trim().toLowerCase() : ''
-  }
-
-  function appendRealtimeMessage(raw: Message) {
-    updateSince(raw.created_at)
-    const msgSessionId = (raw.session_id ?? '').trim()
-    if (msgSessionId && sessionId.value && msgSessionId !== sessionId.value) return
-    const platform = resolveMessagePlatform(raw)
-    if (platform === 'local') return
-    const mid = String(raw.id ?? '').trim()
-    if (mid && hasMessageWithId(mid)) return
-    const item = messageToChat(raw)
-    if (!item) return
-    messages.push(item)
-    messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-    if (sessionId.value) touchSession(sessionId.value)
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null
+      void refreshCurrentSession()
+    }, delay)
   }
 
   function handleStreamEvent(targetBotId: string, event: MessageStreamEvent) {
@@ -709,14 +425,18 @@ export const useChatStore = defineStore('chat', () => {
     if (eventType === 'message_created') {
       const raw = event.message
       if (!raw) return
-      const pBotId = (raw.bot_id ?? '').trim()
-      if (pBotId && pBotId !== targetBotId) return
-      appendRealtimeMessage(raw)
-    } else if (eventType === 'session_title_updated') {
+      updateSince(raw.created_at)
+      if (shouldRefreshFromMessageCreated(targetBotId, sessionId.value, streamingSessionId.value, event)) {
+        scheduleRefreshCurrentSession((raw.session_id ?? '').trim())
+      }
+      return
+    }
+
+    if (eventType === 'session_title_updated') {
       const sid = (event.session_id ?? '').trim()
       const title = (event.title ?? '').trim()
       if (!sid || !title) return
-      const target = sessions.value.find((s) => s.id === sid)
+      const target = sessions.value.find((session) => session.id === sid)
       if (target) target.title = title
     }
   }
@@ -730,43 +450,53 @@ export const useChatStore = defineStore('chat', () => {
       await streamMessageEvents(
         bid,
         signal,
-        (e) => handleStreamEvent(bid, e),
+        (event) => handleStreamEvent(bid, event),
         messageEventsSince || undefined,
       )
     })
   }
 
-  // ---- Bot management ----
+  function abort() {
+    if (activeWs?.connected) {
+      activeWs.abort()
+    }
+    abortFn?.()
+    abortFn = null
+    for (const message of messages) {
+      if (message.role === 'assistant' && message.streaming) {
+        message.streaming = false
+      }
+    }
+    streamingSessionId.value = null
+  }
 
   async function ensureBot(): Promise<string | null> {
     try {
       const list = await fetchBots()
       bots.value = list
-      if (!list.length) { currentBotId.value = null; return null }
+      if (!list.length) {
+        currentBotId.value = null
+        return null
+      }
       if (currentBotId.value) {
-        const found = list.find((b) => b.id === currentBotId.value)
+        const found = list.find(bot => bot.id === currentBotId.value)
         if (found && !isPendingBot(found)) return currentBotId.value
       }
-      const ready = list.find((b) => !isPendingBot(b))
+      const ready = list.find(bot => !isPendingBot(bot))
       currentBotId.value = ready ? ready.id : list[0]!.id
       return currentBotId.value
-    } catch (err) {
-      console.error('Failed to fetch bots:', err)
+    } catch (error) {
+      console.error('Failed to fetch bots:', error)
       return currentBotId.value
     }
   }
 
-  // ---- Pagination ----
-
   const PAGE_SIZE = 30
 
   async function loadMessages(botId: string, sid: string) {
-    const rows = await fetchMessages(botId, sid, { limit: PAGE_SIZE })
-    const items = convertMessagesToChats(rows)
-    const serverRowIds = rows.map((r) => r.id).filter(Boolean)
-    replaceMessages(items, serverRowIds)
-    hasMoreOlder.value = true
-    updateSinceFromRows(rows)
+    const turns = await fetchMessagesUI(botId, sid, { limit: PAGE_SIZE })
+    replaceMessages(turns)
+    hasMoreOlder.value = turns.length > 0
   }
 
   async function loadOlderMessages(): Promise<number> {
@@ -776,33 +506,31 @@ export const useChatStore = defineStore('chat', () => {
     const first = messages[0]
     if (!first?.timestamp) return 0
 
-    const before = first.timestamp.toISOString()
     loadingOlder.value = true
     try {
-      const rows = await fetchMessages(bid, sid, { limit: PAGE_SIZE, before })
-      const items = convertMessagesToChats(rows)
-      if (rows.length < PAGE_SIZE) hasMoreOlder.value = false
-      for (const r of rows) {
-        const tid = (r.id ?? '').trim()
-        if (tid) knownServerMessageIds.add(tid)
+      const turns = await fetchMessagesUI(bid, sid, {
+        limit: PAGE_SIZE,
+        before: first.timestamp,
+      })
+      const existingIds = new Set(messages.map(message => message.id))
+      const older = turns
+        .map(normalizeTurn)
+        .filter(turn => !existingIds.has(turn.id))
+      if (older.length === 0) {
+        hasMoreOlder.value = false
+        return 0
       }
-      for (const item of items) {
-        const tid = String(item.id ?? '').trim()
-        if (tid) knownServerMessageIds.add(tid)
-      }
-      messages.unshift(...items)
-      return items.length
+      messages.unshift(...older)
+      return older.length
     } finally {
       loadingOlder.value = false
     }
   }
 
-  // ---- Session CRUD ----
-
   function touchSession(targetSessionId: string) {
-    const idx = sessions.value.findIndex((s) => s.id === targetSessionId)
-    if (idx < 0) return
-    const [target] = sessions.value.splice(idx, 1)
+    const index = sessions.value.findIndex(session => session.id === targetSessionId)
+    if (index < 0) return
+    const [target] = sessions.value.splice(index, 1)
     if (!target) return
     target.updated_at = new Date().toISOString()
     sessions.value.unshift(target)
@@ -813,19 +541,16 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? await ensureBot()
     if (!bid) throw new Error('Bot not ready')
     const created = await createSession(bid)
-    sessions.value = [created, ...sessions.value.filter((s) => s.id !== created.id)]
+    sessions.value = [created, ...sessions.value.filter(session => session.id !== created.id)]
     sessionId.value = created.id
     replaceMessages([])
   }
-
-  // ---- Initialize ----
 
   async function initialize() {
     if (initializing.value) return
     initializing.value = true
     loadingChats.value = true
     stopMessageEvents()
-    stopLocalStream()
     stopWebSocket()
     try {
       const bid = await ensureBot()
@@ -836,6 +561,7 @@ export const useChatStore = defineStore('chat', () => {
         replaceMessages([])
         return
       }
+
       const visible = await fetchSessions(bid)
       sessions.value = visible
       if (!visible.length) {
@@ -843,15 +569,15 @@ export const useChatStore = defineStore('chat', () => {
         sessionId.value = null
         replaceMessages([])
       } else {
-        const activeSessionId = sessionId.value && visible.some((s) => s.id === sessionId.value)
+        const activeSessionId = sessionId.value && visible.some(session => session.id === sessionId.value)
           ? sessionId.value
           : visible[0]!.id
         sessionId.value = activeSessionId
         await loadMessages(bid, activeSessionId)
       }
+
       startWebSocket(bid)
       startMessageEvents(bid)
-      startLocalStream(bid)
     } finally {
       loadingChats.value = false
       initializing.value = false
@@ -895,7 +621,7 @@ export const useChatStore = defineStore('chat', () => {
       const bid = currentBotId.value ?? ''
       if (!bid) throw new Error('Bot not selected')
       await requestDeleteSession(bid, delId)
-      const remaining = sessions.value.filter((s) => s.id !== delId)
+      const remaining = sessions.value.filter(session => session.id !== delId)
       sessions.value = remaining
       if (sessionId.value !== delId) return
       if (!remaining.length) {
@@ -910,13 +636,12 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  // ---- Send message (blocks-based streaming) ----
-
   async function sendMessage(text: string, attachments?: ChatAttachment[]) {
     const trimmed = text.trim()
     if ((!trimmed && !attachments?.length) || streaming.value || !currentBotId.value) return
 
     loading.value = true
+    let assistantTurn: ChatAssistantTurn | null = null
 
     try {
       await ensureActiveSession()
@@ -925,84 +650,64 @@ export const useChatStore = defineStore('chat', () => {
       const sid = sessionId.value!
       streamingSessionId.value = sid
 
-      const userBlocks: ContentBlock[] = []
-      if (trimmed) userBlocks.push({ type: 'text', content: trimmed })
-      if (attachments?.length) {
-        userBlocks.push({
-          type: 'attachment',
-          attachments: attachments.map((a) => ({
-            type: a.type,
-            name: a.name ?? '',
-            mime: a.mime ?? '',
-            url: a.base64,
-          })),
-        })
-      }
-      messages.push({
-        id: nextId(),
-        role: 'user',
-        blocks: userBlocks,
-        timestamp: new Date(),
-        streaming: false,
-      })
-
-      messages.push({
-        id: nextId(),
-        role: 'assistant',
-        blocks: [],
-        timestamp: new Date(),
-        streaming: true,
-      })
-      const assistantMsg = messages[messages.length - 1]!
-      const completion = new Promise<void>((resolve, reject) => {
-        pendingAssistantStream = {
-          assistantMsg,
-          textBlockIdx: -1,
-          thinkingBlockIdx: -1,
-          deferredAttachments: [],
-          done: false,
-          resolve,
-          reject,
-        }
-      })
-
-      abortFn = () => {
-        const abortError = new Error('aborted')
-        abortError.name = 'AbortError'
-        if (activeWs) {
-          activeWs.abort()
-        }
-        rejectPendingAssistantStream(abortError)
-      }
+      messages.push(createOptimisticUserTurn(trimmed, attachments))
+      messages.push(createOptimisticAssistantTurn())
+      assistantTurn = messages[messages.length - 1] as ChatAssistantTurn
 
       const modelId = overrideModelId.value || undefined
-      const re = overrideReasoningEffort.value
-      const reasoningEffort = (re && re !== 'off') ? re : undefined
-      if (activeWs?.connected) {
-        activeWs.send({ type: 'message', text: trimmed, session_id: sid, attachments, model_id: modelId, reasoning_effort: reasoningEffort })
-      } else {
-        await sendLocalChannelMessage(bid, trimmed, attachments, { modelId, reasoningEffort })
-      }
-      await completion
+      const effort = overrideReasoningEffort.value
+      const reasoningEffort = effort && effort !== 'off' ? effort : undefined
 
-      assistantMsg.streaming = false
+      const ws = ensureWebSocket(bid)
+      if (ws) {
+        const completion = createCompletionForAssistantTurn(assistantTurn)
+        abortFn = () => {
+          const abortError = new Error('aborted')
+          abortError.name = 'AbortError'
+          ws.abort()
+          rejectPendingAssistantStream(abortError)
+        }
+        ws.send({
+          type: 'message',
+          text: trimmed,
+          session_id: sid,
+          attachments,
+          model_id: modelId,
+          reasoning_effort: reasoningEffort,
+        })
+        await completion
+        await refreshCurrentSession(bid, sid)
+      } else {
+        void createCompletionForAssistantTurn(assistantTurn).catch(() => {})
+        await sendLocalChannelMessage(bid, trimmed, attachments, { modelId, reasoningEffort })
+        await refreshCurrentSession(bid, sid)
+      }
+
+      assistantTurn.streaming = false
       streamingSessionId.value = null
       loading.value = false
       abortFn = null
       touchSession(sid)
-    } catch (err) {
-      const isAbort = err instanceof Error && err.name === 'AbortError'
-      const reason = err instanceof Error ? err.message : 'Unknown error'
-      const last = messages[messages.length - 1]
-      if (!isAbort && last?.role === 'assistant' && last.streaming) {
-        last.blocks = [{ type: 'text', content: `Failed to send message: ${reason}` }]
-        last.streaming = false
+    } catch (error) {
+      const isAbort = error instanceof Error && error.name === 'AbortError'
+      const reason = error instanceof Error ? error.message : 'Unknown error'
+      if (!isAbort && assistantTurn) {
+        assistantTurn.messages = [{
+          id: 0,
+          type: 'text',
+          content: `Failed to send message: ${reason}`,
+        }]
+        assistantTurn.streaming = false
       } else if (!isAbort) {
         messages.push({
           id: nextId(),
           role: 'assistant',
-          blocks: [{ type: 'text', content: `Failed to send message: ${reason}` }],
-          timestamp: new Date(),
+          messages: [{
+            id: 0,
+            type: 'text',
+            content: `Failed to send message: ${reason}`,
+          }],
+          timestamp: new Date().toISOString(),
           streaming: false,
         })
       }
@@ -1018,7 +723,6 @@ export const useChatStore = defineStore('chat', () => {
     replaceMessages([])
   }
 
-  // Backward-compatible aliases
   const chats = sessions
   const chatId = sessionId
 
@@ -1056,9 +760,3 @@ export const useChatStore = defineStore('chat', () => {
   }
 })
 
-function extractFallbackText(event: StreamEvent): string | null {
-  if (typeof event.delta === 'string') return event.delta
-  if (typeof (event as Record<string, unknown>).text === 'string') return (event as Record<string, unknown>).text as string
-  if (typeof (event as Record<string, unknown>).content === 'string') return (event as Record<string, unknown>).content as string
-  return null
-}

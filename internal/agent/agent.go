@@ -216,6 +216,14 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				Input:      p.Input,
 			}
 
+		case *sdk.ToolProgressPart:
+			ch <- StreamEvent{
+				Type:       EventToolCallProgress,
+				ToolName:   p.ToolName,
+				ToolCallID: p.ToolCallID,
+				Progress:   p.Content,
+			}
+
 		case *sdk.StreamToolResultPart:
 			shouldAbort := false
 			if _, ok := toolLoopAbortCallIDs[p.ToolCallID]; ok {

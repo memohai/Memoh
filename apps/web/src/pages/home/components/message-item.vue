@@ -68,10 +68,14 @@
         class="space-y-2"
       >
         <HeartbeatTriggerBlock
-          v-for="(block, i) in message.blocks.filter(b => b.type === 'text')"
-          :key="i"
-          :content="block.content ?? ''"
+          v-if="message.text"
+          :content="message.text"
           :bot-id="botId"
+        />
+        <AttachmentBlock
+          v-if="userAttachmentBlock"
+          :block="userAttachmentBlock"
+          :on-open-media="onOpenMedia"
         />
         <p
           class="text-xs text-muted-foreground/80 mt-1"
@@ -87,10 +91,14 @@
         class="space-y-2"
       >
         <ScheduleTriggerBlock
-          v-for="(block, i) in message.blocks.filter(b => b.type === 'text')"
-          :key="i"
-          :content="block.content ?? ''"
+          v-if="message.text"
+          :content="message.text"
           :bot-id="botId"
+        />
+        <AttachmentBlock
+          v-if="userAttachmentBlock"
+          :block="userAttachmentBlock"
+          :on-open-media="onOpenMedia"
         />
         <p
           class="text-xs text-muted-foreground/80 mt-1"
@@ -106,28 +114,23 @@
         class="space-y-2"
       >
         <div
-          v-for="(block, i) in message.blocks"
-          :key="i"
+          v-if="message.text"
+          class="w-full rounded-lg border border-violet-200 dark:border-violet-400/20 bg-violet-50/50 dark:bg-violet-950/20 px-4 py-3"
         >
-          <div
-            v-if="block.type === 'text' && block.content"
-            class="w-full rounded-lg border border-violet-200 dark:border-violet-400/20 bg-violet-50/50 dark:bg-violet-950/20 px-4 py-3"
-          >
-            <div class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0">
-              <MarkdownRender
-                :content="block.content"
-                :is-dark="isDark"
-                :typewriter="message.streaming"
-                custom-id="chat-msg"
-              />
-            </div>
+          <div class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0">
+            <MarkdownRender
+              :content="message.text"
+              :is-dark="isDark"
+              :typewriter="message.streaming"
+              custom-id="chat-msg"
+            />
           </div>
-          <AttachmentBlock
-            v-else-if="block.type === 'attachment'"
-            :block="(block as AttachmentBlockType)"
-            :on-open-media="onOpenMedia"
-          />
         </div>
+        <AttachmentBlock
+          v-if="userAttachmentBlock"
+          :block="userAttachmentBlock"
+          :on-open-media="onOpenMedia"
+        />
         <p
           class="text-xs text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
@@ -142,24 +145,19 @@
         class="space-y-2"
       >
         <div
-          v-for="(block, i) in message.blocks"
-          :key="i"
+          v-if="cleanUserText(message.text)"
+          class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
+          :class="isSelf
+            ? 'rounded-tr-sm bg-foreground text-background'
+            : 'rounded-tl-sm bg-accent text-foreground'"
         >
-          <div
-            v-if="block.type === 'text' && cleanUserText(block.content)"
-            class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
-            :class="isSelf
-              ? 'rounded-tr-sm bg-foreground text-background'
-              : 'rounded-tl-sm bg-accent text-foreground'"
-          >
-            {{ cleanUserText(block.content) }}
-          </div>
-          <AttachmentBlock
-            v-else-if="block.type === 'attachment'"
-            :block="(block as AttachmentBlockType)"
-            :on-open-media="onOpenMedia"
-          />
+          {{ cleanUserText(message.text) }}
         </div>
+        <AttachmentBlock
+          v-if="userAttachmentBlock"
+          :block="userAttachmentBlock"
+          :on-open-media="onOpenMedia"
+        />
         <p
           class="text-xs text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
@@ -182,19 +180,19 @@
         </p> -->
 
         <template
-          v-for="(block, i) in message.blocks"
+          v-for="(block, i) in message.messages"
           :key="i"
         >
           <!-- Thinking block -->
           <ThinkingBlock
-            v-if="block.type === 'thinking'"
+            v-if="block.type === 'reasoning'"
             :block="(block as ThinkingBlockType)"
-            :streaming="message.streaming && !block.done"
+            :streaming="isAssistantBlockStreaming(i)"
           />
 
           <!-- Tool call block -->
           <ToolCallBlock
-            v-else-if="block.type === 'tool_call'"
+            v-else-if="block.type === 'tool' && !isHiddenToolMessage(block)"
             :block="(block as ToolCallBlockType)"
           />
 
@@ -206,14 +204,14 @@
             <MarkdownRender
               :content="block.content"
               :is-dark="isDark"
-              :typewriter="message.streaming"
+              :typewriter="isAssistantBlockStreaming(i)"
               custom-id="chat-msg"
             />
           </div>
 
           <!-- Attachment block -->
           <AttachmentBlock
-            v-else-if="block.type === 'attachment'"
+            v-else-if="block.type === 'attachments'"
             :block="(block as AttachmentBlockType)"
             :on-open-media="onOpenMedia"
           />
@@ -221,7 +219,7 @@
 
         <!-- Streaming indicator -->
         <div
-          v-if="message.streaming && message.blocks.length === 0"
+          v-if="message.streaming && !hasVisibleAssistantBlocks"
           class="flex items-center gap-2 text-xs text-muted-foreground h-6"
         >
           <LoaderCircle
@@ -259,6 +257,7 @@ import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 // import { useI18n } from 'vue-i18n'
 import type {
   ChatMessage,
+  ContentBlock,
   ThinkingBlock as ThinkingBlockType,
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
@@ -280,7 +279,9 @@ const props = defineProps<{
 // const chatStore = useChatStore()
 // const { currentBotId, bots } = storeToRefs(chatStore)
 
-const isSelf = computed(() => props.message.isSelf !== false)
+const isSelf = computed(() =>
+  props.message.role !== 'user' || props.message.isSelf !== false,
+)
 
 // const currentBot = computed(() =>
 //   bots.value.find((b) => b.id === currentBotId.value) ?? null,
@@ -300,7 +301,7 @@ const isSelf = computed(() => props.message.isSelf !== false)
 // })
 
 const senderFallback = computed(() => {
-  const name = props.message.senderDisplayName ?? ''
+  const name = props.message.role === 'user' ? (props.message.senderDisplayName ?? '') : ''
   return name.slice(0, 2).toUpperCase() || '?'
 })
 
@@ -324,10 +325,38 @@ const contentClass = computed(() => {
   return 'flex-1 max-w-full'
 })
 
+const userAttachmentBlock = computed<AttachmentBlockType | null>(() => {
+  if (props.message.role !== 'user' || props.message.attachments.length === 0) return null
+  return {
+    id: -1,
+    type: 'attachments',
+    attachments: props.message.attachments,
+  }
+})
+
+function isHiddenToolMessage(block: ContentBlock): boolean {
+  if (block.type !== 'tool') return false
+  const result = block.result as Record<string, unknown> | null
+  return !!result && typeof result === 'object' && result.delivered === 'current_conversation'
+}
+
+function hasLaterAssistantMessage(index: number): boolean {
+  return props.message.role === 'assistant' && props.message.messages.slice(index + 1).length > 0
+}
+
+function isAssistantBlockStreaming(index: number): boolean {
+  return props.message.role === 'assistant' && props.message.streaming && !hasLaterAssistantMessage(index)
+}
+
+const hasVisibleAssistantBlocks = computed(() =>
+  props.message.role === 'assistant'
+    && props.message.messages.some(block => block.type !== 'tool' || !isHiddenToolMessage(block)),
+)
+
 const relativeTimestamp = computed(() =>
   formatRelativeTime(props.message.timestamp),
 )
 const fullTimestamp = computed(() =>
-  formatDateTime(props.message.timestamp.toISOString()),
+  formatDateTime(props.message.timestamp),
 )
 </script>

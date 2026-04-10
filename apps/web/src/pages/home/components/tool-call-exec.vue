@@ -59,6 +59,10 @@
       </CollapsibleTrigger>
       <CollapsibleContent>
         <pre
+          v-if="progressText"
+          class="px-3 pb-2 text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all"
+        >{{ progressText }}</pre>
+        <pre
           v-if="stdout"
           class="px-3 pb-2 text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all"
         >{{ stdout }}</pre>
@@ -137,7 +141,23 @@ const stderr = computed(() => {
   return (r?.stderr as string) ?? ''
 })
 
-const hasOutput = computed(() =>
-  props.block.done && (stdout.value || stderr.value || errorText.value),
+const progressText = computed(() =>
+  (props.block.progress ?? [])
+    .map((item) => formatProgress(item))
+    .filter(Boolean)
+    .join('\n'),
 )
+
+const hasOutput = computed(() =>
+  !!(progressText.value || (props.block.done && (stdout.value || stderr.value || errorText.value))),
+)
+
+function formatProgress(val: unknown): string {
+  if (typeof val === 'string') return val
+  try {
+    return JSON.stringify(val, null, 2)
+  } catch {
+    return String(val)
+  }
+}
 </script>

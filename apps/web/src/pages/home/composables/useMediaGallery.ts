@@ -70,8 +70,23 @@ export function useMediaGallery(messages: Ref<ChatMessage[]>) {
   const items = computed((): MediaGalleryItem[] => {
     const result: MediaGalleryItem[] = []
     for (const msg of messages.value) {
-      for (const block of msg.blocks) {
-        if (block.type !== 'attachment') continue
+      if (msg.role === 'user') {
+        for (const att of msg.attachments) {
+          if (!isMediaType(att)) continue
+          const src = resolveUrl(att)
+          if (!src) continue
+          const type = String(att.type ?? '').toLowerCase()
+          result.push({
+            src,
+            type: type === 'video' ? 'video' : 'image',
+            name: String(att.name ?? '').trim() || undefined,
+          })
+        }
+        continue
+      }
+
+      for (const block of msg.messages) {
+        if (block.type !== 'attachments') continue
         for (const att of block.attachments) {
           if (!isMediaType(att)) continue
           const src = resolveUrl(att)

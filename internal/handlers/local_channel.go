@@ -19,6 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
@@ -446,14 +447,49 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}()
 
 			go func() {
+				converter := conversation.NewUIMessageStreamConverter()
 				for event := range eventCh {
 					processed := h.processWSEvent(streamCtx, botID, event)
 					for _, p := range processed {
-						writer.Send(p)
 						if refs := extractAssetRefsFromProcessedEvent(p); len(refs) > 0 {
 							outboundAssetMu.Lock()
 							outboundAssetRefs = append(outboundAssetRefs, refs...)
 							outboundAssetMu.Unlock()
+						}
+
+						var streamEvent agentpkg.StreamEvent
+						if err := json.Unmarshal(p, &streamEvent); err != nil {
+							continue
+						}
+
+						switch streamEvent.Type {
+						case agentpkg.EventAgentStart:
+							writer.SendJSON(map[string]string{"type": "start"})
+							continue
+						case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
+							for _, uiMessage := range conversation.ConvertRawModelMessagesToUIAssistantMessages(streamEvent.Messages) {
+								writer.SendJSON(map[string]any{
+									"type": "message",
+									"data": uiMessage,
+								})
+							}
+							writer.SendJSON(map[string]string{"type": "end"})
+							continue
+						case agentpkg.EventError:
+							message := strings.TrimSpace(streamEvent.Error)
+							if message == "" {
+								message = "stream error"
+							}
+							writer.SendJSON(map[string]string{"type": "error", "message": message})
+							continue
+						}
+
+						uiEvents := converter.HandleEvent(uiStreamEventFromAgentEvent(streamEvent))
+						for _, uiMessage := range uiEvents {
+							writer.SendJSON(map[string]any{
+								"type": "message",
+								"data": uiMessage,
+							})
 						}
 					}
 				}
@@ -493,6 +529,67 @@ func (*LocalChannelHandler) requireChannelIdentityID(c echo.Context) (string, er
 
 func (h *LocalChannelHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
 	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID)
+}
+
+func uiStreamEventFromAgentEvent(event agentpkg.StreamEvent) conversation.UIMessageStreamEvent {
+	attachments := make([]conversation.UIAttachment, 0, len(event.Attachments))
+	for _, attachment := range event.Attachments {
+		attachments = append(attachments, uiAttachmentFromAgentAttachment(attachment))
+	}
+
+	return conversation.UIMessageStreamEvent{
+		Type:        string(event.Type),
+		Delta:       event.Delta,
+		ToolName:    event.ToolName,
+		ToolCallID:  event.ToolCallID,
+		Input:       event.Input,
+		Output:      event.Result,
+		Progress:    event.Progress,
+		Attachments: attachments,
+		Error:       event.Error,
+	}
+}
+
+func uiAttachmentFromAgentAttachment(attachment agentpkg.FileAttachment) conversation.UIAttachment {
+	result := conversation.UIAttachment{
+		ID:          strings.TrimSpace(attachment.ContentHash),
+		Type:        normalizeWSUIAttachmentType(attachment.Type, attachment.Mime),
+		Path:        strings.TrimSpace(attachment.Path),
+		URL:         strings.TrimSpace(attachment.URL),
+		Name:        strings.TrimSpace(attachment.Name),
+		ContentHash: strings.TrimSpace(attachment.ContentHash),
+		Mime:        strings.TrimSpace(attachment.Mime),
+		Size:        attachment.Size,
+		Metadata:    attachment.Metadata,
+	}
+	if attachment.Metadata != nil {
+		if botID, ok := attachment.Metadata["bot_id"].(string); ok {
+			result.BotID = strings.TrimSpace(botID)
+		}
+		if storageKey, ok := attachment.Metadata["storage_key"].(string); ok {
+			result.StorageKey = strings.TrimSpace(storageKey)
+		}
+	}
+	return result
+}
+
+func normalizeWSUIAttachmentType(kind, mime string) string {
+	normalizedKind := strings.ToLower(strings.TrimSpace(kind))
+	if normalizedKind != "" {
+		return normalizedKind
+	}
+
+	normalizedMime := strings.ToLower(strings.TrimSpace(mime))
+	switch {
+	case strings.HasPrefix(normalizedMime, "image/"):
+		return "image"
+	case strings.HasPrefix(normalizedMime, "audio/"):
+		return "audio"
+	case strings.HasPrefix(normalizedMime, "video/"):
+		return "video"
+	default:
+		return "file"
+	}
 }
 
 // ---------------------------------------------------------------------------

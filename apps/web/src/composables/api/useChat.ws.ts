@@ -1,5 +1,5 @@
 import { client } from '@memohai/sdk/client'
-import type { StreamEvent, MessageStreamEvent, ChatAttachment, StreamEventHandler } from './useChat.types'
+import type { ChatAttachment, UIStreamEvent, UIStreamEventHandler } from './useChat.types'
 
 export interface WSClientMessage {
   type: 'message' | 'abort'
@@ -43,8 +43,7 @@ function resolveWebSocketUrl(botId: string): string {
 
 export function connectWebSocket(
   botId: string,
-  onStreamEvent: StreamEventHandler,
-  onMessageEvent?: (event: MessageStreamEvent) => void,
+  onStreamEvent: UIStreamEventHandler,
 ): ChatWebSocket {
   const id = botId.trim()
   if (!id) throw new Error('bot id is required')
@@ -58,12 +57,16 @@ export function connectWebSocket(
   let closed = false
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let reconnectDelay = 1000
+  const sendQueue: string[] = []
 
   const handle: ChatWebSocket = {
     send(msg: WSClientMessage) {
+      const payload = JSON.stringify(msg)
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(msg))
+        ws.send(payload)
+        return
       }
+      sendQueue.push(payload)
     },
     abort() {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -96,6 +99,9 @@ export function connectWebSocket(
     ws.onopen = () => {
       isConnected = true
       reconnectDelay = 1000
+      while (sendQueue.length > 0 && ws?.readyState === WebSocket.OPEN) {
+        ws.send(sendQueue.shift()!)
+      }
       handle.onOpen?.()
     }
 
@@ -114,14 +120,11 @@ export function connectWebSocket(
       try {
         const parsed = JSON.parse(event.data)
         if (!parsed || typeof parsed !== 'object') return
-
         const eventType = String(parsed.type ?? '').trim()
-        if (eventType === 'message_created' && onMessageEvent) {
-          onMessageEvent(parsed as MessageStreamEvent)
+        if (eventType !== 'start' && eventType !== 'message' && eventType !== 'end' && eventType !== 'error') {
           return
         }
-
-        onStreamEvent(parsed as StreamEvent)
+        onStreamEvent(parsed as UIStreamEvent)
       } catch {
         // Ignore unparsable messages.
       }

@@ -45,6 +45,22 @@
     </Collapsible>
 
     <Collapsible
+      v-if="progressText"
+      v-model:open="progressOpen"
+    >
+      <CollapsibleTrigger class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer w-full border-t border-muted">
+        <ChevronRight
+          class="size-2.5 transition-transform"
+          :class="{ 'rotate-90': progressOpen }"
+        />
+        {{ $t('chat.toolRunning') }}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <pre class="px-3 pb-2 text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all">{{ progressText }}</pre>
+      </CollapsibleContent>
+    </Collapsible>
+
+    <Collapsible
       v-if="block.done && block.result != null"
       v-model:open="resultOpen"
     >
@@ -63,17 +79,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { Check, LoaderCircle, ChevronRight } from 'lucide-vue-next'
 import { Badge, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 
-defineProps<{
+const inputOpen = ref(false)
+const progressOpen = ref(true)
+const resultOpen = ref(false)
+
+const props = defineProps<{
   block: ToolCallBlock
 }>()
 
-const inputOpen = ref(false)
-const resultOpen = ref(false)
+const progressText = computed(() =>
+  (props.block.progress ?? [])
+    .map(item => formatJson(item))
+    .filter(Boolean)
+    .join('\n'),
+)
 
 function formatJson(val: unknown): string {
   if (typeof val === 'string') return val

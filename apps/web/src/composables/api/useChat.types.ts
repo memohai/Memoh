@@ -50,7 +50,7 @@ export interface StreamEvent {
   type?:
     | 'text_start' | 'text_delta' | 'text_end'
     | 'reasoning_start' | 'reasoning_delta' | 'reasoning_end'
-    | 'tool_call_start' | 'tool_call_end'
+    | 'tool_call_start' | 'tool_call_progress' | 'tool_call_end'
     | 'attachment_delta' | 'reaction_delta'
     | 'agent_start' | 'agent_end' | 'agent_abort'
     | 'processing_started' | 'processing_completed' | 'processing_failed'
@@ -59,6 +59,7 @@ export interface StreamEvent {
   toolCallId?: string
   toolName?: string
   input?: unknown
+  progress?: unknown
   result?: unknown
   attachments?: Array<Record<string, unknown>>
   error?: string
@@ -88,3 +89,97 @@ export interface ChatAttachment {
   mime?: string
   name?: string
 }
+
+export interface UIAttachment {
+  id?: string
+  type: string
+  path?: string
+  url?: string
+  base64?: string
+  name?: string
+  content_hash?: string
+  bot_id?: string
+  mime?: string
+  size?: number
+  storage_key?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface UITextMessage {
+  id: number
+  type: 'text'
+  content: string
+}
+
+export interface UIReasoningMessage {
+  id: number
+  type: 'reasoning'
+  content: string
+}
+
+export interface UIToolMessage {
+  id: number
+  type: 'tool'
+  name: string
+  input: unknown
+  output?: unknown
+  tool_call_id: string
+  running: boolean
+  progress?: unknown[]
+}
+
+export interface UIAttachmentsMessage {
+  id: number
+  type: 'attachments'
+  attachments: UIAttachment[]
+}
+
+export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage
+
+export interface UIUserTurn {
+  role: 'user'
+  text: string
+  attachments?: UIAttachment[]
+  timestamp: string
+  platform?: string
+  sender_display_name?: string
+  sender_avatar_url?: string
+  sender_user_id?: string
+  id?: string
+}
+
+export interface UIAssistantTurn {
+  role: 'assistant'
+  messages: UIMessage[]
+  timestamp: string
+  platform?: string
+  id?: string
+}
+
+export type UITurn = UIUserTurn | UIAssistantTurn
+
+export interface UIStreamStartEvent {
+  type: 'start'
+}
+
+export interface UIStreamMessageEvent {
+  type: 'message'
+  data: UIMessage
+}
+
+export interface UIStreamEndEvent {
+  type: 'end'
+}
+
+export interface UIStreamErrorEvent {
+  type: 'error'
+  message: string
+}
+
+export type UIStreamEvent =
+  | UIStreamStartEvent
+  | UIStreamMessageEvent
+  | UIStreamEndEvent
+  | UIStreamErrorEvent
+
+export type UIStreamEventHandler = (event: UIStreamEvent) => void
