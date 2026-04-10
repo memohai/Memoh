@@ -721,7 +721,7 @@ definitions:
       bot_id:
         type: string
       channel_type:
-        type: string
+        $ref: '#/definitions/channel.ChannelType'
       created_at:
         type: string
       credentials:
@@ -749,7 +749,7 @@ definitions:
       channel_identity_id:
         type: string
       channel_type:
-        type: string
+        $ref: '#/definitions/channel.ChannelType'
       config:
         additionalProperties: {}
         type: object
@@ -760,6 +760,30 @@ definitions:
       updated_at:
         type: string
     type: object
+  channel.ChannelType:
+    enum:
+    - telegram
+    - feishu
+    - dingtalk
+    - matrix
+    - discord
+    - qq
+    - wecom
+    - weixin
+    - wechatoa
+    - local
+    type: string
+    x-enum-varnames:
+    - ChannelTypeTelegram
+    - ChannelTypeFeishu
+    - ChannelTypeDingtalk
+    - ChannelTypeMatrix
+    - ChannelTypeDiscord
+    - ChannelTypeQQ
+    - ChannelTypeWecom
+    - ChannelTypeWeixin
+    - ChannelTypeWeChatOA
+    - ChannelTypeLocal
   channel.ConfigSchema:
     properties:
       fields:
@@ -778,6 +802,8 @@ definitions:
           type: string
         type: array
       example: {}
+      order:
+        type: integer
       required:
         type: boolean
       title:

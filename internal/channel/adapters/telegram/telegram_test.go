@@ -476,6 +476,21 @@ func TestParseConfig_APIBaseURL(t *testing.T) {
 			t.Fatalf("expected empty APIBaseURL, got %q", cfg.APIBaseURL)
 		}
 	})
+
+	t.Run("http proxy config", func(t *testing.T) {
+		t.Parallel()
+		proxyURL := "http://memoh:" + "secret" + "@sztu.cc:3128"
+		cfg, err := parseConfig(map[string]any{
+			"botToken":     "t4",
+			"httpProxyUrl": proxyURL,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.HTTPProxy.URL != proxyURL {
+			t.Fatalf("unexpected httpProxyUrl: %q", cfg.HTTPProxy.URL)
+		}
+	})
 }
 
 func TestNormalizeConfig_APIBaseURL(t *testing.T) {
@@ -500,6 +515,21 @@ func TestNormalizeConfig_APIBaseURL(t *testing.T) {
 		}
 		if _, exists := norm["apiBaseURL"]; exists {
 			t.Fatalf("empty apiBaseURL should be omitted: %#v", norm)
+		}
+	})
+
+	t.Run("includes http proxy config", func(t *testing.T) {
+		t.Parallel()
+		proxyURL := "http://memoh:" + "secret" + "@sztu.cc:3128"
+		norm, err := normalizeConfig(map[string]any{
+			"botToken":     "t3",
+			"httpProxyUrl": proxyURL,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if norm["httpProxyUrl"] != proxyURL {
+			t.Fatalf("unexpected httpProxyUrl in output: %#v", norm)
 		}
 	})
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -17,70 +16,25 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 )
 
-type webhookConfigStore interface {
-	ListConfigsByType(ctx context.Context, channelType channel.ChannelType) ([]channel.ChannelConfig, error)
-}
-
-type webhookInboundManager interface {
-	HandleInbound(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) error
-}
-
 const webhookMaxBodyBytes int64 = 1 << 20 // 1 MiB
 
-// WebhookHandler receives Feishu/Lark event-subscription callbacks.
-type WebhookHandler struct {
-	logger  *slog.Logger
-	store   webhookConfigStore
-	manager webhookInboundManager
-	adapter *FeishuAdapter
-}
+// HandleWebhook processes Feishu/Lark event-subscription callbacks.
+func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, r *http.Request, w http.ResponseWriter) error {
+	if a == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "feishu adapter is nil")
+	}
+	if handler == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "feishu inbound handler is nil")
+	}
+	if r.Method == http.MethodGet {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+		return nil
+	}
+	if r.Method != http.MethodPost {
+		return echo.NewHTTPError(http.StatusMethodNotAllowed, "method not allowed")
+	}
 
-// NewWebhookHandler creates a public webhook handler for Feishu/Lark callbacks.
-func NewWebhookHandler(log *slog.Logger, store webhookConfigStore, manager webhookInboundManager) *WebhookHandler {
-	if log == nil {
-		log = slog.Default()
-	}
-	return &WebhookHandler{
-		logger:  log.With(slog.String("handler", "feishu_webhook")),
-		store:   store,
-		manager: manager,
-		adapter: NewFeishuAdapter(log),
-	}
-}
-
-// NewWebhookServerHandler is a DI-friendly constructor for fx/dig, using concrete
-// channel types as parameters.
-func NewWebhookServerHandler(log *slog.Logger, store *channel.Store, manager *channel.Manager) *WebhookHandler {
-	return NewWebhookHandler(log, store, manager)
-}
-
-// Register registers webhook callback routes.
-func (h *WebhookHandler) Register(e *echo.Echo) {
-	e.GET("/channels/feishu/webhook/:config_id", h.HandleProbe)
-	e.POST("/channels/feishu/webhook/:config_id", h.Handle)
-}
-
-// HandleProbe responds to health/probe requests on the webhook URL.
-func (*WebhookHandler) HandleProbe(c echo.Context) error {
-	return c.String(http.StatusOK, "ok")
-}
-
-// Handle processes Feishu/Lark event-subscription webhook requests.
-func (h *WebhookHandler) Handle(c echo.Context) error {
-	if h.store == nil || h.manager == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "feishu webhook dependencies not configured")
-	}
-	configID := strings.TrimSpace(c.Param("config_id"))
-	if configID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "config id is required")
-	}
-	cfg, err := h.findConfigByID(c.Request().Context(), configID)
-	if err != nil {
-		return err
-	}
-	if cfg.Disabled {
-		return echo.NewHTTPError(http.StatusForbidden, "channel config is disabled")
-	}
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -89,7 +43,7 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "feishu inbound_mode is not webhook")
 	}
 
-	payload, err := io.ReadAll(io.LimitReader(c.Request().Body, webhookMaxBodyBytes+1))
+	payload, err := io.ReadAll(io.LimitReader(r.Body, webhookMaxBodyBytes+1))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
 	}
@@ -97,11 +51,9 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, fmt.Sprintf("payload too large: max %d bytes", webhookMaxBodyBytes))
 	}
 
-	botOpenID := h.adapter.resolveBotOpenID(context.WithoutCancel(c.Request().Context()), cfg)
-
-	reqCtx := c.Request().Context()
+	botOpenID := a.resolveBotOpenID(context.WithoutCancel(ctx), cfg)
 	eventDispatcher := dispatcher.NewEventDispatcher(feishuCfg.VerificationToken, feishuCfg.EncryptKey)
-	webhookReq, err := inspectWebhookRequest(reqCtx, eventDispatcher, c.Request(), payload)
+	webhookReq, err := inspectWebhookRequest(ctx, eventDispatcher, r, payload)
 	if err != nil {
 		return err
 	}
@@ -109,28 +61,29 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 		return err
 	}
 	if challengeResp := buildWebhookChallengeResponse(webhookReq); challengeResp != nil {
-		return writeEventResponse(c, challengeResp)
+		return writeEventResponse(w, challengeResp)
 	}
 	eventDispatcher.OnP2MessageReceiveV1(func(_ context.Context, event *larkim.P2MessageReceiveV1) error {
-		msg := extractFeishuInbound(event, botOpenID, h.adapter.logger)
+		msg := extractFeishuInbound(event, botOpenID, a.logger)
 		if strings.TrimSpace(msg.Message.PlainText()) == "" && len(msg.Message.Attachments) == 0 {
 			return nil
 		}
-		h.adapter.enrichSenderProfile(reqCtx, cfg, event, &msg)
-		h.adapter.enrichQuotedMessage(reqCtx, cfg, &msg, botOpenID)
+		a.enrichSenderProfile(ctx, cfg, event, &msg)
+		a.enrichQuotedMessage(ctx, cfg, &msg, botOpenID)
 		msg.BotID = cfg.BotID
-		return h.manager.HandleInbound(reqCtx, cfg, msg)
+		return handler(ctx, cfg, msg)
 	})
 
-	resp := eventDispatcher.Handle(c.Request().Context(), &larkevent.EventReq{
-		Header:     c.Request().Header,
+	resp := eventDispatcher.Handle(ctx, &larkevent.EventReq{
+		Header:     r.Header,
 		Body:       payload,
-		RequestURI: c.Request().RequestURI,
+		RequestURI: r.RequestURI,
 	})
 	if resp == nil {
-		return c.NoContent(http.StatusOK)
+		w.WriteHeader(http.StatusOK)
+		return nil
 	}
-	return writeEventResponse(c, resp)
+	return writeEventResponse(w, resp)
 }
 
 func inspectWebhookRequest(ctx context.Context, eventDispatcher *dispatcher.EventDispatcher, req *http.Request, payload []byte) (larkevent.EventFuzzy, error) {
@@ -198,29 +151,16 @@ func parseWebhookPayload(ctx context.Context, eventDispatcher *dispatcher.EventD
 	return eventDispatcher.DecryptEvent(ctx, cipherPayload)
 }
 
-func writeEventResponse(c echo.Context, resp *larkevent.EventResp) error {
+func writeEventResponse(w http.ResponseWriter, resp *larkevent.EventResp) error {
 	for key, values := range resp.Header {
 		for _, value := range values {
-			c.Response().Header().Add(key, value)
+			w.Header().Add(key, value)
 		}
 	}
-	c.Response().WriteHeader(resp.StatusCode)
+	w.WriteHeader(resp.StatusCode)
 	if len(resp.Body) == 0 {
 		return nil
 	}
-	_, err := c.Response().Write(resp.Body)
+	_, err := w.Write(resp.Body) //nolint:gosec // Response body is generated by the verified Feishu SDK event response.
 	return err
-}
-
-func (h *WebhookHandler) findConfigByID(ctx context.Context, configID string) (channel.ChannelConfig, error) {
-	items, err := h.store.ListConfigsByType(ctx, Type)
-	if err != nil {
-		return channel.ChannelConfig{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	for _, item := range items {
-		if strings.TrimSpace(item.ID) == configID {
-			return item, nil
-		}
-	}
-	return channel.ChannelConfig{}, echo.NewHTTPError(http.StatusNotFound, "channel config not found")
 }

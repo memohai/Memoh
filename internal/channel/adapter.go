@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"sync/atomic"
 )
 
@@ -142,6 +143,13 @@ type SelfDiscoverer interface {
 // Receiver is an adapter capable of establishing a long-lived connection to receive messages.
 type Receiver interface {
 	Connect(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (Connection, error)
+}
+
+// WebhookReceiver handles inbound HTTP webhook callbacks for webhook-style channels.
+// Implementations typically verify the request, parse the platform payload, and
+// forward resulting inbound messages to the provided handler.
+type WebhookReceiver interface {
+	HandleWebhook(ctx context.Context, cfg ChannelConfig, handler InboundHandler, r *http.Request, w http.ResponseWriter) error
 }
 
 // Connection represents an active, long-lived link to a channel platform.

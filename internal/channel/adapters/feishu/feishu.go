@@ -18,7 +18,7 @@ import (
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/common"
+	"github.com/memohai/memoh/internal/channel/common"
 	"github.com/memohai/memoh/internal/media"
 )
 

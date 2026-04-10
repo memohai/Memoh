@@ -18,7 +18,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/common"
+	"github.com/memohai/memoh/internal/channel/common"
 	"github.com/memohai/memoh/internal/media"
 	"github.com/memohai/memoh/internal/textutil"
 )
@@ -47,8 +47,8 @@ type assetOpener interface {
 type TelegramAdapter struct {
 	logger        *slog.Logger
 	mu            sync.RWMutex
-	bots          map[string]*tgbotapi.BotAPI // keyed by bot token
-	fileEndpoints map[string]string           // token → file endpoint format string
+	bots          map[string]*tgbotapi.BotAPI // keyed by effective bot config
+	fileEndpoints map[*tgbotapi.BotAPI]string // bot instance → file endpoint format string
 	assets        assetOpener
 }
 
@@ -60,7 +60,7 @@ func NewTelegramAdapter(log *slog.Logger) *TelegramAdapter {
 	adapter := &TelegramAdapter{
 		logger:        log.With(slog.String("adapter", "telegram")),
 		bots:          make(map[string]*tgbotapi.BotAPI),
-		fileEndpoints: make(map[string]string),
+		fileEndpoints: make(map[*tgbotapi.BotAPI]string),
 	}
 	initTelegramBotLogger(adapter.logger)
 	return adapter
@@ -85,26 +85,38 @@ func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tgbotapi
 	if getOrCreateBotForTest != nil {
 		return getOrCreateBotForTest(a, cfg.BotToken, configID)
 	}
+	cacheKey := strings.Join([]string{
+		cfg.BotToken,
+		cfg.baseURL(),
+		cfg.HTTPProxy.CacheKey(),
+	}, "\x00")
 	a.mu.RLock()
-	bot, ok := a.bots[cfg.BotToken]
+	bot, ok := a.bots[cacheKey]
 	a.mu.RUnlock()
 	if ok {
 		return bot, nil
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if bot, ok := a.bots[cfg.BotToken]; ok {
+	if bot, ok := a.bots[cacheKey]; ok {
 		return bot, nil
 	}
-	bot, err := tgbotapi.NewBotAPIWithAPIEndpoint(cfg.BotToken, cfg.apiEndpoint())
+	httpClient, err := common.NewHTTPClient(30*time.Second, cfg.HTTPProxy)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Error("create bot http client failed", slog.String("config_id", configID), slog.Any("error", err))
+		}
+		return nil, err
+	}
+	bot, err = tgbotapi.NewBotAPIWithClient(cfg.BotToken, cfg.apiEndpoint(), httpClient)
 	if err != nil {
 		if a.logger != nil {
 			a.logger.Error("create bot failed", slog.String("config_id", configID), slog.Any("error", err))
 		}
 		return nil, err
 	}
-	a.bots[cfg.BotToken] = bot
-	a.fileEndpoints[cfg.BotToken] = cfg.fileEndpoint()
+	a.bots[cacheKey] = bot
+	a.fileEndpoints[bot] = cfg.fileEndpoint()
 	return bot, nil
 }
 
@@ -116,7 +128,7 @@ func (a *TelegramAdapter) getFileDirectURL(bot *tgbotapi.BotAPI, fileID string) 
 		return "", err
 	}
 	a.mu.RLock()
-	endpoint := a.fileEndpoints[bot.Token]
+	endpoint := a.fileEndpoints[bot]
 	a.mu.RUnlock()
 	if endpoint == "" {
 		endpoint = tgbotapi.FileEndpoint
@@ -165,13 +177,22 @@ func (*TelegramAdapter) Descriptor() channel.Descriptor {
 				"botToken": {
 					Type:     channel.FieldSecret,
 					Required: true,
+					Order:    0,
 					Title:    "Bot Token",
 				},
 				"apiBaseURL": {
 					Type:        channel.FieldString,
 					Required:    false,
+					Order:       10,
 					Title:       "API Base URL",
 					Description: "Reverse proxy base URL for the Telegram Bot API. Required in regions where Telegram is blocked (e.g. China mainland). Default: https://api.telegram.org",
+				},
+				"httpProxyUrl": {
+					Type:        channel.FieldSecret,
+					Required:    false,
+					Order:       20,
+					Title:       "HTTP Proxy URL",
+					Description: "Optional outbound HTTP proxy URL for Telegram API requests, e.g. http://user:pass@host:port. Explicit adapter proxy overrides HTTP_PROXY/HTTPS_PROXY.",
 				},
 			},
 		},
@@ -235,16 +256,13 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 		}
 		return nil, err
 	}
-	bot, err := tgbotapi.NewBotAPIWithAPIEndpoint(telegramCfg.BotToken, telegramCfg.apiEndpoint())
+	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
 	if err != nil {
 		if a.logger != nil {
 			a.logger.Error("create bot failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 		return nil, err
 	}
-	a.mu.Lock()
-	a.fileEndpoints[telegramCfg.BotToken] = telegramCfg.fileEndpoint()
-	a.mu.Unlock()
 	updateConfig := tgbotapi.NewUpdate(0)
 	updateConfig.Timeout = 30
 	updates := bot.GetUpdatesChan(updateConfig)

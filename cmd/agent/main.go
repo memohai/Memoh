@@ -37,6 +37,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/matrix"
 	"github.com/memohai/memoh/internal/channel/adapters/qq"
 	"github.com/memohai/memoh/internal/channel/adapters/telegram"
+	"github.com/memohai/memoh/internal/channel/adapters/wechatoa"
 	"github.com/memohai/memoh/internal/channel/adapters/wecom"
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
 	"github.com/memohai/memoh/internal/channel/identities"
@@ -248,7 +249,7 @@ func runServe() {
 			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewCompactionHandler),
 			provideServerHandler(handlers.NewChannelHandler),
-			provideServerHandler(feishu.NewWebhookServerHandler),
+			provideServerHandler(channel.NewWebhookServerHandler),
 			provideServerHandler(weixin.NewQRServerHandler),
 			provideServerHandler(provideUsersHandler),
 			provideServerHandler(handlers.NewMemoryProvidersHandler),
@@ -525,6 +526,7 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	registry.MustRegister(wecom.NewWeComAdapter(log))
 	dingTalkAdapter := dingtalk.NewDingTalkAdapter(log)
 	registry.MustRegister(dingTalkAdapter)
+	registry.MustRegister(wechatoa.NewWeChatOAAdapter(log))
 	weixinAdapter := weixin.NewWeixinAdapter(log)
 	weixinAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(weixinAdapter)

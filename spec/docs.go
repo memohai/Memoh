@@ -9729,7 +9729,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "channel_type": {
-                    "type": "string"
+                    "$ref": "#/definitions/channel.ChannelType"
                 },
                 "created_at": {
                     "type": "string"
@@ -9770,7 +9770,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "channel_type": {
-                    "type": "string"
+                    "$ref": "#/definitions/channel.ChannelType"
                 },
                 "config": {
                     "type": "object",
@@ -9786,6 +9786,33 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "channel.ChannelType": {
+            "type": "string",
+            "enum": [
+                "telegram",
+                "feishu",
+                "dingtalk",
+                "matrix",
+                "discord",
+                "qq",
+                "wecom",
+                "weixin",
+                "wechatoa",
+                "local"
+            ],
+            "x-enum-varnames": [
+                "ChannelTypeTelegram",
+                "ChannelTypeFeishu",
+                "ChannelTypeDingtalk",
+                "ChannelTypeMatrix",
+                "ChannelTypeDiscord",
+                "ChannelTypeQQ",
+                "ChannelTypeWecom",
+                "ChannelTypeWeixin",
+                "ChannelTypeWeChatOA",
+                "ChannelTypeLocal"
+            ]
         },
         "channel.ConfigSchema": {
             "type": "object",
@@ -9814,6 +9841,9 @@ const docTemplate = `{
                     }
                 },
                 "example": {},
+                "order": {
+                    "type": "integer"
+                },
                 "required": {
                     "type": "boolean"
                 },

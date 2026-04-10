@@ -2,7 +2,7 @@ package server
 
 import "testing"
 
-func TestShouldSkipJWT_FeishuWebhookPaths(t *testing.T) {
+func TestShouldSkipJWT_ChannelWebhookPaths(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -10,6 +10,7 @@ func TestShouldSkipJWT_FeishuWebhookPaths(t *testing.T) {
 		want bool
 	}{
 		{path: "/channels/feishu/webhook/cfg-1", want: true},
+		{path: "/channels/wechatoa/webhook/cfg-1", want: true},
 		{path: "/channels/feishu/webhook", want: false},
 		{path: "/api/channels/feishu/webhook", want: false},
 	}

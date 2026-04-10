@@ -81,7 +81,7 @@ func shouldSkipJWT(path string) bool {
 	if strings.HasPrefix(path, "/api/docs") {
 		return true
 	}
-	if strings.HasPrefix(path, "/channels/feishu/webhook/") {
+	if isPublicChannelWebhookPath(path) {
 		return true
 	}
 	if strings.HasPrefix(path, "/email/mailgun/webhook/") {
@@ -97,4 +97,13 @@ func shouldSkipJWT(path string) bool {
 		return true
 	}
 	return false
+}
+
+func isPublicChannelWebhookPath(path string) bool {
+	if !strings.HasPrefix(path, "/channels/") {
+		return false
+	}
+	trimmed := strings.Trim(strings.TrimPrefix(path, "/channels/"), "/")
+	parts := strings.Split(trimmed, "/")
+	return len(parts) >= 3 && strings.TrimSpace(parts[0]) != "" && parts[1] == "webhook" && strings.TrimSpace(parts[2]) != ""
 }

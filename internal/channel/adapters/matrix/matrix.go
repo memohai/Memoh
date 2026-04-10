@@ -22,7 +22,7 @@ import (
 
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/common"
+	"github.com/memohai/memoh/internal/channel/common"
 	"github.com/memohai/memoh/internal/media"
 	"github.com/memohai/memoh/internal/textutil"
 )

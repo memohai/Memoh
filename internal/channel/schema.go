@@ -15,6 +15,7 @@ const (
 type FieldSchema struct {
 	Type        FieldType `json:"type"`
 	Required    bool      `json:"required"`
+	Order       int       `json:"order,omitempty"`
 	Title       string    `json:"title,omitempty"`
 	Description string    `json:"description,omitempty"`
 	Enum        []string  `json:"enum,omitempty"`

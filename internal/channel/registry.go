@@ -237,6 +237,16 @@ func (r *Registry) GetReceiver(channelType ChannelType) (Receiver, bool) {
 	return receiver, ok
 }
 
+// GetWebhookReceiver returns the WebhookReceiver for the given channel type, or nil if unsupported.
+func (r *Registry) GetWebhookReceiver(channelType ChannelType) (WebhookReceiver, bool) {
+	adapter, ok := r.Get(channelType)
+	if !ok {
+		return nil, false
+	}
+	receiver, ok := adapter.(WebhookReceiver)
+	return receiver, ok
+}
+
 // GetProcessingStatusNotifier returns the ProcessingStatusNotifier for the given channel type, or nil if unsupported.
 func (r *Registry) GetProcessingStatusNotifier(channelType ChannelType) (ProcessingStatusNotifier, bool) {
 	adapter, ok := r.Get(channelType)

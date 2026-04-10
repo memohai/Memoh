@@ -444,5 +444,6 @@ const (
 	ChannelTypeQQ       ChannelType = "qq"
 	ChannelTypeWecom    ChannelType = "wecom"
 	ChannelTypeWeixin   ChannelType = "weixin"
+	ChannelTypeWeChatOA ChannelType = "wechatoa"
 	ChannelTypeLocal    ChannelType = "local"
 )

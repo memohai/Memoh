@@ -5,7 +5,7 @@
       <div class="flex items-center gap-3">
         <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
           <ChannelIcon
-            :channel="channelItem.meta.type"
+            :channel="platformType"
             size="1.5em"
           />
         </span>
@@ -345,10 +345,13 @@ const orderedFields = computed(() => {
   const fields = props.channelItem.meta.config_schema?.fields ?? {}
   const hiddenFields = new Set(['status', 'disabled'])
   const entries = Object.entries(fields).filter(([key]) => !hiddenFields.has(key))
-  entries.sort(([, a], [, b]) => {
+  entries.sort(([keyA, a], [keyB, b]) => {
     if (a.required && !b.required) return -1
     if (!a.required && b.required) return 1
-    return 0
+    const orderA = a.order ?? Number.MAX_SAFE_INTEGER
+    const orderB = b.order ?? Number.MAX_SAFE_INTEGER
+    if (orderA !== orderB) return orderA - orderB
+    return keyA.localeCompare(keyB)
   })
   return Object.fromEntries(entries) as Record<string, ChannelFieldSchema>
 })
@@ -360,7 +363,7 @@ const currentInboundMode = computed(() => {
 })
 
 const showWebhookCallback = computed(() => {
-  return props.channelItem.meta.type === 'feishu' && currentInboundMode.value === 'webhook'
+  return supportsWebhookCallback(platformType.value, currentInboundMode.value)
 })
 
 const webhookCallbackUrl = computed(() => {
@@ -552,13 +555,13 @@ function buildWebhookCallbackUrl(configId: string): string {
   if (!normalizedBase) return ''
   if (typeof window !== 'undefined') {
     const baseUrl = new URL(normalizedBase, window.location.origin)
-    baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/channels/feishu/webhook/${encodeURIComponent(configId)}`
+    baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/channels/${encodeURIComponent(platformType.value)}/webhook/${encodeURIComponent(configId)}`
     baseUrl.search = ''
     baseUrl.hash = ''
     return baseUrl.toString()
   }
   const base = normalizedBase.replace(/\/+$/, '')
-  return `${base}/channels/feishu/webhook/${encodeURIComponent(configId)}`
+  return `${base}/channels/${encodeURIComponent(platformType.value)}/webhook/${encodeURIComponent(configId)}`
 }
 
 function resolveWebhookCallbackBaseUrl(): string {
@@ -591,6 +594,16 @@ function resolveWebhookCallbackBaseUrl(): string {
 
 function isAbsoluteHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value)
+}
+
+function supportsWebhookCallback(channelType: string, inboundMode: string): boolean {
+  if (channelType === 'feishu') {
+    return inboundMode === 'webhook'
+  }
+  if (channelType === 'wechatoa') {
+    return true
+  }
+  return false
 }
 
 function handleWeixinLoginSuccess() {

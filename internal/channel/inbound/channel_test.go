@@ -747,6 +747,34 @@ func (s *failingOpenStreamSender) OpenStream(_ context.Context, _ string, _ chan
 	return nil, errors.New("open stream failed")
 }
 
+type failingCloseSender struct {
+	err error
+}
+
+func (*failingCloseSender) Send(_ context.Context, _ channel.OutboundMessage) error {
+	return nil
+}
+
+func (s *failingCloseSender) OpenStream(_ context.Context, target string, _ channel.StreamOptions) (channel.OutboundStream, error) {
+	return &failingCloseStream{target: strings.TrimSpace(target), err: s.err}, nil
+}
+
+type failingCloseStream struct {
+	target string
+	err    error
+}
+
+func (*failingCloseStream) Push(_ context.Context, _ channel.StreamEvent) error {
+	return nil
+}
+
+func (s *failingCloseStream) Close(_ context.Context) error {
+	if s != nil && s.err != nil {
+		return s.err
+	}
+	return errors.New("close stream failed")
+}
+
 func TestChannelInboundProcessorDoesNotPersistBeforeOpenStream(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-openstream"}}
 	policySvc := &fakePolicyService{}
@@ -777,6 +805,39 @@ func TestChannelInboundProcessorDoesNotPersistBeforeOpenStream(t *testing.T) {
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatalf("runner should not be called when stream open fails")
+	}
+}
+
+func TestChannelInboundProcessorReturnsCloseStreamError(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-closestream"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-closestream", RouteID: "route-closestream"}}
+	gateway := &fakeChatGateway{
+		resp: conversation.ChatResponse{
+			Messages: []conversation.ModelMessage{
+				{Role: "assistant", Content: conversation.NewTextContent("ok")},
+			},
+		},
+	}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
+	sender := &failingCloseSender{err: errors.New("wechat send failed")}
+
+	cfg := channel.ChannelConfig{ID: "cfg-closestream", BotID: "bot-1", ChannelType: channel.ChannelType("wechatoa")}
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("wechatoa"),
+		Message:     channel.Message{ID: "msg-closestream-1", Text: "hello"},
+		ReplyTarget: "openid:user-openid",
+		Sender:      channel.Identity{SubjectID: "user-1"},
+		Conversation: channel.Conversation{
+			ID:   "conv-closestream",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	err := processor.HandleInbound(context.Background(), cfg, msg, sender)
+	if err == nil || err.Error() != "wechat send failed" {
+		t.Fatalf("expected close stream error, got: %v", err)
 	}
 }
 

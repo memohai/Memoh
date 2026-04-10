@@ -21,6 +21,7 @@ import {
   Slack,
   Feishu,
   Wechat,
+  Wechatoa,
   Wecom,
   Matrix,
 } from '@memohai/icon'
@@ -33,6 +34,7 @@ const channelIcons: Record<string, Component> = {
   feishu: Feishu,
   wechat: Wechat,
   weixin: Wechat,
+  wechatoa: Wechatoa,
   wecom: Wecom,
   matrix: Matrix,
   dingtalk: Dingtalk,

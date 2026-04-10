@@ -233,7 +233,7 @@ func (p *ChannelInboundProcessor) SetDispatcher(dispatcher *RouteDispatcher) {
 }
 
 // HandleInbound processes an inbound channel message through identity resolution and chat gateway.
-func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, sender channel.StreamReplySender) error {
+func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, sender channel.StreamReplySender) (retErr error) {
 	if p.runner == nil {
 		return errors.New("channel inbound processor not configured")
 	}
@@ -623,8 +623,32 @@ startStream:
 		}
 		return err
 	}
+	streamClosed := false
+	closeStream := func() error {
+		if streamClosed {
+			return nil
+		}
+		streamClosed = true
+		return stream.Close(context.WithoutCancel(ctx))
+	}
 	defer func() {
-		_ = stream.Close(context.WithoutCancel(ctx))
+		if streamClosed {
+			return
+		}
+		if closeErr := closeStream(); closeErr != nil {
+			if p.logger != nil {
+				p.logger.Error(
+					"reply stream close failed",
+					slog.String("channel", msg.Channel.String()),
+					slog.String("channel_identity_id", identity.ChannelIdentityID),
+					slog.String("user_id", identity.UserID),
+					slog.Any("error", closeErr),
+				)
+			}
+			if retErr == nil {
+				retErr = closeErr
+			}
+		}
 	}()
 
 	// For non-local channels, wrap the stream so events are mirrored to the
@@ -806,6 +830,14 @@ startStream:
 		}); err != nil {
 			return err
 		}
+		if err := closeStream(); err != nil {
+			if statusNotifier != nil {
+				if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, err); notifyErr != nil {
+					p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
+				}
+			}
+			return err
+		}
 		if statusNotifier != nil {
 			if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
 				p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
@@ -846,6 +878,14 @@ startStream:
 		Type:   channel.StreamEventStatus,
 		Status: channel.StreamStatusCompleted,
 	}); err != nil {
+		return err
+	}
+	if err := closeStream(); err != nil {
+		if statusNotifier != nil {
+			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, err); notifyErr != nil {
+				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
+			}
+		}
 		return err
 	}
 	if statusNotifier != nil {

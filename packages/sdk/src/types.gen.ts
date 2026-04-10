@@ -443,7 +443,7 @@ export type ChannelChannelCapabilities = {
 
 export type ChannelChannelConfig = {
     bot_id?: string;
-    channel_type?: string;
+    channel_type?: ChannelChannelType;
     created_at?: string;
     credentials?: {
         [key: string]: unknown;
@@ -463,7 +463,7 @@ export type ChannelChannelConfig = {
 
 export type ChannelChannelIdentityBinding = {
     channel_identity_id?: string;
-    channel_type?: string;
+    channel_type?: ChannelChannelType;
     config?: {
         [key: string]: unknown;
     };
@@ -471,6 +471,8 @@ export type ChannelChannelIdentityBinding = {
     id?: string;
     updated_at?: string;
 };
+
+export type ChannelChannelType = 'telegram' | 'feishu' | 'dingtalk' | 'matrix' | 'discord' | 'qq' | 'wecom' | 'weixin' | 'wechatoa' | 'local';
 
 export type ChannelConfigSchema = {
     fields?: {
@@ -483,6 +485,7 @@ export type ChannelFieldSchema = {
     description?: string;
     enum?: Array<string>;
     example?: unknown;
+    order?: number;
     required?: boolean;
     title?: string;
     type?: ChannelFieldType;

@@ -103,7 +103,7 @@
             >
               <span class="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
                 <ChannelIcon
-                  :channel="item.meta.type"
+                  :channel="item.meta.type ?? ''"
                   size="1em"
                 />
               </span>
@@ -221,7 +221,7 @@ watch(configuredChannels, (list) => {
   }
 
   const configured = list.find((item) => item.configured)
-  selectedType.value = configured?.meta.type ?? list[0].meta.type
+  selectedType.value = configured?.meta.type ?? list[0]?.meta.type ?? null
 }, { immediate: true })
 
 function addChannel(type: string) {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/channel/common"
 )
 
 const defaultAPIBaseURL = "https://api.telegram.org"
@@ -13,6 +14,7 @@ const defaultAPIBaseURL = "https://api.telegram.org"
 type Config struct {
 	BotToken   string
 	APIBaseURL string // Reverse proxy base URL for regions where Telegram is blocked (e.g. China mainland)
+	HTTPProxy  common.HTTPProxyConfig
 }
 
 // baseURL returns the effective base URL with trailing slashes removed.
@@ -52,6 +54,7 @@ func normalizeConfig(raw map[string]any) (map[string]any, error) {
 	if cfg.APIBaseURL != "" {
 		out["apiBaseURL"] = cfg.APIBaseURL
 	}
+	common.NormalizeHTTPProxyConfig(out, cfg.HTTPProxy)
 	return out, nil
 }
 
@@ -136,7 +139,11 @@ func parseConfig(raw map[string]any) (Config, error) {
 		return Config{}, errors.New("telegram botToken is required")
 	}
 	apiBaseURL := strings.TrimSpace(channel.ReadString(raw, "apiBaseURL", "api_base_url"))
-	return Config{BotToken: token, APIBaseURL: apiBaseURL}, nil
+	proxyCfg, err := common.ParseHTTPProxyConfig(raw)
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{BotToken: token, APIBaseURL: apiBaseURL, HTTPProxy: proxyCfg}, nil
 }
 
 func parseUserConfig(raw map[string]any) (UserConfig, error) {
