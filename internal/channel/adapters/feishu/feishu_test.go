@@ -251,11 +251,8 @@ func TestFeishuResolveAttachmentRequiresPlatformKey(t *testing.T) {
 
 	adapter := NewFeishuAdapter(nil)
 	_, err := adapter.ResolveAttachment(context.Background(), channel.ChannelConfig{}, channel.Attachment{})
-	if err == nil {
-		t.Fatal("expected error when platform_key is missing")
-	}
-	if !strings.Contains(err.Error(), "platform_key") {
-		t.Fatalf("expected platform_key error, got: %v", err)
+	if !errors.Is(err, channel.ErrAttachmentNotResolvable) {
+		t.Fatalf("expected ErrAttachmentNotResolvable, got: %v", err)
 	}
 }
 

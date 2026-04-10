@@ -132,11 +132,8 @@ func TestTelegramResolveAttachmentRequiresReference(t *testing.T) {
 
 	adapter := NewTelegramAdapter(nil)
 	_, err := adapter.ResolveAttachment(context.Background(), channel.ChannelConfig{}, channel.Attachment{})
-	if err == nil {
-		t.Fatal("expected error when attachment has no platform_key/url")
-	}
-	if !strings.Contains(err.Error(), "platform_key") {
-		t.Fatalf("expected platform_key error, got: %v", err)
+	if !errors.Is(err, channel.ErrAttachmentNotResolvable) {
+		t.Fatalf("expected ErrAttachmentNotResolvable, got: %v", err)
 	}
 }
 
