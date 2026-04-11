@@ -310,8 +310,10 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			ch <- StreamEvent{Type: EventError, Error: errMsg}
 
 			// Mid-stream retry: if the error is retryable, attempt to continue
-			// the agent run from the accumulated state.
-			if isRetryableStreamError(p.Error) && stepNumber > 0 {
+			// the agent run from the accumulated state. This also handles
+			// errors at step 0 (e.g. timeout awaiting response headers) since
+			// no work has been completed yet and retrying from the start is safe.
+			if isRetryableStreamError(p.Error) {
 				streamResult, aborted = a.runMidStreamRetry(
 					ctx, ch, cfg, sdkTools, prepareStep, streamResult,
 					stepNumber, errMsg, &allText, textLoopProbeBuffer,

@@ -94,8 +94,9 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		}
 
 		// Intermediate persistence on abort/error: if stream ended without
-		// storing results and we accumulated tool calls, persist partial results.
-		if !stored && toolCallCount > 0 {
+		// storing results, persist a synthetic message so the user can see
+		// what happened and ask the bot to continue.
+		if !stored {
 			r.persistPartialResult(ctx, streamReq, rc, toolCallCount, idleCancel.DidFire())
 		}
 
@@ -202,7 +203,7 @@ func (r *Resolver) StreamChatWS(
 	}
 
 	// Intermediate persistence on abort/error
-	if !stored && toolCallCount > 0 {
+	if !stored {
 		r.persistPartialResult(ctx, req, rc, toolCallCount, idleCancel.DidFire())
 	}
 
