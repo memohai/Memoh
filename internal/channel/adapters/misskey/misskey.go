@@ -13,7 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/common"
+	"github.com/memohai/memoh/internal/channel/common"
 	"github.com/memohai/memoh/internal/textutil"
 )
 

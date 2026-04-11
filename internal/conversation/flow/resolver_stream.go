@@ -277,9 +277,9 @@ func (r *Resolver) persistPartialResult(ctx context.Context, req conversation.Ch
 	}
 	syntheticMsg := fmt.Sprintf("[Agent interrupted after %d tool calls: %s. Partial results saved — ask the bot to continue.]", toolCallCount, reason)
 
-	roundMessages := []conversation.ModelMessage{
+	roundMessages := prependUserMessage(req.Query, []conversation.ModelMessage{
 		{Role: "assistant", Content: conversation.NewTextContent(syntheticMsg)},
-	}
+	})
 
 	if err := r.storeRound(context.WithoutCancel(ctx), req, roundMessages, rc.model.ID); err != nil {
 		r.logger.Error("failed to persist partial result",
