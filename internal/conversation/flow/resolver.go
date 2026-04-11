@@ -228,9 +228,15 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
+	botSettings, _ := r.loadBotSettings(ctx, req.BotID)
+	contextTokenBudget := 0
+	if botSettings.ContextTokenBudget > 0 {
+		contextTokenBudget = botSettings.ContextTokenBudget
+	}
+
 	var messages []conversation.ModelMessage
 	if usePipeline {
-		messages = r.buildMessagesFromPipeline(ctx, req)
+		messages = r.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
 	} else if r.conversationSvc != nil {
 		loaded, loadErr := r.loadMessages(ctx, req.ChatID, req.SessionID, defaultMaxContextMinutes)
 		if loadErr != nil {
@@ -239,11 +245,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		loaded = pruneHistoryForGateway(loaded)
 		loaded = dedupePersistedCurrentUserMessage(loaded, req)
 		loaded = r.replaceCompactedMessages(ctx, loaded)
-		botSettings, _ := r.loadBotSettings(ctx, req.BotID)
-		contextTokenBudget := 0
-		if botSettings.ContextTokenBudget > 0 {
-			contextTokenBudget = botSettings.ContextTokenBudget
-		}
 		messages = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
 	}
 	if memoryMsg != nil {

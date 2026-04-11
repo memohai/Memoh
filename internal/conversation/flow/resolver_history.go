@@ -126,19 +126,14 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 		return result
 	}
 
-	// Scan from newest to oldest, accumulating per-message token costs.
-	// Messages with stored usage data use that value; others fall back to a
-	// character-based estimate so that user/tool messages are not free-passed.
+	// Scan from newest to oldest, accumulating per-message estimated context
+	// token costs. Each message's cost represents the tokens it occupies in the
+	// context window (not the output tokens it generated). We use a character-
+	// based estimate for all messages since this measures context window impact.
 	totalTokens := 0
 	cutoff := 0
-	messagesWithUsage := 0
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].UsageOutputTokens != nil {
-			totalTokens += *messages[i].UsageOutputTokens
-			messagesWithUsage++
-		} else {
-			totalTokens += estimateMessageTokens(messages[i].Message)
-		}
+		totalTokens += estimateMessageTokens(messages[i].Message)
 		if totalTokens > maxTokens {
 			cutoff = i + 1
 			break
@@ -152,11 +147,10 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 		cutoff++
 	}
 
-	if log != nil {
-		log.Debug("trimMessagesByTokens",
+	if cutoff > 0 && log != nil {
+		log.Info("trimMessagesByTokens: context trimmed",
 			slog.Int("total_messages", len(messages)),
-			slog.Int("messages_with_usage", messagesWithUsage),
-			slog.Int("accumulated_output_tokens", totalTokens),
+			slog.Int("estimated_tokens", totalTokens),
 			slog.Int("max_tokens", maxTokens),
 			slog.Int("cutoff_index", cutoff),
 			slog.Int("kept_messages", len(messages)-cutoff),
@@ -233,7 +227,7 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []mess
 // RenderedContext (RC) merged with assistant/tool turns (TR) from
 // bot_history_messages. This gives chat mode the same event-driven context
 // that discuss mode uses, replacing the legacy loadMessages path.
-func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversation.ChatRequest) []conversation.ModelMessage {
+func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversation.ChatRequest, contextTokenBudget int) []conversation.ModelMessage {
 	sessionID := strings.TrimSpace(req.SessionID)
 	if r.pipeline == nil || sessionID == "" {
 		return nil
@@ -261,7 +255,43 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 			Content: contentJSON,
 		})
 	}
+
+	// Apply context token budget trimming to pipeline path as well.
+	if contextTokenBudget > 0 && len(messages) > 0 {
+		messages = trimPipelineMessagesByTokens(r.logger, messages, contextTokenBudget)
+	}
+
 	return messages
+}
+
+// trimPipelineMessagesByTokens trims pipeline-assembled messages to fit within
+// the context token budget using character-based estimation.
+func trimPipelineMessagesByTokens(log *slog.Logger, messages []conversation.ModelMessage, maxTokens int) []conversation.ModelMessage {
+	totalTokens := 0
+	cutoff := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		totalTokens += estimateMessageTokens(messages[i])
+		if totalTokens > maxTokens {
+			cutoff = i + 1
+			break
+		}
+	}
+
+	// Avoid orphaned tool messages at the cutoff boundary.
+	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Role), "tool") {
+		cutoff++
+	}
+
+	if cutoff > 0 && log != nil {
+		log.Info("trimPipelineMessagesByTokens: context trimmed",
+			slog.Int("total_messages", len(messages)),
+			slog.Int("estimated_tokens", totalTokens),
+			slog.Int("max_tokens", maxTokens),
+			slog.Int("kept_messages", len(messages)-cutoff),
+		)
+	}
+
+	return messages[cutoff:]
 }
 
 // loadTurnResponses loads recent assistant/tool messages from bot_history_messages
