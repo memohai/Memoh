@@ -30,16 +30,13 @@ const (
 // The container is stopped during export and restarted afterwards.
 // Caller must consume the returned reader before the context is cancelled.
 func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, error) {
-	containerID := m.resolveContainerID(ctx, botID)
-	unlock := m.lockContainer(containerID)
-	defer unlock()
-
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return nil, fmt.Errorf("get container: %w", err)
 	}
+	defer ref.Close()
 
-	mounts, err := m.snapshotMounts(ctx, info)
+	mounts, err := m.snapshotMounts(ctx, ref.info)
 	if errors.Is(err, errMountNotSupported) {
 		return m.exportDataViaGRPC(ctx, botID)
 	}
@@ -47,7 +44,8 @@ func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, 
 		return nil, err
 	}
 
-	if err := m.safeStopTask(ctx, containerID); err != nil {
+	restartTask, err := ref.StopTaskForMutation(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("stop container: %w", err)
 	}
 
@@ -57,7 +55,7 @@ func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, 
 		var exportErr error
 		defer func() {
 			_ = pw.CloseWithError(exportErr)
-			m.restartContainer(context.WithoutCancel(ctx), botID, containerID)
+			restartTask()
 		}()
 
 		exportErr = mount.WithReadonlyTempMount(ctx, mounts, func(root string) error {
@@ -75,16 +73,13 @@ func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, 
 // ImportData extracts a tar.gz archive into the container's /data directory.
 // The container is stopped during import and restarted afterwards.
 func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) error {
-	containerID := m.resolveContainerID(ctx, botID)
-	unlock := m.lockContainer(containerID)
-	defer unlock()
-
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return fmt.Errorf("get container: %w", err)
 	}
+	defer ref.Close()
 
-	mounts, err := m.snapshotMounts(ctx, info)
+	mounts, err := m.snapshotMounts(ctx, ref.info)
 	if errors.Is(err, errMountNotSupported) {
 		return m.importDataViaGRPC(ctx, botID, r)
 	}
@@ -92,10 +87,11 @@ func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) err
 		return err
 	}
 
-	if err := m.safeStopTask(ctx, containerID); err != nil {
+	restartTask, err := ref.StopTaskForMutation(ctx)
+	if err != nil {
 		return fmt.Errorf("stop container: %w", err)
 	}
-	defer m.restartContainer(context.WithoutCancel(ctx), botID, containerID)
+	defer restartTask()
 
 	return mount.WithTempMount(ctx, mounts, func(root string) error {
 		dataDir := mountedDataDir(root)
@@ -112,48 +108,20 @@ func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) err
 // mounted snapshot is consistent; the Apple fallback uses gRPC and does not
 // require a stop.
 func (m *Manager) PreserveData(ctx context.Context, botID string) error {
-	containerID := m.resolveContainerID(ctx, botID)
-
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return fmt.Errorf("get container: %w", err)
 	}
+	defer ref.Close()
 
-	backupPath := m.backupPath(botID)
-	if err := os.MkdirAll(filepath.Dir(backupPath), 0o750); err != nil {
-		return fmt.Errorf("create backup dir: %w", err)
-	}
-
-	mounts, mountErr := m.snapshotMounts(ctx, info)
+	mounts, mountErr := m.snapshotMounts(ctx, ref.info)
 	if errors.Is(mountErr, errMountNotSupported) {
-		return m.preserveDataViaGRPC(ctx, botID, backupPath)
+		return m.preserveDataViaGRPC(ctx, botID, m.backupPath(botID))
 	}
 	if mountErr != nil {
 		return mountErr
 	}
-
-	f, err := os.Create(backupPath) //nolint:gosec // G304: operator-controlled path
-	if err != nil {
-		return fmt.Errorf("create backup file: %w", err)
-	}
-
-	writeErr := mount.WithReadonlyTempMount(ctx, mounts, func(root string) error {
-		dataDir := mountedDataDir(root)
-		if _, statErr := os.Stat(dataDir); statErr != nil {
-			return nil // no /data to backup
-		}
-		return tarGzDir(f, dataDir)
-	})
-
-	closeErr := f.Close()
-	if writeErr != nil {
-		_ = os.Remove(backupPath)
-		return fmt.Errorf("export data: %w", writeErr)
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return nil
+	return m.preserveDataToBackup(ctx, botID, mounts)
 }
 
 // RestorePreservedData imports preserved data (backup tar.gz or legacy
@@ -202,14 +170,13 @@ func (m *Manager) HasPreservedData(botID string) bool {
 // importLegacyDir copies a legacy bind-mount directory into the container
 // via snapshot mount, then renames the source to .migrated.
 func (m *Manager) importLegacyDir(ctx context.Context, botID, srcDir string) error {
-	containerID := m.resolveContainerID(ctx, botID)
-
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return fmt.Errorf("get container: %w", err)
 	}
+	defer ref.Close()
 
-	mounts, err := m.snapshotMounts(ctx, info)
+	mounts, err := m.snapshotMounts(ctx, ref.info)
 	if errors.Is(err, errMountNotSupported) {
 		return m.importLegacyDirViaGRPC(ctx, botID, srcDir)
 	}
@@ -217,10 +184,11 @@ func (m *Manager) importLegacyDir(ctx context.Context, botID, srcDir string) err
 		return err
 	}
 
-	if err := m.safeStopTask(ctx, containerID); err != nil {
+	restartTask, err := ref.StopTaskForMutation(ctx)
+	if err != nil {
 		return fmt.Errorf("stop container: %w", err)
 	}
-	defer m.restartContainer(context.WithoutCancel(ctx), botID, containerID)
+	defer restartTask()
 
 	mountErr := mount.WithTempMount(ctx, mounts, func(root string) error {
 		dataDir := mountedDataDir(root)
@@ -308,13 +276,13 @@ func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string
 	}
 	defer func() { _ = f.Close() }()
 
-	containerID := m.resolveContainerID(ctx, botID)
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return fmt.Errorf("get container: %w", err)
 	}
+	defer ref.Close()
 
-	mounts, err := m.snapshotMounts(ctx, info)
+	mounts, err := m.snapshotMounts(ctx, ref.info)
 	if err != nil {
 		return err
 	}
@@ -363,22 +331,76 @@ func (m *Manager) restartContainer(ctx context.Context, botID, containerID strin
 			slog.String("container_id", containerID), slog.Any("error", err))
 		return
 	}
-	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
-		m.logger.Warn("restart after data operation failed",
+	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
+		m.logger.Error("restart after data operation failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 		return
 	}
-	// CNI network setup — outbound connectivity is required for package
-	// downloads and other network-dependent operations in the container.
-	if _, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-		ContainerID: containerID,
-		CNIBinDir:   m.cfg.CNIBinaryDir,
-		CNIConfDir:  m.cfg.CNIConfigDir,
-	}); err != nil {
-		m.logger.Error("network setup after restart failed",
-			slog.String("container_id", containerID), slog.Any("error", err))
-		return
+}
+
+func (m *Manager) stopTaskForMutation(ctx context.Context, botID, containerID string) (func(), error) {
+	if err := m.safeStopTask(ctx, containerID); err != nil {
+		return nil, err
 	}
+	restartCtx := context.WithoutCancel(ctx)
+	return func() {
+		m.restartContainer(restartCtx, botID, containerID)
+	}, nil
+}
+
+func (m *Manager) preserveDataToBackup(ctx context.Context, botID string, mounts []mount.Mount) error {
+	backupPath := m.backupPath(botID)
+	if err := os.MkdirAll(filepath.Dir(backupPath), 0o750); err != nil {
+		return fmt.Errorf("create backup dir: %w", err)
+	}
+
+	f, err := os.Create(backupPath) //nolint:gosec // G304: operator-controlled path
+	if err != nil {
+		return fmt.Errorf("create backup file: %w", err)
+	}
+
+	writeErr := mount.WithReadonlyTempMount(ctx, mounts, func(root string) error {
+		dataDir := mountedDataDir(root)
+		if _, statErr := os.Stat(dataDir); statErr != nil {
+			return nil // no /data to backup
+		}
+		return tarGzDir(f, dataDir)
+	})
+
+	closeErr := f.Close()
+	if writeErr != nil {
+		_ = os.Remove(backupPath)
+		return fmt.Errorf("export data: %w", writeErr)
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return nil
+}
+
+func (m *Manager) preserveDataBeforeDelete(ctx context.Context, botID string) error {
+	ref, err := m.loadLockedContainer(ctx, botID)
+	if err != nil {
+		return fmt.Errorf("get container for preserve: %w", err)
+	}
+	defer ref.Close()
+
+	mounts, err := m.snapshotMounts(ctx, ref.info)
+	if errors.Is(err, errMountNotSupported) {
+		return m.preserveDataViaGRPC(ctx, botID, m.backupPath(botID))
+	}
+	if err != nil {
+		return err
+	}
+
+	if err := m.safeStopTask(ctx, ref.containerID); err != nil {
+		return fmt.Errorf("stop for data preserve: %w", err)
+	}
+	if err := m.preserveDataToBackup(ctx, botID, mounts); err != nil {
+		m.restartContainer(ctx, botID, ref.containerID)
+		return err
+	}
+	return nil
 }
 
 func mountedDataDir(root string) string {

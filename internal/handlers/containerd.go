@@ -28,7 +28,7 @@ import (
 )
 
 type ContainerdHandler struct {
-	manager          *workspace.Manager
+	manager          containerWorkspace
 	cfg              config.WorkspaceConfig
 	containerBackend string
 	logger           *slog.Logger
@@ -182,7 +182,7 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.WorkspaceConfig, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg config.WorkspaceConfig, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *ContainerdHandler {
 	h := &ContainerdHandler{
 		manager:          manager,
 		cfg:              cfg,

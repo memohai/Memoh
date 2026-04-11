@@ -15,6 +15,7 @@ import (
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	netctl "github.com/memohai/memoh/internal/network"
 )
 
 // ---------------------------------------------------------------------------
@@ -86,14 +87,22 @@ func (m *Manager) isTaskRunning(ctx context.Context, containerID string) bool {
 	return err == nil && task.Status == ctr.TaskStatusRunning
 }
 
-func (m *Manager) setupNetworkAndGetIP(ctx context.Context, containerID string) (string, error) {
-	var lastErr error
-	for attempt := range 2 {
-		result, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
+func (m *Manager) networkAttachmentRequest(botID, containerID string) netctl.AttachmentRequest {
+	return netctl.AttachmentRequest{
+		BotID:       botID,
+		ContainerID: containerID,
+		Runtime: netctl.RuntimeNetworkRequest{
 			ContainerID: containerID,
 			CNIBinDir:   m.cfg.CNIBinaryDir,
 			CNIConfDir:  m.cfg.CNIConfigDir,
-		})
+		},
+	}
+}
+
+func (m *Manager) ensureContainerNetworkAndGetIP(ctx context.Context, botID, containerID string) (string, error) {
+	var lastErr error
+	for attempt := range 2 {
+		result, err := m.networkController.EnsureAttached(ctx, m.networkAttachmentRequest(botID, containerID))
 		if err != nil {
 			lastErr = err
 			m.logger.Warn("network setup attempt failed",
@@ -102,17 +111,17 @@ func (m *Manager) setupNetworkAndGetIP(ctx context.Context, containerID string) 
 				slog.Any("error", err))
 			continue
 		}
-		if strings.TrimSpace(result.IP) == "" {
+		if strings.TrimSpace(result.Runtime.IP) == "" {
 			lastErr = fmt.Errorf("network setup returned no IP for %s", containerID)
 			continue
 		}
-		return result.IP, nil
+		return result.Runtime.IP, nil
 	}
 	return "", fmt.Errorf("network setup failed for container %s: %w", containerID, lastErr)
 }
 
-func (m *Manager) setupNetworkOrFail(ctx context.Context, containerID, botID string) error {
-	ip, err := m.setupNetworkAndGetIP(ctx, containerID)
+func (m *Manager) ensureContainerNetwork(ctx context.Context, containerID, botID string) error {
+	ip, err := m.ensureContainerNetworkAndGetIP(ctx, botID, containerID)
 	if err != nil {
 		return err
 	}
@@ -121,6 +130,17 @@ func (m *Manager) setupNetworkOrFail(ctx context.Context, containerID, botID str
 		m.SetLegacyIP(botID, ip)
 	}
 	return nil
+}
+
+func (m *Manager) removeContainerNetwork(ctx context.Context, botID, containerID string) error {
+	return m.networkController.Detach(ctx, m.networkAttachmentRequest(botID, containerID))
+}
+
+func (m *Manager) startTaskAndEnsureNetwork(ctx context.Context, botID, containerID string) error {
+	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
+		return err
+	}
+	return m.ensureContainerNetwork(ctx, containerID, botID)
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +173,7 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 	taskInfo, err := m.service.GetTaskInfo(ctx, containerID)
 	if err == nil {
 		if taskInfo.Status == ctr.TaskStatusRunning {
-			return m.setupNetworkOrFail(ctx, containerID, botID)
+			return m.ensureContainerNetwork(ctx, containerID, botID)
 		}
 		if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
 			if !errdefs.IsNotFound(err) {
@@ -166,10 +186,7 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 		return err
 	}
 
-	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
-		return err
-	}
-	return m.setupNetworkOrFail(ctx, containerID, botID)
+	return m.startTaskAndEnsureNetwork(ctx, botID, containerID)
 }
 
 // StopBot stops the container task for a bot and marks it stopped in DB.
@@ -373,7 +390,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 					continue
 				}
 			}
-			if ip, netErr := m.setupNetworkAndGetIP(ctx, containerID); netErr != nil {
+			if ip, netErr := m.ensureContainerNetworkAndGetIP(ctx, botID, containerID); netErr != nil {
 				m.logger.Error("reconcile: network setup failed for legacy container",
 					slog.String("bot_id", botID), slog.Any("error", netErr))
 			} else {
@@ -390,7 +407,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 			if row.Status != "running" {
 				m.markContainerStarted(ctx, botID)
 			}
-			if netErr := m.setupNetworkOrFail(ctx, containerID, botID); netErr != nil {
+			if netErr := m.ensureContainerNetwork(ctx, containerID, botID); netErr != nil {
 				m.logger.Error("reconcile: network setup failed for running task, container unreachable",
 					slog.String("bot_id", botID),
 					slog.String("container_id", containerID),

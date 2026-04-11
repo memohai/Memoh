@@ -20,6 +20,7 @@ import (
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/identity"
+	netctl "github.com/memohai/memoh/internal/network"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -74,20 +75,21 @@ type ContainerMetricsResult struct {
 }
 
 type Manager struct {
-	service         ctr.Service
-	cfg             config.WorkspaceConfig
-	namespace       string
-	db              *pgxpool.Pool
-	queries         dbstore.Queries
-	logger          *slog.Logger
-	containerLockMu sync.Mutex
-	containerLocks  map[string]*sync.Mutex
-	grpcPool        *bridge.Pool
-	legacyMu        sync.RWMutex
-	legacyIPs       map[string]string // botID → IP for pre-bridge containers
+	service           runtimeService
+	networkController netctl.Controller
+	cfg               config.WorkspaceConfig
+	namespace         string
+	db                *pgxpool.Pool
+	queries           dbstore.Queries
+	logger            *slog.Logger
+	containerLockMu   sync.Mutex
+	containerLocks    map[string]*sync.Mutex
+	grpcPool          *bridge.Pool
+	legacyMu          sync.RWMutex
+	legacyIPs         map[string]string // botID → IP for pre-bridge containers
 }
 
-func NewManager(log *slog.Logger, service ctr.Service, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool, queryOverride ...dbstore.Queries) *Manager {
+func NewManager(log *slog.Logger, service runtimeService, networkController netctl.Controller, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool, queryOverride ...dbstore.Queries) *Manager {
 	if namespace == "" {
 		namespace = config.DefaultNamespace
 	}
@@ -98,14 +100,15 @@ func NewManager(log *slog.Logger, service ctr.Service, cfg config.WorkspaceConfi
 		queries = postgresstore.NewQueries(dbsqlc.New(conn))
 	}
 	m := &Manager{
-		service:        service,
-		cfg:            cfg,
-		namespace:      namespace,
-		db:             conn,
-		queries:        queries,
-		logger:         log.With(slog.String("component", "workspace")),
-		containerLocks: make(map[string]*sync.Mutex),
-		legacyIPs:      make(map[string]string),
+		service:           service,
+		networkController: networkController,
+		cfg:               cfg,
+		namespace:         namespace,
+		db:                conn,
+		queries:           queries,
+		logger:            log.With(slog.String("component", "workspace")),
+		containerLocks:    make(map[string]*sync.Mutex),
+		legacyIPs:         make(map[string]string),
 	}
 	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
@@ -415,17 +418,9 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 		}
 	}
 
-	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
-		return err
-	}
-
-	// CNI network setup (for outbound connectivity — container processes
-	// may need to download packages). Server communicates via UDS, not IP.
-	if _, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-		ContainerID: containerID,
-		CNIBinDir:   m.cfg.CNIBinaryDir,
-		CNIConfDir:  m.cfg.CNIConfigDir,
-	}); err != nil {
+	// Start the task and restore the container network so workspace processes
+	// regain outbound connectivity. Server communication still uses UDS.
+	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
 		if stopErr := m.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{Force: true}); stopErr != nil {
 			m.logger.Warn("cleanup: stop task failed", slog.String("container_id", containerID), slog.Any("error", stopErr))
 		}
@@ -454,42 +449,15 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 
 	containerID := m.resolveContainerID(ctx, botID)
 
-	stoppedForPreserve := false
-
 	if preserveData {
-		info, err := m.service.GetContainer(ctx, containerID)
-		if err != nil {
-			return fmt.Errorf("get container for preserve: %w", err)
-		}
-
-		if _, err := m.snapshotMounts(ctx, info); errors.Is(err, errMountNotSupported) {
-			// Apple backend fallback uses gRPC against a running container.
-		} else if err != nil {
-			return err
-		} else {
-			if err := m.safeStopTask(ctx, containerID); err != nil {
-				return fmt.Errorf("stop for data preserve: %w", err)
-			}
-			stoppedForPreserve = true
-		}
-
-		if err := m.PreserveData(ctx, botID); err != nil {
-			// Export failed — restart only if we stopped the task, and abort
-			// deletion to prevent data loss.
-			if stoppedForPreserve {
-				m.restartContainer(ctx, botID, containerID)
-			}
+		if err := m.preserveDataBeforeDelete(ctx, botID); err != nil {
 			return fmt.Errorf("preserve data: %w", err)
 		}
 	}
 
 	m.clearLegacyRoute(botID)
 
-	if err := m.service.RemoveNetwork(ctx, ctr.NetworkSetupRequest{
-		ContainerID: containerID,
-		CNIBinDir:   m.cfg.CNIBinaryDir,
-		CNIConfDir:  m.cfg.CNIConfigDir,
-	}); err != nil {
+	if err := m.removeContainerNetwork(ctx, botID, containerID); err != nil {
 		m.logger.Warn("delete: remove network failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}

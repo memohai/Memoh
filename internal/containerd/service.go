@@ -80,7 +80,8 @@ type ListTasksOptions struct {
 	Filter string
 }
 
-type Service interface {
+// ImageService groups image and registry operations.
+type ImageService interface {
 	PullImage(ctx context.Context, ref string, opts *PullImageOptions) (ImageInfo, error)
 	GetImage(ctx context.Context, ref string) (ImageInfo, error)
 	ListImages(ctx context.Context) ([]ImageInfo, error)
@@ -89,27 +90,51 @@ type Service interface {
 	// without downloading any layers. Returns ErrNotSupported on backends that
 	// have no concept of a remote registry (e.g. Apple Virtualization).
 	ResolveRemoteDigest(ctx context.Context, ref string) (string, error)
+}
 
+// ContainerService groups container metadata and creation operations.
+type ContainerService interface {
 	CreateContainer(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error)
 	GetContainer(ctx context.Context, id string) (ContainerInfo, error)
 	ListContainers(ctx context.Context) ([]ContainerInfo, error)
 	DeleteContainer(ctx context.Context, id string, opts *DeleteContainerOptions) error
 	ListContainersByLabel(ctx context.Context, key, value string) ([]ContainerInfo, error)
+	CreateContainerFromSnapshot(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error)
+}
 
+// TaskService groups workload process lifecycle operations.
+type TaskService interface {
 	StartContainer(ctx context.Context, containerID string, opts *StartTaskOptions) error
 	StopContainer(ctx context.Context, containerID string, opts *StopTaskOptions) error
 	DeleteTask(ctx context.Context, containerID string, opts *DeleteTaskOptions) error
 	GetTaskInfo(ctx context.Context, containerID string) (TaskInfo, error)
 	GetContainerMetrics(ctx context.Context, containerID string) (ContainerMetrics, error)
 	ListTasks(ctx context.Context, opts *ListTasksOptions) ([]TaskInfo, error)
-	SetupNetwork(ctx context.Context, req NetworkSetupRequest) (NetworkResult, error)
-	RemoveNetwork(ctx context.Context, req NetworkSetupRequest) error
+}
 
+// NetworkService groups default CNI-based network attachment operations used
+// to give workspace containers basic outbound connectivity.
+type NetworkService interface {
+	SetupNetwork(ctx context.Context, req NetworkRequest) (NetworkResult, error)
+	RemoveNetwork(ctx context.Context, req NetworkRequest) error
+}
+
+// SnapshotService groups snapshot and rootfs operations.
+type SnapshotService interface {
 	CommitSnapshot(ctx context.Context, snapshotter, name, key string) error
 	ListSnapshots(ctx context.Context, snapshotter string) ([]SnapshotInfo, error)
 	PrepareSnapshot(ctx context.Context, snapshotter, key, parent string) error
-	CreateContainerFromSnapshot(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error)
 	SnapshotMounts(ctx context.Context, snapshotter, key string) ([]MountInfo, error)
+}
+
+// Service is the compatibility façade consumed by existing callers while the
+// workspace/runtime boundary is being decomposed into narrower interfaces.
+type Service interface {
+	ImageService
+	ContainerService
+	TaskService
+	NetworkService
+	SnapshotService
 }
 
 type DefaultService struct {
@@ -765,24 +790,38 @@ func (s *DefaultService) SnapshotMounts(ctx context.Context, snapshotter, key st
 	return result, nil
 }
 
-func (s *DefaultService) SetupNetwork(ctx context.Context, req NetworkSetupRequest) (NetworkResult, error) {
-	task, ctx, err := s.getTask(ctx, req.ContainerID)
-	if err != nil {
-		return NetworkResult{}, err
+func (s *DefaultService) SetupNetwork(ctx context.Context, req NetworkRequest) (NetworkResult, error) {
+	if req.ContainerID == "" {
+		return NetworkResult{}, ErrInvalidArgument
 	}
-	ip, err := setupCNINetwork(ctx, task, req.ContainerID, req.CNIBinDir, req.CNIConfDir)
+	if req.PID == 0 {
+		task, taskCtx, err := s.getTask(ctx, req.ContainerID)
+		if err != nil {
+			return NetworkResult{}, err
+		}
+		ctx = taskCtx
+		req.PID = task.Pid()
+	}
+	ip, err := setupNetwork(ctx, req)
 	if err != nil {
 		return NetworkResult{}, err
 	}
 	return NetworkResult{IP: ip}, nil
 }
 
-func (s *DefaultService) RemoveNetwork(ctx context.Context, req NetworkSetupRequest) error {
-	task, ctx, err := s.getTask(ctx, req.ContainerID)
-	if err != nil {
-		return err
+func (s *DefaultService) RemoveNetwork(ctx context.Context, req NetworkRequest) error {
+	if req.ContainerID == "" {
+		return ErrInvalidArgument
 	}
-	return removeCNINetwork(ctx, task, req.ContainerID, req.CNIBinDir, req.CNIConfDir)
+	if req.PID == 0 {
+		task, taskCtx, err := s.getTask(ctx, req.ContainerID)
+		if err != nil {
+			return err
+		}
+		ctx = taskCtx
+		req.PID = task.Pid()
+	}
+	return removeNetwork(ctx, req)
 }
 
 func (s *DefaultService) withNamespace(ctx context.Context) context.Context {
