@@ -69,6 +69,10 @@ type SpawnResult struct {
 // This prevents runaway subagent calls from blocking the parent agent forever.
 const subagentTimeout = 10 * time.Minute
 
+// spawnHeartbeatInterval controls how often a progress event is emitted during
+// spawn execution to keep the parent stream's idle timeout from firing.
+const spawnHeartbeatInterval = 30 * time.Second
+
 // subagentMaxRetries is the maximum number of retry attempts for a failed
 // subagent task. Only transient errors (rate limits, network failures) are
 // retried; fatal errors (bad config, invalid input) fail immediately.
@@ -219,7 +223,12 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 		tasks = tasks[:maxTasksPerSpawn]
 	}
 
-	sdkModel, modelID, err := p.resolveModel(ctx, botID)
+	// Use a decoupled context for model resolution and subagent execution
+	// so that a parent stream cancellation (e.g. idle timeout) does not
+	// prevent the spawn from completing and returning its results.
+	sessionCtx := context.WithoutCancel(ctx)
+
+	sdkModel, modelID, err := p.resolveModel(sessionCtx, botID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model: %w", err)
 	}
@@ -233,15 +242,50 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 	var wg sync.WaitGroup
 	wg.Add(len(tasks))
 
+	// Start a heartbeat goroutine that emits progress events into the
+	// parent stream at regular intervals. This keeps the stream's idle
+	// timeout from firing while subagents are running.
+	heartbeatCtx, heartbeatCancel := context.WithCancel(sessionCtx)
+	defer heartbeatCancel()
+	p.startSpawnHeartbeat(heartbeatCtx, session, len(tasks))
+
 	for i, task := range tasks {
 		go func(idx int, query string) {
 			defer wg.Done()
-			results[idx] = p.runSubagentTask(ctx, session, sdkModel, modelID, systemPrompt, query)
+			results[idx] = p.runSubagentTask(sessionCtx, session, sdkModel, modelID, systemPrompt, query)
 		}(i, task)
 	}
 	wg.Wait()
 
 	return map[string]any{"results": results}, nil
+}
+
+// startSpawnHeartbeat emits periodic progress events into the parent agent
+// stream to prevent the idle timeout from firing while spawn tasks run.
+// Each heartbeat carries a progress status so the frontend can display it.
+func (p *SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionContext, totalTasks int) {
+	emitter := session.Emitter
+	if emitter == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(spawnHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Emit a progress event through the agent's stream emitter.
+				// The agent framework converts ToolStreamEvent into the
+				// appropriate wire-level progress event, which resets the
+				// idle timeout timer in the resolver.
+				emitter(ToolStreamEvent{
+					Type: StreamEventSpawnHeartbeat,
+				})
+			}
+		}
+	}()
 }
 
 func (p *SpawnProvider) runSubagentTask(

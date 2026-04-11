@@ -586,6 +586,8 @@ func toolStreamEventToAgentEvent(evt tools.ToolStreamEvent) StreamEvent {
 			ss = append(ss, SpeechItem{Text: s.Text})
 		}
 		return StreamEvent{Type: EventSpeech, Speeches: ss}
+	case tools.StreamEventSpawnHeartbeat:
+		return StreamEvent{Type: EventProgress, ProgressStatus: "spawn_running"}
 	default:
 		return StreamEvent{}
 	}
