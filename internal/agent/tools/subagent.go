@@ -263,7 +263,7 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 // startSpawnHeartbeat emits periodic progress events into the parent agent
 // stream to prevent the idle timeout from firing while spawn tasks run.
 // Each heartbeat carries a progress status so the frontend can display it.
-func (p *SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionContext, totalTasks int) {
+func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionContext, _ int) {
 	emitter := session.Emitter
 	if emitter == nil {
 		return

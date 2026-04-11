@@ -817,7 +817,7 @@ func (a *Agent) runMidStreamRetry(
 		aborted := false
 		for retryPart := range retryResult.Stream {
 			switch rp := retryPart.(type) {
-		case *sdk.TextStartPart:
+			case *sdk.TextStartPart:
 				if !sendEvent(ctx, ch, StreamEvent{Type: EventTextStart}) {
 					aborted = true
 				}
