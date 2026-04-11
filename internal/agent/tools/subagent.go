@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,9 +65,26 @@ type SpawnResult struct {
 	Usage    *sdk.Usage
 }
 
-// subagentTimeout caps total execution time for a single subagent task.
+// subagentTimeout caps total execution time for a single subagent task attempt.
 // This prevents runaway subagent calls from blocking the parent agent forever.
 const subagentTimeout = 10 * time.Minute
+
+// subagentMaxRetries is the maximum number of retry attempts for a failed
+// subagent task. Only transient errors (rate limits, network failures) are
+// retried; fatal errors (bad config, invalid input) fail immediately.
+const subagentMaxRetries = 2
+
+// subagentRetryBaseDelay is the initial backoff delay between retry attempts.
+const subagentRetryBaseDelay = 2 * time.Second
+
+var (
+	// err429Pattern matches HTTP 429 status codes in error strings.
+	err429Pattern = regexp.MustCompile(`(^|[^0-9])429($|[^0-9])`)
+	// errEOFPattern matches EOF or connection-level resets.
+	errEOFPattern = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
+	// serverErrPattern matches "api error 5XX" where XX is any two digits.
+	serverErrPattern = regexp.MustCompile(`api error 5\d{2}`)
+)
 
 // maxTasksPerSpawn caps the number of tasks accepted in a single spawn call.
 const maxTasksPerSpawn = 5
@@ -233,14 +252,11 @@ func (p *SpawnProvider) runSubagentTask(
 	systemPrompt string,
 	query string,
 ) spawnResult {
-	taskCtx, taskCancel := context.WithTimeout(ctx, subagentTimeout)
-	defer taskCancel()
-
 	res := spawnResult{Task: query}
 
 	var sessionID string
 	if p.sessionService != nil {
-		sess, err := p.sessionService.Create(taskCtx, sessionpkg.CreateInput{
+		sess, err := p.sessionService.Create(context.WithoutCancel(ctx), sessionpkg.CreateInput{
 			BotID:           parentSession.BotID,
 			Type:            sessionpkg.TypeSubagent,
 			Title:           truncateTitle(query, 100),
@@ -271,20 +287,82 @@ func (p *SpawnProvider) runSubagentTask(
 		LoopDetection: SpawnLoopConfig{Enabled: true},
 	}
 
-	genResult, err := p.agent.Generate(taskCtx, cfg)
-	if err != nil {
-		res.Error = err.Error()
-		return res
+	var lastErr error
+	for attempt := 0; attempt <= subagentMaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := subagentRetryBaseDelay * time.Duration(attempt)
+			p.logger.Info("subagent retry",
+				slog.String("session_id", sessionID),
+				slog.Int("attempt", attempt),
+				slog.Duration("delay", delay),
+				slog.String("error", lastErr.Error()),
+			)
+			select {
+			case <-time.After(delay):
+			case <-time.After(subagentTimeout):
+				// Hard deadline: don't retry indefinitely.
+				res.Error = fmt.Sprintf("retry deadline exceeded (last error: %v)", lastErr)
+				return res
+			}
+		}
+
+		// Use context.WithoutCancel so retries get a fresh timeout even if
+		// the parent stream was cancelled (e.g. by idle timeout).
+		taskCtx, taskCancel := context.WithTimeout(context.WithoutCancel(ctx), subagentTimeout)
+		genResult, err := p.agent.Generate(taskCtx, cfg)
+		taskCancel()
+
+		if err == nil {
+			res.Text = genResult.Text
+			res.Success = true
+			if p.messageService != nil && sessionID != "" {
+				p.persistMessages(context.WithoutCancel(ctx), parentSession.BotID, sessionID, modelID, query, genResult)
+			}
+			return res
+		}
+
+		lastErr = err
+		if !isRetryableSubagentError(err) {
+			res.Error = err.Error()
+			return res
+		}
 	}
 
-	res.Text = genResult.Text
-	res.Success = true
-
-	if p.messageService != nil && sessionID != "" {
-		p.persistMessages(taskCtx, parentSession.BotID, sessionID, modelID, query, genResult)
-	}
-
+	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
 	return res
+}
+
+// isRetryableSubagentError returns true for transient errors that warrant a retry.
+// Fatal errors (invalid config, context cancelled by user) return false.
+func isRetryableSubagentError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Rate limits
+	if strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "rate_limit") {
+		return true
+	}
+	// HTTP 429 and 5xx
+	if err429Pattern.MatchString(errStr) || serverErrPattern.MatchString(errStr) {
+		return true
+	}
+	// Connection-level errors
+	if errEOFPattern.MatchString(errStr) {
+		return true
+	}
+	// Network timeouts
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	// Context cancellation from parent (idle timeout, etc.) IS retryable
+	// for subagents — they should complete their work even if the parent
+	// stream was interrupted.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	return false
 }
 
 func (p *SpawnProvider) persistMessages(

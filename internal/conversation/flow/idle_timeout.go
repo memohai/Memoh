@@ -52,12 +52,14 @@ func (ic *idleCancel) ToolCalls() int {
 	return ic.toolCalls
 }
 
-// currentTimeout returns the adaptive timeout: base + 10s per tool call, capped at 300s.
+// currentTimeout returns the adaptive timeout: base + 60s per tool call, capped at 600s.
+// Tool calls (especially spawn/subagent) can take minutes to complete, so the
+// extension per tool call is generous to avoid interrupting active work.
 func (ic *idleCancel) currentTimeout() time.Duration {
-	extra := time.Duration(ic.toolCalls) * 10 * time.Second
+	extra := time.Duration(ic.toolCalls) * 60 * time.Second
 	timeout := ic.baseTimeout + extra
-	if timeout > 300*time.Second {
-		timeout = 300 * time.Second
+	if timeout > 600*time.Second {
+		timeout = 600 * time.Second
 	}
 	return timeout
 }
