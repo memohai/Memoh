@@ -365,10 +365,10 @@ func (s *AppleService) ListTasks(ctx context.Context, opts *ListTasksOptions) ([
 // Network (no-op — Apple Container handles networking natively)
 // ---------------------------------------------------------------------------
 
-func (*AppleService) SetupNetwork(context.Context, NetworkSetupRequest) (NetworkResult, error) {
+func (*AppleService) SetupNetwork(context.Context, NetworkRequest) (NetworkResult, error) {
 	return NetworkResult{}, nil
 }
-func (*AppleService) RemoveNetwork(context.Context, NetworkSetupRequest) error { return nil }
+func (*AppleService) RemoveNetwork(context.Context, NetworkRequest) error { return nil }
 
 // ---------------------------------------------------------------------------
 // Snapshots (not supported on Apple Container)

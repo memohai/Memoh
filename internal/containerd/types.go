@@ -126,13 +126,19 @@ type PullProgress struct {
 	Layers []LayerStatus `json:"layers"`
 }
 
-type NetworkSetupRequest struct {
+// NetworkRequest describes the host-side wiring required to attach a container
+// task to the default CNI-provided network for basic outbound connectivity.
+// It does not describe future provider/overlay networking.
+type NetworkRequest struct {
 	ContainerID string
+	NetNSPath   string
 	PID         uint32
 	CNIBinDir   string
 	CNIConfDir  string
 }
 
+// NetworkResult captures the outcome of attaching the container to the default
+// container network.
 type NetworkResult struct {
 	IP string
 }

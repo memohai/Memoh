@@ -13,6 +13,7 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
+	netctl "github.com/memohai/memoh/internal/network"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -119,7 +120,7 @@ func (*legacyRouteTestService) ListTasks(context.Context, *ctr.ListTasksOptions)
 	return nil, nil
 }
 
-func (s *legacyRouteTestService) SetupNetwork(context.Context, ctr.NetworkSetupRequest) (ctr.NetworkResult, error) {
+func (s *legacyRouteTestService) SetupNetwork(context.Context, ctr.NetworkRequest) (ctr.NetworkResult, error) {
 	idx := s.setupNet
 	s.setupNet++
 	if idx < len(s.setupNetworkErrs) && s.setupNetworkErrs[idx] != nil {
@@ -131,7 +132,7 @@ func (s *legacyRouteTestService) SetupNetwork(context.Context, ctr.NetworkSetupR
 	return ctr.NetworkResult{IP: "10.0.0.2"}, nil
 }
 
-func (s *legacyRouteTestService) RemoveNetwork(context.Context, ctr.NetworkSetupRequest) error {
+func (s *legacyRouteTestService) RemoveNetwork(context.Context, ctr.NetworkRequest) error {
 	s.removeNet++
 	return nil
 }
@@ -156,16 +157,17 @@ func (*legacyRouteTestService) SnapshotMounts(context.Context, string, string) (
 	return nil, ctr.ErrNotSupported
 }
 
-func newLegacyRouteTestManager(t *testing.T, svc ctr.Service, cfg config.WorkspaceConfig) *Manager {
+func newLegacyRouteTestManager(t *testing.T, svc runtimeService, cfg config.WorkspaceConfig) *Manager {
 	t.Helper()
 	logger := slog.New(slog.DiscardHandler)
 	m := &Manager{
-		service:        svc,
-		cfg:            cfg,
-		namespace:      config.DefaultNamespace,
-		containerLocks: make(map[string]*sync.Mutex),
-		legacyIPs:      make(map[string]string),
-		logger:         logger,
+		service:           svc,
+		networkController: netctl.NewController(netctl.NewContainerRuntimeFromBackend("containerd", svc), nil),
+		cfg:               cfg,
+		namespace:         config.DefaultNamespace,
+		containerLocks:    make(map[string]*sync.Mutex),
+		legacyIPs:         make(map[string]string),
+		logger:            logger,
 	}
 	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
@@ -230,7 +232,7 @@ func TestDeleteClearsLegacyRoute(t *testing.T) {
 	}
 }
 
-func TestSetupNetworkAndGetIPRejectsEmptyIP(t *testing.T) {
+func TestEnsureContainerNetworkAndGetIPRejectsEmptyIP(t *testing.T) {
 	svc := &legacyRouteTestService{
 		setupNetworkResults: []ctr.NetworkResult{{IP: ""}, {IP: "10.0.0.3"}},
 	}
@@ -239,9 +241,9 @@ func TestSetupNetworkAndGetIPRejectsEmptyIP(t *testing.T) {
 		CNIConfigDir: "/etc/cni/net.d",
 	})
 
-	ip, err := m.setupNetworkAndGetIP(context.Background(), "workspace-bot")
+	ip, err := m.ensureContainerNetworkAndGetIP(context.Background(), "", "workspace-bot")
 	if err != nil {
-		t.Fatalf("setupNetworkAndGetIP failed: %v", err)
+		t.Fatalf("ensureContainerNetworkAndGetIP failed: %v", err)
 	}
 	if ip != "10.0.0.3" {
 		t.Fatalf("expected retry IP, got %q", ip)

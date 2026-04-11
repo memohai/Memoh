@@ -66,18 +66,17 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		return nil, err
 	}
 
-	containerID := m.resolveContainerID(ctx, botID)
-	unlock := m.lockContainer(containerID)
-	defer unlock()
-
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := m.ensureDBRecords(ctx, botID, info.ID, info.Runtime.Name, info.Image); err != nil {
+	defer ref.Close()
+	if err := ref.EnsureDBRecords(ctx); err != nil {
 		return nil, err
 	}
 
+	containerID := ref.containerID
+	info := ref.info
 	displayName := strings.TrimSpace(snapshotName)
 	runtimeSnapshotName := fmt.Sprintf("%s-snapshot-%d", containerID, time.Now().UnixNano())
 	normalizedSource := normalizeSnapshotSource(source)
@@ -87,16 +86,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 	// Use a detached context so a cancelled HTTP request cannot break it.
 	dctx := context.WithoutCancel(ctx)
 
-	if err := m.safeStopTask(dctx, containerID); err != nil {
-		return nil, err
-	}
-
-	if err := m.service.CommitSnapshot(dctx, info.Snapshotter, runtimeSnapshotName, info.SnapshotKey); err != nil {
-		return nil, err
-	}
-
-	activeSnapshotName := fmt.Sprintf("%s-active-%d", containerID, time.Now().UnixNano())
-	if err := m.replaceContainerSnapshot(dctx, botID, containerID, info, activeSnapshotName, runtimeSnapshotName); err != nil {
+	if err := m.commitSnapshotAndReplaceContainer(dctx, ref, runtimeSnapshotName); err != nil {
 		return nil, err
 	}
 
@@ -142,32 +132,21 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		return nil, err
 	}
 
-	containerID := m.resolveContainerID(ctx, botID)
-	unlock := m.lockContainer(containerID)
-	defer unlock()
-
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-
-	if _, err := m.ensureDBRecords(ctx, botID, info.ID, info.Runtime.Name, info.Image); err != nil {
+	defer ref.Close()
+	if err := ref.EnsureDBRecords(ctx); err != nil {
 		return nil, err
 	}
 
+	containerID := ref.containerID
+	info := ref.info
 	dctx := context.WithoutCancel(ctx)
 
-	if err := m.safeStopTask(dctx, containerID); err != nil {
-		return nil, err
-	}
-
 	versionSnapshotName := fmt.Sprintf("%s-v%d", containerID, time.Now().UnixNano())
-	if err := m.service.CommitSnapshot(dctx, info.Snapshotter, versionSnapshotName, info.SnapshotKey); err != nil {
-		return nil, err
-	}
-
-	activeSnapshotName := fmt.Sprintf("%s-active-%d", containerID, time.Now().UnixNano())
-	if err := m.replaceContainerSnapshot(dctx, botID, containerID, info, activeSnapshotName, versionSnapshotName); err != nil {
+	if err := m.commitSnapshotAndReplaceContainer(dctx, ref, versionSnapshotName); err != nil {
 		return nil, err
 	}
 
@@ -210,15 +189,14 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 		return nil, err
 	}
 
-	containerID := m.resolveContainerID(ctx, botID)
-	unlock := m.lockContainer(containerID)
-	defer unlock()
-
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
+	defer ref.Close()
 
+	containerID := ref.containerID
+	info := ref.info
 	snapshotter := strings.TrimSpace(info.Snapshotter)
 	if snapshotter == "" {
 		snapshotter = m.cfg.Snapshotter
@@ -307,35 +285,31 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 		return errors.New("version out of range")
 	}
 
-	containerID := m.resolveContainerID(ctx, botID)
-	unlock := m.lockContainer(containerID)
-	defer unlock()
+	ref, err := m.loadLockedContainer(ctx, botID)
+	if err != nil {
+		return err
+	}
+	defer ref.Close()
 
 	snapshotName, err := m.queries.GetVersionSnapshotRuntimeName(ctx, dbsqlc.GetVersionSnapshotRuntimeNameParams{
-		ContainerID: containerID,
+		ContainerID: ref.containerID,
 		Version:     int32(version),
 	})
 	if err != nil {
 		return err
 	}
 
-	info, err := m.service.GetContainer(ctx, containerID)
-	if err != nil {
-		return err
-	}
-
 	dctx := context.WithoutCancel(ctx)
 
-	if err := m.safeStopTask(dctx, containerID); err != nil {
+	if err := m.safeStopTask(dctx, ref.containerID); err != nil {
 		return err
 	}
 
-	activeSnapshotName := fmt.Sprintf("%s-rollback-%d", containerID, time.Now().UnixNano())
-	if err := m.replaceContainerSnapshot(dctx, botID, containerID, info, activeSnapshotName, snapshotName); err != nil {
+	if err := m.replaceLockedContainerFromSnapshot(dctx, ref, "rollback", snapshotName); err != nil {
 		return err
 	}
 
-	return m.insertEvent(dctx, containerID, "version_rollback", map[string]any{
+	return m.insertEvent(dctx, ref.containerID, "version_rollback", map[string]any{
 		"snapshot_name": snapshotName,
 		"version":       version,
 		"source":        SnapshotSourceRollback,
@@ -384,22 +358,31 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	}); err != nil {
 		return err
 	}
-	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
-		return err
-	}
 	// Container process was recreated — evict the stale gRPC connection
 	// unconditionally so the next call dials fresh to the new process.
 	m.grpcPool.Remove(botID)
 
-	// CNI network setup (for outbound connectivity).
-	if _, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-		ContainerID: containerID,
-		CNIBinDir:   m.cfg.CNIBinaryDir,
-		CNIConfDir:  m.cfg.CNIConfigDir,
-	}); err != nil {
-		return fmt.Errorf("network setup after snapshot replace: %w", err)
+	// Recreate the task and restore the container network before the next
+	// workspace operation.
+	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
+		return fmt.Errorf("restart container after snapshot replace: %w", err)
 	}
 	return nil
+}
+
+func (m *Manager) commitSnapshotAndReplaceContainer(ctx context.Context, ref *lockedContainerRef, runtimeSnapshotName string) error {
+	if err := m.safeStopTask(ctx, ref.containerID); err != nil {
+		return err
+	}
+	if err := m.service.CommitSnapshot(ctx, ref.info.Snapshotter, runtimeSnapshotName, ref.info.SnapshotKey); err != nil {
+		return err
+	}
+	return m.replaceLockedContainerFromSnapshot(ctx, ref, "active", runtimeSnapshotName)
+}
+
+func (m *Manager) replaceLockedContainerFromSnapshot(ctx context.Context, ref *lockedContainerRef, activeLabel, parentSnapshot string) error {
+	activeSnapshotName := fmt.Sprintf("%s-%s-%d", ref.containerID, strings.TrimSpace(activeLabel), time.Now().UnixNano())
+	return m.replaceContainerSnapshot(ctx, ref.botID, ref.containerID, ref.info, activeSnapshotName, parentSnapshot)
 }
 
 func (m *Manager) buildVersionSpec(ctx context.Context, botID string, cdiDevices []string) (ctr.ContainerSpec, error) {
