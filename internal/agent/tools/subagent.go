@@ -341,9 +341,13 @@ func (p *SpawnProvider) runSubagentTask(
 				slog.Duration("delay", delay),
 				slog.String("error", lastErr.Error()),
 			)
+			delayTimer := time.NewTimer(delay)
+			deadlineTimer := time.NewTimer(subagentTimeout)
 			select {
-			case <-time.After(delay):
-			case <-time.After(subagentTimeout):
+			case <-delayTimer.C:
+				deadlineTimer.Stop()
+			case <-deadlineTimer.C:
+				delayTimer.Stop()
 				// Hard deadline: don't retry indefinitely.
 				res.Error = fmt.Sprintf("retry deadline exceeded (last error: %v)", lastErr)
 				return res

@@ -63,11 +63,24 @@ func (a *Agent) Generate(ctx context.Context, cfg RunConfig) (*GenerateResult, e
 	return a.runGenerate(ctx, cfg)
 }
 
+// sendEvent sends an event to the stream channel. It returns false if the
+// context was cancelled (consumer stopped reading), allowing the caller to
+// abort cleanly instead of leaking the goroutine on a blocked channel send.
+func sendEvent(ctx context.Context, ch chan<- StreamEvent, evt StreamEvent) bool {
+	select {
+	case ch <- evt:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
 	// Stream emitter: tools targeting the current conversation push
 	// side-effect events (attachments, reactions, speech) directly here.
+	// Uses sendEvent to avoid goroutine leaks when the consumer stops reading.
 	streamEmitter := tools.StreamEmitter(func(evt tools.ToolStreamEvent) {
-		ch <- toolStreamEventToAgentEvent(evt)
+		sendEvent(ctx, ch, toolStreamEventToAgentEvent(evt))
 	})
 
 	var sdkTools []sdk.Tool
@@ -75,7 +88,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		var err error
 		sdkTools, err = a.assembleTools(ctx, cfg, streamEmitter)
 		if err != nil {
-			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("assemble tools: %v", err)}
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("assemble tools: %v", err)})
 			return
 		}
 	}
@@ -171,7 +184,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			break
 		}
 		if !isRetryableStreamError(err) {
-			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: %v", err)}
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: %v", err)})
 			return
 		}
 		a.logger.Warn("stream start failed, retrying",
@@ -179,26 +192,28 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			slog.Int("max_attempts", retryCfg.MaxAttempts),
 			slog.String("error", err.Error()),
 		)
-		ch <- StreamEvent{
+		if !sendEvent(ctx, ch, StreamEvent{
 			Type:       EventRetry,
 			Attempt:    attempt + 1,
 			MaxAttempt: retryCfg.MaxAttempts,
 			RetryError: err.Error(),
+		}) {
+			return
 		}
 		if attempt+1 >= retryCfg.MaxAttempts {
-			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: all %d attempts failed (last: %v)", retryCfg.MaxAttempts, err)}
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: all %d attempts failed (last: %v)", retryCfg.MaxAttempts, err)})
 			return
 		}
 		delay := retryDelay(attempt, retryCfg)
 		if delay > 0 {
 			if err := sleepWithContext(ctx, delay); err != nil {
-				ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: context cancelled during retry: %v", err)}
+				sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: context cancelled during retry: %v", err)})
 				return
 			}
 		}
 	}
 
-	ch <- StreamEvent{Type: EventAgentStart}
+	sendEvent(ctx, ch, StreamEvent{Type: EventAgentStart})
 
 	var allText strings.Builder
 	aborted := false
@@ -215,14 +230,18 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			_ = p // stream start already emitted
 
 		case *sdk.TextStartPart:
-			ch <- StreamEvent{Type: EventTextStart}
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventTextStart}) {
+				aborted = true
+			}
 
 		case *sdk.TextDeltaPart:
 			if p.Text != "" {
 				if textLoopProbeBuffer != nil {
 					textLoopProbeBuffer.Push(p.Text)
 				}
-				ch <- StreamEvent{Type: EventTextDelta, Delta: p.Text}
+				if !sendEvent(ctx, ch, StreamEvent{Type: EventTextDelta, Delta: p.Text}) {
+					aborted = true
+				}
 				allText.WriteString(p.Text)
 			}
 
@@ -231,31 +250,41 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				textLoopProbeBuffer.Flush()
 			}
 			stepNumber++
-			ch <- StreamEvent{Type: EventTextEnd}
-			ch <- StreamEvent{
-				Type:           EventProgress,
-				StepNumber:     stepNumber,
-				ProgressStatus: "text",
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventTextEnd}) ||
+				!sendEvent(ctx, ch, StreamEvent{
+					Type:           EventProgress,
+					StepNumber:     stepNumber,
+					ProgressStatus: "text",
+				}) {
+				aborted = true
 			}
 
 		case *sdk.ReasoningStartPart:
-			ch <- StreamEvent{Type: EventReasoningStart}
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventReasoningStart}) {
+				aborted = true
+			}
 
 		case *sdk.ReasoningDeltaPart:
-			ch <- StreamEvent{Type: EventReasoningDelta, Delta: p.Text}
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventReasoningDelta, Delta: p.Text}) {
+				aborted = true
+			}
 
 		case *sdk.ReasoningEndPart:
-			ch <- StreamEvent{Type: EventReasoningEnd}
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventReasoningEnd}) {
+				aborted = true
+			}
 
 		case *sdk.StreamToolCallPart:
 			if textLoopProbeBuffer != nil {
 				textLoopProbeBuffer.Flush()
 			}
-			ch <- StreamEvent{
+			if !sendEvent(ctx, ch, StreamEvent{
 				Type:       EventToolCallStart,
 				ToolName:   p.ToolName,
 				ToolCallID: p.ToolCallID,
 				Input:      p.Input,
+			}) {
+				aborted = true
 			}
 
 		case *sdk.StreamToolResultPart:
@@ -265,18 +294,19 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				shouldAbort = true
 			}
 			stepNumber++
-			ch <- StreamEvent{
+			if !sendEvent(ctx, ch, StreamEvent{
 				Type:       EventToolCallEnd,
 				ToolName:   p.ToolName,
 				ToolCallID: p.ToolCallID,
 				Input:      p.Input,
 				Result:     p.Output,
-			}
-			ch <- StreamEvent{
+			}) || !sendEvent(ctx, ch, StreamEvent{
 				Type:           EventProgress,
 				StepNumber:     stepNumber,
 				ToolName:       p.ToolName,
 				ProgressStatus: "tool_result",
+			}) {
+				aborted = true
 			}
 			if shouldAbort {
 				a.logger.Warn("tool loop abort triggered", slog.String("tool_call_id", p.ToolCallID))
@@ -284,11 +314,13 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			}
 
 		case *sdk.StreamToolErrorPart:
-			ch <- StreamEvent{
+			if !sendEvent(ctx, ch, StreamEvent{
 				Type:       EventToolCallEnd,
 				ToolName:   p.ToolName,
 				ToolCallID: p.ToolCallID,
 				Error:      p.Error.Error(),
+			}) {
+				aborted = true
 			}
 
 		case *sdk.StreamFilePart:
@@ -296,18 +328,20 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			if mediaType == "" {
 				mediaType = "image/png"
 			}
-			ch <- StreamEvent{
+			if !sendEvent(ctx, ch, StreamEvent{
 				Type: EventAttachment,
 				Attachments: []FileAttachment{{
 					Type: "image",
 					URL:  fmt.Sprintf("data:%s;base64,%s", mediaType, p.File.Data),
 					Mime: mediaType,
 				}},
+			}) {
+				aborted = true
 			}
 
 		case *sdk.ErrorPart:
 			errMsg := p.Error.Error()
-			ch <- StreamEvent{Type: EventError, Error: errMsg}
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: errMsg})
 
 			// Mid-stream retry: if the error is retryable, attempt to continue
 			// the agent run from the accumulated state. This also handles
@@ -374,7 +408,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			)
 		}
 	}
-	ch <- termEvent
+	sendEvent(ctx, ch, termEvent)
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult, error) {
@@ -745,11 +779,13 @@ func (a *Agent) runMidStreamRetry(
 			slog.Int("max_attempts", retryCfg.MaxAttempts),
 			slog.String("error", errMsg),
 		)
-		ch <- StreamEvent{
+		if !sendEvent(ctx, ch, StreamEvent{
 			Type:       EventRetry,
 			Attempt:    attempt + 1,
 			MaxAttempt: retryCfg.MaxAttempts,
 			RetryError: errMsg,
+		}) {
+			return prevResult, true
 		}
 
 		delay := retryDelay(attempt, retryCfg)
@@ -781,14 +817,18 @@ func (a *Agent) runMidStreamRetry(
 		aborted := false
 		for retryPart := range retryResult.Stream {
 			switch rp := retryPart.(type) {
-			case *sdk.TextStartPart:
-				ch <- StreamEvent{Type: EventTextStart}
+		case *sdk.TextStartPart:
+				if !sendEvent(ctx, ch, StreamEvent{Type: EventTextStart}) {
+					aborted = true
+				}
 			case *sdk.TextDeltaPart:
 				if rp.Text != "" {
 					if textLoopProbeBuffer != nil {
 						textLoopProbeBuffer.Push(rp.Text)
 					}
-					ch <- StreamEvent{Type: EventTextDelta, Delta: rp.Text}
+					if !sendEvent(ctx, ch, StreamEvent{Type: EventTextDelta, Delta: rp.Text}) {
+						aborted = true
+					}
 					allText.WriteString(rp.Text)
 				}
 			case *sdk.TextEndPart:
@@ -796,41 +836,48 @@ func (a *Agent) runMidStreamRetry(
 					textLoopProbeBuffer.Flush()
 				}
 				stepNumber++
-				ch <- StreamEvent{Type: EventTextEnd}
+				if !sendEvent(ctx, ch, StreamEvent{Type: EventTextEnd}) {
+					aborted = true
+				}
 			case *sdk.StreamToolCallPart:
 				if textLoopProbeBuffer != nil {
 					textLoopProbeBuffer.Flush()
 				}
-				ch <- StreamEvent{
+				if !sendEvent(ctx, ch, StreamEvent{
 					Type:       EventToolCallStart,
 					ToolName:   rp.ToolName,
 					ToolCallID: rp.ToolCallID,
 					Input:      rp.Input,
+				}) {
+					aborted = true
 				}
 			case *sdk.StreamToolResultPart:
 				stepNumber++
-				ch <- StreamEvent{
+				if !sendEvent(ctx, ch, StreamEvent{
 					Type:       EventToolCallEnd,
 					ToolName:   rp.ToolName,
 					ToolCallID: rp.ToolCallID,
 					Input:      rp.Input,
 					Result:     rp.Output,
-				}
-				ch <- StreamEvent{
+				}) || !sendEvent(ctx, ch, StreamEvent{
 					Type:           EventProgress,
 					StepNumber:     stepNumber,
 					ToolName:       rp.ToolName,
 					ProgressStatus: "tool_result",
+				}) {
+					aborted = true
 				}
 			case *sdk.StreamToolErrorPart:
-				ch <- StreamEvent{
+				if !sendEvent(ctx, ch, StreamEvent{
 					Type:       EventToolCallEnd,
 					ToolName:   rp.ToolName,
 					ToolCallID: rp.ToolCallID,
 					Error:      rp.Error.Error(),
+				}) {
+					aborted = true
 				}
 			case *sdk.ErrorPart:
-				ch <- StreamEvent{Type: EventError, Error: rp.Error.Error()}
+				sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: rp.Error.Error()})
 				aborted = true
 			case *sdk.AbortPart:
 				aborted = true
