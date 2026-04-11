@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -65,6 +66,13 @@ type SpawnResult struct {
 // subagentTimeout caps total execution time for a single subagent task.
 // This prevents runaway subagent calls from blocking the parent agent forever.
 const subagentTimeout = 10 * time.Minute
+
+// maxTasksPerSpawn caps the number of tasks accepted in a single spawn call.
+const maxTasksPerSpawn = 5
+
+// maxSpawnCallsPerSession caps the total number of spawn tool calls within
+// a single agent session to prevent subagent storms.
+const maxSpawnCallsPerSession = 3
 
 // SpawnProvider exposes a "spawn" tool that runs one or more subagent tasks
 // concurrently and returns results to the parent agent.
@@ -123,23 +131,24 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 		return nil, nil
 	}
 	sess := session
+	spawnCount := new(int32)
 	return []sdk.Tool{
 		{
 			Name:        "spawn",
-			Description: "Spawn one or more subagents to work on tasks in parallel. Each task runs in its own context with file, exec, and web tools. All results are returned together.",
+			Description: fmt.Sprintf("Spawn one or more subagents to work on tasks in parallel. Each task runs in its own context with file, exec, and web tools. All results are returned together. Max %d tasks per call, max %d calls per session.", maxTasksPerSpawn, maxSpawnCallsPerSession),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"tasks": map[string]any{
 						"type":        "array",
-						"description": "List of task instructions. Each string is a self-contained prompt for one subagent.",
+						"description": fmt.Sprintf("List of task instructions. Each string is a self-contained prompt for one subagent. Max %d tasks.", maxTasksPerSpawn),
 						"items":       map[string]any{"type": "string"},
 					},
 				},
 				"required": []string{"tasks"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSpawn(ctx.Context, sess, inputAsMap(input))
+				return p.execSpawn(ctx.Context, sess, inputAsMap(input), spawnCount)
 			},
 		},
 	}, nil
@@ -153,10 +162,22 @@ type spawnResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, args map[string]any, spawnCount *int32) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
+	}
+
+	// Enforce per-session spawn call limit.
+	current := atomic.AddInt32(spawnCount, 1)
+	if current > maxSpawnCallsPerSession {
+		return map[string]any{
+			"isError": true,
+			"content": []map[string]any{{
+				"type": "text",
+				"text": fmt.Sprintf("Spawn limit reached: max %d spawn calls per session (already made %d). Consolidate your remaining work into the current agent context instead of spawning more subagents.", maxSpawnCallsPerSession, current-1),
+			}},
+		}, nil
 	}
 
 	tasksRaw, ok := args["tasks"]
@@ -169,6 +190,14 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 	}
 	if len(tasks) == 0 {
 		return nil, errors.New("at least one task is required")
+	}
+	// Cap tasks per call.
+	if len(tasks) > maxTasksPerSpawn {
+		p.logger.Warn("spawn tasks capped",
+			slog.Int("requested", len(tasks)),
+			slog.Int("max", maxTasksPerSpawn),
+		)
+		tasks = tasks[:maxTasksPerSpawn]
 	}
 
 	sdkModel, modelID, err := p.resolveModel(ctx, botID)
