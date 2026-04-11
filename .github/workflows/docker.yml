@@ -32,8 +32,51 @@ permissions:
   id-token: write
 
 jobs:
+  detect-changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      server: ${{ steps.filter.outputs.server }}
+      web: ${{ steps.filter.outputs.web }}
+      browser: ${{ steps.filter.outputs.browser }}
+      sparse: ${{ steps.filter.outputs.sparse }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # Tags, releases, and workflow_dispatch always build everything
+          predicate-quantifier: some
+          filters: |
+            server:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'cmd/**'
+              - 'internal/**'
+              - 'docker/Dockerfile.server'
+              - 'docker/server-entrypoint.sh'
+              - 'docker/toolkit/**'
+              - 'conf/providers/**'
+              - 'spec/**'
+            web:
+              - 'apps/web/**'
+              - 'packages/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'docker/Dockerfile.web'
+              - 'docker/nginx.conf'
+            browser:
+              - 'apps/browser/**'
+              - 'packages/config/**'
+              - 'docker/Dockerfile.browser'
+            sparse:
+              - 'internal/memory/sparse/service/**'
+              - 'docker/Dockerfile.sparse'
+
   build:
     name: build ${{ matrix.image }}${{ matrix.variant != '' && format(' ({0})', matrix.variant) || '' }} ${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+    needs: detect-changes
     strategy:
       fail-fast: false
       matrix:
@@ -76,34 +119,60 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Check if build is needed
+        id: should-build
+        run: |
+          FORCE="false"
+          if [[ "${{ github.ref }}" == refs/tags/* ]] || \
+             [[ "${{ github.event_name }}" == "release" ]] || \
+             [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            FORCE="true"
+          fi
+          IMAGE="${{ matrix.image }}"
+          CHANGED="false"
+          case "$IMAGE" in
+            server)  CHANGED="${{ needs.detect-changes.outputs.server }}" ;;
+            web)     CHANGED="${{ needs.detect-changes.outputs.web }}" ;;
+            browser) CHANGED="${{ needs.detect-changes.outputs.browser }}" ;;
+            sparse)  CHANGED="${{ needs.detect-changes.outputs.sparse }}" ;;
+          esac
+          if [[ "$FORCE" == "true" || "$CHANGED" == "true" ]]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping $IMAGE build — no relevant files changed"
+          fi
+
       - name: Checkout
+        if: steps.should-build.outputs.skip != 'true'
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
+        if: steps.should-build.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Set up Go
-        if: matrix.image == 'server'
+        if: steps.should-build.outputs.skip != 'true' && matrix.image == 'server'
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
           cache: true
 
       - name: Pre-warm Go mod cache
-        if: matrix.image == 'server'
+        if: steps.should-build.outputs.skip != 'true' && matrix.image == 'server'
         run: |
           mkdir -p .go-cache
           GOMODCACHE=$(pwd)/.go-cache go mod download
 
       - name: Login to Docker Hub
-        if: env.PUSH == 'true'
+        if: steps.should-build.outputs.skip != 'true' && env.PUSH == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Login to GitHub Container Registry
-        if: env.PUSH == 'true'
+        if: steps.should-build.outputs.skip != 'true' && env.PUSH == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -112,6 +181,7 @@ jobs:
 
       - name: Resolve artifact key
         id: resolve
+        if: steps.should-build.outputs.skip != 'true'
         run: |
           VARIANT="${{ matrix.variant }}"
           if [ -n "$VARIANT" ]; then
@@ -123,6 +193,7 @@ jobs:
 
       - name: Build and push by digest
         id: build
+        if: steps.should-build.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -144,14 +215,14 @@ jobs:
             ${{ env.PUSH == 'true' && format('type=registry,ref={0}/{1}/{2}:buildcache-{3}-{4},mode=max,compression=zstd', env.REGISTRY, github.repository_owner, matrix.image, steps.resolve.outputs.artifact_key, matrix.platform == 'linux/amd64' && 'amd64' || 'arm64') || '' }}
 
       - name: Export digest
-        if: env.PUSH == 'true'
+        if: steps.should-build.outputs.skip != 'true' && env.PUSH == 'true'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        if: env.PUSH == 'true'
+        if: steps.should-build.outputs.skip != 'true' && env.PUSH == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: digests__${{ steps.resolve.outputs.artifact_key }}__${{ strategy.job-index }}
@@ -163,7 +234,7 @@ jobs:
     name: publish ${{ matrix.image }}${{ matrix.variant != '' && format(' ({0})', matrix.variant) || '' }}
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release')
-    needs: build
+    needs: [detect-changes, build]
     strategy:
       matrix:
         include:
@@ -186,7 +257,32 @@ jobs:
             artifact_key: sparse
             variant: ""
     steps:
+      - name: Check if publish is needed
+        id: should-publish
+        run: |
+          FORCE="false"
+          if [[ "${{ github.ref }}" == refs/tags/* ]] || \
+             [[ "${{ github.event_name }}" == "release" ]] || \
+             [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            FORCE="true"
+          fi
+          IMAGE="${{ matrix.image }}"
+          CHANGED="false"
+          case "$IMAGE" in
+            server)  CHANGED="${{ needs.detect-changes.outputs.server }}" ;;
+            web)     CHANGED="${{ needs.detect-changes.outputs.web }}" ;;
+            browser) CHANGED="${{ needs.detect-changes.outputs.browser }}" ;;
+            sparse)  CHANGED="${{ needs.detect-changes.outputs.sparse }}" ;;
+          esac
+          if [[ "$FORCE" == "true" || "$CHANGED" == "true" ]]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping $IMAGE publish — no relevant files changed"
+          fi
+
       - name: Download digests
+        if: steps.should-publish.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
@@ -194,15 +290,18 @@ jobs:
           merge-multiple: true
 
       - name: Set up Docker Buildx
+        if: steps.should-publish.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
+        if: steps.should-publish.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Login to GitHub Container Registry
+        if: steps.should-publish.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -210,6 +309,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Resolve publish config
+        if: steps.should-publish.outputs.skip != 'true'
         id: publish
         run: |
           IMAGE="memohai/${{ matrix.image }}"
@@ -260,6 +360,7 @@ jobs:
           echo "tag_args=${TAG_ARGS# }" >> "$GITHUB_OUTPUT"
 
       - name: Create manifest list and push
+        if: steps.should-publish.outputs.skip != 'true'
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \

@@ -39,7 +39,8 @@
     "no": "No",
     "details": "Details",
     "pin": "Pin",
-    "unpin": "Unpin"
+    "unpin": "Unpin",
+    "searchTimezone": "Search timezone"
   },
   "auth": {
     "welcome": "Welcome Back",

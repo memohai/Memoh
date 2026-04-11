@@ -212,6 +212,18 @@
       />
     </div>
 
+    <!-- Timezone -->
+    <div class="space-y-2">
+      <Label>{{ $t('bots.timezone') }}</Label>
+      <TimezoneSelect
+        :model-value="form.timezone || emptyTimezoneValue"
+        :placeholder="$t('bots.timezonePlaceholder')"
+        allow-empty
+        :empty-label="$t('bots.timezoneInherited')"
+        @update:model-value="(val: string) => form.timezone = val === emptyTimezoneValue ? '' : val"
+      />
+    </div>
+
     <Separator />
 
     <!-- Language -->
@@ -275,10 +287,10 @@
     <!-- Save -->
     <div class="flex justify-end">
       <Button
-        :disabled="!hasChanges || isLoading"
+        :disabled="!hasChanges || saveLoading"
         @click="handleSave"
       >
-        <Spinner v-if="isLoading" />
+        <Spinner v-if="saveLoading" />
         {{ $t('bots.settings.save') }}
       </Button>
     </div>
@@ -335,6 +347,7 @@ import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import TimezoneSelect from '@/components/timezone-select/index.vue'
 import ModelSelect from './model-select.vue'
 import ReasoningEffortSelect from './reasoning-effort-select.vue'
 import { EFFORT_LABELS, EFFORT_OPACITY } from './reasoning-effort'
@@ -343,11 +356,11 @@ import MemoryProviderSelect from './memory-provider-select.vue'
 import TtsModelSelect from './tts-model-select.vue'
 import BrowserContextSelect from './browser-context-select.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getBrowserContexts, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
+import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getBrowserContexts, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import TimezoneSelect from '@/components/timezone-select/index.vue'
+import { useUserStore } from '@/store/user'
 import { emptyTimezoneValue } from '@/utils/timezones'
 
 const props = defineProps<{
@@ -356,6 +369,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const router = useRouter()
+const userStore = useUserStore()
 
 const botIdRef = computed(() => props.botId) as Ref<string>
 
@@ -366,6 +380,15 @@ const { data: settings } = useQuery({
   key: () => ['bot-settings', botIdRef.value],
   query: async () => {
     const { data } = await getBotsByBotIdSettings({ path: { bot_id: botIdRef.value }, throwOnError: true })
+    return data
+  },
+  enabled: () => !!botIdRef.value,
+})
+
+const { data: bot } = useQuery({
+  key: () => ['bot', botIdRef.value],
+  query: async () => {
+    const { data } = await getBotsById({ path: { id: botIdRef.value }, throwOnError: true })
     return data
   },
   enabled: () => !!botIdRef.value,
@@ -439,6 +462,21 @@ const { mutateAsync: updateSettings, isLoading } = useMutation({
   onSettled: () => queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] }),
 })
 
+const { mutateAsync: updateBot, isLoading: isUpdatingBot } = useMutation({
+  mutation: async (timezone: string) => {
+    const { data } = await putBotsById({
+      path: { id: botIdRef.value },
+      body: { timezone },
+      throwOnError: true,
+    })
+    return data
+  },
+  onSettled: () => {
+    queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
+    queryCache.invalidateQueries({ key: ['bots'] })
+  },
+})
+
 const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
     await deleteBotsById({ path: { id: botIdRef.value }, throwOnError: true })
@@ -470,8 +508,8 @@ const form = reactive({
   memory_provider_id: '',
   tts_model_id: '',
   browser_context_id: '',
-  language: '',
   timezone: '',
+  language: '',
   reasoning_enabled: false,
   reasoning_effort: 'medium',
 })
@@ -616,10 +654,14 @@ watch(settings, (val) => {
   }
 }, { immediate: true })
 
-const hasChanges = computed(() => {
+watch(bot, (val) => {
+  form.timezone = val?.timezone ?? ''
+}, { immediate: true })
+
+const hasSettingsChanges = computed(() => {
   if (!settings.value) return true
   const s = settings.value
-  let changed =
+  return (
     form.chat_model_id !== (s.chat_model_id ?? '')
     || form.title_model_id !== (s.title_model_id ?? '')
     || form.image_model_id !== (s.image_model_id ?? '')
@@ -631,15 +673,25 @@ const hasChanges = computed(() => {
     || form.timezone !== (s.timezone ?? '')
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')
-  return changed
+  )
 })
+
+const hasTimezoneChanges = computed(() => form.timezone !== (bot.value?.timezone ?? ''))
+const hasChanges = computed(() => hasSettingsChanges.value || hasTimezoneChanges.value)
+const saveLoading = computed(() => isLoading.value || isUpdatingBot.value)
 
 async function handleSave() {
   try {
-    await updateSettings({ ...form })
+    if (hasSettingsChanges.value) {
+      const { timezone: _timezone, ...settingsPayload } = form
+      await updateSettings(settingsPayload)
+    }
+    if (hasTimezoneChanges.value) {
+      await updateBot(form.timezone)
+    }
     toast.success(t('bots.settings.saveSuccess'))
-  } catch {
-    return
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   }
 }
 
