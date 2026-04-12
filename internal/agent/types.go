@@ -6,6 +6,8 @@ import (
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/agent/background"
 )
 
 // SessionContext carries request-scoped identity and routing information.
@@ -93,6 +95,12 @@ type RunConfig struct {
 	// output messages that preceded the injection. Used by the resolver
 	// to interleave injected messages at the correct position in storeRound.
 	InjectedRecorder func(headerifiedText string, insertAfter int)
+
+	// BackgroundManager provides access to the background task system.
+	// When non-nil, the agent loop drains pending notifications at step
+	// boundaries and injects them as user messages so the model learns
+	// about completed background work.
+	BackgroundManager *background.Manager
 }
 
 // GenerateResult holds the result of a non-streaming agent invocation.

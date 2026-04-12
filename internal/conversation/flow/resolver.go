@@ -21,6 +21,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/sqlc"
@@ -71,12 +72,18 @@ type Resolver struct {
 	settingsService   *settings.Service
 	accountService    *accounts.Service
 	sessionService    SessionService
+	routeService      RouteService
 	compactionService *compaction.Service
 	eventPublisher    messageevent.Publisher
 	skillLoader       SkillLoader
 	assetLoader       gatewayAssetLoader
 	pipeline          *pipelinepkg.Pipeline
 	streamHTTPClient  *http.Client
+	bgManager         *background.Manager
+	outboundFn        func(ctx context.Context, botID, channelType, target, text string) error
+	bgNotifDeferred   sync.Map // key: "botID:sessionID" → wake arrived while a session turn was active
+	sessionTurnMu     sync.Mutex
+	sessionTurnRefs   map[string]int // key: "botID:sessionID" → active turn refcount
 	timeout           time.Duration
 	clockLocation     *time.Location
 	logger            *slog.Logger
@@ -129,6 +136,7 @@ func NewResolver(
 		settingsService:  settingsService,
 		accountService:   accountService,
 		streamHTTPClient: streamHTTPClient,
+		sessionTurnRefs:  make(map[string]int),
 		timeout:          timeout,
 		clockLocation:    clockLocation,
 		logger:           log.With(slog.String("service", "conversation_resolver")),
@@ -154,6 +162,19 @@ func (r *Resolver) SetGatewayAssetLoader(loader gatewayAssetLoader) {
 // SetCompactionService configures the compaction service for context compaction.
 func (r *Resolver) SetCompactionService(s *compaction.Service) {
 	r.compactionService = s
+}
+
+// SetBackgroundManager configures the background task manager so that
+// background exec notifications are injected into the agent loop.
+func (r *Resolver) SetBackgroundManager(m *background.Manager) {
+	r.bgManager = m
+}
+
+// SetOutboundFn configures the function used to deliver background notification
+// responses to the user. The agent's text output is delivered through the same
+// path as normal responses.
+func (r *Resolver) SetOutboundFn(fn func(ctx context.Context, botID, channelType, target, text string) error) {
+	r.outboundFn = fn
 }
 
 // SetPipeline configures the DCP pipeline for RC-based context assembly.
@@ -412,6 +433,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 
 // Chat sends a synchronous chat request and stores the result.
 func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conversation.ChatResponse, error) {
+	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
+	defer doneTurn()
+
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
 		return conversation.ChatResponse{}, err
@@ -549,8 +573,9 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 			TimezoneLocation:  userClockLocation,
 			SessionToken:      p.SessionToken,
 		},
-		Skills:        agentSkills,
-		LoopDetection: agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
+		Skills:            agentSkills,
+		LoopDetection:     agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
+		BackgroundManager: r.bgManager,
 	}
 
 	return cfg, chatModel, provider, nil

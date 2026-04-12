@@ -23,8 +23,10 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 	go func() {
 		defer close(chunkCh)
 		defer close(errCh)
-
 		streamReq := req
+		doneTurn := r.enterSessionTurn(ctx, streamReq.BotID, streamReq.SessionID)
+		defer doneTurn()
+
 		rc, err := r.resolve(ctx, streamReq)
 		if err != nil {
 			r.logger.Error("agent stream resolve failed",
@@ -126,6 +128,9 @@ func (r *Resolver) StreamChatWS(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) error {
+	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
+	defer doneTurn()
+
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
 		r.logger.Error("StreamChatWS: resolve failed",

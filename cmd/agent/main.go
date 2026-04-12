@@ -24,6 +24,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/agent/background"
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
 	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/boot"
@@ -230,6 +231,7 @@ func runServe() {
 			provideContainerdHandler,
 			provideFederationGateway,
 			provideToolGatewayService,
+			provideBackgroundManager,
 			provideToolProviders,
 
 			// http handlers (group:"server_handlers")
@@ -280,9 +282,11 @@ func runServe() {
 
 			startScheduleService,
 			startHeartbeatService,
+			wireResolverOutbound,
 			startChannelManager,
 			startEmailManager,
 			startContainerReconciliation,
+			startBackgroundTaskCleanup,
 			startTtsTempStoreCleanup,
 			startServer,
 		),
@@ -486,15 +490,20 @@ func injectToolProviders(a *agentpkg.Agent, msgService *message.DBService, provi
 	}
 }
 
-func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig) *flow.Resolver {
+func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries *dbsqlc.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, routeService *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
+	resolver.SetRouteService(routeService)
 	resolver.SetSessionService(sessionService)
 	resolver.SetEventPublisher(eventHub)
 	resolver.SetCompactionService(compactionService)
 	resolver.SetPipeline(pipeline)
+	resolver.SetBackgroundManager(bgManager)
+	bgManager.SetWakeFunc(func(botID, sessionID string) {
+		resolver.TriggerBackgroundNotification(context.Background(), botID, sessionID)
+	})
 	return resolver
 }
 
@@ -669,7 +678,11 @@ func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederat
 	return svc
 }
 
-func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service, sessionService *sessionpkg.Service) []agenttools.ToolProvider {
+func provideBackgroundManager(log *slog.Logger) *background.Manager {
+	return background.New(log)
+}
+
+func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service, sessionService *sessionpkg.Service, bgManager *background.Manager) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -681,7 +694,7 @@ func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *c
 		agenttools.NewScheduleProvider(log, scheduleService),
 		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
-		agenttools.NewContainerProvider(log, manager, config.DefaultDataMount),
+		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailManager),
 		agenttools.NewWebFetchProvider(log),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService),
@@ -762,6 +775,20 @@ func startTtsTempStoreCleanup(lc fx.Lifecycle, store *ttspkg.TempStore) {
 	lc.Append(fx.Hook{
 		OnStart: func(_ context.Context) error {
 			go store.StartCleanup(done)
+			return nil
+		},
+		OnStop: func(_ context.Context) error {
+			close(done)
+			return nil
+		},
+	})
+}
+
+func startBackgroundTaskCleanup(lc fx.Lifecycle, mgr *background.Manager) {
+	done := make(chan struct{})
+	lc.Append(fx.Hook{
+		OnStart: func(_ context.Context) error {
+			go mgr.StartCleanupLoop(done, background.DefaultCleanupInterval, background.DefaultTaskRetention)
 			return nil
 		},
 		OnStop: func(_ context.Context) error {
@@ -955,6 +982,15 @@ func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service)
 		OnStart: func(ctx context.Context) error {
 			return heartbeatService.Bootstrap(ctx)
 		},
+	})
+}
+
+func wireResolverOutbound(resolver *flow.Resolver, channelManager *channel.Manager) {
+	resolver.SetOutboundFn(func(ctx context.Context, botID, channelType, target, text string) error {
+		return channelManager.Send(ctx, botID, channel.ChannelType(channelType), channel.SendRequest{
+			Target:  target,
+			Message: channel.Message{Text: text},
+		})
 	})
 }
 

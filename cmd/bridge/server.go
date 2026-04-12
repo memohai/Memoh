@@ -369,10 +369,14 @@ func execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) err
 		timeout = defaultTimeout
 	}
 
-	ctx, cancel := context.WithTimeout(stream.Context(), time.Duration(timeout)*time.Second)
-	defer cancel()
+	// Process context is independent of the gRPC stream so the process keeps
+	// running even if the stream is cancelled (e.g. background tasks whose client
+	// disconnects or whose stream context dies after the process completes).
+	// Only the process-level timeout kills the process, not stream death.
+	procCtx, procCancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer procCancel()
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command) //nolint:gosec // G204: MCP exec tool intentionally executes agent-issued shell commands inside the container
+	cmd := exec.CommandContext(procCtx, "/bin/sh", "-c", command) //nolint:gosec // G204: MCP exec tool intentionally executes agent-issued shell commands inside the container
 	cmd.Dir = workDir
 	if len(firstMsg.GetEnv()) > 0 {
 		cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)
@@ -396,13 +400,15 @@ func execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) err
 		return status.Errorf(codes.Internal, "start: %v", err)
 	}
 
-	// When the context deadline fires, exec.CommandContext sends SIGKILL to the
-	// main process.  However, child processes may still hold the stdout/stderr
-	// pipe file descriptors open, causing streamPipe's Read to block forever.
-	// Closing the pipes here unblocks those reads so the function can proceed
-	// to cmd.Wait and send the EXIT message back to the client.
+	// Close pipes when EITHER the process finishes (procCtx done) OR the gRPC
+	// stream dies (stream.Context done). Closing unblocks streamPipe's Read so
+	// the goroutines can exit. We do NOT cancel procCtx on stream death — the
+	// process keeps running so background tasks survive client disconnects.
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-procCtx.Done():
+		case <-stream.Context().Done():
+		}
 		_ = stdoutPipe.Close()
 		_ = stderrPipe.Close()
 	}()
@@ -439,10 +445,15 @@ func execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) err
 		}
 	}
 
-	return stream.Send(&pb.ExecOutput{
+	// Send exit code to the client. If the stream is already gone (e.g. the
+	// client is a background task manager that got a stream error when the
+	// process completed), the send will fail but we return nil so the gRPC
+	// handler does not propagate a spurious "context canceled" error status.
+	_ = stream.Send(&pb.ExecOutput{
 		Stream:   pb.ExecOutput_EXIT,
 		ExitCode: exitCode,
 	})
+	return nil
 }
 
 func (*containerServer) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_ReadRawServer) error {

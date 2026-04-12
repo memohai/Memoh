@@ -260,7 +260,7 @@ func TestAgentGenerateReadMediaInjectsImageIntoNextStep(t *testing.T) {
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		agenttools.NewContainerProvider(nil, bp, "/data"),
+		agenttools.NewContainerProvider(nil, bp, nil, "/data"),
 	})
 
 	result, err := a.Generate(context.Background(), RunConfig{
@@ -340,7 +340,7 @@ func TestAgentGenerateReadMediaInjectsAnthropicSafeImageIntoNextStep(t *testing.
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		agenttools.NewContainerProvider(nil, bp, "/data"),
+		agenttools.NewContainerProvider(nil, bp, nil, "/data"),
 	})
 
 	_, err := a.Generate(context.Background(), RunConfig{
@@ -390,7 +390,7 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		agenttools.NewContainerProvider(nil, bp, "/data"),
+		agenttools.NewContainerProvider(nil, bp, nil, "/data"),
 	})
 
 	var terminal StreamEvent
