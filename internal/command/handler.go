@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/browsercontexts"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
@@ -56,11 +56,26 @@ type Handler struct {
 	emailService       *emailpkg.Service
 	emailOutboxService *emailpkg.OutboxService
 	heartbeatService   *heartbeat.Service
-	queries            *dbsqlc.Queries
+	queries            CommandQueries
+	aclEvaluator       AccessEvaluator
 	skillLoader        SkillLoader
 	containerFS        ContainerFS
 
 	logger *slog.Logger
+}
+
+// ExecuteInput carries the caller identity and channel context for command execution.
+type ExecuteInput struct {
+	BotID             string
+	ChannelIdentityID string
+	UserID            string
+	Text              string
+	ChannelType       string
+	ConversationType  string
+	ConversationID    string
+	ThreadID          string
+	RouteID           string
+	SessionID         string
 }
 
 // NewHandler creates a Handler with all required services.
@@ -78,7 +93,8 @@ func NewHandler(
 	emailService *emailpkg.Service,
 	emailOutboxService *emailpkg.OutboxService,
 	heartbeatService *heartbeat.Service,
-	queries *dbsqlc.Queries,
+	queries CommandQueries,
+	aclEvaluator AccessEvaluator,
 	skillLoader SkillLoader,
 	containerFS ContainerFS,
 ) *Handler {
@@ -99,6 +115,7 @@ func NewHandler(
 		emailOutboxService: emailOutboxService,
 		heartbeatService:   heartbeatService,
 		queries:            queries,
+		aclEvaluator:       aclEvaluator,
 		skillLoader:        skillLoader,
 		containerFS:        containerFS,
 		logger:             log.With(slog.String("component", "command")),
@@ -140,7 +157,16 @@ func (h *Handler) IsCommand(text string) bool {
 
 // Execute parses and runs a slash command, returning the text reply.
 func (h *Handler) Execute(ctx context.Context, botID, channelIdentityID, text string) (string, error) {
-	cmdText := ExtractCommandText(text)
+	return h.ExecuteWithInput(ctx, ExecuteInput{
+		BotID:             botID,
+		ChannelIdentityID: channelIdentityID,
+		Text:              text,
+	})
+}
+
+// ExecuteWithInput parses and runs a slash command with channel/session context.
+func (h *Handler) ExecuteWithInput(ctx context.Context, input ExecuteInput) (string, error) {
+	cmdText := ExtractCommandText(input.Text)
 	if cmdText == "" {
 		return h.registry.GlobalHelp(), nil
 	}
@@ -151,12 +177,16 @@ func (h *Handler) Execute(ctx context.Context, botID, channelIdentityID, text st
 
 	// Resolve the user's role in this bot.
 	role := ""
-	if h.roleResolver != nil && channelIdentityID != "" {
-		r, err := h.roleResolver.GetMemberRole(ctx, botID, channelIdentityID)
+	roleIdentityID := input.ChannelIdentityID
+	if strings.TrimSpace(input.UserID) != "" {
+		roleIdentityID = strings.TrimSpace(input.UserID)
+	}
+	if h.roleResolver != nil && roleIdentityID != "" {
+		r, err := h.roleResolver.GetMemberRole(ctx, input.BotID, roleIdentityID)
 		if err != nil {
 			h.logger.Warn("failed to resolve member role",
-				slog.String("bot_id", botID),
-				slog.String("channel_identity_id", channelIdentityID),
+				slog.String("bot_id", input.BotID),
+				slog.String("role_identity_id", roleIdentityID),
 				slog.Any("error", err),
 			)
 		} else {
@@ -165,15 +195,29 @@ func (h *Handler) Execute(ctx context.Context, botID, channelIdentityID, text st
 	}
 
 	cc := CommandContext{
-		Ctx:   ctx,
-		BotID: botID,
-		Role:  role,
-		Args:  parsed.Args,
+		Ctx:               ctx,
+		BotID:             input.BotID,
+		Role:              role,
+		Args:              parsed.Args,
+		ChannelIdentityID: strings.TrimSpace(input.ChannelIdentityID),
+		UserID:            strings.TrimSpace(input.UserID),
+		ChannelType:       strings.TrimSpace(input.ChannelType),
+		ConversationType:  strings.TrimSpace(input.ConversationType),
+		ConversationID:    strings.TrimSpace(input.ConversationID),
+		ThreadID:          strings.TrimSpace(input.ThreadID),
+		RouteID:           strings.TrimSpace(input.RouteID),
+		SessionID:         strings.TrimSpace(input.SessionID),
 	}
 
 	// /help
 	if parsed.Resource == "help" {
-		return h.registry.GlobalHelp(), nil
+		if parsed.Action == "" {
+			return h.registry.GlobalHelp(), nil
+		}
+		if len(parsed.Args) == 0 {
+			return h.registry.GroupHelp(parsed.Action), nil
+		}
+		return h.registry.ActionHelp(parsed.Action, parsed.Args[0]), nil
 	}
 
 	// Top-level commands (e.g. /new) are handled by the channel inbound

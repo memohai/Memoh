@@ -6,19 +6,10 @@ import (
 	"unicode/utf8"
 )
 
+const defaultListLimit = 12
+
 // formatItems renders a list of records as a Markdown-style list.
-// Each record is a slice of kv pairs; the first pair's value is used as the
-// bullet title, and subsequent pairs are indented beneath it.
-//
-// Example output:
-//
-//   - mybot
-//     Description: A helpful assistant
-//     ID: abc123
-//
-//   - another
-//     Description: Something else
-//     ID: def456
+// Each record is rendered on a single line so long lists stay readable in IM.
 func formatItems(items [][]kv) string {
 	if len(items) == 0 {
 		return ""
@@ -31,12 +22,39 @@ func formatItems(items [][]kv) string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		fmt.Fprintf(&b, "- %s\n", record[0].value)
+		fmt.Fprintf(&b, "- %s", record[0].value)
+		extras := make([]string, 0, len(record)-1)
 		for _, pair := range record[1:] {
-			fmt.Fprintf(&b, "  %s: %s\n", pair.key, pair.value)
+			if strings.TrimSpace(pair.value) == "" {
+				continue
+			}
+			extras = append(extras, fmt.Sprintf("%s: %s", pair.key, pair.value))
+		}
+		if len(extras) > 0 {
+			fmt.Fprintf(&b, " | %s", strings.Join(extras, " | "))
 		}
 	}
 	return b.String()
+}
+
+func formatLimitedItems(items [][]kv, limit int, hint string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+	total := len(items)
+	if total <= limit {
+		return formatItems(items)
+	}
+	shown := items[:limit]
+	result := formatItems(shown)
+	suffix := fmt.Sprintf("Showing %d of %d items.", len(shown), total)
+	if strings.TrimSpace(hint) != "" {
+		suffix += " " + strings.TrimSpace(hint)
+	}
+	return result + "\n\n" + suffix
 }
 
 // formatKV renders key-value pairs as a simple Markdown list.

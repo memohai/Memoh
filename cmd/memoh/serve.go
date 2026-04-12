@@ -492,6 +492,7 @@ func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *loc
 		emailOutboxService,
 		heartbeatService,
 		queries,
+		aclService,
 		&commandSkillLoaderAdapter{handler: containerdHandler},
 		&commandContainerFSAdapter{manager: manager},
 	))
@@ -871,6 +872,14 @@ type sessionEnsurerAdapter struct {
 
 func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (inbound.SessionResult, error) {
 	sess, err := a.svc.EnsureActiveSession(ctx, botID, routeID, channelType)
+	if err != nil {
+		return inbound.SessionResult{}, err
+	}
+	return inbound.SessionResult{ID: sess.ID, Type: sess.Type}, nil
+}
+
+func (a *sessionEnsurerAdapter) GetActiveSession(ctx context.Context, routeID string) (inbound.SessionResult, error) {
+	sess, err := a.svc.GetActiveForRoute(ctx, routeID)
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}

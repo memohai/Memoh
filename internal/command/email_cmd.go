@@ -24,7 +24,7 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 					{"Provider", item.Provider},
 				})
 			}
-			return formatItems(records), nil
+			return formatLimitedItems(records, defaultListLimit, "Use /email bindings to inspect bot bindings."), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -46,7 +46,7 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 					{"Permissions", perms},
 				})
 			}
-			return formatItems(records), nil
+			return formatLimitedItems(records, defaultListLimit, "Use /email outbox to inspect recent sends."), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -70,7 +70,7 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 					{"Sent", item.SentAt.Format("01-02 15:04")},
 				})
 			}
-			return formatItems(records), nil
+			return formatLimitedItems(records, 10, "Use the Web UI for older outbox entries."), nil
 		},
 	})
 	return g
