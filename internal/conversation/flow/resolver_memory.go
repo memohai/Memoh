@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/db"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 )
 
@@ -77,9 +78,31 @@ func (r *Resolver) storeMemory(ctx context.Context, req conversation.ChatRequest
 		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 		DisplayName:       r.resolveDisplayName(ctx, req),
 		TimezoneLocation:  tzLoc,
+		ConversationType:  strings.TrimSpace(req.ConversationType),
+		ConversationName:  strings.TrimSpace(req.ConversationName),
+		Platform:          strings.TrimSpace(req.CurrentChannel),
+		BotName:           r.resolveBotDisplayName(ctx, botID),
 	}); err != nil {
 		r.logger.Warn("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
 	}
+}
+
+func (r *Resolver) resolveBotDisplayName(ctx context.Context, botID string) string {
+	if r.queries == nil {
+		return ""
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return ""
+	}
+	row, err := r.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		return ""
+	}
+	if row.DisplayName.Valid {
+		return strings.TrimSpace(row.DisplayName.String)
+	}
+	return ""
 }
 
 func toProviderMessages(messages []conversation.ModelMessage) []memprovider.Message {

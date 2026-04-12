@@ -3,8 +3,11 @@ package nowledgemem
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"unicode"
 
 	"github.com/memohai/memoh/internal/mcp"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
@@ -23,8 +26,9 @@ const (
 
 // NowledgeMemProvider implements adapters.Provider by delegating to a local Nowledge Mem instance.
 type NowledgeMemProvider struct {
-	client *nmemClient
-	logger *slog.Logger
+	client   *nmemClient
+	logger   *slog.Logger
+	spaceIDs sync.Map // botID → spaceID cache
 }
 
 func NewNowledgeMemProvider(log *slog.Logger, config map[string]any) (*NowledgeMemProvider, error) {
@@ -50,7 +54,12 @@ func (p *NowledgeMemProvider) OnBeforeChat(ctx context.Context, req adapters.Bef
 	if query == "" {
 		return nil, nil
 	}
-	results, err := p.client.searchMemories(ctx, query, nmemContextMaxItems)
+	spaceID, err := p.resolveSpaceID(ctx, req.BotID)
+	if err != nil {
+		p.logger.Warn("nowledgemem resolve space failed", slog.Any("error", err))
+		return nil, nil
+	}
+	results, err := p.client.searchMemories(ctx, query, nmemContextMaxItems, spaceID)
 	if err != nil {
 		p.logger.Warn("nowledgemem search for context failed", slog.Any("error", err))
 		return nil, nil
@@ -91,11 +100,16 @@ func (p *NowledgeMemProvider) OnAfterChat(ctx context.Context, req adapters.Afte
 	if len(req.Messages) == 0 {
 		return nil
 	}
-	content := formatConversation(req.Messages, req.DisplayName)
+	content := formatConversation(req.Messages, req.DisplayName, req.BotName, req.Platform, req.ConversationType, req.ConversationName)
 	if content == "" {
 		return nil
 	}
-	if _, err := p.client.addMemory(ctx, content, nmemSource); err != nil {
+	spaceID, err := p.resolveSpaceID(ctx, req.BotID)
+	if err != nil {
+		p.logger.Warn("nowledgemem resolve space failed", slog.Any("error", err))
+		return nil
+	}
+	if _, err := p.client.addMemory(ctx, content, nmemSource, spaceID); err != nil {
 		p.logger.Warn("nowledgemem store memory failed", slog.Any("error", err))
 	}
 	return nil
@@ -126,7 +140,7 @@ func (*NowledgeMemProvider) ListTools(_ context.Context, _ mcp.ToolSessionContex
 	}, nil
 }
 
-func (p *NowledgeMemProvider) CallTool(ctx context.Context, _ mcp.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
+func (p *NowledgeMemProvider) CallTool(ctx context.Context, session mcp.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
 	if toolName != nmemToolSearchMemory {
 		return nil, mcp.ErrToolNotFound
 	}
@@ -147,7 +161,12 @@ func (p *NowledgeMemProvider) CallTool(ctx context.Context, _ mcp.ToolSessionCon
 		limit = nmemMaxLimit
 	}
 
-	results, err := p.client.searchMemories(ctx, query, limit)
+	spaceID, err := p.resolveSpaceID(ctx, session.BotID)
+	if err != nil {
+		return mcp.BuildToolErrorResult(fmt.Sprintf("resolve space failed: %v", err)), nil
+	}
+
+	results, err := p.client.searchMemories(ctx, query, limit, spaceID)
 	if err != nil {
 		return mcp.BuildToolErrorResult("memory search failed"), nil
 	}
@@ -171,12 +190,16 @@ func (p *NowledgeMemProvider) CallTool(ctx context.Context, _ mcp.ToolSessionCon
 func (p *NowledgeMemProvider) Add(ctx context.Context, req adapters.AddRequest) (adapters.SearchResponse, error) {
 	text := strings.TrimSpace(req.Message)
 	if text == "" && len(req.Messages) > 0 {
-		text = formatConversation(req.Messages, "")
+		text = formatConversation(req.Messages, "", "", "", "", "")
 	}
 	if text == "" {
 		return adapters.SearchResponse{}, errors.New("message is required")
 	}
-	mem, err := p.client.addMemory(ctx, text, nmemSource)
+	spaceID, err := p.resolveSpaceID(ctx, req.BotID)
+	if err != nil {
+		return adapters.SearchResponse{}, fmt.Errorf("resolve space: %w", err)
+	}
+	mem, err := p.client.addMemory(ctx, text, nmemSource, spaceID)
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
@@ -190,7 +213,11 @@ func (p *NowledgeMemProvider) Search(ctx context.Context, req adapters.SearchReq
 	} else if limit > nmemMaxLimit {
 		limit = nmemMaxLimit
 	}
-	results, err := p.client.searchMemories(ctx, req.Query, limit)
+	spaceID, err := p.resolveSpaceID(ctx, req.BotID)
+	if err != nil {
+		return adapters.SearchResponse{}, fmt.Errorf("resolve space: %w", err)
+	}
+	results, err := p.client.searchMemories(ctx, req.Query, limit, spaceID)
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
@@ -251,11 +278,40 @@ func (*NowledgeMemProvider) Usage(_ context.Context, _ map[string]any) (adapters
 
 // --- Helpers ---
 
+const nmemSpacePrefix = "memoh:"
+
+// resolveSpaceID returns the Nowledge Mem space ID for a given bot.
+// It caches the mapping in a sync.Map to avoid repeated API calls.
+func (p *NowledgeMemProvider) resolveSpaceID(ctx context.Context, botID string) (string, error) {
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return "", errors.New("botID is required for space resolution")
+	}
+	if cached, ok := p.spaceIDs.Load(botID); ok {
+		return cached.(string), nil
+	}
+	spaceName := nmemSpacePrefix + botID
+	spaceID, err := p.client.ensureSpace(ctx, spaceName)
+	if err != nil {
+		return "", fmt.Errorf("ensure space %q: %w", spaceName, err)
+	}
+	p.spaceIDs.Store(botID, spaceID)
+	return spaceID, nil
+}
+
 // formatConversation formats a round of messages into attributed text for storage.
 // User messages are tagged with the sender's display name parsed from the YAML
-// front-matter header; bot messages are tagged with [我].
-func formatConversation(messages []adapters.Message, fallbackDisplayName string) string {
+// front-matter header; bot messages are tagged with [botName].
+// A header line annotates platform and conversation context.
+func formatConversation(messages []adapters.Message, fallbackDisplayName, botName, platform, convType, convName string) string {
 	var sb strings.Builder
+
+	// Header annotation: (Platform convType「convName」)
+	header := buildContextHeader(platform, convType, convName)
+	if header != "" {
+		sb.WriteString(header)
+	}
+
 	for _, msg := range messages {
 		text := strings.TrimSpace(msg.Content)
 		if text == "" {
@@ -288,11 +344,59 @@ func formatConversation(messages []adapters.Message, fallbackDisplayName string)
 			if sb.Len() > 0 {
 				sb.WriteByte('\n')
 			}
-			sb.WriteString("[我] ")
+			sb.WriteString("[")
+			sb.WriteString(botName)
+			sb.WriteString("] ")
 			sb.WriteString(text)
 		}
 	}
 	return sb.String()
+}
+
+// buildContextHeader produces the platform/conversation annotation line.
+// Format: (Platform convType「convName」)
+func buildContextHeader(platform, convType, convName string) string {
+	platform = strings.TrimSpace(platform)
+	convType = strings.TrimSpace(convType)
+	convName = strings.TrimSpace(convName)
+
+	platformDisplay := capitalizeFirst(platform)
+	convTypeDisplay := mapConversationType(convType)
+
+	var sb strings.Builder
+	sb.WriteString("(")
+	sb.WriteString(platformDisplay)
+	sb.WriteString(" ")
+	sb.WriteString(convTypeDisplay)
+	if convName != "" {
+		sb.WriteString("「")
+		sb.WriteString(convName)
+		sb.WriteString("」")
+	}
+	sb.WriteString(")")
+	return sb.String()
+}
+
+func mapConversationType(t string) string {
+	switch t {
+	case "group":
+		return "群组"
+	case "private":
+		return "私聊"
+	case "thread":
+		return "话题"
+	default:
+		return t
+	}
+}
+
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }
 
 // parseDisplayNameFromYAML extracts the display-name field from a YAML

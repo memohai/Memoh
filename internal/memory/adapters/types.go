@@ -25,6 +25,10 @@ type AfterChatRequest struct {
 	ChannelIdentityID string
 	DisplayName       string
 	TimezoneLocation  *time.Location
+	ConversationType  string // "private", "group", "thread"
+	ConversationName  string // group name (set for group/thread conversations)
+	Platform          string // "telegram", "feishu", "discord", etc.
+	BotName           string // bot's display name
 }
 
 // LLM is the interface for LLM operations needed by memory service.

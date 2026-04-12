@@ -42,6 +42,7 @@ func newNmemClient(config map[string]any) (*nmemClient, error) {
 type nmemMemoryCreateRequest struct {
 	Content string `json:"content"`
 	Source  string `json:"source,omitempty"`
+	SpaceID string `json:"space_id,omitempty"`
 }
 
 type nmemMemoryUpdateRequest struct {
@@ -52,6 +53,7 @@ type nmemSearchRequest struct {
 	Query           string `json:"query"`
 	Limit           int    `json:"limit,omitempty"`
 	IncludeEntities bool   `json:"include_entities,omitempty"`
+	SpaceID         string `json:"space_id,omitempty"`
 }
 
 type nmemMemory struct {
@@ -80,25 +82,43 @@ type nmemDeleteResponse struct {
 	DeletedEntities      int    `json:"deleted_entities,omitempty"`
 }
 
+// --- Space types ---
+
+type nmemSpaceCreateRequest struct {
+	Name string `json:"name"`
+}
+
+type nmemSpace struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type nmemSpacesResponse struct {
+	Enabled bool        `json:"enabled"`
+	Spaces  []nmemSpace `json:"spaces"`
+}
+
 // --- Client methods ---
 
-func (c *nmemClient) addMemory(ctx context.Context, content, source string) (*nmemMemory, error) {
+func (c *nmemClient) addMemory(ctx context.Context, content, source, spaceID string) (*nmemMemory, error) {
 	var result nmemMemory
 	if err := c.doJSON(ctx, http.MethodPost, "/memories", nmemMemoryCreateRequest{
 		Content: content,
 		Source:  source,
+		SpaceID: spaceID,
 	}, &result); err != nil {
 		return nil, fmt.Errorf("nowledgemem add: %w", err)
 	}
 	return &result, nil
 }
 
-func (c *nmemClient) searchMemories(ctx context.Context, query string, limit int) ([]nmemSearchResult, error) {
+func (c *nmemClient) searchMemories(ctx context.Context, query string, limit int, spaceID string) ([]nmemSearchResult, error) {
 	var result nmemSearchResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/memories/search", nmemSearchRequest{
 		Query:           query,
 		Limit:           limit,
 		IncludeEntities: true,
+		SpaceID:         spaceID,
 	}, &result); err != nil {
 		return nil, fmt.Errorf("nowledgemem search: %w", err)
 	}
@@ -121,6 +141,51 @@ func (c *nmemClient) deleteMemory(ctx context.Context, id string) error {
 		return fmt.Errorf("nowledgemem delete: %w", err)
 	}
 	return nil
+}
+
+func (c *nmemClient) listSpaces(ctx context.Context) ([]nmemSpace, error) {
+	var result nmemSpacesResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/spaces", nil, &result); err != nil {
+		return nil, fmt.Errorf("nowledgemem list spaces: %w", err)
+	}
+	return result.Spaces, nil
+}
+
+func (c *nmemClient) createSpace(ctx context.Context, name string) (*nmemSpace, error) {
+	var result nmemSpacesResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/spaces", nmemSpaceCreateRequest{
+		Name: name,
+	}, &result); err != nil {
+		return nil, fmt.Errorf("nowledgemem create space: %w", err)
+	}
+	for _, s := range result.Spaces {
+		if s.Name == name {
+			return &s, nil
+		}
+	}
+	if len(result.Spaces) > 0 {
+		last := result.Spaces[len(result.Spaces)-1]
+		return &last, nil
+	}
+	return nil, fmt.Errorf("nowledgemem create space: space %q not found in response", name)
+}
+
+// ensureSpace finds an existing space by name or creates it. Returns the space ID.
+func (c *nmemClient) ensureSpace(ctx context.Context, name string) (string, error) {
+	spaces, err := c.listSpaces(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range spaces {
+		if s.Name == name {
+			return s.ID, nil
+		}
+	}
+	created, err := c.createSpace(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	return created.ID, nil
 }
 
 // --- HTTP helper ---
