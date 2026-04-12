@@ -108,18 +108,20 @@
 
     <!-- Edit Dialog -->
     <Dialog v-model:open="isDialogOpen">
-      <DialogContent class="sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent class="sm:max-w-2xl max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden">
+        <DialogHeader class="shrink-0">
           <DialogTitle>{{ isEditing ? $t('common.edit') : $t('bots.skills.addSkill') }}</DialogTitle>
         </DialogHeader>
-        <div class="py-4 h-[400px]">
-          <MonacoEditor
-            v-model="draftRaw"
-            language="markdown"
-            :readonly="isSaving"
-          />
+        <div class="basis-[400px] flex-1 min-h-0 py-4">
+          <div class="h-full rounded-md border overflow-hidden">
+            <MonacoEditor
+              v-model="draftRaw"
+              language="markdown"
+              :readonly="isSaving"
+            />
+          </div>
         </div>
-        <DialogFooter>
+        <DialogFooter class="shrink-0">
           <DialogClose as-child>
             <Button
               variant="outline"
