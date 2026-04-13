@@ -36,6 +36,7 @@ func (l *QueriesLookup) GetBotModelIDs(ctx context.Context, botID string) (BotMo
 	}
 
 	var m BotModels
+	m.OwnerUserID = bot.OwnerUserID.String()
 	if bot.ChatModelID.Valid {
 		m.ChatModelID = bot.ChatModelID.String()
 	}

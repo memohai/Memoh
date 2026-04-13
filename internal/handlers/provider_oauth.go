@@ -7,6 +7,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/auth"
+	"github.com/memohai/memoh/internal/oauthctx"
 	"github.com/memohai/memoh/internal/providers"
 )
 
@@ -20,6 +22,7 @@ func NewProviderOAuthHandler(service *providers.Service) *ProviderOAuthHandler {
 
 func (h *ProviderOAuthHandler) Register(e *echo.Echo) {
 	e.GET("/providers/:id/oauth/authorize", h.Authorize)
+	e.POST("/providers/:id/oauth/poll", h.Poll)
 	e.GET("/providers/:id/oauth/status", h.Status)
 	e.DELETE("/providers/:id/oauth/token", h.Revoke)
 	e.GET("/auth/callback", h.Callback)
@@ -30,7 +33,7 @@ func (h *ProviderOAuthHandler) Register(e *echo.Echo) {
 // @Summary Start OAuth2 authorization for an LLM provider
 // @Tags providers-oauth
 // @Param id path string true "Provider ID (UUID)"
-// @Success 200 {object} map[string]string
+// @Success 200 {object} providers.OAuthAuthorizeResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Router /providers/{id}/oauth/authorize [get].
@@ -39,11 +42,39 @@ func (h *ProviderOAuthHandler) Authorize(c echo.Context) error {
 	if providerID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
-	authURL, err := h.service.StartOAuthAuthorization(c.Request().Context(), providerID)
+	ctx := c.Request().Context()
+	if userID, err := auth.UserIDFromContext(c); err == nil {
+		ctx = oauthctx.WithUserID(ctx, userID)
+	}
+	resp, err := h.service.StartOAuthAuthorization(ctx, providerID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]string{"auth_url": authURL})
+	return c.JSON(http.StatusOK, resp)
+}
+
+// Poll godoc
+// @Summary Poll OAuth device authorization for an LLM provider
+// @Tags providers-oauth
+// @Param id path string true "Provider ID (UUID)"
+// @Success 200 {object} providers.OAuthStatus
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /providers/{id}/oauth/poll [post].
+func (h *ProviderOAuthHandler) Poll(c echo.Context) error {
+	providerID := strings.TrimSpace(c.Param("id"))
+	if providerID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	}
+	ctx := c.Request().Context()
+	if userID, err := auth.UserIDFromContext(c); err == nil {
+		ctx = oauthctx.WithUserID(ctx, userID)
+	}
+	status, err := h.service.PollOAuthAuthorization(ctx, providerID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.JSON(http.StatusOK, status)
 }
 
 // Status godoc
@@ -59,7 +90,11 @@ func (h *ProviderOAuthHandler) Status(c echo.Context) error {
 	if providerID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
-	status, err := h.service.GetOAuthStatus(c.Request().Context(), providerID)
+	ctx := c.Request().Context()
+	if userID, err := auth.UserIDFromContext(c); err == nil {
+		ctx = oauthctx.WithUserID(ctx, userID)
+	}
+	status, err := h.service.GetOAuthStatus(ctx, providerID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -79,7 +114,11 @@ func (h *ProviderOAuthHandler) Revoke(c echo.Context) error {
 	if providerID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
-	if err := h.service.RevokeOAuthToken(c.Request().Context(), providerID); err != nil {
+	ctx := c.Request().Context()
+	if userID, err := auth.UserIDFromContext(c); err == nil {
+		ctx = oauthctx.WithUserID(ctx, userID)
+	}
+	if err := h.service.RevokeOAuthToken(ctx, providerID); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -111,11 +150,11 @@ func (h *ProviderOAuthHandler) Callback(c echo.Context) error {
 <html>
   <head>
     <meta charset="utf-8">
-    <title>OpenAI OAuth Connected</title>
+    <title>Provider Connected</title>
   </head>
   <body style="font-family: sans-serif; padding: 24px;">
-    <h2>OpenAI OAuth connected</h2>
-    <p>You can close this window and return to Memoh.</p>
+    <h2>Provider connected</h2>
+    <p>Your current Memoh account is now connected.</p>
     <script>
       window.opener?.postMessage({ type: "memoh-provider-oauth-success", providerId: "{{.ProviderID}}" }, "*");
       window.close();

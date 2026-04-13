@@ -54,11 +54,37 @@ type TestResponse struct {
 
 // OAuthStatus is returned by GET /providers/:id/oauth/status.
 type OAuthStatus struct {
-	Configured  bool       `json:"configured"`
-	HasToken    bool       `json:"has_token"`
-	Expired     bool       `json:"expired"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
-	CallbackURL string     `json:"callback_url"`
+	Configured  bool               `json:"configured"`
+	Mode        string             `json:"mode,omitempty"`
+	HasToken    bool               `json:"has_token"`
+	Expired     bool               `json:"expired"`
+	ExpiresAt   *time.Time         `json:"expires_at,omitempty"`
+	CallbackURL string             `json:"callback_url"`
+	Device      *OAuthDeviceStatus `json:"device,omitempty"`
+	Account     *OAuthAccount      `json:"account,omitempty"`
+}
+
+type OAuthDeviceStatus struct {
+	Pending         bool       `json:"pending"`
+	UserCode        string     `json:"user_code,omitempty"`
+	VerificationURI string     `json:"verification_uri,omitempty"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
+	IntervalSeconds int64      `json:"interval_seconds,omitempty"`
+}
+
+type OAuthAccount struct {
+	Label      string `json:"label,omitempty"`
+	Login      string `json:"login,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Email      string `json:"email,omitempty"`
+	AvatarURL  string `json:"avatar_url,omitempty"`
+	ProfileURL string `json:"profile_url,omitempty"`
+}
+
+type OAuthAuthorizeResponse struct {
+	Mode    string             `json:"mode,omitempty"`
+	AuthURL string             `json:"auth_url,omitempty"`
+	Device  *OAuthDeviceStatus `json:"device,omitempty"`
 }
 
 // RemoteModel represents a model returned by the provider's /v1/models endpoint.

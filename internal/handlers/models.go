@@ -10,7 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/oauthctx"
 )
 
 type ModelsHandler struct {
@@ -301,7 +303,12 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
 
-	resp, err := h.service.Test(c.Request().Context(), id)
+	ctx := c.Request().Context()
+	if userID, err := auth.UserIDFromContext(c); err == nil {
+		ctx = oauthctx.WithUserID(ctx, userID)
+	}
+
+	resp, err := h.service.Test(ctx, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid") {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())

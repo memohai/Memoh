@@ -7,6 +7,7 @@ import (
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/oauthctx"
 	"github.com/memohai/memoh/internal/providers"
 )
 
@@ -56,7 +57,8 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		return
 	}
 	authResolver := providers.NewService(nil, r.queries, "")
-	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	authCtx := oauthctx.WithUserID(ctx, req.UserID)
+	creds, err := authResolver.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
 		r.logger.Warn("compaction: failed to resolve provider credentials", slog.Any("error", err))
 		return

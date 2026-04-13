@@ -515,3 +515,19 @@ type UserChannelBinding struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
+
+type UserProviderOauthToken struct {
+	ID               pgtype.UUID        `json:"id"`
+	ProviderID       pgtype.UUID        `json:"provider_id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	AccessToken      string             `json:"access_token"`
+	RefreshToken     string             `json:"refresh_token"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	Scope            string             `json:"scope"`
+	TokenType        string             `json:"token_type"`
+	State            string             `json:"state"`
+	PkceCodeVerifier string             `json:"pkce_code_verifier"`
+	Metadata         []byte             `json:"metadata"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/memohai/memoh/internal/healthcheck"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/oauthctx"
 )
 
 const (
@@ -25,6 +26,7 @@ type BotModelLookup interface {
 
 // BotModels holds the model UUIDs associated with a bot.
 type BotModels struct {
+	OwnerUserID      string
 	ChatModelID      string
 	MemoryModelID    string
 	EmbeddingModelID string
@@ -115,7 +117,8 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 		wg.Add(1)
 		go func(idx int, s modelSlot) {
 			defer wg.Done()
-			results[idx] = c.probeSlot(probeCtx, s)
+			slotCtx := oauthctx.WithUserID(probeCtx, botModels.OwnerUserID)
+			results[idx] = c.probeSlot(slotCtx, s)
 		}(i, slot)
 	}
 	wg.Wait()

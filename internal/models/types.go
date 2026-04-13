@@ -22,6 +22,7 @@ const (
 	ClientTypeAnthropicMessages  ClientType = "anthropic-messages"
 	ClientTypeGoogleGenerativeAI ClientType = "google-generative-ai"
 	ClientTypeOpenAICodex        ClientType = "openai-codex"
+	ClientTypeGitHubCopilot      ClientType = "github-copilot"
 	ClientTypeEdgeSpeech         ClientType = "edge-speech"
 )
 

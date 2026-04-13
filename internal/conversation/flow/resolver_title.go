@@ -13,6 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/oauthctx"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/session"
 )
@@ -82,7 +83,7 @@ func (r *Resolver) maybeGenerateSessionTitle(ctx context.Context, req conversati
 		return
 	}
 
-	title := r.generateTitle(ctx, titleModel, provider, userQuery)
+	title := r.generateTitle(ctx, req.UserID, titleModel, provider, userQuery)
 	if title == "" {
 		return
 	}
@@ -95,7 +96,7 @@ func (r *Resolver) maybeGenerateSessionTitle(ctx context.Context, req conversati
 	}
 }
 
-func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, provider sqlc.Provider, userQuery string) string {
+func (r *Resolver) generateTitle(ctx context.Context, userID string, model models.GetResponse, provider sqlc.Provider, userQuery string) string {
 	userSnippet := truncate(strings.TrimSpace(userQuery), titlePromptMaxInputChars)
 	if userSnippet == "" {
 		return ""
@@ -106,7 +107,8 @@ func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, 
 		"User: " + userSnippet
 
 	authResolver := providers.NewService(nil, r.queries, "")
-	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	authCtx := oauthctx.WithUserID(ctx, userID)
+	creds, err := authResolver.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
 		r.logger.Warn("title gen: failed to resolve provider credentials", slog.Any("error", err))
 		return ""

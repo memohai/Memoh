@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/models"
 )
@@ -24,25 +25,38 @@ func SupportsOpenAICodexOAuth(provider sqlc.Provider) bool {
 }
 
 func (s *Service) ResolveModelCredentials(ctx context.Context, provider sqlc.Provider) (ModelCredentials, error) {
-	if models.ClientType(provider.ClientType) != models.ClientTypeOpenAICodex {
+	switch models.ClientType(provider.ClientType) {
+	case models.ClientTypeGitHubCopilot:
+		githubToken, err := s.GetValidAccessToken(ctx, provider.ID.String())
+		if err != nil {
+			return ModelCredentials{}, err
+		}
+		copilotToken, err := memohcopilot.ResolveToken(ctx, githubToken)
+		if err != nil {
+			return ModelCredentials{}, err
+		}
+		return ModelCredentials{APIKey: copilotToken}, nil
+
+	case models.ClientTypeOpenAICodex:
+		token, err := s.GetValidAccessToken(ctx, provider.ID.String())
+		if err != nil {
+			return ModelCredentials{}, err
+		}
+		accountID, err := codexAccountIDFromToken(token)
+		if err != nil {
+			return ModelCredentials{}, err
+		}
+		return ModelCredentials{
+			APIKey:         token,
+			CodexAccountID: accountID,
+		}, nil
+
+	default:
 		apiKey := ProviderConfigString(provider, "api_key")
 		return ModelCredentials{
 			APIKey: apiKey,
 		}, nil
 	}
-
-	token, err := s.GetValidAccessToken(ctx, provider.ID.String())
-	if err != nil {
-		return ModelCredentials{}, err
-	}
-	accountID, err := codexAccountIDFromToken(token)
-	if err != nil {
-		return ModelCredentials{}, err
-	}
-	return ModelCredentials{
-		APIKey:         token,
-		CodexAccountID: accountID,
-	}, nil
 }
 
 func codexAccountIDFromToken(token string) (string, error) {

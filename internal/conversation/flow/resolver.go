@@ -26,6 +26,7 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/oauthctx"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
@@ -385,7 +386,8 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	}
 
 	authResolver := providers.NewService(nil, r.queries, "")
-	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	authCtx := oauthctx.WithUserID(ctx, p.UserID)
+	creds, err := authResolver.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
 		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("resolve provider credentials: %w", err)
 	}

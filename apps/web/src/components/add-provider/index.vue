@@ -46,7 +46,7 @@
             </FormItem>
           </FormField>
           <FormField
-            v-if="form.values.client_type !== 'openai-codex'"
+            v-if="!['openai-codex', 'github-copilot'].includes(form.values.client_type)"
             v-slot="{ componentField }"
             name="api_key"
           >
@@ -69,12 +69,13 @@
             </FormItem>
           </FormField>
           <div
-            v-else
+            v-else-if="['openai-codex', 'github-copilot'].includes(form.values.client_type)"
             class="rounded-lg border p-3 text-xs text-muted-foreground"
           >
-            {{ $t('provider.oauth.createHint') }}
+            {{ $t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubCreateHint' : 'provider.oauth.openaiCreateHint') }}
           </div>
           <FormField
+            v-if="form.values.client_type !== 'github-copilot'"
             v-slot="{ componentField }"
             name="base_url"
           >
@@ -188,12 +189,13 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
     const config: Record<string, unknown> = {}
     if (data.base_url) config.base_url = data.base_url
-    if (data.api_key) config.api_key = data.api_key
+    if (typeof data.api_key === 'string' && data.api_key.trim() !== '' && data.client_type !== 'github-copilot') {
+      config.api_key = data.api_key.trim()
+    }
     const payload = {
       name: data.name,
       client_type: data.client_type,
       config,
-      metadata: { additionalProp1: {} },
     }
     const { data: result } = await postProviders({ body: payload as ProvidersCreateRequest, throwOnError: true })
     if (data.auto_import && result?.id) {
@@ -221,16 +223,23 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
 
 const providerSchema = toTypedSchema(z.object({
   api_key: z.string().optional(),
-  base_url: z.string().min(1),
+  base_url: z.string().optional(),
   name: z.string().min(1),
   client_type: z.string().min(1),
   auto_import: z.boolean().optional(),
 }).superRefine((value, ctx) => {
-  if (value.client_type !== 'openai-codex' && !value.api_key?.trim()) {
+  if (!['openai-codex', 'github-copilot'].includes(value.client_type) && !value.api_key?.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['api_key'],
       message: 'API key is required',
+    })
+  }
+  if (value.client_type !== 'github-copilot' && !value.base_url?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['base_url'],
+      message: 'Base URL is required',
     })
   }
 }))
@@ -240,13 +249,15 @@ const form = useForm({
   initialValues: {
     auto_import: false,
     client_type: 'openai-completions',
-  },
+  }
 })
 
 watch(() => form.values.client_type, (clientType) => {
-  if (clientType !== 'openai-codex') return
-  if (!form.values.base_url) {
+  if (clientType === 'openai-codex' && !form.values.base_url) {
     form.setFieldValue('base_url', 'https://chatgpt.com/backend-api')
+  }
+  if (clientType === 'github-copilot') {
+    form.setFieldValue('base_url', '')
   }
 })
 

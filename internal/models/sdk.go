@@ -10,6 +10,8 @@ import (
 	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
 	openairesponses "github.com/memohai/twilight-ai/provider/openai/responses"
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	memohcopilot "github.com/memohai/memoh/internal/copilot"
 )
 
 // SDKModelConfig holds provider and model information resolved from DB,
@@ -75,6 +77,9 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			opts = append(opts, openaicodex.WithAccountID(cfg.CodexAccountID))
 		}
 		return openaicodex.New(opts...).ChatModel(cfg.ModelID)
+
+	case ClientTypeGitHubCopilot:
+		return memohcopilot.NewModel(cfg.APIKey, cfg.ModelID, cfg.HTTPClient)
 
 	case ClientTypeAnthropicMessages:
 		opts := []anthropicmessages.Option{
@@ -178,6 +183,8 @@ func ResolveClientType(model *sdk.Model) string {
 		return string(ClientTypeAnthropicMessages)
 	case strings.Contains(name, "google"):
 		return string(ClientTypeGoogleGenerativeAI)
+	case strings.Contains(name, "github-copilot"), strings.Contains(name, "copilot"):
+		return string(ClientTypeGitHubCopilot)
 	case strings.Contains(name, "codex"):
 		return string(ClientTypeOpenAICodex)
 	case strings.Contains(name, "responses"):

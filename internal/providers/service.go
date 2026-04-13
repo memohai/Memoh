@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	githubcopilot "github.com/memohai/twilight-ai/provider/github/copilot"
 	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/models"
@@ -47,14 +49,13 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
 	}
 
-	configJSON, err := json.Marshal(req.Config)
-	if err != nil {
-		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
-	}
-
 	clientType := req.ClientType
 	if clientType == "" {
 		clientType = string(models.ClientTypeOpenAICompletions)
+	}
+	configJSON, err := json.Marshal(normalizeProviderConfig(clientType, req.Config))
+	if err != nil {
+		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
 
 	var icon pgtype.Text
@@ -150,12 +151,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 
 	existingConfig := providerConfig(existing.Config)
 	if req.Config != nil {
-		existingAPIKey := configString(existingConfig, "api_key")
-		newAPIKey := configString(req.Config, "api_key")
-		if newAPIKey != "" && newAPIKey == maskAPIKey(existingAPIKey) {
-			req.Config["api_key"] = existingAPIKey
-		}
-		existingConfig = req.Config
+		mergedConfig := mergeProviderConfig(existingConfig, req.Config)
+		preserveMaskedConfigSecret(mergedConfig, existingConfig, req.Config, "api_key")
+		existingConfig = normalizeProviderConfig(clientType, mergedConfig)
+	} else {
+		existingConfig = normalizeProviderConfig(clientType, existingConfig)
 	}
 	configJSON, err := json.Marshal(existingConfig)
 	if err != nil {
@@ -257,6 +257,34 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
+	if models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot {
+		creds, err := s.ResolveModelCredentials(ctx, provider)
+		if err != nil {
+			return nil, err
+		}
+		sdkProvider := memohcopilot.NewProvider(creds.APIKey, nil)
+		if result := sdkProvider.Test(ctx); result.Status != sdk.ProviderStatusOK {
+			return nil, fmt.Errorf("github copilot provider test failed: %s", result.Message)
+		}
+
+		catalog := githubcopilot.Catalog()
+		remoteModels := make([]RemoteModel, 0, len(catalog))
+		for _, model := range catalog {
+			remoteModels = append(remoteModels, RemoteModel{
+				ID:      model.ID,
+				Name:    model.DisplayName,
+				Object:  "model",
+				OwnedBy: "github-copilot",
+				Type:    "chat",
+				Compatibilities: []string{
+					models.CompatVision,
+					models.CompatToolCall,
+					models.CompatReasoning,
+				},
+			})
+		}
+		return remoteModels, nil
+	}
 	if supportsOAuth(provider) {
 		catalog := openaicodex.Catalog()
 		remoteModels := make([]RemoteModel, 0, len(catalog))
@@ -329,7 +357,7 @@ func (s *Service) toGetResponse(provider sqlc.Provider) GetResponse {
 	}
 
 	cfg := providerConfig(provider.Config)
-	maskedCfg := maskConfigAPIKey(cfg)
+	maskedCfg := maskConfigSecrets(provider.ClientType, cfg)
 
 	var icon string
 	if provider.Icon.Valid {
@@ -378,14 +406,51 @@ func ProviderConfigString(provider sqlc.Provider, key string) string {
 	return configString(providerConfig(provider.Config), key)
 }
 
-// maskConfigAPIKey returns a copy of config with api_key masked.
-func maskConfigAPIKey(cfg map[string]any) map[string]any {
+func cloneConfig(cfg map[string]any) map[string]any {
 	result := make(map[string]any, len(cfg))
 	for k, v := range cfg {
 		result[k] = v
 	}
-	if apiKey, _ := result["api_key"].(string); apiKey != "" {
-		result["api_key"] = maskAPIKey(apiKey)
+	return result
+}
+
+func mergeProviderConfig(existing, incoming map[string]any) map[string]any {
+	result := cloneConfig(existing)
+	for k, v := range incoming {
+		result[k] = v
+	}
+	return result
+}
+
+func preserveMaskedConfigSecret(merged, existing, incoming map[string]any, key string) {
+	existingValue := strings.TrimSpace(configString(existing, key))
+	newValue := strings.TrimSpace(configString(incoming, key))
+	if existingValue == "" || newValue == "" {
+		return
+	}
+	if newValue == maskAPIKey(existingValue) {
+		merged[key] = existingValue
+	}
+}
+
+// normalizeProviderConfig keeps provider-specific secrets under stable keys while
+// preserving backward compatibility for legacy stored configs.
+func normalizeProviderConfig(clientType string, cfg map[string]any) map[string]any {
+	result := cloneConfig(cfg)
+	if models.ClientType(clientType) == models.ClientTypeGitHubCopilot {
+		delete(result, "api_key")
+		delete(result, configOAuthClientSecretKey)
+	}
+	return result
+}
+
+// maskConfigSecrets returns a copy of config with all known secret fields masked.
+func maskConfigSecrets(clientType string, cfg map[string]any) map[string]any {
+	result := normalizeProviderConfig(clientType, cfg)
+	for _, key := range []string{"api_key", configOAuthClientSecretKey} {
+		if value, _ := result[key].(string); value != "" {
+			result[key] = maskAPIKey(value)
+		}
 	}
 	return result
 }

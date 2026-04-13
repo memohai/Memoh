@@ -20,6 +20,11 @@ export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
     label: 'OpenAI Codex',
     hint: 'Codex API (OAuth, coding-optimized)',
   },
+  'github-copilot': {
+    value: 'github-copilot',
+    label: 'GitHub Copilot',
+    hint: 'Device OAuth with GitHub account',
+  },
   'anthropic-messages': {
     value: 'anthropic-messages',
     label: 'Anthropic Messages',
