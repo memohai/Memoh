@@ -77,6 +77,16 @@ func (c *Client) ListBots(ctx context.Context) ([]bots.Bot, error) {
 	return resp.Items, err
 }
 
+func (c *Client) CreateBot(ctx context.Context, req bots.CreateBotRequest) (bots.Bot, error) {
+	var resp bots.Bot
+	err := c.doJSON(ctx, http.MethodPost, "/bots", req, &resp)
+	return resp, err
+}
+
+func (c *Client) DeleteBot(ctx context.Context, botID string) error {
+	return c.doJSON(ctx, http.MethodDelete, fmt.Sprintf("/bots/%s", botID), nil, nil)
+}
+
 func (c *Client) ListSessions(ctx context.Context, botID string) ([]session.Session, error) {
 	var resp struct {
 		Items []session.Session `json:"items"`

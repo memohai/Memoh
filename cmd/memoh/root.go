@@ -39,8 +39,11 @@ func newRootCommand() *cobra.Command {
 	rootCmd.PersistentFlags().StringVar(&ctx.server, "server", "", "Memoh server URL")
 
 	rootCmd.AddCommand(newMigrateCommand())
+	rootCmd.AddCommand(newInstallCommand())
 	rootCmd.AddCommand(newLoginCommand(ctx))
 	rootCmd.AddCommand(newChatCommand(ctx))
+	rootCmd.AddCommand(newBotsCommand(ctx))
+	rootCmd.AddCommand(newComposeCommands()...)
 	rootCmd.AddCommand(&cobra.Command{
 		Use:   "tui",
 		Short: "Open the terminal UI",
