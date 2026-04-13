@@ -96,7 +96,7 @@
                       <CircleHelp class="size-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent class="max-w-64 text-left">
+                  <TooltipContent class="max-w-80 text-left leading-relaxed">
                     {{ $t('bots.aclPresetHelp') }}
                   </TooltipContent>
                 </Tooltip>
