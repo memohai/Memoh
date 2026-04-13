@@ -1864,6 +1864,7 @@ func (p *ChannelInboundProcessor) loadInboundAttachmentPayload(
 		size:   resolved.Size,
 	}, nil
 }
+
 func (p *ChannelInboundProcessor) resolveAttachmentResolver(channelType channel.ChannelType) channel.AttachmentResolver {
 	if p == nil {
 		return nil
