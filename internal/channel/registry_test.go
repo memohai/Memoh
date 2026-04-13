@@ -1,6 +1,7 @@
 package channel_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -249,6 +250,46 @@ func TestEffectiveResolver_RejectsHTMLImage(t *testing.T) {
 	}
 }
 
+func TestEffectiveResolver_URLDoesNotEagerlyBufferBody(t *testing.T) {
+	body := &limitedResolveBody{
+		data:       bytes.Repeat([]byte("z"), 2048),
+		readBudget: 512,
+		enforce:    true,
+	}
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != "https://public.example.test/stream.bin" {
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/octet-stream"}},
+			Body:       body,
+		}, nil
+	})
+	defer func() { http.DefaultTransport = oldTransport }()
+
+	reg := newTestConfigRegistry()
+	resolver := reg.EffectiveAttachmentResolver(testChannelType)
+	payload, err := resolver.ResolveAttachment(context.Background(), channel.ChannelConfig{}, channel.Attachment{
+		Type: channel.AttachmentFile,
+		URL:  "https://public.example.test/stream.bin",
+	})
+	if err != nil {
+		t.Fatalf("ResolveAttachment: %v", err)
+	}
+	defer func() { _ = payload.Reader.Close() }()
+
+	body.enforce = false
+	data, err := io.ReadAll(payload.Reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if len(data) != 2048 {
+		t.Fatalf("expected 2048 bytes, got %d", len(data))
+	}
+}
+
 func TestEffectiveResolver_PlatformError(t *testing.T) {
 	reg := channel.NewRegistry()
 	reg.MustRegister(&failingResolverAdapter{})
@@ -302,4 +343,41 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
+}
+
+type limitedResolveBody struct {
+	data       []byte
+	offset     int
+	readBudget int
+	enforce    bool
+}
+
+func (r *limitedResolveBody) Read(p []byte) (int, error) {
+	if r.offset >= len(r.data) {
+		return 0, io.EOF
+	}
+	if r.enforce && r.offset >= r.readBudget {
+		return 0, errors.New("resolver eagerly buffered attachment body")
+	}
+
+	allowed := len(p)
+	if r.enforce {
+		remaining := r.readBudget - r.offset
+		if remaining < allowed {
+			allowed = remaining
+		}
+	}
+	if remaining := len(r.data) - r.offset; remaining < allowed {
+		allowed = remaining
+	}
+	copy(p, r.data[r.offset:r.offset+allowed])
+	r.offset += allowed
+	if r.offset >= len(r.data) {
+		return allowed, io.EOF
+	}
+	return allowed, nil
+}
+
+func (*limitedResolveBody) Close() error {
+	return nil
 }

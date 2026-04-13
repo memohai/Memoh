@@ -15,6 +15,8 @@ import (
 	"github.com/memohai/memoh/internal/media"
 )
 
+const attachmentSniffBytes = 512
+
 type defaultAttachmentResolver struct{}
 
 type effectiveAttachmentResolver struct {
@@ -113,21 +115,95 @@ func (defaultAttachmentResolver) ResolveAttachment(ctx context.Context, _ Channe
 }
 
 func readAttachmentBody(body io.ReadCloser, maxBytes int64) ([]byte, io.ReadCloser, string, error) {
-	limited := io.LimitReader(body, maxBytes+1)
-	data, err := io.ReadAll(limited)
-	_ = body.Close()
-	if err != nil {
+	if body == nil {
+		return nil, nil, "", errors.New("attachment body is required")
+	}
+	if maxBytes <= 0 {
+		_ = body.Close()
+		return nil, nil, "", errors.New("max bytes must be greater than 0")
+	}
+
+	limited := &io.LimitedReader{R: body, N: maxBytes + 1}
+	sniffBytes := attachmentSniffBytes
+	if remaining := int(maxBytes + 1); remaining < sniffBytes {
+		sniffBytes = remaining
+	}
+	head := make([]byte, sniffBytes)
+	n, err := io.ReadFull(limited, head)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		_ = body.Close()
 		return nil, nil, "", fmt.Errorf("read attachment body: %w", err)
 	}
-	if int64(len(data)) > maxBytes {
+	head = head[:n]
+	if int64(len(head)) > maxBytes {
+		_ = body.Close()
 		return nil, nil, "", fmt.Errorf("%w: max %d bytes", media.ErrAssetTooLarge, maxBytes)
 	}
-	head := data
-	if len(head) > 512 {
-		head = head[:512]
-	}
 	sniffed := strings.TrimSpace(http.DetectContentType(head))
-	return head, io.NopCloser(bytes.NewReader(data)), sniffed, nil
+	stream := &attachmentStreamReadCloser{
+		reader: io.MultiReader(
+			bytes.NewReader(head),
+			&maxBytesReader{
+				reader:   limited,
+				maxBytes: maxBytes,
+				emitted:  int64(len(head)),
+			},
+		),
+		closer: body,
+	}
+	return head, stream, sniffed, nil
+}
+
+type attachmentStreamReadCloser struct {
+	reader io.Reader
+	closer io.Closer
+}
+
+func (r *attachmentStreamReadCloser) Read(p []byte) (int, error) {
+	return r.reader.Read(p)
+}
+
+func (r *attachmentStreamReadCloser) Close() error {
+	if r.closer == nil {
+		return nil
+	}
+	return r.closer.Close()
+}
+
+type maxBytesReader struct {
+	reader   io.Reader
+	maxBytes int64
+	emitted  int64
+}
+
+func (r *maxBytesReader) Read(p []byte) (int, error) {
+	if r.emitted >= r.maxBytes {
+		return r.probeOverflow()
+	}
+
+	allowed := int(r.maxBytes - r.emitted)
+	if allowed <= 0 {
+		return r.probeOverflow()
+	}
+	if len(p) > allowed {
+		p = p[:allowed]
+	}
+
+	n, err := r.reader.Read(p)
+	r.emitted += int64(n)
+	return n, err
+}
+
+func (r *maxBytesReader) probeOverflow() (int, error) {
+	var probe [1]byte
+	n, err := r.reader.Read(probe[:])
+	if n > 0 {
+		return 0, fmt.Errorf("%w: max %d bytes", media.ErrAssetTooLarge, r.maxBytes)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return 0, io.EOF
 }
 
 func normalizeResponseMime(raw string) string {
