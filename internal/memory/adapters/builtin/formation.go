@@ -39,6 +39,7 @@ func runFormation(ctx context.Context, logger *slog.Logger, llm adapters.LLM, ru
 	result := formationResult{}
 
 	extracted, err := llm.Extract(ctx, adapters.ExtractRequest{
+		BotID:            botID,
 		Messages:         req.Messages,
 		TimezoneLocation: req.TimezoneLocation,
 	})
@@ -55,6 +56,7 @@ func runFormation(ctx context.Context, logger *slog.Logger, llm adapters.LLM, ru
 	candidates := gatherCandidates(ctx, logger, runtime, botID, facts)
 
 	decided, err := llm.Decide(ctx, adapters.DecideRequest{
+		BotID:      botID,
 		Facts:      facts,
 		Candidates: candidates,
 	})

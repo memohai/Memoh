@@ -27,7 +27,7 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 					{"Status", item.Status},
 				})
 			}
-			return formatItems(records), nil
+			return formatLimitedItems(records, defaultListLimit, "Use /mcp get <name> for full details."), nil
 		},
 	})
 	g.Register(SubCommand{

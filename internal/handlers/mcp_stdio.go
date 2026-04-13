@@ -706,7 +706,7 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
 
-	readCtx, cancelRead := context.WithCancel(context.Background())
+	readCtx, cancelRead := context.WithCancel(context.Background()) //nolint:gosec // G118: cancelRead is stored in sess.cancelRead
 	sess := &mcpSession{
 		stdin:      stdinW,
 		stdout:     stdoutR,

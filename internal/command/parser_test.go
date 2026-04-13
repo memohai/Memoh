@@ -13,6 +13,8 @@ func TestParse_Basic(t *testing.T) {
 		args     []string
 	}{
 		{"/help", "help", "", nil},
+		{"/help model", "help", "model", nil},
+		{"/help model set", "help", "model", []string{"set"}},
 		{"/subagent list", "subagent", "list", nil},
 		{"/subagent get mybot", "subagent", "get", []string{"mybot"}},
 		{"/schedule create daily \"0 9 * * *\" Send report", "schedule", "create", []string{"daily", "0 9 * * *", "Send", "report"}},

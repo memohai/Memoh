@@ -90,11 +90,12 @@ func adaptAttachments(atts []channel.Attachment) []Attachment {
 	result := make([]Attachment, 0, len(atts))
 	for _, a := range atts {
 		att := Attachment{
-			Type:     string(a.Type),
-			MimeType: strings.TrimSpace(a.Mime),
-			FileName: strings.TrimSpace(a.Name),
-			Width:    a.Width,
-			Height:   a.Height,
+			Type:        string(a.Type),
+			MimeType:    strings.TrimSpace(a.Mime),
+			FileName:    strings.TrimSpace(a.Name),
+			ContentHash: strings.TrimSpace(a.ContentHash),
+			Width:       a.Width,
+			Height:      a.Height,
 		}
 		if a.DurationMs > 0 {
 			att.Duration = int(a.DurationMs / 1000)

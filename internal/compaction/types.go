@@ -38,4 +38,6 @@ type TriggerConfig struct {
 	HTTPClient       *http.Client
 	Ratio            int
 	TotalInputTokens int
+	MaxCompactTokens int // if > 0, cap compaction input to this many tokens (e.g. 90% of model window)
+	TargetTokens     int // if > 0, compaction goal: reduce context to this many tokens (used by sync compaction)
 }

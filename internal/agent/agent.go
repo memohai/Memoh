@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -62,11 +63,24 @@ func (a *Agent) Generate(ctx context.Context, cfg RunConfig) (*GenerateResult, e
 	return a.runGenerate(ctx, cfg)
 }
 
+// sendEvent sends an event to the stream channel. It returns false if the
+// context was cancelled (consumer stopped reading), allowing the caller to
+// abort cleanly instead of leaking the goroutine on a blocked channel send.
+func sendEvent(ctx context.Context, ch chan<- StreamEvent, evt StreamEvent) bool {
+	select {
+	case ch <- evt:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
 	// Stream emitter: tools targeting the current conversation push
 	// side-effect events (attachments, reactions, speech) directly here.
+	// Uses sendEvent to avoid goroutine leaks when the consumer stops reading.
 	streamEmitter := tools.StreamEmitter(func(evt tools.ToolStreamEvent) {
-		ch <- toolStreamEventToAgentEvent(evt)
+		sendEvent(ctx, ch, toolStreamEventToAgentEvent(evt))
 	})
 
 	var sdkTools []sdk.Tool
@@ -74,7 +88,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		var err error
 		sdkTools, err = a.assembleTools(ctx, cfg, streamEmitter)
 		if err != nil {
-			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("assemble tools: %v", err)}
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("assemble tools: %v", err)})
 			return
 		}
 	}
@@ -157,16 +171,53 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 
 	opts := a.buildGenerateOptions(cfg, sdkTools, prepareStep)
 
-	streamResult, err := a.client.StreamText(ctx, opts...)
-	if err != nil {
-		ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: %v", err)}
-		return
+	retryCfg := cfg.Retry
+	if retryCfg.MaxAttempts <= 0 {
+		retryCfg = DefaultRetryConfig()
 	}
 
-	ch <- StreamEvent{Type: EventAgentStart}
+	var streamResult *sdk.StreamResult
+	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
+		var err error
+		streamResult, err = a.client.StreamText(ctx, opts...)
+		if err == nil {
+			break
+		}
+		if !isRetryableStreamError(err) {
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: %v", err)})
+			return
+		}
+		a.logger.Warn("stream start failed, retrying",
+			slog.Int("attempt", attempt+1),
+			slog.Int("max_attempts", retryCfg.MaxAttempts),
+			slog.String("error", err.Error()),
+		)
+		if !sendEvent(ctx, ch, StreamEvent{
+			Type:       EventRetry,
+			Attempt:    attempt + 1,
+			MaxAttempt: retryCfg.MaxAttempts,
+			RetryError: err.Error(),
+		}) {
+			return
+		}
+		if attempt+1 >= retryCfg.MaxAttempts {
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: all %d attempts failed (last: %v)", retryCfg.MaxAttempts, err)})
+			return
+		}
+		delay := retryDelay(attempt, retryCfg)
+		if delay > 0 {
+			if err := sleepWithContext(ctx, delay); err != nil {
+				sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: context cancelled during retry: %v", err)})
+				return
+			}
+		}
+	}
+
+	sendEvent(ctx, ch, StreamEvent{Type: EventAgentStart})
 
 	var allText strings.Builder
 	aborted := false
+	stepNumber := 0
 
 	for part := range streamResult.Stream {
 		if ctx.Err() != nil {
@@ -179,14 +230,18 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			_ = p // stream start already emitted
 
 		case *sdk.TextStartPart:
-			ch <- StreamEvent{Type: EventTextStart}
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventTextStart}) {
+				aborted = true
+			}
 
 		case *sdk.TextDeltaPart:
 			if p.Text != "" {
 				if textLoopProbeBuffer != nil {
 					textLoopProbeBuffer.Push(p.Text)
 				}
-				ch <- StreamEvent{Type: EventTextDelta, Delta: p.Text}
+				if !sendEvent(ctx, ch, StreamEvent{Type: EventTextDelta, Delta: p.Text}) {
+					aborted = true
+				}
 				allText.WriteString(p.Text)
 			}
 
@@ -194,26 +249,42 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			if textLoopProbeBuffer != nil {
 				textLoopProbeBuffer.Flush()
 			}
-			ch <- StreamEvent{Type: EventTextEnd}
+			stepNumber++
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventTextEnd}) ||
+				!sendEvent(ctx, ch, StreamEvent{
+					Type:           EventProgress,
+					StepNumber:     stepNumber,
+					ProgressStatus: "text",
+				}) {
+				aborted = true
+			}
 
 		case *sdk.ReasoningStartPart:
-			ch <- StreamEvent{Type: EventReasoningStart}
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventReasoningStart}) {
+				aborted = true
+			}
 
 		case *sdk.ReasoningDeltaPart:
-			ch <- StreamEvent{Type: EventReasoningDelta, Delta: p.Text}
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventReasoningDelta, Delta: p.Text}) {
+				aborted = true
+			}
 
 		case *sdk.ReasoningEndPart:
-			ch <- StreamEvent{Type: EventReasoningEnd}
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventReasoningEnd}) {
+				aborted = true
+			}
 
 		case *sdk.StreamToolCallPart:
 			if textLoopProbeBuffer != nil {
 				textLoopProbeBuffer.Flush()
 			}
-			ch <- StreamEvent{
+			if !sendEvent(ctx, ch, StreamEvent{
 				Type:       EventToolCallStart,
 				ToolName:   p.ToolName,
 				ToolCallID: p.ToolCallID,
 				Input:      p.Input,
+			}) {
+				aborted = true
 			}
 
 		case *sdk.ToolProgressPart:
@@ -230,12 +301,20 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				delete(toolLoopAbortCallIDs, p.ToolCallID)
 				shouldAbort = true
 			}
-			ch <- StreamEvent{
+			stepNumber++
+			if !sendEvent(ctx, ch, StreamEvent{
 				Type:       EventToolCallEnd,
 				ToolName:   p.ToolName,
 				ToolCallID: p.ToolCallID,
 				Input:      p.Input,
 				Result:     p.Output,
+			}) || !sendEvent(ctx, ch, StreamEvent{
+				Type:           EventProgress,
+				StepNumber:     stepNumber,
+				ToolName:       p.ToolName,
+				ProgressStatus: "tool_result",
+			}) {
+				aborted = true
 			}
 			if shouldAbort {
 				a.logger.Warn("tool loop abort triggered", slog.String("tool_call_id", p.ToolCallID))
@@ -243,11 +322,13 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			}
 
 		case *sdk.StreamToolErrorPart:
-			ch <- StreamEvent{
+			if !sendEvent(ctx, ch, StreamEvent{
 				Type:       EventToolCallEnd,
 				ToolName:   p.ToolName,
 				ToolCallID: p.ToolCallID,
 				Error:      p.Error.Error(),
+			}) {
+				aborted = true
 			}
 
 		case *sdk.StreamFilePart:
@@ -255,18 +336,33 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			if mediaType == "" {
 				mediaType = "image/png"
 			}
-			ch <- StreamEvent{
+			if !sendEvent(ctx, ch, StreamEvent{
 				Type: EventAttachment,
 				Attachments: []FileAttachment{{
 					Type: "image",
 					URL:  fmt.Sprintf("data:%s;base64,%s", mediaType, p.File.Data),
 					Mime: mediaType,
 				}},
+			}) {
+				aborted = true
 			}
 
 		case *sdk.ErrorPart:
-			ch <- StreamEvent{Type: EventError, Error: p.Error.Error()}
-			aborted = true
+			errMsg := p.Error.Error()
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: errMsg})
+
+			// Mid-stream retry: if the error is retryable, attempt to continue
+			// the agent run from the accumulated state. This also handles
+			// errors at step 0 (e.g. timeout awaiting response headers) since
+			// no work has been completed yet and retrying from the start is safe.
+			if isRetryableStreamError(p.Error) {
+				streamResult, aborted = a.runMidStreamRetry(
+					ctx, ch, cfg, sdkTools, prepareStep, streamResult,
+					stepNumber, errMsg, &allText, textLoopProbeBuffer,
+				)
+			} else {
+				aborted = true
+			}
 
 		case *sdk.AbortPart:
 			aborted = true
@@ -311,8 +407,16 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		termEvent.Type = EventAgentAbort
 	} else {
 		termEvent.Type = EventAgentEnd
+		// Warn if LLM produced no text and no tool calls — likely a context overflow.
+		if allText.Len() == 0 && stepNumber == 0 {
+			a.logger.Warn("agent produced empty response (no text, no tool calls)",
+				slog.String("bot_id", cfg.Identity.BotID),
+				slog.Int("input_messages", len(cfg.Messages)),
+				slog.Int("input_tokens", totalUsage.InputTokens),
+			)
+		}
 	}
-	ch <- termEvent
+	sendEvent(ctx, ch, termEvent)
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult, error) {
@@ -421,9 +525,29 @@ func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep 
 	if len(tools) > 0 && cfg.SupportsToolCall {
 		opts = append(opts, sdk.WithTools(tools))
 	}
-	if prepareStep != nil {
-		opts = append(opts, sdk.WithPrepareStep(prepareStep))
+
+	// Wrap the existing prepareStep (if any) with mid-task context pruning.
+	// When the message array grows large during multi-tool runs, this prunes
+	// older tool results to keep the context window manageable.
+	basePrepare := prepareStep
+	keepSteps := cfg.MidTaskPruneKeepSteps
+	if keepSteps <= 0 {
+		keepSteps = MidTaskPruneKeepStepsDefault
 	}
+	threshold := cfg.MidTaskPruneThreshold
+	if threshold <= 0 {
+		threshold = MidTaskPruneThresholdDefault
+	}
+	midTaskPrune := func(p *sdk.GenerateParams) *sdk.GenerateParams {
+		if basePrepare != nil {
+			if override := basePrepare(p); override != nil {
+				p = override
+			}
+		}
+		return pruneOldToolResults(p, keepSteps, threshold)
+	}
+	opts = append(opts, sdk.WithPrepareStep(midTaskPrune))
+
 	opts = append(opts, models.BuildReasoningOptions(models.SDKModelConfig{
 		ClientType: models.ResolveClientType(cfg.Model),
 		ReasoningConfig: &models.ReasoningConfig{
@@ -504,6 +628,8 @@ func toolStreamEventToAgentEvent(evt tools.ToolStreamEvent) StreamEvent {
 			ss = append(ss, SpeechItem{Text: s.Text})
 		}
 		return StreamEvent{Type: EventSpeech, Speeches: ss}
+	case tools.StreamEventSpawnHeartbeat:
+		return StreamEvent{Type: EventProgress, ProgressStatus: "spawn_running"}
 	default:
 		return StreamEvent{}
 	}
@@ -540,4 +666,250 @@ func wrapToolsWithLoopGuard(tools []sdk.Tool, guard *ToolLoopGuard, abortCallIDs
 		}
 	}
 	return wrapped
+}
+
+const (
+	// MidTaskPruneKeepStepsDefault is the number of recent tool-call steps to keep
+	// intact when pruning older tool results during a multi-step agent run.
+	MidTaskPruneKeepStepsDefault = 4
+	// MidTaskPruneThresholdDefault is the minimum number of messages before pruning activates.
+	MidTaskPruneThresholdDefault = 20
+)
+
+// pruneOldToolResults prunes older tool result messages in the SDK params to
+// keep the context window manageable during long multi-tool agent runs. It
+// keeps the most recent keepSteps tool-call cycles intact and replaces older
+// tool results with size summaries.
+func pruneOldToolResults(p *sdk.GenerateParams, keepSteps, threshold int) *sdk.GenerateParams {
+	msgs := p.Messages
+	if len(msgs) < threshold {
+		return p
+	}
+
+	// Count complete tool-call cycles (tool-result pair) from the end to find the cutoff.
+	toolResultCount := 0
+	cutoffIdx := len(msgs)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == sdk.MessageRoleTool {
+			// Check that the preceding assistant message contains the matching tool call
+			// to ensure we count complete cycles, not orphaned results.
+			hasMatchingCall := false
+			for j := i - 1; j >= 0; j-- {
+				if msgs[j].Role == sdk.MessageRoleAssistant {
+					// If there's another tool result between this and the assistant msg,
+					// it means this assistant message belongs to a different cycle.
+					if j+1 < i && msgs[j+1].Role == sdk.MessageRoleTool {
+						break
+					}
+					hasMatchingCall = true
+					break
+				}
+				if msgs[j].Role == sdk.MessageRoleUser {
+					break
+				}
+			}
+			if hasMatchingCall {
+				toolResultCount++
+				if toolResultCount > keepSteps {
+					cutoffIdx = i
+					break
+				}
+			}
+		}
+	}
+	if cutoffIdx >= len(msgs) {
+		return p // not enough tool messages to prune
+	}
+
+	// Build a new slice so the original messages can be GC'd.
+	pruned := make([]sdk.Message, 0, len(msgs))
+	pruned = append(pruned, msgs[:cutoffIdx]...)
+	for i := cutoffIdx; i < len(msgs); i++ {
+		if msgs[i].Role != sdk.MessageRoleTool {
+			pruned = append(pruned, msgs[i])
+			continue
+		}
+		// Measure content size from ToolResultPart entries.
+		contentSize := 0
+		for _, part := range msgs[i].Content {
+			if tr, ok := part.(sdk.ToolResultPart); ok {
+				contentSize += len(fmt.Sprintf("%v", tr.Result))
+			}
+		}
+		if contentSize > 512 { // only prune if content is large enough
+			// Build replacement parts preserving ToolResultPart type so that
+			// provider serializers that validate part types per role stay happy.
+			replacementParts := make([]sdk.MessagePart, 0, len(msgs[i].Content))
+			for _, part := range msgs[i].Content {
+				if tr, ok := part.(sdk.ToolResultPart); ok {
+					replacementParts = append(replacementParts, sdk.ToolResultPart{
+						ToolCallID: tr.ToolCallID,
+						ToolName:   tr.ToolName,
+						Result:     fmt.Sprintf("[tool result pruned: %d bytes]", contentSize),
+					})
+				} else {
+					replacementParts = append(replacementParts, part)
+				}
+			}
+			pruned = append(pruned, sdk.Message{
+				Role:    msgs[i].Role,
+				Content: replacementParts,
+			})
+		} else {
+			pruned = append(pruned, msgs[i])
+		}
+	}
+
+	p.Messages = pruned
+	return p
+}
+
+// runMidStreamRetry attempts to continue the agent stream after a retryable
+// mid-stream error. It re-invokes StreamText with the accumulated messages
+// and drains the new stream into the same output channel.
+func (a *Agent) runMidStreamRetry(
+	ctx context.Context,
+	ch chan<- StreamEvent,
+	cfg RunConfig,
+	sdkTools []sdk.Tool,
+	prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams,
+	prevResult *sdk.StreamResult,
+	stepNumber int,
+	errMsg string,
+	allText *strings.Builder,
+	textLoopProbeBuffer *TextLoopProbeBuffer,
+) (*sdk.StreamResult, bool) {
+	retryCfg := DefaultRetryConfig()
+	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
+		a.logger.Warn("mid-stream error, retrying",
+			slog.Int("step", stepNumber),
+			slog.Int("attempt", attempt+1),
+			slog.Int("max_attempts", retryCfg.MaxAttempts),
+			slog.String("error", errMsg),
+		)
+		if !sendEvent(ctx, ch, StreamEvent{
+			Type:       EventRetry,
+			Attempt:    attempt + 1,
+			MaxAttempt: retryCfg.MaxAttempts,
+			RetryError: errMsg,
+		}) {
+			return prevResult, true
+		}
+
+		delay := retryDelay(attempt, retryCfg)
+		if delay > 0 {
+			if err := sleepWithContext(ctx, delay); err != nil {
+				return prevResult, true // aborted
+			}
+		}
+
+		// Re-invoke StreamText with accumulated messages.
+		// Use buildGenerateOptions so retry benefits from mid-task pruning,
+		// media resolution, and other prepare-step logic — same as initial stream.
+		retryCfgCopy := cfg
+		retryCfgCopy.Messages = prevResult.Messages
+		retryOpts := a.buildGenerateOptions(retryCfgCopy, sdkTools, prepareStep)
+
+		retryResult, retryErr := a.client.StreamText(ctx, retryOpts...)
+		if retryErr != nil {
+			a.logger.Warn("mid-stream retry failed to start",
+				slog.Int("attempt", attempt+1),
+				slog.String("error", retryErr.Error()),
+			)
+			// Update errMsg so the next retry event shows the latest error.
+			errMsg = retryErr.Error()
+			continue
+		}
+
+		// Drain the retry stream into the main event loop
+		aborted := false
+		for retryPart := range retryResult.Stream {
+			switch rp := retryPart.(type) {
+			case *sdk.TextStartPart:
+				if !sendEvent(ctx, ch, StreamEvent{Type: EventTextStart}) {
+					aborted = true
+				}
+			case *sdk.TextDeltaPart:
+				if rp.Text != "" {
+					if textLoopProbeBuffer != nil {
+						textLoopProbeBuffer.Push(rp.Text)
+					}
+					if !sendEvent(ctx, ch, StreamEvent{Type: EventTextDelta, Delta: rp.Text}) {
+						aborted = true
+					}
+					allText.WriteString(rp.Text)
+				}
+			case *sdk.TextEndPart:
+				if textLoopProbeBuffer != nil {
+					textLoopProbeBuffer.Flush()
+				}
+				stepNumber++
+				if !sendEvent(ctx, ch, StreamEvent{Type: EventTextEnd}) {
+					aborted = true
+				}
+			case *sdk.StreamToolCallPart:
+				if textLoopProbeBuffer != nil {
+					textLoopProbeBuffer.Flush()
+				}
+				if !sendEvent(ctx, ch, StreamEvent{
+					Type:       EventToolCallStart,
+					ToolName:   rp.ToolName,
+					ToolCallID: rp.ToolCallID,
+					Input:      rp.Input,
+				}) {
+					aborted = true
+				}
+			case *sdk.StreamToolResultPart:
+				stepNumber++
+				if !sendEvent(ctx, ch, StreamEvent{
+					Type:       EventToolCallEnd,
+					ToolName:   rp.ToolName,
+					ToolCallID: rp.ToolCallID,
+					Input:      rp.Input,
+					Result:     rp.Output,
+				}) || !sendEvent(ctx, ch, StreamEvent{
+					Type:           EventProgress,
+					StepNumber:     stepNumber,
+					ToolName:       rp.ToolName,
+					ProgressStatus: "tool_result",
+				}) {
+					aborted = true
+				}
+			case *sdk.StreamToolErrorPart:
+				if !sendEvent(ctx, ch, StreamEvent{
+					Type:       EventToolCallEnd,
+					ToolName:   rp.ToolName,
+					ToolCallID: rp.ToolCallID,
+					Error:      rp.Error.Error(),
+				}) {
+					aborted = true
+				}
+			case *sdk.ErrorPart:
+				sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: rp.Error.Error()})
+				aborted = true
+			case *sdk.AbortPart:
+				aborted = true
+			case *sdk.FinishPart:
+				// handled after loop
+			}
+			if aborted {
+				break
+			}
+		}
+		return retryResult, aborted
+	}
+	// All retry attempts failed
+	return prevResult, true
+}
+
+// sleepWithContext sleeps for the given duration or returns context error.
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

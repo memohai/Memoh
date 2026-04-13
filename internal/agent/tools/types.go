@@ -21,9 +21,10 @@ type SkillDetail struct {
 type StreamEventType string
 
 const (
-	StreamEventAttachment StreamEventType = "attachment"
-	StreamEventReaction   StreamEventType = "reaction"
-	StreamEventSpeech     StreamEventType = "speech"
+	StreamEventAttachment     StreamEventType = "attachment"
+	StreamEventReaction       StreamEventType = "reaction"
+	StreamEventSpeech         StreamEventType = "speech"
+	StreamEventSpawnHeartbeat StreamEventType = "spawn_heartbeat"
 )
 
 // ToolStreamEvent is a side-effect event emitted by a tool targeting the

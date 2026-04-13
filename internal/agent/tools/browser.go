@@ -173,7 +173,7 @@ func (p *BrowserProvider) execAction(ctx context.Context, session SessionContext
 	if files, ok := args["files"].([]any); ok && len(files) > 0 {
 		payload["files"] = files
 	}
-	return p.doGatewayAction(ctx, botID, contextID, payload)
+	return p.doGatewayAction(ctx, session, botID, contextID, payload)
 }
 
 func (p *BrowserProvider) execObserve(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
@@ -199,7 +199,7 @@ func (p *BrowserProvider) execObserve(ctx context.Context, session SessionContex
 	if v, ok := args["full_page"].(bool); ok {
 		payload["full_page"] = v
 	}
-	return p.doGatewayAction(ctx, botID, contextID, payload)
+	return p.doGatewayAction(ctx, session, botID, contextID, payload)
 }
 
 func (p *BrowserProvider) ensureContext(ctx context.Context, botID, contextID string, bc browsercontexts.BrowserContext) error {
@@ -242,7 +242,7 @@ func (p *BrowserProvider) ensureContext(ctx context.Context, botID, contextID st
 	return nil
 }
 
-func (p *BrowserProvider) doGatewayAction(ctx context.Context, botID, contextID string, payload map[string]any) (any, error) {
+func (p *BrowserProvider) doGatewayAction(ctx context.Context, session SessionContext, botID, contextID string, payload map[string]any) (any, error) {
 	body, _ := json.Marshal(payload)
 	actionURL := fmt.Sprintf("%s/context/%s/action", p.gatewayBaseURL, contextID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, actionURL, bytes.NewReader(body))
@@ -272,31 +272,33 @@ func (p *BrowserProvider) doGatewayAction(ctx context.Context, botID, contextID 
 		return nil, fmt.Errorf("%s", errMsg)
 	}
 	if b64, ok := gwResp.Data["screenshot"].(string); ok && b64 != "" {
-		return p.buildScreenshotResult(ctx, botID, b64), nil
+		return p.buildScreenshotResult(ctx, botID, b64, session), nil
 	}
 	return gwResp.Data, nil
 }
 
 const browserScreenshotDir = "/data/browser-screenshots"
 
-func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base64Data string) any {
+func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base64Data string, session SessionContext) any {
 	mimeType := "image/png"
 	imgBytes, err := base64.StdEncoding.DecodeString(base64Data)
 	if err != nil {
 		return map[string]any{
 			"content": []map[string]any{
-				{"type": "text", "text": "Screenshot captured (failed to decode for saving)"},
-				{"type": "image", "data": base64Data, "mimeType": mimeType},
+				{"type": "text", "text": "Screenshot captured (failed to decode image data)"},
 			},
 		}
 	}
+
+	// Emit the screenshot as attachment for user delivery (once).
+	p.emitScreenshotAttachment(session, base64Data, mimeType, int64(len(imgBytes)))
+
 	containerPath := fmt.Sprintf("%s/%d.png", browserScreenshotDir, time.Now().UnixMilli())
 	client, clientErr := p.containers.MCPClient(ctx, botID)
 	if clientErr != nil {
 		return map[string]any{
 			"content": []map[string]any{
-				{"type": "text", "text": "Screenshot captured (container not reachable, not saved to disk)"},
-				{"type": "image", "data": base64Data, "mimeType": mimeType},
+				{"type": "text", "text": "Screenshot captured and sent to user (container not reachable, not saved to disk)"},
 			},
 		}
 	}
@@ -305,17 +307,33 @@ func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base
 	if writeErr := client.WriteFile(ctx, containerPath, imgBytes); writeErr != nil {
 		return map[string]any{
 			"content": []map[string]any{
-				{"type": "text", "text": fmt.Sprintf("Screenshot captured (failed to save: %s)", writeErr.Error())},
-				{"type": "image", "data": base64Data, "mimeType": mimeType},
+				{"type": "text", "text": fmt.Sprintf("Screenshot captured and sent to user (failed to save: %s)", writeErr.Error())},
 			},
 		}
 	}
 	return map[string]any{
 		"content": []map[string]any{
-			{"type": "text", "text": fmt.Sprintf("Screenshot saved to %s", containerPath)},
-			{"type": "image", "data": base64Data, "mimeType": mimeType},
+			{"type": "text", "text": fmt.Sprintf("Screenshot saved to %s and sent to user", containerPath)},
 		},
 	}
+}
+
+// emitScreenshotAttachment pushes the screenshot as an image attachment into the
+// agent stream so it gets delivered to the user's chat.
+func (*BrowserProvider) emitScreenshotAttachment(session SessionContext, base64Data, mimeType string, size int64) {
+	if session.Emitter == nil {
+		return
+	}
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)
+	session.Emitter(ToolStreamEvent{
+		Type: StreamEventAttachment,
+		Attachments: []Attachment{{
+			Type: "image",
+			URL:  dataURL,
+			Mime: mimeType,
+			Size: size,
+		}},
+	})
 }
 
 func (p *BrowserProvider) execRemoteSession(ctx context.Context, session SessionContext, args map[string]any) (any, error) {

@@ -6,7 +6,7 @@ import vue from 'eslint-plugin-vue'
 export default [
   ...tseslint.configs.recommended,
   ...vue.configs['flat/recommended'],
-  { ignores: ['**/node_modules/**', '**/dist/**', '**/cache/**', 'packages/sdk/src/**'] },
+  { ignores: ['**/node_modules/**', '**/dist/**', '**/cache/**', '**/target/**', 'packages/sdk/src/**'] },
   {
     files: ['packages/**/*.{js,jsx,ts,tsx}', 'apps/**/*.{js,jsx,ts,tsx}'],
     languageOptions: {
@@ -56,6 +56,8 @@ export default [
     files: [
       'apps/web/src/pages/chat/components/tool-call-edit.vue',
       'apps/web/src/pages/chat/components/tool-call-write.vue',
+      'apps/web/src/pages/home/components/tool-call-edit.vue',
+      'apps/web/src/pages/home/components/tool-call-write.vue',
     ],
     rules: {
       'vue/no-v-html': 'off',

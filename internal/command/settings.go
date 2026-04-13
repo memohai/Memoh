@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -104,6 +105,13 @@ func settingsUpdateUsage() string {
 		"- --heartbeat_interval <minutes>\n" +
 		"- --chat_model_id <id>\n" +
 		"- --heartbeat_model_id <id>"
+}
+
+func (h *Handler) getBotSettings(cc CommandContext) (settings.Settings, error) {
+	if h.settingsService == nil {
+		return settings.Settings{}, errors.New("settings service is not available")
+	}
+	return h.settingsService.GetBot(cc.Ctx, cc.BotID)
 }
 
 // resolveModelName resolves a model UUID to "model_name (provider_name)".

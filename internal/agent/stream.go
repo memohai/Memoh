@@ -21,25 +21,33 @@ const (
 	EventSpeech           StreamEventType = "speech_delta"
 	EventAgentEnd         StreamEventType = "agent_end"
 	EventAgentAbort       StreamEventType = "agent_abort"
+	EventRetry            StreamEventType = "retry"
+	EventProgress         StreamEventType = "progress"
 	EventError            StreamEventType = "error"
 )
 
 // StreamEvent is emitted by the agent during streaming.
 type StreamEvent struct {
-	Type        StreamEventType  `json:"type"`
-	Delta       string           `json:"delta,omitempty"`
-	ToolName    string           `json:"toolName,omitempty"`
-	ToolCallID  string           `json:"toolCallId,omitempty"`
-	Input       any              `json:"input,omitempty"`
-	Progress    any              `json:"progress,omitempty"`
-	Result      any              `json:"result,omitempty"`
-	Attachments []FileAttachment `json:"attachments,omitempty"`
-	Reactions   []ReactionItem   `json:"reactions,omitempty"`
-	Speeches    []SpeechItem     `json:"speeches,omitempty"`
-	Messages    json.RawMessage  `json:"messages,omitempty"`
-	Usage       json.RawMessage  `json:"usage,omitempty"`
-	Reasoning   []string         `json:"reasoning,omitempty"`
-	Error       string           `json:"error,omitempty"`
+	Type           StreamEventType  `json:"type"`
+	Delta          string           `json:"delta,omitempty"`
+	ToolName       string           `json:"toolName,omitempty"`
+	ToolCallID     string           `json:"toolCallId,omitempty"`
+	Input          any              `json:"input,omitempty"`
+	Progress       any              `json:"progress,omitempty"`
+	Result         any              `json:"result,omitempty"`
+	Attachments    []FileAttachment `json:"attachments,omitempty"`
+	Reactions      []ReactionItem   `json:"reactions,omitempty"`
+	Speeches       []SpeechItem     `json:"speeches,omitempty"`
+	Messages       json.RawMessage  `json:"messages,omitempty"`
+	Usage          json.RawMessage  `json:"usage,omitempty"`
+	Reasoning      []string         `json:"reasoning,omitempty"`
+	Error          string           `json:"error,omitempty"`
+	Attempt        int              `json:"attempt,omitempty"`
+	MaxAttempt     int              `json:"maxAttempt,omitempty"`
+	RetryError     string           `json:"retryError,omitempty"`
+	StepNumber     int              `json:"stepNumber,omitempty"`
+	TotalSteps     int              `json:"totalSteps,omitempty"`
+	ProgressStatus string           `json:"progressStatus,omitempty"`
 }
 
 // IsTerminal returns true for events that signal end of stream.

@@ -108,7 +108,7 @@ func jsonRPCSuccessResponse(id sdkjsonrpc.ID, payload map[string]any) *sdkjsonrp
 }
 
 func newTestMCPSession(conn *fakeMCPConnection) *mcpSession {
-	readCtx, cancelRead := context.WithCancel(context.Background())
+	readCtx, cancelRead := context.WithCancel(context.Background()) //nolint:gosec // G118: cancelRead is stored in mcpSession.cancelRead
 	return &mcpSession{
 		pending:    map[string]chan *sdkjsonrpc.Response{},
 		conn:       conn,

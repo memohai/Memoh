@@ -122,7 +122,7 @@ func (a *Adapter) StartReceiving(ctx context.Context, config map[string]any, han
 	providerID, _ := config["_provider_id"].(string)
 	domain, _ := config["domain"].(string)
 
-	rctx, cancel := context.WithCancel(ctx)
+	rctx, cancel := context.WithCancel(ctx) //nolint:gosec // G118: cancel is stored in conn.cancel and called by Stop()
 	conn := &pollConn{
 		logger:       a.logger,
 		client:       newClient(config),

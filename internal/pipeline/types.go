@@ -45,6 +45,8 @@ type Attachment struct {
 	AltText      string `json:"alt_text,omitempty"`
 	// FilePath is the workspace path where the attachment is stored.
 	FilePath string `json:"file_path,omitempty"`
+	// ContentHash is the media-store content hash for persisted attachments.
+	ContentHash string `json:"content_hash,omitempty"`
 }
 
 // ForwardInfo describes a forwarded message origin.

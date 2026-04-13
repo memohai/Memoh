@@ -24,14 +24,15 @@ import (
 )
 
 const (
-	readMaxLines     = 200
-	readMaxBytes     = 5120
-	readMaxLineLen   = 1000
-	listMaxEntries   = 200
-	binaryProbeBytes = 8 * 1024
-	rawChunkSize     = 64 * 1024
-	defaultWorkDir   = "/data"
-	defaultTimeout   = 30
+	readMaxLines      = 2000
+	readMaxBytes      = 0 // 0 = no byte limit (line count only)
+	readMaxLineLen    = 0 // 0 = no per-line truncation
+	listMaxEntries    = 200
+	binaryProbeBytes  = 8 * 1024
+	rawChunkSize      = 64 * 1024
+	defaultWorkDir    = "/data"
+	defaultTimeout    = 30
+	defaultPTYTimeout = 5 * 60 // 5 minutes max for PTY sessions (agent tool calls)
 )
 
 type containerServer struct {
@@ -89,12 +90,12 @@ func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*p
 		}
 
 		line := scanner.Text()
-		if utf8.RuneCountInString(line) > readMaxLineLen {
+		if readMaxLineLen > 0 && utf8.RuneCountInString(line) > readMaxLineLen {
 			line = truncateRunes(line, readMaxLineLen) + "..."
 		}
 
 		entry := line + "\n"
-		if bytesWritten+len(entry) > readMaxBytes {
+		if readMaxBytes > 0 && bytesWritten+len(entry) > readMaxBytes {
 			break
 		}
 		out.WriteString(entry)
@@ -288,11 +289,18 @@ func execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) erro
 		workDir = defaultWorkDir
 	}
 
+	timeout := int(firstMsg.GetTimeoutSeconds())
+	if timeout <= 0 {
+		timeout = defaultPTYTimeout
+	}
+	ctx, cancel := context.WithTimeout(stream.Context(), time.Duration(timeout)*time.Second)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	if isBarePath(command) {
-		cmd = exec.CommandContext(stream.Context(), command) //nolint:gosec // G204: intentional
+		cmd = exec.CommandContext(ctx, command) //nolint:gosec // G204: intentional
 	} else {
-		cmd = exec.CommandContext(stream.Context(), "/bin/sh", "-c", command) //nolint:gosec // G204: intentional
+		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command) //nolint:gosec // G204: intentional
 	}
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)

@@ -27,6 +27,7 @@ type ResolveRunConfigResult struct {
 // rounds. Implemented by flow.Resolver.
 type RunConfigResolver interface {
 	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
+	InlineImageAttachments(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
 	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
 
@@ -110,7 +111,7 @@ func (d *DiscussDriver) NotifyRC(_ context.Context, sessionID string, rc Rendere
 	d.mu.Lock()
 	sess, ok := d.sessions[sessionID]
 	if !ok {
-		sessCtx, cancel := context.WithCancel(context.Background())
+		sessCtx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in sess.cancel
 		sess = &discussSession{
 			config: config,
 			rcCh:   make(chan RenderedContext, 16),
@@ -256,6 +257,17 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
 
+	// Inline image attachments from new RC segments so the model receives
+	// them as native vision input (ImagePart) on the first encounter.
+	// Subsequent turns only see the file path in the XML rendering.
+	if runConfig.SupportsImageInput && d.deps.Resolver != nil {
+		imageRefs := extractNewImageRefs(rc, sess.lastProcessedMs)
+		if len(imageRefs) > 0 {
+			imageParts := d.deps.Resolver.InlineImageAttachments(ctx, cfg.BotID, imageRefs)
+			injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
+		}
+	}
+
 	isMentioned := wasRecentlyMentioned(rc, sess.lastProcessedMs)
 	lateBinding := buildLateBindingPrompt(isMentioned)
 	runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(lateBinding))
@@ -373,6 +385,41 @@ func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string)
 		})
 	}
 	return trs
+}
+
+// extractNewImageRefs collects ImageAttachmentRef entries from RC segments
+// that arrived after afterMs (i.e. new since the last LLM call).
+func extractNewImageRefs(rc RenderedContext, afterMs int64) []ImageAttachmentRef {
+	var refs []ImageAttachmentRef
+	for _, seg := range rc {
+		if seg.ReceivedAtMs > afterMs && !seg.IsMyself {
+			refs = append(refs, seg.ImageRefs...)
+		}
+	}
+	return refs
+}
+
+// injectImagePartsIntoLastUserMessage appends ImageParts to the last user
+// message in msgs so the model receives inline vision input.
+func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePart) {
+	if len(parts) == 0 {
+		return
+	}
+	extra := make([]sdk.MessagePart, 0, len(parts))
+	for _, p := range parts {
+		if strings.TrimSpace(p.Image) != "" {
+			extra = append(extra, p)
+		}
+	}
+	if len(extra) == 0 {
+		return
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == sdk.MessageRoleUser {
+			msgs[i].Content = append(msgs[i].Content, extra...)
+			return
+		}
+	}
 }
 
 func wasRecentlyMentioned(rc RenderedContext, afterMs int64) bool {

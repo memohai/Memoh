@@ -188,7 +188,7 @@ func (h *MessageHandler) fillAssetMimeFromStorage(ctx context.Context, botID str
 	}
 	for i := range messages {
 		for j := range messages[i].Assets {
-			a := &messages[i].Assets[j]
+			a := &messages[i].Assets[j] //nolint:gosec // G602: j is bounded by range loop
 			if strings.TrimSpace(a.ContentHash) == "" {
 				continue
 			}

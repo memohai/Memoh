@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
 	"github.com/memohai/memoh/internal/logger"
@@ -49,7 +50,7 @@ func initDataDir() {
 		if err != nil {
 			continue
 		}
-		if err := os.WriteFile(dst, data, fs.FileMode(0o644)); err != nil {
+		if err := os.WriteFile(dst, data, fs.FileMode(0o644)); err != nil { //nolint:gosec // G703: dst is built from filepath.Join(defaultWorkDir, e.Name()) where e comes from os.ReadDir
 			logger.Warn("failed to seed template", slog.String("file", e.Name()), slog.Any("error", err))
 		}
 	}
@@ -91,7 +92,21 @@ func main() {
 		return
 	}
 
-	srv := grpc.NewServer()
+	srv := grpc.NewServer(
+		grpc.MaxRecvMsgSize(16*1024*1024),
+		grpc.MaxSendMsgSize(16*1024*1024),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle:     5 * time.Minute,
+			MaxConnectionAge:      30 * time.Minute,
+			MaxConnectionAgeGrace: 10 * time.Second,
+			Time:                  60 * time.Second,
+			Timeout:               15 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
 	pb.RegisterContainerServiceServer(srv, &containerServer{})
 	reflection.Register(srv)
 

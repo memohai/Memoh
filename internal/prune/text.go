@@ -8,8 +8,8 @@ import (
 
 const (
 	DefaultMarker   = "[memoh pruned]"
-	DefaultMaxBytes = 10 * 1024
-	DefaultMaxLines = 250
+	DefaultMaxBytes = 64 * 1024
+	DefaultMaxLines = 2000
 )
 
 type Config struct {

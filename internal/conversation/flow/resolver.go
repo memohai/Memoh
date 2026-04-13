@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,6 +77,7 @@ type Resolver struct {
 	skillLoader       SkillLoader
 	assetLoader       gatewayAssetLoader
 	pipeline          *pipelinepkg.Pipeline
+	streamHTTPClient  *http.Client
 	timeout           time.Duration
 	clockLocation     *time.Location
 	logger            *slog.Logger
@@ -99,17 +102,37 @@ func NewResolver(
 	if clockLocation == nil {
 		clockLocation = time.UTC
 	}
+	// HTTP client with timeouts for LLM provider streaming.
+	// - DialTimeout: fail fast on connection issues
+	// - ResponseHeaderTimeout: catch servers that accept TCP but never respond
+	// - Timeout: overall request lifetime cap (prevents stuck SSE body reads)
+	streamHTTPClient := &http.Client{
+		Timeout: 10 * time.Minute, // overall cap, matches resolver timeout
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       90 * time.Second,
+		},
+	}
+
 	return &Resolver{
-		agent:           a,
-		modelsService:   modelsService,
-		queries:         queries,
-		conversationSvc: conversationSvc,
-		messageService:  messageService,
-		settingsService: settingsService,
-		accountService:  accountService,
-		timeout:         timeout,
-		clockLocation:   clockLocation,
-		logger:          log.With(slog.String("service", "conversation_resolver")),
+		agent:            a,
+		modelsService:    modelsService,
+		queries:          queries,
+		conversationSvc:  conversationSvc,
+		messageService:   messageService,
+		settingsService:  settingsService,
+		accountService:   accountService,
+		streamHTTPClient: streamHTTPClient,
+		timeout:          timeout,
+		clockLocation:    clockLocation,
+		logger:           log.With(slog.String("service", "conversation_resolver")),
 	}
 }
 
@@ -146,6 +169,39 @@ func (r *Resolver) Pipeline() *pipelinepkg.Pipeline {
 	return r.pipeline
 }
 
+// InlineImageAttachments resolves image content hashes to sdk.ImagePart values
+// using the configured asset loader. Intended for the discuss driver to inline
+// images from new RC segments before calling the LLM.
+func (r *Resolver) InlineImageAttachments(ctx context.Context, botID string, refs []pipelinepkg.ImageAttachmentRef) []sdk.ImagePart {
+	if r == nil || r.assetLoader == nil || len(refs) == 0 {
+		return nil
+	}
+	var parts []sdk.ImagePart
+	for _, ref := range refs {
+		contentHash := strings.TrimSpace(ref.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		dataURL, mime, err := r.inlineAssetAsDataURL(ctx, botID, contentHash, "image", strings.TrimSpace(ref.Mime))
+		if err != nil {
+			if r.logger != nil {
+				r.logger.Warn(
+					"inline discuss image attachment failed",
+					slog.Any("error", err),
+					slog.String("bot_id", botID),
+					slog.String("content_hash", contentHash),
+				)
+			}
+			continue
+		}
+		parts = append(parts, sdk.ImagePart{
+			Image:     dataURL,
+			MediaType: mime,
+		})
+	}
+	return parts
+}
+
 type usageInfo struct {
 	InputTokens  *int `json:"inputTokens"`
 	OutputTokens *int `json:"outputTokens"`
@@ -157,6 +213,7 @@ type resolvedContext struct {
 	provider        sqlc.Provider
 	query           string // headerified query
 	injectedRecords *[]conversation.InjectedMessageRecord
+	estimatedTokens int // estimated input token count for compaction
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
@@ -185,9 +242,12 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		ReasoningEffort:   req.ReasoningEffort,
 	})
 	if err != nil {
+		r.logger.Error("resolve: buildBaseRunConfig failed",
+			slog.String("bot_id", req.BotID),
+			slog.Any("error", err),
+		)
 		return resolvedContext{}, err
 	}
-
 	memoryMsg := r.loadMemoryContextMessage(ctx, req)
 	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
 	if memoryMsg != nil {
@@ -206,18 +266,65 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
+	botSettings, _ := r.loadBotSettings(ctx, req.BotID)
+	contextTokenBudget := 0
+	if botSettings.ContextTokenBudget > 0 {
+		contextTokenBudget = botSettings.ContextTokenBudget
+	}
+
 	var messages []conversation.ModelMessage
+	var estimatedTokens int
 	if usePipeline {
-		messages = r.buildMessagesFromPipeline(ctx, req)
+		messages = r.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
 	} else if r.conversationSvc != nil {
 		loaded, loadErr := r.loadMessages(ctx, req.ChatID, req.SessionID, defaultMaxContextMinutes)
 		if loadErr != nil {
+			r.logger.Error("resolve: loadMessages failed",
+				slog.String("bot_id", req.BotID),
+				slog.Any("error", loadErr),
+			)
 			return resolvedContext{}, loadErr
 		}
 		loaded = pruneHistoryForGateway(loaded)
 		loaded = dedupePersistedCurrentUserMessage(loaded, req)
 		loaded = r.replaceCompactedMessages(ctx, loaded)
-		messages = trimMessagesByTokens(r.logger, loaded, 0)
+		messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
+		// When context reaches 70% of the contextTokenBudget (the user-configured
+		// budget cap), run synchronous compaction before sending the request.
+		// contextTokenBudget is the authoritative limit for how much context
+		// the user wants to send to the LLM. We compact at 70% to keep the
+		// context healthy and avoid edge-case timeouts.
+		compactionThreshold := 0
+		if contextTokenBudget > 0 {
+			compactionThreshold = contextTokenBudget * 70 / 100
+		}
+		if compactionThreshold > 0 && estimatedTokens >= compactionThreshold {
+			r.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
+				slog.String("bot_id", req.BotID),
+				slog.Int("estimated_tokens", estimatedTokens),
+				slog.Int("context_token_budget", contextTokenBudget),
+				slog.Int("compaction_threshold", compactionThreshold),
+			)
+			r.runCompactionSync(ctx, req, estimatedTokens)
+			// Reload messages after compaction.
+			loaded, loadErr = r.loadMessages(ctx, req.ChatID, req.SessionID, defaultMaxContextMinutes)
+			if loadErr != nil {
+				r.logger.Error("resolve: reload messages after compaction failed",
+					slog.String("bot_id", req.BotID),
+					slog.Any("error", loadErr),
+				)
+				return resolvedContext{}, loadErr
+			}
+			loaded = pruneHistoryForGateway(loaded)
+			loaded = dedupePersistedCurrentUserMessage(loaded, req)
+			loaded = r.replaceCompactedMessages(ctx, loaded)
+			messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
+			// Remove tool messages from the recent context — they are large
+			// and unnecessary when we already have a summary. Keep only
+			// user/assistant conversation turns.
+			messages = stripToolMessages(messages)
+		}
+		_ = estimatedTokens
 	}
 	if memoryMsg != nil {
 		messages = append(messages, *memoryMsg)
@@ -226,6 +333,12 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		messages = append(messages, reqMessages...)
 	}
 	messages = sanitizeMessages(messages)
+	// Strip tool messages and tool-call-only assistant messages from context.
+	// Tool outputs are large and waste tokens; the LLM doesn't need raw tool
+	// results when summaries and memory tools are available for lookup.
+	if len(messages) > 10 {
+		messages = stripToolMessages(messages)
+	}
 
 	displayName := r.resolveDisplayName(ctx, req)
 	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)
@@ -294,6 +407,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		provider:        provider,
 		query:           headerifiedQuery,
 		injectedRecords: injectedRecords,
+		estimatedTokens: estimatedTokens,
 	}, nil
 }
 
@@ -398,6 +512,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		APIKey:          creds.APIKey,
 		CodexAccountID:  creds.CodexAccountID,
 		BaseURL:         providers.ProviderConfigString(provider, "base_url"),
+		HTTPClient:      r.streamHTTPClient,
 		ReasoningConfig: reasoningConfig,
 	})
 

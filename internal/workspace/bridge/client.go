@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -45,6 +46,15 @@ func NewClientFromConn(conn *grpc.ClientConn) *Client {
 func Dial(_ context.Context, target string) (*Client, error) {
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                30 * time.Second, // ping every 30s if idle
+			Timeout:             10 * time.Second, // wait 10s for ping ack
+			PermitWithoutStream: true,             // ping even with no active RPC
+		}),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(16*1024*1024),
+			grpc.MaxCallSendMsgSize(16*1024*1024),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("grpc dial %s: %w", target, err)

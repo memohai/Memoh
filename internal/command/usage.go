@@ -18,6 +18,9 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 		Name:  "summary",
 		Usage: "summary - Token usage summary (last 7 days)",
 		Handler: func(cc CommandContext) (string, error) {
+			if h.queries == nil {
+				return "Usage info is not available.", nil
+			}
 			botUUID, err := parseBotUUID(cc.BotID)
 			if err != nil {
 				return "", err
@@ -89,6 +92,9 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 		Name:  "by-model",
 		Usage: "by-model - Token usage grouped by model",
 		Handler: func(cc CommandContext) (string, error) {
+			if h.queries == nil {
+				return "Usage info is not available.", nil
+			}
 			botUUID, err := parseBotUUID(cc.BotID)
 			if err != nil {
 				return "", err

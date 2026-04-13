@@ -21,6 +21,10 @@ import (
 
 const heartbeatTokenTTL = 10 * time.Minute
 
+// heartbeatRunTimeout caps how long a single heartbeat execution may take.
+// This prevents unbounded Generate() calls from hanging forever.
+const heartbeatRunTimeout = 5 * time.Minute
+
 // SessionCreator creates sessions for heartbeat runs.
 type SessionCreator interface {
 	CreateSession(ctx context.Context, botID, sessionType string) (string, error)
@@ -239,7 +243,9 @@ func (s *Service) scheduleJob(ctx context.Context, cfg Config) error {
 	}
 	spec := fmt.Sprintf("@every %dm", cfg.Interval)
 	job := func() {
-		s.runHeartbeat(context.WithoutCancel(ctx), cfg)
+		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), heartbeatRunTimeout)
+		defer runCancel()
+		s.runHeartbeat(runCtx, cfg)
 	}
 	entryID, err := s.cron.AddFunc(spec, job)
 	if err != nil {

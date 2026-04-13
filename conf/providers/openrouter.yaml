@@ -250,7 +250,7 @@ models:
       compatibilities: [reasoning]
       context_window: 131072
   - model_id: baidu/ernie-4.5-300b-a47b
-    name: "Baidu: ERNIE 4.5 300B A47B "
+    name: "Baidu: ERNIE 4.5 300B A47B"
     type: chat
     config:
       context_window: 123000
@@ -261,7 +261,7 @@ models:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 30000
   - model_id: baidu/ernie-4.5-vl-424b-a47b
-    name: "Baidu: ERNIE 4.5 VL 424B A47B "
+    name: "Baidu: ERNIE 4.5 VL 424B A47B"
     type: chat
     config:
       compatibilities: [vision, reasoning]
@@ -291,7 +291,7 @@ models:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
   - model_id: bytedance/ui-tars-1.5-7b
-    name: "ByteDance: UI-TARS 7B "
+    name: "ByteDance: UI-TARS 7B"
     type: chat
     config:
       compatibilities: [vision]
@@ -1512,7 +1512,7 @@ models:
     config:
       context_window: 32768
   - model_id: qwen/qwen-max
-    name: "Qwen: Qwen-Max "
+    name: "Qwen: Qwen-Max"
     type: chat
     config:
       compatibilities: [tool-call]
@@ -1989,7 +1989,7 @@ models:
       compatibilities: [tool-call, reasoning]
       context_window: 1048576
   - model_id: z-ai/glm-4-32b
-    name: "Z.ai: GLM 4 32B "
+    name: "Z.ai: GLM 4 32B"
     type: chat
     config:
       compatibilities: [tool-call]

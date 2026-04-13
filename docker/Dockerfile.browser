@@ -39,6 +39,6 @@ RUN for core in $(echo "$BROWSER_CORES" | tr ',' ' '); do \
 EXPOSE 8083
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl -sf http://127.0.0.1:8083/health || exit 1
+    CMD curl -sf http://$(hostname):8083/health || exit 1
 
 CMD ["bun", "run", "dist/index.js"]

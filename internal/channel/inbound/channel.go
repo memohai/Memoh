@@ -71,6 +71,7 @@ type ttsModelResolver interface {
 // SessionEnsurer resolves or creates an active session for a route.
 type SessionEnsurer interface {
 	EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
+	GetActiveSession(ctx context.Context, routeID string) (SessionResult, error)
 	// CreateNewSession always creates a fresh session and sets it as the
 	// active session for the given route, replacing any previous one.
 	// sessionType defaults to "chat" if empty.
@@ -298,11 +299,23 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if isStopCommand(cmdText) && isDirectedAtBot(msg) {
 		return p.handleStopCommand(ctx, cfg, msg, sender, identity)
 	}
+	if isStatusCommand(cmdText) && isDirectedAtBot(msg) {
+		return p.handleStatusCommand(ctx, cfg, msg, sender, identity)
+	}
 
 	// Skip generic command handler for mode-prefix commands (/btw, /now, /next)
 	// so they pass through to mode detection below.
 	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && !IsModeCommand(cmdText) && isDirectedAtBot(msg) {
-		reply, err := p.commandHandler.Execute(ctx, strings.TrimSpace(identity.BotID), strings.TrimSpace(identity.ChannelIdentityID), cmdText)
+		reply, err := p.commandHandler.ExecuteWithInput(ctx, command.ExecuteInput{
+			BotID:             strings.TrimSpace(identity.BotID),
+			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
+			UserID:            strings.TrimSpace(identity.UserID),
+			Text:              cmdText,
+			ChannelType:       msg.Channel.String(),
+			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
+			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
+			ThreadID:          extractThreadID(msg),
+		})
 		if err != nil {
 			reply = "Error: " + err.Error()
 		}
@@ -347,17 +360,25 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	// Resolve or auto-create the active session for this route.
+	// Retry up to 3 times with short backoff to avoid persisting messages with NULL session_id.
 	sessionID := ""
 	sessionType := ""
 	if p.sessionEnsurer != nil {
-		sess, sessErr := p.sessionEnsurer.EnsureActiveSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
-		if sessErr != nil {
-			if p.logger != nil {
-				p.logger.Warn("ensure active session failed", slog.Any("error", sessErr))
+		for attempt := range 3 {
+			sess, sessErr := p.sessionEnsurer.EnsureActiveSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String())
+			if sessErr == nil {
+				sessionID = sess.ID
+				sessionType = sess.Type
+				break
 			}
-		} else {
-			sessionID = sess.ID
-			sessionType = sess.Type
+			if p.logger != nil {
+				p.logger.Warn("ensure active session failed",
+					slog.Int("attempt", attempt+1),
+					slog.Any("error", sessErr))
+			}
+			if attempt < 2 {
+				time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+			}
 		}
 	}
 
@@ -404,7 +425,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
 			p.replayPipelineSession(ctx, sessionID)
 		}
-		event := pipelinepkg.AdaptInbound(msg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
+		pipelineMsg := msg
+		pipelineMsg.Message = msg.Message
+		pipelineMsg.Message.Attachments = resolvedAttachments
+		event := pipelinepkg.AdaptInbound(pipelineMsg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
 		if p.eventStore != nil {
 			eid, persistErr := p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event)
 			if persistErr != nil {
@@ -1967,7 +1991,7 @@ func extractStorageKey(accessPath string, _ string) string {
 // natively (e.g. web). Wrapping these with a tee would cause duplicate events.
 func isLocalChannelType(ct channel.ChannelType) bool {
 	s := strings.ToLower(strings.TrimSpace(string(ct)))
-	return s == "local"
+	return s == "web" || s == "cli"
 }
 
 // replayPipelineSession loads persisted events from the DB and replays them
@@ -2489,6 +2513,18 @@ func isNewSessionCommand(cmdText string) bool {
 	return parsed.Resource == "new"
 }
 
+func isStatusCommand(cmdText string) bool {
+	extracted := command.ExtractCommandText(cmdText)
+	if extracted == "" {
+		return false
+	}
+	parsed, err := command.Parse(extracted)
+	if err != nil {
+		return false
+	}
+	return parsed.Resource == "status"
+}
+
 // resolveNewSessionType determines the session type for /new command.
 // /new chat → chat, /new discuss → discuss, /new (no arg) → default by context.
 // WebUI (local channel) always defaults to chat.
@@ -2609,5 +2645,85 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	return sender.Send(ctx, channel.OutboundMessage{
 		Target:  target,
 		Message: channel.Message{Text: fmt.Sprintf("New %s conversation started.", modeLabel)},
+	})
+}
+
+func (p *ChannelInboundProcessor) handleStatusCommand(
+	ctx context.Context,
+	cfg channel.ChannelConfig,
+	msg channel.InboundMessage,
+	sender channel.StreamReplySender,
+	identity InboundIdentity,
+) error {
+	target := strings.TrimSpace(msg.ReplyTarget)
+	if target == "" {
+		return errors.New("reply target missing for /status command")
+	}
+	if p.routeResolver == nil {
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: route resolver not configured."},
+		})
+	}
+	if p.commandHandler == nil {
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: command handler not configured."},
+		})
+	}
+
+	threadID := extractThreadID(msg)
+	routeMetadata := buildRouteMetadata(msg, identity)
+	p.enrichConversationAvatar(ctx, cfg, msg, routeMetadata)
+	resolved, err := p.routeResolver.ResolveConversation(ctx, route.ResolveInput{
+		BotID:             identity.BotID,
+		Platform:          msg.Channel.String(),
+		ConversationID:    msg.Conversation.ID,
+		ThreadID:          threadID,
+		ConversationType:  msg.Conversation.Type,
+		ChannelIdentityID: identity.UserID,
+		ChannelConfigID:   identity.ChannelConfigID,
+		ReplyTarget:       target,
+		Metadata:          routeMetadata,
+	})
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("resolve route for /status command failed", slog.Any("error", err))
+		}
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  target,
+			Message: channel.Message{Text: "Error: failed to resolve conversation route."},
+		})
+	}
+
+	sessionID := ""
+	if p.sessionEnsurer != nil {
+		sess, sessErr := p.sessionEnsurer.GetActiveSession(ctx, resolved.RouteID)
+		if sessErr == nil {
+			sessionID = strings.TrimSpace(sess.ID)
+		} else if p.logger != nil {
+			p.logger.Debug("resolve active session for /status command failed", slog.Any("error", sessErr))
+		}
+	}
+
+	reply, execErr := p.commandHandler.ExecuteWithInput(ctx, command.ExecuteInput{
+		BotID:             strings.TrimSpace(identity.BotID),
+		ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
+		UserID:            strings.TrimSpace(identity.UserID),
+		Text:              rawTextForCommand(msg, strings.TrimSpace(msg.Message.PlainText())),
+		ChannelType:       msg.Channel.String(),
+		ConversationType:  strings.TrimSpace(msg.Conversation.Type),
+		ConversationID:    strings.TrimSpace(msg.Conversation.ID),
+		ThreadID:          threadID,
+		RouteID:           strings.TrimSpace(resolved.RouteID),
+		SessionID:         sessionID,
+	})
+	if execErr != nil {
+		reply = "Error: " + execErr.Error()
+	}
+
+	return sender.Send(ctx, channel.OutboundMessage{
+		Target:  target,
+		Message: channel.Message{Text: reply},
 	})
 }

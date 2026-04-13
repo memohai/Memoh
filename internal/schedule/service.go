@@ -27,15 +27,16 @@ type SessionCreator interface {
 }
 
 type Service struct {
-	queries        *sqlc.Queries
-	cron           *cron.Cron
-	parser         cron.Parser
-	triggerer      Triggerer
-	sessionCreator SessionCreator
-	jwtSecret      string
-	logger         *slog.Logger
-	mu             sync.Mutex
-	jobs           map[string]cron.EntryID
+	queries         *sqlc.Queries
+	cron            *cron.Cron
+	parser          cron.Parser
+	triggerer       Triggerer
+	sessionCreator  SessionCreator
+	jwtSecret       string
+	logger          *slog.Logger
+	defaultLocation *time.Location
+	mu              sync.Mutex
+	jobs            map[string]cron.EntryID
 }
 
 func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
@@ -46,14 +47,15 @@ func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, se
 	}
 	c := cron.New(cron.WithParser(parser), cron.WithLocation(location))
 	service := &Service{
-		queries:        queries,
-		cron:           c,
-		parser:         parser,
-		triggerer:      triggerer,
-		sessionCreator: sessionCreator,
-		jwtSecret:      runtimeConfig.JwtSecret,
-		logger:         log.With(slog.String("service", "schedule")),
-		jobs:           map[string]cron.EntryID{},
+		queries:         queries,
+		cron:            c,
+		parser:          parser,
+		triggerer:       triggerer,
+		sessionCreator:  sessionCreator,
+		jwtSecret:       runtimeConfig.JwtSecret,
+		logger:          log.With(slog.String("service", "schedule")),
+		defaultLocation: location,
+		jobs:            map[string]cron.EntryID{},
 	}
 	c.Start()
 	return service
@@ -239,6 +241,10 @@ func (s *Service) Trigger(ctx context.Context, scheduleID string) error {
 }
 
 const scheduleTokenTTL = 10 * time.Minute
+
+// scheduleRunTimeout caps how long a single schedule execution may take.
+// This prevents unbounded Generate() calls from hanging forever.
+const scheduleRunTimeout = 5 * time.Minute
 
 func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	if s.triggerer == nil {
@@ -484,14 +490,21 @@ func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error
 		return errors.New("schedule id missing")
 	}
 	job := func() {
-		if err := s.runSchedule(context.WithoutCancel(ctx), toSchedule(schedule)); err != nil {
+		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), scheduleRunTimeout)
+		defer runCancel()
+		if err := s.runSchedule(runCtx, toSchedule(schedule)); err != nil {
 			s.logger.Error("scheduled job failed", slog.String("schedule_id", schedule.ID.String()), slog.Any("error", err))
 		}
 	}
-	entryID, err := s.cron.AddFunc(schedule.Pattern, job)
+
+	// Resolve bot timezone so cron expressions are interpreted in the bot's
+	// configured timezone rather than the system default.
+	loc := s.resolveBotLocation(ctx, schedule.BotID)
+	sched, err := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(schedule.Pattern)
 	if err != nil {
 		return err
 	}
+	entryID := s.cron.Schedule(newLocationSchedule(sched, loc), cron.FuncJob(job))
 	s.mu.Lock()
 	s.jobs[id] = entryID
 	s.mu.Unlock()
@@ -550,4 +563,52 @@ func toUUID(id string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return pgID
+}
+
+// resolveBotLocation returns the bot's configured timezone location, falling
+// back to the system default when the bot has no timezone set or the value is
+// invalid.
+func (s *Service) resolveBotLocation(ctx context.Context, botID pgtype.UUID) *time.Location {
+	if s.queries == nil || !botID.Valid {
+		return s.defaultLocation
+	}
+	row, err := s.queries.GetBotByID(ctx, botID)
+	if err != nil {
+		return s.defaultLocation
+	}
+	if !row.Timezone.Valid {
+		return s.defaultLocation
+	}
+	tz := strings.TrimSpace(row.Timezone.String)
+	if tz == "" {
+		return s.defaultLocation
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		s.logger.Warn("invalid bot timezone for schedule, using default",
+			slog.String("bot_id", botID.String()),
+			slog.String("timezone", tz),
+			slog.Any("error", err),
+		)
+		return s.defaultLocation
+	}
+	return loc
+}
+
+// locationSchedule wraps a cron.Schedule to evaluate Next() in a specific
+// timezone, regardless of the global cron location.
+type locationSchedule struct {
+	inner cron.Schedule
+	loc   *time.Location
+}
+
+func newLocationSchedule(inner cron.Schedule, loc *time.Location) cron.Schedule {
+	if loc == nil {
+		return inner
+	}
+	return &locationSchedule{inner: inner, loc: loc}
+}
+
+func (s *locationSchedule) Next(t time.Time) time.Time {
+	return s.inner.Next(t.In(s.loc))
 }

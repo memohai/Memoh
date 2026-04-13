@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
 type Service struct {
@@ -97,6 +99,17 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if req.CompactionRatio != nil && *req.CompactionRatio >= 1 && *req.CompactionRatio <= 100 {
 		current.CompactionRatio = *req.CompactionRatio
 	}
+	if req.PersistFullToolResults != nil {
+		current.PersistFullToolResults = *req.PersistFullToolResults
+	}
+	timezoneValue := pgtype.Text{}
+	if req.Timezone != nil {
+		normalized, err := normalizeOptionalTimezone(*req.Timezone)
+		if err != nil {
+			return Settings{}, err
+		}
+		timezoneValue = normalized
+	}
 	chatModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.ChatModelID); value != "" {
 		modelID, err := s.resolveModelUUID(ctx, value)
@@ -171,26 +184,38 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		browserContextUUID = ctxID
 	}
+	contextTokenBudgetValue := pgtype.Int4{}
+	if req.ContextTokenBudget != nil && *req.ContextTokenBudget >= 0 {
+		v := *req.ContextTokenBudget
+		if v > math.MaxInt32 {
+			v = math.MaxInt32
+		}
+		contextTokenBudgetValue = pgtype.Int4{Int32: int32(v), Valid: true} //nolint:gosec // G115: clamped above
+	}
+
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
-		ID:                  pgID,
-		Language:            current.Language,
-		ReasoningEnabled:    current.ReasoningEnabled,
-		ReasoningEffort:     current.ReasoningEffort,
-		HeartbeatEnabled:    current.HeartbeatEnabled,
-		HeartbeatInterval:   int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
-		HeartbeatPrompt:     "",
-		CompactionEnabled:   current.CompactionEnabled,
-		CompactionThreshold: int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
-		CompactionRatio:     int32(current.CompactionRatio),     //nolint:gosec // bounded 1-100 above
-		ChatModelID:         chatModelUUID,
-		HeartbeatModelID:    heartbeatModelUUID,
-		CompactionModelID:   compactionModelUUID,
-		TitleModelID:        titleModelUUID,
-		ImageModelID:        imageModelUUID,
-		SearchProviderID:    searchProviderUUID,
-		MemoryProviderID:    memoryProviderUUID,
-		TtsModelID:          ttsModelUUID,
-		BrowserContextID:    browserContextUUID,
+		ID:                     pgID,
+		Timezone:               timezoneValue,
+		Language:               current.Language,
+		ReasoningEnabled:       current.ReasoningEnabled,
+		ReasoningEffort:        current.ReasoningEffort,
+		HeartbeatEnabled:       current.HeartbeatEnabled,
+		HeartbeatInterval:      int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
+		HeartbeatPrompt:        "",
+		CompactionEnabled:      current.CompactionEnabled,
+		CompactionThreshold:    int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
+		CompactionRatio:        int32(current.CompactionRatio),     //nolint:gosec // bounded 1-100 above
+		ChatModelID:            chatModelUUID,
+		HeartbeatModelID:       heartbeatModelUUID,
+		CompactionModelID:      compactionModelUUID,
+		TitleModelID:           titleModelUUID,
+		ImageModelID:           imageModelUUID,
+		SearchProviderID:       searchProviderUUID,
+		MemoryProviderID:       memoryProviderUUID,
+		TtsModelID:             ttsModelUUID,
+		BrowserContextID:       browserContextUUID,
+		ContextTokenBudget:     contextTokenBudgetValue,
+		PersistFullToolResults: current.PersistFullToolResults,
 	})
 	if err != nil {
 		return Settings{}, err
@@ -274,6 +299,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.CompactionEnabled,
 		row.CompactionThreshold,
 		row.CompactionRatio,
+		row.Timezone,
 		row.ChatModelID,
 		row.HeartbeatModelID,
 		row.CompactionModelID,
@@ -283,6 +309,8 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.BrowserContextID,
+		row.ContextTokenBudget,
+		row.PersistFullToolResults,
 	)
 }
 
@@ -296,6 +324,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.CompactionEnabled,
 		row.CompactionThreshold,
 		row.CompactionRatio,
+		row.Timezone,
 		row.ChatModelID,
 		row.HeartbeatModelID,
 		row.CompactionModelID,
@@ -305,6 +334,8 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.BrowserContextID,
+		row.ContextTokenBudget,
+		row.PersistFullToolResults,
 	)
 }
 
@@ -317,6 +348,7 @@ func normalizeBotSettingsFields(
 	compactionEnabled bool,
 	compactionThreshold int32,
 	compactionRatio int32,
+	timezone pgtype.Text,
 	chatModelID pgtype.UUID,
 	heartbeatModelID pgtype.UUID,
 	compactionModelID pgtype.UUID,
@@ -326,8 +358,13 @@ func normalizeBotSettingsFields(
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
 	browserContextID pgtype.UUID,
+	contextTokenBudget pgtype.Int4,
+	persistFullToolResults bool,
 ) Settings {
 	settings := normalizeBotSetting(language, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionRatio)
+	if timezone.Valid {
+		settings.Timezone = timezone.String
+	}
 	if chatModelID.Valid {
 		settings.ChatModelID = uuid.UUID(chatModelID.Bytes).String()
 	}
@@ -355,6 +392,10 @@ func normalizeBotSettingsFields(
 	if browserContextID.Valid {
 		settings.BrowserContextID = uuid.UUID(browserContextID.Bytes).String()
 	}
+	if contextTokenBudget.Valid {
+		settings.ContextTokenBudget = int(contextTokenBudget.Int32)
+	}
+	settings.PersistFullToolResults = persistFullToolResults
 	return settings
 }
 
@@ -401,4 +442,16 @@ func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.
 		return pgtype.UUID{}, fmt.Errorf("%w: %s", ErrModelIDAmbiguous, modelID)
 	}
 	return rows[0].ID, nil
+}
+
+func normalizeOptionalTimezone(raw string) (pgtype.Text, error) {
+	normalized := strings.TrimSpace(raw)
+	if normalized == "" {
+		return pgtype.Text{}, nil
+	}
+	loc, _, err := tzutil.Resolve(normalized)
+	if err != nil {
+		return pgtype.Text{}, fmt.Errorf("invalid timezone: %w", err)
+	}
+	return pgtype.Text{String: loc.String(), Valid: true}, nil
 }

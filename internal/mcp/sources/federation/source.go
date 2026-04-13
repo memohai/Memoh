@@ -15,6 +15,10 @@ import (
 
 const cacheTTL = 5 * time.Second
 
+// mcpCallTimeout caps individual MCP tool calls and tool listing to prevent
+// stuck external MCP servers from blocking the agent indefinitely.
+const mcpCallTimeout = 60 * time.Second
+
 type ConnectionLister interface {
 	ListActiveByBot(ctx context.Context, botID string) ([]mcpgw.Connection, error)
 }
@@ -104,17 +108,20 @@ func (s *Source) CallTool(ctx context.Context, session mcpgw.ToolSessionContext,
 		arguments = map[string]any{}
 	}
 
+	callCtx, callCancel := context.WithTimeout(ctx, mcpCallTimeout)
+	defer callCancel()
+
 	var (
 		payload map[string]any
 		err     error
 	)
 	switch route.sourceType {
 	case "http":
-		payload, err = s.gateway.CallHTTPConnectionTool(ctx, route.connection, route.originalName, arguments)
+		payload, err = s.gateway.CallHTTPConnectionTool(callCtx, route.connection, route.originalName, arguments)
 	case "sse":
-		payload, err = s.gateway.CallSSEConnectionTool(ctx, route.connection, route.originalName, arguments)
+		payload, err = s.gateway.CallSSEConnectionTool(callCtx, route.connection, route.originalName, arguments)
 	case "stdio":
-		payload, err = s.gateway.CallStdioConnectionTool(ctx, botID, route.connection, route.originalName, arguments)
+		payload, err = s.gateway.CallStdioConnectionTool(callCtx, botID, route.connection, route.originalName, arguments)
 	default:
 		return mcpgw.BuildToolErrorResult("unsupported federated source"), nil
 	}
@@ -172,17 +179,20 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 			})
 			for _, connection := range items {
 				var connTools []mcpgw.ToolDescriptor
+				listCtx, listCancel := context.WithTimeout(ctx, mcpCallTimeout)
 				switch strings.ToLower(strings.TrimSpace(connection.Type)) {
 				case "http":
-					connTools, err = s.gateway.ListHTTPConnectionTools(ctx, connection)
+					connTools, err = s.gateway.ListHTTPConnectionTools(listCtx, connection)
 				case "sse":
-					connTools, err = s.gateway.ListSSEConnectionTools(ctx, connection)
+					connTools, err = s.gateway.ListSSEConnectionTools(listCtx, connection)
 				case "stdio":
-					connTools, err = s.gateway.ListStdioConnectionTools(ctx, botID, connection)
+					connTools, err = s.gateway.ListStdioConnectionTools(listCtx, botID, connection)
 				default:
+					listCancel()
 					s.logger.Warn("unsupported mcp connection type", slog.String("connection_id", connection.ID), slog.String("type", connection.Type))
 					continue
 				}
+				listCancel()
 				if err != nil {
 					s.logger.Warn("list tools from connection failed", slog.String("connection_id", connection.ID), slog.String("name", connection.Name), slog.Any("error", err))
 					continue
