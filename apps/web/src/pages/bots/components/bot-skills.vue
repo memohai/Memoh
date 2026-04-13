@@ -56,7 +56,7 @@
         class="flex flex-col"
       >
         <CardHeader class="pb-3">
-          <div class="flex items-start justify-between gap-2">
+          <div class="flex items-center justify-between gap-2">
             <CardTitle
               class="text-sm truncate"
               :title="skill.name"
@@ -88,7 +88,7 @@
                   v-if="isSkillActionPending(skill, 'enable')"
                   class="size-3.5"
                 />
-                <Eye
+                <EyeOff
                   v-else
                   class="size-3.5"
                 />
@@ -106,7 +106,7 @@
                   v-if="isSkillActionPending(skill, 'disable')"
                   class="size-3.5"
                 />
-                <EyeOff
+                <Eye
                   v-else
                   class="size-3.5"
                 />
