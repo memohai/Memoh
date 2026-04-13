@@ -50,6 +50,7 @@ const llmProviders: string[] = [
   ...withVariants('siliconcloud', ['color']),
   ...withVariants('volcengine', ['color']),
   ...withVariants('newapi', ['color']),
+  ...withVariants('github-copilot', []),
 ]
 
 // ---------------------------------------------------------------------------
