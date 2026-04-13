@@ -212,17 +212,16 @@
       />
     </div>
 
+    <!-- Timezone -->
     <div class="space-y-2">
       <Label>{{ $t('bots.timezone') }}</Label>
       <TimezoneSelect
-        v-model="form.timezone"
+        :model-value="form.timezone || emptyTimezoneValue"
+        :placeholder="$t('bots.timezonePlaceholder')"
         allow-empty
-        :placeholder="defaultTimezone"
-        :empty-label="timezoneEmptyLabel"
+        :empty-label="$t('bots.timezoneInherited')"
+        @update:model-value="(val: string) => form.timezone = val === emptyTimezoneValue ? '' : val"
       />
-      <p class="text-xs text-muted-foreground">
-        {{ $t('bots.timezoneInheritedHint') }}
-      </p>
     </div>
 
     <Separator />
@@ -237,8 +236,21 @@
       />
     </div>
 
-    <!-- Reasoning -->
+    <!-- Timezone -->
+    <div class="space-y-2">
+      <Label>{{ $t('bots.timezone') }}</Label>
+      <TimezoneSelect
+        :model-value="form.timezone || emptyTimezoneValue"
+        :placeholder="$t('bots.timezonePlaceholder')"
+        allow-empty
+        :empty-label="$t('bots.timezoneInherited')"
+        @update:model-value="(val: string) => form.timezone = val === emptyTimezoneValue ? '' : val"
+      />
+    </div>
+
     <Separator />
+
+    <!-- Reasoning -->
     <div class="space-y-2">
       <Label>{{ $t('bots.settings.reasoningEffort') }}</Label>
       <Popover v-model:open="reasoningPopoverOpen">
@@ -348,7 +360,7 @@ import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSetting
 import type { SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { useUserStore } from '@/store/user'
+import { emptyTimezoneValue } from '@/utils/timezones'
 
 const props = defineProps<{
   botId: string
@@ -356,13 +368,8 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const router = useRouter()
-const userStore = useUserStore()
 
 const botIdRef = computed(() => props.botId) as Ref<string>
-const defaultTimezone = computed(() => userStore.userInfo.timezone || 'UTC')
-const timezoneEmptyLabel = computed(() =>
-  `${t('bots.timezoneInherited')} (${defaultTimezone.value})`,
-)
 
 // ---- Data ----
 const queryCache = useQueryCache()
@@ -639,6 +646,7 @@ watch(settings, (val) => {
     form.tts_model_id = val.tts_model_id ?? ''
     form.browser_context_id = val.browser_context_id ?? ''
     form.language = val.language ?? ''
+    form.timezone = val.timezone ?? ''
     form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
   }
@@ -660,6 +668,7 @@ const hasSettingsChanges = computed(() => {
     || form.tts_model_id !== (s.tts_model_id ?? '')
     || form.browser_context_id !== (s.browser_context_id ?? '')
     || form.language !== (s.language ?? '')
+    || form.timezone !== (s.timezone ?? '')
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')
   )

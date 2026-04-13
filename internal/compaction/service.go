@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -44,6 +43,11 @@ func (s *Service) TriggerCompaction(ctx context.Context, cfg TriggerConfig) {
 	}()
 }
 
+// RunCompactionSync runs compaction synchronously and returns any error.
+func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) error {
+	return s.runCompaction(ctx, cfg)
+}
+
 func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 	botUUID, err := db.ParseUUID(cfg.BotID)
 	if err != nil {
@@ -64,7 +68,7 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 
 	compactErr := s.doCompaction(ctx, logRow.ID, sessionUUID, cfg)
 	if compactErr != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", compactErr.Error(), nil, pgtype.UUID{})
+		s.completeLog(ctx, logRow.ID, "error", "", compactErr.Error(), 0, nil, pgtype.UUID{})
 	}
 	return compactErr
 }
@@ -75,15 +79,40 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		return err
 	}
 	if len(messages) == 0 {
-		s.completeLog(ctx, logID, "ok", "", "", nil, pgtype.UUID{})
+		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
 		return nil
 	}
 
-	toCompact := splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
+	var toCompact []sqlc.ListUncompactedMessagesBySessionRow
+	if cfg.TargetTokens > 0 {
+		// Sync compaction: compress enough messages to bring context
+		// down to TargetTokens. Calculate how many tokens to keep
+		// (newest messages) and compact everything older.
+		toCompact = splitByTarget(messages, cfg.TargetTokens)
+	} else {
+		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
+	}
 	if len(toCompact) == 0 {
-		s.completeLog(ctx, logID, "ok", "", "", nil, pgtype.UUID{})
+		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
 		return nil
 	}
+
+	// Cap the compaction input to avoid exceeding the compaction model's
+	// context window. MaxCompactTokens is typically set to 90% of the model's
+	// window. If not set, use a conservative default of 30K tokens.
+	maxCompactTokens := cfg.MaxCompactTokens
+	if maxCompactTokens <= 0 {
+		maxCompactTokens = 30000
+	}
+	s.logger.Info("compaction: before trim",
+		slog.Int("messages", len(toCompact)),
+		slog.Int("total_uncompacted", len(messages)),
+		slog.Int("max_compact_tokens", maxCompactTokens),
+	)
+	toCompact = trimCompactMessages(toCompact, maxCompactTokens)
+	s.logger.Info("compaction: after trim",
+		slog.Int("messages", len(toCompact)),
+	)
 
 	priorLogs, err := s.queries.ListCompactionLogsBySession(ctx, sessionUUID)
 	if err != nil {
@@ -101,7 +130,7 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 	for _, m := range toCompact {
 		entries = append(entries, messageEntry{
 			Role:    m.Role,
-			Content: extractTextContent(m.Content),
+			Content: string(m.Content),
 		})
 		messageIDs = append(messageIDs, m.ID)
 	}
@@ -137,16 +166,16 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		return err
 	}
 
-	s.completeLog(ctx, logID, "ok", result.Text, "", usageJSON, modelUUID)
+	s.completeLog(ctx, logID, "ok", result.Text, "", len(messageIDs), usageJSON, modelUUID)
 	return nil
 }
 
-func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, usage []byte, modelID pgtype.UUID) {
+func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID) {
 	if _, err := s.queries.CompleteCompactionLog(ctx, sqlc.CompleteCompactionLogParams{
 		ID:           logID,
 		Status:       status,
 		Summary:      summary,
-		MessageCount: 0,
+		MessageCount: int32(messageCount), //nolint:gosec // count always small
 		ErrorMessage: errMsg,
 		Usage:        usage,
 		ModelID:      modelID,
@@ -231,45 +260,15 @@ func formatUUID(id pgtype.UUID) string {
 	return uuid.UUID(id.Bytes).String()
 }
 
-// extractTextContent extracts plain text from a message content JSONB field.
-// The content may be a JSON string, an array of content parts, or raw bytes.
-func extractTextContent(content []byte) string {
-	if len(content) == 0 {
-		return ""
-	}
-
-	var s string
-	if json.Unmarshal(content, &s) == nil {
-		return s
-	}
-
-	var parts []map[string]any
-	if json.Unmarshal(content, &parts) == nil {
-		var texts []string
-		for _, p := range parts {
-			if t, ok := p["type"].(string); ok && t == "text" {
-				if text, ok := p["text"].(string); ok {
-					texts = append(texts, text)
-				}
-			}
-		}
-		if len(texts) > 0 {
-			return joinTexts(texts)
-		}
-	}
-
-	return string(content)
-}
-
-func joinTexts(parts []string) string {
-	return strings.Join(parts, " ")
-}
-
 // splitByRatio splits messages so that roughly the first ratio% (by token weight)
 // are returned for compaction, and the rest are kept as-is.
-// When ratio >= 100 or totalInputTokens <= 0, all messages are returned.
+// When ratio >= 100, all messages are returned for compaction.
+// When ratio <= 0 or totalInputTokens <= 0 or messages is empty, nil is returned (no compaction).
 func splitByRatio(messages []sqlc.ListUncompactedMessagesBySessionRow, totalInputTokens, ratio int) []sqlc.ListUncompactedMessagesBySessionRow {
-	if ratio >= 100 || ratio <= 0 || totalInputTokens <= 0 || len(messages) == 0 {
+	if ratio <= 0 || totalInputTokens <= 0 || len(messages) == 0 {
+		return nil
+	}
+	if ratio >= 100 {
 		return messages
 	}
 
@@ -297,6 +296,29 @@ func splitByRatio(messages []sqlc.ListUncompactedMessagesBySessionRow, totalInpu
 	return messages[:cutoff]
 }
 
+// splitByTarget returns the oldest messages to compact so that the remaining
+// newest messages fit within targetTokens. This is used for synchronous
+// compaction where the goal is to reduce context to a specific size.
+func splitByTarget(messages []sqlc.ListUncompactedMessagesBySessionRow, targetTokens int) []sqlc.ListUncompactedMessagesBySessionRow {
+	if targetTokens <= 0 || len(messages) == 0 {
+		return nil
+	}
+	// Scan from newest to oldest, keeping messages that fit within target.
+	accumulated := 0
+	cutoff := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		accumulated += estimateRowTokens(messages[i])
+		if accumulated > targetTokens {
+			cutoff = i + 1
+			break
+		}
+	}
+	if cutoff <= 0 {
+		return nil
+	}
+	return messages[:cutoff]
+}
+
 type usagePayload struct {
 	OutputTokens *int `json:"output_tokens"`
 }
@@ -309,4 +331,33 @@ func estimateRowTokens(m sqlc.ListUncompactedMessagesBySessionRow) int {
 		}
 	}
 	return len(m.Content) / 4
+}
+
+// trimCompactMessages trims the compaction input from the tail (oldest)
+// so the total estimated tokens stay within maxTokens.
+func trimCompactMessages(messages []sqlc.ListUncompactedMessagesBySessionRow, maxTokens int) []sqlc.ListUncompactedMessagesBySessionRow {
+	if len(messages) == 0 || maxTokens <= 0 {
+		return messages
+	}
+	total := 0
+	for _, m := range messages {
+		total += estimateRowTokens(m)
+	}
+	if total <= maxTokens {
+		return messages
+	}
+	// Drop oldest messages from the tail until within budget.
+	accumulated := 0
+	cutoff := len(messages)
+	for i := len(messages) - 1; i >= 0; i-- {
+		accumulated += estimateRowTokens(messages[i])
+		if accumulated > maxTokens {
+			cutoff = i + 1
+			break
+		}
+	}
+	if cutoff >= len(messages) {
+		return messages
+	}
+	return messages[cutoff:]
 }

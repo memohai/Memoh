@@ -437,6 +437,7 @@ func IsValidClientType(clientType ClientType) bool {
 }
 
 // SelectMemoryModel selects a chat model for memory operations.
+// It only considers models from enabled providers.
 func SelectMemoryModel(ctx context.Context, modelsService *Service, queries *sqlc.Queries) (GetResponse, sqlc.Provider, error) {
 	if modelsService == nil {
 		return GetResponse{}, sqlc.Provider{}, errors.New("models service not configured")
@@ -444,9 +445,9 @@ func SelectMemoryModel(ctx context.Context, modelsService *Service, queries *sql
 	if queries == nil {
 		return GetResponse{}, sqlc.Provider{}, errors.New("queries not configured")
 	}
-	candidates, err := modelsService.ListByType(ctx, ModelTypeChat)
+	candidates, err := modelsService.ListEnabledByType(ctx, ModelTypeChat)
 	if err != nil || len(candidates) == 0 {
-		return GetResponse{}, sqlc.Provider{}, errors.New("no chat models available for memory operations")
+		return GetResponse{}, sqlc.Provider{}, errors.New("no enabled chat models available for memory operations")
 	}
 	selected := candidates[0]
 	provider, err := FetchProviderByID(ctx, queries, selected.ProviderID)
@@ -456,8 +457,29 @@ func SelectMemoryModel(ctx context.Context, modelsService *Service, queries *sql
 	return selected, provider, nil
 }
 
-// SelectMemoryModelForBot delegates to SelectMemoryModel.
-func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, queries *sqlc.Queries, _ string) (GetResponse, sqlc.Provider, error) {
+// SelectMemoryModelForBot selects a chat model for memory operations.
+// If botID is provided, it attempts to use the bot's configured chat model first,
+// falling back to the first enabled chat model globally.
+func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, queries *sqlc.Queries, chatModelID string) (GetResponse, sqlc.Provider, error) {
+	// If a specific model is configured (e.g. bot's chat_model_id), try to use it.
+	if chatModelID = strings.TrimSpace(chatModelID); chatModelID != "" {
+		model, err := modelsService.GetByModelID(ctx, chatModelID)
+		if err == nil && model.Type == ModelTypeChat {
+			provider, pErr := FetchProviderByID(ctx, queries, model.ProviderID)
+			if pErr == nil && provider.Enable {
+				return model, provider, nil
+			}
+		}
+		// UUID-based lookup fallback
+		model, err = modelsService.GetByID(ctx, chatModelID)
+		if err == nil && model.Type == ModelTypeChat {
+			provider, pErr := FetchProviderByID(ctx, queries, model.ProviderID)
+			if pErr == nil && provider.Enable {
+				return model, provider, nil
+			}
+		}
+	}
+	// Fallback: pick first enabled chat model globally.
 	return SelectMemoryModel(ctx, modelsService, queries)
 }
 

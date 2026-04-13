@@ -43,7 +43,7 @@ func TestBuildToolCallPayloadFromRaw(t *testing.T) {
 
 func TestHandleMCPToolsWithoutGateway(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"tools/list"}`))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/bot-1/tools", strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"tools/list"}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -108,7 +108,7 @@ func TestHandleMCPToolsWithGatewayAcceptCompatibility(t *testing.T) {
 		toolGateway: toolGateway,
 	}
 
-	listReq := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"tools/list"}`))
+	listReq := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/bot-1/tools", strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"tools/list"}`))
 	listReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	listReq.Header.Set("Accept", "application/json")
 	listReq.Header.Set("X-Memoh-Channel-Identity-Id", "user-1")
@@ -135,7 +135,7 @@ func TestHandleMCPToolsWithGatewayAcceptCompatibility(t *testing.T) {
 		t.Fatalf("expected one tool, got: %#v", result["tools"])
 	}
 
-	callReq := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", strings.NewReader(`{"jsonrpc":"2.0","id":"2","method":"tools/call","params":{"name":"echo_tool","arguments":{"input":"hello"}}}`))
+	callReq := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/bot-1/tools", strings.NewReader(`{"jsonrpc":"2.0","id":"2","method":"tools/call","params":{"name":"echo_tool","arguments":{"input":"hello"}}}`))
 	callReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	callReq.Header.Set("Accept", "application/json")
 	callReq.Header.Set("X-Memoh-Channel-Identity-Id", "user-1")

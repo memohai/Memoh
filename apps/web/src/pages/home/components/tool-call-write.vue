@@ -51,11 +51,13 @@
         >
           <LoaderCircle class="size-3 animate-spin" />
         </div>
+        <!-- eslint-disable vue/no-v-html -->
         <div
           v-else
           class="shiki-container overflow-x-auto text-xs [&_pre]:bg-transparent! [&_pre]:p-3 [&_pre]:m-0 [&_code]:text-xs"
           v-html="shiki.html.value"
         />
+        <!-- eslint-enable vue/no-v-html -->
       </CollapsibleContent>
     </Collapsible>
   </div>

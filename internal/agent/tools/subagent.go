@@ -6,9 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -24,6 +28,7 @@ import (
 // It is satisfied by *agent.Agent and avoids an import cycle.
 type SpawnAgent interface {
 	Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error)
+	GenerateWithWatchdog(ctx context.Context, cfg SpawnRunConfig, touchFn func()) (*SpawnResult, error)
 }
 
 // SpawnRunConfig mirrors agent.RunConfig fields needed by spawn.
@@ -60,6 +65,138 @@ type SpawnResult struct {
 	Text     string
 	Usage    *sdk.Usage
 }
+
+// subagentTimeout caps total execution time as a safety net per attempt.
+// This prevents runaway subagent calls from blocking the parent agent forever,
+// even if the watchdog keeps getting touched (e.g., tiny tokens but no convergence).
+const subagentTimeout = 10 * time.Minute
+
+// spawnHeartbeatInterval controls how often a progress event is emitted during
+// spawn execution to keep the parent stream's idle timeout from firing.
+const spawnHeartbeatInterval = 30 * time.Second
+
+// subagentMaxRetries is the maximum number of retry attempts for a failed
+// subagent task. Only transient errors (rate limits, network failures) are
+// retried; fatal errors (bad config, invalid input) fail immediately.
+const subagentMaxRetries = 3
+
+// subagentRetryBaseDelay is the initial backoff delay between retry attempts.
+const subagentRetryBaseDelay = 2 * time.Second
+
+// ErrWatchdogTimedOut is returned when the subagent watchdog fires
+// (no activity within the timeout period).
+var ErrWatchdogTimedOut = errors.New("subagent watchdog: no activity within timeout")
+
+// subagentWatchdogTimeout is the default inactivity timeout for the watchdog.
+const subagentWatchdogTimeout = 3 * time.Minute
+
+var (
+	// err429Pattern matches HTTP 429 status codes in error strings.
+	err429Pattern = regexp.MustCompile(`(^|[^0-9])429($|[^0-9])`)
+	// errEOFPattern matches EOF or connection-level resets.
+	errEOFPattern = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
+	// serverErrPattern matches "api error 5XX" where XX is any two digits.
+	serverErrPattern = regexp.MustCompile(`api error 5\\d{2}`)
+)
+
+// SubagentWatchdog implements an activity-based timeout for subagent execution.
+// It is "touched" (fed/reset) on each activity signal from the LLM or tools.
+// If no touch occurs within the configured timeout, it fires by cancelling
+// its associated context.
+//
+// Lifecycle:
+//  1. Call NewSubagentWatchdog to create a watchdog context.
+//  2. Call Touch() on each activity signal.
+//  3. Call Stop() when the watched operation completes normally.
+//
+// The watchdog respects parent context cancellation: if the parent context
+// is cancelled, the watchdog's context is also cancelled immediately.
+type SubagentWatchdog struct {
+	timeout time.Duration
+	touchCh chan struct{}
+	cancel  context.CancelCauseFunc
+	done    chan struct{}
+	logger  *slog.Logger
+}
+
+// NewSubagentWatchdog creates a watchdog that cancels the returned context
+// after timeout of inactivity. The returned context is derived from parentCtx.
+// If parentCtx is cancelled, the watchdog context is also cancelled.
+func NewSubagentWatchdog(parentCtx context.Context, timeout time.Duration, logger *slog.Logger) (context.Context, *SubagentWatchdog) {
+	if timeout <= 0 {
+		timeout = subagentWatchdogTimeout
+	}
+	ctx, cancel := context.WithCancelCause(parentCtx)
+
+	wd := &SubagentWatchdog{
+		timeout: timeout,
+		touchCh: make(chan struct{}, 1),
+		cancel:  cancel,
+		done:    make(chan struct{}),
+		logger:  logger,
+	}
+
+	go wd.run(ctx)
+
+	return ctx, wd
+}
+
+// Touch resets the watchdog timer. It is non-blocking and safe to call
+// from any goroutine.
+func (w *SubagentWatchdog) Touch() {
+	select {
+	case w.touchCh <- struct{}{}:
+	default:
+		// Already a pending touch, no need to queue another.
+	}
+}
+
+// Stop terminates the watchdog goroutine and releases resources.
+// Call this when the watched operation completes normally.
+func (w *SubagentWatchdog) Stop() {
+	w.cancel(context.Canceled)
+	<-w.done
+}
+
+// run is the watchdog loop. It watches for touches and fires if none arrive
+// within the configured timeout.
+func (w *SubagentWatchdog) run(ctx context.Context) {
+	defer close(w.done)
+
+	timer := time.NewTimer(w.timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Parent cancelled or Stop() called.
+			return
+		case <-w.touchCh:
+			// Activity detected; reset the timer.
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(w.timeout)
+		case <-timer.C:
+			// No activity within timeout -- fire!
+			w.logger.Warn("subagent watchdog fired",
+				slog.Duration("timeout", w.timeout),
+			)
+			w.cancel(ErrWatchdogTimedOut)
+			return
+		}
+	}
+}
+
+// maxTasksPerSpawn caps the number of tasks accepted in a single spawn call.
+const maxTasksPerSpawn = 5
+
+// maxSpawnCallsPerSession caps the total number of spawn tool calls within
+// a single agent session to prevent subagent storms.
+const maxSpawnCallsPerSession = 3
 
 // SpawnProvider exposes a "spawn" tool that runs one or more subagent tasks
 // concurrently and returns results to the parent agent.
@@ -118,23 +255,24 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 		return nil, nil
 	}
 	sess := session
+	spawnCount := new(int32)
 	return []sdk.Tool{
 		{
 			Name:        "spawn",
-			Description: "Spawn one or more subagents to work on tasks in parallel. Each task runs in its own context with file, exec, and web tools. All results are returned together.",
+			Description: fmt.Sprintf("Spawn one or more subagents to work on tasks in parallel. Each task runs in its own context with file, exec, and web tools. All results are returned together. Max %d tasks per call, max %d calls per session.", maxTasksPerSpawn, maxSpawnCallsPerSession),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"tasks": map[string]any{
 						"type":        "array",
-						"description": "List of task instructions. Each string is a self-contained prompt for one subagent.",
+						"description": fmt.Sprintf("List of task instructions. Each string is a self-contained prompt for one subagent. Max %d tasks.", maxTasksPerSpawn),
 						"items":       map[string]any{"type": "string"},
 					},
 				},
 				"required": []string{"tasks"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSpawn(ctx.Context, sess, inputAsMap(input))
+				return p.execSpawn(ctx.Context, sess, inputAsMap(input), spawnCount)
 			},
 		},
 	}, nil
@@ -148,10 +286,22 @@ type spawnResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, args map[string]any, spawnCount *int32) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
+	}
+
+	// Enforce per-session spawn call limit.
+	current := atomic.AddInt32(spawnCount, 1)
+	if current > maxSpawnCallsPerSession {
+		return map[string]any{
+			"isError": true,
+			"content": []map[string]any{{
+				"type": "text",
+				"text": fmt.Sprintf("Spawn limit reached: max %d spawn calls per session (already made %d). Consolidate your remaining work into the current agent context instead of spawning more subagents.", maxSpawnCallsPerSession, current-1),
+			}},
+		}, nil
 	}
 
 	tasksRaw, ok := args["tasks"]
@@ -165,8 +315,21 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 	if len(tasks) == 0 {
 		return nil, errors.New("at least one task is required")
 	}
+	// Cap tasks per call.
+	if len(tasks) > maxTasksPerSpawn {
+		p.logger.Warn("spawn tasks capped",
+			slog.Int("requested", len(tasks)),
+			slog.Int("max", maxTasksPerSpawn),
+		)
+		tasks = tasks[:maxTasksPerSpawn]
+	}
 
-	sdkModel, modelID, err := p.resolveModel(ctx, botID)
+	// Use a decoupled context for model resolution and subagent execution
+	// so that a parent stream cancellation (e.g. idle timeout) does not
+	// prevent the spawn from completing and returning its results.
+	sessionCtx := context.WithoutCancel(ctx)
+
+	sdkModel, modelID, err := p.resolveModel(sessionCtx, botID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model: %w", err)
 	}
@@ -180,15 +343,50 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 	var wg sync.WaitGroup
 	wg.Add(len(tasks))
 
+	// Start a heartbeat goroutine that emits progress events into the
+	// parent stream at regular intervals. This keeps the stream's idle
+	// timeout from firing while subagents are running.
+	heartbeatCtx, heartbeatCancel := context.WithCancel(sessionCtx)
+	defer heartbeatCancel()
+	p.startSpawnHeartbeat(heartbeatCtx, session, len(tasks))
+
 	for i, task := range tasks {
 		go func(idx int, query string) {
 			defer wg.Done()
-			results[idx] = p.runSubagentTask(ctx, session, sdkModel, modelID, systemPrompt, query)
+			results[idx] = p.runSubagentTask(sessionCtx, session, sdkModel, modelID, systemPrompt, query)
 		}(i, task)
 	}
 	wg.Wait()
 
 	return map[string]any{"results": results}, nil
+}
+
+// startSpawnHeartbeat emits periodic progress events into the parent agent
+// stream to prevent the idle timeout from firing while spawn tasks run.
+// Each heartbeat carries a progress status so the frontend can display it.
+func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionContext, _ int) {
+	emitter := session.Emitter
+	if emitter == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(spawnHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Emit a progress event through the agent's stream emitter.
+				// The agent framework converts ToolStreamEvent into the
+				// appropriate wire-level progress event, which resets the
+				// idle timeout timer in the resolver.
+				emitter(ToolStreamEvent{
+					Type: StreamEventSpawnHeartbeat,
+				})
+			}
+		}
+	}()
 }
 
 func (p *SpawnProvider) runSubagentTask(
@@ -203,7 +401,7 @@ func (p *SpawnProvider) runSubagentTask(
 
 	var sessionID string
 	if p.sessionService != nil {
-		sess, err := p.sessionService.Create(ctx, sessionpkg.CreateInput{
+		sess, err := p.sessionService.Create(context.WithoutCancel(ctx), sessionpkg.CreateInput{
 			BotID:           parentSession.BotID,
 			Type:            sessionpkg.TypeSubagent,
 			Title:           truncateTitle(query, 100),
@@ -234,20 +432,116 @@ func (p *SpawnProvider) runSubagentTask(
 		LoopDetection: SpawnLoopConfig{Enabled: true},
 	}
 
-	genResult, err := p.agent.Generate(ctx, cfg)
-	if err != nil {
-		res.Error = err.Error()
-		return res
+	var lastErr error
+	for attempt := 0; attempt <= subagentMaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := subagentRetryBaseDelay * time.Duration(attempt)
+			p.logger.Info("subagent retry",
+				slog.String("session_id", sessionID),
+				slog.Int("attempt", attempt),
+				slog.Duration("delay", delay),
+				slog.String("error", lastErr.Error()),
+			)
+			delayTimer := time.NewTimer(delay)
+			deadlineTimer := time.NewTimer(subagentTimeout)
+			select {
+			case <-delayTimer.C:
+				deadlineTimer.Stop()
+			case <-deadlineTimer.C:
+				delayTimer.Stop()
+				// Hard deadline: don't retry indefinitely.
+				res.Error = fmt.Sprintf("retry deadline exceeded (last error: %v)", lastErr)
+				return res
+			}
+		}
+
+		// Create a two-layer timeout per attempt:
+		// 1. Safety net: wall-clock timeout (subagentTimeout) via context.WithTimeout.
+		// 2. Watchdog: activity-based timeout (subagentWatchdogTimeout) that fires
+		//    when no stream events (tokens, tool output) are received.
+		// Use context.WithoutCancel so retries get a fresh timeout even if
+		// the parent stream was cancelled (e.g. by idle timeout).
+		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), subagentTimeout)
+		wdCtx, wd := NewSubagentWatchdog(safetyCtx, subagentWatchdogTimeout, p.logger)
+
+		genResult, err := p.agent.GenerateWithWatchdog(wdCtx, cfg, wd.Touch)
+		wd.Stop()
+		safetyCancel()
+
+		if err == nil {
+			res.Text = genResult.Text
+			res.Success = true
+			if p.messageService != nil && sessionID != "" {
+				p.persistMessages(context.WithoutCancel(ctx), parentSession.BotID, sessionID, modelID, query, genResult)
+			}
+			return res
+		}
+
+		lastErr = err
+
+		// Check if the true parent context was cancelled (not watchdog, not safety timeout).
+		// If the parent is done, don't retry.
+		if ctx.Err() != nil && !errors.Is(err, ErrWatchdogTimedOut) {
+			res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
+			return res
+		}
+
+		// Watchdog timeouts are always retryable.
+		if errors.Is(err, ErrWatchdogTimedOut) {
+			p.logger.Warn("subagent watchdog fired, will retry",
+				slog.String("session_id", sessionID),
+				slog.Int("attempt", attempt+1),
+				slog.Int("max_attempts", subagentMaxRetries+1),
+			)
+			continue
+		}
+
+		if !isRetryableSubagentError(err) {
+			res.Error = err.Error()
+			return res
+		}
 	}
 
-	res.Text = genResult.Text
-	res.Success = true
-
-	if p.messageService != nil && sessionID != "" {
-		p.persistMessages(ctx, parentSession.BotID, sessionID, modelID, query, genResult)
-	}
-
+	p.logger.Warn("subagent failed after all retries",
+		slog.String("session_id", sessionID),
+		slog.Int("attempts", subagentMaxRetries+1),
+		slog.String("error", lastErr.Error()),
+	)
+	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
 	return res
+}
+
+// isRetryableSubagentError returns true for transient errors that warrant a retry.
+// Fatal errors (invalid config, context cancelled by user) return false.
+func isRetryableSubagentError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Rate limits
+	if strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "rate_limit") {
+		return true
+	}
+	// HTTP 429 and 5xx
+	if err429Pattern.MatchString(errStr) || serverErrPattern.MatchString(errStr) {
+		return true
+	}
+	// Connection-level errors
+	if errEOFPattern.MatchString(errStr) {
+		return true
+	}
+	// Network timeouts
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	// Context cancellation from parent (idle timeout, etc.) IS retryable
+	// for subagents — they should complete their work even if the parent
+	// stream was interrupted.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	return false
 }
 
 func (p *SpawnProvider) persistMessages(

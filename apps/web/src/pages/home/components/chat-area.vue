@@ -40,7 +40,22 @@
                   v-if="messages.length === 0 && !loadingChats"
                   class="flex items-center justify-center min-h-[300px]"
                 >
-                  <p class="text-muted-foreground text-xs">
+                  <p
+                    v-if="activeSession?.type === 'subagent'"
+                    class="text-muted-foreground text-xs"
+                  >
+                    {{ $t('chat.emptySubagent') }}
+                  </p>
+                  <p
+                    v-else-if="activeSession?.type === 'heartbeat' || activeSession?.type === 'schedule'"
+                    class="text-muted-foreground text-xs"
+                  >
+                    {{ $t('chat.emptySystemSession') }}
+                  </p>
+                  <p
+                    v-else
+                    class="text-muted-foreground text-xs"
+                  >
                     {{ $t('chat.greeting') }}
                   </p>
                 </div>

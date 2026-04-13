@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,7 @@ import (
 
 func TestRefreshTokenFromContext(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -80,7 +81,7 @@ func TestRefreshTokenFromContext(t *testing.T) {
 
 func TestRefreshTokenFromContext_MissingUser(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 

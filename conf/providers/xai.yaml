@@ -1,5 +1,5 @@
 name: xAI (Grok)
-client_type: openai-completions
+client_type: openai-responses
 icon: xai
 base_url: https://api.x.ai/v1
 
@@ -8,7 +8,7 @@ models:
     name: Grok 4.20 Beta
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, tool-call]
       context_window: 2000000
 
   - model_id: grok-4.20-beta-0309-non-reasoning
@@ -22,7 +22,7 @@ models:
     name: Grok 4.20 Multi-Agent Beta
     type: chat
     config:
-      compatibilities: [vision, reasoning]
+      compatibilities: [vision]
       context_window: 2000000
 
   - model_id: grok-4-1-fast-non-reasoning
@@ -36,7 +36,7 @@ models:
     name: Grok 4.1 Fast
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, tool-call]
       context_window: 2000000
 
   - model_id: grok-4-fast-non-reasoning
@@ -50,21 +50,21 @@ models:
     name: Grok 4 Fast
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, tool-call]
       context_window: 2000000
 
   - model_id: grok-code-fast-1
     name: Grok Code Fast 1
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
+      compatibilities: [tool-call]
       context_window: 256000
 
   - model_id: grok-4
     name: Grok 4 0709
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, tool-call]
       context_window: 256000
 
   - model_id: grok-3

@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -62,8 +63,9 @@ func (s *telegramOutboundStream) getBotAndReply(ctx context.Context) (bot *tgbot
 }
 
 func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context) error {
-	// When ensureStreamMessage is called, always means that the message has not been completely generated
-	// so always refresh the "typing" action to improve the user experience
+	if err := s.adapter.waitStreamLimit(ctx); err != nil {
+		return err
+	}
 	bot, err := s.getBot(ctx)
 	if err != nil {
 		return err
@@ -132,6 +134,9 @@ func (s *telegramOutboundStream) editStreamMessage(ctx context.Context, text str
 	if time.Since(lastEditedAt) < telegramStreamEditThrottle {
 		return nil
 	}
+	if err := s.adapter.waitStreamLimit(ctx); err != nil {
+		return err
+	}
 	bot, _, err := s.getBotAndReply(ctx)
 	if err != nil {
 		return err
@@ -162,7 +167,7 @@ func (s *telegramOutboundStream) editStreamMessage(ctx context.Context, text str
 	return nil
 }
 
-const telegramFinalEditMaxRetries = 3
+const telegramFinalEditMaxRetries = 5
 
 // editStreamMessageFinal edits the streamed message for the final content.
 // Retries on 429 with server-provided backoff to ensure delivery.
@@ -182,7 +187,11 @@ func (s *telegramOutboundStream) editStreamMessageFinal(ctx context.Context, tex
 	if err != nil {
 		return err
 	}
+	var lastEditErr error
 	for attempt := range telegramFinalEditMaxRetries {
+		if err := s.adapter.waitStreamLimit(ctx); err != nil {
+			return err
+		}
 		editErr := error(nil)
 		if testEditFunc != nil {
 			editErr = testEditFunc(bot, chatID, msgID, text, s.parseMode)
@@ -196,6 +205,7 @@ func (s *telegramOutboundStream) editStreamMessageFinal(ctx context.Context, tex
 			s.mu.Unlock()
 			return nil
 		}
+		lastEditErr = editErr
 		if !isTelegramTooManyRequests(editErr) {
 			return editErr
 		}
@@ -209,7 +219,7 @@ func (s *telegramOutboundStream) editStreamMessageFinal(ctx context.Context, tex
 		case <-time.After(d):
 		}
 	}
-	return nil
+	return fmt.Errorf("telegram: final edit failed after %d retries: %w", telegramFinalEditMaxRetries, lastEditErr)
 }
 
 // sendDraft sends a partial message via sendMessageDraft with throttling.
@@ -226,6 +236,9 @@ func (s *telegramOutboundStream) sendDraft(ctx context.Context, text string) err
 		return nil
 	}
 
+	if err := s.adapter.waitStreamLimit(ctx); err != nil {
+		return err
+	}
 	bot, err := s.getBot(ctx)
 	if err != nil {
 		return err
@@ -257,6 +270,9 @@ func (s *telegramOutboundStream) sendDraft(ctx context.Context, text string) err
 func (s *telegramOutboundStream) sendPermanentMessage(ctx context.Context, text string, parseMode string) error {
 	if strings.TrimSpace(text) == "" {
 		return nil
+	}
+	if err := s.adapter.waitStreamLimit(ctx); err != nil {
+		return err
 	}
 	bot, replyTo, err := s.getBotAndReply(ctx)
 	if err != nil {

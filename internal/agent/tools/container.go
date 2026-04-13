@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"math"
 	"strings"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -15,6 +17,15 @@ import (
 )
 
 const defaultContainerExecWorkDir = "/data"
+
+// containerOpTimeout is the maximum time allowed for individual file
+// operations (read, write, list, edit). Exec has its own timeout.
+const containerOpTimeout = 30 * time.Second
+
+// largeFileThreshold defines the size above which file operations use
+// streaming (async chunked I/O) instead of loading fully into memory.
+// Files <= this threshold use the simpler synchronous gRPC calls.
+const largeFileThreshold = 512 * 1024 // 512 KB
 
 type ContainerProvider struct {
 	clients     bridge.Provider
@@ -37,7 +48,7 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 	wd := p.execWorkDir
 	sess := session
 
-	readDesc := fmt.Sprintf("Read file content inside the bot container. Supports pagination for large files. Max %d lines / %d bytes per call.", readMaxLines, readMaxBytes)
+	readDesc := "Read file content inside the bot container. Reads the full file by default; use line_offset and n_lines for pagination. Files up to ~16 MB are supported."
 	if sess.SupportsImageInput {
 		readDesc += " Also supports reading image files (PNG, JPEG, GIF, WebP) — binary images are loaded into model context automatically."
 	}
@@ -51,7 +62,7 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 				"properties": map[string]any{
 					"path":        map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute inside container)", wd)},
 					"line_offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed). Default: 1.", "minimum": 1, "default": 1},
-					"n_lines":     map[string]any{"type": "integer", "description": fmt.Sprintf("Number of lines to read per call. Default: %d. Max: %d.", readMaxLines, readMaxLines), "minimum": 1, "maximum": readMaxLines, "default": readMaxLines},
+					"n_lines":     map[string]any{"type": "integer", "description": "Number of lines to read. Default: read entire file.", "minimum": 1},
 				},
 				"required": []string{"path"},
 			},
@@ -61,7 +72,7 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        "write",
-			Description: "Write file content inside the bot container.",
+			Description: "Write file content inside the bot container. Creates parent directories automatically. Handles files of any size.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -156,7 +167,10 @@ func (p *ContainerProvider) getClient(ctx context.Context, botID string) (*bridg
 }
 
 func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	client, err := p.getClient(ctx, session.BotID)
+	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
+	defer opCancel()
+
+	client, err := p.getClient(opCtx, session.BotID)
 	if err != nil {
 		return nil, err
 	}
@@ -164,46 +178,93 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
-	lineOffset := int32(1)
+
+	lineOffset := 1
 	if offset, ok, err := IntArg(args, "line_offset"); err != nil {
 		return nil, fmt.Errorf("invalid line_offset: %w", err)
 	} else if ok {
 		if offset < 1 {
 			return nil, errors.New("line_offset must be >= 1")
 		}
-		if offset > math.MaxInt32 {
-			return nil, errors.New("line_offset exceeds maximum")
-		}
-		lineOffset = int32(offset)
+		lineOffset = offset
 	}
-	nLines := int32(readMaxLines)
+	nLines := 0 // 0 = read entire file
 	if n, ok, err := IntArg(args, "n_lines"); err != nil {
 		return nil, fmt.Errorf("invalid n_lines: %w", err)
-	} else if ok {
-		if n < 1 {
-			return nil, errors.New("n_lines must be >= 1")
-		}
-		if n > readMaxLines {
-			n = readMaxLines
-		}
-		nLines = int32(n) //nolint:gosec // bounded by readMaxLines
+	} else if ok && n > 0 {
+		nLines = n
 	}
-	resp, err := client.ReadFile(ctx, filePath, lineOffset, nLines)
+
+	// Pre-check file size to avoid loading excessively large files into
+	// memory. The gRPC transport is capped at 16 MB, so anything larger
+	// would fail anyway; reject early with a clear message.
+	const maxReadBytes = 16 * 1024 * 1024 // 16 MB
+	if stat, err := client.Stat(opCtx, filePath); err == nil && stat != nil {
+		if stat.GetSize() > maxReadBytes {
+			return nil, fmt.Errorf("file is too large (%d bytes, limit %d bytes). Use exec with head/tail/sed for partial reads", stat.GetSize(), maxReadBytes)
+		}
+	}
+
+	// Stream-read the full file content.
+	reader, err := client.ReadRaw(opCtx, filePath)
 	if err != nil {
 		return nil, err
 	}
-	if resp.GetBinary() {
+	defer func() { _ = reader.Close() }()
+
+	// Probe for binary content.
+	probe := make([]byte, 8*1024)
+	probeN, probeErr := reader.Read(probe)
+	if probeErr != nil && probeErr != io.EOF {
+		return nil, fmt.Errorf("read probe: %w", probeErr)
+	}
+	if bytes.IndexByte(probe[:probeN], 0) >= 0 {
 		if !session.SupportsImageInput {
 			return nil, errors.New("file appears to be binary. Read tool only supports text files (image reading not available for this model)")
 		}
-		return ReadImageFromContainer(ctx, client, filePath, defaultReadMediaMaxBytes), nil
+		return ReadImageFromContainer(opCtx, client, filePath, defaultReadMediaMaxBytes), nil
 	}
-	content := addLineNumbers(resp.GetContent(), lineOffset)
-	return map[string]any{"content": content, "total_lines": resp.GetTotalLines()}, nil
+
+	// Read remaining content after probe.
+	var buf strings.Builder
+	buf.Write(probe[:probeN])
+	if probeErr != io.EOF {
+		remaining, readErr := io.ReadAll(reader)
+		if readErr != nil {
+			return nil, fmt.Errorf("read file: %w", readErr)
+		}
+		buf.Write(remaining)
+	}
+
+	fullContent := buf.String()
+	lines := strings.Split(fullContent, "\n")
+	totalLines := len(lines)
+
+	// Apply line_offset and n_lines.
+	start := lineOffset - 1 // convert to 0-based
+	if start > totalLines {
+		start = totalLines
+	}
+	end := totalLines
+	if nLines > 0 && start+nLines < end {
+		end = start + nLines
+	}
+
+	selectedLines := lines[start:end]
+	content := strings.Join(selectedLines, "\n")
+	if !strings.HasSuffix(content, "\n") && end < totalLines {
+		content += "\n"
+	}
+
+	content = addLineNumbers(content, int32(lineOffset))
+	return map[string]any{"content": content, "total_lines": totalLines}, nil
 }
 
 func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	client, err := p.getClient(ctx, session.BotID)
+	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
+	defer opCancel()
+
+	client, err := p.getClient(opCtx, session.BotID)
 	if err != nil {
 		return nil, err
 	}
@@ -212,14 +273,28 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
-	if err := client.WriteFile(ctx, filePath, []byte(content)); err != nil {
-		return nil, err
+
+	data := []byte(content)
+	if len(data) > largeFileThreshold {
+		// Large content: use streaming WriteRaw to avoid loading everything
+		// into a single gRPC message and to allow incremental transfer.
+		if _, err := client.WriteRaw(opCtx, filePath, strings.NewReader(content)); err != nil {
+			return nil, err
+		}
+	} else {
+		// Small content: simple synchronous write.
+		if err := client.WriteFile(opCtx, filePath, data); err != nil {
+			return nil, err
+		}
 	}
 	return map[string]any{"ok": true}, nil
 }
 
 func (p *ContainerProvider) execList(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	client, err := p.getClient(ctx, session.BotID)
+	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
+	defer opCancel()
+
+	client, err := p.getClient(opCtx, session.BotID)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +335,7 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 		collapseThreshold = listCollapseThreshold
 	}
 
-	result, err := client.ListDir(ctx, dirPath, recursive, offset, limit, collapseThreshold)
+	result, err := client.ListDir(opCtx, dirPath, recursive, offset, limit, collapseThreshold)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +363,10 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 }
 
 func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	client, err := p.getClient(ctx, session.BotID)
+	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
+	defer opCancel()
+
+	client, err := p.getClient(opCtx, session.BotID)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +376,9 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	if filePath == "" || oldText == "" {
 		return nil, errors.New("path, old_text and new_text are required")
 	}
-	reader, err := client.ReadRaw(ctx, filePath)
+
+	// Read file content via streaming RPC.
+	reader, err := client.ReadRaw(opCtx, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -307,12 +387,22 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	if err != nil {
 		return nil, err
 	}
+
 	updated, err := applyEdit(string(raw), filePath, oldText, newText)
 	if err != nil {
 		return nil, err
 	}
-	if err := client.WriteFile(ctx, filePath, []byte(updated)); err != nil {
-		return nil, err
+
+	updatedBytes := []byte(updated)
+	if len(updatedBytes) > largeFileThreshold {
+		// Large result: stream-write to avoid gRPC message size issues.
+		if _, err := client.WriteRaw(opCtx, filePath, strings.NewReader(updated)); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := client.WriteFile(opCtx, filePath, updatedBytes); err != nil {
+			return nil, err
+		}
 	}
 	return map[string]any{"ok": true}, nil
 }

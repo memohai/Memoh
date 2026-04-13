@@ -377,6 +377,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		}
 		var msg wsClientMessage
 		if err := json.Unmarshal(raw, &msg); err != nil {
+			h.logger.Warn("ws: unmarshal failed",
+				slog.String("bot_id", botID),
+				slog.Any("error", err),
+			)
 			writer.SendJSON(map[string]string{"type": "error", "message": "invalid message format"})
 			continue
 		}
@@ -390,6 +394,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)
+			sessionID := strings.TrimSpace(msg.SessionID)
 
 			chatAttachments := make([]conversation.ChatAttachment, 0, len(msg.Attachments))
 			for _, rawAtt := range msg.Attachments {
@@ -414,7 +419,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			activeCancel = streamCancel
 			eventCh := make(chan flow.WSStreamEvent, 64)
 
-			sessionID := strings.TrimSpace(msg.SessionID)
 			var (
 				outboundAssetMu   sync.Mutex
 				outboundAssetRefs []messagepkg.AssetRef
@@ -440,7 +444,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				if streamErr := h.resolver.StreamChatWS(streamCtx, req, eventCh, abortCh); streamErr != nil {
 					if ctx.Err() == nil {
-						h.logger.Error("ws stream error", slog.Any("error", streamErr))
+						h.logger.Error("ws stream error", slog.Any("error", streamErr), slog.String("bot_id", botID), slog.String("session_id", sessionID))
 						writer.SendJSON(map[string]string{"type": "error", "message": streamErr.Error()})
 					}
 				}

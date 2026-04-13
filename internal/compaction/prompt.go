@@ -14,6 +14,8 @@ const systemPrompt = `You are a conversation summarizer. Given a conversation hi
 
 If <prior_context> is provided, it contains summaries of earlier conversation segments. Use them ONLY to understand the conversation flow and maintain continuity. Do NOT include, repeat, or rephrase any content from <prior_context> in your output.
 
+For tool results, only include key outcomes; ignore intermediate steps or errors.
+
 Output ONLY the summary of the new conversation segment. No preamble, no headers.`
 
 type messageEntry struct {

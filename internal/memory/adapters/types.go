@@ -149,6 +149,7 @@ type DeleteResponse struct {
 }
 
 type ExtractRequest struct {
+	BotID            string         `json:"bot_id,omitempty"`
 	Messages         []Message      `json:"messages"`
 	Filters          map[string]any `json:"filters,omitempty"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
@@ -167,6 +168,7 @@ type CandidateMemory struct {
 }
 
 type DecideRequest struct {
+	BotID      string            `json:"bot_id,omitempty"`
 	Facts      []string          `json:"facts"`
 	Candidates []CandidateMemory `json:"candidates"`
 	Filters    map[string]any    `json:"filters,omitempty"`

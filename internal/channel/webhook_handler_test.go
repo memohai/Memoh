@@ -103,7 +103,7 @@ func TestGenericWebhookHandlerDispatchesToAdapter(t *testing.T) {
 	h.registry = registry
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/channels/testhook/webhook/cfg-1", strings.NewReader(`{}`))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/channels/testhook/webhook/cfg-1", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("platform", "config_id")
@@ -135,7 +135,7 @@ func TestGenericWebhookHandlerRejectsUnknownConfig(t *testing.T) {
 	h.registry = registry
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/channels/testhook/webhook/missing", strings.NewReader(`{}`))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/channels/testhook/webhook/missing", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("platform", "config_id")

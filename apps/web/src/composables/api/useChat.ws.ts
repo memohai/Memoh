@@ -21,7 +21,7 @@ export interface ChatWebSocket {
 
 function resolveWebSocketUrl(botId: string): string {
   const baseUrl = String(client.getConfig().baseUrl || '').trim()
-  const path = `/bots/${encodeURIComponent(botId)}/local/ws`
+  const path = `/bots/${encodeURIComponent(botId)}/web/ws`
 
   if (!baseUrl || baseUrl.startsWith('/')) {
     const loc = window.location

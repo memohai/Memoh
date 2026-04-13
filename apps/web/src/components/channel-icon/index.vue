@@ -24,6 +24,7 @@ import {
   Wechatoa,
   Wecom,
   Matrix,
+  Misskey,
 } from '@memohai/icon'
 
 const channelIcons: Record<string, Component> = {
@@ -37,6 +38,7 @@ const channelIcons: Record<string, Component> = {
   wechatoa: Wechatoa,
   wecom: Wecom,
   matrix: Matrix,
+  misskey: Misskey,
   dingtalk: Dingtalk,
 }
 

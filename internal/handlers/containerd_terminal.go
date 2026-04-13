@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -13,6 +15,10 @@ import (
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
+
+// terminalIdleTimeout closes inactive terminal WebSocket sessions to
+// prevent leaked PTY processes. Reset on every inbound WebSocket message.
+const terminalIdleTimeout = 30 * time.Minute
 
 var terminalUpgrader = websocket.Upgrader{
 	CheckOrigin: func(_ *http.Request) bool { return true },
@@ -106,6 +112,22 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 
 	done := make(chan struct{})
 
+	// Idle timer: closes the connection if no client activity for terminalIdleTimeout.
+	var idleMu sync.Mutex
+	idleTimer := time.AfterFunc(terminalIdleTimeout, func() {
+		h.logger.Info("terminal idle timeout reached, closing", slog.String("bot_id", botID))
+		_ = conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "idle timeout"),
+			time.Now().Add(5*time.Second))
+		_ = conn.Close()
+	})
+	defer idleTimer.Stop()
+	resetIdle := func() {
+		idleMu.Lock()
+		idleTimer.Reset(terminalIdleTimeout)
+		idleMu.Unlock()
+	}
+
 	// gRPC output -> WebSocket
 	go func() {
 		defer close(done)
@@ -135,6 +157,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 				_ = execStream.Close()
 				return
 			}
+			resetIdle() // client is active
 			switch msgType {
 			case websocket.BinaryMessage:
 				if len(data) > 0 {

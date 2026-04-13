@@ -571,7 +571,7 @@ export const useChatStore = defineStore('chat', () => {
       } else {
         const activeSessionId = sessionId.value && visible.some(session => session.id === sessionId.value)
           ? sessionId.value
-          : visible[0]!.id
+          : (visible.find((s) => s.type === 'chat' || s.type === 'discuss')?.id ?? visible[0]!.id)
         sessionId.value = activeSessionId
         await loadMessages(bid, activeSessionId)
       }

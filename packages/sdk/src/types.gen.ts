@@ -1590,6 +1590,7 @@ export type SettingsUpsertRequest = {
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
+    timezone?: string;
     title_model_id?: string;
     tts_model_id?: string;
 };

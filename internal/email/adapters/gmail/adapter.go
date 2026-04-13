@@ -146,7 +146,7 @@ func (a *Adapter) Send(ctx context.Context, config map[string]any, msg email.Out
 
 func (a *Adapter) StartReceiving(ctx context.Context, config map[string]any, handler email.InboundHandler) (email.Stopper, error) {
 	providerID, _ := config["_provider_id"].(string)
-	rctx, cancel := context.WithCancel(ctx)
+	rctx, cancel := context.WithCancel(ctx) //nolint:gosec // G118: cancel is stored in conn.cancel and called by Stop()
 	conn := &gmailImapConn{
 		adapter:    a,
 		config:     config,

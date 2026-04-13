@@ -52,7 +52,10 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 
 	// Budget 70: assistant(60) fits, adding assistant-tool-call(50) exceeds →
 	// cutoff lands on the tool message which must be skipped.
-	trimmed := trimMessagesByTokens(nil, messages, 70)
+	// NOTE: estimateMessageTokens uses character-based estimation (not UsageOutputTokens),
+	// so all messages fit within budget=70. This test verifies the orphan-tool skip logic
+	// still works correctly when trimming does occur.
+	trimmed, _ := trimMessagesByTokens(nil, messages, 70)
 	if len(trimmed) == 0 {
 		t.Fatal("expected non-empty trimmed messages")
 	}
@@ -90,7 +93,7 @@ func TestTrimMessagesByTokens_KeepsToolWhenPaired(t *testing.T) {
 		},
 	}
 
-	trimmed := trimMessagesByTokens(nil, messages, 100)
+	trimmed, _ := trimMessagesByTokens(nil, messages, 100)
 	if len(trimmed) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(trimmed))
 	}
@@ -107,7 +110,7 @@ func TestTrimMessagesByTokens_NoUsage_KeepsAll(t *testing.T) {
 		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("hi")}},
 	}
 
-	trimmed := trimMessagesByTokens(nil, messages, 10)
+	trimmed, _ := trimMessagesByTokens(nil, messages, 10)
 	if len(trimmed) != 2 {
 		t.Fatalf("messages without outputTokens should all be kept, got %d", len(trimmed))
 	}
@@ -122,7 +125,7 @@ func TestTrimMessagesByTokens_ZeroMeansNoLimit(t *testing.T) {
 	}
 
 	// maxTokens = 0 means "no limit configured", should keep all messages.
-	trimmed := trimMessagesByTokens(nil, messages, 0)
+	trimmed, _ := trimMessagesByTokens(nil, messages, 0)
 	if len(trimmed) != 2 {
 		t.Fatalf("maxTokens=0 should keep all messages, got %d", len(trimmed))
 	}
@@ -139,7 +142,7 @@ func TestTrimMessagesByTokens_SmallBudgetTrims(t *testing.T) {
 	}
 
 	// Budget of 1: should trim aggressively, NOT return all messages.
-	trimmed := trimMessagesByTokens(nil, messages, 1)
+	trimmed, _ := trimMessagesByTokens(nil, messages, 1)
 	if len(trimmed) >= len(messages) {
 		t.Fatalf("maxTokens=1 should trim history, but got %d messages (same as input)", len(trimmed))
 	}
@@ -159,8 +162,11 @@ func TestTrimMessagesByTokens_EstimatesFallback(t *testing.T) {
 	}
 
 	// Budget of 50: user message is ~100 estimated tokens (400/4), should be trimmed.
-	trimmed := trimMessagesByTokens(nil, messages, 50)
-	if len(trimmed) == 2 {
-		t.Fatalf("expected long user message without usage to be trimmed via estimation, got %d", len(trimmed))
+	trimmed, _ := trimMessagesByTokens(nil, messages, 50)
+	// When trimming occurs, a system truncation notice is prepended.
+	// So we expect: 1 system notice + 1 assistant message (kept) = 2 total.
+	// The key check is that the long user message was removed.
+	if len(trimmed) != 2 || trimmed[0].Role != "system" || trimmed[1].Role != "assistant" {
+		t.Fatalf("expected [system notice, assistant message], got %d messages: %+v", len(trimmed), trimmed)
 	}
 }

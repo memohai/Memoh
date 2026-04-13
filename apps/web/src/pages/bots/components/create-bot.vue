@@ -58,7 +58,7 @@
           </FormField>
 
           <FormField
-            v-slot="{ componentField }"
+            v-slot="{ value, handleChange }"
             name="timezone"
           >
             <FormItem>
@@ -67,28 +67,13 @@
                 <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
               </Label>
               <FormControl>
-                <Select
-                  :model-value="componentField.modelValue || emptyTimezoneValue"
-                  @update:model-value="(value) => componentField['onUpdate:modelValue'](value === emptyTimezoneValue ? '' : value)"
-                >
-                  <SelectTrigger class="w-full">
-                    <SelectValue :placeholder="$t('bots.timezonePlaceholder')" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem :value="emptyTimezoneValue">
-                        {{ $t('bots.timezoneInherited') }}
-                      </SelectItem>
-                      <SelectItem
-                        v-for="timezoneOption in timezones"
-                        :key="timezoneOption"
-                        :value="timezoneOption"
-                      >
-                        {{ timezoneOption }}
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
+                <TimezoneSelect
+                  :model-value="value || emptyTimezoneValue"
+                  :placeholder="$t('bots.timezonePlaceholder')"
+                  allow-empty
+                  :empty-label="$t('bots.timezoneInherited')"
+                  @update:model-value="(val) => handleChange(val === emptyTimezoneValue ? '' : val)"
+                />
               </FormControl>
             </FormItem>
           </FormField>
@@ -133,12 +118,6 @@ import {
   FormItem,
   Separator,
   Label,
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Spinner,
 } from '@memohai/ui'
 import { Plus } from 'lucide-vue-next'
@@ -150,7 +129,8 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { postBotsMutation, getBotsQueryKey } from '@memohai/sdk/colada'
 import { useI18n } from 'vue-i18n'
 import { useDialogMutation } from '@/composables/useDialogMutation'
-import { emptyTimezoneValue, timezones } from '@/utils/timezones'
+import { emptyTimezoneValue } from '@/utils/timezones'
+import TimezoneSelect from '@/components/timezone-select/index.vue'
 
 const open = defineModel<boolean>('open', { default: false })
 const { t } = useI18n()

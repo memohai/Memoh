@@ -111,7 +111,7 @@ func (d *DiscussDriver) NotifyRC(_ context.Context, sessionID string, rc Rendere
 	d.mu.Lock()
 	sess, ok := d.sessions[sessionID]
 	if !ok {
-		sessCtx, cancel := context.WithCancel(context.Background())
+		sessCtx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in sess.cancel
 		sess = &discussSession{
 			config: config,
 			rcCh:   make(chan RenderedContext, 16),
