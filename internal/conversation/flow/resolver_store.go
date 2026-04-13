@@ -26,6 +26,7 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 		}
 		fullRound = append(fullRound, m)
 	}
+	fullRound = repairToolCallClosures(fullRound, syntheticToolClosureError)
 
 	// Filter out empty assistant messages (content: []) that result from LLM
 	// returning no useful output (e.g., context window overflow). These provide
