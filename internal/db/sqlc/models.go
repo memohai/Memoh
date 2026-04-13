@@ -9,36 +9,38 @@ import (
 )
 
 type Bot struct {
-	ID                  pgtype.UUID        `json:"id"`
-	OwnerUserID         pgtype.UUID        `json:"owner_user_id"`
-	DisplayName         pgtype.Text        `json:"display_name"`
-	AvatarUrl           pgtype.Text        `json:"avatar_url"`
-	Timezone            pgtype.Text        `json:"timezone"`
-	IsActive            bool               `json:"is_active"`
-	Status              string             `json:"status"`
-	Language            string             `json:"language"`
-	ReasoningEnabled    bool               `json:"reasoning_enabled"`
-	ReasoningEffort     string             `json:"reasoning_effort"`
-	ChatModelID         pgtype.UUID        `json:"chat_model_id"`
-	SearchProviderID    pgtype.UUID        `json:"search_provider_id"`
-	MemoryProviderID    pgtype.UUID        `json:"memory_provider_id"`
-	HeartbeatEnabled    bool               `json:"heartbeat_enabled"`
-	HeartbeatInterval   int32              `json:"heartbeat_interval"`
-	HeartbeatPrompt     string             `json:"heartbeat_prompt"`
-	HeartbeatModelID    pgtype.UUID        `json:"heartbeat_model_id"`
-	CompactionEnabled   bool               `json:"compaction_enabled"`
-	CompactionThreshold int32              `json:"compaction_threshold"`
-	CompactionRatio     int32              `json:"compaction_ratio"`
-	CompactionModelID   pgtype.UUID        `json:"compaction_model_id"`
-	TitleModelID        pgtype.UUID        `json:"title_model_id"`
-	ImageModelID        pgtype.UUID        `json:"image_model_id"`
-	DiscussProbeModelID pgtype.UUID        `json:"discuss_probe_model_id"`
-	TtsModelID          pgtype.UUID        `json:"tts_model_id"`
-	BrowserContextID    pgtype.UUID        `json:"browser_context_id"`
-	Metadata            []byte             `json:"metadata"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	AclDefaultEffect    string             `json:"acl_default_effect"`
+	ID                     pgtype.UUID        `json:"id"`
+	OwnerUserID            pgtype.UUID        `json:"owner_user_id"`
+	DisplayName            pgtype.Text        `json:"display_name"`
+	AvatarUrl              pgtype.Text        `json:"avatar_url"`
+	Timezone               pgtype.Text        `json:"timezone"`
+	IsActive               bool               `json:"is_active"`
+	Status                 string             `json:"status"`
+	Language               string             `json:"language"`
+	ReasoningEnabled       bool               `json:"reasoning_enabled"`
+	ReasoningEffort        string             `json:"reasoning_effort"`
+	ChatModelID            pgtype.UUID        `json:"chat_model_id"`
+	SearchProviderID       pgtype.UUID        `json:"search_provider_id"`
+	MemoryProviderID       pgtype.UUID        `json:"memory_provider_id"`
+	HeartbeatEnabled       bool               `json:"heartbeat_enabled"`
+	HeartbeatInterval      int32              `json:"heartbeat_interval"`
+	HeartbeatPrompt        string             `json:"heartbeat_prompt"`
+	HeartbeatModelID       pgtype.UUID        `json:"heartbeat_model_id"`
+	CompactionEnabled      bool               `json:"compaction_enabled"`
+	CompactionThreshold    int32              `json:"compaction_threshold"`
+	CompactionRatio        int32              `json:"compaction_ratio"`
+	CompactionModelID      pgtype.UUID        `json:"compaction_model_id"`
+	TitleModelID           pgtype.UUID        `json:"title_model_id"`
+	ImageModelID           pgtype.UUID        `json:"image_model_id"`
+	DiscussProbeModelID    pgtype.UUID        `json:"discuss_probe_model_id"`
+	TtsModelID             pgtype.UUID        `json:"tts_model_id"`
+	BrowserContextID       pgtype.UUID        `json:"browser_context_id"`
+	ContextTokenBudget     pgtype.Int4        `json:"context_token_budget"`
+	PersistFullToolResults bool               `json:"persist_full_tool_results"`
+	Metadata               []byte             `json:"metadata"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	AclDefaultEffect       string             `json:"acl_default_effect"`
 }
 
 type BotAclRule struct {
@@ -468,6 +470,18 @@ type StorageProvider struct {
 	Config    []byte             `json:"config"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Task struct {
+	ID        string             `json:"id"`
+	BotID     string             `json:"bot_id"`
+	Name      string             `json:"name"`
+	Command   string             `json:"command"`
+	Status    string             `json:"status"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ExecID    pgtype.Text        `json:"exec_id"`
+	Pid       pgtype.Int4        `json:"pid"`
 }
 
 type TtsModel struct {
