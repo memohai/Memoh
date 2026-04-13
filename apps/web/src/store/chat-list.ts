@@ -364,6 +364,27 @@ export const useChatStore = defineStore('chat', () => {
     stopWebSocket()
     if (!bid) return
     activeWs = connectWebSocket(bid, handleWSStreamEvent)
+    // When the WS reconnects after a disconnect, the old stream's WS events
+    // are gone. Clear the stale pendingAssistantStream so SSE message_created
+    // events can trigger refreshes. Then do an immediate refresh to show
+    // cached in-progress content from the server.
+    activeWs.onOpen = () => {
+      if (pendingAssistantStream && !pendingAssistantStream.done) {
+        pendingAssistantStream.assistantTurn.streaming = false
+        pendingAssistantStream = null
+        // Keep streamingSessionId set so we know this session has an active
+        // stream, but allow SSE to trigger refreshes now that the old
+        // pending stream reference is cleared.
+        // Actually we need to clear streamingSessionId too so SSE refresh works:
+        streamingSessionId.value = null
+      }
+      // Always refresh on reconnect to pick up latest state (including
+      // active stream cache from the server).
+      const sid = sessionId.value
+      if (sid) {
+        void refreshCurrentSession(bid, sid)
+      }
+    }
   }
 
   function ensureWebSocket(targetBotId: string): ChatWebSocket | null {

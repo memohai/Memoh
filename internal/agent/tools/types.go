@@ -32,6 +32,7 @@ const (
 // The agent framework converts these into the appropriate wire-level events.
 type ToolStreamEvent struct {
 	Type        StreamEventType
+	Progress    any // optional progress payload (e.g. SubagentStatus for spawn heartbeat)
 	Attachments []Attachment
 	Reactions   []Reaction
 	Speeches    []Speech

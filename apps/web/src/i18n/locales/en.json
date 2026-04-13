@@ -181,6 +181,7 @@
     "toolEmailCount": "{count} emails",
     "toolEmailAccounts": "{count} accounts",
     "toolSpawnCount": "{count} tasks",
+    "toolRetry": "Retry",
     "unknownUser": "{platform} User",
     "files": "Files",
     "clearMessages": "Clear Messages",

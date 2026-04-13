@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -368,11 +369,16 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 	abortCh := make(chan struct{}, 1)
 	var activeCancel context.CancelFunc
+	var disconnected atomic.Bool
 
 	for {
 		_, raw, readErr := conn.ReadMessage()
 		if readErr != nil {
-			cancel()
+			// Mark disconnected but do NOT cancel the context —
+			// the LLM stream should continue running so the task
+			// completes and results are persisted to the database.
+			// The user can reconnect later to see results.
+			disconnected.Store(true)
 			break
 		}
 		var msg wsClientMessage
@@ -415,7 +421,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			default:
 			}
 
-			streamCtx, streamCancel := context.WithCancel(ctx)
+			// Derive stream context from a decoupled background context
+			// so that WS disconnect does not cancel the LLM stream.
+			// The abort channel is still wired through StreamChatWS
+			// so explicit user aborts work as expected.
+			streamCtx, streamCancel := context.WithCancel(context.WithoutCancel(ctx))
 			activeCancel = streamCancel
 			eventCh := make(chan flow.WSStreamEvent, 64)
 
@@ -454,6 +464,14 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				converter := conversation.NewUIMessageStreamConverter()
 				for event := range eventCh {
 					processed := h.processWSEvent(streamCtx, botID, event)
+
+					// If WS is disconnected, drain events without writing
+					// to the WS writer. This prevents blocking the stream
+					// goroutine which would stall the LLM.
+					if disconnected.Load() {
+						continue
+					}
+
 					for _, p := range processed {
 						if refs := extractAssetRefsFromProcessedEvent(p); len(refs) > 0 {
 							outboundAssetMu.Lock()
@@ -495,8 +513,13 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 								"data": uiMessage,
 							})
 						}
+						// Update active stream cache so users reconnecting
+						// can see in-progress content.
+						SetActiveStream(botID, sessionID, converter.Snapshot())
 					}
 				}
+				// Stream finished — clear the active stream cache.
+				ClearActiveStream(botID, sessionID)
 				outboundAssetMu.Lock()
 				refs := outboundAssetRefs
 				outboundAssetMu.Unlock()

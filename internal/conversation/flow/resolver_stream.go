@@ -286,11 +286,13 @@ func (r *Resolver) persistPartialResult(ctx context.Context, req conversation.Ch
 		)
 	}
 
-	// Trigger compaction on failure path so that oversized contexts don't
-	// create a deadlock where the LLM can never succeed (and therefore
-	// compaction never fires). Use the estimated token count from resolve.
+	// Trigger synchronous compaction on the failure path so that oversized
+	// contexts don't create a deadlock where the LLM can never succeed (and
+	// therefore compaction never fires). Use the estimated token count from
+	// resolve. Synchronous (not async) ensures the compressed context is
+	// persisted before the next request arrives.
 	if rc.estimatedTokens > 0 {
-		r.maybeCompact(context.WithoutCancel(ctx), req, rc, rc.estimatedTokens)
+		r.runCompactionSync(context.WithoutCancel(ctx), req, rc.estimatedTokens)
 	}
 }
 

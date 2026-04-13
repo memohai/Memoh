@@ -194,9 +194,22 @@ func (w *SubagentWatchdog) run(ctx context.Context) {
 // maxTasksPerSpawn caps the number of tasks accepted in a single spawn call.
 const maxTasksPerSpawn = 5
 
+// maxSpawnConcurrency limits how many subagents run concurrently.
+// This prevents overwhelming unreliable APIs with too many simultaneous requests.
+const maxSpawnConcurrency = 2
+
 // maxSpawnCallsPerSession caps the total number of spawn tool calls within
 // a single agent session to prevent subagent storms.
 const maxSpawnCallsPerSession = 3
+
+// SubagentStatus describes the real-time status of a single subagent task.
+// Used in heartbeat progress events to notify the frontend.
+type SubagentStatus struct {
+	Index   int    `json:"index"`
+	Task    string `json:"task"`
+	Status  string `json:"status"` // "running", "completed", "failed"
+	Attempt int    `json:"attempt,omitempty"`
+}
 
 // SpawnProvider exposes a "spawn" tool that runs one or more subagent tasks
 // concurrently and returns results to the parent agent.
@@ -341,22 +354,65 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 
 	results := make([]spawnResult, len(tasks))
 	var wg sync.WaitGroup
-	wg.Add(len(tasks))
+
+	// Track per-subagent status for heartbeat progress events.
+	statuses := make([]SubagentStatus, len(tasks))
+	for i, task := range tasks {
+		statuses[i] = SubagentStatus{Index: i, Task: task, Status: "running"}
+	}
 
 	// Start a heartbeat goroutine that emits progress events into the
 	// parent stream at regular intervals. This keeps the stream's idle
 	// timeout from firing while subagents are running.
 	heartbeatCtx, heartbeatCancel := context.WithCancel(sessionCtx)
 	defer heartbeatCancel()
-	p.startSpawnHeartbeat(heartbeatCtx, session, len(tasks))
+	p.startSpawnHeartbeat(heartbeatCtx, session, len(tasks), statuses)
 
+	p.logger.Info("spawn start",
+		slog.String("bot_id", session.BotID),
+		slog.String("session_id", session.SessionID),
+		slog.Int("task_count", len(tasks)),
+		slog.Int("max_concurrency", maxSpawnConcurrency),
+	)
+	spawnStart := time.Now()
+
+	// Fan-out: limit concurrent subagent startup with a semaphore
+	// to avoid overwhelming unreliable APIs.
+	sem := make(chan struct{}, maxSpawnConcurrency)
 	for i, task := range tasks {
+		sem <- struct{}{} // acquire token (blocks if at capacity)
+		wg.Add(1)
 		go func(idx int, query string) {
-			defer wg.Done()
-			results[idx] = p.runSubagentTask(sessionCtx, session, sdkModel, modelID, systemPrompt, query)
+			defer func() {
+				<-sem // release token
+				wg.Done()
+			}()
+			result := p.runSubagentTask(sessionCtx, session, sdkModel, modelID, systemPrompt, query)
+			results[idx] = result
+			if result.Success {
+				statuses[idx] = SubagentStatus{Index: idx, Task: query, Status: "completed"}
+			} else {
+				statuses[idx] = SubagentStatus{Index: idx, Task: query, Status: "failed"}
+			}
 		}(i, task)
 	}
 	wg.Wait()
+
+	var successCount, failCount int
+	for _, r := range results {
+		if r.Success {
+			successCount++
+		} else {
+			failCount++
+		}
+	}
+	p.logger.Info("spawn complete",
+		slog.String("bot_id", session.BotID),
+		slog.String("session_id", session.SessionID),
+		slog.Duration("duration", time.Since(spawnStart)),
+		slog.Int("success_count", successCount),
+		slog.Int("fail_count", failCount),
+	)
 
 	return map[string]any{"results": results}, nil
 }
@@ -364,7 +420,7 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 // startSpawnHeartbeat emits periodic progress events into the parent agent
 // stream to prevent the idle timeout from firing while spawn tasks run.
 // Each heartbeat carries a progress status so the frontend can display it.
-func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionContext, _ int) {
+func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionContext, _ int, statuses []SubagentStatus) {
 	emitter := session.Emitter
 	if emitter == nil {
 		return
@@ -381,8 +437,12 @@ func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionCo
 				// The agent framework converts ToolStreamEvent into the
 				// appropriate wire-level progress event, which resets the
 				// idle timeout timer in the resolver.
+				// Carry subagent statuses so the frontend can show progress.
+				statusCopy := make([]SubagentStatus, len(statuses))
+				copy(statusCopy, statuses)
 				emitter(ToolStreamEvent{
-					Type: StreamEventSpawnHeartbeat,
+					Type:     StreamEventSpawnHeartbeat,
+					Progress: statusCopy,
 				})
 			}
 		}
@@ -398,6 +458,12 @@ func (p *SpawnProvider) runSubagentTask(
 	query string,
 ) spawnResult {
 	res := spawnResult{Task: query}
+	subStart := time.Now()
+
+	p.logger.Info("subagent start",
+		slog.String("task", truncateTitle(query, 80)),
+		slog.String("parent_session_id", parentSession.SessionID),
+	)
 
 	var sessionID string
 	if p.sessionService != nil {
@@ -508,6 +574,11 @@ func (p *SpawnProvider) runSubagentTask(
 		slog.String("error", lastErr.Error()),
 	)
 	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
+	p.logger.Info("subagent done",
+		slog.String("session_id", sessionID),
+		slog.Bool("success", res.Success),
+		slog.Duration("duration", time.Since(subStart)),
+	)
 	return res
 }
 

@@ -174,8 +174,21 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
+		turns := conversation.ConvertMessagesToUITurns(messages)
+		// If there is an active stream for this session, append the cached
+		// in-progress content as an extra assistant turn. This allows users
+		// who reconnect (after closing their browser) to see what has been
+		// generated so far while the LLM is still running.
+		if sessionID != "" {
+			if cached := GetActiveStream(botID, sessionID); len(cached) > 0 {
+				turns = append(turns, conversation.UITurn{
+					Role:     "assistant",
+					Messages: cached,
+				})
+			}
+		}
 		return c.JSON(http.StatusOK, map[string]any{
-			"items": conversation.ConvertMessagesToUITurns(messages),
+			"items": turns,
 		})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"items": messages})

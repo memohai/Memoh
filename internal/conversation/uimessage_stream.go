@@ -140,6 +140,18 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			Attachments: append([]UIAttachment(nil), event.Attachments...),
 		}}
 
+	case "progress":
+		// Find the spawn tool and update its progress array.
+		for _, state := range c.tools {
+			if state.Message.Name == "spawn" {
+				if event.Progress != nil {
+					state.Message.Progress = append(state.Message.Progress, event.Progress)
+				}
+				return []UIMessage{cloneToolStreamMessage(state.Message)}
+			}
+		}
+		return nil
+
 	default:
 		return nil
 	}
@@ -165,6 +177,31 @@ func (c *UIMessageStreamConverter) findToolState(toolCallID, toolName string) *u
 		}
 	}
 	return nil
+}
+
+// Snapshot returns the current state of all tracked UI messages.
+// Used to capture in-progress content for the active stream cache,
+// so that users reconnecting can see what has been generated so far.
+func (c *UIMessageStreamConverter) Snapshot() []UIMessage {
+	var msgs []UIMessage
+	if c.text != nil {
+		msgs = append(msgs, UIMessage{
+			ID:      c.text.ID,
+			Type:    UIMessageText,
+			Content: c.text.Content,
+		})
+	}
+	if c.reasoning != nil {
+		msgs = append(msgs, UIMessage{
+			ID:      c.reasoning.ID,
+			Type:    UIMessageReasoning,
+			Content: c.reasoning.Content,
+		})
+	}
+	for _, state := range c.tools {
+		msgs = append(msgs, cloneToolStreamMessage(state.Message))
+	}
+	return msgs
 }
 
 func cloneToolStreamMessage(message UIMessage) UIMessage {

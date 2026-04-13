@@ -36,9 +36,37 @@
       </Badge>
     </div>
 
-    <!-- Task list (only shown while running, before results are available) -->
+    <!-- Live subagent status (shown during execution when progress available) -->
     <div
-      v-if="tasks.length && !results.length"
+      v-if="subagentStatuses.length && !results.length"
+      class="px-3 py-2 space-y-1"
+    >
+      <div
+        v-for="status in subagentStatuses"
+        :key="status.index"
+        class="flex items-center gap-1.5 text-xs truncate"
+        :title="status.task"
+      >
+        <LoaderCircle
+          v-if="status.status === 'running'"
+          class="size-2.5 animate-spin text-muted-foreground shrink-0"
+        />
+        <CircleCheck
+          v-else-if="status.status === 'completed'"
+          class="size-2.5 text-green-500 shrink-0"
+        />
+        <CircleX
+          v-else-if="status.status === 'failed'"
+          class="size-2.5 text-red-500 shrink-0"
+        />
+        <span class="font-mono text-foreground shrink-0">#{{ status.index + 1 }}</span>
+        <span class="truncate text-muted-foreground">{{ status.task }}</span>
+      </div>
+    </div>
+
+    <!-- Task list fallback (shown while running without progress) -->
+    <div
+      v-else-if="tasks.length && !results.length"
       class="px-3 py-2 space-y-1"
     >
       <div
@@ -83,6 +111,13 @@
         >
           {{ result.task }}
         </span>
+        <button
+          v-if="!result.success"
+          class="ml-auto text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded border border-border hover:bg-accent transition-colors shrink-0"
+          @click.stop="retryTask(result.task || '')"
+        >
+          {{ $t('chat.toolRetry') }}
+        </button>
         <ExternalLink
           v-if="result.session_id"
           class="size-2.5 text-muted-foreground/50 shrink-0 ml-auto"
@@ -143,6 +178,13 @@ interface SpawnTaskResult {
   error?: string
 }
 
+interface SubagentStatus {
+  index: number
+  task: string
+  status: 'running' | 'completed' | 'failed'
+  attempt?: number
+}
+
 const props = defineProps<{ block: ToolCallBlock }>()
 
 const router = useRouter()
@@ -159,6 +201,19 @@ const tasks = computed(() => {
 
 const taskCount = computed(() => {
   return tasks.value.length || null
+})
+
+// Extract the latest subagent status from progress events.
+// The backend heartbeat sends SubagentStatus[] arrays as progress updates.
+const subagentStatuses = computed<SubagentStatus[]>(() => {
+  const progress = props.block.progress
+  if (!Array.isArray(progress) || progress.length === 0) return []
+  // The last progress entry is the most recent heartbeat payload.
+  const latest = progress[progress.length - 1]
+  if (!latest || typeof latest !== 'object' || !Array.isArray(latest)) return []
+  return (latest as SubagentStatus[]).filter(
+    s => s && typeof s === 'object' && 'status' in s
+  ) as SubagentStatus[]
 })
 
 function resolveResult(): Record<string, unknown> | null {
@@ -186,5 +241,10 @@ function navigateToSession(sessionId: string) {
     name: 'chat',
     params: { botId, sessionId },
   })
+}
+
+function retryTask(task: string) {
+  if (!task) return
+  chatStore.sendMessage(`请重试 spawn 中失败的任务：${task}`)
 }
 </script>

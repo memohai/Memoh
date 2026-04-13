@@ -629,7 +629,7 @@ func toolStreamEventToAgentEvent(evt tools.ToolStreamEvent) StreamEvent {
 		}
 		return StreamEvent{Type: EventSpeech, Speeches: ss}
 	case tools.StreamEventSpawnHeartbeat:
-		return StreamEvent{Type: EventProgress, ProgressStatus: "spawn_running"}
+		return StreamEvent{Type: EventProgress, ProgressStatus: "spawn_running", Progress: evt.Progress}
 	default:
 		return StreamEvent{}
 	}
