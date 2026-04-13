@@ -258,6 +258,62 @@ func TestBuildTelegramMediaGroupInboundMessageAggregatesAttachments(t *testing.T
 	}
 }
 
+func TestBuildTelegramInboundMessageIncludesUpdateIDMetadata(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	bot := &tgbotapi.BotAPI{
+		Token: "test",
+		Self:  tgbotapi.User{ID: 1001, UserName: "memohbot"},
+	}
+	update := tgbotapi.Update{
+		UpdateID: 777,
+		Message: &tgbotapi.Message{
+			MessageID: 101,
+			Date:      1710000000,
+			Text:      "hello",
+			Chat:      &tgbotapi.Chat{ID: 123, Type: "private"},
+			From:      &tgbotapi.User{ID: 10, UserName: "alice"},
+		},
+	}
+
+	inbound, ok := adapter.buildTelegramInboundMessage(bot, channel.ChannelConfig{}, update)
+	if !ok {
+		t.Fatal("expected inbound message")
+	}
+	if got := inbound.Metadata["update_id"]; got != 777 {
+		t.Fatalf("unexpected update_id metadata: %#v", got)
+	}
+}
+
+func TestSeenTelegramUpdate(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	now := time.Unix(1710000000, 0)
+
+	if adapter.seenTelegramUpdate("cfg-1", 42, now) {
+		t.Fatal("first update should not be treated as duplicate")
+	}
+	if !adapter.seenTelegramUpdate("cfg-1", 42, now.Add(time.Second)) {
+		t.Fatal("second update should be treated as duplicate")
+	}
+	if adapter.seenTelegramUpdate("cfg-2", 42, now.Add(time.Second)) {
+		t.Fatal("same update_id under different config should not collide")
+	}
+	if adapter.seenTelegramUpdate("cfg-1", 43, now.Add(time.Second)) {
+		t.Fatal("different update_id should not collide")
+	}
+	if adapter.seenTelegramUpdate("cfg-1", 0, now.Add(time.Second)) {
+		t.Fatal("zero update_id should bypass dedupe")
+	}
+
+	later := now.Add(telegramUpdateDedupeTTL + time.Second)
+	if adapter.seenTelegramUpdate("cfg-1", 42, later) {
+		t.Fatal("expired dedupe entry should be accepted again")
+	}
+}
+
 func TestIsTelegramMediaGroupForChat(t *testing.T) {
 	t.Parallel()
 
