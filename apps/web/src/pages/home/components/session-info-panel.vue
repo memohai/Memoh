@@ -104,8 +104,8 @@ import { storeToRefs } from 'pinia'
 import { useQuery } from '@pinia/colada'
 import { Sparkles, ExternalLink } from 'lucide-vue-next'
 import { ScrollArea } from '@memohai/ui'
-import { getBotsByBotIdSessionsBySessionIdStatus } from '@memohai/sdk'
-import type { HandlersSessionInfoResponse } from '@memohai/sdk'
+import { getBotsByBotIdContainerSkills, getBotsByBotIdSessionsBySessionIdStatus } from '@memohai/sdk'
+import type { HandlersSessionInfoResponse, HandlersSkillItem } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 
@@ -117,6 +117,11 @@ const props = defineProps<{
 const chatStore = useChatStore()
 const { currentBotId, sessionId } = storeToRefs(chatStore)
 const openInFileManager = inject(openInFileManagerKey, undefined)
+
+type SkillItem = HandlersSkillItem & {
+  source_path?: string
+  state?: string
+}
 
 const { data: info } = useQuery({
   key: () => ['session-status', currentBotId.value ?? '', sessionId.value ?? '', props.overrideModelId ?? ''],
@@ -134,6 +139,21 @@ const { data: info } = useQuery({
     return data as HandlersSessionInfoResponse
   },
   enabled: () => !!currentBotId.value && !!sessionId.value && props.visible,
+  refetchOnWindowFocus: false,
+})
+
+const { data: skillCatalog } = useQuery({
+  key: () => ['bot-skill-catalog', currentBotId.value ?? ''],
+  query: async () => {
+    const { data } = await getBotsByBotIdContainerSkills({
+      path: {
+        bot_id: currentBotId.value!,
+      },
+      throwOnError: true,
+    })
+    return (data.skills || []) as SkillItem[]
+  },
+  enabled: () => !!currentBotId.value && props.visible,
   refetchOnWindowFocus: false,
 })
 
@@ -155,6 +175,14 @@ const cacheHitRate = computed(() => {
 })
 
 const skills = computed(() => info.value?.skills ?? [])
+const effectiveSkillPathByName = computed<Record<string, string>>(() => {
+  const out: Record<string, string> = {}
+  for (const item of skillCatalog.value || []) {
+    if (item.state !== 'effective' || !item.name || !item.source_path) continue
+    out[item.name] = item.source_path
+  }
+  return out
+})
 
 function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -163,6 +191,6 @@ function formatTokenCount(n: number): string {
 }
 
 function openSkillFile(skillName: string) {
-  openInFileManager?.(`/data/skills/${skillName}/SKILL.md`, false)
+  openInFileManager?.(effectiveSkillPathByName.value[skillName] || `/data/skills/${skillName}/SKILL.md`, false)
 }
 </script>

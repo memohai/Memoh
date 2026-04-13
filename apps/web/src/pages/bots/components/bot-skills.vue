@@ -52,7 +52,7 @@
     >
       <Card
         v-for="skill in skills"
-        :key="skill.name"
+        :key="skillKey(skill)"
         class="flex flex-col"
       >
         <CardHeader class="pb-3">
@@ -68,14 +68,69 @@
                 variant="ghost"
                 size="sm"
                 class="size-8 p-0"
-                :title="$t('common.edit')"
+                :title="skill.managed === false ? $t('bots.skills.overrideTitle') : $t('common.edit')"
                 @click="handleEdit(skill)"
               >
                 <SquarePen
                   class="size-3.5"
                 />
               </Button>
+              <Button
+                v-if="skill.state === 'disabled'"
+                variant="ghost"
+                size="sm"
+                class="size-8 p-0"
+                :disabled="isActioning"
+                :title="$t('bots.skills.enableAction')"
+                @click="handleSkillAction('enable', skill)"
+              >
+                <Spinner
+                  v-if="isSkillActionPending(skill, 'enable')"
+                  class="size-3.5"
+                />
+                <Eye
+                  v-else
+                  class="size-3.5"
+                />
+              </Button>
+              <Button
+                v-else
+                variant="ghost"
+                size="sm"
+                class="size-8 p-0"
+                :disabled="isActioning"
+                :title="$t('bots.skills.disableAction')"
+                @click="handleSkillAction('disable', skill)"
+              >
+                <Spinner
+                  v-if="isSkillActionPending(skill, 'disable')"
+                  class="size-3.5"
+                />
+                <EyeOff
+                  v-else
+                  class="size-3.5"
+                />
+              </Button>
+              <Button
+                v-if="skill.managed === false"
+                variant="ghost"
+                size="sm"
+                class="size-8 p-0"
+                :disabled="isActioning || skill.state === 'shadowed'"
+                :title="skill.state === 'shadowed' ? $t('bots.skills.adoptBlocked') : $t('bots.skills.adoptAction')"
+                @click="handleSkillAction('adopt', skill)"
+              >
+                <Spinner
+                  v-if="isSkillActionPending(skill, 'adopt')"
+                  class="size-3.5"
+                />
+                <ArrowDownToLine
+                  v-else
+                  class="size-3.5"
+                />
+              </Button>
               <ConfirmPopover
+                v-if="skill.managed"
                 :message="$t('bots.skills.deleteConfirm')"
                 :loading="isDeleting && deletingName === skill.name"
                 @confirm="handleDelete(skill.name)"
@@ -103,6 +158,43 @@
             {{ skill.description || '-' }}
           </CardDescription>
         </CardHeader>
+        <CardContent class="pt-0 mt-auto space-y-2">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <Badge
+              variant="secondary"
+              class="text-[10px]"
+            >
+              {{ skill.managed ? $t('bots.skills.managedBadge') : $t('bots.skills.discoveredBadge') }}
+            </Badge>
+            <Badge
+              variant="outline"
+              class="text-[10px]"
+            >
+              {{ stateLabel(skill.state) }}
+            </Badge>
+            <Badge
+              v-if="skill.source_kind && skill.source_kind !== 'managed'"
+              variant="outline"
+              class="text-[10px]"
+            >
+              {{ sourceKindLabel(skill.source_kind) }}
+            </Badge>
+          </div>
+          <p
+            v-if="skill.shadowed_by"
+            class="text-[11px] text-muted-foreground truncate"
+            :title="skill.shadowed_by"
+          >
+            {{ $t('bots.skills.shadowedBy') }} {{ skill.shadowed_by }}
+          </p>
+          <p
+            v-if="skill.source_path"
+            class="text-[11px] text-muted-foreground truncate"
+            :title="skill.source_path"
+          >
+            {{ skill.source_path }}
+          </p>
+        </CardContent>
       </Card>
     </div>
 
@@ -147,12 +239,12 @@
 </template>
 
 <script setup lang="ts">
-import { Plus, Zap, SquarePen, Trash2 } from 'lucide-vue-next'
+import { ArrowDownToLine, Eye, EyeOff, Plus, Zap, SquarePen, Trash2 } from 'lucide-vue-next'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import {
-  Button, Card, CardHeader, CardTitle, CardDescription,
+  Badge, Button, Card, CardContent, CardHeader, CardTitle, CardDescription,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
   Spinner,
 } from '@memohai/ui'
@@ -161,10 +253,20 @@ import MonacoEditor from '@/components/monaco-editor/index.vue'
 import {
   getBotsByBotIdContainerSkills,
   postBotsByBotIdContainerSkills,
+  postBotsByBotIdContainerSkillsActions,
   deleteBotsByBotIdContainerSkills,
   type HandlersSkillItem,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+
+type SkillItem = HandlersSkillItem & {
+  source_path?: string
+  source_root?: string
+  source_kind?: string
+  managed?: boolean
+  state?: string
+  shadowed_by?: string
+}
 
 const props = defineProps<{
   botId: string
@@ -176,7 +278,10 @@ const isLoading = ref(false)
 const isSaving = ref(false)
 const isDeleting = ref(false)
 const deletingName = ref('')
-const skills = ref<HandlersSkillItem[]>([])
+const isActioning = ref(false)
+const actionTargetPath = ref('')
+const actionName = ref('')
+const skills = ref<SkillItem[]>([])
 
 const isDialogOpen = ref(false)
 const isEditing = ref(false)
@@ -220,6 +325,74 @@ function handleEdit(skill: HandlersSkillItem) {
   isEditing.value = true
   draftRaw.value = skill.raw || ''
   isDialogOpen.value = true
+}
+
+function skillKey(skill: SkillItem) {
+  return skill.source_path || `${skill.name || 'unknown'}:${skill.source_kind || 'unknown'}`
+}
+
+function isSkillActionPending(skill: SkillItem, action: string) {
+  return isActioning.value && actionTargetPath.value === skill.source_path && actionName.value === action
+}
+
+function sourceKindLabel(kind?: string) {
+  switch (kind) {
+    case 'legacy':
+      return t('bots.skills.legacyBadge')
+    case 'compat':
+      return t('bots.skills.compatBadge')
+    default:
+      return t('bots.skills.managedBadge')
+  }
+}
+
+function stateLabel(state?: string) {
+  switch (state) {
+    case 'disabled':
+      return t('bots.skills.disabledBadge')
+    case 'shadowed':
+      return t('bots.skills.shadowedBadge')
+    default:
+      return t('bots.skills.effectiveBadge')
+  }
+}
+
+async function handleSkillAction(action: 'adopt' | 'disable' | 'enable', skill: SkillItem) {
+  if (!skill.source_path) return
+  isActioning.value = true
+  actionTargetPath.value = skill.source_path
+  actionName.value = action
+  try {
+    await postBotsByBotIdContainerSkillsActions({
+      path: { bot_id: props.botId },
+      body: {
+        action,
+        target_path: skill.source_path,
+      },
+      throwOnError: true,
+    })
+    toast.success(
+      action === 'adopt'
+        ? t('bots.skills.adoptSuccess')
+        : action === 'disable'
+          ? t('bots.skills.disableSuccess')
+          : t('bots.skills.enableSuccess'),
+    )
+    await fetchSkills()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(
+      error,
+      action === 'adopt'
+        ? t('bots.skills.adoptFailed')
+        : action === 'disable'
+          ? t('bots.skills.disableFailed')
+          : t('bots.skills.enableFailed'),
+    ))
+  } finally {
+    isActioning.value = false
+    actionTargetPath.value = ''
+    actionName.value = ''
+  }
 }
 
 async function handleSave() {
