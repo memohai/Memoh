@@ -220,3 +220,12 @@ func (q *Queries) ListCompactionLogsBySession(ctx context.Context, sessionID pgt
 	}
 	return items, nil
 }
+
+const deleteCompactionLogsBySession = `-- name: DeleteCompactionLogsBySession :exec
+DELETE FROM bot_history_message_compacts WHERE session_id = $1
+`
+
+func (q *Queries) DeleteCompactionLogsBySession(ctx context.Context, sessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteCompactionLogsBySession, sessionID)
+	return err
+}

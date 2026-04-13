@@ -26,3 +26,6 @@ SELECT count(*) FROM bot_heartbeat_logs WHERE bot_id = $1;
 
 -- name: DeleteHeartbeatLogsByBot :exec
 DELETE FROM bot_heartbeat_logs WHERE bot_id = $1;
+
+-- name: DeleteHeartbeatLogsBySession :exec
+DELETE FROM bot_heartbeat_logs WHERE session_id = $1;

@@ -322,6 +322,31 @@ func (q *Queries) UpdateSessionMetadata(ctx context.Context, arg UpdateSessionMe
 	return i, err
 }
 
+const softDeleteSubSessions = `-- name: SoftDeleteSubSessions :exec
+UPDATE bot_sessions
+SET deleted_at = now(), updated_at = now()
+WHERE parent_session_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteSubSessions(ctx context.Context, parentSessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, softDeleteSubSessions, parentSessionID)
+	return err
+}
+
+const clearRouteActiveSessionRef = `-- name: ClearRouteActiveSessionRef :execrows
+UPDATE bot_channel_routes
+SET active_session_id = NULL
+WHERE active_session_id = $1
+`
+
+func (q *Queries) ClearRouteActiveSessionRef(ctx context.Context, sessionID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, clearRouteActiveSessionRef, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateSessionTitle = `-- name: UpdateSessionTitle :one
 UPDATE bot_sessions
 SET title = $1, updated_at = now()

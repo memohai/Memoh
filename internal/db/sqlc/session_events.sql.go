@@ -138,3 +138,12 @@ func (q *Queries) ListSessionEventsBySessionAfter(ctx context.Context, arg ListS
 	}
 	return items, nil
 }
+
+const deleteSessionEventsBySession = `-- name: DeleteSessionEventsBySession :exec
+DELETE FROM bot_session_events WHERE session_id = $1
+`
+
+func (q *Queries) DeleteSessionEventsBySession(ctx context.Context, sessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSessionEventsBySession, sessionID)
+	return err
+}

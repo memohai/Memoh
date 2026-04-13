@@ -55,6 +55,23 @@ UPDATE bot_sessions
 SET deleted_at = now(), updated_at = now()
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
 
+-- name: SoftDeleteSubSessions :exec
+UPDATE bot_sessions
+SET deleted_at = now(), updated_at = now()
+WHERE parent_session_id = sqlc.arg(parent_session_id) AND deleted_at IS NULL;
+
+-- name: DeleteSessionAssets :exec
+DELETE FROM bot_history_message_assets
+WHERE message_id IN (
+  SELECT m.id FROM bot_history_messages m
+  WHERE m.session_id = sqlc.arg(session_id)
+);
+
+-- name: ClearRouteActiveSessionRef :execrows
+UPDATE bot_channel_routes
+SET active_session_id = NULL
+WHERE active_session_id = sqlc.arg(session_id);
+
 -- name: TouchSession :exec
 UPDATE bot_sessions
 SET updated_at = now()

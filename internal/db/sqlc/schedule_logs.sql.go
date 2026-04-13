@@ -141,6 +141,15 @@ func (q *Queries) DeleteScheduleLogsBySchedule(ctx context.Context, scheduleID p
 	return err
 }
 
+const deleteScheduleLogsBySession = `-- name: DeleteScheduleLogsBySession :exec
+DELETE FROM schedule_logs WHERE session_id = $1
+`
+
+func (q *Queries) DeleteScheduleLogsBySession(ctx context.Context, sessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteScheduleLogsBySession, sessionID)
+	return err
+}
+
 const listScheduleLogsByBot = `-- name: ListScheduleLogsByBot :many
 SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs

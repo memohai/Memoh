@@ -24,3 +24,6 @@ ORDER BY received_at_ms ASC;
 -- name: CountSessionEvents :one
 SELECT COUNT(*) FROM bot_session_events
 WHERE session_id = $1;
+
+-- name: DeleteSessionEventsBySession :exec
+DELETE FROM bot_session_events WHERE session_id = $1;

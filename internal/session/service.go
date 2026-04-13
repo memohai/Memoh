@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbpkg "github.com/memohai/memoh/internal/db"
@@ -51,18 +52,25 @@ type CreateInput struct {
 
 // Service manages bot chat sessions.
 type Service struct {
-	queries *sqlc.Queries
-	logger  *slog.Logger
+	logger *slog.Logger
+	db     *sqlc.Queries
+	pool   dbtx
+}
+
+// dbtx matches the minimal interface needed for BeginTx.
+type dbtx interface {
+	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
 }
 
 // NewService creates a session service.
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries *sqlc.Queries, pool dbtx) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Service{
-		queries: queries,
-		logger:  log.With(slog.String("service", "session")),
+		db:     queries,
+		pool:   pool,
+		logger: log.With(slog.String("service", "session")),
 	}
 }
 
@@ -101,7 +109,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		return Session{}, fmt.Errorf("invalid parent session id: %w", err)
 	}
 
-	row, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
+	row, err := s.db.CreateSession(ctx, sqlc.CreateSessionParams{
 		BotID:           pgBotID,
 		RouteID:         pgRouteID,
 		ChannelType:     channelType,
@@ -122,7 +130,7 @@ func (s *Service) Get(ctx context.Context, sessionID string) (Session, error) {
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid session id: %w", err)
 	}
-	row, err := s.queries.GetSessionByID(ctx, pgID)
+	row, err := s.db.GetSessionByID(ctx, pgID)
 	if err != nil {
 		return Session{}, err
 	}
@@ -135,7 +143,7 @@ func (s *Service) ListByBot(ctx context.Context, botID string) ([]Session, error
 	if err != nil {
 		return nil, fmt.Errorf("invalid bot id: %w", err)
 	}
-	rows, err := s.queries.ListSessionsByBot(ctx, pgBotID)
+	rows, err := s.db.ListSessionsByBot(ctx, pgBotID)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +160,7 @@ func (s *Service) ListByRoute(ctx context.Context, routeID string) ([]Session, e
 	if err != nil {
 		return nil, fmt.Errorf("invalid route id: %w", err)
 	}
-	rows, err := s.queries.ListSessionsByRoute(ctx, pgRouteID)
+	rows, err := s.db.ListSessionsByRoute(ctx, pgRouteID)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +177,7 @@ func (s *Service) GetActiveForRoute(ctx context.Context, routeID string) (Sessio
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid route id: %w", err)
 	}
-	row, err := s.queries.GetActiveSessionForRoute(ctx, pgRouteID)
+	row, err := s.db.GetActiveSessionForRoute(ctx, pgRouteID)
 	if err != nil {
 		return Session{}, err
 	}
@@ -182,7 +190,7 @@ func (s *Service) UpdateTitle(ctx context.Context, sessionID, title string) (Ses
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid session id: %w", err)
 	}
-	row, err := s.queries.UpdateSessionTitle(ctx, sqlc.UpdateSessionTitleParams{
+	row, err := s.db.UpdateSessionTitle(ctx, sqlc.UpdateSessionTitleParams{
 		ID:    pgID,
 		Title: title,
 	})
@@ -205,7 +213,7 @@ func (s *Service) UpdateMetadata(ctx context.Context, sessionID string, metadata
 	if err != nil {
 		return Session{}, fmt.Errorf("marshal metadata: %w", err)
 	}
-	row, err := s.queries.UpdateSessionMetadata(ctx, sqlc.UpdateSessionMetadataParams{
+	row, err := s.db.UpdateSessionMetadata(ctx, sqlc.UpdateSessionMetadataParams{
 		ID:       pgID,
 		Metadata: metaBytes,
 	})
@@ -215,13 +223,60 @@ func (s *Service) UpdateMetadata(ctx context.Context, sessionID string, metadata
 	return toSession(row), nil
 }
 
-// SoftDelete marks a session as deleted.
+// SoftDelete marks a session as deleted and cleans up all associated resources
+// including child subagent sessions, messages, events, logs, and route references.
 func (s *Service) SoftDelete(ctx context.Context, sessionID string) error {
 	pgID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return fmt.Errorf("invalid session id: %w", err)
 	}
-	return s.queries.SoftDeleteSession(ctx, pgID)
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := s.db.WithTx(tx)
+
+	// 1. List child subagent sessions before soft-deleting them.
+	children, err := q.ListSubagentSessionsByParent(ctx, pgID)
+	if err != nil {
+		return fmt.Errorf("list sub-sessions: %w", err)
+	}
+
+	// 2. Delete messages for child subagent sessions.
+	for _, child := range children {
+		if err := q.DeleteMessagesBySession(ctx, child.ID); err != nil {
+			return fmt.Errorf("delete child session messages: %w", err)
+		}
+	}
+
+	// 3. Soft-delete child subagent sessions.
+	if err := q.SoftDeleteSubSessions(ctx, pgID); err != nil {
+		return fmt.Errorf("soft-delete sub-sessions: %w", err)
+	}
+
+	// 4. Delete messages for the session itself.
+	if err := q.DeleteMessagesBySession(ctx, pgID); err != nil {
+		return fmt.Errorf("delete session messages: %w", err)
+	}
+
+	// 5. Delete session events, heartbeat logs, compaction logs, schedule logs.
+	_ = q.DeleteSessionEventsBySession(ctx, pgID)
+	_ = q.DeleteHeartbeatLogsBySession(ctx, pgID)
+	_ = q.DeleteCompactionLogsBySession(ctx, pgID)
+	_ = q.DeleteScheduleLogsBySession(ctx, pgID)
+
+	// 6. Clear route active_session_id references.
+	_, _ = q.ClearRouteActiveSessionRef(ctx, pgID)
+
+	// 7. Finally, soft-delete the session itself.
+	if err := q.SoftDeleteSession(ctx, pgID); err != nil {
+		return fmt.Errorf("soft-delete session: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }
 
 // Touch updates a session's updated_at timestamp.
@@ -230,7 +285,7 @@ func (s *Service) Touch(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return fmt.Errorf("invalid session id: %w", err)
 	}
-	return s.queries.TouchSession(ctx, pgID)
+	return s.db.TouchSession(ctx, pgID)
 }
 
 // SetRouteActiveSession sets the active session for a route.
@@ -243,7 +298,7 @@ func (s *Service) SetRouteActiveSession(ctx context.Context, routeID, sessionID 
 	if err != nil {
 		return fmt.Errorf("invalid session id: %w", err)
 	}
-	return s.queries.SetRouteActiveSession(ctx, sqlc.SetRouteActiveSessionParams{
+	return s.db.SetRouteActiveSession(ctx, sqlc.SetRouteActiveSessionParams{
 		ID:              pgRouteID,
 		ActiveSessionID: pgSessionID,
 	})

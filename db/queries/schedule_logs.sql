@@ -37,5 +37,8 @@ SELECT count(*) FROM schedule_logs WHERE schedule_id = $1;
 -- name: DeleteScheduleLogsByBot :exec
 DELETE FROM schedule_logs WHERE bot_id = $1;
 
+-- name: DeleteScheduleLogsBySession :exec
+DELETE FROM schedule_logs WHERE session_id = $1;
+
 -- name: DeleteScheduleLogsBySchedule :exec
 DELETE FROM schedule_logs WHERE schedule_id = $1;

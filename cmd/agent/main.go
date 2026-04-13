@@ -424,8 +424,8 @@ func provideRouteService(log *slog.Logger, queries *dbsqlc.Queries, chatService 
 	return route.NewService(log, queries, chatService)
 }
 
-func provideSessionService(log *slog.Logger, queries *dbsqlc.Queries) *sessionpkg.Service {
-	return sessionpkg.NewService(log, queries)
+func provideSessionService(log *slog.Logger, queries *dbsqlc.Queries, pool *pgxpool.Pool) *sessionpkg.Service {
+	return sessionpkg.NewService(log, queries, pool)
 }
 
 func provideMessageService(log *slog.Logger, queries *dbsqlc.Queries, hub *event.Hub) *message.DBService {

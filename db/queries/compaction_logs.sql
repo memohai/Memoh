@@ -38,3 +38,6 @@ ORDER BY started_at ASC;
 
 -- name: DeleteCompactionLogsByBot :exec
 DELETE FROM bot_history_message_compacts WHERE bot_id = $1;
+
+-- name: DeleteCompactionLogsBySession :exec
+DELETE FROM bot_history_message_compacts WHERE session_id = $1;

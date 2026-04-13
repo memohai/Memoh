@@ -172,3 +172,12 @@ func (q *Queries) ListHeartbeatLogsByBot(ctx context.Context, arg ListHeartbeatL
 	}
 	return items, nil
 }
+
+const deleteHeartbeatLogsBySession = `-- name: DeleteHeartbeatLogsBySession :exec
+DELETE FROM bot_heartbeat_logs WHERE session_id = $1
+`
+
+func (q *Queries) DeleteHeartbeatLogsBySession(ctx context.Context, sessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteHeartbeatLogsBySession, sessionID)
+	return err
+}
