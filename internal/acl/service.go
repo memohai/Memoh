@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
@@ -25,17 +24,15 @@ var (
 
 type Service struct {
 	queries *sqlc.Queries
-	bots    *bots.Service
 	logger  *slog.Logger
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, botService *bots.Service) *Service {
+func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Service{
 		queries: queries,
-		bots:    botService,
 		logger:  log.With(slog.String("service", "acl")),
 	}
 }
@@ -43,7 +40,6 @@ func NewService(log *slog.Logger, queries *sqlc.Queries, botService *bots.Servic
 // Evaluate checks whether the given request is allowed to perform chat.trigger.
 // It uses a single first-match-wins query over priority-ordered enabled rules,
 // falling back to the bot's acl_default_effect if no rule matches.
-// The bot owner is always allowed without consulting the rule table.
 func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (bool, error) {
 	// Validate scope before any service nil checks so callers get meaningful errors.
 	sourceScope, err := normalizeSourceScope(req.SourceScope)
@@ -51,25 +47,13 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (bool, erro
 		return false, err
 	}
 
-	if s == nil || s.queries == nil || s.bots == nil {
+	if s == nil || s.queries == nil {
 		return false, errors.New("acl service not configured")
 	}
 
 	botID := strings.TrimSpace(req.BotID)
 	channelIdentityID := strings.TrimSpace(req.ChannelIdentityID)
 	channelType := strings.TrimSpace(req.ChannelType)
-
-	bot, err := s.bots.Get(ctx, botID)
-	if err != nil {
-		return false, err
-	}
-	// Owner always bypasses ACL.
-	// Note: ChannelIdentityID here is the resolved Memoh user ID (set only when logged in).
-	// The owner bypass was historically keyed on UserID; callers that pass the
-	// ownerUserID via ChannelIdentityID will naturally not get bypassed here.
-	// The inbound processor passes the resolved UserID separately — see the
-	// comments in internal/channel/inbound/channel.go.
-	_ = bot // currently unused after the user_id removal; keep the Get() for owner check wiring if re-added
 
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
@@ -441,6 +442,9 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 				return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
 			}
 			return echo.NewHTTPError(http.StatusBadRequest, "owner user not found")
+		}
+		if errors.Is(err, acl.ErrUnknownPreset) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

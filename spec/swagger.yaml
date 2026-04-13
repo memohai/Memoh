@@ -539,6 +539,8 @@ definitions:
     type: object
   bots.CreateBotRequest:
     properties:
+      acl_preset:
+        type: string
       avatar_url:
         type: string
       display_name:
@@ -2330,18 +2332,61 @@ definitions:
       skipped:
         type: integer
     type: object
+  providers.OAuthAccount:
+    properties:
+      avatar_url:
+        type: string
+      email:
+        type: string
+      label:
+        type: string
+      login:
+        type: string
+      name:
+        type: string
+      profile_url:
+        type: string
+    type: object
+  providers.OAuthAuthorizeResponse:
+    properties:
+      auth_url:
+        type: string
+      device:
+        $ref: '#/definitions/providers.OAuthDeviceStatus'
+      mode:
+        type: string
+    type: object
+  providers.OAuthDeviceStatus:
+    properties:
+      expires_at:
+        type: string
+      interval_seconds:
+        type: integer
+      pending:
+        type: boolean
+      user_code:
+        type: string
+      verification_uri:
+        type: string
+    type: object
   providers.OAuthStatus:
     properties:
+      account:
+        $ref: '#/definitions/providers.OAuthAccount'
       callback_url:
         type: string
       configured:
         type: boolean
+      device:
+        $ref: '#/definitions/providers.OAuthDeviceStatus'
       expired:
         type: boolean
       expires_at:
         type: string
       has_token:
         type: boolean
+      mode:
+        type: string
     type: object
   providers.TestResponse:
     properties:
@@ -2614,6 +2659,8 @@ definitions:
         type: integer
       compaction_threshold:
         type: integer
+      context_token_budget:
+        type: integer
       discuss_probe_model_id:
         type: string
       heartbeat_enabled:
@@ -2628,11 +2675,15 @@ definitions:
         type: string
       memory_provider_id:
         type: string
+      persist_full_tool_results:
+        type: boolean
       reasoning_effort:
         type: string
       reasoning_enabled:
         type: boolean
       search_provider_id:
+        type: string
+      timezone:
         type: string
       title_model_id:
         type: string
@@ -2655,6 +2706,8 @@ definitions:
         type: integer
       compaction_threshold:
         type: integer
+      context_token_budget:
+        type: integer
       discuss_probe_model_id:
         type: string
       heartbeat_enabled:
@@ -2669,11 +2722,15 @@ definitions:
         type: string
       memory_provider_id:
         type: string
+      persist_full_tool_results:
+        type: boolean
       reasoning_effort:
         type: string
       reasoning_enabled:
         type: boolean
       search_provider_id:
+        type: string
+      timezone:
         type: string
       title_model_id:
         type: string
@@ -7615,9 +7672,7 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/providers.OAuthAuthorizeResponse'
         "400":
           description: Bad Request
           schema:
@@ -7627,6 +7682,30 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Start OAuth2 authorization for an LLM provider
+      tags:
+      - providers-oauth
+  /providers/{id}/oauth/poll:
+    post:
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/providers.OAuthStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Poll OAuth device authorization for an LLM provider
       tags:
       - providers-oauth
   /providers/{id}/oauth/status:
