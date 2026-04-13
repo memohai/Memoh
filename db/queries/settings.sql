@@ -46,7 +46,7 @@ WITH updated AS (
       compaction_enabled = sqlc.arg(compaction_enabled),
       compaction_threshold = sqlc.arg(compaction_threshold),
       compaction_ratio = sqlc.arg(compaction_ratio),
-      timezone = COALESCE(sqlc.narg(timezone), bots.timezone),
+      timezone = COALESCE(sqlc.narg(timezone)::text, bots.timezone),
       chat_model_id = COALESCE(sqlc.narg(chat_model_id)::uuid, bots.chat_model_id),
       heartbeat_model_id = COALESCE(sqlc.narg(heartbeat_model_id)::uuid, bots.heartbeat_model_id),
       compaction_model_id = COALESCE(sqlc.narg(compaction_model_id)::uuid, bots.compaction_model_id),
@@ -56,7 +56,7 @@ WITH updated AS (
       image_model_id = COALESCE(sqlc.narg(image_model_id)::uuid, bots.image_model_id),
       tts_model_id = COALESCE(sqlc.narg(tts_model_id)::uuid, bots.tts_model_id),
       browser_context_id = COALESCE(sqlc.narg(browser_context_id)::uuid, bots.browser_context_id),
-      context_token_budget = COALESCE(sqlc.narg(context_token_budget), bots.context_token_budget),
+      context_token_budget = COALESCE(sqlc.narg(context_token_budget)::integer, bots.context_token_budget),
       persist_full_tool_results = sqlc.arg(persist_full_tool_results),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
