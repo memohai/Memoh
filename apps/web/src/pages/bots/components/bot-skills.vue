@@ -53,12 +53,12 @@
       <Card
         v-for="skill in skills"
         :key="skillKey(skill)"
-        class="flex flex-col"
+        class="flex min-w-0 flex-col overflow-hidden"
       >
-        <CardHeader class="pb-3">
-          <div class="flex items-center justify-between gap-2">
+        <CardHeader class="min-w-0 pb-3">
+          <div class="flex min-w-0 items-center justify-between gap-2">
             <CardTitle
-              class="text-sm truncate"
+              class="min-w-0 flex-1 truncate text-sm"
               :title="skill.name"
             >
               {{ skill.name }}
@@ -152,13 +152,13 @@
             </div>
           </div>
           <CardDescription
-            class="line-clamp-2"
+            class="min-w-0 overflow-hidden line-clamp-2 break-words [overflow-wrap:anywhere]"
             :title="skill.description"
           >
             {{ skill.description || '-' }}
           </CardDescription>
         </CardHeader>
-        <CardContent class="pt-0 mt-auto space-y-1.5">
+        <CardContent class="mt-auto min-w-0 space-y-1.5 pt-0">
           <div class="flex flex-wrap items-center gap-1.5">
             <Badge
               variant="secondary"
