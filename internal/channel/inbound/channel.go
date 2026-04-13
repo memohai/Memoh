@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -1865,37 +1864,6 @@ func (p *ChannelInboundProcessor) loadInboundAttachmentPayload(
 		size:   resolved.Size,
 	}, nil
 }
-
-func openInboundAttachmentURL(ctx context.Context, rawURL string) (inboundAttachmentPayload, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return inboundAttachmentPayload{}, fmt.Errorf("build request: %w", err)
-	}
-	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Do(req) //nolint:gosec // G704: URL is an attachment URL provided by the inbound channel adapter
-	if err != nil {
-		return inboundAttachmentPayload{}, fmt.Errorf("download attachment: %w", err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		_ = resp.Body.Close()
-		return inboundAttachmentPayload{}, fmt.Errorf("download attachment status: %d", resp.StatusCode)
-	}
-	maxBytes := media.MaxAssetBytes
-	if resp.ContentLength > maxBytes {
-		_ = resp.Body.Close()
-		return inboundAttachmentPayload{}, fmt.Errorf("%w: max %d bytes", media.ErrAssetTooLarge, maxBytes)
-	}
-	mime := strings.TrimSpace(resp.Header.Get("Content-Type"))
-	if idx := strings.Index(mime, ";"); idx >= 0 {
-		mime = strings.TrimSpace(mime[:idx])
-	}
-	return inboundAttachmentPayload{
-		reader: resp.Body,
-		mime:   mime,
-		size:   resp.ContentLength,
-	}, nil
-}
-
 func (p *ChannelInboundProcessor) resolveAttachmentResolver(channelType channel.ChannelType) channel.AttachmentResolver {
 	if p == nil {
 		return nil

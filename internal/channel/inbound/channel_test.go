@@ -8,8 +8,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -1648,25 +1646,6 @@ func TestChannelInboundProcessorProcessingFailedNotifyErrorDoesNotOverrideChatEr
 	}
 	if len(notifier.events) != 2 || notifier.events[0] != "started" || notifier.events[1] != "failed" {
 		t.Fatalf("unexpected processing status lifecycle: %+v", notifier.events)
-	}
-}
-
-func TestDownloadInboundAttachmentURLTooLarge(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Length", "999999999")
-		_, _ = w.Write([]byte("x"))
-	}))
-	defer server.Close()
-
-	_, err := openInboundAttachmentURL(context.Background(), server.URL)
-	if err == nil {
-		t.Fatalf("expected too-large error")
-	}
-	if !errors.Is(err, media.ErrAssetTooLarge) {
-		t.Fatalf("expected ErrAssetTooLarge, got %v", err)
 	}
 }
 

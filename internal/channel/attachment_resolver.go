@@ -182,9 +182,6 @@ func (r *maxBytesReader) Read(p []byte) (int, error) {
 	}
 
 	allowed := int(r.maxBytes - r.emitted)
-	if allowed <= 0 {
-		return r.probeOverflow()
-	}
 	if len(p) > allowed {
 		p = p[:allowed]
 	}
