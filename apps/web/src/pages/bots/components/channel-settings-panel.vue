@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-6">
+  <div class="space-y-6 mr-4">
     <!-- Header -->
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-3">
@@ -208,7 +208,7 @@
 
     <Separator />
 
-    <div class="flex justify-end gap-2">
+    <div class="flex justify-end gap-2 ">
       <template v-if="isEditMode">
         <Button
           :disabled="isBusy"

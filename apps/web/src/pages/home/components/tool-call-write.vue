@@ -98,4 +98,5 @@ function handleOpenFile() {
     openInFileManager(filePath.value, false)
   }
 }
+
 </script>

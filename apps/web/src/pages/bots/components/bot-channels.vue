@@ -1,7 +1,7 @@
 <template>
-  <div class="flex gap-6 absolute inset-0  mx-auto p-4">
+  <div class="flex gap-6 absolute inset-0  mx-auto py-4 pl-4">
     <!-- Left: Channel list -->
-    <div class="h-full flex-col border rounded-lg overflow-hidden flex">
+    <div class="h-full flex-col border rounded-lg overflow-hidden flex sticky top-0">
       <ScrollArea class="w-60 flex-1 flex flex-col ">
         <!-- Loading -->
         <div
@@ -115,20 +115,22 @@
     </div>
     <!-- Right: Channel settings -->
     <div class="flex-1 min-w-0">
-      <div
-        v-if="!selectedType || !selectedItem"
-        class="flex h-full items-center justify-center text-xs text-muted-foreground"
-      >
-        {{ configuredChannels.length > 0 ? $t('bots.channels.selectType') : '' }}
-      </div>
+      <ScrollArea class="h-full">
+        <div 
+          v-if="!selectedType || !selectedItem"
+          class="flex h-full items-center justify-center text-xs text-muted-foreground"
+        >
+          {{ configuredChannels.length > 0 ? $t('bots.channels.selectType') : '' }}
+        </div>
 
-      <ChannelSettingsPanel
-        v-else
-        :key="selectedType"
-        :bot-id="botId"
-        :channel-item="selectedItem"
-        @saved="refetch()"
-      />
+        <ChannelSettingsPanel
+          v-else
+          :key="selectedType"
+          :bot-id="botId"
+          :channel-item="selectedItem"
+          @saved="refetch()"
+        />
+      </ScrollArea>
     </div>
   </div>
 </template>

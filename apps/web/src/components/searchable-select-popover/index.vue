@@ -54,7 +54,7 @@
         <div
           v-for="group in filteredGroups"
           :key="group.key"
-          class="p-1"
+          class="p-1 *:mt-1 overflow-hidden"
         >
           <div
             v-if="showGroupHeaders && group.label"

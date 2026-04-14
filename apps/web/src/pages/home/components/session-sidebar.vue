@@ -87,13 +87,14 @@
             <DropdownMenuItem
               v-for="opt in filterOptions"
               :key="opt.value ?? 'all'"
+              class="relative"
               @click="filterType = opt.value"
             >
               <Check
                 v-if="filterType === opt.value"
-                class="size-3 mr-2"
+                class="size-3 mr-2 absolute"
               />
-              <span :class="filterType !== opt.value ? 'ml-5' : ''">
+              <span class="ml-5">
                 {{ opt.label }}
               </span>
             </DropdownMenuItem>
