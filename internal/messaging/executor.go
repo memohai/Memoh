@@ -438,7 +438,7 @@ func (e *Executor) resolveAttachmentBundle(ctx context.Context, botID string, bu
 		}
 		return nil
 	}
-	att.URL = ref
+	// att.Path is already set correctly by AttachmentFromBundle (bundle.Path = ref).
 	return &att
 }
 

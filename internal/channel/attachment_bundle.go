@@ -8,6 +8,7 @@ func BundleFromAttachment(att Attachment) attachmentpkg.Bundle {
 	return attachmentpkg.Bundle{
 		Type:           string(att.Type),
 		Base64:         att.Base64,
+		Path:           att.Path,
 		URL:            att.URL,
 		PlatformKey:    att.PlatformKey,
 		SourcePlatform: att.SourcePlatform,
@@ -25,20 +26,17 @@ func BundleFromAttachment(att Attachment) attachmentpkg.Bundle {
 }
 
 // AttachmentFromBundle converts the shared internal bundle shape to a channel
-// attachment, preserving the channel convention that local paths travel in URL.
+// attachment. URL and Path are kept in their respective fields.
 // Callers must guarantee bundle is already normalized (produced by BundleFromXxx or Normalize()).
 func AttachmentFromBundle(bundle attachmentpkg.Bundle) Attachment {
 	attType := AttachmentType(bundle.Type)
 	if attType == "" {
 		attType = AttachmentFile
 	}
-	urlRef := bundle.URL
-	if urlRef == "" {
-		urlRef = bundle.Path
-	}
 	return Attachment{
 		Type:           attType,
-		URL:            urlRef,
+		URL:            bundle.URL,
+		Path:           bundle.Path,
 		PlatformKey:    bundle.PlatformKey,
 		SourcePlatform: bundle.SourcePlatform,
 		ContentHash:    bundle.ContentHash,

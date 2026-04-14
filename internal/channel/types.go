@@ -250,7 +250,8 @@ const (
 // Attachment represents a binary file attached to a message.
 type Attachment struct {
 	Type           AttachmentType `json:"type"`
-	URL            string         `json:"url,omitempty"`
+	URL            string         `json:"url,omitempty"`  // HTTP(S) or data URL
+	Path           string         `json:"path,omitempty"` // container-local filesystem path
 	PlatformKey    string         `json:"platform_key,omitempty"`
 	SourcePlatform string         `json:"source_platform,omitempty"`
 	ContentHash    string         `json:"content_hash,omitempty"`
@@ -267,15 +268,18 @@ type Attachment struct {
 }
 
 // Reference returns the strongest available attachment reference.
-// URL is preferred for cross-platform portability, then platform key.
+// URL is preferred for cross-platform portability, then local Path, then platform key.
 func (a Attachment) Reference() string {
 	if strings.TrimSpace(a.URL) != "" {
 		return strings.TrimSpace(a.URL)
 	}
+	if strings.TrimSpace(a.Path) != "" {
+		return strings.TrimSpace(a.Path)
+	}
 	return strings.TrimSpace(a.PlatformKey)
 }
 
-// HasReference reports whether URL or platform key is available.
+// HasReference reports whether URL, Path, or platform key is available.
 func (a Attachment) HasReference() bool {
 	return a.Reference() != ""
 }
