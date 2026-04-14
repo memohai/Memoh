@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,22 +89,27 @@ func (m *Manager) isTaskRunning(ctx context.Context, containerID string) bool {
 	return err == nil && task.Status == ctr.TaskStatusRunning
 }
 
-func (m *Manager) networkAttachmentRequest(botID, containerID string) netctl.AttachmentRequest {
+func (m *Manager) networkAttachmentRequest(ctx context.Context, botID, containerID string) netctl.AttachmentRequest {
+	runtimeReq := netctl.RuntimeNetworkRequest{
+		ContainerID: containerID,
+		CNIBinDir:   m.cfg.CNIBinaryDir,
+		CNIConfDir:  m.cfg.CNIConfigDir,
+	}
+	if task, err := m.service.GetTaskInfo(ctx, containerID); err == nil && task.PID > 0 {
+		runtimeReq.PID = task.PID
+		runtimeReq.NetNSPath = filepath.Join("/proc", strconv.FormatUint(uint64(task.PID), 10), "ns", "net")
+	}
 	return netctl.AttachmentRequest{
 		BotID:       botID,
 		ContainerID: containerID,
-		Runtime: netctl.RuntimeNetworkRequest{
-			ContainerID: containerID,
-			CNIBinDir:   m.cfg.CNIBinaryDir,
-			CNIConfDir:  m.cfg.CNIConfigDir,
-		},
+		Runtime:     runtimeReq,
 	}
 }
 
 func (m *Manager) ensureContainerNetworkAndGetIP(ctx context.Context, botID, containerID string) (string, error) {
 	var lastErr error
 	for attempt := range 2 {
-		result, err := m.networkController.EnsureAttached(ctx, m.networkAttachmentRequest(botID, containerID))
+		result, err := m.networkController.EnsureAttached(ctx, m.networkAttachmentRequest(ctx, botID, containerID))
 		if err != nil {
 			lastErr = err
 			m.logger.Warn("network setup attempt failed",
@@ -133,7 +140,7 @@ func (m *Manager) ensureContainerNetwork(ctx context.Context, containerID, botID
 }
 
 func (m *Manager) removeContainerNetwork(ctx context.Context, botID, containerID string) error {
-	return m.networkController.Detach(ctx, m.networkAttachmentRequest(botID, containerID))
+	return m.networkController.Detach(ctx, m.networkAttachmentRequest(ctx, botID, containerID))
 }
 
 func (m *Manager) startTaskAndEnsureNetwork(ctx context.Context, botID, containerID string) error {
@@ -204,6 +211,10 @@ func (m *Manager) StopBot(ctx context.Context, botID string) error {
 	}
 	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
 		m.logger.Warn("cleanup: delete task failed",
+			slog.String("container_id", containerID), slog.Any("error", err))
+	}
+	if err := m.removeContainerNetwork(ctx, botID, containerID); err != nil {
+		m.logger.Warn("cleanup: remove network failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}
 

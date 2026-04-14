@@ -16,12 +16,14 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	netctl "github.com/memohai/memoh/internal/network"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
 type Service struct {
 	queries dbstore.Queries
 	acl     *acl.Service
+	network *netctl.Service
 	logger  *slog.Logger
 }
 
@@ -30,10 +32,11 @@ var (
 	ErrInvalidModelRef  = errors.New("invalid model reference")
 )
 
-func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Service) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Service, networkService *netctl.Service) *Service {
 	return &Service{
 		queries: queries,
 		acl:     aclService,
+		network: networkService,
 		logger:  log.With(slog.String("service", "settings")),
 	}
 }
@@ -68,6 +71,16 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
+	networkBindingRow, err := s.queries.GetBotNetworkConfig(ctx, pgID)
+	if err != nil {
+		return Settings{}, err
+	}
+	previousNetworkConfig := settingsNetworkConfigFromRow(networkBindingRow)
+	if s.network != nil {
+		if resolvedPrevious, resolveErr := s.network.GetBotConfig(ctx, botID); resolveErr == nil {
+			previousNetworkConfig = resolvedPrevious
+		}
+	}
 	aclDefaultEffect, err := s.getDefaultEffect(ctx, botID)
 	if err != nil {
 		return Settings{}, err
@@ -76,6 +89,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if settingsRow, err := s.queries.GetSettingsByBotID(ctx, pgID); err == nil {
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
 	}
+	current.NetworkEnabled = networkBindingRow.NetworkEnabled
+	current.NetworkProvider = strings.TrimSpace(networkBindingRow.NetworkProvider)
+	current.NetworkConfig = normalizeJSONObject(networkBindingRow.NetworkConfig)
 	if strings.TrimSpace(req.Language) != "" {
 		current.Language = strings.TrimSpace(req.Language)
 	}
@@ -119,6 +135,15 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			return Settings{}, err
 		}
 		timezoneValue = normalized
+	}
+	if req.NetworkEnabled != nil {
+		current.NetworkEnabled = *req.NetworkEnabled
+	}
+	if req.NetworkProvider != nil {
+		current.NetworkProvider = strings.TrimSpace(*req.NetworkProvider)
+	}
+	if req.NetworkConfig != nil {
+		current.NetworkConfig = req.NetworkConfig
 	}
 	chatModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.ChatModelID); value != "" {
@@ -207,6 +232,33 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		return Settings{}, err
 	}
 
+	normalizedNetwork, err := s.normalizeNetworkConfig(current)
+	if err != nil {
+		return Settings{}, err
+	}
+	nextNetworkConfig := settingsNetworkConfigFromSettings(normalizedNetwork)
+	networkChanged := s.network != nil && !networkConfigsEqual(previousNetworkConfig, nextNetworkConfig)
+	rollbackNetworkChange := func(cause error) error {
+		if !networkChanged {
+			return cause
+		}
+		if rollbackErr := s.reconcileBotNetwork(ctx, botID, nextNetworkConfig, previousNetworkConfig); rollbackErr != nil {
+			return errors.Join(cause, fmt.Errorf("network rollback failed: %w", rollbackErr))
+		}
+		return cause
+	}
+	if networkChanged {
+		if err := s.reconcileBotNetwork(ctx, botID, previousNetworkConfig, nextNetworkConfig); err != nil {
+			if rollbackErr := s.reconcileBotNetwork(ctx, botID, nextNetworkConfig, previousNetworkConfig); rollbackErr != nil {
+				return Settings{}, errors.Join(fmt.Errorf("reconcile bot network: %w", err), fmt.Errorf("network rollback failed: %w", rollbackErr))
+			}
+			return Settings{}, err
+		}
+	}
+	networkConfigJSON, err := json.Marshal(normalizedNetwork.NetworkConfig)
+	if err != nil {
+		return Settings{}, rollbackNetworkChange(fmt.Errorf("marshal network config: %w", err))
+	}
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
 		ID:                     pgID,
 		Timezone:               timezoneValue,
@@ -232,9 +284,12 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		PersistFullToolResults: current.PersistFullToolResults,
 		ShowToolCallsInIm:      current.ShowToolCallsInIM,
 		ToolApprovalConfig:     toolApprovalConfig,
+		NetworkProvider:        normalizedNetwork.NetworkProvider,
+		NetworkEnabled:         normalizedNetwork.NetworkEnabled,
+		NetworkConfig:          networkConfigJSON,
 	})
 	if err != nil {
-		return Settings{}, err
+		return Settings{}, rollbackNetworkChange(err)
 	}
 	createdByUserID := ""
 	if botRow.OwnerUserID.Valid {
@@ -294,6 +349,7 @@ func normalizeBotSetting(language string, aclDefaultEffect string, reasoningEnab
 	if settings.CompactionRatio < 1 || settings.CompactionRatio > 100 {
 		settings.CompactionRatio = 80
 	}
+	settings.NetworkConfig = map[string]any{}
 	return settings
 }
 
@@ -330,6 +386,9 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
+		row.NetworkProvider,
+		row.NetworkEnabled,
+		row.NetworkConfig,
 	)
 }
 
@@ -357,6 +416,9 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
+		row.NetworkProvider,
+		row.NetworkEnabled,
+		row.NetworkConfig,
 	)
 }
 
@@ -383,6 +445,9 @@ func normalizeBotSettingsFields(
 	persistFullToolResults bool,
 	showToolCallsInIM bool,
 	toolApprovalConfig []byte,
+	networkProvider string,
+	networkEnabled bool,
+	networkConfig []byte,
 ) Settings {
 	settings := normalizeBotSetting(language, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionRatio)
 	if timezone.Valid {
@@ -421,6 +486,9 @@ func normalizeBotSettingsFields(
 	settings.PersistFullToolResults = persistFullToolResults
 	settings.ShowToolCallsInIM = showToolCallsInIM
 	settings.ToolApprovalConfig = parseToolApprovalConfig(toolApprovalConfig)
+	settings.NetworkProvider = strings.TrimSpace(networkProvider)
+	settings.NetworkEnabled = networkEnabled
+	settings.NetworkConfig = normalizeJSONObject(networkConfig)
 	return settings
 }
 
@@ -433,6 +501,94 @@ func parseToolApprovalConfig(raw []byte) ToolApprovalConfig {
 		return DefaultToolApprovalConfig()
 	}
 	return NormalizeToolApprovalConfig(cfg)
+}
+
+func normalizeJSONObject(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func (s *Service) normalizeNetworkConfig(current Settings) (Settings, error) {
+	current.NetworkProvider = strings.TrimSpace(current.NetworkProvider)
+	current.NetworkConfig = cloneSettingsMap(current.NetworkConfig)
+	if current.NetworkProvider == "" {
+		if current.NetworkEnabled {
+			return Settings{}, errors.New("network provider is required when network is enabled")
+		}
+		current.NetworkConfig = map[string]any{}
+		return current, nil
+	}
+	if s.network == nil {
+		return Settings{}, errors.New("network service not configured")
+	}
+	cfg, err := s.network.PrepareBotConfigForWrite(netctl.BotNetworkConfig{
+		Enabled:  current.NetworkEnabled,
+		Provider: current.NetworkProvider,
+		Config:   current.NetworkConfig,
+	})
+	if err != nil {
+		return Settings{}, err
+	}
+	current.NetworkEnabled = cfg.Enabled
+	current.NetworkProvider = cfg.Provider
+	current.NetworkConfig = cfg.Config
+	return current, nil
+}
+
+func cloneSettingsMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func settingsNetworkConfigFromRow(row sqlc.GetBotNetworkConfigRow) netctl.BotNetworkConfig {
+	return netctl.BotNetworkConfig{
+		Enabled:  row.NetworkEnabled,
+		Provider: strings.TrimSpace(row.NetworkProvider),
+		Config:   normalizeJSONObject(row.NetworkConfig),
+	}
+}
+
+func settingsNetworkConfigFromSettings(current Settings) netctl.BotNetworkConfig {
+	return netctl.BotNetworkConfig{
+		Enabled:  current.NetworkEnabled,
+		Provider: strings.TrimSpace(current.NetworkProvider),
+		Config:   cloneSettingsMap(current.NetworkConfig),
+	}
+}
+
+func networkConfigsEqual(left, right netctl.BotNetworkConfig) bool {
+	if left.Enabled != right.Enabled || left.Provider != right.Provider {
+		return false
+	}
+	return jsonEqual(left.Config, right.Config)
+}
+
+func (s *Service) reconcileBotNetwork(ctx context.Context, botID string, previous, next netctl.BotNetworkConfig) error {
+	if s.network == nil || networkConfigsEqual(previous, next) {
+		return nil
+	}
+	return s.network.ReconcileBot(ctx, botID, previous, next)
+}
+
+func jsonEqual(left, right map[string]any) bool {
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return string(leftJSON) == string(rightJSON)
 }
 
 func (s *Service) getDefaultEffect(ctx context.Context, botID string) (string, error) {

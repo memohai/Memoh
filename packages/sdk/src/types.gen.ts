@@ -1812,6 +1812,11 @@ export type SettingsSettings = {
     image_model_id?: string;
     language?: string;
     memory_provider_id?: string;
+    network_config?: {
+        [key: string]: unknown;
+    };
+    network_enabled?: boolean;
+    network_provider?: string;
     persist_full_tool_results?: boolean;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
@@ -1858,6 +1863,11 @@ export type SettingsUpsertRequest = {
     image_model_id?: string;
     language?: string;
     memory_provider_id?: string;
+    network_config?: {
+        [key: string]: unknown;
+    };
+    network_enabled?: boolean;
+    network_provider?: string;
     persist_full_tool_results?: boolean;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;

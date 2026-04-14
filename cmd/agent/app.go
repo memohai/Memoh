@@ -124,9 +124,11 @@ func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Confi
 	return svc, nil
 }
 
-func provideNetworkController(service ctr.Service, rc *boot.RuntimeConfig) netctl.Controller {
+func provideNetworkController(service ctr.Service, rc *boot.RuntimeConfig, networkService *netctl.Service, registry *netctl.Registry) netctl.Controller {
 	runtime := netctl.NewContainerRuntimeFromBackend(rc.ContainerBackend, service)
-	return netctl.NewController(runtime, nil)
+	ctrl := netctl.NewController(runtime, networkService, registry)
+	networkService.SetController(ctrl)
+	return ctrl
 }
 
 func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
@@ -167,6 +169,18 @@ func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
 		return nil, nil
 	}
 	return postgresstore.New(conn)
+}
+
+func provideNetworkProviderRegistry(service ctr.Service, cfg config.Config) *netctl.Registry {
+	registry := netctl.NewRegistry()
+	if err := netctl.RegisterBuiltinProviders(registry, service, cfg.Workspace.DataRoot); err != nil {
+		panic(err)
+	}
+	return registry
+}
+
+func provideNetworkService(log *slog.Logger, queries dbstore.Queries, registry *netctl.Registry, service ctr.Service, rc *boot.RuntimeConfig, cfg config.Config) *netctl.Service {
+	return netctl.NewService(log, queries, registry, service, rc.ContainerBackend, cfg.Workspace.CNIBinaryDir, cfg.Workspace.CNIConfigDir, cfg.Workspace.DataRoot)
 }
 
 func provideSQLiteStore(conn *sql.DB) (*sqlitestore.Store, error) {

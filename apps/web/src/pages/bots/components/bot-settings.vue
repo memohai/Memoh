@@ -236,7 +236,6 @@
     </div>
 
     <Separator />
-
     <!-- Language -->
     <div class="space-y-2">
       <Label>{{ $t('bots.settings.language') }}</Label>
@@ -541,7 +540,6 @@ const enabledTranscriptionProviderIds = computed(() => new Set(transcriptionProv
 const ttsModels = computed(() => (ttsModelData.value ?? []).filter((m: Record<string, unknown>) => enabledTtsProviderIds.value.has(m.provider_id as string)))
 const transcriptionModels = computed(() => (transcriptionModelData.value ?? []).filter((m: Record<string, unknown>) => enabledTranscriptionProviderIds.value.has(m.provider_id as string)))
 const browserContexts = computed(() => browserContextData.value ?? [])
-
 // ---- Form ----
 const form = reactive({
   chat_model_id: '',

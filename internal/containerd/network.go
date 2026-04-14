@@ -93,6 +93,27 @@ func extractIP(result *gocni.Result) string {
 	return ""
 }
 
+func checkNetwork(ctx context.Context, req NetworkRequest) error {
+	containerID, netnsPath, err := resolveNetworkTarget(req)
+	if err != nil {
+		return err
+	}
+	cni, err := gocni.New(
+		gocni.WithPluginDir([]string{req.CNIBinDir}),
+		gocni.WithPluginConfDir(req.CNIConfDir),
+	)
+	if err != nil {
+		return err
+	}
+	// Only load the default network config (skip loopback) because go-cni's
+	// WithLoNetwork hardcodes cniVersion "0.3.1" which predates the CHECK
+	// command (requires >= 0.4.0).
+	if err := cni.Load(gocni.WithDefaultConf); err != nil {
+		return err
+	}
+	return cni.Check(ctx, containerID, netnsPath)
+}
+
 func removeNetwork(ctx context.Context, req NetworkRequest) error {
 	containerID, netnsPath, err := resolveNetworkTarget(req)
 	if err != nil {

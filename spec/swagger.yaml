@@ -3040,6 +3040,13 @@ definitions:
         type: string
       memory_provider_id:
         type: string
+      network_config:
+        additionalProperties: {}
+        type: object
+      network_enabled:
+        type: boolean
+      network_provider:
+        type: string
       persist_full_tool_results:
         type: boolean
       reasoning_effort:
@@ -3127,6 +3134,13 @@ definitions:
       language:
         type: string
       memory_provider_id:
+        type: string
+      network_config:
+        additionalProperties: {}
+        type: object
+      network_enabled:
+        type: boolean
+      network_provider:
         type: string
       persist_full_tool_results:
         type: boolean
