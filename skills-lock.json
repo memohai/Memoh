@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "mmx-cli": {
+      "source": "MiniMax-AI/cli",
+      "sourceType": "github",
+      "computedHash": "54adc09c298ca1fd11457a8cb6a9eaf558a4d0758570dfb43e82f3002ec32c16"
+    },
     "twilight-ai": {
       "source": "memohai/twilight-ai",
       "sourceType": "github",
