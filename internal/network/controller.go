@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ErrNotSupported indicates the selected runtime or overlay driver cannot
@@ -18,20 +19,23 @@ type Controller interface {
 	Status(ctx context.Context, req AttachmentRequest) (AttachmentStatus, error)
 }
 
-type controller struct {
-	runtime Runtime
-	overlay OverlayDriver
+type BindingResolver interface {
+	Resolve(ctx context.Context, botID string) (BotNetworkConfig, error)
 }
 
-// NewController creates a controller with the given runtime and optional
-// overlay driver. When overlay is nil, a no-op overlay driver is used.
-func NewController(runtime Runtime, overlay OverlayDriver) Controller {
-	if overlay == nil {
-		overlay = NoopOverlayDriver{}
-	}
+type controller struct {
+	runtime  Runtime
+	resolver BindingResolver
+	registry *Registry
+}
+
+// NewController creates a controller with runtime networking and optional bot
+// binding resolution for overlay providers.
+func NewController(runtime Runtime, resolver BindingResolver, registry *Registry) Controller {
 	return &controller{
-		runtime: runtime,
-		overlay: overlay,
+		runtime:  runtime,
+		resolver: resolver,
+		registry: registry,
 	}
 }
 
@@ -47,7 +51,7 @@ func (c *controller) EnsureAttached(ctx context.Context, req AttachmentRequest) 
 		}
 		return cause
 	}
-	if c.runtime != nil {
+	if c.runtime != nil && !req.OverlayOnly {
 		runtimeStatus, err := c.runtime.EnsureNetwork(ctx, req.Runtime)
 		if err != nil {
 			return AttachmentStatus{}, err
@@ -55,23 +59,27 @@ func (c *controller) EnsureAttached(ctx context.Context, req AttachmentRequest) 
 		status.Runtime = runtimeStatus
 		runtimeReady = true
 	}
-	if c.overlay != nil {
-		overlayStatus, err := c.overlay.EnsureAttached(ctx, req)
-		if err != nil {
-			return AttachmentStatus{}, rollbackRuntime(err)
-		}
-		status.Overlay = overlayStatus
+	resolvedReq, overlay, err := c.resolveOverlay(ctx, req)
+	if err != nil {
+		return AttachmentStatus{}, rollbackRuntime(err)
 	}
+	overlayStatus, err := overlay.EnsureAttached(ctx, resolvedReq)
+	if err != nil {
+		return AttachmentStatus{}, rollbackRuntime(err)
+	}
+	status.Overlay = overlayStatus
 	return status, nil
 }
 
 func (c *controller) Detach(ctx context.Context, req AttachmentRequest) error {
-	if c.overlay != nil {
-		if err := c.overlay.Detach(ctx, req); err != nil {
-			return err
-		}
+	resolvedReq, overlay, err := c.resolveOverlay(ctx, req)
+	if err != nil {
+		return err
 	}
-	if c.runtime != nil {
+	if err := overlay.Detach(ctx, resolvedReq); err != nil {
+		return err
+	}
+	if c.runtime != nil && !req.OverlayOnly {
 		return c.runtime.RemoveNetwork(ctx, req.Runtime)
 	}
 	return nil
@@ -88,14 +96,44 @@ func (c *controller) Status(ctx context.Context, req AttachmentRequest) (Attachm
 			status.Runtime = runtimeStatus
 		}
 	}
-	if c.overlay != nil {
-		overlayStatus, err := c.overlay.Status(ctx, req)
-		if err != nil && !errors.Is(err, ErrNotSupported) {
-			return AttachmentStatus{}, err
-		}
-		if err == nil {
-			status.Overlay = overlayStatus
-		}
+	resolvedReq, overlay, err := c.resolveOverlay(ctx, req)
+	if err != nil {
+		return AttachmentStatus{}, err
+	}
+	overlayStatus, err := overlay.Status(ctx, resolvedReq)
+	if err != nil && !errors.Is(err, ErrNotSupported) {
+		return AttachmentStatus{}, err
+	}
+	if err == nil {
+		status.Overlay = overlayStatus
 	}
 	return status, nil
+}
+
+func (c *controller) resolveOverlay(ctx context.Context, req AttachmentRequest) (AttachmentRequest, OverlayDriver, error) {
+	if c.resolver != nil && req.BotID != "" && !req.Overlay.Enabled && strings.TrimSpace(req.Overlay.Provider) == "" {
+		overlayReq, err := c.resolver.Resolve(ctx, req.BotID)
+		if err != nil {
+			return AttachmentRequest{}, nil, err
+		}
+		req.Overlay = overlayReq
+	}
+	if !req.Overlay.Enabled || strings.TrimSpace(req.Overlay.Provider) == "" {
+		return req, NoopOverlayDriver{}, nil
+	}
+	if c.registry == nil {
+		return AttachmentRequest{}, nil, fmt.Errorf("network provider registry not configured for %s", req.Overlay.Provider)
+	}
+	provider, ok := c.registry.Get(req.Overlay.Provider)
+	if !ok {
+		return AttachmentRequest{}, nil, fmt.Errorf("network provider not registered: %s", req.Overlay.Provider)
+	}
+	driver, err := provider.BuildDriver(req.Overlay)
+	if err != nil {
+		return AttachmentRequest{}, nil, err
+	}
+	if driver == nil {
+		return AttachmentRequest{}, nil, fmt.Errorf("network provider %s returned nil driver", req.Overlay.Provider)
+	}
+	return req, driver, nil
 }

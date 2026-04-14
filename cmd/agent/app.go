@@ -122,9 +122,11 @@ func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Confi
 	return svc, nil
 }
 
-func provideNetworkController(service ctr.Service, rc *boot.RuntimeConfig) netctl.Controller {
+func provideNetworkController(service ctr.Service, rc *boot.RuntimeConfig, networkService *netctl.Service, registry *netctl.Registry) netctl.Controller {
 	runtime := netctl.NewContainerRuntimeFromBackend(rc.ContainerBackend, service)
-	return netctl.NewController(runtime, nil)
+	ctrl := netctl.NewController(runtime, networkService, registry)
+	networkService.SetController(ctrl)
+	return ctrl
 }
 
 func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
@@ -143,6 +145,18 @@ func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 
 func provideDBQueries(conn *pgxpool.Pool) *dbsqlc.Queries {
 	return dbsqlc.New(conn)
+}
+
+func provideNetworkProviderRegistry(service ctr.Service, cfg config.Config) *netctl.Registry {
+	registry := netctl.NewRegistry()
+	if err := netctl.RegisterBuiltinProviders(registry, service, cfg.Workspace.DataRoot); err != nil {
+		panic(err)
+	}
+	return registry
+}
+
+func provideNetworkService(log *slog.Logger, queries *dbsqlc.Queries, registry *netctl.Registry, service ctr.Service, rc *boot.RuntimeConfig, cfg config.Config) *netctl.Service {
+	return netctl.NewService(log, queries, registry, service, rc.ContainerBackend, cfg.Workspace.CNIBinaryDir, cfg.Workspace.CNIConfigDir, cfg.Workspace.DataRoot)
 }
 
 func provideWorkspaceManager(log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool) *workspace.Manager {

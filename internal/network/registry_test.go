@@ -1,6 +1,9 @@
 package network
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 type testProvider struct {
 	kind string
@@ -10,6 +13,26 @@ type testProvider struct {
 func (p testProvider) Kind() string { return p.kind }
 
 func (p testProvider) Descriptor() ProviderDescriptor { return p.desc }
+
+func (testProvider) NormalizeConfig(raw map[string]any) (map[string]any, error) {
+	return raw, nil
+}
+
+func (testProvider) Status(_ context.Context, _ BotNetworkConfig) (ProviderStatus, error) {
+	return ProviderStatus{State: StatusStateReady}, nil
+}
+
+func (testProvider) ExecuteAction(_ context.Context, _ BotNetworkConfig, _ string, _ map[string]any) (ProviderActionExecution, error) {
+	return ProviderActionExecution{}, nil
+}
+
+func (testProvider) ListNodes(_ context.Context, _ string, _ BotNetworkConfig) ([]NodeOption, error) {
+	return nil, nil
+}
+
+func (testProvider) BuildDriver(_ BotNetworkConfig) (OverlayDriver, error) {
+	return NoopOverlayDriver{}, nil
+}
 
 func TestRegistryDescriptorAndCapabilities(t *testing.T) {
 	registry := NewRegistry()

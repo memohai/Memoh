@@ -11,6 +11,8 @@ import (
 
 	"github.com/memohai/acgo"
 	"github.com/memohai/acgo/socktainer"
+
+	"github.com/memohai/memoh/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -161,7 +163,11 @@ func (s *AppleService) CreateContainer(ctx context.Context, req CreateContainerR
 	if req.ID == "" || req.ImageRef == "" {
 		return ContainerInfo{}, ErrInvalidArgument
 	}
+	req.ImageRef = config.NormalizeImageRef(req.ImageRef)
 	if len(req.Spec.CDIDevices) > 0 {
+		return ContainerInfo{}, ErrNotSupported
+	}
+	if req.Spec.NetworkNamespacePath != "" || len(req.Spec.AddedCapabilities) > 0 {
 		return ContainerInfo{}, ErrNotSupported
 	}
 	if err := s.ensureHealthy(ctx); err != nil {
@@ -369,6 +375,7 @@ func (*AppleService) SetupNetwork(context.Context, NetworkRequest) (NetworkResul
 	return NetworkResult{}, nil
 }
 func (*AppleService) RemoveNetwork(context.Context, NetworkRequest) error { return nil }
+func (*AppleService) CheckNetwork(context.Context, NetworkRequest) error  { return nil }
 
 // ---------------------------------------------------------------------------
 // Snapshots (not supported on Apple Container)

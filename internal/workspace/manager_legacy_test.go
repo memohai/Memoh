@@ -137,6 +137,10 @@ func (s *legacyRouteTestService) RemoveNetwork(context.Context, ctr.NetworkReque
 	return nil
 }
 
+func (*legacyRouteTestService) CheckNetwork(context.Context, ctr.NetworkRequest) error {
+	return nil
+}
+
 func (*legacyRouteTestService) CommitSnapshot(context.Context, string, string, string) error {
 	return nil
 }
@@ -162,7 +166,7 @@ func newLegacyRouteTestManager(t *testing.T, svc runtimeService, cfg config.Work
 	logger := slog.New(slog.DiscardHandler)
 	m := &Manager{
 		service:           svc,
-		networkController: netctl.NewController(netctl.NewContainerRuntimeFromBackend("containerd", svc), nil),
+		networkController: netctl.NewController(netctl.NewContainerRuntimeFromBackend("containerd", svc), nil, nil),
 		cfg:               cfg,
 		namespace:         config.DefaultNamespace,
 		containerLocks:    make(map[string]*sync.Mutex),

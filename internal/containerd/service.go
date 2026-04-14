@@ -117,6 +117,7 @@ type TaskService interface {
 type NetworkService interface {
 	SetupNetwork(ctx context.Context, req NetworkRequest) (NetworkResult, error)
 	RemoveNetwork(ctx context.Context, req NetworkRequest) error
+	CheckNetwork(ctx context.Context, req NetworkRequest) error
 }
 
 // SnapshotService groups snapshot and rootfs operations.
@@ -277,12 +278,71 @@ func specOptsFromSpec(spec ContainerSpec) []oci.SpecOpts {
 		}
 		opts = append(opts, oci.WithMounts(mounts))
 	}
+	if spec.NetworkNamespacePath != "" {
+		opts = append(opts, withNetworkNamespacePath(spec.NetworkNamespacePath))
+	}
+	if len(spec.AddedCapabilities) > 0 {
+		opts = append(opts, withAddedCapabilities(spec.AddedCapabilities...))
+	}
 	if len(spec.CDIDevices) > 0 {
 		opts = append(opts, withStaticCDIRegistry())
 		opts = append(opts, cdispec.WithCDIDevices(spec.CDIDevices...))
 	}
 
 	return opts
+}
+
+func withNetworkNamespacePath(path string) oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, spec *oci.Spec) error {
+		if spec.Linux == nil {
+			spec.Linux = &specs.Linux{}
+		}
+		filtered := make([]specs.LinuxNamespace, 0, len(spec.Linux.Namespaces)+1)
+		for _, ns := range spec.Linux.Namespaces {
+			if ns.Type != specs.NetworkNamespace {
+				filtered = append(filtered, ns)
+			}
+		}
+		filtered = append(filtered, specs.LinuxNamespace{
+			Type: specs.NetworkNamespace,
+			Path: path,
+		})
+		spec.Linux.Namespaces = filtered
+		return nil
+	}
+}
+
+func withAddedCapabilities(capabilities ...string) oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, spec *oci.Spec) error {
+		if spec.Process == nil {
+			spec.Process = &specs.Process{}
+		}
+		if spec.Process.Capabilities == nil {
+			spec.Process.Capabilities = &specs.LinuxCapabilities{}
+		}
+		spec.Process.Capabilities.Bounding = appendUnique(spec.Process.Capabilities.Bounding, capabilities...)
+		spec.Process.Capabilities.Effective = appendUnique(spec.Process.Capabilities.Effective, capabilities...)
+		spec.Process.Capabilities.Inheritable = appendUnique(spec.Process.Capabilities.Inheritable, capabilities...)
+		spec.Process.Capabilities.Permitted = appendUnique(spec.Process.Capabilities.Permitted, capabilities...)
+		spec.Process.Capabilities.Ambient = appendUnique(spec.Process.Capabilities.Ambient, capabilities...)
+		return nil
+	}
+}
+
+func appendUnique(current []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(current))
+	for _, item := range current {
+		seen[item] = struct{}{}
+	}
+	out := append([]string(nil), current...)
+	for _, item := range values {
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }
 
 func withStaticCDIRegistry() oci.SpecOpts {
@@ -301,6 +361,7 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 	if req.ID == "" || req.ImageRef == "" {
 		return ContainerInfo{}, ErrInvalidArgument
 	}
+	req.ImageRef = config.NormalizeImageRef(req.ImageRef)
 
 	ctx = s.withNamespace(ctx)
 	ctx, done, err := s.client.WithLease(ctx)
@@ -822,6 +883,21 @@ func (s *DefaultService) RemoveNetwork(ctx context.Context, req NetworkRequest) 
 		req.PID = task.Pid()
 	}
 	return removeNetwork(ctx, req)
+}
+
+func (s *DefaultService) CheckNetwork(ctx context.Context, req NetworkRequest) error {
+	if req.ContainerID == "" {
+		return ErrInvalidArgument
+	}
+	if req.PID == 0 {
+		task, taskCtx, err := s.getTask(ctx, req.ContainerID)
+		if err != nil {
+			return err
+		}
+		ctx = taskCtx
+		req.PID = task.Pid()
+	}
+	return checkNetwork(ctx, req)
 }
 
 func (s *DefaultService) withNamespace(ctx context.Context) context.Context {

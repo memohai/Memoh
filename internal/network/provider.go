@@ -2,34 +2,46 @@ package network
 
 import "context"
 
-// Provider is the read-only descriptor entry registered for a network provider.
+// Provider describes a supported network backend family such as Tailscale or
+// NetBird. It is registered globally and later instantiated from stored
+// provider records.
 type Provider interface {
 	Kind() string
 	Descriptor() ProviderDescriptor
+	NormalizeConfig(raw map[string]any) (map[string]any, error)
+	Status(ctx context.Context, cfg BotNetworkConfig) (ProviderStatus, error)
+	ExecuteAction(ctx context.Context, cfg BotNetworkConfig, actionID string, input map[string]any) (ProviderActionExecution, error)
+	ListNodes(ctx context.Context, botID string, cfg BotNetworkConfig) ([]NodeOption, error)
+	BuildDriver(cfg BotNetworkConfig) (OverlayDriver, error)
 }
 
-// OverlayDriver is the behavioral surface for future SD-WAN/overlay providers.
+// OverlayDriver is the runtime surface for a concrete configured provider
+// instance bound to a bot.
 type OverlayDriver interface {
-	Provider
+	Kind() string
 	EnsureAttached(ctx context.Context, req AttachmentRequest) (OverlayStatus, error)
 	Detach(ctx context.Context, req AttachmentRequest) error
 	Status(ctx context.Context, req AttachmentRequest) (OverlayStatus, error)
 }
 
-// ProviderDescriptor is the read-only metadata exported by a provider.
 type ProviderDescriptor struct {
 	Kind         string               `json:"kind"`
 	DisplayName  string               `json:"display_name"`
+	Description  string               `json:"description,omitempty"`
+	ConfigSchema ConfigSchema         `json:"config_schema"`
 	Capabilities ProviderCapabilities `json:"capabilities"`
+	Actions      []ProviderAction     `json:"actions,omitempty"`
 }
 
-// ProviderCapabilities describes the feature matrix of an overlay provider.
 type ProviderCapabilities struct {
-	Mesh         bool `json:"mesh"`
-	PrivateDNS   bool `json:"private_dns"`
-	ServiceProxy bool `json:"service_proxy"`
-	EgressProxy  bool `json:"egress_proxy"`
-	ExitNode     bool `json:"exit_node"`
-	Userspace    bool `json:"userspace"`
-	KernelTUN    bool `json:"kernel_tun"`
+	Mesh              bool `json:"mesh"`
+	PrivateDNS        bool `json:"private_dns"`
+	ServiceProxy      bool `json:"service_proxy"`
+	EgressProxy       bool `json:"egress_proxy"`
+	TransparentProxy  bool `json:"transparent_proxy"`
+	ExitNode          bool `json:"exit_node"`
+	Userspace         bool `json:"userspace"`
+	KernelTUN         bool `json:"kernel_tun"`
+	NativeClient      bool `json:"native_client"`
+	SharedNetNSWorker bool `json:"shared_netns_worker"`
 }

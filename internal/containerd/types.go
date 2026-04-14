@@ -104,12 +104,14 @@ type MountSpec struct {
 }
 
 type ContainerSpec struct {
-	Cmd     []string
-	Env     []string
-	WorkDir string
-	User    string
-	Mounts  []MountSpec
-	DNS     []string
+	Cmd                  []string
+	Env                  []string
+	WorkDir              string
+	User                 string
+	Mounts               []MountSpec
+	DNS                  []string
+	NetworkNamespacePath string
+	AddedCapabilities    []string
 	// CDIDevices contains fully-qualified CDI device names such as
 	// "nvidia.com/gpu=0" or "amd.com/gpu=0".
 	CDIDevices []string
