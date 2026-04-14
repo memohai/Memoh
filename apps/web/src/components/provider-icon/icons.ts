@@ -21,6 +21,7 @@ import {
   FireworksColor,
   Gemini,
   GeminiColor,
+  GithubCopilot,
   Google,
   GoogleBrandColor,
   GoogleColor,
@@ -74,6 +75,7 @@ import {
 export const iconMap: Record<string, Component> = {
   'openai': Openai,
   'anthropic': Anthropic,
+  'github-copilot': GithubCopilot,
   'google': Google,
   'google-color': GoogleColor,
   'google-brand-color': GoogleBrandColor,

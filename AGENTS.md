@@ -195,12 +195,11 @@ Memoh/
 | `mise run db-up` | Initialize and migrate the database |
 | `mise run db-down` | Drop the database |
 | `mise run build-embedded-assets` | Build and stage embedded web assets |
-| `mise run build-unified` | Build unified memoh binary |
+| `mise run build-unified` | Build the memoh CLI locally |
 | `mise run bridge:build` | Rebuild bridge binary in dev container |
 | `mise run lint` | Run all linters (Go + ESLint) |
 | `mise run lint:fix` | Run all linters with auto-fix |
 | `mise run release` | Release new version (bumpp) |
-| `mise run release-binaries` | Build release archive for target (requires TARGET_OS TARGET_ARCH) |
 | `mise run install-socktainer` | Install socktainer (macOS container backend) |
 | `mise run install-workspace-toolkit` | Install workspace toolkit (bridge binary etc.) |
 

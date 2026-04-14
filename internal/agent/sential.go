@@ -4,9 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -28,6 +30,11 @@ const (
 	defaultOverlapThreshold    = 0.75
 	defaultConsecutiveHits     = 10
 	defaultMinNewGramsPerChunk = 1
+)
+
+var (
+	ErrTextLoopDetected = errors.New(LoopDetectedAbortMessage)
+	ErrToolLoopDetected = errors.New(ToolLoopDetectedAbortMessage)
 )
 
 // --- Sential: n-gram overlap detector ---
@@ -322,6 +329,7 @@ type ToolLoopResult struct {
 
 // ToolLoopGuard detects repeated identical tool calls.
 type ToolLoopGuard struct {
+	mu                  sync.Mutex
 	repeatThreshold     int
 	warningsBeforeAbort int
 	volatileKeySet      map[string]struct{}
@@ -352,7 +360,16 @@ func NewToolLoopGuard(repeatThreshold, warningsBeforeAbort int) *ToolLoopGuard {
 
 // Inspect checks a tool call for repetition.
 func (g *ToolLoopGuard) Inspect(input ToolLoopInput) ToolLoopResult {
+	if g == nil {
+		return ToolLoopResult{
+			Hash: computeToolLoopHash(input, nil),
+		}
+	}
+
 	hash := computeToolLoopHash(input, g.volatileKeySet)
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
 	if hash == g.lastHash {
 		g.repeatCount++
@@ -391,6 +408,13 @@ func (g *ToolLoopGuard) Inspect(input ToolLoopInput) ToolLoopResult {
 
 // Reset clears the guard state.
 func (g *ToolLoopGuard) Reset() {
+	if g == nil {
+		return
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	g.lastHash = ""
 	g.repeatCount = 0
 	g.breachCount = 0

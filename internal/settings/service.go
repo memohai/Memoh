@@ -263,7 +263,7 @@ func normalizeBotSetting(language string, aclDefaultEffect string, reasoningEnab
 		settings.Language = DefaultLanguage
 	}
 	if settings.AclDefaultEffect == "" {
-		settings.AclDefaultEffect = "deny"
+		settings.AclDefaultEffect = "allow"
 	}
 	if !isValidReasoningEffort(settings.ReasoningEffort) {
 		settings.ReasoningEffort = DefaultReasoningEffort
@@ -401,7 +401,7 @@ func normalizeBotSettingsFields(
 
 func (s *Service) getDefaultEffect(ctx context.Context, botID string) (string, error) {
 	if s.acl == nil {
-		return "deny", nil
+		return "allow", nil
 	}
 	return s.acl.GetDefaultEffect(ctx, botID)
 }

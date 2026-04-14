@@ -145,14 +145,9 @@ run = "scripts/release.sh --prepare-assets"
 depends = ["//:pnpm-install"]
 
 [tasks.build-unified]
-description = "Build unified memoh binary"
+description = "Build memoh CLI locally"
 depends = ["//:build-embedded-assets"]
 run = "go build -o bin/memoh ./cmd/memoh"
-
-[tasks.release-binaries]
-description = "Build release archive for one target (requires TARGET_OS TARGET_ARCH)"
-depends = ["//:pnpm-install"]
-run = "scripts/release.sh"
 
 [tasks.install-socktainer]
 description = "Install socktainer"

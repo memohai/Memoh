@@ -615,6 +615,32 @@
     "timezonePlaceholder": "e.g. America/New_York",
     "timezoneInherited": "Inherited from user/system",
     "timezoneInheritedHint": "Leave empty to inherit the user's timezone, or fall back to the system timezone.",
+    "aclPreset": "Security Policy",
+    "aclPresetDescription": "Choose a common ACL starting point during creation. You can fine-tune it later in Access Control.",
+    "aclPresetHint": "Recommendation: use Private Only for personal assistants, Group Only or Group and Thread for community bots, and Allow All when you want the broadest default.",
+    "aclPresetHelp": "This initializes the bot ACL default effect and preset rules at creation time. You can still edit them later in Access Control.",
+    "aclPresets": {
+      "allowAll": {
+        "title": "Allow All",
+        "description": "Adds no extra restriction and allows all conversation types by default."
+      },
+      "privateOnly": {
+        "title": "Private Only",
+        "description": "Defaults to deny and only allows private conversations."
+      },
+      "groupOnly": {
+        "title": "Group Only",
+        "description": "Defaults to deny and only allows group conversations."
+      },
+      "groupAndThreadOnly": {
+        "title": "Group and Thread",
+        "description": "Defaults to deny and allows group conversations plus threads."
+      },
+      "denyAll": {
+        "title": "Deny All",
+        "description": "Defaults to deny and adds no rules, so you can configure access manually later."
+      }
+    },
     "editAvatar": "Edit Avatar",
     "editAvatarDescription": "Set the image URL for the bot avatar.",
     "editTimezone": "Edit Timezone",

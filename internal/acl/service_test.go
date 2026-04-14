@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
@@ -90,40 +89,6 @@ func (*fakeRows) Conn() *pgx.Conn        { return nil }
 
 // ---- helpers ----
 
-func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
-	return &fakeRow{
-		scanFunc: func(dest ...any) error {
-			if len(dest) < 22 {
-				return pgx.ErrNoRows
-			}
-			*dest[0].(*pgtype.UUID) = botID
-			*dest[1].(*pgtype.UUID) = ownerUserID
-			*dest[2].(*pgtype.Text) = pgtype.Text{String: "bot", Valid: true}
-			*dest[3].(*pgtype.Text) = pgtype.Text{}
-			*dest[4].(*pgtype.Text) = pgtype.Text{}
-			*dest[5].(*bool) = true
-			*dest[6].(*string) = bots.BotStatusReady
-			*dest[7].(*string) = ""                  // Language
-			*dest[8].(*bool) = false                 // ReasoningEnabled
-			*dest[9].(*string) = "medium"            // ReasoningEffort
-			*dest[10].(*pgtype.UUID) = pgtype.UUID{} // ChatModelID
-			*dest[11].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
-			*dest[12].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
-			*dest[13].(*bool) = false                // HeartbeatEnabled
-			*dest[14].(*int32) = 30                  // HeartbeatInterval
-			*dest[15].(*string) = ""                 // HeartbeatPrompt
-			*dest[16].(*bool) = false                // CompactionEnabled
-			*dest[17].(*int32) = 100000              // CompactionThreshold
-			*dest[18].(*int32) = 80                  // CompactionRatio
-			*dest[19].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
-			*dest[20].(*[]byte) = []byte(`{}`)
-			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			return nil
-		},
-	}
-}
-
 func makeStringRow(value string) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
@@ -163,7 +128,6 @@ func noRule() *fakeRow {
 
 func TestEvaluate(t *testing.T) {
 	botUUID := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
-	ownerUUID := pgtype.UUID{Bytes: uuid.MustParse("22222222-2222-2222-2222-222222222222"), Valid: true}
 
 	tests := []struct {
 		name          string
@@ -202,8 +166,6 @@ func TestEvaluate(t *testing.T) {
 			db := &fakeDBTX{
 				queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
 					switch {
-					case strings.Contains(sql, "FROM bots") && strings.Contains(sql, "owner_user_id"):
-						return makeBotRow(botUUID, ownerUUID)
 					case strings.Contains(sql, "FROM bot_acl_rules") && strings.Contains(sql, "LIMIT 1"):
 						// Evaluate query
 						if tt.matchedEffect == "" {
@@ -218,8 +180,7 @@ func TestEvaluate(t *testing.T) {
 				},
 			}
 			queries := sqlc.New(db)
-			botService := bots.NewService(nil, queries)
-			service := NewService(nil, queries, botService)
+			service := NewService(nil, queries)
 
 			allowed, err := service.Evaluate(context.Background(), EvaluateRequest{
 				BotID:             botUUID.String(),
@@ -241,7 +202,7 @@ func TestEvaluate(t *testing.T) {
 }
 
 func TestEvaluateRejectsInvalidScope(t *testing.T) {
-	service := NewService(nil, nil, nil)
+	service := NewService(nil, nil)
 	_, err := service.Evaluate(context.Background(), EvaluateRequest{
 		BotID: "11111111-1111-1111-1111-111111111111",
 		SourceScope: SourceScope{
@@ -306,7 +267,7 @@ func TestSetDefaultEffect(t *testing.T) {
 			return pgconn.CommandTag{}, nil
 		},
 	}
-	service := NewService(nil, sqlc.New(db), nil)
+	service := NewService(nil, sqlc.New(db))
 	if err := service.SetDefaultEffect(context.Background(), botUUID.String(), EffectAllow); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -346,7 +307,7 @@ func TestListObservedConversationsByChannelIdentity(t *testing.T) {
 		},
 	}
 
-	service := NewService(nil, sqlc.New(db), nil)
+	service := NewService(nil, sqlc.New(db))
 	items, err := service.ListObservedConversationsByChannelIdentity(context.Background(), botUUID.String(), channelIdentityUUID.String())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -373,7 +334,7 @@ func TestReorderRules(t *testing.T) {
 			return pgconn.CommandTag{}, nil
 		},
 	}
-	service := NewService(nil, sqlc.New(db), nil)
+	service := NewService(nil, sqlc.New(db))
 	err := service.ReorderRules(context.Background(), []ReorderItem{
 		{ID: ruleUUID.String(), Priority: 42},
 	})

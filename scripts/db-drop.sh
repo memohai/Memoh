@@ -11,4 +11,4 @@ if [ "$confirmation" != "yes" ]; then
     exit 0
 fi
 
-go run "${PROJECT_ROOT}/cmd/agent/main.go" migrate down
+go run "${PROJECT_ROOT}/cmd/agent" migrate down

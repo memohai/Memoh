@@ -22,7 +22,7 @@ services:
       - memoh-network
 
   migrate:
-    image: memohai/server:local
+    image: memohai/server:latest
     container_name: memoh-migrate
     entrypoint: ["/app/memoh-server", "migrate", "up"]
     volumes:
@@ -35,7 +35,7 @@ services:
       - memoh-network
 
   server:
-    image: memohai/server:local
+    image: memohai/server:latest
     container_name: memoh-server
     privileged: true
     pid: host

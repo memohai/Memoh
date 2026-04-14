@@ -1,0 +1,160 @@
+package main
+
+import (
+	"log/slog"
+
+	"go.uber.org/fx"
+	"go.uber.org/fx/fxevent"
+
+	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/acl"
+	"github.com/memohai/memoh/internal/bind"
+	"github.com/memohai/memoh/internal/boot"
+	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/browsercontexts"
+	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/channel/adapters/local"
+	"github.com/memohai/memoh/internal/channel/adapters/weixin"
+	"github.com/memohai/memoh/internal/channel/identities"
+	"github.com/memohai/memoh/internal/compaction"
+	"github.com/memohai/memoh/internal/conversation"
+	emailpkg "github.com/memohai/memoh/internal/email"
+	"github.com/memohai/memoh/internal/handlers"
+	"github.com/memohai/memoh/internal/heartbeat"
+	"github.com/memohai/memoh/internal/mcp"
+	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	"github.com/memohai/memoh/internal/message/event"
+	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/policy"
+	"github.com/memohai/memoh/internal/schedule"
+	"github.com/memohai/memoh/internal/searchproviders"
+	"github.com/memohai/memoh/internal/settings"
+	ttspkg "github.com/memohai/memoh/internal/tts"
+)
+
+func runServe() {
+	fx.New(options()).Run()
+}
+
+func options() fx.Option {
+	return fx.Options(
+		fx.Provide(
+			provideConfig,
+			boot.ProvideRuntimeConfig,
+			provideLogger,
+			provideContainerService,
+			provideDBConn,
+			provideDBQueries,
+			provideWorkspaceManager,
+			provideMemoryLLM,
+			memprovider.NewService,
+			provideMemoryProviderRegistry,
+			models.NewService,
+			bots.NewService,
+			accounts.NewService,
+			acl.NewService,
+			settings.NewService,
+			provideProvidersService,
+			searchproviders.NewService,
+			browsercontexts.NewService,
+			policy.NewService,
+			mcp.NewConnectionService,
+			conversation.NewService,
+			identities.NewService,
+			bind.NewService,
+			event.NewHub,
+			provideTtsRegistry,
+			ttspkg.NewService,
+			provideTtsTempStore,
+			emailpkg.NewDBOAuthTokenStore,
+			provideEmailRegistry,
+			emailpkg.NewService,
+			emailpkg.NewOutboxService,
+			provideEmailChatGateway,
+			provideEmailTrigger,
+			emailpkg.NewManager,
+			provideRouteService,
+			provideSessionService,
+			provideMessageService,
+			provideMediaService,
+			providePipeline,
+			provideEventStore,
+			provideDiscussDriver,
+			local.NewRouteHub,
+			provideChannelRegistry,
+			channel.NewStore,
+			provideChannelRouter,
+			provideChannelManager,
+			provideChannelLifecycleService,
+			provideAgent,
+			provideChatResolver,
+			provideScheduleTriggerer,
+			provideHeartbeatSessionCreator,
+			provideScheduleSessionCreator,
+			schedule.NewService,
+			provideHeartbeatTriggerer,
+			heartbeat.NewService,
+			compaction.NewService,
+			provideContainerdHandler,
+			provideFederationGateway,
+			provideToolGatewayService,
+			provideBackgroundManager,
+			provideToolProviders,
+			provideServerHandler(handlers.NewPingHandler),
+			provideServerHandler(provideAuthHandler),
+			provideServerHandler(provideMemoryHandler),
+			provideServerHandler(provideMessageHandler),
+			provideServerHandler(provideSessionHandler),
+			provideServerHandler(handlers.NewSwaggerHandler),
+			provideServerHandler(handlers.NewProvidersHandler),
+			provideServerHandler(handlers.NewProviderOAuthHandler),
+			provideServerHandler(handlers.NewSearchProvidersHandler),
+			provideServerHandler(handlers.NewModelsHandler),
+			provideServerHandler(handlers.NewSettingsHandler),
+			provideServerHandler(handlers.NewACLHandler),
+			provideServerHandler(handlers.NewBindHandler),
+			provideServerHandler(handlers.NewScheduleHandler),
+			provideServerHandler(handlers.NewHeartbeatHandler),
+			provideServerHandler(handlers.NewCompactionHandler),
+			provideServerHandler(handlers.NewChannelHandler),
+			provideServerHandler(channel.NewWebhookServerHandler),
+			provideServerHandler(weixin.NewQRServerHandler),
+			provideServerHandler(provideUsersHandler),
+			provideServerHandler(handlers.NewMemoryProvidersHandler),
+			provideServerHandler(handlers.NewSpeechHandler),
+			provideServerHandler(handlers.NewBotTtsHandler),
+			provideServerHandler(handlers.NewEmailProvidersHandler),
+			provideServerHandler(handlers.NewEmailBindingsHandler),
+			provideServerHandler(handlers.NewEmailOutboxHandler),
+			provideServerHandler(handlers.NewEmailWebhookHandler),
+			provideServerHandler(provideEmailOAuthHandler),
+			provideServerHandler(handlers.NewMCPHandler),
+			provideServerHandler(handlers.NewMCPOAuthHandler),
+			provideOAuthService,
+			provideServerHandler(handlers.NewTokenUsageHandler),
+			provideServerHandler(handlers.NewSessionInfoHandler),
+			provideServerHandler(handlers.NewBrowserContextsHandler),
+			provideServerHandler(handlers.NewSupermarketHandler),
+			provideServerHandler(provideWebHandler),
+			provideServer,
+		),
+		fx.Invoke(
+			injectToolProviders,
+			startRegistrySync,
+			startMemoryProviderBootstrap,
+			startSearchProviderBootstrap,
+			startScheduleService,
+			startHeartbeatService,
+			wireResolverOutbound,
+			startChannelManager,
+			startEmailManager,
+			startContainerReconciliation,
+			startBackgroundTaskCleanup,
+			startTtsTempStoreCleanup,
+			startServer,
+		),
+		fx.WithLogger(func(logger *slog.Logger) fxevent.Logger {
+			return &fxevent.SlogLogger{Logger: logger.With(slog.String("component", "fx"))}
+		}),
+	)
+}

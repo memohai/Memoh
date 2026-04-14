@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -99,7 +100,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	var textLoopGuard *TextLoopGuard
 	var textLoopProbeBuffer *TextLoopProbeBuffer
 	var toolLoopGuard *ToolLoopGuard
-	toolLoopAbortCallIDs := make(map[string]struct{})
+	toolLoopAbortCallIDs := newToolAbortRegistry()
 	if cfg.LoopDetection.Enabled {
 		textLoopGuard = NewTextLoopGuard(LoopDetectedStreakThreshold, LoopDetectedMinNewGramsPerChunk, SentialOptions{})
 		textLoopProbeBuffer = NewTextLoopProbeBuffer(LoopDetectedProbeChars, func(text string) {
@@ -314,11 +315,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			}
 
 		case *sdk.StreamToolResultPart:
-			shouldAbort := false
-			if _, ok := toolLoopAbortCallIDs[p.ToolCallID]; ok {
-				delete(toolLoopAbortCallIDs, p.ToolCallID)
-				shouldAbort = true
-			}
+			shouldAbort := toolLoopAbortCallIDs.Take(p.ToolCallID)
 			stepNumber++
 			if !sendEvent(ctx, ch, StreamEvent{
 				Type:       EventToolCallEnd,
@@ -438,16 +435,23 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult, error) {
+	genCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	loopAbort := newLoopAbortState()
+
 	// Collecting emitter: tools push side-effect events here during generation.
 	var collected []tools.ToolStreamEvent
+	var collectedMu sync.Mutex
 	collectEmitter := tools.StreamEmitter(func(evt tools.ToolStreamEvent) {
+		collectedMu.Lock()
+		defer collectedMu.Unlock()
 		collected = append(collected, evt)
 	})
 
 	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
 		var err error
-		sdkTools, err = a.assembleTools(ctx, cfg, collectEmitter)
+		sdkTools, err = a.assembleTools(genCtx, cfg, collectEmitter)
 		if err != nil {
 			return nil, fmt.Errorf("assemble tools: %w", err)
 		}
@@ -456,7 +460,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard
-	toolLoopAbortCallIDs := make(map[string]struct{})
+	toolLoopAbortCallIDs := newToolAbortRegistry()
 	if cfg.LoopDetection.Enabled {
 		toolLoopGuard = NewToolLoopGuard(ToolLoopRepeatThreshold, ToolLoopWarningsBeforeAbort)
 		textLoopGuard = NewTextLoopGuard(LoopDetectedStreakThreshold, LoopDetectedMinNewGramsPerChunk, SentialOptions{})
@@ -490,13 +494,17 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 	opts = append(opts,
 		sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
 			if cfg.LoopDetection.Enabled {
-				if len(toolLoopAbortCallIDs) > 0 {
-					return nil // stop
+				if toolLoopAbortCallIDs.Any() {
+					loopAbort.Set(ErrToolLoopDetected)
+					cancel(ErrToolLoopDetected)
+					return nil
 				}
 				if textLoopGuard != nil && isNonEmptyString(step.Text) {
 					result := textLoopGuard.Inspect(step.Text)
 					if result.Abort {
-						return nil // stop
+						loopAbort.Set(ErrTextLoopDetected)
+						cancel(ErrTextLoopDetected)
+						return nil
 					}
 				}
 			}
@@ -504,9 +512,15 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		}),
 	)
 
-	genResult, err := a.client.GenerateTextResult(ctx, opts...)
+	genResult, err := a.client.GenerateTextResult(genCtx, opts...)
 	if err != nil {
+		if loopErr := detectGenerateLoopAbort(genCtx, err); loopErr != nil {
+			return nil, loopErr
+		}
 		return nil, fmt.Errorf("generate: %w", err)
+	}
+	if loopErr := loopAbort.Err(); loopErr != nil {
+		return nil, loopErr
 	}
 
 	// Drain collected tool-emitted side effects into the result.
@@ -701,7 +715,7 @@ func drainBackgroundNotifications(
 	return p
 }
 
-func wrapToolsWithLoopGuard(tools []sdk.Tool, guard *ToolLoopGuard, abortCallIDs map[string]struct{}) []sdk.Tool {
+func wrapToolsWithLoopGuard(tools []sdk.Tool, guard *ToolLoopGuard, abortCallIDs *toolAbortRegistry) []sdk.Tool {
 	wrapped := make([]sdk.Tool, len(tools))
 	for i, tool := range tools {
 		originalExecute := tool.Execute
@@ -710,14 +724,14 @@ func wrapToolsWithLoopGuard(tools []sdk.Tool, guard *ToolLoopGuard, abortCallIDs
 		wrapped[i].Execute = func(ctx *sdk.ToolExecContext, input any) (any, error) {
 			warn, abort := guard.Guard(toolName, input)
 			if abort {
-				abortCallIDs[ctx.ToolCallID] = struct{}{}
+				abortCallIDs.Add(ctx.ToolCallID)
 				return map[string]any{
 					"isError": true,
 					"content": []map[string]any{{
 						"type": "text",
 						"text": ToolLoopDetectedAbortMessage,
 					}},
-				}, errors.New(ToolLoopDetectedAbortMessage)
+				}, ErrToolLoopDetected
 			}
 			if warn {
 				return map[string]any{
@@ -978,4 +992,51 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func detectGenerateLoopAbort(ctx context.Context, err error) error {
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+
+	cause := context.Cause(ctx)
+	switch {
+	case errors.Is(cause, ErrToolLoopDetected):
+		return ErrToolLoopDetected
+	case errors.Is(cause, ErrTextLoopDetected):
+		return ErrTextLoopDetected
+	default:
+		return nil
+	}
+}
+
+type loopAbortState struct {
+	mu  sync.Mutex
+	err error
+}
+
+func newLoopAbortState() *loopAbortState {
+	return &loopAbortState{}
+}
+
+func (s *loopAbortState) Set(err error) {
+	if s == nil || err == nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err == nil {
+		s.err = err
+	}
+}
+
+func (s *loopAbortState) Err() error {
+	if s == nil {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
 }

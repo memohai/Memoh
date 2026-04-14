@@ -31,6 +31,9 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -102,10 +105,7 @@ jobs:
 
       # macOS code signing with certificate secrets.
       - name: Prepare macOS code signing
-        if: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        if: ${{ matrix.platform == 'macos-latest' && env.APPLE_CERTIFICATE != '' && env.APPLE_CERTIFICATE_PASSWORD != '' }}
         run: |
           set -euo pipefail
           KEYCHAIN_PASSWORD="github-actions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-1}"

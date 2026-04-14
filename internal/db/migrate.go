@@ -14,6 +14,11 @@ import (
 	"github.com/memohai/memoh/internal/config"
 )
 
+type MigrationStatus struct {
+	Version uint
+	Dirty   bool
+}
+
 // RunMigrate applies or rolls back database migrations.
 // The migrationsFS should contain .sql files at its root (not in a subdirectory).
 // Supported commands: "up", "down", "version", "force N".
@@ -74,6 +79,31 @@ func RunMigrate(logger *slog.Logger, cfg config.PostgresConfig, migrationsFS fs.
 	}
 
 	return nil
+}
+
+func ReadMigrationStatus(cfg config.PostgresConfig, migrationsFS fs.FS) (MigrationStatus, error) {
+	sourceDriver, err := iofs.New(migrationsFS, ".")
+	if err != nil {
+		return MigrationStatus{}, fmt.Errorf("migration source: %w", err)
+	}
+
+	m, err := migrate.NewWithSourceInstance("iofs", sourceDriver, DSN(cfg))
+	if err != nil {
+		return MigrationStatus{}, fmt.Errorf("migrate init: %w", err)
+	}
+	defer func() { _, _ = m.Close() }()
+
+	ver, dirty, err := m.Version()
+	if err != nil {
+		if errors.Is(err, migrate.ErrNilVersion) {
+			return MigrationStatus{}, nil
+		}
+		return MigrationStatus{}, fmt.Errorf("migrate version: %w", err)
+	}
+	return MigrationStatus{
+		Version: ver,
+		Dirty:   dirty,
+	}, nil
 }
 
 type migrateLogger struct {

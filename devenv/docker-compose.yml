@@ -54,7 +54,7 @@ services:
     container_name: memoh-dev-migrate
     working_dir: /workspace
     entrypoint: []
-    command: ["go", "run", "./cmd/agent/main.go", "migrate", "up"]
+    command: ["go", "run", "./cmd/agent", "migrate", "up"]
     environment:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
       GOFLAGS: -buildvcs=false

@@ -2,12 +2,15 @@ package bots
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
@@ -143,5 +146,36 @@ func TestAuthorizeAccess(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestCreateRejectsUnknownACLPreset(t *testing.T) {
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	createCalled := false
+
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "FROM users") && strings.Contains(sql, "WHERE id = $1"):
+				return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
+			case strings.Contains(sql, "INSERT INTO bots"):
+				createCalled = true
+				return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
+			default:
+				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+			}
+		},
+	}
+
+	svc := NewService(nil, sqlc.New(db))
+	_, err := svc.Create(context.Background(), ownerUUID.String(), CreateBotRequest{
+		DisplayName: "test-bot",
+		AclPreset:   "not_a_real_preset",
+	})
+	if !errors.Is(err, acl.ErrUnknownPreset) {
+		t.Fatalf("expected ErrUnknownPreset, got %v", err)
+	}
+	if createCalled {
+		t.Fatal("bot row should not be created when acl preset is invalid")
 	}
 }

@@ -360,6 +360,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if len(messages) > 10 {
 		messages = stripToolMessages(messages)
 	}
+	messages = repairToolCallClosures(messages, syntheticToolClosureError)
 
 	displayName := r.resolveDisplayName(ctx, req)
 	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)

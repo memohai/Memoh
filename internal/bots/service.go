@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	tzutil "github.com/memohai/memoh/internal/timezone"
@@ -100,6 +101,10 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err := s.ensureUserExists(ctx, ownerUUID); err != nil {
 		return Bot{}, err
 	}
+	aclPresetKey := acl.NormalizePresetKey(req.AclPreset)
+	if _, err := acl.ResolvePreset(aclPresetKey); err != nil {
+		return Bot{}, err
+	}
 	displayName := strings.TrimSpace(req.DisplayName)
 	if displayName == "" {
 		displayName = "bot-" + uuid.NewString()
@@ -136,6 +141,15 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	bot, err := toBot(asSQLCBot(row))
 	if err != nil {
 		return Bot{}, err
+	}
+	if err := acl.ApplyPreset(ctx, s.queries, bot.ID, ownerID, aclPresetKey); err != nil {
+		if cleanupErr := s.queries.DeleteBotByID(ctx, row.ID); cleanupErr != nil {
+			return Bot{}, errors.Join(
+				fmt.Errorf("apply acl preset: %w", err),
+				fmt.Errorf("cleanup bot after acl preset failure: %w", cleanupErr),
+			)
+		}
+		return Bot{}, fmt.Errorf("apply acl preset: %w", err)
 	}
 	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err

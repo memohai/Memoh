@@ -833,7 +833,7 @@ function onConversationSourceChange(routeId: string) {
 
 // ---- default effect ----
 
-const defaultEffectDraft = ref('deny')
+const defaultEffectDraft = ref('allow')
 const isSavingDefaultEffect = ref(false)
 
 watch(defaultEffectData, (data) => {
@@ -843,7 +843,7 @@ watch(defaultEffectData, (data) => {
 }, { immediate: true })
 
 const hasDefaultEffectChanges = computed(
-  () => defaultEffectDraft.value !== (defaultEffectData.value?.default_effect ?? 'deny'),
+  () => defaultEffectDraft.value !== (defaultEffectData.value?.default_effect ?? 'allow'),
 )
 
 async function handleSaveDefaultEffect() {

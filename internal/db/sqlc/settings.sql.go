@@ -146,7 +146,7 @@ WITH updated AS (
       compaction_enabled = $7,
       compaction_threshold = $8,
       compaction_ratio = $9,
-      timezone = COALESCE($10, bots.timezone),
+      timezone = COALESCE($10::text, bots.timezone),
       chat_model_id = COALESCE($11::uuid, bots.chat_model_id),
       heartbeat_model_id = COALESCE($12::uuid, bots.heartbeat_model_id),
       compaction_model_id = COALESCE($13::uuid, bots.compaction_model_id),
@@ -156,7 +156,7 @@ WITH updated AS (
       image_model_id = COALESCE($17::uuid, bots.image_model_id),
       tts_model_id = COALESCE($18::uuid, bots.tts_model_id),
       browser_context_id = COALESCE($19::uuid, bots.browser_context_id),
-      context_token_budget = COALESCE($20, bots.context_token_budget),
+      context_token_budget = COALESCE($20::integer, bots.context_token_budget),
       persist_full_tool_results = $21,
       updated_at = now()
   WHERE bots.id = $22

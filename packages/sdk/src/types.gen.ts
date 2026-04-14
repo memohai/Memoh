@@ -341,6 +341,7 @@ export type BotsBotCheck = {
 };
 
 export type BotsCreateBotRequest = {
+    acl_preset?: string;
     avatar_url?: string;
     display_name?: string;
     is_active?: boolean;
@@ -1393,12 +1394,38 @@ export type ProvidersImportModelsResponse = {
     skipped?: number;
 };
 
+export type ProvidersOAuthAccount = {
+    avatar_url?: string;
+    email?: string;
+    label?: string;
+    login?: string;
+    name?: string;
+    profile_url?: string;
+};
+
+export type ProvidersOAuthAuthorizeResponse = {
+    auth_url?: string;
+    device?: ProvidersOAuthDeviceStatus;
+    mode?: string;
+};
+
+export type ProvidersOAuthDeviceStatus = {
+    expires_at?: string;
+    interval_seconds?: number;
+    pending?: boolean;
+    user_code?: string;
+    verification_uri?: string;
+};
+
 export type ProvidersOAuthStatus = {
+    account?: ProvidersOAuthAccount;
     callback_url?: string;
     configured?: boolean;
+    device?: ProvidersOAuthDeviceStatus;
     expired?: boolean;
     expires_at?: string;
     has_token?: boolean;
+    mode?: string;
 };
 
 export type ProvidersTestResponse = {
@@ -1558,6 +1585,7 @@ export type SettingsSettings = {
     compaction_model_id?: string;
     compaction_ratio?: number;
     compaction_threshold?: number;
+    context_token_budget?: number;
     discuss_probe_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
@@ -1565,9 +1593,11 @@ export type SettingsSettings = {
     image_model_id?: string;
     language?: string;
     memory_provider_id?: string;
+    persist_full_tool_results?: boolean;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
+    timezone?: string;
     title_model_id?: string;
     tts_model_id?: string;
 };
@@ -1580,6 +1610,7 @@ export type SettingsUpsertRequest = {
     compaction_model_id?: string;
     compaction_ratio?: number;
     compaction_threshold?: number;
+    context_token_budget?: number;
     discuss_probe_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
@@ -1587,6 +1618,7 @@ export type SettingsUpsertRequest = {
     image_model_id?: string;
     language?: string;
     memory_provider_id?: string;
+    persist_full_tool_results?: boolean;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
     search_provider_id?: string;
@@ -7720,12 +7752,44 @@ export type GetProvidersByIdOauthAuthorizeResponses = {
     /**
      * OK
      */
-    200: {
-        [key: string]: string;
-    };
+    200: ProvidersOAuthAuthorizeResponse;
 };
 
 export type GetProvidersByIdOauthAuthorizeResponse = GetProvidersByIdOauthAuthorizeResponses[keyof GetProvidersByIdOauthAuthorizeResponses];
+
+export type PostProvidersByIdOauthPollData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/oauth/poll';
+};
+
+export type PostProvidersByIdOauthPollErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostProvidersByIdOauthPollError = PostProvidersByIdOauthPollErrors[keyof PostProvidersByIdOauthPollErrors];
+
+export type PostProvidersByIdOauthPollResponses = {
+    /**
+     * OK
+     */
+    200: ProvidersOAuthStatus;
+};
+
+export type PostProvidersByIdOauthPollResponse = PostProvidersByIdOauthPollResponses[keyof PostProvidersByIdOauthPollResponses];
 
 export type GetProvidersByIdOauthStatusData = {
     body?: never;

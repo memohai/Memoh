@@ -1,0 +1,154 @@
+name: CLI Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 1.2.3 or v1.2.3"
+        required: false
+      publish:
+        description: "Create or update the GitHub release"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_VERSION="${{ github.event.inputs.version }}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -z "$RAW_VERSION" ]]; then
+            echo "workflow_dispatch requires the version input" >&2
+            exit 1
+          fi
+          if [[ -z "$RAW_VERSION" ]]; then
+            RAW_VERSION="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${RAW_VERSION#v}"
+          TAG_NAME="${RAW_VERSION}"
+          if [[ "$TAG_NAME" != v* ]]; then
+            TAG_NAME="v${TAG_NAME}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build release archive
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT_HASH: ${{ github.sha }}
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          bash scripts/release.sh \
+            --version "$VERSION" \
+            --commit-hash "$COMMIT_HASH" \
+            --os "$TARGET_OS" \
+            --arch "$TARGET_ARCH" \
+            --output-dir dist
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: memoh-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish == 'true'
+    steps:
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_VERSION="${{ github.event.inputs.version }}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -z "$RAW_VERSION" ]]; then
+            echo "workflow_dispatch requires the version input" >&2
+            exit 1
+          fi
+          if [[ -z "$RAW_VERSION" ]]; then
+            RAW_VERSION="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${RAW_VERSION#v}"
+          TAG_NAME="${RAW_VERSION}"
+          if [[ "$TAG_NAME" != v* ]]; then
+            TAG_NAME="v${TAG_NAME}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: memoh-*
+          merge-multiple: true
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag_name }}
+          name: Memoh ${{ steps.meta.outputs.tag_name }}
+          generate_release_notes: true
+          files: |
+            release-artifacts/*.tar.gz
+            release-artifacts/*.zip

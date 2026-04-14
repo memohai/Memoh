@@ -1,4 +1,4 @@
-çç#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,8 +23,8 @@ Usage: scripts/release.sh [options]
 Options:
   --os <os>             Target OS (default: current GOOS)
   --arch <arch>         Target ARCH (default: current GOARCH)
-  --version <version>   Version string injected into memoh binary
-  --commit-hash <sha>   Commit hash injected into memoh binary
+  --version <version>   Version string injected into the memoh CLI
+  --commit-hash <sha>   Commit hash injected into the memoh CLI
   --output-dir <dir>    Output directory for release artifacts
   --prepare-assets      Only prepare embedded assets, do not build archive
 EOF

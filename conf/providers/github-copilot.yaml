@@ -1,5 +1,6 @@
 name: GitHub Copilot
 client_type: github-copilot
+icons: github-copilot
 
 models:
   - model_id: claude-opus-4.6-1m

@@ -39,6 +39,7 @@ type CreateBotRequest struct {
 	AvatarURL   string         `json:"avatar_url,omitempty"`
 	Timezone    *string        `json:"timezone,omitempty"`
 	IsActive    *bool          `json:"is_active,omitempty"`
+	AclPreset   string         `json:"acl_preset,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 

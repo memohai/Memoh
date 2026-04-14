@@ -33,7 +33,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -X github.com/memohai/memoh/internal/version.Version=${VERSION} \
       -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} \
       -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
-    -o memoh-server ./cmd/agent/main.go
+    -o memoh-server ./cmd/agent
 
 # ---- Stage 3: Build bridge binary ----
 FROM build-base AS bridge-builder
