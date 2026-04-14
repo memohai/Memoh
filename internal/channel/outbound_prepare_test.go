@@ -28,7 +28,7 @@ func TestPrepareOutboundMessage_ContainerPathFallsBackToIngestContainerFile(t *t
 		Message: Message{
 			Attachments: []Attachment{{
 				Type: AttachmentImage,
-				URL:  sourcePath,
+				Path: sourcePath,
 			}},
 		},
 	})
@@ -45,8 +45,8 @@ func TestPrepareOutboundMessage_ContainerPathFallsBackToIngestContainerFile(t *t
 	if logical.ContentHash == "" {
 		t.Fatal("expected content hash after container fallback ingest")
 	}
-	if logical.URL == sourcePath {
-		t.Fatalf("expected prepared access path, got original path %q", logical.URL)
+	if logical.Path == sourcePath {
+		t.Fatalf("expected prepared access path, got original path %q", logical.Path)
 	}
 	if logical.Metadata["source_path"] != sourcePath {
 		t.Fatalf("expected source_path metadata, got %#v", logical.Metadata["source_path"])
@@ -508,7 +508,7 @@ func TestPrepareOutboundMessage_ContainerPathHitStorageKey(t *testing.T) {
 		Message: Message{
 			Attachments: []Attachment{{
 				Type: AttachmentImage,
-				URL:  accessPath,
+				Path: accessPath,
 			}},
 		},
 	})
@@ -711,7 +711,7 @@ func TestPrepareContainerAttachment_StoreWithoutIngesterFails(t *testing.T) {
 			Attachments: []Attachment{{
 				Type: AttachmentImage,
 				// Path that won't match any storage key so it falls through to IngestContainerFile.
-				URL: "/data/nonexistent/unique/file.png",
+				Path: "/data/nonexistent/unique/file.png",
 			}},
 		},
 	})

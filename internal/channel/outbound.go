@@ -439,6 +439,7 @@ func normalizeAttachmentRefs(attachments []Attachment, defaultPlatform ChannelTy
 	for _, att := range attachments {
 		item := att
 		item.URL = strings.TrimSpace(item.URL)
+		item.Path = strings.TrimSpace(item.Path)
 		item.PlatformKey = strings.TrimSpace(item.PlatformKey)
 		item.ContentHash = strings.TrimSpace(item.ContentHash)
 		item.Base64 = strings.TrimSpace(item.Base64)
@@ -446,7 +447,7 @@ func normalizeAttachmentRefs(attachments []Attachment, defaultPlatform ChannelTy
 		if item.SourcePlatform == "" && item.PlatformKey != "" {
 			item.SourcePlatform = defaultPlatform.String()
 		}
-		if item.URL == "" && item.PlatformKey == "" && item.ContentHash == "" && item.Base64 == "" {
+		if item.URL == "" && item.Path == "" && item.PlatformKey == "" && item.ContentHash == "" && item.Base64 == "" {
 			return nil, errors.New("attachment reference is required")
 		}
 		normalized = append(normalized, item)

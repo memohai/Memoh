@@ -10925,6 +10925,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "path": {
+                    "description": "container-local filesystem path",
+                    "type": "string"
+                },
                 "platform_key": {
                     "type": "string"
                 },
@@ -10941,6 +10945,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/channel.AttachmentType"
                 },
                 "url": {
+                    "description": "HTTP(S) or data URL",
                     "type": "string"
                 },
                 "width": {

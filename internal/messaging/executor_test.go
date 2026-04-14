@@ -96,8 +96,8 @@ func TestSendDirectSameConversationWithAttachments(t *testing.T) {
 		t.Fatalf("expected 1 attachment, got %d", len(sender.req.Message.Attachments))
 	}
 	att := sender.req.Message.Attachments[0]
-	if att.URL != "/data/screenshot.png" {
-		t.Fatalf("unexpected attachment url: %q", att.URL)
+	if att.Path != "/data/screenshot.png" {
+		t.Fatalf("unexpected attachment path: %q", att.Path)
 	}
 	if att.Type != channel.AttachmentImage {
 		t.Fatalf("unexpected attachment type: %q", att.Type)
@@ -139,8 +139,8 @@ func TestSendSameConversationWithAttachmentsUsesLocalResult(t *testing.T) {
 		t.Fatalf("expected 1 local attachment, got %d", len(result.LocalAttachments))
 	}
 	att := result.LocalAttachments[0]
-	if att.URL != "/data/screenshot.png" {
-		t.Fatalf("unexpected local attachment url: %q", att.URL)
+	if att.Path != "/data/screenshot.png" {
+		t.Fatalf("unexpected local attachment path: %q", att.Path)
 	}
 	if att.Type != channel.AttachmentImage {
 		t.Fatalf("unexpected local attachment type: %q", att.Type)

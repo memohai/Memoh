@@ -884,6 +884,9 @@ definitions:
         type: string
       name:
         type: string
+      path:
+        description: container-local filesystem path
+        type: string
       platform_key:
         type: string
       size:
@@ -895,6 +898,7 @@ definitions:
       type:
         $ref: '#/definitions/channel.AttachmentType'
       url:
+        description: HTTP(S) or data URL
         type: string
       width:
         type: integer

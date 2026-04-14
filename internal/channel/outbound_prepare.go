@@ -176,7 +176,7 @@ func prepareAttachment(
 		return prepareBase64Attachment(ctx, store, botID, item)
 	case IsHTTPURL(item.URL):
 		return prepareHTTPAttachment(ctx, store, botID, item)
-	case IsDataPath(item.URL):
+	case strings.TrimSpace(item.Path) != "":
 		return prepareContainerAttachment(ctx, store, botID, item)
 	default:
 		return Attachment{}, PreparedAttachment{}, errors.New("attachment reference is required")
@@ -280,7 +280,7 @@ func prepareContainerAttachment(
 	if strings.TrimSpace(botID) == "" {
 		return Attachment{}, PreparedAttachment{}, errors.New("bot id is required for container attachments")
 	}
-	sourcePath := strings.TrimSpace(item.URL)
+	sourcePath := strings.TrimSpace(item.Path)
 	if item.Name == "" {
 		item.Name = preparedAttachmentName(item, sourcePath)
 	}
@@ -450,9 +450,6 @@ func applyPreparedAsset(store OutboundAttachmentStore, asset media.Asset, botID 
 	bundle := BundleFromAttachment(*item)
 	if sourcePath = strings.TrimSpace(sourcePath); sourcePath != "" {
 		bundle.Path = sourcePath
-		if bundle.URL == sourcePath {
-			bundle.URL = ""
-		}
 	}
 	*item = AttachmentFromBundle(bundle.WithAssetAccess(botID, asset, store.AccessPath(asset)))
 	item.SourcePlatform = ""
