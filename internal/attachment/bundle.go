@@ -100,27 +100,34 @@ func BundleFromMap(item map[string]any) Bundle {
 	if item == nil {
 		return Bundle{}
 	}
+	return bundleFieldsFromMap(item).Normalize()
+}
+
+// bundleFieldsFromMap extracts all known fields from a map into a Bundle without
+// calling Normalize. Used as a shared primitive by BundleFromMap and
+// parseToolInputBundle to avoid duplicating field extraction logic.
+func bundleFieldsFromMap(m map[string]any) Bundle {
 	bundle := Bundle{
-		Type:           stringValue(item["type"]),
-		Base64:         stringValue(item["base64"]),
-		Path:           stringValue(item["path"]),
-		URL:            stringValue(item["url"]),
-		PlatformKey:    stringValue(item["platform_key"]),
-		SourcePlatform: stringValue(item["source_platform"]),
-		ContentHash:    stringValue(item["content_hash"]),
-		Name:           stringValue(item["name"]),
-		Mime:           stringValue(item["mime"]),
-		Size:           int64Value(item["size"]),
-		DurationMs:     int64Value(item["duration_ms"]),
-		Width:          int(int64Value(item["width"])),
-		Height:         int(int64Value(item["height"])),
-		ThumbnailURL:   stringValue(item["thumbnail_url"]),
-		Caption:        stringValue(item["caption"]),
+		Type:           stringValue(m["type"]),
+		Base64:         stringValue(m["base64"]),
+		Path:           stringValue(m["path"]),
+		URL:            stringValue(m["url"]),
+		PlatformKey:    stringValue(m["platform_key"]),
+		SourcePlatform: stringValue(m["source_platform"]),
+		ContentHash:    stringValue(m["content_hash"]),
+		Name:           stringValue(m["name"]),
+		Mime:           stringValue(m["mime"]),
+		Size:           int64Value(m["size"]),
+		DurationMs:     int64Value(m["duration_ms"]),
+		Width:          int(int64Value(m["width"])),
+		Height:         int(int64Value(m["height"])),
+		ThumbnailURL:   stringValue(m["thumbnail_url"]),
+		Caption:        stringValue(m["caption"]),
 	}
-	if metadata, ok := item["metadata"].(map[string]any); ok {
+	if metadata, ok := m["metadata"].(map[string]any); ok {
 		bundle.Metadata = cloneMetadata(metadata)
 	}
-	return bundle.Normalize()
+	return bundle
 }
 
 // ToMap serializes the internal bundle back into a generic JSON-like object.
@@ -230,8 +237,8 @@ func (b Bundle) MergeIntoMap(item map[string]any) map[string]any {
 
 // WithAsset rewrites the bundle into a persisted asset reference while
 // preserving useful source metadata for later resolution and rendering.
+// Callers must guarantee b is already normalized (produced by BundleFromXxx or Normalize()).
 func (b Bundle) WithAsset(botID string, asset media.Asset) Bundle {
-	b = b.Normalize()
 	sourcePath := b.Path
 	sourceURL := b.URL
 	if b.Name == "" {
@@ -333,26 +340,7 @@ func parseToolInputBundle(raw any) (Bundle, bool) {
 	case string:
 		return normalizeToolBundle(Bundle{URL: v}), strings.TrimSpace(v) != ""
 	case map[string]any:
-		bundle := Bundle{
-			Type:           stringValue(v["type"]),
-			Base64:         stringValue(v["base64"]),
-			Path:           stringValue(v["path"]),
-			URL:            stringValue(v["url"]),
-			PlatformKey:    stringValue(v["platform_key"]),
-			SourcePlatform: stringValue(v["source_platform"]),
-			ContentHash:    stringValue(v["content_hash"]),
-			Name:           stringValue(v["name"]),
-			Mime:           stringValue(v["mime"]),
-			Size:           int64Value(v["size"]),
-			DurationMs:     int64Value(v["duration_ms"]),
-			Width:          int(int64Value(v["width"])),
-			Height:         int(int64Value(v["height"])),
-			ThumbnailURL:   stringValue(v["thumbnail_url"]),
-			Caption:        stringValue(v["caption"]),
-		}
-		if metadata, ok := v["metadata"].(map[string]any); ok {
-			bundle.Metadata = cloneMetadata(metadata)
-		}
+		bundle := bundleFieldsFromMap(v)
 		if bundle.Base64 == "" && bundle.Path == "" && bundle.URL == "" &&
 			bundle.PlatformKey == "" && bundle.ContentHash == "" {
 			return Bundle{}, false
