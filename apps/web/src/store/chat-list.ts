@@ -262,7 +262,6 @@ export const useChatStore = defineStore('chat', () => {
       text,
       attachments: (attachments ?? []).map((attachment) => ({
         type: attachment.type,
-        url: attachment.base64,
         base64: attachment.base64,
         name: attachment.name ?? '',
         mime: attachment.mime ?? '',

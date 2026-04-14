@@ -880,7 +880,7 @@ func (h *LocalChannelHandler) buildTtsAttachment(ctx context.Context, botID, con
 	}
 
 	bundle.Base64 = "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(audioData)
-	return bundle.Normalize().ToLegacyMap()
+	return bundle.Normalize().ToMap()
 }
 
 // extractAssetRefsFromProcessedEvent parses a processed attachment_delta
@@ -920,14 +920,7 @@ func extractAssetRefsFromProcessedEvent(event json.RawMessage) []messagepkg.Asse
 }
 
 func applyBundleToItemMap(item map[string]any, bundle attachmentpkg.Bundle) map[string]any {
-	legacy := bundle.ToLegacyMap()
-	for key := range legacy {
-		delete(item, key)
-	}
-	for key, value := range legacy {
-		item[key] = value
-	}
-	return item
+	return bundle.MergeIntoMap(item)
 }
 
 func parseWSClientAttachments(rawAttachments []json.RawMessage) []conversation.ChatAttachment {
