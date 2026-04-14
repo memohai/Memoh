@@ -888,6 +888,13 @@ func (a *Agent) runMidStreamRetry(
 	allText *strings.Builder,
 	textLoopProbeBuffer *TextLoopProbeBuffer,
 ) (*sdk.StreamResult, bool) {
+	// Drain the previous stream before reading prevResult.Messages.
+	// This avoids racing with the SDK's final StreamResult write.
+	if prevResult.Stream != nil {
+		for range prevResult.Stream {
+		}
+	}
+
 	retryCfg := DefaultRetryConfig()
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
 		a.logger.Warn("mid-stream error, retrying",
