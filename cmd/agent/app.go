@@ -337,6 +337,7 @@ func provideChannelRouter(
 	emailService *emailpkg.Service,
 	emailOutboxService *emailpkg.OutboxService,
 	heartbeatService *heartbeat.Service,
+	compactionService *compaction.Service,
 	queries *dbsqlc.Queries,
 	containerdHandler *handlers.ContainerdHandler,
 	manager *workspace.Manager,
@@ -366,7 +367,7 @@ func provideChannelRouter(
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
 	processor.SetDispatcher(inbound.NewRouteDispatcher(log))
 	processor.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
-	processor.SetCommandHandler(command.NewHandler(
+	cmdHandler := command.NewHandler(
 		log,
 		&command.BotMemberRoleAdapter{BotService: botService},
 		scheduleService,
@@ -384,7 +385,9 @@ func provideChannelRouter(
 		aclService,
 		&commandSkillLoaderAdapter{handler: containerdHandler},
 		&commandContainerFSAdapter{manager: manager},
-	))
+	)
+	cmdHandler.SetCompactionService(compactionService, queries)
+	processor.SetCommandHandler(cmdHandler)
 	return processor
 }
 

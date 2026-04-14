@@ -204,6 +204,7 @@
                 <Label>{{ $t('mcp.cwd') }}</Label>
                 <Input
                   v-model="formData.cwd"
+                  class="max-w-85"
                   :placeholder="$t('mcp.cwdPlaceholder')"
                 />
               </div>
@@ -227,8 +228,10 @@
               </div>
               <div class="space-y-1.5">
                 <Label>Transport</Label>
-                <Select v-model="formData.transport">
-                  <SelectTrigger class="w-full">
+                <Select
+                  v-model="formData.transport"
+                >
+                  <SelectTrigger class="min-w-60">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

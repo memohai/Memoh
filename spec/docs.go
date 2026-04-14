@@ -4395,6 +4395,51 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/compact": {
+            "post": {
+                "description": "Run context compaction synchronously for a session",
+                "tags": [
+                    "compaction"
+                ],
+                "summary": "Trigger immediate context compaction",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TriggerCompactResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/status": {
             "get": {
                 "description": "Get aggregated info for a chat session including message count, context usage, cache stats, and used skills",
@@ -11357,6 +11402,20 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.TriggerCompactResponse": {
+            "type": "object",
+            "properties": {
+                "message_count": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.createSessionRequest": {
             "type": "object",
             "properties": {
@@ -12678,9 +12737,6 @@ const docTemplate = `{
                 "compaction_threshold": {
                     "type": "integer"
                 },
-                "context_token_budget": {
-                    "type": "integer"
-                },
                 "discuss_probe_model_id": {
                     "type": "string"
                 },
@@ -12747,9 +12803,6 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "compaction_threshold": {
-                    "type": "integer"
-                },
-                "context_token_budget": {
                     "type": "integer"
                 },
                 "discuss_probe_model_id": {

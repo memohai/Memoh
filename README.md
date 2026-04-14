@@ -4,8 +4,7 @@
 </div>  
 
 <div align="center">
-  <img src="./assets/logo.png" alt="Memoh" width="100" height="100">
-  <h1>Memoh</h1>
+  <img src="./assets/logo_title.png" alt="Memoh" height="100">
   <p>Self hosted, always-on AI agent platform run in containers.</p>
   <p>📌 <a href="https://docs.memoh.ai/blogs/2026-02-16.html">Introduction to Memoh - The Case for an Always-On, Containerized Home Agent</a></p>
   <div align="center">

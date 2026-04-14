@@ -50,7 +50,7 @@
         </div>
       </div>
 
-      <ScrollArea class="flex-1 min-h-0">
+      <ScrollArea class="flex-1 min-h-0 ">
         <div class="p-2 space-y-1">
           <div
             v-if="loading && memories.length === 0"

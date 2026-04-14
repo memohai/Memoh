@@ -65,6 +65,26 @@
           </div>
         </div>
 
+        <!-- Compact Now -->
+        <div class="mt-3">
+          <button
+            type="button"
+            class="flex items-center justify-center gap-1.5 w-full px-2 py-1.5 rounded-md text-xs font-medium text-foreground bg-accent hover:bg-accent/80 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+            :disabled="!sessionId || usedTokens <= 0 || isCompacting"
+            @click="triggerCompact"
+          >
+            <Loader2
+              v-if="isCompacting"
+              class="size-3 animate-spin"
+            />
+            <Minimize2
+              v-else
+              class="size-3"
+            />
+            {{ $t('chat.compactNow') }}
+          </button>
+        </div>
+
         <!-- Skills -->
         <div class="mt-3">
           <p class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
@@ -99,13 +119,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useQuery } from '@pinia/colada'
-import { Sparkles, ExternalLink } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { toast } from 'vue-sonner'
+import { Sparkles, ExternalLink, Loader2, Minimize2 } from 'lucide-vue-next'
 import { ScrollArea } from '@memohai/ui'
-import { getBotsByBotIdSessionsBySessionIdStatus } from '@memohai/sdk'
+import { getBotsByBotIdSessionsBySessionIdStatus, postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
 import type { HandlersSessionInfoResponse } from '@memohai/sdk'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 
@@ -114,9 +137,11 @@ const props = defineProps<{
   overrideModelId?: string
 }>()
 
+const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId, sessionId } = storeToRefs(chatStore)
 const openInFileManager = inject(openInFileManagerKey, undefined)
+const queryCache = useQueryCache()
 
 const { data: info } = useQuery({
   key: () => ['session-status', currentBotId.value ?? '', sessionId.value ?? '', props.overrideModelId ?? ''],
@@ -164,5 +189,29 @@ function formatTokenCount(n: number): string {
 
 function openSkillFile(skillName: string) {
   openInFileManager?.(`/data/skills/${skillName}/SKILL.md`, false)
+}
+
+const isCompacting = ref(false)
+
+async function triggerCompact() {
+  const botId = currentBotId.value
+  const sid = sessionId.value
+  if (!botId || !sid || isCompacting.value) return
+
+  isCompacting.value = true
+  try {
+    await postBotsByBotIdSessionsBySessionIdCompact({
+      path: { bot_id: botId, session_id: sid },
+      throwOnError: true,
+    })
+    toast.success(t('chat.compactSuccess'))
+    queryCache.invalidateQueries({ key: ['session-status', botId, sid] })
+  }
+  catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('chat.compactFailed')))
+  }
+  finally {
+    isCompacting.value = false
+  }
 }
 </script>

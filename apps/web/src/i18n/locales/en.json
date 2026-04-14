@@ -230,7 +230,10 @@
     "infoCacheWrite": "Cache Write",
     "infoSkills": "Skills",
     "infoNoSkills": "No skills used in this session",
-    "infoNoData": "No data available"
+    "infoNoData": "No data available",
+    "compactNow": "Compact Now",
+    "compactSuccess": "Context compaction completed",
+    "compactFailed": "Context compaction failed"
   },
   "models": {
     "title": "Models",
