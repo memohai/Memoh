@@ -1054,6 +1054,12 @@ export type HandlersTokenUsageResponse = {
     schedule?: Array<HandlersDailyTokenUsage>;
 };
 
+export type HandlersTriggerCompactResponse = {
+    message_count?: number;
+    status?: string;
+    summary?: string;
+};
+
 export type HandlersCreateSessionRequest = {
     channel_type?: string;
     metadata?: {
@@ -1585,7 +1591,6 @@ export type SettingsSettings = {
     compaction_model_id?: string;
     compaction_ratio?: number;
     compaction_threshold?: number;
-    context_token_budget?: number;
     discuss_probe_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
@@ -1610,7 +1615,6 @@ export type SettingsUpsertRequest = {
     compaction_model_id?: string;
     compaction_ratio?: number;
     compaction_threshold?: number;
-    context_token_budget?: number;
     discuss_probe_model_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
@@ -5283,6 +5287,44 @@ export type PatchBotsByBotIdSessionsBySessionIdResponses = {
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdResponse = PatchBotsByBotIdSessionsBySessionIdResponses[keyof PatchBotsByBotIdSessionsBySessionIdResponses];
+
+export type PostBotsByBotIdSessionsBySessionIdCompactData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/compact';
+};
+
+export type PostBotsByBotIdSessionsBySessionIdCompactErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdCompactError = PostBotsByBotIdSessionsBySessionIdCompactErrors[keyof PostBotsByBotIdSessionsBySessionIdCompactErrors];
+
+export type PostBotsByBotIdSessionsBySessionIdCompactResponses = {
+    /**
+     * OK
+     */
+    200: HandlersTriggerCompactResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdCompactResponse = PostBotsByBotIdSessionsBySessionIdCompactResponses[keyof PostBotsByBotIdSessionsBySessionIdCompactResponses];
 
 export type GetBotsByBotIdSessionsBySessionIdStatusData = {
     body?: never;

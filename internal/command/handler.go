@@ -8,6 +8,8 @@ import (
 
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/browsercontexts"
+	"github.com/memohai/memoh/internal/compaction"
+	"github.com/memohai/memoh/internal/db/sqlc"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
@@ -56,7 +58,9 @@ type Handler struct {
 	emailService       *emailpkg.Service
 	emailOutboxService *emailpkg.OutboxService
 	heartbeatService   *heartbeat.Service
+	compactionService  *compaction.Service
 	queries            CommandQueries
+	sqlcQueries        *sqlc.Queries
 	aclEvaluator       AccessEvaluator
 	skillLoader        SkillLoader
 	containerFS        ContainerFS
@@ -122,6 +126,12 @@ func NewHandler(
 	}
 	h.registry = h.buildRegistry()
 	return h
+}
+
+// SetCompactionService configures the compaction service for the /compact command.
+func (h *Handler) SetCompactionService(s *compaction.Service, q *sqlc.Queries) {
+	h.compactionService = s
+	h.sqlcQueries = q
 }
 
 // topLevelCommands are standalone commands (no sub-actions) that are

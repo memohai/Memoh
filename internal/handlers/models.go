@@ -87,7 +87,11 @@ func (h *ModelsHandler) List(c echo.Context) error {
 	case modelType != "":
 		resp, err = h.service.ListEnabledByType(c.Request().Context(), models.ModelType(modelType))
 	case clientType != "":
-		resp, err = h.service.ListEnabledByProviderClientType(c.Request().Context(), models.ClientType(clientType))
+		ct := models.ClientType(clientType)
+		if !models.IsLLMClientType(ct) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid client type for LLM models endpoint")
+		}
+		resp, err = h.service.ListEnabledByProviderClientType(c.Request().Context(), ct)
 	default:
 		resp, err = h.service.ListEnabled(c.Request().Context())
 	}

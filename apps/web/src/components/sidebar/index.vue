@@ -2,18 +2,23 @@
   <aside>
     <Sidebar collapsible="icon">
       <SidebarHeader class="p-0 border-0">
-        <div class="h-1.5 group-data-[collapsible=icon]:hidden" />
-        <div class="h-9.5 flex items-center group-data-[collapsible=icon]:justify-center">
-          <div class="flex items-center gap-1 ml-3 group-data-[collapsible=icon]:hidden">
-            <span class="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.7px]">
-              {{ t('sidebar.bots') }}
-            </span>
-          </div>
-          <div class="flex items-center gap-1 ml-auto mr-1.5 group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:mr-0">
+        <div class="h-10 flex items-center pl-2 group-data-[collapsible=icon]:pl-3 transition-[padding] duration-200 ease-linear">
+          <Button
+            variant="ghost"
+            size="icon"
+            class="size-6 text-muted-foreground hover:text-foreground shrink-0"
+            aria-label="Toggle Sidebar"
+            @click="toggleSidebar"
+          >
+            <PanelLeftClose class="size-3.5 group-data-[collapsible=icon]:hidden" />
+            <PanelLeftOpen class="size-3.5 hidden group-data-[collapsible=icon]:block" />
+          </Button>
+          
+          <div class="ml-auto mr-1.5 group-data-[collapsible=icon]:hidden">
             <Button
               variant="ghost"
               size="icon"
-              class="size-6 text-muted-foreground hover:text-foreground"
+              class="size-6 text-muted-foreground hover:text-foreground shrink-0"
               :aria-label="t('bots.createBot')"
               @click="router.push({ name: 'bots' })"
             >
@@ -120,14 +125,16 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from '@memohai/ui'
-import { Plus, LoaderCircle, Settings } from 'lucide-vue-next'
+import { Plus, LoaderCircle, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
 import BotItem from './bot-item.vue'
 import { usePinnedBots } from '@/composables/usePinnedBots'
 
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
+const { toggleSidebar } = useSidebar()
 // const { userInfo } = useUserStore()
 const { sortBots } = usePinnedBots()
 

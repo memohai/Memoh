@@ -287,10 +287,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
-	botSettings, _ := r.loadBotSettings(ctx, req.BotID)
 	contextTokenBudget := 0
-	if botSettings.ContextTokenBudget > 0 {
-		contextTokenBudget = botSettings.ContextTokenBudget
+	if chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
+		contextTokenBudget = *chatModel.Config.ContextWindow
 	}
 
 	var messages []conversation.ModelMessage
