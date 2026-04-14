@@ -185,23 +185,6 @@ func (b Bundle) ToMap() map[string]any {
 	return item
 }
 
-// ToLegacyMap serializes the bundle into a map that uses the "url" field for
-// both HTTP URLs and inline data URLs, matching the legacy WS event protocol
-// where consumers expect data URLs in the "url" key.
-func (b Bundle) ToLegacyMap() map[string]any {
-	item := b.ToMap()
-	if base64Val, ok := item["base64"].(string); ok && base64Val != "" {
-		if _, hasURL := item["url"]; !hasURL || item["url"] == "" {
-			item["url"] = base64Val
-		}
-		delete(item, "base64")
-	}
-	if _, ok := item["url"]; !ok {
-		item["url"] = ""
-	}
-	return item
-}
-
 // MergeIntoMap applies bundle-owned fields into an existing JSON-like object.
 // Unknown fields are preserved.
 func (b Bundle) MergeIntoMap(item map[string]any) map[string]any {

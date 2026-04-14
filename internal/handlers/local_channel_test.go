@@ -143,7 +143,7 @@ func TestWSIngestAttachments_RewritesContainerPathToAssetRef(t *testing.T) {
 	}
 }
 
-func TestBuildTtsAttachment_FallbackKeepsDataURLInURLField(t *testing.T) {
+func TestBuildTtsAttachment_FallbackKeepsDataURLInBase64Field(t *testing.T) {
 	t.Parallel()
 
 	handler := &LocalChannelHandler{logger: slog.Default()}
@@ -152,11 +152,11 @@ func TestBuildTtsAttachment_FallbackKeepsDataURLInURLField(t *testing.T) {
 	if got, _ := att["type"].(string); got != "voice" {
 		t.Fatalf("expected voice attachment type, got %#v", att["type"])
 	}
-	if got, _ := att["url"].(string); got == "" {
-		t.Fatalf("expected fallback data URL in url field, got %#v", att["url"])
+	if got, _ := att["base64"].(string); got == "" {
+		t.Fatalf("expected fallback data URL in base64 field, got %#v", att["base64"])
 	}
-	if _, ok := att["base64"]; ok {
-		t.Fatalf("unexpected base64 field in fallback attachment: %#v", att["base64"])
+	if got, _ := att["url"].(string); got != "" {
+		t.Fatalf("expected empty url field in fallback attachment, got %#v", att["url"])
 	}
 }
 
@@ -243,8 +243,8 @@ func TestApplyBundleToItemMap_UsesMergedBundleFields(t *testing.T) {
 	if got["content_hash"] != "asset-1" {
 		t.Fatalf("expected content_hash updated, got %#v", got["content_hash"])
 	}
-	if got["url"] != "" {
-		t.Fatalf("expected empty url retained for frontend compatibility, got %#v", got["url"])
+	if url, ok := got["url"]; ok && url != "" {
+		t.Fatalf("expected url absent or empty after bundle merge, got %#v", url)
 	}
 }
 
