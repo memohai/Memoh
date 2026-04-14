@@ -35,9 +35,18 @@
 
       <div
         v-if="providerModels.length === 0"
-        class="text-xs text-muted-foreground py-4 text-center"
+        class="text-xs text-muted-foreground py-4 text-center space-y-2"
       >
-        {{ $t('speech.noModels') }}
+        <p>{{ $t('speech.noModels') }}</p>
+        <Button
+          v-if="currentMeta?.models?.length"
+          variant="outline"
+          size="sm"
+          :disabled="importLoading"
+          @click="handleImportModels"
+        >
+          {{ $t('speech.importModels') }}
+        </Button>
       </div>
 
       <div
@@ -84,6 +93,7 @@
 import {
   Separator,
   Switch,
+  Button,
 } from '@memohai/ui'
 import ModelConfigEditor from './model-config-editor.vue'
 import { Volume2, ChevronUp, ChevronDown } from 'lucide-vue-next'
@@ -91,7 +101,7 @@ import { computed, inject, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getSpeechProvidersMeta, getSpeechModels, putProvidersById } from '@memohai/sdk'
+import { getSpeechProvidersMeta, getSpeechModels, putProvidersById, postModels } from '@memohai/sdk'
 import type { TtsSpeechProviderResponse, TtsProviderMetaResponse, TtsModelInfo } from '@memohai/sdk'
 
 const { t } = useI18n()
@@ -134,6 +144,41 @@ const providerModels = computed(() => {
 const expandedModelId = ref('')
 function toggleModel(id: string) {
   expandedModelId.value = expandedModelId.value === id ? '' : id
+}
+
+const importLoading = ref(false)
+async function handleImportModels() {
+  if (!curProviderId.value || !currentMeta.value?.models) return
+  importLoading.value = true
+  try {
+    let created = 0
+    for (const m of currentMeta.value.models) {
+      try {
+        await postModels({
+          body: {
+            model_id: m.id,
+            name: m.name,
+            provider_id: curProviderId.value,
+            type: 'speech',
+          },
+          throwOnError: true,
+        })
+        created++
+      } catch {
+        // Model may already exist, skip
+      }
+    }
+    if (created > 0) {
+      toast.success(t('speech.importSuccess'))
+    } else {
+      toast.info(t('speech.noModels'))
+    }
+    queryCache.invalidateQueries({ key: ['speech-models'] })
+  } catch {
+    toast.error(t('common.saveFailed'))
+  } finally {
+    importLoading.value = false
+  }
 }
 
 const queryCache = useQueryCache()

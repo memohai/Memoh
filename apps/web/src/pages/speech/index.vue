@@ -12,11 +12,13 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  Button,
 } from '@memohai/ui'
 import { getSpeechProviders } from '@memohai/sdk'
 import type { TtsSpeechProviderResponse } from '@memohai/sdk'
 import ProviderSetting from './components/provider-setting.vue'
-import { Volume2 } from 'lucide-vue-next'
+import AddSpeechProvider from './components/add-speech-provider.vue'
+import { Volume2, Plus } from 'lucide-vue-next'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 
 const { data: providerData } = useQuery({
@@ -27,6 +29,7 @@ const { data: providerData } = useQuery({
   },
 })
 const curProvider = ref<TtsSpeechProviderResponse>()
+const showAddProvider = ref(false)
 provide('curTtsProvider', curProvider)
 
 const selectProvider = (name: string) => computed(() => {
@@ -63,6 +66,7 @@ watch(filteredProviders, (list) => {
 <template>
   <MasterDetailSidebarLayout>
     <template #sidebar-content>
+      <AddSpeechProvider v-model:open="showAddProvider" />
       <SidebarMenu
         v-for="item in filteredProviders"
         :key="item.id"
@@ -113,6 +117,14 @@ watch(filteredProviders, (list) => {
         </EmptyHeader>
         <EmptyTitle>{{ $t('speech.emptyTitle') }}</EmptyTitle>
         <EmptyDescription>{{ $t('speech.emptyDescription') }}</EmptyDescription>
+        <Button
+          variant="outline"
+          class="mt-2"
+          @click="showAddProvider = true"
+        >
+          <Plus class="mr-1" />
+          {{ $t('speech.add') }}
+        </Button>
       </Empty>
     </template>
   </MasterDetailSidebarLayout>
