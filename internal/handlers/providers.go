@@ -313,6 +313,14 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		ctx = oauthctx.WithUserID(ctx, userID)
 	}
 
+	provider, err := h.service.Get(ctx, id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("provider not found: %v", err))
+	}
+	if !models.IsLLMClientType(models.ClientType(provider.ClientType)) {
+		return echo.NewHTTPError(http.StatusBadRequest, "import models is not supported for speech providers")
+	}
+
 	remoteModels, err := h.service.FetchRemoteModels(ctx, id)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("fetch remote models: %v", err))

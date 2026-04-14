@@ -127,6 +127,7 @@ func TestSendSameConversationWithAttachmentsUsesLocalResult(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
+		return
 	}
 	if !result.Local {
 		t.Fatal("expected local result for same-conversation send")

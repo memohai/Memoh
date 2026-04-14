@@ -167,7 +167,7 @@ import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
-import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
+import { LLM_CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
 import { toast } from 'vue-sonner'
 import { computed, watch } from 'vue'
 
@@ -176,7 +176,7 @@ const { t } = useI18n()
 const { run } = useDialogMutation()
 
 const clientTypeOptions = computed(() =>
-  CLIENT_TYPE_LIST.map((ct) => ({
+  LLM_CLIENT_TYPE_LIST.map((ct) => ({
     value: ct.value,
     label: ct.label,
     description: ct.hint,

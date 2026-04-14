@@ -13,6 +13,7 @@ import (
 
 const countModels = `-- name: CountModels :one
 SELECT COUNT(*) FROM models
+WHERE type != 'speech'
 `
 
 func (q *Queries) CountModels(ctx context.Context) (int64, error) {
@@ -35,6 +36,7 @@ func (q *Queries) CountModelsByType(ctx context.Context, type_ string) (int64, e
 
 const countProviders = `-- name: CountProviders :one
 SELECT COUNT(*) FROM providers
+WHERE client_type NOT IN ('edge-speech')
 `
 
 func (q *Queries) CountProviders(ctx context.Context) (int64, error) {
@@ -351,6 +353,7 @@ SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, 
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
+  AND m.type != 'speech'
 ORDER BY m.created_at DESC
 `
 
@@ -495,6 +498,7 @@ func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid pg
 
 const listModels = `-- name: ListModels :many
 SELECT id, model_id, name, provider_id, type, config, created_at, updated_at FROM models
+WHERE type != 'speech'
 ORDER BY created_at DESC
 `
 
@@ -602,6 +606,7 @@ func (q *Queries) ListModelsByProviderClientType(ctx context.Context, clientType
 const listModelsByProviderID = `-- name: ListModelsByProviderID :many
 SELECT id, model_id, name, provider_id, type, config, created_at, updated_at FROM models
 WHERE provider_id = $1
+  AND type != 'speech'
 ORDER BY created_at DESC
 `
 

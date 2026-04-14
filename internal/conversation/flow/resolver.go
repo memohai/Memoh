@@ -287,16 +287,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
-	botSettings, settingsErr := r.loadBotSettings(ctx, req.BotID)
-	if settingsErr != nil {
-		r.logger.Warn("resolve: failed to reload bot settings for context budget",
-			slog.String("bot_id", req.BotID),
-			slog.Any("error", settingsErr),
-		)
-	}
 	contextTokenBudget := 0
-	if botSettings.ContextTokenBudget > 0 {
-		contextTokenBudget = botSettings.ContextTokenBudget
+	if chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
+		contextTokenBudget = *chatModel.Config.ContextWindow
 	}
 
 	var messages []conversation.ModelMessage
