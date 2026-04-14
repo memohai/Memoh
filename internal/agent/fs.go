@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -14,14 +15,18 @@ type FSClient struct {
 	provider bridge.Provider
 	botID    string
 	now      func() time.Time
+	logger   *slog.Logger
 }
 
 // NewFSClient creates a new container filesystem client.
-func NewFSClient(provider bridge.Provider, botID string, now func() time.Time) *FSClient {
+func NewFSClient(provider bridge.Provider, botID string, now func() time.Time, logger *slog.Logger) *FSClient {
 	if now == nil {
 		now = time.Now
 	}
-	return &FSClient{provider: provider, botID: botID, now: now}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &FSClient{provider: provider, botID: botID, now: now, logger: logger}
 }
 
 // ReadText reads a text file from the container, returning its content as a string.
@@ -48,6 +53,7 @@ func (f *FSClient) ReadTextSafe(ctx context.Context, path string) string {
 }
 
 // LoadSystemFiles loads the standard set of system files from the bot container.
+// Logs warnings for files that fail to load (container down, bridge unreachable).
 func (f *FSClient) LoadSystemFiles(ctx context.Context) []SystemFile {
 	home := "/data"
 	now := time.Now()
@@ -71,7 +77,15 @@ func (f *FSClient) LoadSystemFiles(ctx context.Context) []SystemFile {
 
 	files := make([]SystemFile, len(filenames))
 	for i, name := range filenames {
-		content := f.ReadTextSafe(ctx, home+"/"+name)
+		content, err := f.ReadText(ctx, home+"/"+name)
+		if err != nil {
+			f.logger.Warn("failed to read container file",
+				slog.String("bot_id", f.botID),
+				slog.String("file", name),
+				slog.Any("error", err),
+			)
+			content = ""
+		}
 		files[i] = SystemFile{
 			Filename: name,
 			Content:  strings.TrimSpace(content),

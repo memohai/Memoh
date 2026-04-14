@@ -287,7 +287,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
-	botSettings, _ := r.loadBotSettings(ctx, req.BotID)
+	botSettings, settingsErr := r.loadBotSettings(ctx, req.BotID)
+	if settingsErr != nil {
+		r.logger.Warn("resolve: failed to reload bot settings for context budget",
+			slog.String("bot_id", req.BotID),
+			slog.Any("error", settingsErr),
+		)
+	}
 	contextTokenBudget := 0
 	if botSettings.ContextTokenBudget > 0 {
 		contextTokenBudget = botSettings.ContextTokenBudget
@@ -634,7 +640,7 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 		if cfg.Identity.TimezoneLocation != nil {
 			nowFn = func() time.Time { return time.Now().In(cfg.Identity.TimezoneLocation) }
 		}
-		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), cfg.Identity.BotID, nowFn)
+		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), cfg.Identity.BotID, nowFn, r.logger)
 		files = fs.LoadSystemFiles(ctx)
 	}
 

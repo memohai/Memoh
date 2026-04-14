@@ -236,6 +236,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 
 	var allText strings.Builder
 	aborted := false
+	errorSent := false
 	stepNumber := 0
 
 	for part := range streamResult.Stream {
@@ -307,11 +308,13 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			}
 
 		case *sdk.ToolProgressPart:
-			ch <- StreamEvent{
+			if !sendEvent(ctx, ch, StreamEvent{
 				Type:       EventToolCallProgress,
 				ToolName:   p.ToolName,
 				ToolCallID: p.ToolCallID,
 				Progress:   p.Content,
+			}) {
+				aborted = true
 			}
 
 		case *sdk.StreamToolResultPart:
@@ -364,7 +367,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 
 		case *sdk.ErrorPart:
 			errMsg := p.Error.Error()
-			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: errMsg})
 
 			// Mid-stream retry: if the error is retryable, attempt to continue
 			// the agent run from the accumulated state. This also handles
@@ -375,8 +377,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 					ctx, ch, cfg, sdkTools, prepareStep, streamResult,
 					stepNumber, errMsg, &allText, textLoopProbeBuffer,
 				)
+				errorSent = aborted
 			} else {
+				sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: errMsg})
 				aborted = true
+				errorSent = true
 			}
 
 		case *sdk.AbortPart:
@@ -420,6 +425,15 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 	if aborted {
 		termEvent.Type = EventAgentAbort
+		// If the agent aborted without producing any output and no specific
+		// error was already reported, emit a generic error so the caller
+		// knows something went wrong rather than silently ending empty.
+		if allText.Len() == 0 && stepNumber == 0 && !errorSent {
+			sendEvent(ctx, ch, StreamEvent{
+				Type:  EventError,
+				Error: "agent aborted before producing output (possible context overflow or provider error)",
+			})
+		}
 	} else {
 		termEvent.Type = EventAgentEnd
 		// Warn if LLM produced no text and no tool calls — likely a context overflow.
@@ -638,13 +652,22 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 	}
 
 	var allTools []sdk.Tool
+	var failedProviders int
 	for _, provider := range a.toolProviders {
 		providerTools, err := provider.Tools(ctx, session)
 		if err != nil {
 			a.logger.Warn("tool provider failed", slog.Any("error", err))
+			failedProviders++
 			continue
 		}
 		allTools = append(allTools, providerTools...)
+	}
+	if failedProviders > 0 {
+		a.logger.Warn("tool providers degraded",
+			slog.Int("failed", failedProviders),
+			slog.Int("total", len(a.toolProviders)),
+			slog.Int("available_tools", len(allTools)),
+		)
 	}
 	return allTools, nil
 }
@@ -978,7 +1001,11 @@ func (a *Agent) runMidStreamRetry(
 		}
 		return retryResult, aborted
 	}
-	// All retry attempts failed
+	// All retry attempts failed — emit EventError so the caller knows why.
+	sendEvent(ctx, ch, StreamEvent{
+		Type:  EventError,
+		Error: fmt.Sprintf("mid-stream retry: all %d attempts failed (last: %s)", retryCfg.MaxAttempts, errMsg),
+	})
 	return prevResult, true
 }
 

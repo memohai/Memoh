@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -36,7 +37,8 @@ func ShouldCompact(inputTokens, threshold int) bool {
 // TriggerCompaction runs compaction in the background.
 func (s *Service) TriggerCompaction(ctx context.Context, cfg TriggerConfig) {
 	go func() {
-		bgCtx := context.WithoutCancel(ctx)
+		bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		defer cancel()
 		if err := s.runCompaction(bgCtx, cfg); err != nil {
 			s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.String("error", err.Error()))
 		}
@@ -68,7 +70,7 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 
 	compactErr := s.doCompaction(ctx, logRow.ID, sessionUUID, cfg)
 	if compactErr != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", compactErr.Error(), 0, nil, pgtype.UUID{})
+		s.completeLog(context.WithoutCancel(ctx), logRow.ID, "error", "", compactErr.Error(), 0, nil, pgtype.UUID{})
 	}
 	return compactErr
 }

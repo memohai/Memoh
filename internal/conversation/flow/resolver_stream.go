@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"strings"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -15,6 +17,70 @@ import (
 
 // WSStreamEvent represents a raw JSON event forwarded from the agent.
 type WSStreamEvent = json.RawMessage
+
+// compactionRetryConfig controls the retry strategy after compaction when the
+// agent stream fails. Matches the agent-level retry strategy: 10 total attempts,
+// first 5 fast (no delay), last 5 with exponential backoff.
+const (
+	compactionMaxAttempts  = 10
+	compactionFastAttempts = 5
+	compactionBaseDelay    = 1 * time.Second
+	compactionMaxDelay     = 30 * time.Second
+)
+
+// compactionRetryDelay returns the delay before the next compaction-retry attempt.
+// First compactionFastAttempts are instant; after that, exponential backoff with jitter.
+func compactionRetryDelay(attempt int) time.Duration {
+	if attempt < compactionFastAttempts {
+		return 0
+	}
+	backoffIdx := attempt - compactionFastAttempts
+	if backoffIdx > 20 {
+		backoffIdx = 20
+	}
+	delay := compactionBaseDelay * time.Duration(1<<uint(backoffIdx))
+	delay = min(delay, compactionMaxDelay)
+	jitter := time.Duration(rand.Int64N(int64(delay / 2))) //nolint:gosec // jitter does not need crypto/rand
+	return delay/2 + jitter
+}
+
+// sendWSErrorEvent sends an EventError to the client via the WS event channel.
+// Returns true if sent, false if context was cancelled.
+func sendWSErrorEvent(ctx context.Context, eventCh chan<- WSStreamEvent, errMsg string) bool {
+	evt := agentpkg.StreamEvent{
+		Type:  agentpkg.EventError,
+		Error: errMsg,
+	}
+	data, err := json.Marshal(evt)
+	if err != nil {
+		return false
+	}
+	select {
+	case eventCh <- json.RawMessage(data):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// sendChunkErrorEvent sends an EventError to the client via the chunk channel.
+// Returns true if sent, false if context was cancelled.
+func sendChunkErrorEvent(ctx context.Context, chunkCh chan<- conversation.StreamChunk, errMsg string) bool {
+	evt := agentpkg.StreamEvent{
+		Type:  agentpkg.EventError,
+		Error: errMsg,
+	}
+	data, err := json.Marshal(evt)
+	if err != nil {
+		return false
+	}
+	select {
+	case chunkCh <- conversation.StreamChunk(data):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
 
 // StreamChat runs a streaming chat via the internal agent.
 func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
@@ -27,95 +93,129 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		doneTurn := r.enterSessionTurn(ctx, streamReq.BotID, streamReq.SessionID)
 		defer doneTurn()
 
-		rc, err := r.resolve(ctx, streamReq)
-		if err != nil {
-			r.logger.Error("agent stream resolve failed",
-				slog.String("bot_id", streamReq.BotID),
-				slog.String("chat_id", streamReq.ChatID),
-				slog.Any("error", err),
-			)
-			errCh <- err
-			return
-		}
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
-		streamReq.Query = rc.query
 
-		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.Query)
+		var titleGenerated bool
+		var lastIdleTimeout bool
+		var lastToolCallCount int
+		var lastRC resolvedContext
 
-		cfg := rc.runConfig
-		cfg = r.prepareRunConfig(ctx, cfg)
-
-		// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
-		idleCtx, idleCancel := withIdleTimeout(ctx)
-		defer idleCancel.Stop()
-
-		eventCh := r.agent.Stream(idleCtx, cfg)
-		stored := false
-		var toolCallCount int
-		for event := range eventCh {
-			idleCancel.Reset() // each event resets the idle timer
-
-			// Track tool calls for adaptive idle timeout and progress events
-			if event.Type == agentpkg.EventToolCallStart {
-				toolCallCount++
-				idleCancel.RecordToolCall()
-			}
-
-			if event.Type == agentpkg.EventError {
-				r.logger.Error("agent stream error",
+		for attempt := 0; attempt < compactionMaxAttempts; attempt++ {
+			rc, err := r.resolve(ctx, streamReq)
+			if err != nil {
+				errMsg := fmt.Sprintf("resolve failed (attempt %d/%d): %v", attempt+1, compactionMaxAttempts, err)
+				r.logger.Error("agent stream resolve failed",
 					slog.String("bot_id", streamReq.BotID),
 					slog.String("chat_id", streamReq.ChatID),
-					slog.String("model_id", rc.model.ID),
-					slog.String("error", event.Error),
+					slog.Int("attempt", attempt+1),
+					slog.Any("error", err),
 				)
-			}
-
-			data, err := json.Marshal(event)
-			if err != nil {
-				continue
-			}
-			if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-				if _, storeErr := r.tryStoreStream(ctx, streamReq, data, rc.model.ID, rc); storeErr != nil {
-					r.logger.Error("stream persist failed", slog.Any("error", storeErr))
+				if attempt == 0 {
+					errCh <- err
 				} else {
-					stored = true
+					sendChunkErrorEvent(ctx, chunkCh, errMsg)
 				}
-			}
-			select {
-			case chunkCh <- conversation.StreamChunk(data):
-			case <-ctx.Done():
 				return
 			}
-		}
+			streamReq.Query = rc.query
+			lastRC = rc
 
-		// Intermediate persistence on abort/error: if stream ended without
-		// storing results, persist a synthetic message so the user can see
-		// what happened and ask the bot to continue.
-		if !stored {
-			r.persistPartialResult(ctx, streamReq, rc, toolCallCount, idleCancel.DidFire())
-		}
-
-		if idleCancel.DidFire() {
-			r.logger.Warn("agent stream aborted: idle timeout (no events from provider)",
-				slog.String("bot_id", streamReq.BotID),
-				slog.String("chat_id", streamReq.ChatID),
-				slog.String("model_id", rc.model.ID),
-				slog.Int("tool_calls", toolCallCount),
-			)
-			// Notify the client that the stream was terminated due to idle timeout.
-			timeoutEvent := agentpkg.StreamEvent{
-				Type:  agentpkg.EventError,
-				Error: fmt.Sprintf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount),
+			if !titleGenerated {
+				go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.Query)
+				titleGenerated = true
 			}
-			if data, err := json.Marshal(timeoutEvent); err == nil {
+
+			cfg := rc.runConfig
+			cfg = r.prepareRunConfig(ctx, cfg)
+
+			// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
+			idleCtx, idleCancel := withIdleTimeout(ctx)
+
+			eventCh := r.agent.Stream(idleCtx, cfg)
+			stored := false
+			var toolCallCount int
+			for event := range eventCh {
+				idleCancel.Reset() // each event resets the idle timer
+
+				// Track tool calls for adaptive idle timeout and progress events
+				if event.Type == agentpkg.EventToolCallStart {
+					toolCallCount++
+					idleCancel.RecordToolCall()
+				}
+
+				if event.Type == agentpkg.EventError {
+					r.logger.Error("agent stream error",
+						slog.String("bot_id", streamReq.BotID),
+						slog.String("chat_id", streamReq.ChatID),
+						slog.String("model_id", rc.model.ID),
+						slog.String("error", event.Error),
+					)
+				}
+
+				data, err := json.Marshal(event)
+				if err != nil {
+					continue
+				}
+				if !stored && event.IsTerminal() && len(event.Messages) > 0 {
+					if _, storeErr := r.tryStoreStream(ctx, streamReq, data, rc.model.ID, rc); storeErr != nil {
+						r.logger.Error("stream persist failed", slog.Any("error", storeErr))
+					} else {
+						stored = true
+					}
+				}
 				select {
 				case chunkCh <- conversation.StreamChunk(data):
 				case <-ctx.Done():
+					idleCancel.Stop()
+					return
+				}
+			}
+
+			lastIdleTimeout = idleCancel.DidFire()
+			lastToolCallCount = toolCallCount
+			idleCancel.Stop()
+
+			if stored {
+				return
+			}
+
+			// Stream ended without storing. Run compaction to shrink context,
+			// then retry. Send error event so the client knows what's happening.
+			if !r.runCompactionSyncWithResult(context.WithoutCancel(ctx), streamReq, rc.estimatedTokens) {
+				// Compaction didn't run or failed. No point retrying without it.
+				reason := "provider error"
+				if lastIdleTimeout {
+					reason = "provider idle timeout"
+				}
+				r.persistFinalError(context.WithoutCancel(ctx), streamReq, rc, lastToolCallCount, lastIdleTimeout)
+				sendChunkErrorEvent(ctx, chunkCh, fmt.Sprintf("stream failed after %d tool calls: %s (compaction unavailable)", lastToolCallCount, reason))
+				return
+			}
+
+			// Compaction ran. Notify client and retry.
+			r.logger.Info("retrying agent stream after compaction",
+				slog.String("bot_id", streamReq.BotID),
+				slog.Int("attempt", attempt+2),
+				slog.Int("max_attempts", compactionMaxAttempts),
+			)
+			sendChunkErrorEvent(ctx, chunkCh, fmt.Sprintf("context compacted, retrying (attempt %d/%d)", attempt+2, compactionMaxAttempts))
+
+			if delay := compactionRetryDelay(attempt); delay > 0 {
+				timer := time.NewTimer(delay)
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					timer.Stop()
+					return
 				}
 			}
 		}
+
+		// All retries exhausted. Persist a final error for the record.
+		r.persistFinalError(context.WithoutCancel(ctx), streamReq, lastRC, lastToolCallCount, lastIdleTimeout)
+		sendChunkErrorEvent(ctx, chunkCh, fmt.Sprintf("all %d attempts exhausted after compaction", compactionMaxAttempts))
 	}()
 	return chunkCh, errCh
 }
@@ -131,106 +231,146 @@ func (r *Resolver) StreamChatWS(
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
 
-	rc, err := r.resolve(ctx, req)
-	if err != nil {
-		r.logger.Error("StreamChatWS: resolve failed",
-			slog.String("bot_id", req.BotID),
-			slog.Any("error", err),
-		)
-		return fmt.Errorf("resolve: %w", err)
-	}
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
-	req.Query = rc.query
 
-	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.Query)
+	var titleGenerated bool
+	var lastIdleTimeout bool
+	var lastToolCallCount int
+	var lastRC resolvedContext
 
-	streamCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	go func() {
-		select {
-		case <-abortCh:
-			cancel()
-		case <-streamCtx.Done():
-		}
-	}()
-
-	cfg := rc.runConfig
-	cfg = r.prepareRunConfig(streamCtx, cfg)
-
-	// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
-	idleCtx, idleCancel := withIdleTimeout(streamCtx)
-	defer idleCancel.Stop()
-
-	agentEventCh := r.agent.Stream(idleCtx, cfg)
-	modelID := rc.model.ID
-	stored := false
-	var toolCallCount int
-	for event := range agentEventCh {
-		idleCancel.Reset() // each event resets the idle timer
-
-		// Track tool calls for adaptive idle timeout
-		if event.Type == agentpkg.EventToolCallStart {
-			toolCallCount++
-			idleCancel.RecordToolCall()
-		}
-
-		if event.Type == agentpkg.EventError {
-			r.logger.Error("agent stream error",
-				slog.String("bot_id", req.BotID),
-				slog.String("chat_id", req.ChatID),
-				slog.String("model_id", modelID),
-				slog.String("error", event.Error),
-			)
-		}
-
-		data, err := json.Marshal(event)
+	for attempt := 0; attempt < compactionMaxAttempts; attempt++ {
+		rc, err := r.resolve(ctx, req)
 		if err != nil {
-			continue
-		}
-
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if _, storeErr := r.tryStoreStream(ctx, req, data, modelID, rc); storeErr != nil {
-				r.logger.Error("ws persist failed", slog.Any("error", storeErr))
-			} else {
-				stored = true
+			errMsg := fmt.Sprintf("resolve failed (attempt %d/%d): %v", attempt+1, compactionMaxAttempts, err)
+			r.logger.Error("StreamChatWS: resolve failed",
+				slog.String("bot_id", req.BotID),
+				slog.Int("attempt", attempt+1),
+				slog.Any("error", err),
+			)
+			sendWSErrorEvent(ctx, eventCh, errMsg)
+			if attempt == 0 {
+				return fmt.Errorf("resolve: %w", err)
 			}
+			return fmt.Errorf("resolve retry %d: %w", attempt+1, err)
+		}
+		req.Query = rc.query
+		lastRC = rc
+
+		if !titleGenerated {
+			go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.Query)
+			titleGenerated = true
 		}
 
-		select {
-		case eventCh <- json.RawMessage(data):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
+		streamCtx, cancel := context.WithCancel(ctx)
 
-	// Intermediate persistence on abort/error
-	if !stored {
-		r.persistPartialResult(ctx, req, rc, toolCallCount, idleCancel.DidFire())
-	}
+		abortDone := make(chan struct{})
+		go func() {
+			defer close(abortDone)
+			select {
+			case <-abortCh:
+				cancel()
+			case <-streamCtx.Done():
+			}
+		}()
 
-	if idleCancel.DidFire() {
-		r.logger.Warn("agent ws stream aborted: idle timeout (no events from provider)",
-			slog.String("bot_id", req.BotID),
-			slog.String("chat_id", req.ChatID),
-			slog.String("model_id", modelID),
-			slog.Int("tool_calls", toolCallCount),
-		)
-		// Notify the client that the stream was terminated due to idle timeout.
-		timeoutEvent := agentpkg.StreamEvent{
-			Type:  agentpkg.EventError,
-			Error: fmt.Sprintf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount),
-		}
-		if data, err := json.Marshal(timeoutEvent); err == nil {
+		cfg := rc.runConfig
+		cfg = r.prepareRunConfig(streamCtx, cfg)
+
+		// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
+		idleCtx, idleCancel := withIdleTimeout(streamCtx)
+
+		agentEventCh := r.agent.Stream(idleCtx, cfg)
+		modelID := rc.model.ID
+		stored := false
+		var toolCallCount int
+		for event := range agentEventCh {
+			idleCancel.Reset() // each event resets the idle timer
+
+			// Track tool calls for adaptive idle timeout
+			if event.Type == agentpkg.EventToolCallStart {
+				toolCallCount++
+				idleCancel.RecordToolCall()
+			}
+
+			if event.Type == agentpkg.EventError {
+				r.logger.Error("agent stream error",
+					slog.String("bot_id", req.BotID),
+					slog.String("chat_id", req.ChatID),
+					slog.String("model_id", modelID),
+					slog.String("error", event.Error),
+				)
+			}
+
+			data, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+
+			if !stored && event.IsTerminal() && len(event.Messages) > 0 {
+				if _, storeErr := r.tryStoreStream(ctx, req, data, modelID, rc); storeErr != nil {
+					r.logger.Error("ws persist failed", slog.Any("error", storeErr))
+				} else {
+					stored = true
+				}
+			}
+
 			select {
 			case eventCh <- json.RawMessage(data):
 			case <-ctx.Done():
+				idleCancel.Stop()
+				cancel()
+				<-abortDone // wait for abort goroutine to finish
+				return ctx.Err()
+			}
+		}
+
+		lastIdleTimeout = idleCancel.DidFire()
+		lastToolCallCount = toolCallCount
+		idleCancel.Stop()
+		cancel()
+		<-abortDone // wait for abort goroutine to finish
+
+		if stored {
+			return nil
+		}
+
+		// Stream ended without storing. Run compaction to shrink context,
+		// then retry. Send error event so the client knows what's happening.
+		if !r.runCompactionSyncWithResult(context.WithoutCancel(ctx), req, rc.estimatedTokens) {
+			// Compaction didn't run or failed. No point retrying without it.
+			reason := "provider error"
+			if lastIdleTimeout {
+				reason = "provider idle timeout"
+			}
+			r.persistFinalError(context.WithoutCancel(ctx), req, rc, lastToolCallCount, lastIdleTimeout)
+			sendWSErrorEvent(ctx, eventCh, fmt.Sprintf("stream failed after %d tool calls: %s", lastToolCallCount, reason))
+			return nil
+		}
+
+		// Compaction ran. Notify client and retry.
+		r.logger.Info("retrying ws agent stream after compaction",
+			slog.String("bot_id", req.BotID),
+			slog.Int("attempt", attempt+2),
+			slog.Int("max_attempts", compactionMaxAttempts),
+		)
+		sendWSErrorEvent(ctx, eventCh, fmt.Sprintf("context compacted, retrying (attempt %d/%d)", attempt+2, compactionMaxAttempts))
+
+		if delay := compactionRetryDelay(attempt); delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
 			}
 		}
 	}
 
+	// All retries exhausted. Persist a final error for the record.
+	r.persistFinalError(context.WithoutCancel(ctx), req, lastRC, lastToolCallCount, lastIdleTimeout)
+	sendWSErrorEvent(ctx, eventCh, fmt.Sprintf("all %d attempts exhausted after compaction", compactionMaxAttempts))
 	return nil
 }
 
@@ -269,11 +409,21 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	return true, nil
 }
 
-// persistPartialResult stores a synthetic assistant message when the agent
-// stream was interrupted (error, abort, idle timeout) after completing tool
-// calls but before producing a final response. This preserves intermediate
-// progress so the user can see what was accomplished and ask the bot to continue.
-func (r *Resolver) persistPartialResult(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, toolCallCount int, wasIdleTimeout bool) {
+// runCompactionSyncWithResult runs synchronous compaction and returns true
+// if compaction actually ran and succeeded.
+func (r *Resolver) runCompactionSyncWithResult(ctx context.Context, req conversation.ChatRequest, estimatedTokens int) bool {
+	if estimatedTokens <= 0 {
+		return false
+	}
+	return r.runCompactionSync(ctx, req, estimatedTokens)
+}
+
+// persistFinalError stores a synthetic assistant message as a last resort when
+// all retry attempts have been exhausted or compaction is unavailable.
+func (r *Resolver) persistFinalError(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, toolCallCount int, wasIdleTimeout bool) {
+	if rc.model.ID == "" {
+		return
+	}
 	reason := "provider error"
 	if wasIdleTimeout {
 		reason = "provider idle timeout"
@@ -284,20 +434,11 @@ func (r *Resolver) persistPartialResult(ctx context.Context, req conversation.Ch
 		{Role: "assistant", Content: conversation.NewTextContent(syntheticMsg)},
 	})
 
-	if err := r.storeRound(context.WithoutCancel(ctx), req, roundMessages, rc.model.ID); err != nil {
+	if err := r.storeRound(ctx, req, roundMessages, rc.model.ID); err != nil {
 		r.logger.Error("failed to persist partial result",
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
-	}
-
-	// Trigger compaction on failure path so that oversized contexts don't
-	// create a deadlock where the LLM can never succeed (and therefore
-	// compaction never fires). Use the estimated token count from resolve.
-	// Synchronous (not async) ensures the compressed context is
-	// persisted before the next request arrives.
-	if rc.estimatedTokens > 0 {
-		r.runCompactionSync(context.WithoutCancel(ctx), req, rc.estimatedTokens)
 	}
 }
 

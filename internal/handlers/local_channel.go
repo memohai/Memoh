@@ -270,16 +270,18 @@ type wsClientMessage struct {
 // wsWriter serialises all WebSocket writes through a single goroutine to
 // avoid concurrent write panics with gorilla/websocket.
 type wsWriter struct {
-	conn *websocket.Conn
-	ch   chan []byte
-	done chan struct{}
+	conn   *websocket.Conn
+	ch     chan []byte
+	done   chan struct{}
+	logger *slog.Logger
 }
 
-func newWSWriter(conn *websocket.Conn) *wsWriter {
+func newWSWriter(conn *websocket.Conn, logger *slog.Logger) *wsWriter {
 	w := &wsWriter{
-		conn: conn,
-		ch:   make(chan []byte, 128),
-		done: make(chan struct{}),
+		conn:   conn,
+		ch:     make(chan []byte, 128),
+		done:   make(chan struct{}),
+		logger: logger,
 	}
 	go w.loop()
 	return w
@@ -288,7 +290,10 @@ func newWSWriter(conn *websocket.Conn) *wsWriter {
 func (w *wsWriter) loop() {
 	defer close(w.done)
 	for data := range w.ch {
-		_ = w.conn.WriteMessage(websocket.TextMessage, data)
+		if err := w.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			w.logger.Warn("ws write failed, stopping writer", slog.Any("error", err))
+			return
+		}
 	}
 }
 
@@ -296,12 +301,14 @@ func (w *wsWriter) Send(data []byte) {
 	select {
 	case w.ch <- data:
 	case <-w.done:
+		// Writer stopped (WS disconnected or write error).
 	}
 }
 
 func (w *wsWriter) SendJSON(v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
+		w.logger.Warn("ws sendjson marshal failed", slog.Any("error", err))
 		return
 	}
 	w.Send(data)
@@ -361,7 +368,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	rawToken := extractRawBearerToken(c)
 	bearerToken := "Bearer " + rawToken
 
-	writer := newWSWriter(conn)
+	writer := newWSWriter(conn, h.logger)
 	defer writer.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -696,7 +696,13 @@ export const useChatStore = defineStore('chat', () => {
           model_id: modelId,
           reasoning_effort: reasoningEffort,
         })
-        await completion
+        await new Promise<void>((resolve, reject) => {
+          const timeoutId = setTimeout(
+            () => reject(new Error('stream timeout: no response for 15 minutes')),
+            15 * 60 * 1000,
+          )
+          void completion.then(resolve).catch(reject).finally(() => clearTimeout(timeoutId))
+        })
         await refreshCurrentSession(bid, sid)
       } else {
         void createCompletionForAssistantTurn(assistantTurn).catch(() => {})

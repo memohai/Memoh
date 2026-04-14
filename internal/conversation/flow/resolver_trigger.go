@@ -120,7 +120,7 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 		if cfg.Identity.TimezoneLocation != nil {
 			nowFn = func() time.Time { return time.Now().In(cfg.Identity.TimezoneLocation) }
 		}
-		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), botID, nowFn)
+		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), botID, nowFn, r.logger)
 		checklist = fs.ReadTextSafe(ctx, "/data/HEARTBEAT.md")
 	}
 	now := time.Now().UTC()

@@ -26,7 +26,7 @@ func (r *Resolver) resolveMemoryProvider(ctx context.Context, botID string) memp
 	}
 	p, err := r.memoryRegistry.Get(providerID)
 	if err != nil {
-		r.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", err))
+		r.logger.Error("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", err))
 		return nil
 	}
 	return p
@@ -43,7 +43,7 @@ func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversatio
 		ChatID: req.ChatID,
 	})
 	if err != nil {
-		r.logger.Warn("memory provider OnBeforeChat failed", slog.Any("error", err))
+		r.logger.Error("memory provider OnBeforeChat failed", slog.String("bot_id", req.BotID), slog.Any("error", err))
 		return nil
 	}
 	if result == nil || strings.TrimSpace(result.ContextText) == "" {
@@ -78,7 +78,7 @@ func (r *Resolver) storeMemory(ctx context.Context, req conversation.ChatRequest
 		DisplayName:       r.resolveDisplayName(ctx, req),
 		TimezoneLocation:  tzLoc,
 	}); err != nil {
-		r.logger.Warn("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
+		r.logger.Error("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
 	}
 }
 
