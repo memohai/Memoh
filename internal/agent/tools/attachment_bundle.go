@@ -5,8 +5,9 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 )
 
+// toolAttachmentFromBundle converts a normalized bundle to a tools.Attachment.
+// Callers must guarantee bundle is already normalized (produced by BundleFromXxx or Normalize()).
 func toolAttachmentFromBundle(bundle attachmentpkg.Bundle) Attachment {
-	bundle = bundle.Normalize()
 	return Attachment{
 		Type:        bundle.Type,
 		Base64:      bundle.Base64,

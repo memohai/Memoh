@@ -26,8 +26,8 @@ func BundleFromAttachment(att Attachment) attachmentpkg.Bundle {
 
 // AttachmentFromBundle converts the shared internal bundle shape to a channel
 // attachment, preserving the channel convention that local paths travel in URL.
+// Callers must guarantee bundle is already normalized (produced by BundleFromXxx or Normalize()).
 func AttachmentFromBundle(bundle attachmentpkg.Bundle) Attachment {
-	bundle = bundle.Normalize()
 	attType := AttachmentType(bundle.Type)
 	if attType == "" {
 		attType = AttachmentFile

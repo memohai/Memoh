@@ -20,8 +20,9 @@ func bundleFromToolAttachment(att tools.Attachment) attachmentpkg.Bundle {
 	}.Normalize()
 }
 
+// fileAttachmentFromBundle converts a normalized bundle to an agent FileAttachment.
+// Callers must guarantee bundle is already normalized (produced by BundleFromXxx or Normalize()).
 func fileAttachmentFromBundle(bundle attachmentpkg.Bundle) FileAttachment {
-	bundle = bundle.Normalize()
 	return FileAttachment{
 		Type:        bundle.Type,
 		Base64:      bundle.Base64,

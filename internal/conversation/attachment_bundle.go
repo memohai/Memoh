@@ -21,8 +21,8 @@ func BundleFromChatAttachment(att ChatAttachment) attachmentpkg.Bundle {
 
 // ChatAttachmentFromBundle converts the shared internal bundle shape to a chat
 // request attachment without changing the public conversation DTO.
+// Callers must guarantee bundle is already normalized (produced by BundleFromXxx or Normalize()).
 func ChatAttachmentFromBundle(bundle attachmentpkg.Bundle) ChatAttachment {
-	bundle = bundle.Normalize()
 	return ChatAttachment{
 		Type:        bundle.Type,
 		Base64:      bundle.Base64,
