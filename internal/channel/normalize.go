@@ -55,12 +55,7 @@ func InferAttachmentType(currentType AttachmentType, mime, name string) Attachme
 
 // NormalizeInboundChannelAttachment normalizes a channel attachment at adapter boundary.
 func NormalizeInboundChannelAttachment(att Attachment) Attachment {
-	att.Type = InferAttachmentType(att.Type, att.Mime, att.Name)
-	att.Mime = attachment.NormalizeMime(att.Mime)
-	att.URL = strings.TrimSpace(att.URL)
-	att.PlatformKey = strings.TrimSpace(att.PlatformKey)
-	att.SourcePlatform = strings.TrimSpace(att.SourcePlatform)
-	att.Name = strings.TrimSpace(att.Name)
-	att.Caption = strings.TrimSpace(att.Caption)
-	return att
+	normalized := AttachmentFromBundle(BundleFromAttachment(att))
+	normalized.Type = InferAttachmentType(att.Type, normalized.Mime, normalized.Name)
+	return normalized
 }

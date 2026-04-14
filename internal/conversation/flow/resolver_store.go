@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
@@ -264,11 +265,7 @@ func chatAttachmentsToAssetRefs(attachments []conversation.ChatAttachment) []mes
 			Name:        strings.TrimSpace(att.Name),
 			Metadata:    att.Metadata,
 		}
-		if att.Metadata != nil {
-			if sk, ok := att.Metadata["storage_key"].(string); ok {
-				ref.StorageKey = sk
-			}
-		}
+		ref.StorageKey = attachmentpkg.MetadataString(att.Metadata, attachmentpkg.MetadataKeyStorageKey)
 		refs = append(refs, ref)
 	}
 	return refs

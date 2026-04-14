@@ -120,8 +120,10 @@ type GenerateResult struct {
 // FileAttachment represents a file reference extracted from agent output.
 type FileAttachment struct {
 	Type        string         `json:"type"`
+	Base64      string         `json:"base64,omitempty"`
 	Path        string         `json:"path,omitempty"`
 	URL         string         `json:"url,omitempty"`
+	PlatformKey string         `json:"platform_key,omitempty"`
 	Mime        string         `json:"mime,omitempty"`
 	Name        string         `json:"name,omitempty"`
 	ContentHash string         `json:"content_hash,omitempty"`
