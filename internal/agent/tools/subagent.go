@@ -500,6 +500,12 @@ func (p *SpawnProvider) runSubagentTask(
 
 	var lastErr error
 	for attempt := 0; attempt <= subagentMaxRetries; attempt++ {
+		p.logger.Info("subagent attempt start",
+			slog.String("session_id", sessionID),
+			slog.Int("attempt", attempt),
+			slog.Int("max_attempts", subagentMaxRetries+1),
+		)
+
 		if attempt > 0 {
 			delay := subagentRetryBaseDelay * time.Duration(attempt)
 			p.logger.Info("subagent retry",
@@ -516,6 +522,11 @@ func (p *SpawnProvider) runSubagentTask(
 			case <-deadlineTimer.C:
 				delayTimer.Stop()
 				// Hard deadline: don't retry indefinitely.
+				p.logger.Warn("subagent retry deadline exceeded",
+					slog.String("session_id", sessionID),
+					slog.String("error", lastErr.Error()),
+					slog.Duration("duration", time.Since(subStart)),
+				)
 				res.Error = fmt.Sprintf("retry deadline exceeded (last error: %v)", lastErr)
 				return res
 			}
@@ -537,6 +548,12 @@ func (p *SpawnProvider) runSubagentTask(
 		if err == nil {
 			res.Text = genResult.Text
 			res.Success = true
+			p.logger.Info("subagent done",
+				slog.String("session_id", sessionID),
+				slog.Bool("success", true),
+				slog.Int("attempt", attempt),
+				slog.Duration("duration", time.Since(subStart)),
+			)
 			if p.messageService != nil && sessionID != "" {
 				p.persistMessages(context.WithoutCancel(ctx), parentSession.BotID, sessionID, modelID, query, genResult)
 			}
@@ -545,9 +562,21 @@ func (p *SpawnProvider) runSubagentTask(
 
 		lastErr = err
 
+		p.logger.Warn("subagent attempt failed",
+			slog.String("session_id", sessionID),
+			slog.Int("attempt", attempt),
+			slog.String("error", err.Error()),
+		)
+
 		// Check if the true parent context was cancelled (not watchdog, not safety timeout).
 		// If the parent is done, don't retry.
 		if ctx.Err() != nil && !errors.Is(err, ErrWatchdogTimedOut) {
+			p.logger.Info("subagent done",
+				slog.String("session_id", sessionID),
+				slog.Bool("success", false),
+				slog.String("reason", "parent cancelled"),
+				slog.Duration("duration", time.Since(subStart)),
+			)
 			res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
 			return res
 		}
@@ -563,6 +592,12 @@ func (p *SpawnProvider) runSubagentTask(
 		}
 
 		if !isRetryableSubagentError(err) {
+			p.logger.Info("subagent done",
+				slog.String("session_id", sessionID),
+				slog.Bool("success", false),
+				slog.String("reason", "non-retryable error"),
+				slog.Duration("duration", time.Since(subStart)),
+			)
 			res.Error = err.Error()
 			return res
 		}
@@ -572,6 +607,7 @@ func (p *SpawnProvider) runSubagentTask(
 		slog.String("session_id", sessionID),
 		slog.Int("attempts", subagentMaxRetries+1),
 		slog.String("error", lastErr.Error()),
+		slog.Duration("duration", time.Since(subStart)),
 	)
 	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
 	p.logger.Info("subagent done",
