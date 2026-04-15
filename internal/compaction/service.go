@@ -39,8 +39,20 @@ func (s *Service) TriggerCompaction(ctx context.Context, cfg TriggerConfig) {
 	go func() {
 		bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
+		start := time.Now()
 		if err := s.runCompaction(bgCtx, cfg); err != nil {
-			s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.String("error", err.Error()))
+			s.logger.Error("compaction failed",
+				slog.String("bot_id", cfg.BotID),
+				slog.String("session_id", cfg.SessionID),
+				slog.String("error", err.Error()),
+				slog.Duration("duration", time.Since(start)),
+			)
+		} else {
+			s.logger.Info("compaction completed",
+				slog.String("bot_id", cfg.BotID),
+				slog.String("session_id", cfg.SessionID),
+				slog.Duration("duration", time.Since(start)),
+			)
 		}
 	}()
 }

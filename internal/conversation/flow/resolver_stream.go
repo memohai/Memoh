@@ -135,6 +135,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 
 			eventCh := r.agent.Stream(idleCtx, cfg)
 			stored := false
+			hadError := false
 			var toolCallCount int
 			for event := range eventCh {
 				idleCancel.Reset() // each event resets the idle timer
@@ -146,6 +147,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 				}
 
 				if event.Type == agentpkg.EventError {
+					hadError = true
 					r.logger.Error("agent stream error",
 						slog.String("bot_id", streamReq.BotID),
 						slog.String("chat_id", streamReq.ChatID),
@@ -168,6 +170,12 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 				select {
 				case chunkCh <- conversation.StreamChunk(data):
 				case <-ctx.Done():
+					r.logger.Info("stream chat: context cancelled during event relay",
+						slog.String("bot_id", streamReq.BotID),
+						slog.String("session_id", streamReq.SessionID),
+						slog.Bool("stored", stored),
+						slog.Bool("had_error", hadError),
+					)
 					idleCancel.Stop()
 					return
 				}
@@ -177,18 +185,45 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			lastToolCallCount = toolCallCount
 			idleCancel.Stop()
 
-			if stored {
+			// If the stream produced a stored response and no error was
+			// observed, the round completed successfully.
+			if stored && !hadError {
+				r.logger.Info("stream chat: round completed",
+					slog.String("bot_id", streamReq.BotID),
+					slog.String("session_id", streamReq.SessionID),
+					slog.Int("tool_calls", toolCallCount),
+					slog.Int("attempt", attempt+1),
+				)
 				return
 			}
 
-			// Stream ended without storing. Run compaction to shrink context,
-			// then retry. Send error event so the client knows what's happening.
+			// The stream stored a partial response but also emitted an
+			// error. Treat it as a failed round: persist a final error
+			// so the user sees something in history, then retry.
+			if stored && hadError {
+				r.logger.Warn("stream chat: stored partial response but stream had error, will retry",
+					slog.String("bot_id", streamReq.BotID),
+					slog.String("session_id", streamReq.SessionID),
+					slog.Int("tool_calls", toolCallCount),
+					slog.Int("attempt", attempt+1),
+				)
+				r.persistFinalError(context.WithoutCancel(ctx), streamReq, rc, toolCallCount, lastIdleTimeout)
+			}
+
+			// Stream ended without a clean store (or stored partial + error).
+			// Run compaction to shrink context, then retry.
 			if !r.runCompactionSyncWithResult(context.WithoutCancel(ctx), streamReq, rc.estimatedTokens) {
 				// Compaction didn't run or failed. No point retrying without it.
 				reason := "provider error"
 				if lastIdleTimeout {
 					reason = "provider idle timeout"
 				}
+				r.logger.Warn("stream chat: compaction unavailable, giving up",
+					slog.String("bot_id", streamReq.BotID),
+					slog.String("session_id", streamReq.SessionID),
+					slog.String("reason", reason),
+					slog.Int("attempt", attempt+1),
+				)
 				r.persistFinalError(context.WithoutCancel(ctx), streamReq, rc, lastToolCallCount, lastIdleTimeout)
 				sendChunkErrorEvent(ctx, chunkCh, fmt.Sprintf("stream failed after %d tool calls: %s (compaction unavailable)", lastToolCallCount, reason))
 				return
@@ -284,6 +319,7 @@ func (r *Resolver) StreamChatWS(
 		agentEventCh := r.agent.Stream(idleCtx, cfg)
 		modelID := rc.model.ID
 		stored := false
+		hadError := false
 		var toolCallCount int
 		for event := range agentEventCh {
 			idleCancel.Reset() // each event resets the idle timer
@@ -295,6 +331,7 @@ func (r *Resolver) StreamChatWS(
 			}
 
 			if event.Type == agentpkg.EventError {
+				hadError = true
 				r.logger.Error("agent stream error",
 					slog.String("bot_id", req.BotID),
 					slog.String("chat_id", req.ChatID),
@@ -332,18 +369,41 @@ func (r *Resolver) StreamChatWS(
 		cancel()
 		<-abortDone // wait for abort goroutine to finish
 
-		if stored {
+		if stored && !hadError {
+			r.logger.Info("stream ws: round completed",
+				slog.String("bot_id", req.BotID),
+				slog.String("session_id", req.SessionID),
+				slog.Int("tool_calls", toolCallCount),
+				slog.Int("attempt", attempt+1),
+			)
 			return nil
 		}
 
-		// Stream ended without storing. Run compaction to shrink context,
-		// then retry. Send error event so the client knows what's happening.
+		// Stored partial response but stream had error. Persist error and retry.
+		if stored && hadError {
+			r.logger.Warn("stream ws: stored partial response but stream had error, will retry",
+				slog.String("bot_id", req.BotID),
+				slog.String("session_id", req.SessionID),
+				slog.Int("tool_calls", toolCallCount),
+				slog.Int("attempt", attempt+1),
+			)
+			r.persistFinalError(context.WithoutCancel(ctx), req, rc, toolCallCount, lastIdleTimeout)
+		}
+
+		// Stream ended without a clean store (or stored partial + error).
+		// Run compaction to shrink context, then retry.
 		if !r.runCompactionSyncWithResult(context.WithoutCancel(ctx), req, rc.estimatedTokens) {
 			// Compaction didn't run or failed. No point retrying without it.
 			reason := "provider error"
 			if lastIdleTimeout {
 				reason = "provider idle timeout"
 			}
+			r.logger.Warn("stream ws: compaction unavailable, giving up",
+				slog.String("bot_id", req.BotID),
+				slog.String("session_id", req.SessionID),
+				slog.String("reason", reason),
+				slog.Int("attempt", attempt+1),
+			)
 			r.persistFinalError(context.WithoutCancel(ctx), req, rc, lastToolCallCount, lastIdleTimeout)
 			sendWSErrorEvent(ctx, eventCh, fmt.Sprintf("stream failed after %d tool calls: %s", lastToolCallCount, reason))
 			return nil
